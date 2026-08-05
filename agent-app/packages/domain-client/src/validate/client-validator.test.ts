@@ -322,6 +322,85 @@ describe("client validator (Task 7 brief Step 2)", () => {
     expect(report.status).toBe("pass");
     expect(report.checks.changeScope).toBe("pass");
   });
+
+  it("passes a same-page delete+create control combination", async () => {
+    const base = await copyFixture("client-unknown-field");
+    // Build a 3-control page: [button-guid-1, button-guid-2, button-guid-3].
+    const page = await readPage(base);
+    page.objects.push(
+      { name: "Button2", uiModelType: 35, guid: "button-guid-2", leftTopPt: { x: 0, y: 200 }, width: 90, height: 60, text: "b2" },
+      { name: "Button3", uiModelType: 35, guid: "button-guid-3", leftTopPt: { x: 0, y: 300 }, width: 90, height: 60, text: "b3" },
+    );
+    await writePage(base, page);
+    // Confirmed combination: delete the middle control, create a new one.
+    const comboPlan = plan([
+      { op: "delete", entityId: "button-guid-2", destructiveConfirmed: true, digest: deleteOperationDigest("button-guid-2") },
+      { op: "create", entityType: "control", entityId: "Button4", properties: { pageId: "page-guid-1", type: "button", text: "b4", x: 0, y: 400, width: 90, height: 60 } }
+    ]);
+    const candidate = await applyClientPatch(base, comboPlan);
+    const report = await validateClientProject(base, candidate, comboPlan);
+    expect(report.status).toBe("pass");
+    expect(report.checks.changeScope).toBe("pass");
+  });
+
+  it("passes a delete-middle-control end-to-end", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const page = await readPage(base);
+    page.objects.push(
+      { name: "Button2", uiModelType: 35, guid: "button-guid-2", leftTopPt: { x: 0, y: 200 }, width: 90, height: 60, text: "b2" },
+      { name: "Button3", uiModelType: 35, guid: "button-guid-3", leftTopPt: { x: 0, y: 300 }, width: 90, height: 60, text: "b3" },
+    );
+    await writePage(base, page);
+    const deletePlan = plan([
+      { op: "delete", entityId: "button-guid-2", destructiveConfirmed: true, digest: deleteOperationDigest("button-guid-2") }
+    ]);
+    const candidate = await applyClientPatch(base, deletePlan);
+    const report = await validateClientProject(base, candidate, deletePlan);
+    expect(report.status).toBe("pass");
+    expect(report.checks.changeScope).toBe("pass");
+  });
+
+  it("passes a create-before-delete same-page combination (order-independent)", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const page = await readPage(base);
+    page.objects.push(
+      { name: "Button2", uiModelType: 35, guid: "button-guid-2", leftTopPt: { x: 0, y: 200 }, width: 90, height: 60, text: "b2" },
+      { name: "Button3", uiModelType: 35, guid: "button-guid-3", leftTopPt: { x: 0, y: 300 }, width: 90, height: 60, text: "b3" },
+    );
+    await writePage(base, page);
+    // Same confirmed set as above but the create runs BEFORE the delete in the
+    // plan; the scope prediction must be order-independent.
+    const comboPlan = plan([
+      { op: "create", entityType: "control", entityId: "Button4", properties: { pageId: "page-guid-1", type: "button", text: "b4", x: 0, y: 400, width: 90, height: 60 } },
+      { op: "delete", entityId: "button-guid-2", destructiveConfirmed: true, digest: deleteOperationDigest("button-guid-2") },
+    ]);
+    const candidate = await applyClientPatch(base, comboPlan);
+    const report = await validateClientProject(base, candidate, comboPlan);
+    expect(report.status).toBe("pass");
+    expect(report.checks.changeScope).toBe("pass");
+  });
+
+  it("fails on an unplanned control insertion even next to a same-page delete", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const page = await readPage(base);
+    page.objects.push(
+      { name: "Button2", uiModelType: 35, guid: "button-guid-2", leftTopPt: { x: 0, y: 200 }, width: 90, height: 60, text: "b2" },
+      { name: "Button3", uiModelType: 35, guid: "button-guid-3", leftTopPt: { x: 0, y: 300 }, width: 90, height: 60, text: "b3" },
+    );
+    await writePage(base, page);
+    const comboPlan = plan([
+      { op: "delete", entityId: "button-guid-2", destructiveConfirmed: true, digest: deleteOperationDigest("button-guid-2") },
+      { op: "create", entityType: "control", entityId: "Button4", properties: { pageId: "page-guid-1", type: "button", text: "b4", x: 0, y: 400, width: 90, height: 60 } }
+    ]);
+    const candidate = await applyClientPatch(base, comboPlan);
+    // Rogue control inserted after the confirmed operations — must stay a fail.
+    const candPage = await readPage(candidate);
+    candPage.objects.push({ name: "Rogue", uiModelType: 35, guid: "rogue-guid", leftTopPt: { x: 0, y: 500 }, width: 90, height: 60, text: "rogue" });
+    await writePage(candidate, candPage);
+    const report = await validateClientProject(base, candidate, comboPlan);
+    expect(report.checks.changeScope).toBe("fail");
+    expect(report.status).toBe("fail");
+  });
 });
 
 describe("validator reports", () => {

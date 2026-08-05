@@ -242,9 +242,32 @@ export async function computeChangeScope(
 
   const inspection = await inspectClientProject(baseRoot);
 
+  // Pre-scan: every confirmed delete on a page/group file shifts where a
+  // confirmed create on the SAME page/group file lands (the patcher applies
+  // the plan in order, so creates are pushed onto the array after deletes
+  // have shrunk it). Creating a control next to a same-page delete would
+  // otherwise be reported at a stale base-length index and wrongly fail.
+  const deleteCountByPage = new Map<string, number>();
+  const deleteCountByVarFile = new Map<string, number>();
+  for (const op of plan.operations) {
+    if (op.op !== "delete") continue;
+    const loc = await locateEntity(baseRoot, inspection.index, versionDir, op.entityId, op.entityType);
+    if (loc.kind === "control") {
+      const pageGuid = inspection.index.controls[op.entityId]?.pageGuid;
+      if (pageGuid !== undefined) {
+        deleteCountByPage.set(pageGuid, (deleteCountByPage.get(pageGuid) ?? 0) + 1);
+      }
+    } else if (loc.kind === "variable") {
+      deleteCountByVarFile.set(loc.file, (deleteCountByVarFile.get(loc.file) ?? 0) + 1);
+    }
+  }
+  const createCountByPage = new Map<string, number>();
+  const createCountByVarFile = new Map<string, number>();
+  const shiftCtx = { deleteCountByPage, deleteCountByVarFile, createCountByPage, createCountByVarFile };
+
   for (const op of plan.operations) {
     if (op.op === "create") {
-      await trackCreate(baseRoot, versionDir, op, inspection.index, touchPointer);
+      await trackCreate(baseRoot, versionDir, op, inspection.index, touchPointer, shiftCtx);
     } else if (op.op === "update") {
       const loc = await locateEntity(
         baseRoot,
@@ -284,12 +307,21 @@ function relFile(file: string, versionDir: string): string {
   return versionDir === "." ? file : `${versionDir}/${file}`;
 }
 
+/** Per-array confirmed-delete/create counters used to shift create landing spots. */
+interface CreateShiftContext {
+  deleteCountByPage: Map<string, number>;
+  deleteCountByVarFile: Map<string, number>;
+  createCountByPage: Map<string, number>;
+  createCountByVarFile: Map<string, number>;
+}
+
 async function trackCreate(
   baseRoot: string,
   versionDir: string,
   op: ScopeOperation,
   index: EntityIndex,
   touchPointer: (file: string, pointer: string) => void,
+  shift: CreateShiftContext,
 ): Promise<void> {
   if (op.op !== "create") {
     throw new PatchConflictError(`trackCreate expected a create operation, got "${op.op}"`);
@@ -306,14 +338,22 @@ async function trackCreate(
       }
       const pageDoc = (await readJsonAt(baseRoot, versionDir, page.file)) as Record<string, unknown>;
       const objects = Array.isArray(pageDoc["objects"]) ? (pageDoc["objects"] as unknown[]) : [];
-      touchPointer(page.file, `#/objects/${objects.length}`);
+      const deletes = shift.deleteCountByPage.get(pageId) ?? 0;
+      const creates = shift.createCountByPage.get(pageId) ?? 0;
+      const insertion = Math.max(0, objects.length - deletes + creates);
+      touchPointer(page.file, `#/objects/${insertion}`);
+      shift.createCountByPage.set(pageId, creates + 1);
       break;
     }
     case "variable": {
       const groupFile = await resolveVariableGroupFile(index, baseRoot, versionDir);
       const doc = (await readJsonAt(baseRoot, versionDir, groupFile)) as Record<string, unknown>;
       const variables = Array.isArray(doc["Variables"]) ? (doc["Variables"] as unknown[]) : [];
-      touchPointer(groupFile, `#/Variables/${variables.length}`);
+      const deletes = shift.deleteCountByVarFile.get(groupFile) ?? 0;
+      const creates = shift.createCountByVarFile.get(groupFile) ?? 0;
+      const insertion = Math.max(0, variables.length - deletes + creates);
+      touchPointer(groupFile, `#/Variables/${insertion}`);
+      shift.createCountByVarFile.set(groupFile, creates + 1);
       break;
     }
     case "page": {
