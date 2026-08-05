@@ -1,0 +1,14 @@
+{
+  "guid": "00000000-0000-0000-0000-0000000000aa",
+  "name": "Minimal",
+  "version": "1.0.0.1",
+  "projectData": {
+    "type": "kingclient"
+  },
+  "project": {
+    "enabled": true,
+    "retryCount": 3,
+    "tags": ["minimal", "fixture"],
+    "owner": null
+  }
+}
