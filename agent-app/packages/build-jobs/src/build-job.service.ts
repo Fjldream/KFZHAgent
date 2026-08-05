@@ -13,23 +13,43 @@ import type {
  * idempotencyKey; the UNIQUE index on idempotencyKey is the concurrency
  * backstop.
  *
- * Leasing: `leaseNext` runs a single transaction that locks one candidate row
- * with `SELECT ... FOR UPDATE SKIP LOCKED`, taking a claim (`leaseOwner` +
+ * Leasing: `leaseNext` runs a single transaction that first serializes the
+ * claim decision per candidate workspace with `pg_advisory_xact_lock`
+ * (transaction-scoped, auto-released), then locks one candidate row with
+ * `SELECT ... FOR UPDATE SKIP LOCKED`, taking a claim (`leaseOwner` +
  * `leaseExpiresAt`) and bumping `attemptCount`. Only QUEUED/RUNNING/VALIDATING
  * rows with an expired or absent lease are claimable, and only when no other
  * row of the same workspace currently holds a live lease (one active job per
- * workspace).
+ * workspace). The advisory lock closes the READ COMMITTED race where a
+ * `NOT EXISTS` scan could not see another transaction's uncommitted RUNNING
+ * update.
  *
  * Crash recovery: a worker that dies mid-build leaves the row RUNNING with an
  * expired lease; after expiry `leaseNext` re-claims it and `completeBuild`
  * commits the result exactly once. Re-committing an already terminal row is a
  * no-op (defense in depth).
  */
+/**
+ * Test-only extension points for BuildJobService. `beforeClaim` runs inside
+ * the lease transaction after the claim SELECT has locked the candidate row
+ * but before the RUNNING UPDATE, letting a test widen the READ COMMITTED race
+ * window (the exact condition that allowed two jobs of one workspace to be
+ * claimed concurrently before the advisory-lock fix).
+ */
+export interface BuildJobServiceDebugHooks {
+  beforeClaim?: () => Promise<void>;
+}
+
 export class BuildJobService {
+  readonly #debugHooks: BuildJobServiceDebugHooks;
+
   constructor(
     private readonly prisma: PrismaClient,
     private readonly leaseMs = 30_000,
-  ) {}
+    debugHooks: BuildJobServiceDebugHooks = {},
+  ) {
+    this.#debugHooks = debugHooks;
+  }
 
   /** Enqueues a build job; idempotent on idempotencyKey. */
   async enqueue(input: EnqueueBuildInput): Promise<BuildJob> {
@@ -89,11 +109,37 @@ export class BuildJobService {
   /**
    * Claims the next runnable build job. Returns null when nothing is
    * claimable. `now` is injected for deterministic lease tests.
+   *
+   * The "one active job per workspace" guard cannot be implemented with a
+   * `NOT EXISTS` scan alone: under READ COMMITTED each statement sees its own
+   * snapshot, so a concurrent transaction's uncommitted RUNNING update is
+   * invisible and two workers could claim two QUEUED jobs of the same
+   * workspace. We therefore serialize the claim decision per candidate
+   * workspace with `pg_advisory_xact_lock(workspaceId)` (transaction-scoped,
+   * auto-released) before re-checking against committed state.
    */
   async leaseNext(owner: string, now: Date, leaseMs?: number): Promise<BuildJob | null> {
     const ttl = leaseMs ?? this.leaseMs;
     const expiry = new Date(now.getTime() + ttl);
     return this.prisma.$transaction(async (tx) => {
+      // Candidate workspaces: any workspace holding a claimable row. Sorted so
+      // every worker takes advisory locks in the same order (no deadlocks).
+      const workspaces = await tx.$queryRaw<{ workspaceId: string }[]>`
+        SELECT DISTINCT "workspaceId"
+        FROM "BuildJob"
+        WHERE "status" IN ('QUEUED', 'RUNNING', 'VALIDATING')
+          AND ("leaseExpiresAt" IS NULL
+               OR extract(epoch from "leaseExpiresAt") < extract(epoch from ${now}))
+        ORDER BY "workspaceId"
+      `;
+      for (const ws of workspaces) {
+        await tx.$executeRaw`
+          SELECT pg_advisory_xact_lock(hashtextextended(${ws.workspaceId}, 0))
+        `;
+      }
+
+      // Re-check against committed state now that no other lease transaction
+      // can be mid-claim for the same workspace.
       const rows = await tx.$queryRaw<BuildJobRow[]>`
         SELECT * FROM "BuildJob"
         WHERE "status" IN ('QUEUED', 'RUNNING', 'VALIDATING')
@@ -114,6 +160,7 @@ export class BuildJobService {
       if (rows.length === 0) return null;
       const row = rows[0];
       if (row === undefined) return null;
+      await this.#debugHooks.beforeClaim?.();
       return tx.buildJob.update({
         where: { id: row.id },
         data: {
