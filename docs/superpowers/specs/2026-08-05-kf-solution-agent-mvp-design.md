@@ -1,7 +1,7 @@
 # KingFusion 解决方案开发 Agent 第一版设计
 
 日期：2026-08-05
-状态：待用户审查（v5：纯离线 Agent、LangGraph 单 Agent 工作流、解决方案级扩展架构）
+状态：待用户审查（v5.1：加入 SDB 样本提取方法与开放式 Domain Registry）
 
 ## 1. 结论
 
@@ -14,7 +14,7 @@
 
 第一版不安装客户侧服务、不连接客户机、不配置客户公网 IP、不在线写入或发布运行态。
 
-产品、数据模型、LangGraph 顶层工作流、版本和制品模型从第一天按“完整 KF 解决方案”设计；第一版只实现客户端 `Domain Pack`。计算、数据源、采集工程作为已知但未启用的领域能力，后续通过注册新的 Domain Pack 和 LangGraph Subgraph 接入。
+产品、数据模型、LangGraph 顶层工作流、版本和制品模型从第一天按“完整 KF 解决方案”设计；第一版只实现客户端 `Domain Pack`。计算、数据源、采集、告警及以后发现的其他工程类型通过开放式 Domain Registry 注册，并以新的 Domain Pack 和 LangGraph Subgraph 接入。
 
 核心架构原则：
 
@@ -45,7 +45,7 @@
 - 访问客户公网 IP；
 - 在线读取、写入、备份或回滚客户 KF；
 - 发布、部署、启动或运行态验收；
-- 计算、数据源、采集工程的实际生成与修改；
+- 计算、数据源、采集、告警及其他非客户端工程的实际生成与修改；
 - 多 Agent；
 - 自由注册、短信/邮件验证、自助找回密码；
 - 多 KF 版本兼容矩阵；
@@ -63,6 +63,7 @@
 | 客户端原生导出生成扩展名 `.gz` 的 ZIP 容器，内容为工程目录 | 公司侧可以复刻 KF 原生打包格式 |
 | 客户端原生导入会解包、检查目录并重建部分工程元数据 | 成果包必须通过 KF 原生导入往返测试 |
 | 计算、数据源、采集模块各自拥有独立的导入/导出和目录规则 | 后续必须分别实现 Domain Pack，不能用一个通用压缩函数代替 |
+| `Center/sdb` 已包含客户端、计算、数据源、采集和告警真实工程 | 可以建立跨领域的真实序列化样本库，但必须先脱敏 |
 
 详细证据见：
 
@@ -70,6 +71,56 @@
 - `docs/kf-control-schema.md`
 - `KingFusion3.6_Center/kingdevopscenter/kingclient/exe/lib/services/childProcess/fileoperation.js`
 - `KingFusion3.6_Center/kingdevopscenter/kingcalculation/exe/lib/services/dataStore.js`
+
+### 3.1 现有 SDB 样本基线
+
+对 `KingFusion3.6_Center/sdb` 的只读结构盘点结果：
+
+| KF 存储模块 | 工程数量 | 体量 |
+|---|---:|---:|
+| `kingclient` | 32 | 约 6.2 GB |
+| `kingcalculation` | 17 | 约 179 MB |
+| `kingdbconnector` | 33 | 约 136 KB |
+| `kingioserver` | 20 | 约 120 MB |
+| `kingalarm` | 5 | 约 184 KB |
+
+`filestation` 中还存在计算、数据源、客户端、告警和采集模块的导入/导出目录，可用于核对原生工程包格式。
+
+这些工程属于只读原始语料，可能含客户名称、设备地址、数据库连接、密码、脚本和大体积素材，不进入 Git、不直接作为模型训练数据，也不直接成为公开测试夹具。
+
+样本分三层保存：
+
+```text
+raw-corpus/          原始 SDB 工程；受限访问、只读、不入 Git
+sanitized-golden/    脱敏后的代表性工程；用于私有集成测试
+fixtures/            最小化安全样本；可以进入代码仓库
+```
+
+### 3.2 Domain Pack 四层取证方法
+
+每个工程类型都必须由四层证据共同定义：
+
+```text
+L1 开发态源码：默认模板、枚举、模型、API、持久化和打包逻辑
+L2 Center/sdb：真实目录、字段组合、引用关系和复杂结构
+L3 原生导出包：用户实际上传和下载的容器与目录格式
+L4 测试服务器：导入 → 打开 → 保存 → 导出 → 再导入
+```
+
+只有通过 L4 的具体能力才能在 Domain Registry 中标记为 `supported: true`。
+
+标准提取循环：
+
+1. 沿 `createProject → edit/save → exportProject → importProjects` 跟踪源码；
+2. 在原生编辑器创建空工程和单特性工程；
+3. 将空工程与单特性工程做结构差异分析；
+4. 用 SDB 真实工程补充复杂字段和引用组合；
+5. 定义领域 IR、命名规则和引用规则；
+6. 实现 Importer、Inspector、Compiler、Patcher、Validator 和 Native Packager；
+7. 在测试服务器完成原生往返验证；
+8. 固化脱敏 Golden Sample 和自动回归测试。
+
+开发 `kf-schema-extractor` 作为只读研发工具，负责工程清单、JSON 字段路径与类型统计、样本差异、引用分析、敏感信息扫描和脱敏。自动提取结果只是 Schema 候选，必须结合源码语义和测试服务器结果人工确认。生产 Agent 不动态解析 KF 开发态源码，也不携带完整 KF 源码。
 
 ## 4. 总体架构
 
@@ -173,11 +224,7 @@ packageClientProject(workspace)
 Workspace 从第一版起即代表一个 KF 解决方案，而不是单一客户端工程：
 
 ```ts
-type DomainKind =
-  | "client"
-  | "calculation"
-  | "datasource"
-  | "acquisition";
+type DomainKind = string;
 
 type SolutionWorkspace = {
   id: string;
@@ -197,7 +244,7 @@ type SolutionWorkspace = {
   "projects": [
     {
       "id": "pump-client",
-      "kind": "client",
+      "kind": "kingclient",
       "name": "水泵站客户端"
     }
   ]
@@ -209,6 +256,8 @@ type SolutionWorkspace = {
 ```ts
 interface DomainPack {
   kind: DomainKind;
+  displayName: string;
+  supported: boolean;
   capabilities: {
     create: boolean;
     import: boolean;
@@ -225,9 +274,11 @@ interface DomainPack {
 }
 ```
 
-第一版只注册完整的 `clientDomainPack`。其他工程类型只注册 `supported: false` 的能力元数据，不创建虚假的编译器或空实现。
+DomainKind 使用 KF 模块标识，例如 `kingclient`、`kingcalculation`、`kingdbconnector`、`kingioserver`、`kingalarm`。顶层数据模型不维护封闭枚举；具体工程类型、显示名称和能力由注册表声明。
 
-用户提出尚未支持的计算、数据源或采集需求时，系统：
+第一版只注册完整的 `clientDomainPack`（`kind: "kingclient"`）。其他已知工程类型只注册 `supported: false` 的能力元数据，不创建虚假的编译器或空实现。
+
+用户提出尚未支持的计算、数据源、采集、告警或其他领域需求时，系统：
 
 1. 保存完整解决方案需求；
 2. 明确说明当前不可构建的部分；
@@ -622,10 +673,13 @@ LLM 不能直接：
 
 ### Phase 0：KF 客户端格式固化
 
+- 建立 raw-corpus、sanitized-golden、fixtures 三层样本治理；
+- 开发只读 `kf-schema-extractor`；
+- 从 32 个现成客户端工程中选择最小、典型、复杂和压力样本；
 - 提取页面骨架、公共字段和首批控件模板；
 - 固化客户端原生 `.gz` 目录和打包规则；
 - 准备匿名化的最小、典型和复杂客户端工程 Golden Samples；
-- 完成 KF 导入—导出往返基线。
+- 在测试服务器完成 KF 导入—导出往返基线。
 
 ### Phase 1：确定性 KF Build Engine
 
@@ -657,18 +711,20 @@ LLM 不能直接：
 1. Calculation Domain Pack；
 2. DataSource Domain Pack；
 3. Acquisition Domain Pack；
-4. 跨工程 Symbol Registry、依赖验证和解决方案总包；
-5. 当多个领域 IR、编译器和评测均稳定后，再评估 Supervisor + 受限 Domain Agents。
+4. Alarm Domain Pack；
+5. 由 SDB 和产品能力继续发现并注册其他 Domain Pack；
+6. 跨工程 Symbol Registry、依赖验证和解决方案总包；
+7. 当多个领域 IR、编译器和评测均稳定后，再评估 Supervisor + 受限 Domain Agents。
 
 ## 21. 关键决策摘要
 
 1. 第一版是纯离线、多租户 Web Agent，不连接客户机；
 2. 第一版只交付客户端工程能力；
-3. 产品和顶层模型按完整 KF 解决方案预留；
+3. 产品和顶层模型按完整 KF 解决方案预留，工程类型由开放式 Domain Registry 注册；
 4. 使用 LangGraph，但采用单 Agent 有状态工作流，不使用多 Agent；
 5. LLM 输出设计和变更计划，不能直接生成或修改工程文件；
 6. 新建工程使用确定性 Compiler；上传工程使用无损 Patcher；
 7. 每次确认构建产生不可变 Revision；
 8. 原生 `.gz` 是必须通过 KF 导入往返验收的正式成果；
 9. 只有确定性 Validator 决定工程是否通过；
-10. 后续工程类型通过 Domain Pack + Subgraph 扩展。
+10. 后续工程类型通过“源码 + SDB + 原生包 + 测试服务器”取证并以 Domain Pack + Subgraph 扩展。
