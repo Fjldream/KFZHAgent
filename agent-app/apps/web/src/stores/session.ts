@@ -15,6 +15,8 @@ export interface SessionState {
   tenantName: string;
   loading: boolean;
   error: string | null;
+  /** 首次登录临时密码会话：必须改密后才能使用工作区（I2）。 */
+  mustChangePassword: boolean;
   /** 会话恢复是否已完成（刷新后 /api/me 的结果已落地）。 */
   restored: boolean;
 }
@@ -24,6 +26,7 @@ const state: SessionState = reactive({
   tenantName: "",
   loading: false,
   error: null,
+  mustChangePassword: false,
   restored: false,
 });
 
@@ -45,8 +48,31 @@ async function login(input: LoginInput): Promise<void> {
   try {
     const result = await api.login(input);
     state.user = result.user;
+    state.mustChangePassword = result.mustChangePassword;
     state.tenantName = input.tenant;
     localStorage.setItem(TENANT_STORAGE_KEY, input.tenant);
+  } catch (error) {
+    state.error = errorMessage(error);
+    throw error;
+  } finally {
+    state.loading = false;
+  }
+}
+
+/**
+ * 首次登录强制改密（I2）：改密成功后服务端直接下发完整会话 cookie，
+ * 这里同步刷新本地用户信息并清除 mustChangePassword 标志。
+ */
+async function changePassword(input: {
+  currentPassword: string;
+  newPassword: string;
+}): Promise<void> {
+  state.loading = true;
+  state.error = null;
+  try {
+    const result = await api.changePassword(input);
+    state.user = result.user;
+    state.mustChangePassword = false;
   } catch (error) {
     state.error = errorMessage(error);
     throw error;
@@ -62,12 +88,15 @@ async function restore(): Promise<boolean> {
     return true;
   }
   try {
-    state.user = await api.me();
+    const me = await api.me();
+    state.user = { id: me.id, username: me.username, role: me.role, tenantId: me.tenantId };
+    state.mustChangePassword = me.mustChangePassword;
     state.tenantName = localStorage.getItem(TENANT_STORAGE_KEY) ?? "";
     state.restored = true;
     return true;
   } catch {
     state.user = null;
+    state.mustChangePassword = false;
     state.restored = true;
     return false;
   }
@@ -96,6 +125,7 @@ async function logout(): Promise<void> {
   } finally {
     state.user = null;
     state.tenantName = "";
+    state.mustChangePassword = false;
     state.restored = true;
     localStorage.removeItem(TENANT_STORAGE_KEY);
   }
@@ -105,8 +135,21 @@ function isAuthenticated(): boolean {
   return state.user !== null;
 }
 
-export function useSession() {
-  return { state, login, restore, ensureRestored, logout, isAuthenticated };
+function mustChangePassword(): boolean {
+  return state.user !== null && state.mustChangePassword;
 }
 
-export { isAuthenticated, ensureRestored };
+export function useSession() {
+  return {
+    state,
+    login,
+    changePassword,
+    restore,
+    ensureRestored,
+    logout,
+    isAuthenticated,
+    mustChangePassword,
+  };
+}
+
+export { isAuthenticated, ensureRestored, mustChangePassword };

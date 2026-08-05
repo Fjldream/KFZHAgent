@@ -1,4 +1,5 @@
 import {
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from "@nestjs/common";
@@ -15,13 +16,27 @@ export type AuthenticatedRequest = Request & {
     tenantId: string;
     role: "platform_admin" | "tenant_admin" | "member";
     sessionId: string;
+    mustChangePassword: boolean;
   };
 };
+
+/** Routes a first-login (must-change-password) session may reach. */
+const FIRST_LOGIN_ALLOWED_PATHS = new Set([
+  "/api/auth/change-password",
+  "/api/auth/logout",
+  "/api/me",
+]);
 
 /**
  * Resolves tenantId exclusively from the authenticated session cookie. No
  * tenantId from a request body is ever trusted. Invalid/expired sessions are
  * rejected with 401.
+ *
+ * I2: a user whose `mustChangePassword` flag is still set (temporary first
+ * login password) gets a RESTRICTED session: the guard authenticates it but
+ * only permits the password-change flow (change-password / logout / me).
+ * Every other API route is rejected with 403 until the password is changed,
+ * so the temporary password can never be used to operate the platform.
  */
 @Injectable()
 export class TenantGuard implements CanActivate {
@@ -37,6 +52,11 @@ export class TenantGuard implements CanActivate {
     const principal = await this.sessions.validateSession(token);
     if (principal === null) {
       throw new UnauthorizedException();
+    }
+    if (principal.mustChangePassword && !FIRST_LOGIN_ALLOWED_PATHS.has(request.path)) {
+      throw new ForbiddenException(
+        "password must be changed before using the workspace",
+      );
     }
     request.principal = principal;
     return true;

@@ -19,3 +19,16 @@ export const IntentSchema = z.enum([
 export type Intent = z.infer<typeof IntentSchema>;
 
 export const intentValues = IntentSchema.options;
+
+/**
+ * Runtime gate for `ModelPort.classifyIntent` output (I1). Mirrors the plan
+ * gate in plan-change: a real LLM (Phase 3) can emit garbage and the graph
+ * must reject it before any state side effect, never routing on an invented
+ * intent value.
+ */
+export const ClassifyIntentResultSchema = z.object({
+  intent: IntentSchema,
+  requestedDomains: z.array(z.string()),
+  reply: z.string().optional(),
+});
+export type ClassifyIntentResult = z.infer<typeof ClassifyIntentResultSchema>;

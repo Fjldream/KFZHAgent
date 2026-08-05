@@ -18,8 +18,13 @@ async function submit(): Promise<void> {
       username: form.username.trim(),
       password: form.password,
     });
-    const redirect = typeof route.query.redirect === "string" ? route.query.redirect : "/workspaces";
-    await router.push(redirect);
+    // I2: 首次登录（临时密码）先强制改密，改密完成后服务端才发完整会话。
+    const target = session.state.mustChangePassword
+      ? "/change-password"
+      : typeof route.query.redirect === "string"
+        ? route.query.redirect
+        : "/workspaces";
+    await router.push(target);
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : String(error);
   }

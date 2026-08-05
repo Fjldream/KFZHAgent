@@ -8,12 +8,15 @@ export const SESSION_COOKIE_NAME = "kf_session";
 /**
  * Authenticated identity attached to a request by the session guard.
  * tenantId comes exclusively from the server-side session record.
+ * `mustChangePassword` reflects the user's current flag so the tenant guard
+ * can confine a first-login session to the password-change endpoint (I2).
  */
 export type SessionPrincipal = {
   userId: string;
   tenantId: string;
   role: "platform_admin" | "tenant_admin" | "member";
   sessionId: string;
+  mustChangePassword: boolean;
 };
 
 /**
@@ -80,6 +83,7 @@ export class SessionService {
       tenantId: session.user.tenantId,
       role: session.user.role,
       sessionId: session.id,
+      mustChangePassword: session.user.mustChangePassword,
     };
   }
 

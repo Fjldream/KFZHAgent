@@ -24,6 +24,16 @@ const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const INVALID_CREDENTIALS = "Invalid credentials";
 
 /**
+ * A real Argon2id hash of a fixed dummy password. When the submitted username
+ * does not exist, the login path still runs one full Argon2 verify against it
+ * so the response timing matches the existing-user path and attackers cannot
+ * enumerate usernames through a timing side channel (I4). The verified value
+ * is always false.
+ */
+const DUMMY_PASSWORD_HASH =
+  "$argon2id$v=19$m=65536,p=4,t=3$A9WpYfELHo0bunkko2pKmQ$cTq4J9gHBP9/eZ9mBL/hA/IYM8yb7c0YncbeSkMohM4";
+
+/**
  * Local username/password authentication with HttpOnly session cookies.
  * There is deliberately no registration route here.
  */
@@ -56,6 +66,9 @@ export class AuthController {
     const password = typeof body.password === "string" ? body.password : "";
     const user = await this.users.findLoginTarget(tenantName, username);
     if (user === null) {
+      // I4: burn one full Argon2 verify against a dummy hash so the
+      // unknown-username path takes the same time as the known-user path.
+      await this.passwords.verify(password, DUMMY_PASSWORD_HASH);
       throw new UnauthorizedException(INVALID_CREDENTIALS);
     }
     const now = Date.now();
@@ -120,12 +133,21 @@ export class AuthController {
   }
 
   @Post("auth/change-password")
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @HttpCode(HttpStatus.OK)
   @UseGuards(TenantGuard)
   async changePassword(
     @Req() req: AuthenticatedRequest,
     @Body() body: { currentPassword: string; newPassword: string },
-  ): Promise<void> {
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<{
+    user: {
+      id: string;
+      username: string;
+      role: string;
+      tenantId: string;
+    };
+    mustChangePassword: boolean;
+  }> {
     const currentPassword = typeof body.currentPassword === "string" ? body.currentPassword : "";
     const newPassword = typeof body.newPassword === "string" ? body.newPassword : "";
     if (newPassword.length < 8) {
@@ -139,8 +161,33 @@ export class AuthController {
     if (!changed) {
       throw new UnauthorizedException("Current password is incorrect");
     }
-    // Password changed => revoke every session for the user.
+    // Password changed => revoke every session for the user (including this
+    // restricted first-login one), then issue a FULL session so the user can
+    // keep working without a second login (I2: first login forces the change,
+    // the change hands over a complete session).
     await this.sessions.revokeAllForUser(req.principal.userId);
+    const { token } = await this.sessions.createSession(req.principal.userId);
+    const cookieSecure = process.env.COOKIE_SECURE !== "false";
+    res.cookie(SESSION_COOKIE_NAME, token, {
+      httpOnly: true,
+      secure: cookieSecure,
+      sameSite: "strict",
+      path: "/",
+      maxAge: SESSION_TTL_MS,
+    });
+    const user = await this.prisma.user.findUnique({
+      where: { id: req.principal.userId },
+    });
+    if (user === null) throw new UnauthorizedException();
+    return {
+      user: {
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        tenantId: user.tenantId,
+      },
+      mustChangePassword: false,
+    };
   }
 
   @Get("me")

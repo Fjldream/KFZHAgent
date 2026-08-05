@@ -68,7 +68,9 @@ async function main(): Promise<void> {
         username: "alice",
         passwordHash: await hash("TempPass-123"),
         role: "tenant_admin",
-        mustChangePassword: true,
+        // E2E 用户视为已激活账号：I2 的首次强制改密闭环由 auth 集成测试与
+        // 前端组件测试覆盖；E2E 流程本身直接以完整会话登录工作区。
+        mustChangePassword: false,
       },
     });
 
@@ -79,7 +81,7 @@ async function main(): Promise<void> {
         username: "bob",
         passwordHash: await hash("TempPass-123"),
         role: "tenant_admin",
-        mustChangePassword: true,
+        mustChangePassword: false,
       },
     });
 

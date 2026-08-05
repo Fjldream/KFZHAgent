@@ -3,6 +3,7 @@ import type { ChangePlan } from "@kf/contracts";
 import type { AgentGraphStateValue, AgentGraphUpdate } from "../state.js";
 import type { SolutionGraphDeps } from "../ports.js";
 import { GraphPlanSchema } from "../schemas/change-plan.js";
+import { ProjectDesignSchema } from "../schemas/project-design.js";
 
 /**
  * Produces a change plan for the current requirement (brief Step 4/5):
@@ -31,9 +32,18 @@ export function createPlanChangeNode(deps: SolutionGraphDeps) {
       requirementText: latestUserMessage(state),
     };
 
-    // New workspace: initial design only, no plan/build.
+    // New workspace: initial design only, no plan/build. The raw design output
+    // is zod-gated against the v1 SolutionIR schema before it is referenced in
+    // any summary side effect (I1) — garbage model output returns to idle with
+    // INVALID_MODEL_OUTPUT instead of fabricating an "initial design created"
+    // summary.
     if (state.currentRevisionId === undefined) {
-      const design = await deps.modelPort.createProjectDesign(modelContext);
+      const rawDesign: unknown = await deps.modelPort.createProjectDesign(modelContext);
+      const parsedDesign = ProjectDesignSchema.safeParse(rawDesign);
+      if (!parsedDesign.success) {
+        return { stage: "idle", lastErrorCode: "INVALID_MODEL_OUTPUT" };
+      }
+      const design = parsedDesign.data;
       const addition = `已生成初始设计「${design.displayName}」，待初始化构建。`;
       const nextSummary = mergeSummary(state.conversationSummary, addition);
       if (nextSummary !== undefined && nextSummary !== state.conversationSummary) {

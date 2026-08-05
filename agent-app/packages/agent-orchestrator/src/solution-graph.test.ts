@@ -129,6 +129,10 @@ class FakeModelPort implements ModelPort {
   createdPlans: ChangePlan[] = [];
   /** When true, createChangePlan/reviseChangePlan return a schema-invalid plan. */
   invalidPlan = false;
+  /** When true, classifyIntent returns a schema-invalid intent (I1). */
+  invalidIntent = false;
+  /** When true, createProjectDesign returns a schema-invalid design (I1). */
+  invalidDesign = false;
   private seq = 0;
 
   queueIntent(...intents: Intent[]): void {
@@ -137,11 +141,19 @@ class FakeModelPort implements ModelPort {
 
   async classifyIntent(input: ModelPortContext) {
     this.classifyInputs.push(input);
+    if (this.invalidIntent) {
+      // Garbage output a real LLM could emit: invented intent value.
+      return { intent: "MADE_UP_INTENT" as unknown as Intent, requestedDomains: [] };
+    }
     const intent = this.intents.shift() ?? "QUESTION";
     return { intent, requestedDomains: ["kingclient"], reply: `reply:${intent}` };
   }
 
   async createProjectDesign(): Promise<SolutionIR> {
+    if (this.invalidDesign) {
+      // Malformed design (wrong schema version) a real LLM could emit.
+      return { schema: "kf-solution-ir/v0" } as unknown as SolutionIR;
+    }
     return {
       schema: "kf-solution-ir/v1",
       solutionId: solutionId("sol-1"),
@@ -522,6 +534,46 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     expect(bed.builds.enqueues).toHaveLength(0);
     // The user message is recorded, but no assistant reply is fabricated.
     expect(bed.workspace.appendCalls.filter((call) => call.role === "assistant")).toHaveLength(0);
+  });
+
+  it("rejects an invalid model intent with INVALID_MODEL_OUTPUT and no side effects (I1)", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+    bed.model.invalidIntent = true;
+    await sendUser(bed, ctx, "随便说点什么");
+
+    const result = await bed.graph.invoke(input(ctx), config(ctx));
+
+    expect(result.lastErrorCode).toBe("INVALID_MODEL_OUTPUT");
+    expect(result.stage).toBe("idle");
+    // Garbage intent must not route anywhere: no plan, no build, no reply.
+    expect(bed.model.createCalls).toHaveLength(0);
+    expect(bed.repo.plans.size).toBe(0);
+    expect(bed.builds.enqueues).toHaveLength(0);
+    expect(bed.workspace.appendCalls.filter((call) => call.role === "assistant")).toHaveLength(0);
+  });
+
+  it("rejects an invalid project design with INVALID_MODEL_OUTPUT and no summary side effect (I1)", async () => {
+    const bed = createBed();
+    // Brand-new workspace: no current revision yet → createProjectDesign path.
+    const ctx: Ctx = {
+      tenantId: TENANT_ID,
+      userId: USER_ID,
+      workspaceId: WORKSPACE_ID,
+      conversationId: CONVERSATION_ID,
+    };
+    bed.model.queueIntent("NEW_REQUIREMENT");
+    bed.model.invalidDesign = true;
+    await sendUser(bed, ctx, "请新建一个工程");
+
+    const result = await bed.graph.invoke(input(ctx), config(ctx));
+
+    expect(result.lastErrorCode).toBe("INVALID_MODEL_OUTPUT");
+    expect(result.stage).toBe("idle");
+    // No fabricated "initial design created" summary and no plan/build.
+    expect(bed.workspace.summaries.size).toBe(0);
+    expect(bed.repo.plans.size).toBe(0);
+    expect(bed.builds.enqueues).toHaveLength(0);
   });
 
   it("records pendingRequirements for unsupported domains and never enqueues a build", async () => {

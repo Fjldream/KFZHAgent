@@ -221,8 +221,18 @@ async function login(
       password: user.password,
     })
     .expect(200);
-  const setCookie = (res.headers["set-cookie"] as unknown as string[])[0];
-  return setCookie.split(";")[0] as string;
+  let cookie = (res.headers["set-cookie"] as unknown as string[])[0].split(";")[0] as string;
+  if (res.body.mustChangePassword === true) {
+    // I2: 首次登录会话受限；测试助手用同一密码完成强制改密换取完整会话，
+    // 保持密码不变（后续断言仍可用原密码登录）。
+    const changeRes = await request(server)
+      .post("/api/auth/change-password")
+      .set("Cookie", cookie)
+      .send({ currentPassword: user.password, newPassword: user.password })
+      .expect(200);
+    cookie = (changeRes.headers["set-cookie"] as unknown as string[])[0].split(";")[0] as string;
+  }
+  return cookie;
 }
 
 async function createWorkspace(cookie: string, name: string) {
@@ -897,6 +907,46 @@ describe("task 12 api surface", () => {
       .get(`/api/change-plans/${changePlanId}`)
       .set("Cookie", cookieB)
       .expect(404);
+  });
+
+  it("marks linkMng changes as script changes in the plan detail response (I5)", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createWorkspace(cookie, "Script WS");
+    const planRow = await prisma.changePlan.create({
+      data: {
+        tenantId: ws.body.tenantId,
+        workspaceId: ws.body.id,
+        planHash: "5".repeat(64),
+        plan: {
+          schema: "kf-change-plan/v1",
+          workspaceId: ws.body.id,
+          operations: [
+            {
+              op: "update",
+              entityId: "button-guid-1",
+              entityType: "button",
+              changes: [{ path: "/linkMng/linkList", value: [] }],
+            },
+            {
+              op: "update",
+              entityId: "Text1",
+              entityType: "text",
+              changes: [{ path: "/text", value: "hello" }],
+            },
+          ],
+        },
+      },
+    });
+
+    const res = await request(server)
+      .get(`/api/change-plans/${planRow.id}`)
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(res.body.scriptChanges).toEqual([
+      { op: "update", entityId: "button-guid-1", entityType: "button", paths: ["/linkMng/linkList"] },
+    ]);
+    // 普通字段变更不进脚本类标注。
+    expect(res.body.scriptChanges.length).toBe(1);
   });
 
   it("lists build artifacts and the validation report for a successful job", async () => {

@@ -105,8 +105,17 @@ async function loginWithTemporaryPassword(
       password: seededUser.password,
     })
     .expect(200);
-  const setCookie = (res.headers["set-cookie"] as unknown as string[])[0];
-  return setCookie.split(";")[0] as string;
+  let cookie = (res.headers["set-cookie"] as unknown as string[])[0].split(";")[0] as string;
+  if (res.body.mustChangePassword === true) {
+    // I2: 首次登录会话是受限会话；激活（改密）后拿完整会话。
+    const changeRes = await request(appInstance.getHttpServer())
+      .post("/api/auth/change-password")
+      .set("Cookie", cookie)
+      .send({ currentPassword: seededUser.password, newPassword: seededUser.password })
+      .expect(200);
+    cookie = (changeRes.headers["set-cookie"] as unknown as string[])[0].split(";")[0] as string;
+  }
+  return cookie;
 }
 
 async function tenantIdOf(tenantName: string): Promise<string> {
@@ -137,13 +146,36 @@ describe("auth integration", () => {
       .expect(200);
     expect(me.body.mustChangePassword).toBe(true);
 
-    // First password change clears the mandatory flag and re-login uses it.
+    // I2: 受限会话不能操作工作区，直到完成首次改密。
     await request(app.getHttpServer())
+      .post("/api/workspaces")
+      .set("Cookie", cookie)
+      .send({ name: "Blocked Before Password Change" })
+      .expect(403);
+
+    // First password change clears the mandatory flag and issues a FULL
+    // session (fresh cookie) so no second login is needed.
+    const changed = await request(app.getHttpServer())
       .post("/api/auth/change-password")
       .set("Cookie", cookie)
       .send({ currentPassword: TENANT_A.password, newPassword: "NewPass-456" })
-      .expect(204);
+      .expect(200);
+    expect(changed.body.mustChangePassword).toBe(false);
+    const fullCookie = (changed.headers["set-cookie"] as unknown as string[])[0].split(";")[0];
+    const meAfter = await request(app.getHttpServer())
+      .get("/api/me")
+      .set("Cookie", fullCookie)
+      .expect(200);
+    expect(meAfter.body.mustChangePassword).toBe(false);
 
+    // The full session can now operate the workspace.
+    await request(app.getHttpServer())
+      .post("/api/workspaces")
+      .set("Cookie", fullCookie)
+      .send({ name: "Workspace After Password Change" })
+      .expect(201);
+
+    // Re-login with the new password is a normal (non-forced) login.
     const relogin = await request(app.getHttpServer())
       .post("/api/auth/login")
       .send({
@@ -192,7 +224,7 @@ describe("auth integration", () => {
       .post("/api/auth/change-password")
       .set("Cookie", cookie)
       .send({ currentPassword: "TempPass-123", newPassword: "NewPass-456" })
-      .expect(204);
+      .expect(200);
     await request(app.getHttpServer())
       .get("/api/me")
       .set("Cookie", cookie)
@@ -312,5 +344,19 @@ describe("auth integration", () => {
       .post("/api/tenants")
       .send({ name: "Sneaky", username: "x", temporaryPassword: "OneTimePass-123" })
       .expect(401);
+  });
+
+  it("returns the same unified error for an unknown username (I4)", async () => {
+    // 未知用户名路径执行 dummy Argon2 verify 后抛出与已知用户相同的
+    // "Invalid credentials"，避免通过响应差异枚举用户名。
+    const res = await request(app.getHttpServer())
+      .post("/api/auth/login")
+      .send({
+        tenant: TENANT_A.tenant,
+        username: "ghost-user",
+        password: "Whatever-123",
+      })
+      .expect(401);
+    expect(res.body.message).toBe("Invalid credentials");
   });
 });

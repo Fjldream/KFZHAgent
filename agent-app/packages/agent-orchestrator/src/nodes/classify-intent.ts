@@ -1,5 +1,6 @@
 import type { AgentGraphStateValue, AgentGraphUpdate } from "../state.js";
 import type { SolutionGraphDeps } from "../ports.js";
+import { ClassifyIntentResultSchema } from "../schemas/intent.js";
 
 /**
  * Classifies the current turn through ModelPort.classifyIntent and applies the
@@ -10,11 +11,16 @@ import type { SolutionGraphDeps } from "../ports.js";
  *     idle,
  *   - ROLLBACK → explicitly not supported by this workflow yet,
  *   - everything else → routed by the conditional edge.
+ *
+ * The raw model output is zod-gated before ANY state side effect (I1): a real
+ * LLM can emit an invented intent value or a malformed shape, and the graph
+ * must reject it with INVALID_MODEL_OUTPUT instead of routing on garbage or
+ * writing an assistant reply nobody asked for.
  */
 export function createClassifyIntentNode(deps: SolutionGraphDeps) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
     const requirementText = latestUserMessage(state);
-    const result = await deps.modelPort.classifyIntent({
+    const rawResult: unknown = await deps.modelPort.classifyIntent({
       tenantId: state.tenantId,
       userId: state.userId,
       workspaceId: state.workspaceId,
@@ -25,6 +31,16 @@ export function createClassifyIntentNode(deps: SolutionGraphDeps) {
       currentRevisionId: state.currentRevisionId,
       requirementText,
     });
+    const parsed = ClassifyIntentResultSchema.safeParse(rawResult);
+    if (!parsed.success) {
+      return {
+        stage: "idle",
+        lastErrorCode: "INVALID_MODEL_OUTPUT",
+        pendingRequirements: undefined,
+        resumeAction: undefined,
+      };
+    }
+    const result = parsed.data;
 
     const wantsChange =
       result.intent === "NEW_REQUIREMENT" || result.intent === "MODIFY_REQUIREMENT";

@@ -1,5 +1,5 @@
 import type { ChangePlan, ValidationReport } from "@kf/contracts";
-import type { Intent } from "./schemas/intent.js";
+import type { ClassifyIntentResult, Intent } from "./schemas/intent.js";
 import type { ProjectDesign } from "./schemas/project-design.js";
 import type { GraphMessage } from "./state.js";
 
@@ -23,22 +23,14 @@ export interface ModelPortContext {
 }
 
 /**
- * Result of intent classification. `requestedDomains` lists the domains the
- * user's request touches; when every requested domain is unsupported the graph
- * records pendingRequirements instead of planning or building.
- */
-export interface ClassifyIntentResult {
-  intent: Intent;
-  requestedDomains: string[];
-  /** Optional assistant reply for the QUESTION route. */
-  reply?: string;
-}
-
-/**
  * Model abstraction (brief Step 1). The five methods mirror the brief exactly:
  * classifyIntent / createProjectDesign / createChangePlan / reviseChangePlan /
  * explainValidation. Tests inject a FakeModelPort; the production implementation
  * is wired in Task 11 (real LLM or stub).
+ *
+ * `ClassifyIntentResult` is defined (and zod-gated at runtime) in
+ * schemas/intent.ts — re-exported here so ModelPort implementers keep a single
+ * source of truth for the shape the graph will validate (I1).
  */
 export interface ModelPort {
   classifyIntent(input: ModelPortContext): Promise<ClassifyIntentResult>;
@@ -47,3 +39,5 @@ export interface ModelPort {
   reviseChangePlan(input: ModelPortContext): Promise<ChangePlan>;
   explainValidation(input: { tenantId: string; report: ValidationReport }): Promise<string>;
 }
+
+export type { ClassifyIntentResult, Intent };
