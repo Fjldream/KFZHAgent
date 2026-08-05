@@ -12,10 +12,12 @@
  * and `height` map 1:1 to the raw KF fields.
  */
 
-/** Fields every KF control may be patched on, regardless of type. */
+/** Fields every KF control may be patched on, regardless of type.
+ * Note: `guid` is deliberately NOT here — a KF GUID identifies the entity
+ * across the whole project and must never be changed by a field patch.
+ */
 export const COMMON_CONTROL_ALLOWED_FIELDS: readonly string[] = [
   "name",
-  "guid",
   "leftTopPt",
   "width",
   "height",

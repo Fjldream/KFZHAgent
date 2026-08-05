@@ -23,6 +23,7 @@ import {
 import {
   isControlLocation,
   locateEntity,
+  resolveVariableGroupFile,
   resolveVersionDirName,
   type EntityLocation,
 } from "./change-scope.js";
@@ -296,6 +297,7 @@ async function applyCreate(
   candidate: string,
   versionDir: string,
   inspection: InspectResult,
+  baseRoot: string,
   op: NormalizedOperation,
   workspaceId: string,
 ): Promise<void> {
@@ -337,7 +339,7 @@ async function applyCreate(
       break;
     }
     case "variable": {
-      const groupFile = "project/Tag/variables/group-guid-1.json";
+      const groupFile = await resolveVariableGroupFile(inspection.index, baseRoot, versionDir);
       const doc = await readJsonFile(candidate, versionDir, groupFile);
       const variables = Array.isArray(doc["Variables"]) ? (doc["Variables"] as unknown[]) : [];
       const nextId =
@@ -424,7 +426,7 @@ export async function applyClientPatch(
 
   for (const op of plan.operations) {
     if (op.op === "create") {
-      await applyCreate(candidate, versionDir, inspection, op, plan.workspaceId);
+      await applyCreate(candidate, versionDir, inspection, base, op, plan.workspaceId);
     } else if (op.op === "update") {
       await applyUpdate(candidate, versionDir, inspection, base, op);
     } else {

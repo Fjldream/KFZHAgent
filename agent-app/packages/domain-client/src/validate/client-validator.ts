@@ -248,6 +248,11 @@ async function checkBusinessRules(
   plan: NormalizedPlan,
 ): Promise<CheckOutcome> {
   const issues: string[] = [];
+  if (plan.operations.length === 0) {
+    issues.push(
+      "change plan contains no operations (a confirmed plan must change at least one entity)",
+    );
+  }
   let inspection;
   try {
     inspection = await inspectClientProject(candidate);
@@ -344,14 +349,24 @@ async function checkChangeScope(
   candidate: string,
   plan: NormalizedPlan,
 ): Promise<{ outcome: CheckOutcome; warnings: string[] }> {
-  const scope = await verifyChangeScope(base, candidate, plan);
-  if (scope.violations.length > 0) {
+  try {
+    const scope = await verifyChangeScope(base, candidate, plan);
+    if (scope.violations.length > 0) {
+      return {
+        outcome: fail(scope.violations.map((v) => v.detail)),
+        warnings: scope.warnings,
+      };
+    }
+    return { outcome: pass(), warnings: scope.warnings };
+  } catch (err) {
+    // The validator is the authority and must always return a report:
+    // a plan that cannot be located against the base (unknown entityId, bad
+    // entityType, ...) fails the changeScope layer instead of throwing.
     return {
-      outcome: fail(scope.violations.map((v) => v.detail)),
-      warnings: scope.warnings,
+      outcome: fail([`change-scope verification failed: ${String(err)}`]),
+      warnings: [],
     };
   }
-  return { outcome: pass(), warnings: scope.warnings };
 }
 
 // ---------------------------------------------------------------------------
@@ -428,7 +443,6 @@ export async function validateClientProject(
   planInput: unknown,
   options?: ValidateOptions,
 ): Promise<ValidationReport> {
-  const plan = normalizeChangePlan(planInput);
   const candidate = typeof candidateInput === "string" ? candidateInput : candidateInput.rootDir;
 
   let versionDir: string;
@@ -444,6 +458,25 @@ export async function validateClientProject(
       changeScope: fail([message]),
       roundTrip: fail([message]),
     });
+  }
+
+  // A malformed plan must never bubble out of the validator: it is reported as
+  // a businessRules/changeScope failure while the candidate-only layers
+  // (structure, schema, references, round-trip) still run to full detail.
+  let plan: NormalizedPlan;
+  try {
+    plan = normalizeChangePlan(planInput);
+  } catch (err) {
+    const message = `invalid change plan: ${String(err)}`;
+    const outcomes: Record<CheckKey, CheckOutcome> = {
+      packageStructure: await checkPackageStructure(candidate, versionDir),
+      jsonSchema: await checkJsonSchema(candidate, versionDir),
+      references: await checkReferences(candidate),
+      businessRules: fail([message]),
+      changeScope: fail([message]),
+      roundTrip: options?.skipRoundTrip ? pass() : await checkRoundTrip(candidate),
+    };
+    return makeReport(outcomes);
   }
 
   const outcomes: Record<CheckKey, CheckOutcome> = {

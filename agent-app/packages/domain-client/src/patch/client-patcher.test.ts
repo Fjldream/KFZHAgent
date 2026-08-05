@@ -1,71 +1,83 @@
-// @ts-nocheck -- 测试含 brief 逐字代码（JS 风格、无类型标注）；运行时行为由 vitest 断言验证。
-/* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return */
 import { describe, expect, it } from "vitest";
-import { cp, mkdtemp, readFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ClientWorkspace } from "../compile/client-compiler.js";
 import { inspectClientProject } from "../inspect/client-inspector.js";
 import { deriveGuid } from "../compile/guid-factory.js";
 import { applyClientPatch, deleteOperationDigest, patchConflict, planHash } from "./client-patcher.js";
 
 const pkgDir = fileURLToPath(new URL(".", import.meta.url));
 const fixturesRoot = join(pkgDir, "../../../../tests/fixtures");
-const fixture = (name) => join(fixturesRoot, name);
+const fixture = (name: string): string => join(fixturesRoot, name);
 
-async function tempDir(prefix) {
+type Root = string | ClientWorkspace;
+
+async function tempDir(prefix: string): Promise<string> {
   return mkdtemp(join(tmpdir(), prefix));
 }
 
-async function copyFixture(name) {
+async function copyFixture(name: string): Promise<string> {
   const dest = await tempDir("kf-patch-base-");
   await cp(fixture(name), dest, { recursive: true });
   return dest;
 }
 
-function plan(operations) {
+function plan(operations: unknown[]): { schema: "kf-change-plan/v1"; workspaceId: string; operations: unknown[] } {
   return { schema: "kf-change-plan/v1", workspaceId: "w-test", operations };
 }
 
-function updateOperation(entityId, changes, extra) {
+function updateOperation(
+  entityId: string,
+  changes: Array<{ path: string; value: unknown }>,
+  extra?: Record<string, unknown>,
+): unknown {
   return { op: "update", entityId, changes, ...extra };
 }
 
-async function resolveVersionDir(root) {
-  const entries = await import("node:fs/promises").then((m) => m.readdir(root, { withFileTypes: true }));
+async function resolveVersionDir(root: string): Promise<string> {
+  const entries = await readdir(root, { withFileTypes: true });
   const version = entries.find((e) => e.isDirectory() && /^\d+\.\d+\.\d+\.\d+$/.test(e.name));
   return version ? join(root, version.name) : root;
 }
 
-async function rootDirOf(root) {
+async function rootDirOf(root: Root): Promise<string> {
   return typeof root === "string" ? root : root.rootDir;
 }
 
-async function controlField(root, guid, field) {
+async function pageFile(root: Root): Promise<Record<string, unknown>> {
+  const dir = await rootDirOf(root);
+  const projectRoot = await resolveVersionDir(dir);
+  const page = JSON.parse(
+    await readFile(join(projectRoot, "project", "page", "Page1.json"), "utf8"),
+  ) as Record<string, unknown>;
+  return page;
+}
+
+async function nodeAt(entry: { rawPath: string }, page: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const frag = entry.rawPath.split("#")[1] ?? "";
+  let node: unknown = page;
+  for (const seg of frag.split("/").filter(Boolean)) {
+    const num = Number(seg);
+    node = (node as Record<string, unknown>)[Number.isNaN(num) ? seg : num];
+  }
+  return node as Record<string, unknown>;
+}
+
+async function controlField(root: Root, guid: string, field: string): Promise<unknown> {
   const result = await inspectClientProject(await rootDirOf(root));
   const entry = result.index.controls[guid];
   if (!entry) throw new Error(`no control ${guid} in index`);
-  const [file, frag] = entry.rawPath.split("#");
-  const projectRoot = await resolveVersionDir(await rootDirOf(root));
-  const page = JSON.parse(await readFile(join(projectRoot, file), "utf8"));
-  let node = page;
-  for (const seg of frag.split("/").filter(Boolean)) {
-    node = node[Number.isNaN(Number(seg)) ? seg : Number(seg)];
-  }
+  const node = await nodeAt(entry, await pageFile(root));
   return node[field];
 }
 
-async function wholeControl(root, guid) {
+async function wholeControl(root: Root, guid: string): Promise<Record<string, unknown>> {
   const result = await inspectClientProject(await rootDirOf(root));
   const entry = result.index.controls[guid];
-  const [file, frag] = entry.rawPath.split("#");
-  const projectRoot = await resolveVersionDir(await rootDirOf(root));
-  const page = JSON.parse(await readFile(join(projectRoot, file), "utf8"));
-  let node = page;
-  for (const seg of frag.split("/").filter(Boolean)) {
-    node = node[Number.isNaN(Number(seg)) ? seg : Number(seg)];
-  }
-  return node;
+  if (!entry) throw new Error(`no control ${guid} in index`);
+  return nodeAt(entry, await pageFile(root));
 }
 
 describe("client patcher (Task 7 brief Step 1)", () => {
@@ -113,6 +125,15 @@ describe("client patcher (Task 7 brief Step 1)", () => {
     ).rejects.toThrow(patchConflict);
   });
 
+  it("rejects patching a control GUID (immutable identity field)", async () => {
+    const base = await copyFixture("client-unknown-field");
+    await expect(
+      applyClientPatch(base, plan([
+        updateOperation("button-guid-1", [{ path: "/guid", value: "new-guid" }])
+      ])),
+    ).rejects.toThrow(patchConflict);
+  });
+
   it("fails when the entity GUID does not exist", async () => {
     const base = await copyFixture("client-unknown-field");
     await expect(
@@ -147,10 +168,11 @@ describe("client patcher (Task 7 brief Step 1)", () => {
     ]));
     const result = await inspectClientProject(await rootDirOf(candidate));
     expect(result.index.controls["button-guid-1"]).toBeUndefined();
-    expect(result.index.pages["page-guid-1"].controlGuids).not.toContain("button-guid-1");
+    expect(result.index.pages["page-guid-1"]?.controlGuids).not.toContain("button-guid-1");
     // The page file and its other content survive untouched.
-    expect(result.raw.pages["page-guid-1"].customFutureField).toEqual({ keep: true });
-    expect(result.raw.pages["page-guid-1"].pageProperty.name).toBe("Page1");
+    const rawPage = result.raw.pages["page-guid-1"] as Record<string, unknown>;
+    expect(rawPage["customFutureField"]).toEqual({ keep: true });
+    expect((rawPage["pageProperty"] as Record<string, unknown>)["name"]).toBe("Page1");
   });
 
   it("creates a control from its reviewed template and a derived GUID", async () => {
@@ -184,8 +206,30 @@ describe("client patcher (Task 7 brief Step 1)", () => {
       updateOperation("$TestVar", [{ path: "/comment", value: "patched comment" }])
     ]));
     const result = await inspectClientProject(await rootDirOf(candidate));
-    expect(result.index.variables["1"].name).toBe("$TestVar");
-    expect(result.raw.variables["group-guid-1"].Variables[0].comment).toBe("patched comment");
+    expect(result.index.variables["1"]?.name).toBe("$TestVar");
+    const variables = (result.raw.variables["group-guid-1"] as { Variables: Array<Record<string, unknown>> }).Variables;
+    expect(variables[0]?.comment).toBe("patched comment");
+  });
+
+  it("creates a variable into the located group file (not a hard-coded name)", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const candidate = await applyClientPatch(base, plan([
+      {
+        op: "create",
+        entityType: "variable",
+        entityId: "$NewVar",
+        properties: { dataType: 1, comment: "new", defaultValue: 7 }
+      }
+    ]));
+    const result = await inspectClientProject(await rootDirOf(candidate));
+    const created = Object.values(result.index.variables).find((v) => v.name === "$NewVar");
+    expect(created).toBeDefined();
+    // Appended to the same group file that already holds $TestVar.
+    expect(created?.file).toBe("project/Tag/variables/group-guid-1.json");
+    const variables = (result.raw.variables["group-guid-1"] as { Variables: Array<Record<string, unknown>> }).Variables;
+    const entry = variables.find((v) => v.name === "$NewVar");
+    expect(entry).toMatchObject({ dataType: 1, comment: "new", defaultValue: 7 });
+    expect(typeof entry?.id).toBe("number");
   });
 
   it("accepts a plan whose planHash matches", async () => {

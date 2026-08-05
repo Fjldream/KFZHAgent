@@ -1,59 +1,64 @@
-// @ts-nocheck -- 测试含 brief 逐字代码（JS 风格、无类型标注）；运行时行为由 vitest 断言验证。
-/* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return */
 import { describe, expect, it } from "vitest";
-import { cp, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ClientWorkspace } from "../compile/client-compiler.js";
 import { applyClientPatch, deleteOperationDigest } from "../patch/client-patcher.js";
 import { inspectClientProject } from "../inspect/client-inspector.js";
 import { validateClientProject } from "./client-validator.js";
 
 const pkgDir = fileURLToPath(new URL(".", import.meta.url));
 const fixturesRoot = join(pkgDir, "../../../../tests/fixtures");
-const fixture = (name) => join(fixturesRoot, name);
+const fixture = (name: string): string => join(fixturesRoot, name);
 
-async function tempDir(prefix) {
+type Root = string | ClientWorkspace;
+
+async function tempDir(prefix: string): Promise<string> {
   return mkdtemp(join(tmpdir(), prefix));
 }
 
-async function copyFixture(name) {
+async function copyFixture(name: string): Promise<string> {
   const dest = await tempDir("kf-validate-base-");
   await cp(fixture(name), dest, { recursive: true });
   return dest;
 }
 
-function plan(operations) {
+function plan(operations: unknown[]): { schema: "kf-change-plan/v1"; workspaceId: string; operations: unknown[] } {
   return { schema: "kf-change-plan/v1", workspaceId: "w-test", operations };
 }
 
-async function rootDirOf(root) {
+async function rootDirOf(root: Root): Promise<string> {
   return typeof root === "string" ? root : root.rootDir;
 }
 
-function happyPlan() {
+function happyPlan(): { schema: "kf-change-plan/v1"; workspaceId: string; operations: unknown[] } {
   return plan([
     { op: "update", entityId: "button-guid-1", changes: [{ path: "/backgroundColor", value: "#ff0000" }] }
   ]);
 }
 
-async function resolveVersionDir(root) {
+async function resolveVersionDir(root: Root): Promise<string> {
   const dir = await rootDirOf(root);
-  const entries = await import("node:fs/promises").then((m) => m.readdir(dir, { withFileTypes: true }));
+  const entries = await readdir(dir, { withFileTypes: true });
   const version = entries.find((e) => e.isDirectory() && /^\d+\.\d+\.\d+\.\d+$/.test(e.name));
   return version ? join(dir, version.name) : dir;
 }
 
-async function pageFile(root) {
+async function pageFile(root: Root): Promise<string> {
   const projectRoot = await resolveVersionDir(root);
   return join(projectRoot, "project", "page", "Page1.json");
 }
 
-async function readPage(root) {
-  return JSON.parse(await readFile(await pageFile(root), "utf8"));
+interface PageFixture {
+  objects: Array<Record<string, unknown>>;
 }
 
-async function writePage(root, page) {
+async function readPage(root: Root): Promise<PageFixture> {
+  return JSON.parse(await readFile(await pageFile(root), "utf8")) as PageFixture;
+}
+
+async function writePage(root: Root, page: PageFixture): Promise<void> {
   await writeFile(await pageFile(root), JSON.stringify(page, null, 2));
 }
 
@@ -91,7 +96,7 @@ describe("client validator (Task 7 brief Step 2)", () => {
     const base = await copyFixture("client-unknown-field");
     const candidate = await applyClientPatch(base, happyPlan());
     const page = await readPage(candidate);
-    page.objects[0].linkMng = {
+    page.objects[0]!.linkMng = {
       linkList: [{ action: "setVariable", variableId: "$NoSuchVar", value: 1 }],
     };
     await writePage(candidate, page);
@@ -104,7 +109,7 @@ describe("client validator (Task 7 brief Step 2)", () => {
     const base = await copyFixture("client-unknown-field");
     const candidate = await applyClientPatch(base, happyPlan());
     const page = await readPage(candidate);
-    page.objects[0].uiModelType = 999;
+    page.objects[0]!.uiModelType = 999;
     await writePage(candidate, page);
     const report = await validateClientProject(base, candidate, happyPlan());
     expect(report.checks.businessRules).toBe("fail");
@@ -115,7 +120,7 @@ describe("client validator (Task 7 brief Step 2)", () => {
     const base = await copyFixture("client-unknown-field");
     const candidate = await applyClientPatch(base, happyPlan());
     const page = await readPage(candidate);
-    page.objects[0].leftTopPt = { x: 1300, y: 80 }; // beyond 1280x720 page
+    page.objects[0]!.leftTopPt = { x: 1300, y: 80 }; // beyond 1280x720 page
     await writePage(candidate, page);
     const report = await validateClientProject(base, candidate, happyPlan());
     expect(report.checks.businessRules).toBe("fail");
@@ -137,7 +142,7 @@ describe("client validator (Task 7 brief Step 2)", () => {
     const candidate = await applyClientPatch(base, happyPlan());
     // Tamper with a field the plan did NOT touch (same file, different field).
     const page = await readPage(candidate);
-    page.objects[0].text = "hacked";
+    page.objects[0]!.text = "hacked";
     await writePage(candidate, page);
     const report = await validateClientProject(base, candidate, happyPlan());
     expect(report.checks.changeScope).toBe("fail");
@@ -148,7 +153,7 @@ describe("client validator (Task 7 brief Step 2)", () => {
     const base = await copyFixture("client-unknown-field");
     const candidate = await applyClientPatch(base, happyPlan());
     const page = await readPage(candidate);
-    page.objects[0].linkMng = {
+    page.objects[0]!.linkMng = {
       linkList: [{ action: "teleportToMoon", moon: "full" }],
     };
     await writePage(candidate, page);
@@ -208,6 +213,39 @@ describe("client validator (Task 7 brief Step 2)", () => {
     const report = await validateClientProject(base, candidate, createPlan);
     expect(report.status).toBe("pass");
   });
+
+  it("returns a fail report (not a throw) for an unknown entityId", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const candidate = await copyFixture("client-unknown-field");
+    const badPlan = plan([
+      { op: "update", entityId: "no-such-guid", changes: [{ path: "/text", value: "x" }] }
+    ]);
+    const report = await validateClientProject(base, candidate, badPlan);
+    expect(report.status).toBe("fail");
+    expect(report.checks.changeScope).toBe("fail");
+  });
+
+  it("returns a fail report (not a throw) for a malformed operation", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const candidate = await copyFixture("client-unknown-field");
+    const badPlan = {
+      schema: "kf-change-plan/v1",
+      workspaceId: "w-test",
+      operations: [{ action: "teleport" }],
+    };
+    const report = await validateClientProject(base, candidate, badPlan);
+    expect(report.status).toBe("fail");
+    expect(report.checks.businessRules).toBe("fail");
+    expect(report.checks.changeScope).toBe("fail");
+  });
+
+  it("returns a fail report (not a throw) for an empty operations array", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const candidate = await copyFixture("client-unknown-field");
+    const report = await validateClientProject(base, candidate, plan([]));
+    expect(report.status).toBe("fail");
+    expect(report.checks.businessRules).toBe("fail");
+  });
 });
 
 describe("validator reports", () => {
@@ -230,6 +268,6 @@ describe("validator reports", () => {
     const candidate = await applyClientPatch(base, happyPlan());
     await validateClientProject(base, candidate, happyPlan());
     const result = await inspectClientProject(await rootDirOf(candidate));
-    expect(result.index.controls["button-guid-1"].type).toBe("button");
+    expect(result.index.controls["button-guid-1"]?.type).toBe("button");
   });
 });

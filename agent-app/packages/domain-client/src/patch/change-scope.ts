@@ -139,6 +139,34 @@ async function variablePointer(
 }
 
 /**
+ * Locates the variable group file a created variable should be appended to
+ * (brief M4): prefers the group file that already holds an indexed variable,
+ * otherwise derives the file from the group id in globalVariableMng.json.
+ * Never hard-codes a fixture-specific file name.
+ */
+export async function resolveVariableGroupFile(
+  index: EntityIndex,
+  baseRoot: string,
+  versionDir: string,
+): Promise<string> {
+  const groupFiles = new Set<string>();
+  for (const entry of Object.values(index.variables)) {
+    if (entry.file.startsWith("project/Tag/variables/")) groupFiles.add(entry.file);
+  }
+  const files = [...groupFiles].sort();
+  if (files.length > 0) return files[0]!;
+
+  const manager = (await readJsonAt(baseRoot, versionDir, "project/Tag/globalVariableMng.json")) as Record<string, unknown>;
+  const groups = isObject(manager["Groups"]) ? manager["Groups"] : {};
+  if (typeof groups["id"] === "string") {
+    return `project/Tag/variables/${groups["id"]}.json`;
+  }
+  throw new PatchConflictError(
+    "cannot locate a variable group file for the create-variable operation",
+  );
+}
+
+/**
  * Locates an entity by GUID (KF GUID, numeric variable id, or semantic name).
  * Throws PATCH_CONFLICT when the id matches nothing.
  */
@@ -282,7 +310,7 @@ async function trackCreate(
       break;
     }
     case "variable": {
-      const groupFile = "project/Tag/variables/group-guid-1.json";
+      const groupFile = await resolveVariableGroupFile(index, baseRoot, versionDir);
       const doc = (await readJsonAt(baseRoot, versionDir, groupFile)) as Record<string, unknown>;
       const variables = Array.isArray(doc["Variables"]) ? (doc["Variables"] as unknown[]) : [];
       touchPointer(groupFile, `#/Variables/${variables.length}`);
