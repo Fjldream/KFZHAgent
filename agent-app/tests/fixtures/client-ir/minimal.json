@@ -1,0 +1,58 @@
+{
+  "schema": "kf-client-project-ir/v1",
+  "id": "project-minimal",
+  "name": "Minimal",
+  "version": "1.0.0.1",
+  "pages": [
+    {
+      "id": "page-1",
+      "name": "Page1",
+      "width": 1440,
+      "height": 900,
+      "controls": [
+        {
+          "id": "Text1",
+          "type": "text",
+          "x": 40,
+          "y": 40,
+          "width": 120,
+          "height": 30,
+          "text": "Hello KF"
+        },
+        {
+          "id": "Button1",
+          "type": "button",
+          "x": 40,
+          "y": 100,
+          "width": 90,
+          "height": 60,
+          "text": "Go",
+          "action": {
+            "kind": "setVariable",
+            "variableId": "$Temp",
+            "value": 1
+          }
+        },
+        {
+          "id": "Input1",
+          "type": "inputnumber",
+          "x": 40,
+          "y": 180,
+          "width": 170,
+          "height": 50,
+          "variableId": "$Temp",
+          "decimals": 2
+        }
+      ]
+    }
+  ],
+  "variables": [
+    {
+      "id": "var-temp",
+      "name": "$Temp",
+      "dataType": 1,
+      "comment": "temporary float variable",
+      "defaultValue": 0.5
+    }
+  ]
+}
