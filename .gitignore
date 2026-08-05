@@ -2,3 +2,7 @@
 kf-src/
 KingFusion3.6_Center/
 KingFusion3.6_Node/
+.toolchain/
+.superpowers/
+.worktrees/
+.pnpm-store/
