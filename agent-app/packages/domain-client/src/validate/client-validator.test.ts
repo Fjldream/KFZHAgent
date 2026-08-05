@@ -401,6 +401,85 @@ describe("client validator (Task 7 brief Step 2)", () => {
     expect(report.checks.changeScope).toBe("fail");
     expect(report.status).toBe("fail");
   });
+
+  it("passes a head-delete + create variable combination", async () => {
+    const base = await copyFixture("client-unknown-field");
+    // base variables: [$TestVar, $V2, $V3]
+    const variables = await readVariables(base);
+    variables.Variables.push(
+      { name: "$V2", dataType: 1, id: 2 },
+      { name: "$V3", dataType: 1, id: 3 },
+    );
+    await writeVariables(base, variables);
+    const comboPlan = plan([
+      { op: "delete", entityId: "$TestVar", destructiveConfirmed: true, digest: deleteOperationDigest("$TestVar") },
+      { op: "create", entityType: "variable", entityId: "$V4", properties: { dataType: 1 } }
+    ]);
+    const candidate = await applyClientPatch(base, comboPlan);
+    const report = await validateClientProject(base, candidate, comboPlan);
+    expect(report.status).toBe("pass");
+    expect(report.checks.changeScope).toBe("pass");
+  });
+
+  it("passes a multi-delete + create variable combination", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const variables = await readVariables(base);
+    variables.Variables.push(
+      { name: "$V2", dataType: 1, id: 2 },
+      { name: "$V3", dataType: 1, id: 3 },
+    );
+    await writeVariables(base, variables);
+    const comboPlan = plan([
+      { op: "delete", entityId: "$TestVar", destructiveConfirmed: true, digest: deleteOperationDigest("$TestVar") },
+      { op: "delete", entityId: "$V2", destructiveConfirmed: true, digest: deleteOperationDigest("$V2") },
+      { op: "create", entityType: "variable", entityId: "$V4", properties: { dataType: 1 } }
+    ]);
+    const candidate = await applyClientPatch(base, comboPlan);
+    const report = await validateClientProject(base, candidate, comboPlan);
+    expect(report.status).toBe("pass");
+    expect(report.checks.changeScope).toBe("pass");
+  });
+
+  it("deletes the right controls in an ascending multi-delete", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const page = await readPage(base);
+    page.objects.push(
+      { name: "Button2", uiModelType: 35, guid: "button-guid-2", leftTopPt: { x: 0, y: 200 }, width: 90, height: 60, text: "b2" },
+      { name: "Button3", uiModelType: 35, guid: "button-guid-3", leftTopPt: { x: 0, y: 300 }, width: 90, height: 60, text: "b3" },
+      { name: "Button4", uiModelType: 35, guid: "button-guid-4", leftTopPt: { x: 0, y: 400 }, width: 90, height: 60, text: "b4" },
+    );
+    await writePage(base, page);
+    const deletePlan = plan([
+      { op: "delete", entityId: "button-guid-2", destructiveConfirmed: true, digest: deleteOperationDigest("button-guid-2") },
+      { op: "delete", entityId: "button-guid-3", destructiveConfirmed: true, digest: deleteOperationDigest("button-guid-3") },
+    ]);
+    const candidate = await applyClientPatch(base, deletePlan);
+    const result = await inspectClientProject(await rootDirOf(candidate));
+    // g2 and g3 gone; g1 and g4 survive (ascending base-index deletion must
+    // not splice the wrong element after the array shrinks).
+    expect(result.index.controls["button-guid-2"]).toBeUndefined();
+    expect(result.index.controls["button-guid-3"]).toBeUndefined();
+    expect(result.index.controls["button-guid-1"]).toBeDefined();
+    expect(result.index.controls["button-guid-4"]).toBeDefined();
+  });
+
+  it("passes delete + update of a later control on the same page", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const page = await readPage(base);
+    page.objects.push(
+      { name: "Button2", uiModelType: 35, guid: "button-guid-2", leftTopPt: { x: 0, y: 200 }, width: 90, height: 60, text: "b2" },
+      { name: "Button3", uiModelType: 35, guid: "button-guid-3", leftTopPt: { x: 0, y: 300 }, width: 90, height: 60, text: "b3" },
+    );
+    await writePage(base, page);
+    const comboPlan = plan([
+      { op: "delete", entityId: "button-guid-2", destructiveConfirmed: true, digest: deleteOperationDigest("button-guid-2") },
+      { op: "update", entityId: "button-guid-3", changes: [{ path: "/backgroundColor", value: "#123456" }] }
+    ]);
+    const candidate = await applyClientPatch(base, comboPlan);
+    const report = await validateClientProject(base, candidate, comboPlan);
+    expect(report.status).toBe("pass");
+    expect(report.checks.changeScope).toBe("pass");
+  });
 });
 
 describe("validator reports", () => {

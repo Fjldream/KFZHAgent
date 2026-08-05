@@ -15,9 +15,9 @@ import pageSkeleton from "../templates/page-skeleton.json" with { type: "json" }
 import { allowedFieldsFor, resolveControlPath } from "./allowlist.js";
 import {
   PatchConflictError,
+  isObject,
   parseJsonPointer,
   parseFragmentPointer,
-  removeByTokens,
   setByTokens,
 } from "./json-pointer.js";
 import {
@@ -202,13 +202,73 @@ function asNumber(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-/** Locates the entity JSON root inside a candidate file, returning doc + subtree. */
+/** Container keys under which controls nest inside a page tree. */
+const CONTROL_CONTAINER_KEYS = ["objects", "children", "layoutItems", "insiderObjects"] as const;
+
+/** A located entity inside a candidate document: parent array + index + root. */
+interface EntityRef {
+  parent: unknown[];
+  index: number;
+  root: Record<string, unknown>;
+}
+
+/** Recursively locates a control by its KF GUID anywhere in the page tree. */
+function findControlRef(node: unknown, guid: string): EntityRef | undefined {
+  if (Array.isArray(node)) {
+    for (let i = 0; i < node.length; i += 1) {
+      const item: unknown = node[i];
+      if (isObject(item) && item["guid"] === guid) {
+        return { parent: node, index: i, root: item };
+      }
+      const found = findControlRef(item, guid);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+  if (isObject(node)) {
+    for (const key of CONTROL_CONTAINER_KEYS) {
+      if (key in node) {
+        const found = findControlRef(node[key], guid);
+        if (found !== undefined) return found;
+      }
+    }
+  }
+  return undefined;
+}
+
+/** Locates a variable by its semantic name inside a Tag file's Variables array. */
+function findVariableRef(doc: Record<string, unknown>, name: string): EntityRef | undefined {
+  const variables = Array.isArray(doc["Variables"]) ? (doc["Variables"] as unknown[]) : [];
+  for (let i = 0; i < variables.length; i += 1) {
+    const item = variables[i];
+    if (isObject(item) && item["name"] === name) {
+      return { parent: variables, index: i, root: item };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Locates the entity root inside a candidate file. Controls and variables are
+ * re-located by their IDENTITY (KF GUID / variable name) instead of the base
+ * index pointer: earlier confirmed deletes shrink the candidate array, so a
+ * base pointer would index drift or go out of bounds.
+ */
 async function entityRootOf(
   rootDir: string,
   versionDir: string,
   loc: EntityLocation,
-): Promise<{ doc: Record<string, unknown>; root: Record<string, unknown> }> {
+): Promise<{ doc: Record<string, unknown>; root: Record<string, unknown>; ref: EntityRef | undefined }> {
   const doc = await readJsonFile(rootDir, versionDir, loc.file);
+  const ref =
+    loc.kind === "control" && loc.guid !== undefined
+      ? findControlRef(doc, loc.guid)
+      : loc.kind === "variable" && loc.name !== undefined
+        ? findVariableRef(doc, loc.name)
+        : undefined;
+  if (ref !== undefined) return { doc, root: ref.root, ref };
+
+  // Fallback (page entity / identity missing): resolve the base pointer.
   const tokens = parseFragmentPointer(loc.pointer);
   let node: unknown = doc;
   for (const token of tokens) {
@@ -221,7 +281,7 @@ async function entityRootOf(
   if (node === null || typeof node !== "object" || Array.isArray(node)) {
     throw new PatchConflictError(`entity not found at ${loc.file}${loc.pointer}`);
   }
-  return { doc, root: node as Record<string, unknown> };
+  return { doc, root: node as Record<string, unknown>, ref: undefined };
 }
 
 async function applyUpdate(
@@ -279,8 +339,11 @@ async function applyDelete(
   }
   const loc = await locateEntity(baseRoot, inspection.index, versionDir, op.entityId, op.entityType);
   if (loc.kind === "control" || loc.kind === "variable") {
-    const doc = await readJsonFile(candidate, versionDir, loc.file);
-    removeByTokens(doc, parseFragmentPointer(loc.pointer));
+    const { doc, ref } = await entityRootOf(candidate, versionDir, loc);
+    if (ref === undefined) {
+      throw new PatchConflictError(`entity "${op.entityId}" not found in the candidate`);
+    }
+    ref.parent.splice(ref.index, 1);
     await writeJsonFile(candidate, versionDir, loc.file, doc);
     return;
   }

@@ -72,6 +72,10 @@ export interface EntityLocation {
   pointer: string;
   /** IR control type for controls (`button`, `text`, ...). */
   controlType?: string;
+  /** KF GUID for controls — identity used to re-locate the entity in the candidate. */
+  guid?: string;
+  /** Semantic variable name for variables — identity used to re-locate the entity. */
+  name?: string;
 }
 
 export function isControlLocation(loc: EntityLocation): loc is EntityLocation & { kind: "control" } {
@@ -185,6 +189,7 @@ export async function locateEntity(
       file,
       pointer: fragment === "" ? "#" : fragment,
       controlType: control.type,
+      guid: entityId,
     };
   }
   const page = index.pages[entityId];
@@ -196,7 +201,7 @@ export async function locateEntity(
     Object.values(index.variables).find((v) => v.name === entityId);
   if (variable !== undefined) {
     const pointer = await variablePointer(baseRoot, versionDir, variable.file, variable.name);
-    return { kind: "variable", file: variable.file, pointer };
+    return { kind: "variable", file: variable.file, pointer, name: variable.name };
   }
   throw new PatchConflictError(
     `entity "${entityId}" not found in the base workspace (${entityTypeHint ?? "any kind"})`,
@@ -380,10 +385,6 @@ export interface JsonDiff {
   kind: "add" | "remove" | "replace";
 }
 
-function hasGuid(value: unknown): boolean {
-  return isObject(value) && typeof value["guid"] === "string";
-}
-
 function deepEqual(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true;
   if (Array.isArray(a) && Array.isArray(b)) {
@@ -399,50 +400,66 @@ function deepEqual(a: unknown, b: unknown): boolean {
   return false;
 }
 
+/** Stable identity key for array elements: KF GUID, then name, then id. */
+function identityOf(value: unknown): string | undefined {
+  if (isObject(value)) {
+    const record = value;
+    if (typeof record["guid"] === "string" && record["guid"] !== "") return `guid:${record["guid"]}`;
+    if (typeof record["name"] === "string" && record["name"] !== "") return `name:${record["name"]}`;
+    if (typeof record["id"] === "string" && record["id"] !== "") return `id:${record["id"]}`;
+    if (typeof record["id"] === "number") return `id:${String(record["id"])}`;
+  }
+  return undefined;
+}
+
 function diffArrays(base: unknown[], cand: unknown[], pointer: string, out: JsonDiff[]): void {
-  const baseGuidable = base.length > 0 && base.every(hasGuid);
-  const candGuidable = cand.length > 0 && cand.every(hasGuid);
-  if (baseGuidable && candGuidable) {
-    diffArraysByGuid(base, cand, pointer, out);
+  const baseIdentifiable = base.length > 0 && base.every((v) => identityOf(v) !== undefined);
+  const candIdentifiable = cand.length > 0 && cand.every((v) => identityOf(v) !== undefined);
+  if (baseIdentifiable && candIdentifiable) {
+    diffArraysByIdentity(base, cand, pointer, out);
     return;
   }
   diffArraysByPosition(base, cand, pointer, out);
 }
 
 /**
- * GUID-identity diff for arrays whose elements all carry a `guid` (controls,
- * page objects): elements are matched by GUID across reordering/insertion and
- * deletion, and matched pairs are content-diffed at their BASE index.
+ * Identity diff for arrays whose elements carry a stable identity (controls:
+ * guid; variables: name; pageManager: id). Elements are matched by identity
+ * across reordering/insertion/deletion and matched pairs are content-diffed at
+ * their BASE index. This is what keeps a head-delete + tail-create combination
+ * (or a middle delete) from misaligning untouched elements.
  */
-function diffArraysByGuid(base: unknown[], cand: unknown[], pointer: string, out: JsonDiff[]): void {
-  const baseByGuid = new Map<string, number>();
-  const candByGuid = new Map<string, number>();
+function diffArraysByIdentity(base: unknown[], cand: unknown[], pointer: string, out: JsonDiff[]): void {
+  const baseById = new Map<string, number>();
+  const candById = new Map<string, number>();
   for (let i = 0; i < base.length; i += 1) {
-    if (hasGuid(base[i])) baseByGuid.set((base[i] as Record<string, unknown>)["guid"] as string, i);
+    const id = identityOf(base[i]);
+    if (id !== undefined) baseById.set(id, i);
   }
   for (let i = 0; i < cand.length; i += 1) {
-    if (hasGuid(cand[i])) candByGuid.set((cand[i] as Record<string, unknown>)["guid"] as string, i);
+    const id = identityOf(cand[i]);
+    if (id !== undefined) candById.set(id, i);
   }
 
-  const matchedGuids = new Set<string>();
+  const matchedIds = new Set<string>();
   const usedCand = new Set<number>();
   const usedBase = new Set<number>();
 
-  // Guid-matched pairs: recurse content diff at the BASE index.
-  for (const [guid, bi] of baseByGuid) {
-    const ci = candByGuid.get(guid);
+  // Identity-matched pairs: recurse content diff at the BASE index.
+  for (const [id, bi] of baseById) {
+    const ci = candById.get(id);
     if (ci === undefined) continue;
-    matchedGuids.add(guid);
+    matchedIds.add(id);
     usedBase.add(bi);
     usedCand.add(ci);
     diffJson(base[bi], cand[ci], `${pointer}/${bi}`, out);
   }
 
-  // Removed base elements (no guid match, not equal to any unused cand element).
+  // Removed base elements (no identity match, not equal to any unused cand element).
   for (let i = 0; i < base.length; i += 1) {
     if (usedBase.has(i)) continue;
-    const baseGuid = guidOf(base[i]);
-    if (baseGuid !== undefined && matchedGuids.has(baseGuid)) continue;
+    const id = identityOf(base[i]);
+    if (id !== undefined && matchedIds.has(id)) continue;
     const stillPresent = cand.some(
       (c, ci) => !usedCand.has(ci) && deepEqual(c, base[i]),
     );
@@ -452,8 +469,8 @@ function diffArraysByGuid(base: unknown[], cand: unknown[], pointer: string, out
   // Added cand elements.
   for (let i = 0; i < cand.length; i += 1) {
     if (usedCand.has(i)) continue;
-    const guid = guidOf(cand[i]);
-    if (guid !== undefined && matchedGuids.has(guid)) continue;
+    const id = identityOf(cand[i]);
+    if (id !== undefined && matchedIds.has(id)) continue;
     out.push({ pointer: `${pointer}/${i}`, kind: "add" });
   }
 }
@@ -497,10 +514,6 @@ function diffArraysByPosition(base: unknown[], cand: unknown[], pointer: string,
       diffJson(baseMid[i], candMid[i], `${pointer}/${prefix + i}`, out);
     }
   }
-}
-
-function guidOf(value: unknown): string | undefined {
-  return isObject(value) && typeof value["guid"] === "string" ? value["guid"] : undefined;
 }
 
 function diffJson(base: unknown, cand: unknown, pointer: string, out: JsonDiff[]): void {
