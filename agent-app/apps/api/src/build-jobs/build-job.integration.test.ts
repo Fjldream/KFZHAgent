@@ -6,7 +6,7 @@ process.env.DATABASE_URL =
   process.env.TEST_DATABASE_URL ??
   "postgresql://postgres@127.0.0.1:5432/kf_agent_test";
 
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,6 +35,7 @@ let jobs: BuildJobService;
 let storage: LocalArtifactStorage;
 let registry: DomainRegistry;
 let counter = 0;
+let storageRoot: string;
 
 const TABLES = [
   "AuditLog",
@@ -54,7 +55,7 @@ const TABLES = [
 ];
 
 beforeAll(async () => {
-  const storageRoot = await mkdtemp(path.join(tmpdir(), "kf-api-artifacts-"));
+  storageRoot = await mkdtemp(path.join(tmpdir(), "kf-api-artifacts-"));
   process.env.ARTIFACT_STORAGE_ROOT = storageRoot;
   storage = new LocalArtifactStorage(storageRoot);
 
@@ -72,6 +73,9 @@ beforeAll(async () => {
 afterAll(async () => {
   await app.close();
   await prisma.$disconnect();
+  if (storageRoot.length > 0) {
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
+  }
 });
 
 async function resetDatabase() {

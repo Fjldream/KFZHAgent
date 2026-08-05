@@ -9,14 +9,20 @@ process.env.DATABASE_URL =
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import cookieParser from "cookie-parser";
+import type { ArtifactStorage } from "@kf/artifact-storage";
 import { packageNativeClientProject } from "@kf/domain-client";
 import request from "supertest";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { AppModule } from "./app.module.js";
 import { PrismaService } from "./prisma/prisma.service.js";
 import { PasswordService } from "./auth/password.service.js";
 import { TenantsService } from "./tenants/tenants.service.js";
+import { ARTIFACT_STORAGE } from "./artifacts/artifact-storage.js";
 import { MODEL_PORT } from "./conversations/model-port.js";
 
 const unknownFieldClientDir = fileURLToPath(
@@ -34,6 +40,8 @@ let prisma: PrismaService;
 let tenants: TenantsService;
 let passwords: PasswordService;
 let fakeModel: FakeModelPort;
+let storage: ArtifactStorage;
+let storageRoot: string;
 let counter = 0;
 
 const TABLES = [
@@ -122,6 +130,10 @@ class FakeModelPort {
 }
 
 beforeAll(async () => {
+  // Give this suite its own artifact storage root so uploaded packages never
+  // leak into the working tree's default `.kf-artifacts` directory.
+  storageRoot = await mkdtemp(path.join(tmpdir(), "kf-api-artifacts-"));
+  process.env.ARTIFACT_STORAGE_ROOT = storageRoot;
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(MODEL_PORT)
     .useValue(new FakeModelPort())
@@ -134,11 +146,15 @@ beforeAll(async () => {
   tenants = moduleRef.get(TenantsService);
   passwords = moduleRef.get(PasswordService);
   fakeModel = moduleRef.get(MODEL_PORT);
+  storage = moduleRef.get(ARTIFACT_STORAGE);
 });
 
 afterAll(async () => {
   await app.close();
   await prisma.$disconnect();
+  if (storageRoot.length > 0) {
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
+  }
 });
 
 async function resetDatabase(): Promise<void> {
@@ -696,5 +712,106 @@ describe("audit events", () => {
     const names = tenantActions.map((row) => row.action);
     expect(names).toContain("TENANT_CREATED");
     expect(names).toContain("PLATFORM_ADMIN_CONTENT_ACCESS");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Hardening fixes (I1-I4) from review
+// ---------------------------------------------------------------------------
+
+describe("hardening fixes", () => {
+  it("rejects a repeated resume and never duplicates audit events (I1)", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createUploadWorkspace(cookie, "Replay WS");
+    await uploadPackage(cookie, ws.body.id, await makePackage()).expect(201);
+    const conv = await createConversation(cookie, ws.body.id, "Replay");
+    const planHash = await planRequirement(cookie, conv.body.id);
+
+    await resume(cookie, conv.body.id, { action: "approve", planHash }).expect(200);
+
+    const acmeId = await tenantIdOf(TENANT_A.tenant);
+    const countOf = async (action) =>
+      prisma.auditLog.count({ where: { tenantId: acmeId, action } });
+    expect(await countOf("PLAN_CONFIRMED")).toBe(1);
+    expect(await countOf("BUILD_START")).toBe(1);
+
+    // Second resume with the same planHash: no pending interrupt -> 409, and
+    // the audit trail stays untouched (no fabricated events).
+    await resume(cookie, conv.body.id, { action: "approve", planHash })
+      .expect(409)
+      .expect(({ body }) => {
+        expect(body.error.code).toBe("NO_PENDING_APPROVAL");
+      });
+    expect(await countOf("PLAN_CONFIRMED")).toBe(1);
+    expect(await countOf("BUILD_START")).toBe(1);
+  });
+
+  it("cleans up the temporary import directory after upload (I2)", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createUploadWorkspace(cookie, "TmpCleanup WS");
+    const listImportDirs = async () =>
+      (await readdir(tmpdir())).filter((name) => name.startsWith("kf-source-import-"));
+    const before = await listImportDirs();
+
+    await uploadPackage(cookie, ws.body.id, await makePackage()).expect(201);
+
+    const after = await listImportDirs();
+    expect(after.length).toBe(before.length);
+  });
+
+  it("deletes artifact storage files when the workspace is deleted (I3)", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createUploadWorkspace(cookie, "StorageCleanup WS");
+    const uploaded = await uploadPackage(cookie, ws.body.id, await makePackage()).expect(201);
+    const packageUrl = uploaded.body.packageUrl as string;
+
+    // Simulate a built artifact: job + Artifact row + a real storage file.
+    const job = await prisma.buildJob.create({
+      data: {
+        tenantId: ws.body.tenantId,
+        workspaceId: ws.body.id,
+        baseRevisionId: uploaded.body.revision.id,
+        changePlanId: "cp-storage-cleanup",
+        planHash: "0".repeat(64),
+        domainKind: "kingclient",
+        idempotencyKey: `idem-storage-${Date.now()}`,
+        status: "QUEUED",
+      },
+    });
+    const built = await storage.put({
+      tenantId: ws.body.tenantId,
+      kind: "client-package",
+      stream: Readable.from(Buffer.from("built-artifact")),
+      maxBytes: 1024,
+    });
+    await prisma.artifact.create({
+      data: {
+        tenantId: ws.body.tenantId,
+        buildJobId: job.id,
+        kind: "client-package",
+        storageKey: built.artifactId,
+      },
+    });
+
+    await request(server)
+      .delete(`/api/workspaces/${ws.body.id}`)
+      .set("Cookie", cookie)
+      .send({ confirm: true })
+      .expect(204);
+
+    // Storage files for both the source package and the built artifact are gone.
+    await expect(storage.open(ws.body.tenantId, packageUrl)).rejects.toThrow();
+    await expect(storage.open(ws.body.tenantId, built.artifactId)).rejects.toThrow();
+    // DB rows are gone too.
+    expect(await prisma.artifact.count({ where: { tenantId: ws.body.tenantId } })).toBe(0);
+  });
+
+  it("maps the brief's direct download path to an explicit 404 (I4)", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const res = await request(server)
+      .get("/api/artifacts/some-id/download")
+      .set("Cookie", cookie)
+      .expect(404);
+    expect(res.body.message).toContain("download-token");
   });
 });

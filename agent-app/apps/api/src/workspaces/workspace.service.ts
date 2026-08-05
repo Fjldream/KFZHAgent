@@ -16,7 +16,7 @@ import {
   PackageUnpackError,
 } from "@kf/domain-client";
 import type { DomainProjectRevision, Prisma, SolutionRevision, SolutionWorkspace } from "@prisma/client";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -190,9 +190,9 @@ export class WorkspaceService {
       throw error;
     }
 
+    const workDir = await mkdtemp(path.join(tmpdir(), "kf-source-import-"));
     try {
       const bytes = await collectStream(await this.storage.open(input.tenantId, stored.artifactId));
-      const workDir = await mkdtemp(path.join(tmpdir(), "kf-source-import-"));
       const sourceDir = await importNativeClientPackage(bytes, workDir);
       const inspected = await inspectClientProject(sourceDir);
       return await this.commitSourceRevision({
@@ -208,6 +208,10 @@ export class WorkspaceService {
         throw new UnprocessableEntityException(apiError("PACKAGE_UNPACK_FAILED", error.message));
       }
       throw new UnprocessableEntityException(apiError("PROJECT_PARSE_FAILED", messageOf(error)));
+    } finally {
+      // I2: always remove the unpack directory tree (success or failure) so
+      // uploads cannot leak tens of KB per request into TMPDIR.
+      await rm(workDir, { recursive: true, force: true }).catch(() => {});
     }
   }
 
@@ -243,16 +247,21 @@ export class WorkspaceService {
     });
 
     const workDir = await mkdtemp(path.join(tmpdir(), "kf-source-import-"));
-    const sourceDir = await importNativeClientPackage(source, workDir);
-    const inspected = await inspectClientProject(sourceDir);
+    try {
+      const sourceDir = await importNativeClientPackage(source, workDir);
+      const inspected = await inspectClientProject(sourceDir);
 
-    return this.commitSourceRevision({
-      tenantId: input.tenantId,
-      workspaceId: input.workspaceId,
-      domainKind,
-      stored,
-      summary: inspected.summary,
-    });
+      return this.commitSourceRevision({
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        domainKind,
+        stored,
+        summary: inspected.summary,
+      });
+    } finally {
+      // I2: always remove the unpack directory tree on this variant too.
+      await rm(workDir, { recursive: true, force: true }).catch(() => {});
+    }
   }
 
   async get(tenantId: string, workspaceId: string): Promise<SolutionWorkspace> {
@@ -285,6 +294,11 @@ export class WorkspaceService {
    * already surfaced a destructive confirmation (the controller enforces the
    * confirm flag before calling); the audit trail records that confirmation
    * separately.
+   *
+   * I3: in addition to removing database rows, every tenant-scoped artifact
+   * backing this workspace (source-package via DomainProjectRevision.packageUrl
+   * and build artifacts via Artifact.storageKey) is removed from
+   * ArtifactStorage so no files leak after the workspace row is gone.
    */
   async deleteWorkspace(tenantId: string, workspaceId: string): Promise<void> {
     const workspace = await this.prisma.solutionWorkspace.findFirst({
@@ -293,6 +307,7 @@ export class WorkspaceService {
     if (workspace === null) {
       throw new NotFoundException("workspace");
     }
+    const removedStorageKeys: string[] = [];
     await this.prisma.$transaction(async (tx) => {
       const revisionIds = (
         await tx.solutionRevision.findMany({
@@ -314,12 +329,24 @@ export class WorkspaceService {
       ).map((row) => row.id);
 
       if (revisionIds.length > 0) {
+        const domainRows = await tx.domainProjectRevision.findMany({
+          where: { tenantId, solutionRevisionId: { in: revisionIds } },
+          select: { packageUrl: true },
+        });
+        for (const row of domainRows) {
+          if (row.packageUrl !== null) removedStorageKeys.push(row.packageUrl);
+        }
         await tx.domainProjectRevision.deleteMany({
           where: { tenantId, solutionRevisionId: { in: revisionIds } },
         });
         await tx.solutionRevision.deleteMany({ where: { workspaceId, tenantId } });
       }
       if (jobIds.length > 0) {
+        const artifactRows = await tx.artifact.findMany({
+          where: { tenantId, buildJobId: { in: jobIds } },
+          select: { storageKey: true },
+        });
+        for (const row of artifactRows) removedStorageKeys.push(row.storageKey);
         await tx.artifact.deleteMany({ where: { tenantId, buildJobId: { in: jobIds } } });
         await tx.validationReport.deleteMany({
           where: { tenantId, buildJobId: { in: jobIds } },
@@ -336,6 +363,13 @@ export class WorkspaceService {
       }
       await tx.solutionWorkspace.delete({ where: { id: workspaceId } });
     });
+
+    // Database rows are gone; now remove the underlying storage files. A
+    // missing file is not an error (best-effort cleanup after a committed
+    // delete), so each removal swallows individual failures.
+    for (const key of removedStorageKeys) {
+      await this.storage.delete(tenantId, key).catch(() => {});
+    }
   }
 
   private async commitSourceRevision(input: {

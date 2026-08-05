@@ -71,6 +71,9 @@ export class ConversationController {
    * pushed as `state` events and the final snapshot as a `done` event. When
    * an approval is pending this rejects with 409 APPROVAL_RESUME_REQUIRED
    * (the stream has not started yet).
+   *
+   * If the client disconnects mid-stream, the graph run is cancelled (the
+   * generator is `return()`ed) so no work continues after the socket closes.
    */
   @Post(":id/messages")
   @HttpCode(HttpStatus.OK)
@@ -87,10 +90,23 @@ export class ConversationController {
     res.setHeader("X-Accel-Buffering", "no");
     res.flushHeaders();
 
+    const iterator = events[Symbol.asyncIterator]();
+    let disconnected = false;
+    const onClose = (): void => {
+      disconnected = true;
+    };
+    req.on("close", onClose);
+
     try {
-      for await (const event of events) {
-        res.write(`event: ${event.event}\n`);
-        res.write(`data: ${JSON.stringify(event.data ?? null)}\n\n`);
+      for (;;) {
+        if (disconnected) {
+          await iterator.return?.(undefined);
+          break;
+        }
+        const next = await iterator.next();
+        if (next.done) break;
+        res.write(`event: ${next.value.event}\n`);
+        res.write(`data: ${JSON.stringify(next.value.data ?? null)}\n\n`);
         flushIfSupported(res);
       }
     } catch (error) {
@@ -101,6 +117,7 @@ export class ConversationController {
         })}\n\n`,
       );
     } finally {
+      req.off("close", onClose);
       res.end();
     }
   }

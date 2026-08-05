@@ -166,10 +166,19 @@ export class ConversationService {
 
   /**
    * Resumes a pending approval. Accepts approve/revise/cancel plus the exact
-   * planHash the user was shown. A planHash mismatch is surfaced as a 409
-   * conflict with PLAN_HASH_MISMATCH (graph returns to idle with no side
-   * effects). Returns the resulting stage, and the build job id when a build
-   * was enqueued, or the fresh interrupt payload when a revise re-interrupts.
+   * planHash the user was shown.
+   *
+   * Safety (I1): unlike startTurn, a resume is only meaningful while an
+   * approval interrupt is actually pending. If no interrupt is pending the
+   * resume is rejected with 409 NO_PENDING_APPROVAL *before* the graph runs,
+   * so a replayed resume can never fabricate duplicate PLAN_CONFIRMED /
+   * BUILD_START audit events (the underlying enqueue-build guard already
+   * prevents duplicate builds, but the audit write must not repeat either).
+   *
+   * A planHash mismatch is surfaced as a 409 conflict with
+   * PLAN_HASH_MISMATCH (graph returns to idle with no side effects). Graph
+   * execution failures are surfaced as structured 409 GRAPH_ERROR responses
+   * (mirrors the SSE `error` event on the messages endpoint).
    */
   async resume(
     principal: SessionPrincipalLike,
@@ -189,16 +198,33 @@ export class ConversationService {
     const graph = await this.getGraph();
     const config = threadConfig(conversationId);
 
-    const resumeCommand = new Command({ resume: { action, planHash } });
-    const stream = (await graph.stream(
-      resumeCommand as unknown as Parameters<typeof graph.stream>[0],
-      config,
-    )) as AsyncGenerator<unknown>;
-    for await (const chunk of stream) {
-      void chunk;
-      // Drain the run; the final checkpoint holds the outcome.
+    const snapshot = (await graph.getState(config)) as unknown as StateSnapshotLike;
+    if (!hasPendingInterrupt(snapshot)) {
+      throw new ConflictException(
+        apiError(
+          "NO_PENDING_APPROVAL",
+          "conversation has no pending approval to resume; a resume is only valid once per interrupt",
+        ),
+      );
     }
-    const final = (await graph.getState(config)) as unknown as StateSnapshotLike;
+
+    const resumeCommand = new Command({ resume: { action, planHash } });
+    let final: StateSnapshotLike;
+    try {
+      const stream = (await graph.stream(
+        resumeCommand as unknown as Parameters<typeof graph.stream>[0],
+        config,
+      )) as AsyncGenerator<unknown>;
+      for await (const chunk of stream) {
+        void chunk;
+        // Drain the run; the final checkpoint holds the outcome.
+      }
+      final = (await graph.getState(config)) as unknown as StateSnapshotLike;
+    } catch (error) {
+      throw new ConflictException(
+        apiError("GRAPH_ERROR", error instanceof Error ? error.message : String(error)),
+      );
+    }
     const values = final.values;
     const lastError = values.lastErrorCode;
     if (lastError === "PLAN_HASH_MISMATCH") {
