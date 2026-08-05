@@ -29,4 +29,4 @@ export {
   type PlanArtifactRefs,
   type OpenChangeRequest,
 } from "./ports.js";
-export { compileSolutionGraph } from "./solution-graph.js";
+export { compileSolutionGraph, ApprovalResumeRequiredError } from "./solution-graph.js";

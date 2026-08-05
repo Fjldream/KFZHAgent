@@ -108,10 +108,12 @@ function makePrismaPorts() {
   };
 
   const changePlanRepository: ChangePlanRepository = {
-    async findOpenChangeRequest({ tenantId, workspaceId }) {
+    async findOpenChangeRequest({ tenantId, workspaceId, conversationId }) {
+      // plan-change persists change requests under the deterministic id
+      // `cr:{workspaceId}:{conversationId}`, so lookup by that id keeps
+      // conversations isolated within a shared workspace.
       const request = await prisma.changeRequest.findFirst({
-        where: { tenantId, workspaceId, status: "OPEN" },
-        orderBy: { createdAt: "desc" },
+        where: { id: `cr:${workspaceId}:${conversationId}`, tenantId, status: "OPEN" },
       });
       return request === null ? null : { id: request.id };
     },

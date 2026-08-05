@@ -54,15 +54,31 @@ export function createClassifyIntentNode(deps: SolutionGraphDeps) {
         role: "assistant",
         content: reply,
       });
-      return { intent: result.intent, stage: "idle" };
+      // Explicitly clear the pendingRequirements channel and any stale error
+      // code: a previous unsupported turn must never gate a later supported
+      // turn (see C1), and a plain question resets the error surface.
+      return {
+        intent: result.intent,
+        stage: "idle",
+        pendingRequirements: undefined,
+        lastErrorCode: undefined,
+      };
     }
 
     if (result.intent === "ROLLBACK") {
-      return { intent: result.intent, stage: "idle", lastErrorCode: "ROLLBACK_NOT_SUPPORTED" };
+      return {
+        intent: result.intent,
+        stage: "idle",
+        pendingRequirements: undefined,
+        lastErrorCode: "ROLLBACK_NOT_SUPPORTED",
+      };
     }
 
     // NEW_REQUIREMENT / MODIFY_REQUIREMENT / CONFIRM_PLAN / CANCEL_PLAN / BUILD
-    return { intent: result.intent };
+    // Clear only the pendingRequirements channel so this turn is routed on its
+    // own signal (see C1). lastErrorCode is left untouched here: load-context
+    // may have just set BUILD_FAILED (planning) and the plan node must see it.
+    return { intent: result.intent, pendingRequirements: undefined };
   };
 }
 

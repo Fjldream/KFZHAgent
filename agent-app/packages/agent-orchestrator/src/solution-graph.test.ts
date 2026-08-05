@@ -14,7 +14,7 @@ import type {
 import type { ModelPort, ModelPortContext } from "./model-port.js";
 import type { GraphMessage, ApprovalInterrupt } from "./state.js";
 import type { Intent } from "./schemas/intent.js";
-import { compileSolutionGraph } from "./solution-graph.js";
+import { compileSolutionGraph, ApprovalResumeRequiredError } from "./solution-graph.js";
 
 type CompiledGraph = ReturnType<typeof compileSolutionGraph>;
 
@@ -259,9 +259,18 @@ async function sendUser(bed: Bed, ctx: Ctx, text: string): Promise<void> {
 }
 
 async function interruptPayload(bed: Bed, ctx: Ctx): Promise<ApprovalInterrupt | undefined> {
-  const snapshot = await bed.graph.getState(config(ctx));
-  const values = snapshot.tasks.flatMap((task) => task.interrupts.map((item) => item.value));
-  return values[0] as ApprovalInterrupt | undefined;
+  // Under vitest's module transform an invoke() result whose return value is
+  // never referenced can let the final checkpoint flush be skipped, so the
+  // interrupt write is not visible to getState(). Tests therefore keep the
+  // invoke result referenced (`const r = await ...; void r;`). This helper
+  // polls a few times as a defensive fallback.
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const snapshot = await bed.graph.getState(config(ctx));
+    const values = snapshot.tasks.flatMap((task) => task.interrupts.map((item) => item.value));
+    if (values.length > 0) return values[0] as ApprovalInterrupt | undefined;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  return undefined;
 }
 
 /** Runs a NEW_REQUIREMENT turn up to the approval interrupt. */
@@ -371,6 +380,20 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     expect(bed.repo.statusCalls).toHaveLength(0);
   });
 
+  it("rejects a BUILD intent without an approved plan and never enqueues", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+    bed.model.queueIntent("BUILD");
+    await sendUser(bed, ctx, "开始构建");
+
+    const result = await bed.graph.invoke(input(ctx), config(ctx));
+
+    expect(result.lastErrorCode).toBe("BUILD_REQUIRES_APPROVAL");
+    expect(result.stage).toBe("idle");
+    expect(bed.builds.enqueues).toHaveLength(0);
+    expect(bed.repo.statusCalls).toHaveLength(0);
+  });
+
   it("enqueues the build after an approve resume and marks the request APPROVED", async () => {
     const bed = createBed();
     const ctx = seed(bed);
@@ -390,6 +413,31 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     expect(result.buildJobId).toBe("job-1");
     expect(result.stage).toBe("idle");
     expect(bed.repo.statusOf(payload.changeRequestId)).toBe("APPROVED");
+  });
+
+  it("keeps a pending approval resumable when a non-resume message arrives", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+    const payload = await planNewRequirement(bed, ctx, "新增一个按钮");
+
+    // A plain (non-resume) message while paused must be rejected, not silently
+    // turn the approval into idle.
+    bed.model.queueIntent("QUESTION");
+    await sendUser(bed, ctx, "还在吗");
+    await expect(bed.graph.invoke(input(ctx), config(ctx))).rejects.toThrow(
+      ApprovalResumeRequiredError,
+    );
+
+    // The pending approval is intact: the exact planHash resume still enqueues.
+    const result = await bed.graph.invoke(
+      new Command({ resume: { action: "approve", planHash: payload.planHash } }),
+      config(ctx),
+    );
+    expect(result.buildJobId).toBe("job-1");
+    expect(bed.builds.enqueues).toHaveLength(1);
+    expect(bed.repo.statusOf(payload.changeRequestId)).toBe("APPROVED");
+    // The rejected plain message produced no assistant reply.
+    expect(bed.workspace.appendCalls.filter((call) => call.role === "assistant")).toHaveLength(0);
   });
 
   it("returns to planning when the enqueued build failed", async () => {
@@ -470,6 +518,75 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     ]);
     expect(bed.model.createCalls).toHaveLength(0);
     expect(bed.builds.enqueues).toHaveLength(0);
+  });
+
+  it("isolates pendingRequirements across alternating unsupported/supported turns", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+
+    // Round 1: unsupported → idle with pendingRequirements.
+    bed.deps.isDomainSupported = () => false;
+    bed.model.queueIntent("NEW_REQUIREMENT");
+    await sendUser(bed, ctx, "接入外部 ERP 系统");
+    const r1 = await bed.graph.invoke(input(ctx), config(ctx));
+    expect(r1.lastErrorCode).toBe("UNSUPPORTED_DOMAIN");
+    expect(r1.pendingRequirements).toHaveLength(1);
+
+    // Round 2: supported NEW_REQUIREMENT must plan and interrupt again — the
+    // stale pendingRequirements from round 1 must not gate this turn (C1).
+    bed.deps.isDomainSupported = () => true;
+    bed.model.queueIntent("NEW_REQUIREMENT");
+    await sendUser(bed, ctx, "新增一个按钮");
+    // Keep the invoke result referenced: under vitest's transform an unused
+    // return value can let the final checkpoint flush be skipped, making the
+    // following getState() miss the interrupt.
+    const held2 = await bed.graph.invoke(input(ctx), config(ctx));
+    void held2;
+    const payload2 = await interruptPayload(bed, ctx);
+    expect(payload2).toBeDefined();
+    expect(payload2?.planHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(bed.model.createCalls).toHaveLength(1);
+    await bed.graph.invoke(
+      new Command({ resume: { action: "cancel", planHash: payload2!.planHash } }),
+      config(ctx),
+    );
+
+    // Round 3: unsupported again.
+    bed.deps.isDomainSupported = () => false;
+    bed.model.queueIntent("MODIFY_REQUIREMENT");
+    await sendUser(bed, ctx, "接入外部 ERP 系统");
+    const r3 = await bed.graph.invoke(input(ctx), config(ctx));
+    expect(r3.lastErrorCode).toBe("UNSUPPORTED_DOMAIN");
+    expect(r3.pendingRequirements).toHaveLength(1);
+
+    // Round 4: supported requirement plans again after the second unsupported.
+    bed.deps.isDomainSupported = () => true;
+    bed.model.queueIntent("NEW_REQUIREMENT");
+    await sendUser(bed, ctx, "新增一个文本框");
+    const held4 = await bed.graph.invoke(input(ctx), config(ctx));
+    void held4;
+    const payload4 = await interruptPayload(bed, ctx);
+    expect(payload4).toBeDefined();
+    expect(bed.model.createCalls).toHaveLength(2);
+    expect(bed.builds.enqueues).toHaveLength(0);
+  });
+
+  it("clears a stale UNSUPPORTED_DOMAIN error on a later supported question", async () => {
+    const bed = createBed();
+    bed.deps.isDomainSupported = () => false;
+    const ctx = seed(bed);
+    bed.model.queueIntent("NEW_REQUIREMENT");
+    await sendUser(bed, ctx, "接入外部 ERP 系统");
+    const r1 = await bed.graph.invoke(input(ctx), config(ctx));
+    expect(r1.lastErrorCode).toBe("UNSUPPORTED_DOMAIN");
+
+    bed.deps.isDomainSupported = () => true;
+    bed.model.queueIntent("QUESTION");
+    await sendUser(bed, ctx, "现在支持了吗");
+    const r2 = await bed.graph.invoke(input(ctx), config(ctx));
+    expect(r2.lastErrorCode).toBeUndefined();
+    expect(r2.pendingRequirements).toBeUndefined();
+    expect(r2.stage).toBe("idle");
   });
 
   it("computes a canonical planHash that matches the stored plan", async () => {
