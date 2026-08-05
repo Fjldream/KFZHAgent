@@ -267,4 +267,27 @@ describe("native client package IO", () => {
     // The symlink target must not have received any bytes.
     await expect(readFile(path.join(outside, "evil.txt"), "utf8")).rejects.toThrow();
   });
+
+  it("extracts every entry of a multi-entry package to disk", async () => {
+    const dest = tempDir();
+    const gz = makeZip([
+      { path: "1.0.0.1/project.json", content: '{"name":"Minimal"}' },
+      { path: "1.0.0.1/pages/p1.json", content: '{"page":1}' },
+      { path: "1.0.0.1/pages/p2.json", content: '{"page":2}' },
+      { path: "readme.md", content: "docs" },
+    ]);
+
+    await safeUnzip(gz, dest, DEFAULT_UNZIP_LIMITS);
+
+    await expect(readFile(path.join(dest, "1.0.0.1/project.json"), "utf8")).resolves.toBe(
+      '{"name":"Minimal"}',
+    );
+    await expect(readFile(path.join(dest, "1.0.0.1/pages/p1.json"), "utf8")).resolves.toBe(
+      '{"page":1}',
+    );
+    await expect(readFile(path.join(dest, "1.0.0.1/pages/p2.json"), "utf8")).resolves.toBe(
+      '{"page":2}',
+    );
+    await expect(readFile(path.join(dest, "readme.md"), "utf8")).resolves.toBe("docs");
+  });
 });

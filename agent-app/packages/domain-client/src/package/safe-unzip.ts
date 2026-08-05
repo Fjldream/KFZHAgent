@@ -1,6 +1,6 @@
 import { lstat, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { Unzip, UnzipInflate } from "fflate";
+import { unzipSync } from "fflate";
 
 /**
  * Safe ZIP-compatible handling for KF native client `.gz` packages.
@@ -279,9 +279,24 @@ async function writeEntry(destDir: string, relPath: string, data: Uint8Array): P
 }
 
 /**
- * Decompresses a previously-validated archive into `destDir`. Enforces the
- * expanded-size limit again against the actual decompressed bytes in case the
- * central directory sizes were tampered with. Directory entries end with `/`.
+ * Decompresses a previously-validated archive into `destDir`, one entry at a
+ * time.
+ *
+ * Each validated entry is expanded with a single `unzipSync(data, { filter })`
+ * call that matches only that entry, written to disk, and then released before
+ * the next entry is decompressed. Peak memory is therefore bounded by the
+ * largest single entry (plus the input buffer) and does not grow linearly with
+ * the total number of entries — unlike a batch-unzip that holds every payload
+ * until the whole archive has been expanded.
+ *
+ * Safety model (kept intact):
+ *  - `parseZipEntries` pre-validates the whole central directory (paths,
+ *    symlinks, per-entry and total size, ratio, count) before any expansion;
+ *  - after each real expansion the actual bytes are accumulated and re-checked
+ *    against `maxExpandedBytes`, and the entry size is compared to the value
+ *    declared in the central directory;
+ *  - `extractedCount` must match the validated entry count;
+ *  - `writeEntry` refuses any write that traverses a pre-existing symlink.
  */
 export async function safeUnzip(
   data: Uint8Array,
@@ -291,70 +306,34 @@ export async function safeUnzip(
   const entries = parseZipEntries(data, limits);
   await mkdir(destDir, { recursive: true });
 
-  const unzipper = new Unzip();
-  unzipper.register(UnzipInflate);
-  let failed: Error | null = null;
   let expanded = 0;
   let extractedCount = 0;
-  // Serial chain: entries are written to disk one after another as soon as
-  // each one finishes decompressing, so peak memory is bounded by the largest
-  // single entry instead of the whole archive (defends against a 512MB peak).
-  let writeChain: Promise<void> = Promise.resolve();
 
-  unzipper.onfile = (file) => {
-    if (failed !== null) {
-      file.terminate();
-      return;
+  for (const entry of entries) {
+    const result = unzipSync(data, {
+      filter: (file) => file.name === entry.name,
+    });
+    const payload = result[entry.name];
+    if (payload === undefined) {
+      throw new PackageUnpackError(`corrupt ZIP: entry could not be extracted (${entry.name})`);
     }
-    const name = file.name;
-    try {
-      validateEntryName(name, limits);
-    } catch (err) {
-      failed = err instanceof Error ? err : new PackageUnpackError("unsafe entry path");
-      file.terminate();
-      return;
+    if (payload.length !== entry.uncompressedSize) {
+      throw new PackageUnpackError(
+        `corrupt ZIP: entry size mismatch (${entry.name})`,
+      );
     }
 
-    const chunks: Uint8Array[] = [];
-    file.ondata = (err, dataChunk, final) => {
-      if (failed !== null) return;
-      if (err !== null) {
-        failed = new PackageUnpackError(`corrupt entry ${name}: ${String(err)}`);
-        return;
-      }
-      if (dataChunk !== null) {
-        expanded += dataChunk.length;
-        if (expanded > limits.maxExpandedBytes) {
-          failed = new PackageUnpackError(
-            `expanded size exceeds limit (${expanded} > ${limits.maxExpandedBytes})`,
-          );
-          file.terminate();
-          return;
-        }
-        chunks.push(dataChunk);
-      }
-      if (final && failed === null) {
-        extractedCount += 1;
-        const payload = Buffer.concat(chunks);
-        writeChain = writeChain
-          .then(() => writeEntry(destDir, name, payload))
-          .catch((writeErr: unknown) => {
-            const writeError =
-              writeErr instanceof Error ? writeErr : new PackageUnpackError("write failed");
-            failed = writeError;
-            throw writeError;
-          });
-      }
-    };
-    file.start();
-  };
+    expanded += payload.length;
+    if (expanded > limits.maxExpandedBytes) {
+      throw new PackageUnpackError(
+        `expanded size exceeds limit (${expanded} > ${limits.maxExpandedBytes})`,
+      );
+    }
 
-  unzipper.push(data, true);
-  if (failed !== null) throw failed as Error;
-  await writeChain;
-  if (failed !== null) throw failed as Error;
+    extractedCount += 1;
+    await writeEntry(destDir, entry.name, payload);
+  }
 
-  // Sanity check: the entries we actually decoded must match the validated list.
   if (extractedCount !== entries.length) {
     throw new PackageUnpackError("corrupt ZIP: entry count mismatch after extraction");
   }
