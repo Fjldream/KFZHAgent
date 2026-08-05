@@ -504,4 +504,14 @@ describe("validator reports", () => {
     const result = await inspectClientProject(await rootDirOf(candidate));
     expect(result.index.controls["button-guid-1"]?.type).toBe("button");
   });
+
+  it("fails the changeScope layer when base and candidate are the same directory (C1 defense)", async () => {
+    const base = await copyFixture("client-unknown-field");
+    // A same-directory "patch" with a non-empty plan means the confirmed plan
+    // was never applied; the validator must fail instead of a silent no-op.
+    const report = await validateClientProject(base, base, happyPlan());
+    expect(report.status).toBe("fail");
+    expect(report.checks.changeScope).toBe("fail");
+    expect(report.warnings.join(" ")).toContain("same directory");
+  });
 });

@@ -146,9 +146,17 @@ export class BuildExecutor {
       // workspace (a retried job rebuilds identical bytes).
       const ir = (baseRevision.state ?? {}) as unknown as ClientProjectIR;
       const built = await compileClientProject(ir, { seed: job.workspaceId });
+      // C1: the confirmed change plan must really land in the build artifact.
+      // Apply it to the compiled tree with the same patch path as the
+      // upload/modify flow (planHash-verified); the compiled tree becomes the
+      // verification base and the patched tree the candidate, so
+      // verifyChangeScope can prove nothing outside the approved plan moved.
+      const patched = await applyClientPatch(built.rootDir, planInput, {
+        planHash: job.planHash,
+      });
       return {
         baseDir: built.rootDir,
-        candidateDir: built.rootDir,
+        candidateDir: patched.rootDir,
         planInput,
         mode: "compile",
       };

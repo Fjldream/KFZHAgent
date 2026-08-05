@@ -349,6 +349,19 @@ async function checkChangeScope(
   candidate: string,
   plan: NormalizedPlan,
 ): Promise<{ outcome: CheckOutcome; warnings: string[] }> {
+  // C1 defense-in-depth: when the base and the candidate resolve to the same
+  // directory while the confirmed plan still has operations, the patch was
+  // never applied — an identical-tree diff would otherwise pass every layer
+  // and silently ship a build that ignores the approved plan. Fail loudly
+  // instead of reporting a no-op validator pass.
+  if (base === candidate && plan.operations.length > 0) {
+    return {
+      outcome: fail([
+        "base and candidate resolve to the same directory while the plan has operations (confirmed plan was not applied)",
+      ]),
+      warnings: [],
+    };
+  }
   try {
     const scope = await verifyChangeScope(base, candidate, plan);
     if (scope.violations.length > 0) {

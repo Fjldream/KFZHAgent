@@ -6,7 +6,7 @@
 process.env.DATABASE_URL =
   process.env.TEST_DATABASE_URL ?? "postgresql://postgres@127.0.0.1:5432/kf_agent_test";
 
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { LocalArtifactStorage } from "@kf/artifact-storage";
@@ -15,7 +15,12 @@ import {
   BuildJobService,
   BuildWorkerCrash,
 } from "@kf/build-jobs";
-import { deriveGuid, planHash } from "@kf/domain-client";
+import {
+  deriveGuid,
+  importNativeClientPackage,
+  planHash,
+  resolveVersionDirName,
+} from "@kf/domain-client";
 import type { DomainPack } from "@kf/contracts";
 import { DomainRegistry } from "@kf/domain-registry";
 import { PrismaClient } from "@prisma/client";
@@ -150,7 +155,10 @@ async function seedNewWorkspace(ir = INITIAL_IR): Promise<Seeded> {
         op: "update",
         entityId: deriveGuid({ seed: workspace.id }, "Text1"),
         entityType: "text",
-        changes: [{ path: "/text", value: "Hello" }],
+        // Deliberately different from the compiled default ("Hello") so the
+        // new-flow assertion can prove the confirmed plan really landed in
+        // the build artifact (C1).
+        changes: [{ path: "/text", value: "由 KF Solution Agent 生成" }],
       },
     ],
   };
@@ -204,7 +212,27 @@ describe("job runner", () => {
     const packageBytes = await storage.open(tenant.id, artifact!.storageKey);
     const chunks = [];
     for await (const chunk of packageBytes) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    expect(Buffer.concat(chunks).length).toBe(artifact!.sizeBytes);
+    const gz = Buffer.concat(chunks);
+    expect(gz.length).toBe(artifact!.sizeBytes);
+
+    // C1: the confirmed change plan must really be inside the new-flow build
+    // artifact — unpack the .gz and assert the planned field value landed.
+    const unpacked = await importNativeClientPackage(
+      gz,
+      await mkdtemp(path.join(tmpdir(), "kf-job-newflow-check-")),
+    );
+    const versionDir = await resolveVersionDirName(unpacked);
+    const pageRoot = path.join(unpacked, versionDir, "project", "page");
+    const pageFiles = await readdir(pageRoot);
+    const pageFile = pageFiles.find((f) => f.endsWith(".json"));
+    expect(pageFile).toBeTruthy();
+    const page = JSON.parse(
+      await readFile(path.join(pageRoot, pageFile!), "utf8"),
+    ) as { objects: Array<Record<string, unknown>> };
+    const textGuid = deriveGuid({ seed: workspace.id }, "Text1");
+    const textControl = page.objects.find((obj) => obj["guid"] === textGuid);
+    expect(textControl).toBeTruthy();
+    expect(textControl!["text"]).toBe("由 KF Solution Agent 生成");
   });
 
   it("does not advance the revision or create an artifact on failure", async () => {

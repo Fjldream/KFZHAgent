@@ -112,5 +112,14 @@ test("new project: plan, approve, build, download, and verify client files", asy
   );
   const pageFile = names.find((name) => name.endsWith("project/page/Page1.json"));
   expect(pageFile).toBeTruthy();
+
+  // C1：new-flow 构建必须真正应用已确认的 ChangePlan——下载的 .gz 里
+  // Page1.json 的 Text1.text 必须是 revise 后计划里的值（fake-model
+  // 计划把默认 "Hello" 改为「由 KF Solution Agent 修订生成」）。
+  const pageBytes = tree.get(pageFile!);
+  expect(pageBytes).toBeTruthy();
+  const pageText = new TextDecoder().decode(pageBytes);
+  expect(pageText).toContain("由 KF Solution Agent 修订生成");
+  expect(pageText).not.toContain('"text": "Hello"');
   void fixturePath;
 });
