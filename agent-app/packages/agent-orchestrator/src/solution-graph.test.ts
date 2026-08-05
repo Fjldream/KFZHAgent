@@ -127,6 +127,8 @@ class FakeModelPort implements ModelPort {
   createCalls: ModelPortContext[] = [];
   reviseCalls: ModelPortContext[] = [];
   createdPlans: ChangePlan[] = [];
+  /** When true, createChangePlan/reviseChangePlan return a schema-invalid plan. */
+  invalidPlan = false;
   private seq = 0;
 
   queueIntent(...intents: Intent[]): void {
@@ -157,13 +159,16 @@ class FakeModelPort implements ModelPort {
   async reviseChangePlan(input: ModelPortContext): Promise<ChangePlan> {
     this.reviseCalls.push(input);
     return this.recordPlan(this.makePlan(input.workspaceId, "rev"));
-  }
-  async explainValidation(): Promise<string> {
+  }  async explainValidation(): Promise<string> {
     return "校验通过";
   }
 
   private recordPlan(plan: ChangePlan): ChangePlan {
     this.createdPlans.push(plan);
+    if (this.invalidPlan) {
+      // Shape-valid but schema-invalid: the graph must reject it.
+      return { ...plan, schema: "kf-change-plan/v0" } as unknown as ChangePlan;
+    }
     return plan;
   }
 
@@ -500,6 +505,23 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     expect(bed.model.createCalls[1]?.currentRevisionId).toBe("rev-2");
     expect(second).toBeDefined();
     expect(second?.planHash).not.toBe(payload.planHash);
+  });
+
+  it("rejects an invalid model plan with INVALID_MODEL_OUTPUT and no side effects", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+    bed.model.queueIntent("NEW_REQUIREMENT");
+    bed.model.invalidPlan = true;
+    await sendUser(bed, ctx, "新增一个按钮");
+
+    const result = await bed.graph.invoke(input(ctx), config(ctx));
+
+    expect(result.lastErrorCode).toBe("INVALID_MODEL_OUTPUT");
+    expect(result.stage).toBe("idle");
+    expect(bed.repo.plans.size).toBe(0);
+    expect(bed.builds.enqueues).toHaveLength(0);
+    // The user message is recorded, but no assistant reply is fabricated.
+    expect(bed.workspace.appendCalls.filter((call) => call.role === "assistant")).toHaveLength(0);
   });
 
   it("records pendingRequirements for unsupported domains and never enqueues a build", async () => {

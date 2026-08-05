@@ -4,12 +4,16 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  PayloadTooLargeException,
+  UnprocessableEntityException,
 } from "@nestjs/common";
-import type { ArtifactStorage } from "@kf/artifact-storage";
+import type { ArtifactStorage, StoredArtifact } from "@kf/artifact-storage";
+import { ArtifactStorageError } from "@kf/artifact-storage";
 import type { ClientProjectSummary } from "@kf/domain-client";
 import {
   importNativeClientPackage,
   inspectClientProject,
+  PackageUnpackError,
 } from "@kf/domain-client";
 import type { DomainProjectRevision, Prisma, SolutionRevision, SolutionWorkspace } from "@prisma/client";
 import { mkdtemp } from "node:fs/promises";
@@ -44,17 +48,38 @@ export const DEFAULT_INITIAL_IR = {
   scripts: [],
 } as const;
 
+/** Absolute server-side cap for a single uploaded source package. */
 const DEFAULT_SOURCE_MAX_BYTES = 256 * 1024 * 1024;
+
+/** ZIP local-file-header magic bytes (PK\x03\x04). */
+const ZIP_MAGIC = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
 
 export interface WorkspaceResult {
   workspace: SolutionWorkspace;
   initialRevision?: SolutionRevision;
 }
 
+export interface SourceRevisionResult {
+  revision: SolutionRevision;
+  domainProject: DomainProjectRevision;
+  summary: ClientProjectSummary;
+}
+
+/**
+ * Thrown by the upload sniffing transform when the first bytes are not a ZIP
+ * container (brief Step 4: content sniffing).
+ */
+export class ZipMagicError extends Error {
+  override name = "ZipMagicError";
+  constructor() {
+    super("package is not a ZIP container (expected PK\\x03\\x04 magic)");
+  }
+}
+
 /**
  * Workspace lifecycle: a "new" workspace starts from an empty solution
  * revision (generative flow); an "upload" workspace starts empty and receives
- * its Source Revision 1 through createSourceRevision (import flow).
+ * its Source Revision 1 through the streaming upload (import flow).
  */
 @Injectable()
 export class WorkspaceService {
@@ -112,9 +137,84 @@ export class WorkspaceService {
   }
 
   /**
-   * Upload flow: stores the source .gz as a tenant-scoped artifact, imports it
-   * into a read-only workspace directory, inspects it, and creates Source
-   * Revision 1 (advancing currentRevisionId).
+   * Streaming upload (brief Step 4): sniffs the ZIP magic on the first chunk,
+   * streams the request body straight into ArtifactStorage (never buffering
+   * the whole package in memory), then imports and inspects it. The Source
+   * Revision is created only after safe import + inspection succeeds; any
+   * failure removes the stored package.
+   */
+  async uploadSourceRevision(input: {
+    tenantId: string;
+    workspaceId: string;
+    stream: NodeJS.ReadableStream;
+    maxBytes?: number;
+    domainKind?: string;
+  }): Promise<SourceRevisionResult> {
+    const workspace = await this.prisma.solutionWorkspace.findFirst({
+      where: { id: input.workspaceId, tenantId: input.tenantId },
+    });
+    if (workspace === null) {
+      throw new NotFoundException("workspace");
+    }
+    if (workspace.currentRevisionId !== null) {
+      throw new ConflictException("workspace already has a revision");
+    }
+    const maxBytes = sanitizeMaxBytes(input.maxBytes);
+    const domainKind = input.domainKind ?? "kingclient";
+
+    // Content sniffing + streaming: consume the first chunk, verify the ZIP
+    // magic, then rebuild a paused stream from the same iterator. Nothing is
+    // ever buffered in full; the request body flows straight into storage.
+    let body: Readable;
+    try {
+      body = await sniffZipStream(input.stream);
+    } catch (error) {
+      if (error instanceof ZipMagicError) {
+        throw new UnprocessableEntityException(apiError("PACKAGE_UNSUPPORTED", error.message));
+      }
+      throw error;
+    }
+
+    let stored: StoredArtifact;
+    try {
+      stored = await this.storage.put({
+        tenantId: input.tenantId,
+        kind: "source-package",
+        stream: body,
+        maxBytes,
+      });
+    } catch (error) {
+      if (error instanceof ArtifactStorageError && isArtifactTooLarge(error)) {
+        throw new PayloadTooLargeException(apiError("ARTIFACT_TOO_LARGE", error.message));
+      }
+      throw error;
+    }
+
+    try {
+      const bytes = await collectStream(await this.storage.open(input.tenantId, stored.artifactId));
+      const workDir = await mkdtemp(path.join(tmpdir(), "kf-source-import-"));
+      const sourceDir = await importNativeClientPackage(bytes, workDir);
+      const inspected = await inspectClientProject(sourceDir);
+      return await this.commitSourceRevision({
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        domainKind,
+        stored,
+        summary: inspected.summary,
+      });
+    } catch (error) {
+      await this.storage.delete(input.tenantId, stored.artifactId).catch(() => {});
+      if (error instanceof PackageUnpackError) {
+        throw new UnprocessableEntityException(apiError("PACKAGE_UNPACK_FAILED", error.message));
+      }
+      throw new UnprocessableEntityException(apiError("PROJECT_PARSE_FAILED", messageOf(error)));
+    }
+  }
+
+  /**
+   * Upload flow (in-memory convenience variant, kept for worker/tests): stores
+   * the source .gz as a tenant-scoped artifact, imports it into a read-only
+   * workspace directory, inspects it, and creates Source Revision 1.
    */
   async createSourceRevision(input: {
     tenantId: string;
@@ -122,11 +222,7 @@ export class WorkspaceService {
     source: Uint8Array;
     domainKind?: string;
     maxBytes?: number;
-  }): Promise<{
-    revision: SolutionRevision;
-    domainProject: DomainProjectRevision;
-    summary: ClientProjectSummary;
-  }> {
+  }): Promise<SourceRevisionResult> {
     const workspace = await this.prisma.solutionWorkspace.findFirst({
       where: { id: input.workspaceId, tenantId: input.tenantId },
     });
@@ -143,38 +239,19 @@ export class WorkspaceService {
       tenantId: input.tenantId,
       kind: "source-package",
       stream: Readable.from(source),
-      maxBytes: input.maxBytes ?? DEFAULT_SOURCE_MAX_BYTES,
+      maxBytes: sanitizeMaxBytes(input.maxBytes),
     });
 
     const workDir = await mkdtemp(path.join(tmpdir(), "kf-source-import-"));
     const sourceDir = await importNativeClientPackage(source, workDir);
     const inspected = await inspectClientProject(sourceDir);
 
-    return this.prisma.$transaction(async (tx) => {
-      const revision = await tx.solutionRevision.create({
-        data: {
-          tenantId: input.tenantId,
-          workspaceId: input.workspaceId,
-          revisionNumber: 1,
-          kind: "source",
-          state: inspected.summary as unknown as Prisma.InputJsonValue,
-        },
-      });
-      const domainProject = await tx.domainProjectRevision.create({
-        data: {
-          tenantId: input.tenantId,
-          solutionRevisionId: revision.id,
-          domainKind,
-          kind: "source-package",
-          packageHash: stored.sha256,
-          packageUrl: stored.artifactId,
-        },
-      });
-      await tx.solutionWorkspace.update({
-        where: { id: input.workspaceId },
-        data: { currentRevisionId: revision.id },
-      });
-      return { revision, domainProject, summary: inspected.summary };
+    return this.commitSourceRevision({
+      tenantId: input.tenantId,
+      workspaceId: input.workspaceId,
+      domainKind,
+      stored,
+      summary: inspected.summary,
     });
   }
 
@@ -194,6 +271,160 @@ export class WorkspaceService {
       orderBy: { createdAt: "asc" },
     });
   }
+
+  async listRevisions(tenantId: string, workspaceId: string): Promise<SolutionRevision[]> {
+    await this.get(tenantId, workspaceId);
+    return this.prisma.solutionRevision.findMany({
+      where: { tenantId, workspaceId },
+      orderBy: { revisionNumber: "asc" },
+    });
+  }
+
+  /**
+   * Destructive workspace deletion (brief Step 7). The caller must have
+   * already surfaced a destructive confirmation (the controller enforces the
+   * confirm flag before calling); the audit trail records that confirmation
+   * separately.
+   */
+  async deleteWorkspace(tenantId: string, workspaceId: string): Promise<void> {
+    const workspace = await this.prisma.solutionWorkspace.findFirst({
+      where: { id: workspaceId, tenantId },
+    });
+    if (workspace === null) {
+      throw new NotFoundException("workspace");
+    }
+    await this.prisma.$transaction(async (tx) => {
+      const revisionIds = (
+        await tx.solutionRevision.findMany({
+          where: { workspaceId, tenantId },
+          select: { id: true },
+        })
+      ).map((row) => row.id);
+      const jobIds = (
+        await tx.buildJob.findMany({
+          where: { workspaceId, tenantId },
+          select: { id: true },
+        })
+      ).map((row) => row.id);
+      const conversationIds = (
+        await tx.conversation.findMany({
+          where: { workspaceId, tenantId },
+          select: { id: true },
+        })
+      ).map((row) => row.id);
+
+      if (revisionIds.length > 0) {
+        await tx.domainProjectRevision.deleteMany({
+          where: { tenantId, solutionRevisionId: { in: revisionIds } },
+        });
+        await tx.solutionRevision.deleteMany({ where: { workspaceId, tenantId } });
+      }
+      if (jobIds.length > 0) {
+        await tx.artifact.deleteMany({ where: { tenantId, buildJobId: { in: jobIds } } });
+        await tx.validationReport.deleteMany({
+          where: { tenantId, buildJobId: { in: jobIds } },
+        });
+      }
+      await tx.buildJob.deleteMany({ where: { workspaceId, tenantId } });
+      await tx.changePlan.deleteMany({ where: { workspaceId, tenantId } });
+      await tx.changeRequest.deleteMany({ where: { workspaceId, tenantId } });
+      if (conversationIds.length > 0) {
+        await tx.message.deleteMany({
+          where: { tenantId, conversationId: { in: conversationIds } },
+        });
+        await tx.conversation.deleteMany({ where: { workspaceId, tenantId } });
+      }
+      await tx.solutionWorkspace.delete({ where: { id: workspaceId } });
+    });
+  }
+
+  private async commitSourceRevision(input: {
+    tenantId: string;
+    workspaceId: string;
+    domainKind: string;
+    stored: StoredArtifact;
+    summary: ClientProjectSummary;
+  }): Promise<SourceRevisionResult> {
+    return this.prisma.$transaction(async (tx) => {
+      const revision = await tx.solutionRevision.create({
+        data: {
+          tenantId: input.tenantId,
+          workspaceId: input.workspaceId,
+          revisionNumber: 1,
+          kind: "source",
+          state: input.summary as unknown as Prisma.InputJsonValue,
+        },
+      });
+      const domainProject = await tx.domainProjectRevision.create({
+        data: {
+          tenantId: input.tenantId,
+          solutionRevisionId: revision.id,
+          domainKind: input.domainKind,
+          kind: "source-package",
+          packageHash: input.stored.sha256,
+          packageUrl: input.stored.artifactId,
+        },
+      });
+      await tx.solutionWorkspace.update({
+        where: { id: input.workspaceId },
+        data: { currentRevisionId: revision.id },
+      });
+      return { revision, domainProject, summary: input.summary };
+    });
+  }
+}
+
+/**
+ * Reads the first chunk of a request stream, verifies the ZIP local-file
+ * header magic (PK\x03\x04), and returns a new paused Readable that replays
+ * the checked prefix followed by the rest of the original stream. The async
+ * iterator keeps the source paused between yields, so nothing is buffered.
+ */
+async function sniffZipStream(stream: NodeJS.ReadableStream): Promise<Readable> {
+  const iterator = stream[Symbol.asyncIterator]();
+  const first = await iterator.next();
+  if (first.done) {
+    throw new ZipMagicError();
+  }
+  const firstBuffer = Buffer.isBuffer(first.value) ? first.value : Buffer.from(first.value);
+  if (
+    firstBuffer.length < ZIP_MAGIC.length ||
+    !firstBuffer.subarray(0, ZIP_MAGIC.length).equals(ZIP_MAGIC)
+  ) {
+    throw new ZipMagicError();
+  }
+  return Readable.from(
+    (async function* replay() {
+      yield firstBuffer;
+      yield* iterator;
+    })(),
+  );
+}
+
+function sanitizeMaxBytes(maxBytes: number | undefined): number {
+  const requested = typeof maxBytes === "number" && Number.isFinite(maxBytes) ? maxBytes : undefined;
+  if (requested === undefined || requested <= 0) return DEFAULT_SOURCE_MAX_BYTES;
+  return Math.min(requested, DEFAULT_SOURCE_MAX_BYTES);
+}
+
+function isArtifactTooLarge(error: ArtifactStorageError): boolean {
+  return error.message.includes("ARTIFACT_TOO_LARGE");
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function apiError(code: string, message: string): { error: { code: string; message: string } } {
+  return { error: { code, message } };
+}
+
+async function collectStream(stream: NodeJS.ReadableStream): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream as unknown as AsyncIterable<Buffer | string>) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
 }
 
 function isUniqueViolation(error: unknown): boolean {

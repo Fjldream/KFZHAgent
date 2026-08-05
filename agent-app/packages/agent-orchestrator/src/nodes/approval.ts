@@ -21,6 +21,12 @@ import type { ChangePlanRepository } from "../ports.js";
  */
 export function createApprovalNode() {
   return (state: AgentGraphStateValue): AgentGraphUpdate => {
+    // A plan-change failure (INVALID_MODEL_OUTPUT) must never reach the
+    // approval interrupt: return to idle preserving the error code so the
+    // caller can see why no plan is pending.
+    if (state.lastErrorCode === "INVALID_MODEL_OUTPUT") {
+      return { stage: "idle" };
+    }
     if (
       state.activeChangeRequestId === undefined ||
       state.changePlanId === undefined ||

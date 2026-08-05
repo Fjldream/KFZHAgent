@@ -1,0 +1,700 @@
+// @ts-nocheck -- Brief Step 1/2 的 API 契约测试含逐字代码（JS 风格，无类型标注），
+// 因此本文件关闭类型检查，但 ESLint 静态规则与运行时断言仍然生效。
+// Task 11: HTTP/SSE API, upload, confirmation, and download.
+import "reflect-metadata";
+process.env.DATABASE_URL =
+  process.env.TEST_DATABASE_URL ??
+  "postgresql://postgres@127.0.0.1:5432/kf_agent_test";
+
+import type { INestApplication } from "@nestjs/common";
+import { Test } from "@nestjs/testing";
+import cookieParser from "cookie-parser";
+import { packageNativeClientProject } from "@kf/domain-client";
+import request from "supertest";
+import { fileURLToPath } from "node:url";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { AppModule } from "./app.module.js";
+import { PrismaService } from "./prisma/prisma.service.js";
+import { PasswordService } from "./auth/password.service.js";
+import { TenantsService } from "./tenants/tenants.service.js";
+import { MODEL_PORT } from "./conversations/model-port.js";
+
+const unknownFieldClientDir = fileURLToPath(
+  new URL("../../../tests/fixtures/client-unknown-field", import.meta.url),
+);
+
+const PLATFORM = { tenant: "KF Platform", username: "root", password: "TempPass-123" };
+const TENANT_A = { tenant: "Acme Corp", username: "alice", password: "TempPass-123" };
+const TENANT_A_MEMBER = { tenant: "Acme Corp", username: "carol", password: "CarolPass-123" };
+const TENANT_B = { tenant: "Globex", username: "bob", password: "TempPass-123" };
+
+let app: INestApplication;
+let server: ReturnType<INestApplication["getHttpServer"]>;
+let prisma: PrismaService;
+let tenants: TenantsService;
+let passwords: PasswordService;
+let fakeModel: FakeModelPort;
+let counter = 0;
+
+const TABLES = [
+  "DownloadToken",
+  "AuditLog",
+  "ValidationReport",
+  "Artifact",
+  "BuildJob",
+  "DomainProjectRevision",
+  "SolutionRevision",
+  "ChangePlan",
+  "ChangeRequest",
+  "Message",
+  "Conversation",
+  "SolutionWorkspace",
+  "UserSession",
+  "User",
+  "Tenant",
+];
+
+// PostgresSaver creates these tables through setup(); every integration suite
+// truncates them so checkpoints cannot leak across tests.
+const CHECKPOINT_TABLES = [
+  "checkpoint_writes",
+  "checkpoint_blobs",
+  "checkpoints",
+  "checkpoint_migrations",
+];
+
+/** Deterministic fake model: the API's ModelPort injection point (Task 11). */
+class FakeModelPort {
+  intents = [];
+  requestedDomains = ["kingclient"];
+  createCalls = [];
+  reviseCalls = [];
+
+  queueIntent(...intents) {
+    this.intents.push(...intents);
+  }
+  async classifyIntent(input) {
+    void input;
+    const intent = this.intents.shift() ?? "QUESTION";
+    return {
+      intent,
+      requestedDomains: this.requestedDomains,
+      reply: `reply:${intent}`,
+    };
+  }
+  async createProjectDesign(input) {
+    void input;
+    return {
+      schema: "kf-solution-ir/v1",
+      solutionId: "sol-1",
+      displayName: "初始设计",
+      projects: [],
+      dependencies: [],
+      pendingRequirements: [],
+    };
+  }
+  async createChangePlan(input) {
+    this.createCalls.push(input);
+    return this.makePlan(input.workspaceId, "new");
+  }
+  async reviseChangePlan(input) {
+    this.reviseCalls.push(input);
+    return this.makePlan(input.workspaceId, "rev");
+  }
+  async explainValidation() {
+    return "校验通过";
+  }
+  makePlan(workspaceId, tag) {
+    counter += 1;
+    return {
+      schema: "kf-change-plan/v1",
+      workspaceId,
+      operations: [
+        {
+          op: "update",
+          entityId: `text-${tag}-${counter}`,
+          entityType: "text",
+          changes: [{ path: "/text", value: `${tag}-${counter}` }],
+        },
+      ],
+    };
+  }
+}
+
+beforeAll(async () => {
+  const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+    .overrideProvider(MODEL_PORT)
+    .useValue(new FakeModelPort())
+    .compile();
+  app = moduleRef.createNestApplication();
+  app.use(cookieParser());
+  await app.init();
+  server = app.getHttpServer();
+  prisma = moduleRef.get(PrismaService);
+  tenants = moduleRef.get(TenantsService);
+  passwords = moduleRef.get(PasswordService);
+  fakeModel = moduleRef.get(MODEL_PORT);
+});
+
+afterAll(async () => {
+  await app.close();
+  await prisma.$disconnect();
+});
+
+async function resetDatabase(): Promise<void> {
+  for (const table of TABLES) {
+    await prisma.$executeRawUnsafe(`TRUNCATE TABLE "${table}" CASCADE`);
+  }
+  for (const table of CHECKPOINT_TABLES) {
+    await prisma.$executeRawUnsafe(`TRUNCATE TABLE "${table}" CASCADE`);
+  }
+}
+
+async function seedDatabase(): Promise<void> {
+  const platformHash = await passwords.hash(PLATFORM.password);
+  const platformTenant = await prisma.tenant.create({
+    data: { name: PLATFORM.tenant },
+  });
+  await prisma.user.create({
+    data: {
+      tenantId: platformTenant.id,
+      username: PLATFORM.username,
+      passwordHash: platformHash,
+      role: "platform_admin",
+      mustChangePassword: true,
+    },
+  });
+  await tenants.createTenantWithAdmin({
+    name: TENANT_A.tenant,
+    username: TENANT_A.username,
+    temporaryPassword: TENANT_A.password,
+  });
+  await tenants.createTenantWithAdmin({
+    name: TENANT_B.tenant,
+    username: TENANT_B.username,
+    temporaryPassword: TENANT_B.password,
+  });
+  const acme = await prisma.tenant.findUnique({ where: { name: TENANT_A.tenant } });
+  await prisma.user.create({
+    data: {
+      tenantId: acme.id,
+      username: TENANT_A_MEMBER.username,
+      passwordHash: await passwords.hash(TENANT_A_MEMBER.password),
+      role: "member",
+      mustChangePassword: true,
+    },
+  });
+}
+
+beforeEach(async () => {
+  await resetDatabase();
+  await seedDatabase();
+  fakeModel.intents = [];
+  fakeModel.createCalls = [];
+  fakeModel.reviseCalls = [];
+});
+
+async function login(
+  user: { tenant: string; username: string; password: string },
+): Promise<string> {
+  const res = await request(server)
+    .post("/api/auth/login")
+    .send({
+      tenant: user.tenant,
+      username: user.username,
+      password: user.password,
+    })
+    .expect(200);
+  const setCookie = (res.headers["set-cookie"] as unknown as string[])[0];
+  return setCookie.split(";")[0] as string;
+}
+
+async function createWorkspace(cookie: string, name: string) {
+  return request(server)
+    .post("/api/workspaces")
+    .set("Cookie", cookie)
+    .send({ name })
+    .expect(201);
+}
+
+async function createUploadWorkspace(cookie: string, name: string) {
+  return request(server)
+    .post("/api/workspaces")
+    .set("Cookie", cookie)
+    .send({ name, mode: "upload" })
+    .expect(201);
+}
+
+function uploadPackage(
+  cookie: string,
+  workspaceId: string,
+  body: Buffer,
+  query: Record<string, unknown> = {},
+) {
+  // Not async on purpose: returns the supertest Test so callers can chain
+  // .expect() before awaiting.
+  let req = request(server)
+    .post(`/api/workspaces/${workspaceId}/uploads`)
+    .set("Cookie", cookie)
+    .set("Content-Type", "application/octet-stream");
+  if (Object.keys(query).length > 0) req = req.query(query);
+  return req.send(body);
+}
+
+async function createConversation(cookie: string, workspaceId: string, title: string) {
+  return request(server)
+    .post("/api/conversations")
+    .set("Cookie", cookie)
+    .send({ workspaceId, title })
+    .expect(201);
+}
+
+function sendMessage(cookie: string, conversationId: string, content: string) {
+  // Not async on purpose: returns the supertest Test for chaining .expect().
+  return request(server)
+    .post(`/api/conversations/${conversationId}/messages`)
+    .set("Cookie", cookie)
+    .send({ content });
+}
+
+function resume(cookie: string, conversationId: string, body: Record<string, unknown>) {
+  return request(server)
+    .post(`/api/conversations/${conversationId}/resume`)
+    .set("Cookie", cookie)
+    .send(body);
+}
+
+/** Parses the SSE frames of a message response into [event, data] pairs. */
+function parseSse(text: string): { event: string; data: unknown }[] {
+  const events: { event: string; data: unknown }[] = [];
+  for (const block of text.split("\n\n")) {
+    if (block.trim().length === 0) continue;
+    const lines = block.split("\n");
+    let event = "message";
+    const dataLines: string[] = [];
+    for (const line of lines) {
+      if (line.startsWith("event:")) event = line.slice("event:".length).trim();
+      else if (line.startsWith("data:")) dataLines.push(line.slice("data:".length).trim());
+    }
+    if (dataLines.length > 0) {
+      events.push({ event, data: JSON.parse(dataLines.join("\n")) });
+    }
+  }
+  return events;
+}
+
+function doneEvent(text: string): { data: { stage?: string; interrupt?: { planHash?: string } } } {
+  const events = parseSse(text);
+  const done = events.find((event) => event.event === "done");
+  if (done === undefined) throw new Error(`no done SSE event in: ${text}`);
+  return { data: done.data as { stage?: string; interrupt?: { planHash?: string } } };
+}
+
+async function makePackage(): Promise<Buffer> {
+  return packageNativeClientProject(unknownFieldClientDir);
+}
+
+/** Plans a NEW_REQUIREMENT turn up to the approval interrupt and returns the planHash. */
+async function planRequirement(cookie: string, conversationId: string): Promise<string> {
+  fakeModel.queueIntent("NEW_REQUIREMENT");
+  const res = await sendMessage(cookie, conversationId, "新增一个按钮");
+  expect(res.status).toBe(200);
+  expect(res.headers["content-type"]).toContain("text/event-stream");
+  const done = doneEvent(res.text);
+  expect(done.data.stage).toBe("approval");
+  const planHash = done.data.interrupt?.planHash;
+  if (typeof planHash !== "string") throw new Error("expected planHash in SSE done event");
+  return planHash;
+}
+
+async function tenantIdOf(tenantName: string): Promise<string> {
+  const tenant = await prisma.tenant.findUnique({ where: { name: tenantName } });
+  return tenant!.id;
+}
+
+// ---------------------------------------------------------------------------
+// Step 1: API contract
+// ---------------------------------------------------------------------------
+
+describe("api contract", () => {
+  it("creates an upload workspace and uploads a source package", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createUploadWorkspace(cookie, "Import Workspace");
+    expect(ws.body.mode).toBe("upload");
+    expect(ws.body.currentRevisionId).toBeNull();
+
+    const pkg = await makePackage();
+    const res = await uploadPackage(cookie, ws.body.id, pkg).expect(201);
+    expect(res.body.revision.kind).toBe("source");
+    expect(res.body.revision.revisionNumber).toBe(1);
+    expect(res.body.revision.tenantId).toBe(ws.body.tenantId);
+    expect(res.body.packageUrl).toMatch(/^[0-9a-f-]{36}$/);
+    expect(res.body.summary).toMatchObject({ project: { name: "UnknownFieldFixture" } });
+
+    // The source revision is now current.
+    const get = await request(server)
+      .get(`/api/workspaces/${ws.body.id}`)
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(get.body.currentRevisionId).toBe(res.body.revision.id);
+  });
+
+  it("lists workspace revisions", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createUploadWorkspace(cookie, "Revisions WS");
+    await uploadPackage(cookie, ws.body.id, await makePackage()).expect(201);
+
+    const res = await request(server)
+      .get(`/api/workspaces/${ws.body.id}/revisions`)
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].kind).toBe("source");
+  });
+
+  it("creates and lists a conversation", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createWorkspace(cookie, "Gen Workspace");
+
+    const created = await createConversation(cookie, ws.body.id, "需求讨论");
+    expect(created.body.workspaceId).toBe(ws.body.id);
+    expect(created.body.title).toBe("需求讨论");
+
+    const listed = await request(server)
+      .get(`/api/conversations/${created.body.id}`)
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(listed.body.id).toBe(created.body.id);
+  });
+
+  it("streams a message turn through SSE and stops at the approval interrupt", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createUploadWorkspace(cookie, "SSE WS");
+    const uploaded = await uploadPackage(cookie, ws.body.id, await makePackage()).expect(201);
+    const conv = await createConversation(cookie, ws.body.id, "SSE");
+
+    fakeModel.queueIntent("NEW_REQUIREMENT");
+    const res = await sendMessage(cookie, conv.body.id, "新增一个按钮").expect(200);
+    expect(res.headers["content-type"]).toContain("text/event-stream");
+    expect(res.text).toContain("event: state");
+    expect(res.text).toContain("event: done");
+
+    // Streaming is real: each graph node update is pushed as its own SSE
+    // frame (load-context → classify-intent → plan-change → approval), not
+    // collected and returned as one payload.
+    const events = parseSse(res.text);
+    const stateFrames = events.filter((event) => event.event === "state");
+    expect(stateFrames.length).toBeGreaterThanOrEqual(3);
+    const nodeNames = stateFrames.map((frame) => Object.keys(frame.data as object));
+    expect(nodeNames.flat()).toEqual(
+      expect.arrayContaining(["load-context", "classify-intent", "plan-change"]),
+    );
+
+    const done = doneEvent(res.text);
+    expect(done.data.stage).toBe("approval");
+    expect(done.data.interrupt).toMatchObject({ type: "plan-approval" });
+    expect(done.data.interrupt?.planHash).toMatch(/^[0-9a-f]{64}$/);
+
+    // The user message and the approval interrupt payload are both durable.
+    const messages = await request(server)
+      .get(`/api/conversations/${conv.body.id}/messages`)
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(messages.body).toHaveLength(1);
+    expect(messages.body[0].content).toBe("新增一个按钮");
+    void uploaded;
+  });
+
+  it("requires the displayed plan hash when resuming approval", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createUploadWorkspace(cookie, "Resume WS");
+    await uploadPackage(cookie, ws.body.id, await makePackage()).expect(201);
+    const conv = await createConversation(cookie, ws.body.id, "Resume");
+    await planRequirement(cookie, conv.body.id);
+
+    await request(server)
+      .post(`/api/conversations/${conv.body.id}/resume`)
+      .set("Cookie", cookie)
+      .send({ action: "approve", planHash: "wrong-hash" })
+      .expect(409)
+      .expect(({ body }) => {
+        expect(body.error.code).toBe("PLAN_HASH_MISMATCH");
+      });
+  });
+
+  it("approves the plan and enqueues a durable build job", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createUploadWorkspace(cookie, "Approve WS");
+    await uploadPackage(cookie, ws.body.id, await makePackage()).expect(201);
+    const conv = await createConversation(cookie, ws.body.id, "Approve");
+    const planHash = await planRequirement(cookie, conv.body.id);
+
+    const res = await resume(cookie, conv.body.id, { action: "approve", planHash }).expect(200);
+    expect(res.body.stage).toBe("idle");
+    expect(res.body.buildJobId).toBeTruthy();
+
+    const job = await request(server)
+      .get(`/api/build-jobs/${res.body.buildJobId}`)
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(job.body.planHash).toBe(planHash);
+    expect(job.body.status).toBe("QUEUED");
+  });
+
+  it("rejects a plain message while an approval is pending", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createUploadWorkspace(cookie, "Pending WS");
+    await uploadPackage(cookie, ws.body.id, await makePackage()).expect(201);
+    const conv = await createConversation(cookie, ws.body.id, "Pending");
+    await planRequirement(cookie, conv.body.id);
+
+    await sendMessage(cookie, conv.body.id, "还在吗").expect(409);
+  });
+
+  it("downloads an artifact through a short-lived single-use token", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createUploadWorkspace(cookie, "Download WS");
+    const uploaded = await uploadPackage(cookie, ws.body.id, await makePackage()).expect(201);
+    const packageUrl = uploaded.body.packageUrl as string;
+
+    const tokenRes = await request(server)
+      .post(`/api/artifacts/${packageUrl}/download-token`)
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(tokenRes.body.token).toBeTruthy();
+    expect(new Date(tokenRes.body.expiresAt).getTime()).toBeGreaterThan(Date.now());
+
+    const dl = await request(server)
+      .get(`/api/artifacts/download/${tokenRes.body.token}`)
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(dl.headers["content-type"]).toContain("application/octet-stream");
+    expect(dl.body.length).toBeGreaterThan(1000);
+
+    // Single-use: the second download with the same token fails.
+    await request(server)
+      .get(`/api/artifacts/download/${tokenRes.body.token}`)
+      .set("Cookie", cookie)
+      .expect(401);
+
+    // The file route still requires an active session.
+    await request(server)
+      .get(`/api/artifacts/download/${tokenRes.body.token}`)
+      .expect(401);
+  });
+
+  it("deletes a workspace only after destructive confirmation", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createWorkspace(cookie, "Delete WS");
+
+    await request(server)
+      .delete(`/api/workspaces/${ws.body.id}`)
+      .set("Cookie", cookie)
+      .send({})
+      .expect(400);
+
+    await request(server)
+      .delete(`/api/workspaces/${ws.body.id}`)
+      .set("Cookie", cookie)
+      .send({ confirm: true })
+      .expect(204);
+
+    await request(server)
+      .get(`/api/workspaces/${ws.body.id}`)
+      .set("Cookie", cookie)
+      .expect(404);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 2: Security behavior
+// ---------------------------------------------------------------------------
+
+describe("api security", () => {
+  it("rejects unauthenticated requests with 401", async () => {
+    const pkg = await makePackage();
+    await request(server).get("/api/workspaces/some-id").expect(401);
+    await request(server).post("/api/workspaces").send({ name: "X" }).expect(401);
+    await request(server).post("/api/conversations").send({ workspaceId: "w", title: "t" }).expect(401);
+    await request(server)
+      .post("/api/conversations/c1/messages")
+      .send({ content: "hi" })
+      .expect(401);
+    await request(server)
+      .post("/api/conversations/c1/resume")
+      .send({ action: "approve", planHash: "h" })
+      .expect(401);
+    await request(server).get("/api/build-jobs/j1").expect(401);
+    await request(server).post("/api/artifacts/a1/download-token").expect(401);
+    await request(server).get("/api/artifacts/download/some-token").expect(401);
+    await request(server).delete("/api/workspaces/w1").send({ confirm: true }).expect(401);
+    await request(server)
+      .post(`/api/workspaces/w1/uploads`)
+      .set("Content-Type", "application/octet-stream")
+      .send(pkg)
+      .expect(401);
+  });
+
+  it("returns 404 for cross-tenant ids to prevent enumeration", async () => {
+    const cookieA = await login(TENANT_A_MEMBER);
+    const cookieB = await login(TENANT_B);
+
+    const wsA = await createUploadWorkspace(cookieA, "Tenant A WS");
+    const convA = await createConversation(cookieA, wsA.body.id, "A conv");
+
+    // Upload the package, then issue a real token and prove tenant B cannot use it.
+    const uploaded = await uploadPackage(cookieA, wsA.body.id, await makePackage()).expect(201);
+    const packageUrl = uploaded.body.packageUrl as string;
+    const issued = await request(server)
+      .post(`/api/artifacts/${packageUrl}/download-token`)
+      .set("Cookie", cookieA)
+      .expect(200);
+    await request(server)
+      .get(`/api/artifacts/download/${issued.body.token}`)
+      .set("Cookie", cookieB)
+      .expect(401);
+
+    await request(server)
+      .get(`/api/workspaces/${wsA.body.id}`)
+      .set("Cookie", cookieB)
+      .expect(404);
+    await request(server)
+      .get(`/api/workspaces/${wsA.body.id}/revisions`)
+      .set("Cookie", cookieB)
+      .expect(404);
+    await request(server)
+      .get(`/api/conversations/${convA.body.id}`)
+      .set("Cookie", cookieB)
+      .expect(404);
+    await request(server)
+      .get(`/api/conversations/${convA.body.id}/messages`)
+      .set("Cookie", cookieB)
+      .expect(404);
+    await request(server)
+      .post(`/api/conversations/${convA.body.id}/messages`)
+      .set("Cookie", cookieB)
+      .send({ content: "hi" })
+      .expect(404);
+    await request(server)
+      .delete(`/api/workspaces/${wsA.body.id}`)
+      .set("Cookie", cookieB)
+      .send({ confirm: true })
+      .expect(404);
+
+    // Cross-tenant uploads 404 too.
+    const pkg = await makePackage();
+    await request(server)
+      .post(`/api/workspaces/${wsA.body.id}/uploads`)
+      .set("Cookie", cookieB)
+      .set("Content-Type", "application/octet-stream")
+      .send(pkg)
+      .expect(404);
+  });
+
+  it("rejects oversized uploads with 413", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createUploadWorkspace(cookie, "Oversize WS");
+    // A real (ZIP) package that exceeds the declared maxBytes: content
+    // sniffing passes, then the streaming write rejects it as too large.
+    const big = await makePackage();
+
+    const res = await uploadPackage(cookie, ws.body.id, big, { maxBytes: 1024 }).expect(413);
+    expect(res.body.error.code).toBe("ARTIFACT_TOO_LARGE");
+  });
+
+  it("rejects non-ZIP containers with PACKAGE_UNSUPPORTED", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createUploadWorkspace(cookie, "Bad Package WS");
+    const notZip = Buffer.from("this is definitely not a zip container at all");
+
+    const res = await uploadPackage(cookie, ws.body.id, notZip).expect(422);
+    expect(res.body.error.code).toBe("PACKAGE_UNSUPPORTED");
+  });
+
+  it("rejects corrupt ZIP containers with PACKAGE_UNPACK_FAILED", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createUploadWorkspace(cookie, "Corrupt WS");
+    // Valid ZIP magic but a truncated/garbage central directory.
+    const corrupt = Buffer.concat([
+      Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+      Buffer.alloc(64, 0x42),
+    ]);
+
+    const res = await uploadPackage(cookie, ws.body.id, corrupt).expect(422);
+    expect(res.body.error.code).toBe("PACKAGE_UNPACK_FAILED");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Audit events
+// ---------------------------------------------------------------------------
+
+describe("audit events", () => {
+  it("records login, logout, upload, plan confirmation, build start, download, workspace deletion", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    await request(server).post("/api/auth/logout").set("Cookie", cookie).expect(204);
+    const cookie2 = await login(TENANT_A_MEMBER);
+    const ws = await createUploadWorkspace(cookie2, "Audit WS");
+    const uploaded = await uploadPackage(cookie2, ws.body.id, await makePackage()).expect(201);
+    const packageUrl = uploaded.body.packageUrl as string;
+    const conv = await createConversation(cookie2, ws.body.id, "Audit");
+    const planHash = await planRequirement(cookie2, conv.body.id);
+    await resume(cookie2, conv.body.id, { action: "approve", planHash }).expect(200);
+    const issued = await request(server)
+      .post(`/api/artifacts/${packageUrl}/download-token`)
+      .set("Cookie", cookie2)
+      .expect(200);
+    await request(server)
+      .get(`/api/artifacts/download/${issued.body.token}`)
+      .set("Cookie", cookie2)
+      .expect(200);
+    await request(server)
+      .delete(`/api/workspaces/${ws.body.id}`)
+      .set("Cookie", cookie2)
+      .send({ confirm: true })
+      .expect(204);
+
+    const acmeId = await tenantIdOf(TENANT_A.tenant);
+    const actions = await prisma.auditLog.findMany({
+      where: { tenantId: acmeId },
+      orderBy: { createdAt: "asc" },
+    });
+    const names = actions.map((row) => row.action);
+    expect(names).toContain("LOGIN_SUCCESS");
+    expect(names).toContain("LOGOUT");
+    expect(names).toContain("UPLOAD");
+    expect(names).toContain("PLAN_CONFIRMED");
+    expect(names).toContain("BUILD_START");
+    expect(names).toContain("DOWNLOAD");
+    expect(names).toContain("DESTRUCTIVE_CONFIRM");
+    expect(names).toContain("WORKSPACE_DELETED");
+  });
+
+  it("records tenant creation and platform-admin content access", async () => {
+    const platformCookie = await login(PLATFORM);
+    const created = await request(server)
+      .post("/api/tenants")
+      .set("Cookie", platformCookie)
+      .send({ name: "Audit Tenant", username: "auditadmin", temporaryPassword: "OneTimePass-123" })
+      .expect(201);
+
+    // The platform admin reads the new tenant's content: audit-trailed.
+    await request(server)
+      .get(`/api/tenants/${created.body.tenantId}`)
+      .set("Cookie", platformCookie)
+      .expect(200);
+
+    // TENANT_CREATED is recorded in the new tenant's own audit context (with
+    // the acting platform admin in actorUserId); content access is recorded in
+    // the tenant being accessed.
+    const auditTenantId = created.body.tenantId;
+    const tenantActions = await prisma.auditLog.findMany({
+      where: { tenantId: auditTenantId },
+      orderBy: { createdAt: "asc" },
+    });
+    const names = tenantActions.map((row) => row.action);
+    expect(names).toContain("TENANT_CREATED");
+    expect(names).toContain("PLATFORM_ADMIN_CONTENT_ACCESS");
+  });
+});

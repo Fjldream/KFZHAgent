@@ -80,9 +80,25 @@ model Conversation {
   tenantId    String
   workspaceId String
   title       String
+  summary     String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   @@index([tenantId, workspaceId])
+}
+
+/// Short-lived single-use artifact download tokens (Task 11). Only the
+/// SHA-256 hash of each token is stored; the plaintext token is returned once
+/// to the caller. `usedAt` guards single-use; `expiresAt` guards lifetime.
+model DownloadToken {
+  id         String    @id @default(uuid())
+  tenantId   String
+  userId     String
+  artifactId String
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+  @@index([tenantId, expiresAt])
 }
 
 model Message {

@@ -2,6 +2,7 @@ import { planHash } from "@kf/domain-client";
 import type { ChangePlan } from "@kf/contracts";
 import type { AgentGraphStateValue, AgentGraphUpdate } from "../state.js";
 import type { SolutionGraphDeps } from "../ports.js";
+import { GraphPlanSchema } from "../schemas/change-plan.js";
 
 /**
  * Produces a change plan for the current requirement (brief Step 4/5):
@@ -47,9 +48,17 @@ export function createPlanChangeNode(deps: SolutionGraphDeps) {
 
     const revising =
       state.intent === "MODIFY_REQUIREMENT" || state.stage === "planning" || state.resumeAction === "revise";
-    const plan: ChangePlan = revising
+    // Model output is validated against the canonical plan schema before any
+    // durable side effect: an invalid plan returns to idle with a clear error
+    // code and never reaches the approval/build path (brief Step 5 guard).
+    const rawPlan: unknown = revising
       ? await deps.modelPort.reviseChangePlan(modelContext)
       : await deps.modelPort.createChangePlan(modelContext);
+    const parsedPlan = GraphPlanSchema.safeParse(rawPlan);
+    if (!parsedPlan.success) {
+      return { stage: "idle", lastErrorCode: "INVALID_MODEL_OUTPUT", resumeAction: undefined };
+    }
+    const plan: ChangePlan = parsedPlan.data;
     const hash = planHash(plan);
 
     const existing = await deps.changePlanRepository.findOpenChangeRequest({

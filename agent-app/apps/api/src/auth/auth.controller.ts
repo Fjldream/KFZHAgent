@@ -12,6 +12,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import type { Response } from "express";
+import { AUDIT_ACTIONS, AuditService } from "../audit/audit.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { PasswordService } from "./password.service.js";
 import { SESSION_COOKIE_NAME, SessionService } from "./session.service.js";
@@ -33,6 +34,7 @@ export class AuthController {
     private readonly sessions: SessionService,
     private readonly users: UsersService,
     private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
   ) {}
 
   @Post("auth/login")
@@ -94,6 +96,20 @@ export class AuthController {
     const cookies = req.cookies as Record<string, string> | undefined;
     const token = cookies?.[SESSION_COOKIE_NAME];
     if (typeof token === "string" && token.length > 0) {
+      const tokenHash = this.sessions.hashToken(token);
+      const session = await this.prisma.userSession.findUnique({
+        where: { tokenHash },
+        include: { user: true },
+      });
+      if (session !== null) {
+        await this.audit.record({
+          tenantId: session.user.tenantId,
+          actorUserId: session.user.id,
+          action: AUDIT_ACTIONS.LOGOUT,
+          resourceType: "USER",
+          resourceId: session.user.id,
+        });
+      }
       await this.sessions.revokeByToken(token);
     }
     res.clearCookie(SESSION_COOKIE_NAME, { path: "/" });
