@@ -22,4 +22,13 @@ export default tseslint.config(
       "@typescript-eslint/no-unsafe-member-access": "error",
     },
   },
+  {
+    files: ["**/*.test.ts"],
+    rules: {
+      // Test doubles define async method stubs that intentionally lack await.
+      "@typescript-eslint/require-await": "off",
+      // Brief 逐字测试代码是 JS 风格（无类型标注）；@ts-nocheck 用于保持代码逐字不变。
+      "@typescript-eslint/ban-ts-comment": ["error", { "ts-nocheck": "allow-with-description" }],
+    },
+  },
 );
