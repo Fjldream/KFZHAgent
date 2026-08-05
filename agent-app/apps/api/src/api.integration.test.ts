@@ -814,4 +814,44 @@ describe("hardening fixes", () => {
       .expect(404);
     expect(res.body.message).toContain("download-token");
   });
+
+  it("serializes concurrent resumes: one approve wins and audit stays single (I1 concurrency)", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createUploadWorkspace(cookie, "Concurrent Resume WS");
+    await uploadPackage(cookie, ws.body.id, await makePackage()).expect(201);
+    const conv = await createConversation(cookie, ws.body.id, "Concurrent");
+    const planHash = await planRequirement(cookie, conv.body.id);
+
+    // Three resumes of the same conversation race at the same time. The
+    // pg_advisory_xact_lock serializes them: exactly one observes the pending
+    // interrupt and succeeds; every loser re-checks after the winner commits,
+    // finds nothing pending and is rejected without running the graph or
+    // writing audit rows.
+    const [r1, r2, r3] = await Promise.all([
+      resume(cookie, conv.body.id, { action: "approve", planHash }),
+      resume(cookie, conv.body.id, { action: "approve", planHash }),
+      resume(cookie, conv.body.id, { action: "approve", planHash }),
+    ]);
+
+    const statuses = [r1.status, r2.status, r3.status].sort((a, b) => a - b);
+    expect(statuses).toEqual([200, 409, 409]);
+
+    const ok = [r1, r2, r3].find((r) => r.status === 200);
+    expect(ok.body.stage).toBe("idle");
+    expect(ok.body.buildJobId).toBeTruthy();
+    const conflicts = [r1, r2, r3].filter((r) => r.status === 409);
+    expect(conflicts).toHaveLength(2);
+    for (const conflict of conflicts) {
+      expect(conflict.body.error.code).toBe("NO_PENDING_APPROVAL");
+    }
+
+    const acmeId = await tenantIdOf(TENANT_A.tenant);
+    expect(
+      await prisma.auditLog.count({ where: { tenantId: acmeId, action: "PLAN_CONFIRMED" } }),
+    ).toBe(1);
+    expect(
+      await prisma.auditLog.count({ where: { tenantId: acmeId, action: "BUILD_START" } }),
+    ).toBe(1);
+    expect(await prisma.buildJob.count({ where: { workspaceId: ws.body.id } })).toBe(1);
+  });
 });

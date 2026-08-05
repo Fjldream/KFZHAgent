@@ -168,12 +168,17 @@ export class ConversationService {
    * Resumes a pending approval. Accepts approve/revise/cancel plus the exact
    * planHash the user was shown.
    *
-   * Safety (I1): unlike startTurn, a resume is only meaningful while an
-   * approval interrupt is actually pending. If no interrupt is pending the
-   * resume is rejected with 409 NO_PENDING_APPROVAL *before* the graph runs,
-   * so a replayed resume can never fabricate duplicate PLAN_CONFIRMED /
-   * BUILD_START audit events (the underlying enqueue-build guard already
-   * prevents duplicate builds, but the audit write must not repeat either).
+   * Safety (I1): a resume is only meaningful while an approval interrupt is
+   * actually pending. The check-then-act (getState → graph resume → audit)
+   * sequence is serialized per conversation with a Postgres advisory lock
+   * (`pg_advisory_xact_lock`, transaction-scoped, auto-released — the same
+   * pattern Task 9 uses for build leases). Two concurrent resumes of the same
+   * conversation can therefore never both observe a pending interrupt: the
+   * loser waits on the lock, re-checks after the winner committed, finds no
+   * pending interrupt and is rejected with 409 NO_PENDING_APPROVAL *without*
+   * running the graph or writing audit rows. Audit writes land in the same
+   * transaction as the lock, so PLAN_CONFIRMED / BUILD_START can never be
+   * fabricated by replay (sequential or concurrent).
    *
    * A planHash mismatch is surfaced as a 409 conflict with
    * PLAN_HASH_MISMATCH (graph returns to idle with no side effects). Graph
@@ -198,98 +203,134 @@ export class ConversationService {
     const graph = await this.getGraph();
     const config = threadConfig(conversationId);
 
-    const snapshot = (await graph.getState(config)) as unknown as StateSnapshotLike;
-    if (!hasPendingInterrupt(snapshot)) {
-      throw new ConflictException(
-        apiError(
-          "NO_PENDING_APPROVAL",
-          "conversation has no pending approval to resume; a resume is only valid once per interrupt",
-        ),
-      );
-    }
+    return this.prisma.$transaction(
+      async (tx) => {
+        // Serialize resume processing per conversation. Every concurrent
+        // resume takes the same advisory lock; only one proceeds past this
+        // point at a time.
+        await tx.$executeRaw`
+          SELECT pg_advisory_xact_lock(hashtextextended(${conversationId}, 0))
+        `;
 
-    const resumeCommand = new Command({ resume: { action, planHash } });
-    let final: StateSnapshotLike;
-    try {
-      const stream = (await graph.stream(
-        resumeCommand as unknown as Parameters<typeof graph.stream>[0],
-        config,
-      )) as AsyncGenerator<unknown>;
-      for await (const chunk of stream) {
-        void chunk;
-        // Drain the run; the final checkpoint holds the outcome.
-      }
-      final = (await graph.getState(config)) as unknown as StateSnapshotLike;
-    } catch (error) {
-      throw new ConflictException(
-        apiError("GRAPH_ERROR", error instanceof Error ? error.message : String(error)),
-      );
-    }
-    const values = final.values;
-    const lastError = values.lastErrorCode;
-    if (lastError === "PLAN_HASH_MISMATCH") {
-      throw new ConflictException(
-        apiError("PLAN_HASH_MISMATCH", "the displayed plan hash does not match the pending plan"),
-      );
-    }
-    if (lastError === "INVALID_RESUME_ACTION") {
-      throw new BadRequestException(
-        apiError("INVALID_RESUME_ACTION", "invalid resume action or planHash"),
-      );
-    }
+        // Lock-internal re-check: any committed state from a winner (including
+        // the checkpoint of the graph resume) is visible now.
+        const snapshot = (await graph.getState(config)) as unknown as StateSnapshotLike;
+        if (!hasPendingInterrupt(snapshot)) {
+          throw new ConflictException(
+            apiError(
+              "NO_PENDING_APPROVAL",
+              "conversation has no pending approval to resume; a resume is only valid once per interrupt",
+            ),
+          );
+        }
 
-    const interrupt = extractInterrupt(final);
-    const result: Record<string, unknown> = {
-      stage: interrupt !== undefined ? "approval" : values.stage,
-      changeRequestId: values.activeChangeRequestId ?? undefined,
-      planHash: values.planHash ?? undefined,
-    };
-    if (interrupt !== undefined) result.interrupt = interrupt;
-    if (values.buildJobId !== undefined) result.buildJobId = values.buildJobId;
+        const resumeCommand = new Command({ resume: { action, planHash } });
+        let final: StateSnapshotLike;
+        try {
+          const stream = (await graph.stream(
+            resumeCommand as unknown as Parameters<typeof graph.stream>[0],
+            config,
+          )) as AsyncGenerator<unknown>;
+          for await (const chunk of stream) {
+            void chunk;
+            // Drain the run; the final checkpoint holds the outcome.
+          }
+          final = (await graph.getState(config)) as unknown as StateSnapshotLike;
+        } catch (error) {
+          throw new ConflictException(
+            apiError("GRAPH_ERROR", error instanceof Error ? error.message : String(error)),
+          );
+        }
+        const values = final.values;
+        const lastError = values.lastErrorCode;
+        if (lastError === "PLAN_HASH_MISMATCH") {
+          throw new ConflictException(
+            apiError(
+              "PLAN_HASH_MISMATCH",
+              "the displayed plan hash does not match the pending plan",
+            ),
+          );
+        }
+        if (lastError === "INVALID_RESUME_ACTION") {
+          throw new BadRequestException(
+            apiError("INVALID_RESUME_ACTION", "invalid resume action or planHash"),
+          );
+        }
 
-    const detail = { planHash, workspaceId: conversation.workspaceId };
-    const changePlanId = typeof values.changePlanId === "string" ? values.changePlanId : undefined;
-    const changeRequestId =
-      typeof values.activeChangeRequestId === "string" ? values.activeChangeRequestId : undefined;
-    if (action === "approve") {
-      await this.audit.record({
-        tenantId: principal.tenantId,
-        actorUserId: principal.userId,
-        action: AUDIT_ACTIONS.PLAN_CONFIRMED,
-        resourceType: "CHANGE_PLAN",
-        ...(changePlanId !== undefined ? { resourceId: changePlanId } : {}),
-        detail,
-      });
-      if (typeof values.buildJobId === "string") {
-        await this.audit.record({
-          tenantId: principal.tenantId,
-          actorUserId: principal.userId,
-          action: AUDIT_ACTIONS.BUILD_START,
-          resourceType: "BUILD_JOB",
-          resourceId: values.buildJobId,
-          detail,
-        });
-      }
-    } else if (action === "cancel") {
-      await this.audit.record({
-        tenantId: principal.tenantId,
-        actorUserId: principal.userId,
-        action: AUDIT_ACTIONS.PLAN_CANCELLED,
-        resourceType: "CHANGE_REQUEST",
-        ...(changeRequestId !== undefined ? { resourceId: changeRequestId } : {}),
-        detail,
-      });
-    } else {
-      await this.audit.record({
-        tenantId: principal.tenantId,
-        actorUserId: principal.userId,
-        action: AUDIT_ACTIONS.PLAN_REVISED,
-        resourceType: "CHANGE_PLAN",
-        ...(changePlanId !== undefined ? { resourceId: changePlanId } : {}),
-        detail,
-      });
-    }
-    return result;
+        const interrupt = extractInterrupt(final);
+        const result: Record<string, unknown> = {
+          stage: interrupt !== undefined ? "approval" : values.stage,
+          changeRequestId: values.activeChangeRequestId ?? undefined,
+          planHash: values.planHash ?? undefined,
+        };
+        if (interrupt !== undefined) result.interrupt = interrupt;
+        if (values.buildJobId !== undefined) result.buildJobId = values.buildJobId;
+
+        // Audit rows share the lock transaction: they commit together with
+        // the lock release, so a loser can never write them.
+        const detail = { planHash, workspaceId: conversation.workspaceId };
+        const changePlanId =
+          typeof values.changePlanId === "string" ? values.changePlanId : undefined;
+        const changeRequestId =
+          typeof values.activeChangeRequestId === "string"
+            ? values.activeChangeRequestId
+            : undefined;
+        if (action === "approve") {
+          await this.audit.record(
+            {
+              tenantId: principal.tenantId,
+              actorUserId: principal.userId,
+              action: AUDIT_ACTIONS.PLAN_CONFIRMED,
+              resourceType: "CHANGE_PLAN",
+              ...(changePlanId !== undefined ? { resourceId: changePlanId } : {}),
+              detail,
+            },
+            tx,
+          );
+          if (typeof values.buildJobId === "string") {
+            await this.audit.record(
+              {
+                tenantId: principal.tenantId,
+                actorUserId: principal.userId,
+                action: AUDIT_ACTIONS.BUILD_START,
+                resourceType: "BUILD_JOB",
+                resourceId: values.buildJobId,
+                detail,
+              },
+              tx,
+            );
+          }
+        } else if (action === "cancel") {
+          await this.audit.record(
+            {
+              tenantId: principal.tenantId,
+              actorUserId: principal.userId,
+              action: AUDIT_ACTIONS.PLAN_CANCELLED,
+              resourceType: "CHANGE_REQUEST",
+              ...(changeRequestId !== undefined ? { resourceId: changeRequestId } : {}),
+              detail,
+            },
+            tx,
+          );
+        } else {
+          await this.audit.record(
+            {
+              tenantId: principal.tenantId,
+              actorUserId: principal.userId,
+              action: AUDIT_ACTIONS.PLAN_REVISED,
+              resourceType: "CHANGE_PLAN",
+              ...(changePlanId !== undefined ? { resourceId: changePlanId } : {}),
+              detail,
+            },
+            tx,
+          );
+        }
+        return result;
+      },
+      // The graph resume is fast (no LLM call), but keep a generous bound so
+      // a stalled checkpoint write cannot pin the advisory lock forever.
+      { timeout: 30_000 },
+    );
   }
 
   private async getGraph(): Promise<CompiledGraph> {

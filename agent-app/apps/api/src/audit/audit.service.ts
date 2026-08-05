@@ -39,13 +39,18 @@ export interface AuditInput {
 /**
  * Thin audit-log writer. tenantId always comes from the authenticated
  * principal or the resource itself, never from a request body.
+ *
+ * `record` may be given a transaction client so audit rows land in the same
+ * transaction as the guarded operation (used by the serialized conversation
+ * resume path).
  */
 @Injectable()
 export class AuditService {
   constructor(private readonly prisma: PrismaService) {}
 
-  record(input: AuditInput): Promise<AuditLog> {
-    return this.prisma.auditLog.create({
+  record(input: AuditInput, client?: Prisma.TransactionClient): Promise<AuditLog> {
+    const db = client ?? this.prisma;
+    return db.auditLog.create({
       data: {
         tenantId: input.tenantId,
         ...(input.actorUserId !== undefined ? { actorUserId: input.actorUserId } : {}),
