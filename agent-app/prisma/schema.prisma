@@ -1,0 +1,193 @@
+// Prisma schema for KF Solution Agent.
+// Task 8: PostgreSQL Schema, Local Authentication, and Tenant Isolation.
+// Every tenant business model carries a tenantId; unique indexes for
+// tenant-scoped names and job idempotency keys.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  platform_admin
+  tenant_admin
+  member
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  VALIDATING
+  SUCCEEDED
+  FAILED
+}
+
+model Tenant {
+  id         String              @id @default(uuid())
+  name       String              @unique
+  users      User[]
+  workspaces SolutionWorkspace[]
+  createdAt  DateTime            @default(now())
+}
+
+model User {
+  id                 String        @id @default(uuid())
+  tenantId           String
+  tenant             Tenant        @relation(fields: [tenantId], references: [id])
+  username           String
+  passwordHash       String
+  role               UserRole
+  mustChangePassword Boolean       @default(true)
+  lockedUntil        DateTime?
+  sessions           UserSession[]
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  @@unique([tenantId, username])
+}
+
+model UserSession {
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime  @default(now())
+  revokedAt  DateTime?
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model SolutionWorkspace {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@unique([tenantId, name])
+}
+
+model Conversation {
+  id          String   @id @default(uuid())
+  tenantId    String
+  workspaceId String
+  title       String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([tenantId, workspaceId])
+}
+
+model Message {
+  id             String   @id @default(uuid())
+  tenantId       String
+  conversationId String
+  role           String
+  content        String
+  createdAt      DateTime @default(now())
+  @@index([tenantId, conversationId])
+}
+
+model ChangeRequest {
+  id          String   @id @default(uuid())
+  tenantId    String
+  workspaceId String
+  title       String
+  status      String   @default("OPEN")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([tenantId, workspaceId])
+}
+
+model ChangePlan {
+  id              String   @id @default(uuid())
+  tenantId        String
+  workspaceId     String
+  changeRequestId String?
+  planHash        String
+  plan            Json?
+  createdAt       DateTime @default(now())
+  @@index([tenantId, workspaceId])
+}
+
+model SolutionRevision {
+  id             String   @id @default(uuid())
+  tenantId       String
+  workspaceId    String
+  changePlanId   String?
+  revisionNumber Int      @default(1)
+  state          Json?
+  createdAt      DateTime @default(now())
+  @@index([tenantId, workspaceId])
+}
+
+model DomainProjectRevision {
+  id                 String   @id @default(uuid())
+  tenantId           String
+  solutionRevisionId String
+  domainKind         String
+  packageHash        String?
+  packageUrl         String?
+  createdAt          DateTime @default(now())
+  @@index([tenantId, solutionRevisionId])
+}
+
+model BuildJob {
+  id              String   @id @default(uuid())
+  tenantId        String
+  workspaceId     String
+  baseRevisionId  String
+  changePlanId    String
+  planHash        String
+  domainKind      String
+  idempotencyKey  String   @unique
+  status          JobStatus
+  leaseOwner      String?
+  leaseExpiresAt  DateTime?
+  attemptCount    Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  @@index([status, leaseExpiresAt])
+  @@index([tenantId, workspaceId])
+}
+
+model Artifact {
+  id         String   @id @default(uuid())
+  tenantId   String
+  buildJobId String
+  kind       String
+  storageKey String
+  sizeBytes  Int?
+  sha256     String?
+  createdAt  DateTime @default(now())
+  @@index([tenantId, buildJobId])
+}
+
+model ValidationReport {
+  id            String   @id @default(uuid())
+  tenantId      String
+  buildJobId    String?
+  changePlanId  String?
+  outcome       String
+  summary       String?
+  details       Json?
+  createdAt     DateTime @default(now())
+  @@index([tenantId, buildJobId])
+}
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  tenantId     String
+  actorUserId  String?
+  action       String
+  resourceType String?
+  resourceId   String?
+  detail       Json?
+  createdAt    DateTime @default(now())
+  @@index([tenantId, createdAt])
+}

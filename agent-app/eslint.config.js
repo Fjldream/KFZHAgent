@@ -29,6 +29,13 @@ export default tseslint.config(
       "@typescript-eslint/require-await": "off",
       // Brief 逐字测试代码是 JS 风格（无类型标注）；@ts-nocheck 用于保持代码逐字不变。
       "@typescript-eslint/ban-ts-comment": ["error", { "ts-nocheck": "allow-with-description" }],
+      // Test files are intentionally untyped (see @ts-nocheck above); the
+      // type-aware "unsafe" rules add noise without catching real defects here.
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-call": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
     },
   },
 );
