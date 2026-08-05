@@ -1,0 +1,13 @@
+{
+  "guid": "00000000-0000-0000-0000-0000000000aa",
+  "name": "UnknownFieldFixture",
+  "description": "fixture with a stable-guid button and future unknown fields at page and control level",
+  "version": "1.0.0.1",
+  "status": "updated",
+  "createBy": 1,
+  "createTime": "2026-08-05 10:00:00",
+  "modifiedBy": 1,
+  "modifiedTime": "2026-08-05 10:00:00",
+  "projectGroupId": "default_kingclient",
+  "projectData": {}
+}

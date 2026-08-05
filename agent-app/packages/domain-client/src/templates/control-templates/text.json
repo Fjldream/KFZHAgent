@@ -1,0 +1,24 @@
+{
+  "uiModelType": 6,
+  "prototypeName": "Label",
+  "showUiExtendType": "标签条",
+  "text": "Text",
+  "readOnly": false,
+  "maxLen": 2147483647,
+  "fontInfo": {
+    "fontSize": "18",
+    "fontFamily": "Arial",
+    "textColor": "rgba(0,0,0,1)"
+  },
+  "bkColor": "rgba(255,255,255,0)",
+  "type": "文本",
+  "borderStyle": 0,
+  "borderColor": "rgba(220,220,220,1)",
+  "layoutStyle": "居中",
+  "isShowBorder": false,
+  "toolTipEnable": false,
+  "toolTipText": "",
+  "sizePolicy": {
+    "fixedSize": [40, 30]
+  }
+}

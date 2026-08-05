@@ -1,0 +1,27 @@
+{
+  "default": "Page1",
+  "appHomePage": "Page1",
+  "version": "1.0.0.1",
+  "Pages": [
+    {
+      "name": "Page1",
+      "description": "",
+      "height": 720,
+      "width": 1280,
+      "positionX": 0,
+      "positionY": 0,
+      "pageType": 0,
+      "state": true,
+      "resolution": "1280 * 720",
+      "id": "page-guid-1",
+      "groupId": "group-guid-1",
+      "security": "",
+      "createtime": "2026-08-05 10:00:00",
+      "priority": "",
+      "securitySection": "",
+      "user": "admin",
+      "resourceGroup": "",
+      "resourceGroupMsg": ""
+    }
+  ]
+}

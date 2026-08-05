@@ -1,0 +1,16 @@
+{
+  "uiModelType": 35,
+  "prototypeName": "Button",
+  "showUiExtendType": "ElementUI_Button",
+  "disabled": false,
+  "plain": false,
+  "round": false,
+  "circle": false,
+  "loading": false,
+  "type": "primary",
+  "text": "button",
+  "icon": "",
+  "sizePolicy": {
+    "fixedSize": [90, 60]
+  }
+}

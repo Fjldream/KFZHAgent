@@ -1,0 +1,60 @@
+{
+  "version": "2.0.0.1.51",
+  "showLayer": "对象组0",
+  "objectType": 6,
+  "linkMng": {
+    "linkList": []
+  },
+  "variable": [],
+  "dataSourceMng": [],
+  "customProperty": {},
+  "pagePrototype": {},
+  "pageWindowInfo": {
+    "pageOptions": {
+      "pageTitle": "",
+      "pageClose": true,
+      "pageMax": true,
+      "pageMin": false,
+      "pageResizable": true
+    },
+    "pageScroll": false,
+    "pageWindowType": 0,
+    "pageWindowCss": ""
+  },
+  "pageProperty": {
+    "name": "",
+    "pagePos": { "x": 0, "y": 0 },
+    "pageSize": { "width": 1280, "height": 720 },
+    "windowSize": { "width": 1280, "height": 720 },
+    "comment": "",
+    "brushArray": [{ "color": "rgba(240, 240, 240, 0)" }],
+    "brushName": "纯色",
+    "picSrc": "",
+    "picPath": "static/images/images/caizhi1.png",
+    "picName": "",
+    "title": "",
+    "titleBar": true,
+    "closeBox": false,
+    "sizeable": true,
+    "fontsizeable": false,
+    "autoUserScrollbar": false,
+    "windowType": 0,
+    "borderType": 0,
+    "openAlways": false,
+    "minLockWidth": 1200,
+    "minLockHeight": 500,
+    "lockHeightWidthScale": false,
+    "lockHeightWidthNum": false,
+    "lockAspectRatioType": 0,
+    "hideInOptenDialog": true,
+    "scaleControl": "图形模型实例",
+    "appOrientation": 0,
+    "priority": "",
+    "createtime": "",
+    "security": "",
+    "securitySection": "",
+    "resourceGroup": "",
+    "resourceGroupMsg": "",
+    "resDescriptionMap": []
+  }
+}

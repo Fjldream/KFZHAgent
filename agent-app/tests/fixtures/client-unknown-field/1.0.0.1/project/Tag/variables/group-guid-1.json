@@ -1,0 +1,18 @@
+{
+  "Variables": [
+    {
+      "name": "$TestVar",
+      "dataType": 1,
+      "id": 1,
+      "comment": "test variable",
+      "defaultValue": 0,
+      "isMap": false,
+      "basicItem": {
+        "defaultValue": 0,
+        "maxValue": 999999,
+        "minValue": -999999,
+        "deadZone": 0
+      }
+    }
+  ]
+}
