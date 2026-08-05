@@ -1,0 +1,13 @@
+{
+  "guid": "00000000-0000-0000-0000-000000000002",
+  "name": "SecretFixture",
+  "server": {
+    "username": "doc-user",
+    "password": "secret-value",
+    "token": "secret-value",
+    "connectionString": "Server=db.internal.example;Port=5432;User=doc;Password=secret-value",
+    "host": "203.0.113.10",
+    "ip": "203.0.113.11",
+    "url": "https://example.invalid/api/keys"
+  }
+}

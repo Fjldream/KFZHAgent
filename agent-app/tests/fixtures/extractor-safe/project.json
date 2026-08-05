@@ -1,0 +1,13 @@
+{
+  "guid": "00000000-0000-0000-0000-000000000001",
+  "name": "DemoProject",
+  "projectData": {
+    "type": "kingclient"
+  },
+  "project": {
+    "enabled": true,
+    "retryCount": 3,
+    "tags": ["demo", "fixture"],
+    "owner": null
+  }
+}

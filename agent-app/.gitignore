@@ -5,3 +5,8 @@ coverage/
 .env
 .env.*
 !.env.example
+
+# Task 3: sanitized pipeline artifacts (never committed)
+.private/
+raw-corpus/
+sanitized-golden/

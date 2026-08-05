@@ -9,6 +9,7 @@
   "scripts": {
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "cli": "cd ../.. && node packages/kf-schema-extractor/src/cli.ts"
   }
 }
