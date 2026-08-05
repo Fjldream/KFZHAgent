@@ -256,6 +256,7 @@ function onSelectRevision(_revisionId: string): void {
           :plan="workspace.state.pendingApproval?.plan ?? null"
           :plan-hash="workspace.state.pendingApproval?.planHash ?? ''"
           :summary="workspace.state.pendingApproval?.summary ?? ''"
+          :script-changes="workspace.state.pendingApproval?.scriptChanges ?? []"
           :busy="workspace.state.streaming"
           @approve="onApprove"
           @revise="onRevise"

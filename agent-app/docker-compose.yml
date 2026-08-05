@@ -18,6 +18,18 @@ services:
       timeout: 3s
       retries: 10
 
+  # 一次性迁移服务：空库启动时先把 prisma 迁移应用到 postgres，
+  # api/worker 等它成功后才会启动（service_completed_successfully）。
+  migrate:
+    build:
+      context: .
+      target: migrate
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/kf_agent
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   api:
     build:
       context: .
@@ -36,6 +48,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   worker:
     build:
@@ -49,6 +63,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   web:
     build:

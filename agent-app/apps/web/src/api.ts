@@ -4,7 +4,9 @@ import type {
   BuildJobStatus,
   ChangePlanDisplay,
   LoginResult,
+  MeResult,
   Revision,
+  ScriptChange,
   UploadResult,
   ValidationReport,
   Workspace,
@@ -73,11 +75,21 @@ export const api = {
       body: JSON.stringify(input),
     });
   },
-  async me(): Promise<LoginResult["user"]> {
-    return jsonResponse<LoginResult["user"]>("/api/me");
+  async me(): Promise<MeResult> {
+    return jsonResponse<MeResult>("/api/me");
   },
   async logout(): Promise<void> {
     await jsonFetch("/api/auth/logout", { method: "POST" });
+  },
+  /** 首次登录强制改密：成功后返回完整会话（服务端会 set-cookie 新 token）。 */
+  async changePassword(input: {
+    currentPassword: string;
+    newPassword: string;
+  }): Promise<LoginResult> {
+    return jsonResponse<LoginResult>("/api/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
   },
 
   // ---- 工作区 -------------------------------------------------------------
@@ -117,10 +129,20 @@ export const api = {
       body: JSON.stringify({ workspaceId, ...(title !== undefined ? { title } : {}) }),
     });
   },
-  async getChangePlan(changePlanId: string): Promise<{ id: string; planHash: string; plan: ChangePlanDisplay }> {
-    return jsonResponse<{ id: string; planHash: string; plan: ChangePlanDisplay }>(
-      `/api/change-plans/${changePlanId}`,
-    );
+  async getChangePlan(
+    changePlanId: string,
+  ): Promise<{
+    id: string;
+    planHash: string;
+    plan: ChangePlanDisplay;
+    scriptChanges: ScriptChange[];
+  }> {
+    return jsonResponse<{
+      id: string;
+      planHash: string;
+      plan: ChangePlanDisplay;
+      scriptChanges: ScriptChange[];
+    }>(`/api/change-plans/${changePlanId}`);
   },
   async listMessages(conversationId: string): Promise<{ id: string; role: string; content: string }[]> {
     return jsonResponse<{ id: string; role: string; content: string }[]>(

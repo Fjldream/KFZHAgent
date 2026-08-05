@@ -311,3 +311,50 @@ describe("ProjectTree", () => {
     expect(unsupported.text()).toContain("未支持");
   });
 });
+
+// ---------------------------------------------------------------------------
+// I5: linkMng（自由脚本）变更确认前单独展示
+// ---------------------------------------------------------------------------
+
+describe("ChangePlanPanel script changes (I5)", () => {
+  it("marks a linkMng update as 脚本类变更 and shows the dedicated block", async () => {
+    const plan = {
+      operations: [
+        {
+          op: "update",
+          entityId: "Button1",
+          changes: [
+            { path: "/linkMng/linkList", value: [{ action: "navigatePage", pageId: "p2" }] },
+          ],
+        },
+      ],
+    };
+    const wrapper = mount(ChangePlanPanel, {
+      props: {
+        plan,
+        planHash: "a".repeat(64),
+        scriptChanges: [
+          { op: "update", entityId: "Button1", paths: ["/linkMng/linkList"] },
+        ],
+      },
+    });
+    expect(wrapper.get('[data-testid="script-changes"]').text()).toContain(
+      "脚本类变更（自由脚本最终构建前单独展示）",
+    );
+    expect(wrapper.get('[data-testid="script-change"]').text()).toContain("Button1");
+    expect(wrapper.get('[data-testid="script-change"]').text()).toContain("/linkMng/linkList");
+    // 操作列表里也带脚本徽标。
+    expect(wrapper.text()).toContain("脚本类变更");
+  });
+
+  it("shows no script block when the plan has no linkMng changes", async () => {
+    const wrapper = mount(ChangePlanPanel, {
+      props: {
+        plan: confirmedPlanSummary,
+        planHash: "b".repeat(64),
+        scriptChanges: [],
+      },
+    });
+    expect(wrapper.find('[data-testid="script-changes"]').exists()).toBe(false);
+  });
+});

@@ -14,6 +14,11 @@ export interface LoginResult {
   mustChangePassword: boolean;
 }
 
+/** /api/me 响应：额外携带必须改密标志（I2 会话恢复用）。 */
+export interface MeResult extends SessionUser {
+  mustChangePassword: boolean;
+}
+
 export interface Workspace {
   id: string;
   name: string;
@@ -42,6 +47,17 @@ export interface ChangePlanDisplay {
   schema?: string;
   workspaceId?: string;
   operations: ChangeOperation[];
+}
+
+/**
+ * 计划中涉及 linkMng（控件事件脚本）子树的变更（I5）。服务端在
+ * change-plan 响应里单独标注，确认视图必须把它与普通字段变更分开展示。
+ */
+export interface ScriptChange {
+  op: string;
+  entityId: string;
+  entityType?: string;
+  paths: string[];
 }
 
 /** SSE done 事件中的 approval interrupt 载荷（brief Step 5 字段逐字）。 */

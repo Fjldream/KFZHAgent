@@ -8,6 +8,7 @@ import type {
   ChangePlanDisplay,
   ChatMessage,
   Revision,
+  ScriptChange,
   SseDonePayload,
   ValidationReport,
   Workspace,
@@ -31,6 +32,8 @@ export interface PendingApproval {
   diffArtifactId?: string;
   previewArtifactId?: string;
   plan?: ChangePlanDisplay;
+  /** 计划中 linkMng（脚本类）变更，确认前单独展示（I5）。 */
+  scriptChanges?: ScriptChange[];
 }
 
 export interface WorkspaceState {
@@ -215,6 +218,7 @@ async function loadPlanDetails(changePlanId: string): Promise<void> {
     const plan = await api.getChangePlan(changePlanId);
     if (state.pendingApproval !== null && state.pendingApproval.changePlanId === changePlanId) {
       state.pendingApproval.plan = plan.plan;
+      state.pendingApproval.scriptChanges = plan.scriptChanges;
     }
   } catch {
     // 计划详情加载失败不阻塞审批流程；summary 与 planHash 仍可用。

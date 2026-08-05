@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { ChangePlanDisplay } from "../types";
+import type { ChangePlanDisplay, ScriptChange } from "../types";
 
 /**
  * 确认 UX（brief Step 4）：展示计划摘要、精确 create/update/delete 操作、
  * 破坏性操作警告、预览与 planHash。批准只发送屏幕上展示的 planHash；
  * planHash 缺失时批准按钮必须禁用（brief Step 1 逐字断言）。
+ *
+ * I5：涉及 linkMng（控件事件脚本）子树的变更由服务端单独标注为
+ * `scriptChanges`，本面板在操作列表与专门的「脚本类变更」区块两处显式
+ * 展示，确保自由脚本在确认前可见。
  */
 const props = withDefaults(
   defineProps<{
@@ -15,6 +19,7 @@ const props = withDefaults(
     changePlanId?: string;
     diffArtifactId?: string;
     previewArtifactId?: string;
+    scriptChanges?: ScriptChange[];
     busy?: boolean;
   }>(),
   {
@@ -23,6 +28,7 @@ const props = withDefaults(
     changePlanId: "",
     diffArtifactId: "",
     previewArtifactId: "",
+    scriptChanges: () => [],
     busy: false,
   },
 );
@@ -38,6 +44,17 @@ const hasPlanHash = computed(() => props.planHash !== "");
 const hasDestructive = computed(
   () => props.plan?.operations.some((op) => op.op === "delete") ?? false,
 );
+
+/** 计划中是否有涉及 linkMng 的脚本类变更。 */
+const hasScriptChanges = computed(() => props.scriptChanges.length > 0);
+
+function isScriptPath(path: string): boolean {
+  return path === "/linkMng" || path.startsWith("/linkMng/");
+}
+
+function hasScriptChangesIn(op: ChangePlanDisplay["operations"][number]): boolean {
+  return (op.changes ?? []).some((c) => isScriptPath(c.path));
+}
 
 function opLabel(op: ChangePlanDisplay["operations"][number]): string {
   switch (op.op) {
@@ -72,8 +89,17 @@ function action(kind: "approve" | "revise" | "cancel"): void {
           <span class="op-badge">{{ op.op }}</span>
           {{ opLabel(op) }}
           <span v-if="op.op === 'delete'" class="warning-tag">破坏性</span>
+          <span v-if="hasScriptChangesIn(op)" class="script-tag">脚本类变更</span>
         </li>
       </ul>
+      <div v-if="hasScriptChanges" class="script-changes" data-testid="script-changes">
+        <p class="script-title">脚本类变更（自由脚本最终构建前单独展示）</p>
+        <ul>
+          <li v-for="(change, index) in scriptChanges" :key="`script-${index}`" data-testid="script-change">
+            修改「{{ change.entityId }}」{{ change.paths.join("、") }}
+          </li>
+        </ul>
+      </div>
       <p v-if="hasDestructive" class="warning" data-testid="destructive-warning">
         警告：本计划包含破坏性操作，批准后将不可撤销。
       </p>
@@ -153,6 +179,34 @@ function action(kind: "approve" | "revise" | "cancel"): void {
   border-radius: 4px;
   padding: 0 0.3rem;
   font-size: 0.7rem;
+}
+.script-tag {
+  color: #6d28d9;
+  border: 1px solid #c4b5fd;
+  border-radius: 4px;
+  padding: 0 0.3rem;
+  font-size: 0.7rem;
+}
+.script-changes {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid #c4b5fd;
+  border-radius: 6px;
+  background: #f5f3ff;
+}
+.script-title {
+  margin: 0 0 0.3rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #6d28d9;
+}
+.script-changes ul {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+.script-changes li {
+  font-size: 0.8rem;
+  color: #4c1d95;
 }
 .plan-hash {
   font-size: 0.8rem;
