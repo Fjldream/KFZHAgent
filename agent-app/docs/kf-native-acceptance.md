@@ -72,6 +72,21 @@
 - Domain Registry 其余注册域（calculation / datasource / acquisition / alarm 等）
   一律保持 `supported=false`，直到各自的原生验收通过。
 
+## `KINGCLIENT_NATIVE_ACCEPTED` 发布开关
+
+`apps/worker/src/run.ts` 注册 kingclient DomainPack 时，`supported` 字段由
+环境变量门控（默认 `false`）：
+
+```bash
+# 未设置（默认）：对外宣称 supported=false，Agent 侧构建链路不受影响
+# （DomainRegistry.require 只检查已注册，不检查 supported）。
+KINGCLIENT_NATIVE_ACCEPTED=true   # 仅当上表两轮原生验收全部通过后设置
+```
+
+因此「原生验收通过前 `supported` 保持 false」是一个可执行、可审计的发布
+门槛：在 KF 测试服务器完成上表全部行之后，才在部署环境设置
+`KINGCLIENT_NATIVE_ACCEPTED=true` 重启 worker。
+
 ## 附：本机自动化验收结果（非 KF 原生）
 
 本机通过 Playwright E2E 完成自动化验收（brief Step 6-8），三个 spec 全绿：

@@ -1,9 +1,11 @@
 // @ts-nocheck -- Brief Step 1 的组件测试含逐字代码（JS 风格，无类型标注），
 // 因此本文件关闭类型检查；运行时断言与 ESLint 静态规则仍然生效。
 // Task 12: customer UI component tests. 组件测试不进真实浏览器。
-import { mount, flushPromises } from "@vue/test-utils";
+import { mount } from "@vue/test-utils";
 import { createMemoryHistory, createRouter } from "vue-router";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { createAppRouter } from "../router";
+import { useSession } from "../stores/session";
 import ChangePlanPanel from "./ChangePlanPanel.vue";
 import ConversationPanel from "./ConversationPanel.vue";
 import PreviewFrame from "./PreviewFrame.vue";
@@ -47,22 +49,42 @@ describe("brief step 1 verbatim assertions", () => {
 // ---------------------------------------------------------------------------
 
 describe("WorkspaceView shell", () => {
-  it("routes unauthenticated visitors to the login page", async () => {
-    const router = createRouter({
-      history: createMemoryHistory(),
-      routes: [
-        { path: "/login", component: { template: "<div>login</div>" } },
-        { path: "/workspaces", component: { template: "<div>ws</div>" } },
-        { path: "/workspaces/:id", component: { template: "<div>ws</div>" } },
-      ],
-    });
-    router.beforeEach((to) => {
-      if (to.path !== "/login") return "/login";
-      return true;
-    });
+  // 路由守卫测试会操纵模块级 session state，跑完清理以免影响其他用例。
+  afterEach(() => {
+    const session = useSession();
+    session.state.user = null;
+    session.state.restored = false;
+  });
+
+  it("redirects unauthenticated visitors to /login via the real router guard", async () => {
+    const session = useSession();
+    session.state.user = null;
+    session.state.restored = true;
+    const router = createAppRouter(createMemoryHistory());
     await router.push("/workspaces/ws-1");
-    await flushPromises();
-    expect(router.currentRoute.value.path).toBe("/login");
+    await router.isReady();
+    expect(router.currentRoute.value.name).toBe("login");
+  });
+
+  it("keeps authenticated users on the workspace route", async () => {
+    const session = useSession();
+    session.state.user = { id: "u1", username: "alice", role: "member", tenantId: "t1" };
+    session.state.restored = true;
+    const router = createAppRouter(createMemoryHistory());
+    await router.push("/workspaces/ws-1");
+    await router.isReady();
+    expect(router.currentRoute.value.name).toBe("workspace");
+  });
+
+  it("awaits session restore before judging the guard (refresh race)", async () => {
+    const session = useSession();
+    session.state.user = { id: "u1", username: "alice", role: "member", tenantId: "t1" };
+    session.state.restored = false; // 模拟刷新后 /api/me 尚未返回
+    const router = createAppRouter(createMemoryHistory());
+    await router.push("/workspaces/ws-1");
+    await router.isReady();
+    // 守卫先 await ensureRestored()：已登录用户刷新后不被误重定向到 /login。
+    expect(router.currentRoute.value.name).toBe("workspace");
   });
 
   it("offers create and upload entry choices", async () => {

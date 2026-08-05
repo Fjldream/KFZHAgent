@@ -69,15 +69,35 @@ export class DeterministicFakeModelPort implements ModelPort {
   }
 
   reviseChangePlan(input: ModelPortContext): Promise<ChangePlan> {
+    const text = input.requirementText ?? "";
+    // modify 流程：需求涉及按钮/颜色/红色 → 修改上传包中 Button1 的背景色
+    // （customFutureField 等未知字段由 patcher 无损保留）。
+    if (/按钮|颜色|红色/.test(text) && !/新建|创建|生成/.test(text)) {
+      return Promise.resolve({
+        schema: "kf-change-plan/v1",
+        workspaceId: input.workspaceId,
+        operations: [
+          {
+            op: "update",
+            entityId: "button-guid-1",
+            entityType: "button",
+            changes: [{ path: "/backgroundColor", value: "rgba(255, 0, 0, 1)" }],
+          },
+        ],
+      });
+    }
+    // new 流程（或 new 流程的 revise）：修改初始 Text1 控件。
+    // value 与 createChangePlan 不同，保证 revise 产生新的 planHash。
+    const textGuid = deriveGuid({ seed: input.workspaceId }, "Text1");
     return Promise.resolve({
       schema: "kf-change-plan/v1",
       workspaceId: input.workspaceId,
       operations: [
         {
           op: "update",
-          entityId: "button-guid-1",
-          entityType: "button",
-          changes: [{ path: "/backgroundColor", value: "rgba(255, 0, 0, 1)" }],
+          entityId: textGuid,
+          entityType: "text",
+          changes: [{ path: "/text", value: "由 KF Solution Agent 修订生成" }],
         },
       ],
     });

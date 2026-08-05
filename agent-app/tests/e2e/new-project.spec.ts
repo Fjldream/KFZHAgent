@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -10,6 +10,12 @@ import {
   loginViaApi,
 } from "./helpers/api";
 import { fixturePath, readFileTree, unzipPackageToDir } from "./helpers/unzip";
+
+/** 从 plan-hash 展示区提取 64 位 planHash。 */
+async function extractPlanHash(page: Page): Promise<string> {
+  const text = await page.getByTestId("plan-hash").innerText();
+  return text.replace("planHash：", "").trim();
+}
 
 /**
  * Brief Step 6：确定性 fake-model 新建工程流程。
@@ -49,18 +55,29 @@ test("new project: plan, approve, build, download, and verify client files", asy
   await expect(page.getByTestId("revision-list")).toBeVisible();
   await expect(page.getByTestId("artifact-download")).toBeVisible();
 
-  // 4) 通过 UI 提交确定性 fake-model 需求 → SSE 流在浏览器内完成 → 审批中断
+  // 4) 通过 UI 提交确定性 fake-model 需求 → SSE 流在浏览器内完成 → 审批中断（计划 1）
   await page.getByTestId("message-input").fill("请新建一个示例页面");
   await page.getByTestId("send-message").click();
   await expect(page.getByTestId("plan-hash")).toContainText(/[0-9a-f]{64}/, {
     timeout: 60_000,
   });
-  const planHash = (await page.getByTestId("plan-hash").innerText()).replace("planHash：", "").trim();
-  expect(planHash).toMatch(/^[0-9a-f]{64}$/);
+  const firstPlanHash = await extractPlanHash(page);
+  expect(firstPlanHash).toMatch(/^[0-9a-f]{64}$/);
   await expect(page.getByTestId("change-plan-panel")).toContainText("计划摘要");
   await expect(page.getByTestId("approve-plan")).toBeEnabled();
 
-  // 5) UI 批准：拦截 resume 响应拿 buildJobId
+  // 4.5) revise the plan（brief Step 6 要求）：UI 点「要求修改」→ 新计划展示，
+  //      新 planHash 与旧的不同；批准必须使用 revise 后的 planHash。
+  await page.getByTestId("revise-plan").click();
+  await expect(page.getByTestId("plan-hash")).not.toContainText(firstPlanHash, {
+    timeout: 60_000,
+  });
+  const planHash = await extractPlanHash(page);
+  expect(planHash).toMatch(/^[0-9a-f]{64}$/);
+  expect(planHash).not.toBe(firstPlanHash);
+  await expect(page.getByTestId("approve-plan")).toBeEnabled();
+
+  // 5) UI 批准（revise 后的计划）：拦截 resume 响应拿 buildJobId
   const resumeResponse = page.waitForResponse(
     (res) => res.url().includes("/resume") && res.request().method() === "POST",
   );

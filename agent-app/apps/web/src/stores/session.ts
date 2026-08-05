@@ -15,6 +15,8 @@ export interface SessionState {
   tenantName: string;
   loading: boolean;
   error: string | null;
+  /** 会话恢复是否已完成（刷新后 /api/me 的结果已落地）。 */
+  restored: boolean;
 }
 
 const state: SessionState = reactive({
@@ -22,6 +24,7 @@ const state: SessionState = reactive({
   tenantName: "",
   loading: false,
   error: null,
+  restored: false,
 });
 
 export interface LoginInput {
@@ -52,17 +55,39 @@ async function login(input: LoginInput): Promise<void> {
   }
 }
 
-/** 页面刷新后凭会话 Cookie 恢复登录态。 */
+/** 页面刷新后凭会话 Cookie 恢复登录态。只执行一次，成功后置 restored。 */
 async function restore(): Promise<boolean> {
-  if (state.user !== null) return true;
+  if (state.user !== null) {
+    state.restored = true;
+    return true;
+  }
   try {
     state.user = await api.me();
     state.tenantName = localStorage.getItem(TENANT_STORAGE_KEY) ?? "";
+    state.restored = true;
     return true;
   } catch {
     state.user = null;
+    state.restored = true;
     return false;
   }
+}
+
+let restorePromise: Promise<boolean> | null = null;
+
+/**
+ * 路由守卫专用：等待会话恢复完成（并发安全，多个导航共享同一次恢复）。
+ * 返回是否已认证。刷新后同步守卫会把已登录用户误判为未登录，因此守卫
+ * 必须先 await 本方法再判定。
+ */
+function ensureRestored(): Promise<boolean> {
+  if (state.restored) return Promise.resolve(state.user !== null);
+  if (restorePromise === null) {
+    restorePromise = restore().finally(() => {
+      restorePromise = null;
+    });
+  }
+  return restorePromise;
 }
 
 async function logout(): Promise<void> {
@@ -71,6 +96,7 @@ async function logout(): Promise<void> {
   } finally {
     state.user = null;
     state.tenantName = "";
+    state.restored = true;
     localStorage.removeItem(TENANT_STORAGE_KEY);
   }
 }
@@ -80,7 +106,7 @@ function isAuthenticated(): boolean {
 }
 
 export function useSession() {
-  return { state, login, restore, logout, isAuthenticated };
+  return { state, login, restore, ensureRestored, logout, isAuthenticated };
 }
 
-export { isAuthenticated };
+export { isAuthenticated, ensureRestored };
