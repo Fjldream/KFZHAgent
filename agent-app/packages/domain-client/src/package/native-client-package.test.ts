@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
 import { mkdtempSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { strToU8, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import { importNativeClientPackage, packageNativeClientProject } from "./native-client-package.js";
+import { DEFAULT_UNZIP_LIMITS, safeUnzip } from "./safe-unzip.js";
 
 const FIXED_MTIME = new Date("2020-01-01T00:00:00.000Z");
 
@@ -229,5 +230,41 @@ describe("native client package IO", () => {
     const garbage = new Uint8Array(64).fill(0x41);
     await expect(importNativeClientPackage(garbage, tempDir()))
       .rejects.toThrow(/PACKAGE_UNPACK_FAILED/);
+  });
+
+  it("produces byte-identical packages across time zones", async () => {
+    // fflate encodes DOS timestamps using the host's local time zone; the
+    // byte-level normalization must make the archive independent of TZ.
+    const prevTz = process.env.TZ;
+    try {
+      process.env.TZ = "UTC";
+      const gzUtc = await packageNativeClientProject(minimalProjectDir);
+      process.env.TZ = "Asia/Shanghai";
+      const gzShanghai = await packageNativeClientProject(minimalProjectDir);
+      process.env.TZ = "America/New_York";
+      const gzNewYork = await packageNativeClientProject(minimalProjectDir);
+
+      expect(gzUtc).toEqual(gzShanghai);
+      expect(gzUtc).toEqual(gzNewYork);
+    } finally {
+      if (prevTz === undefined) delete process.env.TZ;
+      else process.env.TZ = prevTz;
+    }
+  });
+
+  it("rejects writes that would traverse a pre-existing symlink directory", async () => {
+    const dest = tempDir();
+    const outside = await mkdtemp(path.join(tmpdir(), "kf-outside-"));
+    await symlink(outside, path.join(dest, "sub"));
+
+    // The entry path passes exactly through the pre-seeded symlink directory.
+    const gz = makeZip([
+      { path: "1.0.0.1/project.json", content: "{}" },
+      { path: "sub/evil.txt", content: "x" },
+    ]);
+
+    await expect(safeUnzip(gz, dest, DEFAULT_UNZIP_LIMITS)).rejects.toThrow(/symlink/i);
+    // The symlink target must not have received any bytes.
+    await expect(readFile(path.join(outside, "evil.txt"), "utf8")).rejects.toThrow();
   });
 });

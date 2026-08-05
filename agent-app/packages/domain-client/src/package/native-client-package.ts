@@ -56,6 +56,85 @@ const ZIP_LEVEL = 6;
 const FILE_MODE = 0o644 << 16;
 const DIR_MODE = 0o755 << 16;
 
+// ZIP record signatures and DOS time/date layout.
+const LOCAL_SIG = 0x04034b50;
+const CEN_SIG = 0x02014b50;
+const EOCD_SIG = 0x06054b50;
+// Fixed DOS date for 2020-01-01 (UTC): ((2020-1980) << 9) | (1 << 5) | 1 = 0x5021.
+// The DOS time is 0 (00:00:00). Written byte-for-byte so the archive does not
+// depend on the local time zone of the packaging host.
+const DOS_DATE_FIXED = 0x5021;
+
+function readU16(data: Uint8Array, offset: number): number {
+  return (data[offset] ?? 0) | ((data[offset + 1] ?? 0) << 8);
+}
+
+function readU32(data: Uint8Array, offset: number): number {
+  return (
+    ((data[offset] ?? 0) |
+      ((data[offset + 1] ?? 0) << 8) |
+      ((data[offset + 2] ?? 0) << 16) |
+      ((data[offset + 3] ?? 0) << 24)) >>>
+    0
+  );
+}
+
+function writeU16(data: Uint8Array, offset: number, value: number): void {
+  data[offset] = value & 0xff;
+  data[offset + 1] = (value >>> 8) & 0xff;
+}
+
+function locateEndOfCentralDirectory(data: Uint8Array): number {
+  const min = Math.max(0, data.length - 22 - 65535);
+  for (let i = data.length - 22; i >= min; i -= 1) {
+    if (readU32(data, i) === EOCD_SIG) return i;
+  }
+  throw new Error("not a ZIP archive (end of central directory not found)");
+}
+
+/**
+ * Overwrites the DOS time/date fields of every local file header and central
+ * directory entry with a fixed value. fflate encodes those fields using the
+ * host's local time zone (see its wzh() helper), so without this normalization
+ * the same input packs to different bytes under different TZ settings, which
+ * would break SHA-256 integrity across machines.
+ *
+ * Layout note: a local file header stores DOS time at +10 and DOS date at +12;
+ * a central directory entry stores them at +12/+14 because it has an extra
+ * two-byte "version made by" field after the signature.
+ */
+function normalizeZipTimestamps(data: Uint8Array): Uint8Array {
+  const eocd = locateEndOfCentralDirectory(data);
+  const count = readU16(data, eocd + 10);
+  const centralOffset = readU32(data, eocd + 16);
+  let pos = centralOffset;
+
+  for (let i = 0; i < count; i += 1) {
+    if (readU32(data, pos) !== CEN_SIG) {
+      throw new Error("corrupt ZIP during timestamp normalization");
+    }
+    // Central directory entry: DOS time at +12, DOS date at +14.
+    writeU16(data, pos + 12, 0);
+    writeU16(data, pos + 14, DOS_DATE_FIXED);
+
+    // Corresponding local file header (offset stored at +42 in the CEN entry).
+    const localOffset = readU32(data, pos + 42);
+    if (readU32(data, localOffset) !== LOCAL_SIG) {
+      throw new Error("corrupt ZIP during timestamp normalization");
+    }
+    // Local file header: DOS time at +10, DOS date at +12.
+    writeU16(data, localOffset + 10, 0);
+    writeU16(data, localOffset + 12, DOS_DATE_FIXED);
+
+    const nameLen = readU16(data, pos + 28);
+    const extraLen = readU16(data, pos + 30);
+    const commentLen = readU16(data, pos + 32);
+    pos += 46 + nameLen + extraLen + commentLen;
+  }
+
+  return data;
+}
+
 export interface ImportNativeClientPackageOptions {
   /** Overrides for the safe-unzip limits (merged over defaults). */
   limits?: Partial<UnzipLimits>;
@@ -188,10 +267,12 @@ export async function packageNativeClientProject(projectDir: string): Promise<Bu
   }
 
   return Buffer.from(
-    zipSync(zippable, {
-      mtime: PACKAGE_FIXED_MTIME,
-      os: 3,
-      level: ZIP_LEVEL,
-    }),
+    normalizeZipTimestamps(
+      zipSync(zippable, {
+        mtime: PACKAGE_FIXED_MTIME,
+        os: 3,
+        level: ZIP_LEVEL,
+      }),
+    ),
   );
 }

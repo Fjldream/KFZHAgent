@@ -32,7 +32,7 @@ export class LocalArtifactStorage implements ArtifactStorage {
     stream: NodeJS.ReadableStream;
     maxBytes: number;
   }): Promise<StoredArtifact> {
-    const { tenantId, kind: _kind, stream, maxBytes } = input;
+    const { tenantId, stream, maxBytes } = input;
     assertTenantId(tenantId);
     if (!Number.isFinite(maxBytes) || maxBytes <= 0) {
       throw new ArtifactStorageError(
@@ -71,6 +71,7 @@ export class LocalArtifactStorage implements ArtifactStorage {
       await handle.close();
       handle = undefined;
       await rename(tmpPath, finalPath);
+      await fsyncDirectory(tenantDir);
 
       return { artifactId, sha256: hash.digest("hex"), size };
     } finally {
@@ -123,5 +124,23 @@ function assertTenantId(tenantId: string): void {
     throw new ArtifactStorageError(
       "INVALID_TENANT_ID: tenantId must match [A-Za-z0-9][A-Za-z0-9._-]{0,63}",
     );
+  }
+}
+
+/**
+ * Best-effort fsync of a directory so the rename that just landed in it is
+ * durably recorded. Not supported on every platform, hence errors are ignored
+ * (the artifact file itself was already fsynced before the rename).
+ */
+async function fsyncDirectory(dir: string): Promise<void> {
+  let handle: Awaited<ReturnType<typeof fsOpen>> | undefined;
+  try {
+    handle = await fsOpen(dir, "r");
+    await handle.sync();
+  } catch {
+    // Platform does not support directory fsync; file contents are already
+    // fsynced so this is a best-effort durability improvement.
+  } finally {
+    await handle?.close().catch(() => {});
   }
 }

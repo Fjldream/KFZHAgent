@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { lstat, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Unzip, UnzipInflate } from "fflate";
 
@@ -79,7 +79,8 @@ function decodeEntryName(bytes: Uint8Array): string {
 
 function isAbsoluteName(name: string): boolean {
   if (name.startsWith("/") || name.startsWith("\\")) return true;
-  return /^[A-Za-z]:[\\/]/.test(name);
+  // C:\... and drive-relative variants like C:foo are both Windows-absolute.
+  return /^[A-Za-z]:/.test(name);
 }
 
 function validateEntryName(name: string, limits: UnzipLimits): void {
@@ -219,6 +220,64 @@ function resolveWithin(root: string, name: string): string {
   return target;
 }
 
+function isErrno(err: unknown, code: string): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    (err as { code?: unknown }).code === code
+  );
+}
+
+/**
+ * Rejects writes that would traverse an already-existing symlink or file
+ * component under `root`. Only components that already exist are checked; the
+ * first missing component terminates the walk because nothing below it can
+ * exist yet in a fresh unpack. This closes the "pre-seeded symlink directory"
+ * escape (a string-level resolveWithin cannot see through symlinks).
+ */
+async function assertSafeAncestors(root: string, relPath: string): Promise<void> {
+  const normalized = relPath.replace(/\\/g, "/").replace(/\/+$/, "");
+  const segments = normalized.split("/").filter((seg) => seg.length > 0);
+  let current = path.resolve(root);
+
+  for (const seg of segments) {
+    current = path.join(current, seg);
+    let st;
+    try {
+      st = await lstat(current);
+    } catch (err) {
+      if (isErrno(err, "ENOENT")) return; // nothing below this can exist yet
+      throw err;
+    }
+    if (st.isSymbolicLink()) {
+      throw new PackageUnpackError(
+        `unsafe entry path: symlink component in destination path (${relPath})`,
+      );
+    }
+    if (!st.isDirectory()) {
+      throw new PackageUnpackError(
+        `unsafe entry path: non-directory component in destination path (${relPath})`,
+      );
+    }
+  }
+}
+
+/**
+ * Writes one entry to disk. Called serially per entry (see safeUnzip) so at
+ * most one entry's payload is held in memory at a time.
+ */
+async function writeEntry(destDir: string, relPath: string, data: Uint8Array): Promise<void> {
+  const target = resolveWithin(destDir, relPath);
+  await assertSafeAncestors(destDir, relPath);
+  if (relPath.endsWith("/")) {
+    await mkdir(target, { recursive: true });
+  } else {
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, data, { mode: 0o644 });
+  }
+}
+
 /**
  * Decompresses a previously-validated archive into `destDir`. Enforces the
  * expanded-size limit again against the actual decompressed bytes in case the
@@ -236,7 +295,11 @@ export async function safeUnzip(
   unzipper.register(UnzipInflate);
   let failed: Error | null = null;
   let expanded = 0;
-  const pending: Array<{ relPath: string; data: Uint8Array }> = [];
+  let extractedCount = 0;
+  // Serial chain: entries are written to disk one after another as soon as
+  // each one finishes decompressing, so peak memory is bounded by the largest
+  // single entry instead of the whole archive (defends against a 512MB peak).
+  let writeChain: Promise<void> = Promise.resolve();
 
   unzipper.onfile = (file) => {
     if (failed !== null) {
@@ -271,7 +334,16 @@ export async function safeUnzip(
         chunks.push(dataChunk);
       }
       if (final && failed === null) {
-        pending.push({ relPath: name, data: Buffer.concat(chunks) });
+        extractedCount += 1;
+        const payload = Buffer.concat(chunks);
+        writeChain = writeChain
+          .then(() => writeEntry(destDir, name, payload))
+          .catch((writeErr: unknown) => {
+            const writeError =
+              writeErr instanceof Error ? writeErr : new PackageUnpackError("write failed");
+            failed = writeError;
+            throw writeError;
+          });
       }
     };
     file.start();
@@ -279,19 +351,11 @@ export async function safeUnzip(
 
   unzipper.push(data, true);
   if (failed !== null) throw failed as Error;
+  await writeChain;
+  if (failed !== null) throw failed as Error;
 
   // Sanity check: the entries we actually decoded must match the validated list.
-  if (pending.length !== entries.length) {
+  if (extractedCount !== entries.length) {
     throw new PackageUnpackError("corrupt ZIP: entry count mismatch after extraction");
-  }
-
-  for (const item of pending) {
-    const target = resolveWithin(destDir, item.relPath);
-    if (item.relPath.endsWith("/")) {
-      await mkdir(target, { recursive: true });
-    } else {
-      await mkdir(path.dirname(target), { recursive: true });
-      await writeFile(target, item.data, { mode: 0o644 });
-    }
   }
 }

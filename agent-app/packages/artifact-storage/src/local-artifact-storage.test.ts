@@ -22,7 +22,15 @@ async function readAll(stream: NodeJS.ReadableStream): Promise<string> {
 async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 2000): Promise<void> {
   const start = Date.now();
   for (;;) {
-    if (await predicate()) return;
+    try {
+      if (await predicate()) return;
+    } catch (err) {
+      // put() creates the tenant directory asynchronously; a readdir before
+      // that mkdir resolves yields ENOENT and must be retried, not failed.
+      if (!(err instanceof Error) || (err as { code?: string }).code !== "ENOENT") {
+        throw err;
+      }
+    }
     if (Date.now() - start > timeoutMs) throw new Error("waitFor timed out");
     await new Promise((r) => setTimeout(r, 10));
   }
