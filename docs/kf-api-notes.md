@@ -57,3 +57,19 @@
 - 编辑器为 Web 端（开发运维中心 devcenter），前端 Vue SPA 通过 `/api/client/*` HTTP 接口 + `/ws` WebSocket 操作工程；保存走 HTTP（saveProjectData）
 - gateway 日志仅保留近 7 天（`logConfig.retainTime`），早期 create 调用已被轮转，但接口可用性已由本次实测证实
 - 工程数据落盘：`sdb/<solutionGUID>/kingclient/<projectId>/`（project.json + project/ 目录）
+
+## 6. 重大发现：saveProjectData 是通用"写工程文件"接口（实测验证）
+
+> 用户质疑"页面 JSON 生成没有接口"——实测确认：**没有控件级 API，但 saveProjectData 提供直接写入页面 JSON 文件的通道**。
+
+- 调用：`POST /api/client/saveProjectData?projectInfo=<JSON>`，body = 完整页面 JSON
+  - `projectInfo` 含 `{name, type, guid(工程id)}`；**type 是文件类型枚举**（见下）
+  - 服务端逻辑（kingclient `projectMng/index.js`）：`fs.writeFile(o, JSON.stringify(body))` 直接落盘，**零校验**
+- type 枚举（kingclient `core/utils/getFilePath.js`）：
+  - `3` → `project/page/<name>.json`（**页面文件**）
+  - `4` → `project/Tag/<name>.json`（**变量 Tag**）
+  - `2/5/9/14/15` → `project/<name>.json`（各管理器文件）
+  - `7` → `project/config/<name>.json`；`11/12/13` → 图形模型/图表/图形组；`20` → userSource
+- 特殊分支：type=3 且带 `operation` 时——`add` 走服务端 `createPageModel` 模板生成；`edit` 读旧文件改 `name` 写回；**不带 operation 时直接写入 body**
+- **实测闭环**：createPage → saveProjectData(type=3, body 含 Button1 控件) → 磁盘生成 `project/page/FINAL.json` → getProjectFile 回读 objects 含 `Button1:35` → 一致
+- **推论**：页面 JSON 的合法性完全由调用方保证（服务端零校验）——这正是「确定性渲染器」架构决策的实证依据；渲染器需从现有页面 JSON + 前端控件定义逆向每种控件的完整 schema
