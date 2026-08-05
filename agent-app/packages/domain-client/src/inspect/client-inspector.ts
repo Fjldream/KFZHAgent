@@ -55,6 +55,8 @@ export interface ControlIndexEntry {
 
 export interface PageIndexEntry {
   guid: string;
+  /** Stable semantic page id (the KF page `name`; fallback to guid), never a KF GUID reference target. */
+  id: string;
   name: string;
   file: string;
   controlGuids: string[];
@@ -63,6 +65,8 @@ export interface PageIndexEntry {
 
 export interface VariableIndexEntry {
   guid: string;
+  /** Stable semantic variable id (the KF variable `name`, e.g. `$TestVar`; fallback to the numeric id). */
+  id: string;
   name: string;
   file: string;
 }
@@ -131,6 +135,8 @@ export interface ControlSummary {
 
 export interface PageSummary {
   guid: string;
+  /** Stable semantic page id (the KF page `name`; fallback to guid). */
+  id: string;
   name: string;
   width?: number;
   height?: number;
@@ -212,6 +218,13 @@ const COMMON_CONTROL_FIELDS = new Set([
   "customPropertyRecords",
   "isChangeFixedSize",
   "isChangeFont",
+  // Layout/container glue fields shared across controls (verified in SDB pages):
+  "region",
+  "baseProperty",
+  "insiderObjects",
+  "objects",
+  "children",
+  "layoutItems",
 ]);
 
 /** Control-specific serialized fields per KF uiModelType (constructor defaults + SDB pages). */
@@ -347,10 +360,15 @@ function collectControls(node: unknown, rawPath: string, out: RawControl[]): voi
     const guid = typeof record["guid"] === "string" ? (record["guid"]) : "";
     const name = typeof record["name"] === "string" ? (record["name"]) : "";
     const knownSet = knownControlFields(uiModelType);
+    // Stable semantic id: KF control `name` first, KF GUID second (controls
+    // like spacers serialize WITHOUT a name — verified across 11k+ SDB spacer
+    // objects — and a traversal ordinal would drift when controls are added or
+    // removed), and only then a positional fallback.
+    const semanticId = name !== "" ? name : guid !== "" ? guid : `control-${out.length}`;
     out.push({
       guid,
       type: CONTROL_TYPE_BY_UIMODEL_TYPE[uiModelType] ?? `kf-${uiModelType}`,
-      id: name === "" ? `control-${out.length}` : name,
+      id: semanticId,
       ...(name !== "" ? { name } : {}),
       x: asNumber((asRecord(record["leftTopPt"])["x"]) ?? 0),
       y: asNumber((asRecord(record["leftTopPt"])["y"]) ?? 0),
@@ -482,6 +500,7 @@ export async function inspectClientProject(
 
     pagesIndex[guid] = {
       guid,
+      id: name,
       name,
       file: `project/page/${file}`,
       controlGuids,
@@ -490,6 +509,7 @@ export async function inspectClientProject(
     pagesProvenance[guid] = { file: `project/page/${file}`, unknownFields };
     summaryPages.push({
       guid,
+      id: name,
       name,
       ...(width !== undefined ? { width } : {}),
       ...(height !== undefined ? { height } : {}),
@@ -527,7 +547,7 @@ export async function inspectClientProject(
         const name = typeof variable["name"] === "string" ? (variable["name"]) : "";
         if (name === "") continue;
         const id = typeof variable["id"] === "string" || typeof variable["id"] === "number" ? String(variable["id"]) : name;
-        variablesIndex[id] = { guid: id, name, file: `project/Tag/${file}` };
+        variablesIndex[id] = { guid: id, id: name, name, file: `project/Tag/${file}` };
         variableCount += 1;
       }
     }
@@ -550,7 +570,7 @@ export async function inspectClientProject(
           const name = typeof variable["name"] === "string" ? (variable["name"]) : "";
           if (name === "") continue;
           const id = typeof variable["id"] === "string" || typeof variable["id"] === "number" ? String(variable["id"]) : name;
-          variablesIndex[id] = { guid: id, name, file: `project/Tag/variables/${file}` };
+          variablesIndex[id] = { guid: id, id: name, name, file: `project/Tag/variables/${file}` };
           variableCount += 1;
         }
       }

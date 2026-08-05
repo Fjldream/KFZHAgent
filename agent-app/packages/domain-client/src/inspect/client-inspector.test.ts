@@ -1,7 +1,7 @@
 // @ts-nocheck -- 测试含 brief 逐字代码（JS 风格、无类型标注）；运行时行为由 vitest 断言验证。
-/* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
 import { describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -64,6 +64,41 @@ describe("client inspector", () => {
     expect(control.guid).not.toBe(control.id);
     expect(result.provenance.controls["button-guid-1"].mappedType).toBe("button");
     expect(result.provenance.controls["button-guid-1"].kfType).toBe(35);
+  });
+
+  it("exposes semantic page and variable ids for action references", async () => {
+    const result = await inspectClientProject(fixture("client-unknown-field"));
+    // navigate.pageId references the semantic page id = KF page name
+    expect(result.summary.pages[0].id).toBe("Page1");
+    expect(result.index.pages["page-guid-1"].id).toBe("Page1");
+    // setVariable.variableId references the semantic variable id = KF $Var name
+    expect(result.index.variables["1"].id).toBe("$TestVar");
+    expect(result.index.variables["1"].name).toBe("$TestVar");
+  });
+
+  it("derives a stable semantic id for name-less controls from their KF GUID", async () => {
+    // Real KF spacers (uiModelType 13/14) serialize without a `name` field
+    // (verified across 11k+ SDB spacer objects); the semantic id must fall back
+    // to the immutable KF GUID, not a traversal ordinal.
+    const root = await makeBigPageFixture(3);
+    const versionDir = join(root, "1.0.0.1");
+    const pageFile = join(versionDir, "project", "page", "BigPage.json");
+    const page = JSON.parse(await readFile(pageFile, "utf8"));
+    page.objects.push({
+      uiModelType: 14,
+      guid: "spacer-guid-1",
+      leftTopPt: { x: 0, y: 200 },
+      width: 20,
+      height: 30,
+      sizePolicy: [0, 3, 0, 0],
+      fixedSize: [30, 30],
+    });
+    await writeFile(pageFile, JSON.stringify(page));
+    const a = await inspectClientProject(root);
+    const b = await inspectClientProject(root);
+    expect(a.summary.pages[0].controls.find((c) => c.guid === "spacer-guid-1").id).toBe("spacer-guid-1");
+    expect(b.summary.pages[0].controls.find((c) => c.guid === "spacer-guid-1").id).toBe("spacer-guid-1");
+    expect(a.index.controls["spacer-guid-1"].id).toBe("spacer-guid-1");
   });
 
   it("records unknown fields at page and control level", async () => {

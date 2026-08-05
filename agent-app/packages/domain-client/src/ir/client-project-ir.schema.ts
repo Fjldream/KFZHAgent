@@ -26,6 +26,15 @@ export type BaseControlIR = z.infer<typeof BaseControlIR>;
  * Restricted action DSL (design doc §11: "动作 DSL/模板" as a limited first
  * capability). Only whitelisted, declarative actions are expressible; free
  * script text is represented separately and never executed on the agent.
+ *
+ * Reference domains (semantic IDs, never KF GUIDs):
+ * - `navigate.pageId` targets a SEMANTIC PAGE ID — the KF page `name` (stable
+ *   and human-readable). The Task 6 compiler resolves it to the page KF GUID
+ *   via the inspector's page index.
+ * - `setVariable.variableId` targets a SEMANTIC VARIABLE ID — the KF variable
+ *   `name` (e.g. `$TestVar`). The numeric KF variable `id` is an internal
+ *   sequential number and is NOT stable across re-imports, so it is never used
+ *   as a reference here.
  */
 export const RestrictedAction = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("navigate"), pageId: z.string().min(1) }),
@@ -97,9 +106,13 @@ export const TabsControlIR = BaseControlIR.extend({
 
 export const TableControlIR = BaseControlIR.extend({
   type: z.literal("table"),
-  columns: z.array(z.object({ id: z.string().min(1), title: z.string() })).min(1),
-  dataSource: z.string().optional(),
 }).strict();
+// KF tables (uiModelType 31) do NOT serialize columns/dataSource as object
+// fields: verified against 1094 real SDB table objects, the column model lives
+// inside the `configureData` script (`this.table({ columns: [...] })`) and the
+// runtime `$VMData.columns` Vue state is never persisted. A structured column
+// mapping is therefore deferred to Task 6 (parse `configureData` or introduce
+// a configuration DSL); until then the table variant exposes base geometry only.
 
 export const RichTextControlIR = BaseControlIR.extend({
   type: z.literal("richtext"),
@@ -110,6 +123,10 @@ export const SpacerControlIR = BaseControlIR.extend({
   type: z.literal("spacer"),
   axis: z.enum(["horizontal", "vertical"]),
 }).strict();
+// `axis` is a DERIVED field: KF spacers carry no such attribute (verified:
+// 11k+ real SDB spacer objects have no `name` and no axis field). The axis is
+// implied by the KF uiModelType (13 = HORIZONTALSPACER, 14 = VERTICALSPACER);
+// the Task 6 compiler emits the uiModelType from `axis`.
 
 export const ControlIR = z.discriminatedUnion("type", [
   TextControlIR,

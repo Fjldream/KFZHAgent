@@ -1,7 +1,5 @@
 {
   "uiModelType": 49,
-  "prototypeName": "InputNumber",
-  "showUiExtendType": "ElementUI_InputNumber",
   "value": 0,
   "min": -99999,
   "max": 99999,
@@ -13,6 +11,23 @@
   "controlsPosition": "default",
   "placeholder": "",
   "sizePolicy": {
-    "fixedSize": [170, 50]
+    "sizePolicy": [
+      3,
+      3,
+      0,
+      0
+    ],
+    "maxSize": [
+      16777215,
+      16777215
+    ],
+    "minSize": [
+      5,
+      5
+    ],
+    "fixedSize": [
+      170,
+      50
+    ]
   }
 }

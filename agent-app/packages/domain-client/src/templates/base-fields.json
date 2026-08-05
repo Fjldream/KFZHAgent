@@ -11,10 +11,5 @@
   "styleData": "",
   "linkMng": {
     "linkList": []
-  },
-  "sizePolicy": {
-    "sizePolicy": [3, 3, 0, 0],
-    "maxSize": [16777215, 16777215],
-    "minSize": [5, 5]
   }
 }

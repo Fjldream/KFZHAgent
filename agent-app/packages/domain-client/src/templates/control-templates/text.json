@@ -14,11 +14,10 @@
   "type": "文本",
   "borderStyle": 0,
   "borderColor": "rgba(220,220,220,1)",
-  "layoutStyle": "居中",
+  "layoutStyle": "居左",
   "isShowBorder": false,
   "toolTipEnable": false,
   "toolTipText": "",
-  "sizePolicy": {
-    "fixedSize": [40, 30]
-  }
+  "sizePolicy": [3, 3, 0, 0],
+  "fixedSize": [40, 30]
 }
