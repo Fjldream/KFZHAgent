@@ -45,6 +45,9 @@ importers:
 
   packages/domain-client:
     dependencies:
+      '@kf/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       fflate:
         specifier: ^0.8.3
         version: 0.8.3

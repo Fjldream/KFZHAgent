@@ -9,3 +9,9 @@ export {
   escapeHtml,
   PREVIEW_CSP,
 } from "./preview/client-preview.js";
+export * from "./patch/client-patcher.js";
+export * from "./patch/change-scope.js";
+export * from "./patch/allowlist.js";
+export * from "./patch/json-pointer.js";
+export * from "./validate/client-validator.js";
+export * from "./validate/report.js";
