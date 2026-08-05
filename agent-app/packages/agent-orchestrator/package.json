@@ -10,5 +10,18 @@
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit",
     "lint": "eslint ."
+  },
+  "dependencies": {
+    "@kf/build-jobs": "workspace:*",
+    "@kf/contracts": "workspace:*",
+    "@kf/domain-client": "workspace:*",
+    "@langchain/langgraph": "^1.4.9",
+    "@langchain/langgraph-checkpoint-postgres": "^1.0.4",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@prisma/client": "^6.19.3",
+    "@types/pg": "^8.15.0",
+    "pg": "^8.16.0"
   }
 }

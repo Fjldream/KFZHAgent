@@ -1,0 +1,487 @@
+import { describe, expect, it } from "vitest";
+import { Command, MemorySaver } from "@langchain/langgraph";
+import { deriveGuid, planHash } from "@kf/domain-client";
+import { solutionId, type ChangePlan, type SolutionIR } from "@kf/contracts";
+import type {
+  AppendMessageInput,
+  BuildJobInfo,
+  BuildJobPort,
+  ChangePlanRepository,
+  EnqueueBuildInput,
+  SolutionGraphDeps,
+  WorkspaceQueryPort,
+} from "./ports.js";
+import type { ModelPort, ModelPortContext } from "./model-port.js";
+import type { GraphMessage, ApprovalInterrupt } from "./state.js";
+import type { Intent } from "./schemas/intent.js";
+import { compileSolutionGraph } from "./solution-graph.js";
+
+type CompiledGraph = ReturnType<typeof compileSolutionGraph>;
+
+// ---------------------------------------------------------------------------
+// Fakes
+// ---------------------------------------------------------------------------
+
+class FakeWorkspaceQuery implements WorkspaceQueryPort {
+  currentRevision = new Map<string, string>();
+  revisionSummaries = new Map<string, string>();
+  summaries = new Map<string, string>();
+  messages = new Map<string, GraphMessage[]>();
+  appendCalls: AppendMessageInput[] = [];
+
+  async listRecentMessages({ conversationId }: { conversationId: string }): Promise<GraphMessage[]> {
+    return this.messages.get(conversationId) ?? [];
+  }
+  async appendMessage(input: AppendMessageInput): Promise<void> {
+    this.appendCalls.push(input);
+    const list = this.messages.get(input.conversationId) ?? [];
+    list.push({ role: input.role, content: input.content });
+    this.messages.set(input.conversationId, list);
+  }
+  async getConversationSummary({ conversationId }: { conversationId: string }): Promise<string | undefined> {
+    return this.summaries.get(conversationId);
+  }
+  async setConversationSummary({
+    conversationId,
+    summary,
+  }: {
+    conversationId: string;
+    summary: string;
+  }): Promise<void> {
+    this.summaries.set(conversationId, summary);
+  }
+  async getCurrentRevisionId({ workspaceId }: { workspaceId: string }): Promise<string | undefined> {
+    return this.currentRevision.get(workspaceId);
+  }
+  async getRevisionSummary({ revisionId }: { revisionId: string }): Promise<string | undefined> {
+    return this.revisionSummaries.get(revisionId);
+  }
+}
+
+interface StoredRequest {
+  id: string;
+  status: string;
+}
+
+class FakeChangePlanRepository implements ChangePlanRepository {
+  requests = new Map<string, StoredRequest>();
+  plans = new Map<string, { planHash: string }>();
+  statusCalls: { changeRequestId: string; status: string }[] = [];
+
+  async findOpenChangeRequest({
+    workspaceId,
+    conversationId,
+  }: {
+    workspaceId: string;
+    conversationId: string;
+  }) {
+    const request = this.requests.get(`cr:${workspaceId}:${conversationId}`);
+    return request !== undefined && request.status === "OPEN" ? { id: request.id } : null;
+  }
+  async saveChangeRequest(input: { id: string; status: string }): Promise<void> {
+    this.requests.set(input.id, { id: input.id, status: input.status });
+  }
+  async savePlan(input: { id: string; planHash: string }): Promise<void> {
+    this.plans.set(input.id, { planHash: input.planHash });
+  }
+  async loadPlanHash({ changePlanId }: { changePlanId: string }): Promise<string | undefined> {
+    return this.plans.get(changePlanId)?.planHash;
+  }
+  async setChangeRequestStatus(input: {
+    changeRequestId: string;
+    status: string;
+  }): Promise<void> {
+    this.statusCalls.push(input);
+    const request = this.requests.get(input.changeRequestId);
+    if (request !== undefined) request.status = input.status;
+  }
+  statusOf(changeRequestId: string): string | undefined {
+    return this.requests.get(changeRequestId)?.status;
+  }
+}
+
+class FakeBuildJobPort implements BuildJobPort {
+  jobs = new Map<string, BuildJobInfo>();
+  enqueues: EnqueueBuildInput[] = [];
+  created: { id: string; input: EnqueueBuildInput }[] = [];
+
+  async enqueue(input: EnqueueBuildInput): Promise<BuildJobInfo> {
+    const id = `job-${this.enqueues.length + 1}`;
+    this.enqueues.push(input);
+    this.created.push({ id, input });
+    this.jobs.set(id, { id, status: "QUEUED" });
+    return { id, status: "QUEUED" };
+  }
+  async getJob({ jobId }: { jobId: string }): Promise<BuildJobInfo | null> {
+    return this.jobs.get(jobId) ?? null;
+  }
+  setStatus(jobId: string, status: BuildJobInfo["status"]): void {
+    const job = this.jobs.get(jobId);
+    if (job !== undefined) job.status = status;
+  }
+}
+
+class FakeModelPort implements ModelPort {
+  intents: Intent[] = [];
+  classifyInputs: ModelPortContext[] = [];
+  createCalls: ModelPortContext[] = [];
+  reviseCalls: ModelPortContext[] = [];
+  createdPlans: ChangePlan[] = [];
+  private seq = 0;
+
+  queueIntent(...intents: Intent[]): void {
+    this.intents.push(...intents);
+  }
+
+  async classifyIntent(input: ModelPortContext) {
+    this.classifyInputs.push(input);
+    const intent = this.intents.shift() ?? "QUESTION";
+    return { intent, requestedDomains: ["kingclient"], reply: `reply:${intent}` };
+  }
+
+  async createProjectDesign(): Promise<SolutionIR> {
+    return {
+      schema: "kf-solution-ir/v1",
+      solutionId: solutionId("sol-1"),
+      displayName: "设计",
+      projects: [],
+      dependencies: [],
+      pendingRequirements: [],
+    };
+  }
+
+  async createChangePlan(input: ModelPortContext): Promise<ChangePlan> {
+    this.createCalls.push(input);
+    return this.recordPlan(this.makePlan(input.workspaceId, "new"));
+  }
+  async reviseChangePlan(input: ModelPortContext): Promise<ChangePlan> {
+    this.reviseCalls.push(input);
+    return this.recordPlan(this.makePlan(input.workspaceId, "rev"));
+  }
+  async explainValidation(): Promise<string> {
+    return "校验通过";
+  }
+
+  private recordPlan(plan: ChangePlan): ChangePlan {
+    this.createdPlans.push(plan);
+    return plan;
+  }
+
+  private makePlan(workspaceId: string, tag: string): ChangePlan {
+    this.seq += 1;
+    const entityId = deriveGuid({ seed: workspaceId }, `Text${this.seq}`);
+    return {
+      schema: "kf-change-plan/v1",
+      workspaceId,
+      operations: [
+        {
+          op: "update",
+          entityId,
+          entityType: "text",
+          changes: [{ path: "/text", value: `${tag}-${this.seq}` }],
+        },
+      ],
+    };
+  }
+}
+
+interface Bed {
+  deps: SolutionGraphDeps;
+  graph: CompiledGraph;
+  workspace: FakeWorkspaceQuery;
+  repo: FakeChangePlanRepository;
+  builds: FakeBuildJobPort;
+  model: FakeModelPort;
+}
+
+function createBed(): Bed {
+  const workspace = new FakeWorkspaceQuery();
+  const repo = new FakeChangePlanRepository();
+  const builds = new FakeBuildJobPort();
+  const model = new FakeModelPort();
+  const deps: SolutionGraphDeps = {
+    modelPort: model,
+    workspaceQuery: workspace,
+    changePlanRepository: repo,
+    buildJobPort: builds,
+    isDomainSupported: () => true,
+  };
+  const graph = compileSolutionGraph(deps, { checkpointer: new MemorySaver() });
+  return { deps, graph, workspace, repo, builds, model };
+}
+
+interface Ctx {
+  tenantId: string;
+  userId: string;
+  workspaceId: string;
+  conversationId: string;
+}
+
+const TENANT_ID = "tenant-1";
+const USER_ID = "user-1";
+const WORKSPACE_ID = "ws-1";
+const CONVERSATION_ID = "conv-1";
+const REVISION_1 = "rev-1";
+
+function seed(bed: Bed, revisionId = REVISION_1): Ctx {
+  bed.workspace.currentRevision.set(WORKSPACE_ID, revisionId);
+  bed.workspace.revisionSummaries.set(revisionId, "页面 Page1；控件 Text1");
+  return {
+    tenantId: TENANT_ID,
+    userId: USER_ID,
+    workspaceId: WORKSPACE_ID,
+    conversationId: CONVERSATION_ID,
+  };
+}
+
+function config(ctx: Ctx) {
+  return { configurable: { thread_id: ctx.conversationId } };
+}
+
+function input(ctx: Ctx) {
+  return {
+    tenantId: ctx.tenantId,
+    userId: ctx.userId,
+    workspaceId: ctx.workspaceId,
+    conversationId: ctx.conversationId,
+    stage: "idle" as const,
+    recentMessages: [] as GraphMessage[],
+  };
+}
+
+async function sendUser(bed: Bed, ctx: Ctx, text: string): Promise<void> {
+  await bed.workspace.appendMessage({
+    tenantId: ctx.tenantId,
+    conversationId: ctx.conversationId,
+    role: "user",
+    content: text,
+  });
+}
+
+async function interruptPayload(bed: Bed, ctx: Ctx): Promise<ApprovalInterrupt | undefined> {
+  const snapshot = await bed.graph.getState(config(ctx));
+  const values = snapshot.tasks.flatMap((task) => task.interrupts.map((item) => item.value));
+  return values[0] as ApprovalInterrupt | undefined;
+}
+
+/** Runs a NEW_REQUIREMENT turn up to the approval interrupt. */
+async function planNewRequirement(bed: Bed, ctx: Ctx, text: string): Promise<ApprovalInterrupt> {
+  bed.model.queueIntent("NEW_REQUIREMENT");
+  await sendUser(bed, ctx, text);
+  await bed.graph.invoke(input(ctx), config(ctx));
+  const payload = await interruptPayload(bed, ctx);
+  if (payload === undefined) throw new Error("expected an approval interrupt");
+  return payload;
+}
+
+async function approve(bed: Bed, ctx: Ctx, payload: ApprovalInterrupt) {
+  return bed.graph.invoke(
+    new Command({ resume: { action: "approve", planHash: payload.planHash } }),
+    config(ctx),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
+  it("routes an ordinary question to idle without planning or building", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+    bed.model.queueIntent("QUESTION");
+    await sendUser(bed, ctx, "你好，介绍一下这个工程");
+
+    const result = await bed.graph.invoke(input(ctx), config(ctx));
+
+    expect(result.intent).toBe("QUESTION");
+    expect(result.stage).toBe("idle");
+    expect(bed.model.createCalls).toHaveLength(0);
+    expect(bed.builds.enqueues).toHaveLength(0);
+    expect(bed.workspace.appendCalls).toContainEqual(
+      expect.objectContaining({ role: "assistant", content: "reply:QUESTION" }),
+    );
+  });
+
+  it("plans a new requirement and stops at the approval interrupt with the verbatim payload", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+
+    const payload = await planNewRequirement(bed, ctx, "新增一个输入框");
+
+    expect(payload.type).toBe("plan-approval");
+    expect(payload.changeRequestId).toBe(`cr:${WORKSPACE_ID}:${CONVERSATION_ID}`);
+    expect(payload.planHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(payload.summary).toContain("计划包含");
+    expect(payload.diffArtifactId).toBeUndefined();
+    expect(payload.previewArtifactId).toBeUndefined();
+    expect(bed.model.createCalls).toHaveLength(1);
+    expect(bed.model.createCalls[0]?.currentRevisionId).toBe(REVISION_1);
+    expect(bed.repo.plans.size).toBe(1);
+    expect(bed.repo.statusOf(`cr:${WORKSPACE_ID}:${CONVERSATION_ID}`)).toBe("OPEN");
+  });
+
+  it("re-plans on a revise resume and interrupts again with a different planHash", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+    const first = await planNewRequirement(bed, ctx, "新增一个按钮");
+
+    await bed.graph.invoke(
+      new Command({ resume: { action: "revise", planHash: first.planHash } }),
+      config(ctx),
+    );
+    const second = await interruptPayload(bed, ctx);
+
+    expect(bed.model.reviseCalls).toHaveLength(1);
+    expect(second?.planHash).toBeDefined();
+    expect(second?.planHash).not.toBe(first.planHash);
+    expect(second?.changeRequestId).toBe(first.changeRequestId);
+    expect(bed.builds.enqueues).toHaveLength(0);
+  });
+
+  it("cancels the change request on a cancel resume (rejection)", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+    const payload = await planNewRequirement(bed, ctx, "新增一个按钮");
+
+    const result = await bed.graph.invoke(
+      new Command({ resume: { action: "cancel", planHash: payload.planHash } }),
+      config(ctx),
+    );
+
+    expect(result.stage).toBe("idle");
+    expect(bed.repo.statusOf(payload.changeRequestId)).toBe("CLOSED");
+    expect(bed.builds.enqueues).toHaveLength(0);
+  });
+
+  it("fails an approve resume whose planHash does not match, without side effects", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+    const payload = await planNewRequirement(bed, ctx, "新增一个按钮");
+
+    const result = await bed.graph.invoke(
+      new Command({ resume: { action: "approve", planHash: "deadbeef" } }),
+      config(ctx),
+    );
+
+    expect(result.lastErrorCode).toBe("PLAN_HASH_MISMATCH");
+    expect(result.stage).toBe("idle");
+    expect(bed.builds.enqueues).toHaveLength(0);
+    expect(bed.repo.statusOf(payload.changeRequestId)).toBe("OPEN");
+    expect(bed.repo.statusCalls).toHaveLength(0);
+  });
+
+  it("enqueues the build after an approve resume and marks the request APPROVED", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+    const payload = await planNewRequirement(bed, ctx, "新增一个按钮");
+
+    const result = await approve(bed, ctx, payload);
+
+    expect(bed.builds.enqueues).toHaveLength(1);
+    expect(bed.builds.enqueues[0]).toMatchObject({
+      tenantId: TENANT_ID,
+      workspaceId: WORKSPACE_ID,
+      baseRevisionId: REVISION_1,
+      changePlanId: `plan:${WORKSPACE_ID}:${payload.planHash}`,
+      planHash: payload.planHash,
+      domainKind: "kingclient",
+    });
+    expect(result.buildJobId).toBe("job-1");
+    expect(result.stage).toBe("idle");
+    expect(bed.repo.statusOf(payload.changeRequestId)).toBe("APPROVED");
+  });
+
+  it("returns to planning when the enqueued build failed", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+    const payload = await planNewRequirement(bed, ctx, "新增一个按钮");
+    await approve(bed, ctx, payload);
+    const jobId = bed.builds.created[0]?.id;
+    if (jobId === undefined) throw new Error("expected an enqueued job");
+    bed.builds.setStatus(jobId, "FAILED");
+
+    // The next turn re-enters the workflow with no new user requirement.
+    bed.model.queueIntent("CONFIRM_PLAN");
+    const result = await bed.graph.invoke(input(ctx), config(ctx));
+
+    expect(result.stage).toBe("planning");
+    expect(result.lastErrorCode).toBe("BUILD_FAILED");
+    expect(result.buildJobId).toBe(jobId);
+  });
+
+  it("returns to idle and refreshes the current revision after a successful build", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+    const payload = await planNewRequirement(bed, ctx, "新增一个按钮");
+    await approve(bed, ctx, payload);
+    const jobId = bed.builds.created[0]?.id;
+    if (jobId === undefined) throw new Error("expected an enqueued job");
+
+    bed.workspace.currentRevision.set(WORKSPACE_ID, "rev-2");
+    bed.workspace.revisionSummaries.set("rev-2", "页面 Page1（已更新）");
+    bed.builds.setStatus(jobId, "SUCCEEDED");
+
+    bed.model.queueIntent("QUESTION");
+    await sendUser(bed, ctx, "构建完成了吗？");
+    const result = await bed.graph.invoke(input(ctx), config(ctx));
+
+    expect(result.stage).toBe("idle");
+    expect(result.currentRevisionId).toBe("rev-2");
+    expect(result.lastErrorCode).toBeUndefined();
+  });
+
+  it("plans a new requirement against the latest revision after a successful build", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+    const payload = await planNewRequirement(bed, ctx, "新增一个按钮");
+    await approve(bed, ctx, payload);
+    const jobId = bed.builds.created[0]?.id;
+    if (jobId === undefined) throw new Error("expected an enqueued job");
+
+    bed.workspace.currentRevision.set(WORKSPACE_ID, "rev-2");
+    bed.workspace.revisionSummaries.set("rev-2", "页面 Page1（已更新）");
+    bed.builds.setStatus(jobId, "SUCCEEDED");
+
+    bed.model.queueIntent("NEW_REQUIREMENT");
+    await sendUser(bed, ctx, "再新增一个文本框");
+    await bed.graph.invoke(input(ctx), config(ctx));
+    const second = await interruptPayload(bed, ctx);
+
+    expect(bed.model.createCalls).toHaveLength(2);
+    expect(bed.model.createCalls[1]?.currentRevisionId).toBe("rev-2");
+    expect(second).toBeDefined();
+    expect(second?.planHash).not.toBe(payload.planHash);
+  });
+
+  it("records pendingRequirements for unsupported domains and never enqueues a build", async () => {
+    const bed = createBed();
+    bed.deps.isDomainSupported = () => false;
+    const ctx = seed(bed);
+    bed.model.queueIntent("NEW_REQUIREMENT");
+    await sendUser(bed, ctx, "接入外部 ERP 系统");
+
+    const result = await bed.graph.invoke(input(ctx), config(ctx));
+
+    expect(result.lastErrorCode).toBe("UNSUPPORTED_DOMAIN");
+    expect(result.stage).toBe("idle");
+    expect(result.pendingRequirements).toEqual([
+      { text: "接入外部 ERP 系统", requestedDomains: ["kingclient"] },
+    ]);
+    expect(bed.model.createCalls).toHaveLength(0);
+    expect(bed.builds.enqueues).toHaveLength(0);
+  });
+
+  it("computes a canonical planHash that matches the stored plan", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+    const payload = await planNewRequirement(bed, ctx, "新增一个输入框");
+
+    // The planHash the user approves must be the canonical hash of the exact
+    // plan the model produced, so approve → enqueue builds the approved plan.
+    expect(bed.model.createdPlans).toHaveLength(1);
+    expect(payload.planHash).toBe(planHash(bed.model.createdPlans[0] as unknown));
+    // And it is the same hash persisted for the deterministic plan id.
+    expect(bed.repo.plans.has(`plan:${WORKSPACE_ID}:${payload.planHash}`)).toBe(true);
+  });
+});

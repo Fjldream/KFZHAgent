@@ -1,0 +1,95 @@
+import { z } from "zod";
+import { pendingRequirementSchema } from "@kf/contracts";
+import { StateSchema } from "@langchain/langgraph";
+import { IntentSchema } from "./schemas/intent.js";
+
+/**
+ * A single persisted conversation message, bounded by role + content. Never
+ * carries raw uploaded files, secrets, full page JSON, or untrusted script
+ * text (brief Step 6).
+ */
+export const MessageSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  content: z.string(),
+});
+export type GraphMessage = z.infer<typeof MessageSchema>;
+
+/**
+ * Workflow stage the graph is in. `approval` is the interrupt point where the
+ * graph waits for the user to approve/revise/cancel the pending change plan.
+ */
+export const StageSchema = z.enum(["idle", "planning", "approval", "building"]);
+export type Stage = z.infer<typeof StageSchema>;
+
+/**
+ * Structured interrupt payload (brief Step 5). Field names and meaning are
+ * verbatim from the brief: type, changeRequestId, planHash, summary,
+ * diffArtifactId, previewArtifactId.
+ */
+export const ApprovalInterruptSchema = z.object({
+  type: z.literal("plan-approval"),
+  changeRequestId: z.string(),
+  planHash: z.string(),
+  summary: z.string(),
+  diffArtifactId: z.string().optional(),
+  previewArtifactId: z.string().optional(),
+});
+export type ApprovalInterrupt = z.infer<typeof ApprovalInterruptSchema>;
+
+/**
+ * Resume payload the API layer sends back through `Command({ resume })`.
+ * Requires an action of approve/revise/cancel and the exact planHash the user
+ * was shown; any mismatch fails the resume without side effects.
+ */
+export const ApprovalResumeSchema = z.object({
+  action: z.enum(["approve", "revise", "cancel"]),
+  planHash: z.string(),
+});
+export type ApprovalResume = z.infer<typeof ApprovalResumeSchema>;
+
+/**
+ * Single-agent solution workflow state (brief Step 1, verbatim fields plus the
+ * supporting context channels documented below).
+ *
+ * Verbatim from the brief:
+ *   tenantId, userId, workspaceId, conversationId, currentRevisionId,
+ *   activeChangeRequestId, changePlanId, planHash, buildJobId, intent, stage,
+ *   recentMessages, conversationSummary, lastErrorCode.
+ *
+ * Supporting channels (bounded context per brief Step 6):
+ *   revisionSummary      — bounded summary of the current revision (never the
+ *                          full page JSON / project IR).
+ *   planSummary          — bounded human-readable plan summary for the
+ *                          approval interrupt.
+ *   diffArtifactId       — artifact holding the plan diff (undefined when the
+ *                          production artifact pipeline is not wired yet).
+ *   previewArtifactId    — artifact holding the rendered preview.
+ *   pendingRequirements  — requests for unsupported domains; they never reach
+ *                          the build queue (brief Step 4).
+ */
+export const AgentGraphState = new StateSchema({
+  tenantId: z.string().min(1),
+  userId: z.string().min(1),
+  workspaceId: z.string().min(1),
+  conversationId: z.string().min(1),
+  currentRevisionId: z.string().optional(),
+  activeChangeRequestId: z.string().optional(),
+  changePlanId: z.string().optional(),
+  planHash: z.string().optional(),
+  buildJobId: z.string().optional(),
+  intent: IntentSchema.optional(),
+  stage: StageSchema,
+  recentMessages: z.array(MessageSchema),
+  conversationSummary: z.string().optional(),
+  lastErrorCode: z.string().optional(),
+  revisionSummary: z.string().optional(),
+  planSummary: z.string().optional(),
+  diffArtifactId: z.string().optional(),
+  previewArtifactId: z.string().optional(),
+  pendingRequirements: z.array(pendingRequirementSchema).optional(),
+  /** Resume routing decision written by the approval node (internal). */
+  resumeAction: z.enum(["approve", "revise", "cancel"]).optional(),
+});
+
+export type AgentGraphStateValue = typeof AgentGraphState.State;
+export type AgentGraphUpdate = typeof AgentGraphState.Update;
