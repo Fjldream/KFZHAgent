@@ -7,5 +7,16 @@
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit",
     "lint": "eslint ."
+  },
+  "dependencies": {
+    "@kf/artifact-storage": "workspace:*",
+    "@kf/build-jobs": "workspace:*",
+    "@kf/contracts": "workspace:*",
+    "@kf/domain-client": "workspace:*",
+    "@kf/domain-registry": "workspace:*",
+    "@prisma/client": "^6.19.3"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.7"
   }
 }

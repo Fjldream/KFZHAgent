@@ -7,7 +7,7 @@
  */
 
 /** The kinds of private artifacts that can be stored per tenant. */
-export type ArtifactKind = "client-package";
+export type ArtifactKind = "client-package" | "source-package";
 
 /** Result of a successful artifact write. */
 export type StoredArtifact = {

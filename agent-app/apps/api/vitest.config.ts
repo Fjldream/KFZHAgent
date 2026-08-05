@@ -29,4 +29,10 @@ function emitDecoratorMetadata(): Plugin {
 
 export default defineConfig({
   plugins: [emitDecoratorMetadata()],
+  test: {
+    // The integration suites share the kf_agent_test database and truncate
+    // tables in beforeEach; run test files sequentially to avoid cross-file
+    // TRUNCATE races.
+    fileParallelism: false,
+  },
 });

@@ -10,3 +10,6 @@ coverage/
 .private/
 raw-corpus/
 sanitized-golden/
+
+# Task 9: default private artifact storage root (never committed)
+.kf-artifacts/

@@ -63,13 +63,15 @@ model UserSession {
 }
 
 model SolutionWorkspace {
-  id          String   @id @default(uuid())
-  tenantId    String
-  tenant      Tenant   @relation(fields: [tenantId], references: [id])
-  name        String
-  description String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id               String    @id @default(uuid())
+  tenantId         String
+  tenant           Tenant    @relation(fields: [tenantId], references: [id])
+  name             String
+  description      String?
+  mode             String    @default("new") // "new" (generative) | "upload" (imported source)
+  currentRevisionId String? // advanced only after validation passes
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
   @@unique([tenantId, name])
 }
 
@@ -116,13 +118,15 @@ model ChangePlan {
 }
 
 model SolutionRevision {
-  id             String   @id @default(uuid())
-  tenantId       String
-  workspaceId    String
-  changePlanId   String?
-  revisionNumber Int      @default(1)
-  state          Json?
-  createdAt      DateTime @default(now())
+  id               String   @id @default(uuid())
+  tenantId         String
+  workspaceId      String
+  changePlanId     String?
+  revisionNumber   Int      @default(1)
+  kind             String   @default("built") // "initial" | "source" | "built" | "rollback"
+  parentRevisionId String? // immutable chain link; rollback points at the historical revision
+  state            Json?
+  createdAt        DateTime @default(now())
   @@index([tenantId, workspaceId])
 }
 
@@ -131,6 +135,7 @@ model DomainProjectRevision {
   tenantId           String
   solutionRevisionId String
   domainKind         String
+  kind               String   @default("client-package") // "source-package" | "client-package"
   packageHash        String?
   packageUrl         String?
   createdAt          DateTime @default(now())

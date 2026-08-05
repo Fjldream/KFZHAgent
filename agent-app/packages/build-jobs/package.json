@@ -1,0 +1,21 @@
+{
+  "name": "@kf/build-jobs",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@kf/artifact-storage": "workspace:*",
+    "@kf/contracts": "workspace:*",
+    "@kf/domain-client": "workspace:*",
+    "@kf/domain-registry": "workspace:*",
+    "@prisma/client": "^6.19.3"
+  }
+}

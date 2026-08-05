@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "vitest run --workspace vitest.workspace.ts",
+    "test": "vitest run --workspace vitest.workspace.ts --maxWorkers=1",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint"
   },

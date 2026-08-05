@@ -36,6 +36,21 @@ importers:
 
   apps/api:
     dependencies:
+      '@kf/artifact-storage':
+        specifier: workspace:*
+        version: link:../../packages/artifact-storage
+      '@kf/build-jobs':
+        specifier: workspace:*
+        version: link:../../packages/build-jobs
+      '@kf/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@kf/domain-client':
+        specifier: workspace:*
+        version: link:../../packages/domain-client
+      '@kf/domain-registry':
+        specifier: workspace:*
+        version: link:../../packages/domain-registry
       '@nestjs/common':
         specifier: ^11.1.28
         version: 11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.1.0)
@@ -88,11 +103,52 @@ importers:
 
   apps/web: {}
 
-  apps/worker: {}
+  apps/worker:
+    dependencies:
+      '@kf/artifact-storage':
+        specifier: workspace:*
+        version: link:../../packages/artifact-storage
+      '@kf/build-jobs':
+        specifier: workspace:*
+        version: link:../../packages/build-jobs
+      '@kf/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@kf/domain-client':
+        specifier: workspace:*
+        version: link:../../packages/domain-client
+      '@kf/domain-registry':
+        specifier: workspace:*
+        version: link:../../packages/domain-registry
+      '@prisma/client':
+        specifier: ^6.19.3
+        version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
+    devDependencies:
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.33.0)(supports-color@7.1.0)
 
   packages/agent-orchestrator: {}
 
   packages/artifact-storage: {}
+
+  packages/build-jobs:
+    dependencies:
+      '@kf/artifact-storage':
+        specifier: workspace:*
+        version: link:../artifact-storage
+      '@kf/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@kf/domain-client':
+        specifier: workspace:*
+        version: link:../domain-client
+      '@kf/domain-registry':
+        specifier: workspace:*
+        version: link:../domain-registry
+      '@prisma/client':
+        specifier: ^6.19.3
+        version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
 
   packages/contracts:
     dependencies:
