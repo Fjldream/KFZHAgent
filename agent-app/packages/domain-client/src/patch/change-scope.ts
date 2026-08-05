@@ -360,6 +360,21 @@ function deepEqual(a: unknown, b: unknown): boolean {
 }
 
 function diffArrays(base: unknown[], cand: unknown[], pointer: string, out: JsonDiff[]): void {
+  const baseGuidable = base.length > 0 && base.every(hasGuid);
+  const candGuidable = cand.length > 0 && cand.every(hasGuid);
+  if (baseGuidable && candGuidable) {
+    diffArraysByGuid(base, cand, pointer, out);
+    return;
+  }
+  diffArraysByPosition(base, cand, pointer, out);
+}
+
+/**
+ * GUID-identity diff for arrays whose elements all carry a `guid` (controls,
+ * page objects): elements are matched by GUID across reordering/insertion and
+ * deletion, and matched pairs are content-diffed at their BASE index.
+ */
+function diffArraysByGuid(base: unknown[], cand: unknown[], pointer: string, out: JsonDiff[]): void {
   const baseByGuid = new Map<string, number>();
   const candByGuid = new Map<string, number>();
   for (let i = 0; i < base.length; i += 1) {
@@ -400,6 +415,47 @@ function diffArrays(base: unknown[], cand: unknown[], pointer: string, out: Json
     const guid = guidOf(cand[i]);
     if (guid !== undefined && matchedGuids.has(guid)) continue;
     out.push({ pointer: `${pointer}/${i}`, kind: "add" });
+  }
+}
+
+/**
+ * Content-aware diff for arrays whose elements carry no GUID (variables
+ * `Variables[]`, `linkMng.linkList`, ...). The longest common prefix and
+ * suffix are matched by deep equality — unchanged head/tail elements are never
+ * reported — and only the remaining middle is diffed index-aligned. This makes
+ * a tail append (create variable/control) report exactly one `add`, while a
+ * mid-array insertion or deletion stays detectable without index drift.
+ */
+function diffArraysByPosition(base: unknown[], cand: unknown[], pointer: string, out: JsonDiff[]): void {
+  let prefix = 0;
+  while (
+    prefix < base.length &&
+    prefix < cand.length &&
+    deepEqual(base[prefix], cand[prefix])
+  ) {
+    prefix += 1;
+  }
+
+  let suffix = 0;
+  while (
+    suffix < base.length - prefix &&
+    suffix < cand.length - prefix &&
+    deepEqual(base[base.length - 1 - suffix], cand[cand.length - 1 - suffix])
+  ) {
+    suffix += 1;
+  }
+
+  const baseMid = base.slice(prefix, base.length - suffix);
+  const candMid = cand.slice(prefix, cand.length - suffix);
+  const midLen = Math.max(baseMid.length, candMid.length);
+  for (let i = 0; i < midLen; i += 1) {
+    if (i >= baseMid.length) {
+      out.push({ pointer: `${pointer}/${prefix + i}`, kind: "add" });
+    } else if (i >= candMid.length) {
+      out.push({ pointer: `${pointer}/${prefix + i}`, kind: "remove" });
+    } else {
+      diffJson(baseMid[i], candMid[i], `${pointer}/${prefix + i}`, out);
+    }
   }
 }
 

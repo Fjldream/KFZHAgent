@@ -62,6 +62,23 @@ async function writePage(root: Root, page: PageFixture): Promise<void> {
   await writeFile(await pageFile(root), JSON.stringify(page, null, 2));
 }
 
+interface VariablesFixture {
+  Variables: Array<Record<string, unknown>>;
+}
+
+async function variableGroupFile(root: Root): Promise<string> {
+  const projectRoot = await resolveVersionDir(root);
+  return join(projectRoot, "project", "Tag", "variables", "group-guid-1.json");
+}
+
+async function readVariables(root: Root): Promise<VariablesFixture> {
+  return JSON.parse(await readFile(await variableGroupFile(root), "utf8")) as VariablesFixture;
+}
+
+async function writeVariables(root: Root, doc: VariablesFixture): Promise<void> {
+  await writeFile(await variableGroupFile(root), JSON.stringify(doc, null, 2));
+}
+
 describe("client validator (Task 7 brief Step 2)", () => {
   it("passes a legal field-level update", async () => {
     const base = await copyFixture("client-unknown-field");
@@ -245,6 +262,65 @@ describe("client validator (Task 7 brief Step 2)", () => {
     const report = await validateClientProject(base, candidate, plan([]));
     expect(report.status).toBe("fail");
     expect(report.checks.businessRules).toBe("fail");
+  });
+
+  it("passes a create-variable end-to-end (no-GUID array tail append)", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const createPlan = plan([
+      {
+        op: "create",
+        entityType: "variable",
+        entityId: "$NewVar",
+        properties: { dataType: 1, comment: "new", defaultValue: 5 },
+      },
+    ]);
+    const candidate = await applyClientPatch(base, createPlan);
+    const report = await validateClientProject(base, candidate, createPlan);
+    expect(report.status).toBe("pass");
+    expect(report.checks.changeScope).toBe("pass");
+  });
+
+  it("fails on a mid-array variable insertion (no-GUID array outside scope)", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const createPlan = plan([
+      {
+        op: "create",
+        entityType: "variable",
+        entityId: "$NewVar",
+        properties: { dataType: 1 },
+      },
+    ]);
+    const candidate = await applyClientPatch(base, createPlan);
+    // Rogue variable inserted in the MIDDLE of Variables[] (not the confirmed
+    // tail append) must be detected by the scope diff.
+    const variables = await readVariables(candidate);
+    variables.Variables.unshift({ name: "$Rogue", dataType: 1, id: 99 });
+    await writeVariables(candidate, variables);
+    const report = await validateClientProject(base, candidate, createPlan);
+    expect(report.checks.changeScope).toBe("fail");
+    expect(report.status).toBe("fail");
+  });
+
+  it("passes a delete-variable end-to-end (no-GUID array element removal)", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const deletePlan = plan([
+      { op: "delete", entityId: "$TestVar", destructiveConfirmed: true, digest: deleteOperationDigest("$TestVar") }
+    ]);
+    const candidate = await applyClientPatch(base, deletePlan);
+    const report = await validateClientProject(base, candidate, deletePlan);
+    expect(report.status).toBe("pass");
+    expect(report.checks.changeScope).toBe("pass");
+  });
+
+  it("passes an update-variable end-to-end (no-GUID array field change)", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const updatePlan = plan([
+      { op: "update", entityId: "$TestVar", changes: [{ path: "/comment", value: "patched comment" }] }
+    ]);
+    const candidate = await applyClientPatch(base, updatePlan);
+    const report = await validateClientProject(base, candidate, updatePlan);
+    expect(report.status).toBe("pass");
+    expect(report.checks.changeScope).toBe("pass");
   });
 });
 
