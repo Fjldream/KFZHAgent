@@ -69,9 +69,13 @@ export class AuthController {
     }
     await this.users.recordLoginSuccess(user);
     const { token } = await this.sessions.createSession(user.id);
+    // Secure 标志默认开启（生产/测试）。E2E 通过 COOKIE_SECURE=false 在本地
+    // http 环境运行（Node 侧 APIRequestContext 不会把 Secure cookie 发到
+    // http 目标），浏览器端仍受 SameSite=strict + HttpOnly 保护。
+    const cookieSecure = process.env.COOKIE_SECURE !== "false";
     res.cookie(SESSION_COOKIE_NAME, token, {
       httpOnly: true,
-      secure: true,
+      secure: cookieSecure,
       sameSite: "strict",
       path: "/",
       maxAge: SESSION_TTL_MS,

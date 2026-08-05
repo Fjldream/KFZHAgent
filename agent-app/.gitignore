@@ -13,3 +13,9 @@ sanitized-golden/
 
 # Task 9: default private artifact storage root (never committed)
 .kf-artifacts/
+
+# Task 12: E2E runtime artifacts and reports (never committed)
+.kf-e2e-artifacts/
+test-results/
+playwright-report/
+tests/e2e/.e2e-pids.json

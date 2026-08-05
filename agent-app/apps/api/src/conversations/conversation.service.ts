@@ -263,6 +263,7 @@ export class ConversationService {
           changeRequestId: values.activeChangeRequestId ?? undefined,
           planHash: values.planHash ?? undefined,
         };
+        if (values.changePlanId !== undefined) result.changePlanId = values.changePlanId;
         if (interrupt !== undefined) result.interrupt = interrupt;
         if (values.buildJobId !== undefined) result.buildJobId = values.buildJobId;
 
@@ -382,6 +383,7 @@ function finalStateData(final: StateSnapshotLike): Record<string, unknown> {
     workspaceId: values.workspaceId ?? null,
     conversationId: values.conversationId ?? null,
     planHash: values.planHash ?? null,
+    changePlanId: values.changePlanId ?? null,
     changeRequestId: values.activeChangeRequestId ?? null,
     ...(interrupt !== undefined ? { interrupt } : {}),
   };

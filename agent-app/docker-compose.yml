@@ -1,0 +1,67 @@
+# KF Solution Agent MVP 服务编排（brief Step 9）。
+# 本机无 Docker 环境，未在本机运行验证；配置按 brief 要求提供
+# postgres / api / worker / web 四服务 + 私有 artifacts volume。
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: kf_agent
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      target: api
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/kf_agent
+      ARTIFACT_STORAGE_ROOT: /artifacts
+      CORS_ORIGINS: http://localhost:5173
+      MODEL_PORT_MODE: ${MODEL_PORT_MODE:-}
+      COOKIE_SECURE: "true"
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+    volumes:
+      - artifacts:/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      target: worker
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/kf_agent
+      ARTIFACT_STORAGE_ROOT: /artifacts
+    volumes:
+      - artifacts:/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      target: web
+    environment:
+      VITE_API_BASE: http://localhost:3000
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  artifacts:
+    # 私有 artifacts 卷：源包与构建制品只通过 API/worker 访问，不暴露到宿主机。

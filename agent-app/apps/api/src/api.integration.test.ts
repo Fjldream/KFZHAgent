@@ -855,3 +855,92 @@ describe("hardening fixes", () => {
     expect(await prisma.buildJob.count({ where: { workspaceId: ws.body.id } })).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Task 12: customer UI API surface (change-plan details, build artifacts, report)
+// ---------------------------------------------------------------------------
+
+describe("task 12 api surface", () => {
+  it("serves the change-plan details shown in the confirmation UI", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createWorkspace(cookie, "PlanDetail WS");
+    const conv = await createConversation(cookie, ws.body.id, "Plan");
+    fakeModel.queueIntent("NEW_REQUIREMENT");
+    const res = await sendMessage(cookie, conv.body.id, "新增一个按钮").expect(200);
+    const done = doneEvent(res.text);
+    const changePlanId = done.data.changePlanId;
+    if (typeof changePlanId !== "string") {
+      throw new Error("expected changePlanId in SSE done event");
+    }
+    expect(done.data.interrupt?.planHash).toMatch(/^[0-9a-f]{64}$/);
+
+    const plan = await request(server)
+      .get(`/api/change-plans/${changePlanId}`)
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(plan.body.planHash).toBe(done.data.interrupt?.planHash);
+    expect(plan.body.plan.schema).toBe("kf-change-plan/v1");
+    expect(Array.isArray(plan.body.plan.operations)).toBe(true);
+    expect(plan.body.plan.operations.length).toBeGreaterThan(0);
+  });
+
+  it("isolates change-plan details across tenants", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createWorkspace(cookie, "PlanTenant WS");
+    const conv = await createConversation(cookie, ws.body.id, "Plan");
+    fakeModel.queueIntent("NEW_REQUIREMENT");
+    const res = await sendMessage(cookie, conv.body.id, "新增一个按钮").expect(200);
+    const changePlanId = doneEvent(res.text).data.changePlanId;
+
+    const cookieB = await login(TENANT_B);
+    await request(server)
+      .get(`/api/change-plans/${changePlanId}`)
+      .set("Cookie", cookieB)
+      .expect(404);
+  });
+
+  it("lists build artifacts and the validation report for a successful job", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createWorkspace(cookie, "BuildSurface WS");
+    const conv = await createConversation(cookie, ws.body.id, "Build");
+    const planHash = await planRequirement(cookie, conv.body.id);
+    const approved = await resume(cookie, conv.body.id, { action: "approve", planHash }).expect(200);
+    const jobId = approved.body.buildJobId;
+
+    // Simulate the worker's committed rows so the terminal job carries data.
+    await prisma.artifact.create({
+      data: {
+        tenantId: ws.body.tenantId,
+        buildJobId: jobId,
+        kind: "client-package",
+        storageKey: "artifact-build-surface",
+        sizeBytes: 12,
+        sha256: "a".repeat(64),
+      },
+    });
+    await prisma.validationReport.create({
+      data: {
+        tenantId: ws.body.tenantId,
+        buildJobId: jobId,
+        changePlanId: "cp-build-surface",
+        outcome: "pass",
+        summary: "validation passed",
+        details: {},
+      },
+    });
+
+    const artifacts = await request(server)
+      .get(`/api/build-jobs/${jobId}/artifacts`)
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(artifacts.body).toHaveLength(1);
+    expect(artifacts.body[0].kind).toBe("client-package");
+
+    const report = await request(server)
+      .get(`/api/build-jobs/${jobId}/report`)
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(report.body.outcome).toBe("pass");
+    expect(report.body.summary).toBe("validation passed");
+  });
+});
