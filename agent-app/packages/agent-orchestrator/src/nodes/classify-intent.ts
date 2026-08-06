@@ -101,6 +101,18 @@ export function createClassifyIntentNode(deps: SolutionGraphDeps) {
       }
     }
 
+    // design-review 阶段：用户短消息确认词指"确认设计计划"（CONFIRM_DESIGN），
+    // 而非批准变更计划（CONFIRM_PLAN）——真实 LLM 常把"确认"误判为后者。
+    if (state.stage === "design-review") {
+      const text = requirementText ?? "";
+      if (
+        text.length <= 12 &&
+        /确认|可以|没问题|同意|就这样|挺好的|就按这个/.test(text)
+      ) {
+        result = { ...result, intent: "CONFIRM_DESIGN" };
+      }
+    }
+
     const wantsChange =
       result.intent === "NEW_REQUIREMENT" || result.intent === "MODIFY_REQUIREMENT";
     const unsupported =

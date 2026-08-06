@@ -215,9 +215,11 @@ export class DeepSeekModelPort implements ModelPort {
     const revising = opts?.revising === true;
     const lines = [
       "设计遵循系统提示中的《KF 设计原则（KF_DESIGN_PRINCIPLES_FULL）》章节：布局有主次、避免模板脸（不要白底等大按钮堆叠）、一个记忆点、控件文案具体可读。",
-      "为一个 KF 客户端工程生成设计计划（不是页面控件，是设计意图）。输出 JSON 符合 kf-design-plan/v1：",
-      "displayName：工程显示名；summary：一句话摘要；layoutConcept：布局概念（含 ASCII 线框）；",
-      "styleDirection：风格方向（配色/基调）；sections：页面分区（≤8 区，每区 ≤12 个控件占位，type 用指定枚举：text/button/inputnumber/switch/checkbox/radio/select/image/tabs/table/richtext/spacer）；",
+      "为一个 KF 客户端工程生成设计计划（不是页面控件，是设计意图）。输出 JSON 对象，所有字段必须齐全：",
+      "schema：固定字面量 \"kf-design-plan/v1\"（必须原样，不得改写）；displayName：工程显示名；summary：一句话摘要（≤80 字）；",
+      "layoutConcept：布局概念（≤400 字符，含一行 ASCII 线框即可，简短）；styleDirection：风格方向（配色/基调）；",
+      "sections：页面分区数组（1-8 区；每区必须是对象，含 id、label（区名，如 \"中部趋势区\"）、controls 数组（≤12 个占位，每个必须含 type，type 用枚举：text/button/inputnumber/switch/checkbox/radio/select/image/tabs/table/richtext/spacer））；",
+      "signature：本方案最特别的 1 个设计决策。所有字段值必须是字符串或数组，禁止省略字段，禁止用 null 占位。",
       "signature：本方案最特别的 1 个设计决策。",
     ];
     if (revising) {
