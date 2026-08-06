@@ -79,7 +79,7 @@ watch(
     }
     if (artifactId === undefined || artifactId === "") return;
     try {
-      previewUrl.value = await workspace.createPreviewUrl(artifactId);
+      previewUrl.value = workspace.createPreviewUrl(artifactId);
     } catch {
       previewUrl.value = undefined;
     }
