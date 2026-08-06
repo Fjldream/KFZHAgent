@@ -34,7 +34,8 @@ test("modify project: upload, patch one button color, byte-compare outside patch
   await page.waitForURL(/\/workspaces\/[0-9a-f-]{36}$/);
 
   // 2) 上传 KF 原生 .gz 源包
-  await expect(page.getByTestId("upload-input")).toBeVisible();
+  //    UploadGuide 的 input 带 hidden（由 label 触发），因此只断言挂载即可。
+  await expect(page.getByTestId("upload-input")).toBeAttached();
   await page.getByTestId("upload-input").setInputFiles(fixturePath("client-unknown-field.gz"));
   // 上传成功 → 产生 source revision 1（修订历史出现 R1）
   await expect(page.getByTestId("revision-list")).toContainText("R1", { timeout: 60_000 });

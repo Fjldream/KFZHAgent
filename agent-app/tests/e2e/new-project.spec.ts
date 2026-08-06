@@ -45,15 +45,15 @@ test("new project: plan, approve, build, download, and verify client files", asy
   await page.getByTestId("create-workspace").click();
   await page.waitForURL(/\/workspaces\/[0-9a-f-]{36}$/);
 
-  // 3) 工作区 shell：solution tree / conversation / plan / preview / revisions /
-  //    report 同屏可见，不跳转（brief Step 3）。
+  // 3) 工作区 shell（新设计：情境面板随工作流 stage 切换，入口在 /workspaces 列表页）。
+  //    进入后 idle：对话 + 工程树 + 修订列表可见；变更计划是弹层（ApprovalSheet）、
+  //    预览条按 previewUrl 出现，二者在未发送需求时均不渲染。
+  await expect(page.getByTestId("conversation-panel")).toBeVisible();
   await expect(page.getByTestId("project-tree")).toContainText("客户端工程");
   await expect(page.getByTestId("project-tree")).toContainText("计算域（未支持）");
-  await expect(page.getByTestId("conversation-panel")).toBeVisible();
-  await expect(page.getByTestId("change-plan-panel")).toBeVisible();
-  await expect(page.getByTestId("preview-panel")).toBeVisible();
   await expect(page.getByTestId("revision-list")).toBeVisible();
-  await expect(page.getByTestId("artifact-download")).toBeVisible();
+  await expect(page.getByTestId("change-plan-panel")).toHaveCount(0);
+  await expect(page.getByTestId("preview-panel")).toHaveCount(0);
 
   // 4) 通过 UI 提交确定性 fake-model 需求 → SSE 流在浏览器内完成 → 审批中断（计划 1）
   await page.getByTestId("message-input").fill("请新建一个示例页面");
@@ -63,8 +63,14 @@ test("new project: plan, approve, build, download, and verify client files", asy
   });
   const firstPlanHash = await extractPlanHash(page);
   expect(firstPlanHash).toMatch(/^[0-9a-f]{64}$/);
-  await expect(page.getByTestId("change-plan-panel")).toContainText("计划摘要");
+  // 变更计划以全屏弹层形式出现（ApprovalSheet），批准按钮在弹层内。
+  await expect(page.getByTestId("change-plan-panel")).toContainText("确认变更计划");
   await expect(page.getByTestId("approve-plan")).toBeEnabled();
+  // 若审批中断携带 previewArtifactId，预览条出现且 iframe 保持无脚本 sandbox。
+  if ((await page.getByTestId("preview-panel").count()) > 0) {
+    const sandbox = await page.getByTestId("preview-frame").getAttribute("sandbox");
+    expect(sandbox).not.toContain("allow-scripts");
+  }
 
   // 4.5) revise the plan（brief Step 6 要求）：UI 点「要求修改」→ 新计划展示，
   //      新 planHash 与旧的不同；批准必须使用 revise 后的 planHash。
@@ -86,7 +92,8 @@ test("new project: plan, approve, build, download, and verify client files", asy
   const jobId = resumeBody.buildJobId;
   expect(jobId).toBeTruthy();
 
-  // 6) worker 完成：UI 自动轮询构建任务，显示校验通过与下载按钮
+  // 6) worker 完成：UI 自动轮询构建任务，ready 情境面板显示校验通过与下载按钮
+  //    （批准后弹层关闭，download-artifact 由 ContextPanel ready 分支内联渲染）。
   await expect(page.getByTestId("report-outcome")).toContainText("校验通过", {
     timeout: 120_000,
   });
