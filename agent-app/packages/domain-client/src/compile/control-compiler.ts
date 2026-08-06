@@ -38,6 +38,8 @@ export class ModelOutputInvalidError extends Error {
 export interface CompileContext {
   /** KF group GUID shared by page-manager entries and the variable group file. */
   variableGroupGuid: string;
+  /** KF GUID of the page group (pageGroupManager.Groups.id / Pages[].groupId). */
+  pageGroupGuid: string;
   /** Resolves a `navigate.pageId` SEMANTIC PAGE ID (page name) to its KF GUID. */
   resolvePageGuid(semanticPageName: string): string;
   /** Validates a `setVariable.variableId` SEMANTIC VARIABLE ID (variable name). */

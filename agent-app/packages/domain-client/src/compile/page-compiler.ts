@@ -67,7 +67,7 @@ export function compilePage(
     state: true,
     resolution: `${width} * ${height}`,
     id: pageGuid,
-    groupId: ctx.variableGroupGuid,
+    groupId: ctx.pageGroupGuid,
     security: "",
     createtime: "",
     priority: "",

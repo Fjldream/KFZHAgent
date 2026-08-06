@@ -18,6 +18,11 @@ import {
 import { deriveGuid, type BuildSeed } from "./guid-factory.js";
 import { compilePage } from "./page-compiler.js";
 import type { TemplateJson } from "../templates/merge-template.js";
+import {
+  KF_METADATA_EMPTY_DIRS,
+  KF_SYSTEM_VARIABLES,
+  buildKfMetadataFiles,
+} from "./kf-metadata.js";
 
 export * from "./guid-factory.js";
 export {
@@ -86,6 +91,7 @@ export async function compileClientProject(
 ): Promise<ClientWorkspace> {
   const ir = validateIr(input);
   const variableGroupGuid = deriveGuid(build, "variables");
+  const pageGroupGuid = deriveGuid(build, "page-group");
 
   // ---------------------------------------------------------------------
   // Semantic-id uniqueness + reference indexes (brief Step 4)
@@ -134,6 +140,7 @@ export async function compileClientProject(
 
   const ctx: CompileContext = {
     variableGroupGuid,
+    pageGroupGuid,
     resolvePageGuid(semanticPageName) {
       const guid = pageNameToGuid.get(semanticPageName);
       if (guid === undefined) {
@@ -192,6 +199,21 @@ export async function compileClientProject(
 
   await writeJson(path.join(projectDir, "Tag", "globalVariableMng.json"), variables.manager);
   await writeJson(path.join(tagDir, `${variableGroupGuid}.json`), variables.group);
+
+  // KF 原生开发界面所需的元数据文件（页面组/配置树/脚本管理/权限/资源等）。
+  // 缺这些文件会导致 KF 客户端无法打开工程。
+  const metadataFiles = buildKfMetadataFiles({
+    pageGroupGuid,
+    pageGuids: compiledPages.map((page) => page.managerEntry["id"] as string),
+  });
+  for (const [rel, value] of Object.entries(metadataFiles)) {
+    const full = path.join(projectDir, rel);
+    await mkdir(path.dirname(full), { recursive: true });
+    await writeJson(full, value);
+  }
+  for (const rel of KF_METADATA_EMPTY_DIRS) {
+    await mkdir(path.join(projectDir, rel), { recursive: true });
+  }
 
   if (ir.scripts.length > 0) {
     await writeFile(
@@ -427,12 +449,14 @@ function compileVariables(
   variables: VariableIR[],
   groupGuid: string,
 ): { manager: TemplateJson; group: TemplateJson } {
-  const list = variables.map((variable, index) => {
+  // KF 工程以 1-10 为内置系统变量（$Year…$DayofWeek），用户变量从 11 开始，
+  // 与 createProject 初始化一致，避免 id 冲突。
+  const userList = variables.map((variable, index) => {
     const defaultValue = variable.defaultValue ?? 0;
     return {
       name: variable.name,
       dataType: variable.dataType,
-      id: index + 1,
+      id: index + 1 + KF_SYSTEM_VARIABLES.length,
       guid: deriveGuid(build, variable.name),
       comment: variable.comment ?? "",
       defaultValue,
@@ -445,13 +469,14 @@ function compileVariables(
       },
     };
   });
+  const list = [...KF_SYSTEM_VARIABLES, ...userList];
   return {
     manager: {
       Variables: [],
       Groups: {
         name: "工程变量",
         id: groupGuid,
-        variables: [],
+        variables: KF_SYSTEM_VARIABLES.map((v) => v.name),
         groups: [],
       },
     },

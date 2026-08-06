@@ -260,6 +260,74 @@ describe("client compiler", () => {
       "inputnumber",
       "text",
     ]);
-    expect(inspected.index.variables["1"].name).toBe("$Temp");
+    // KF 系统变量占 id 1-10，minimal IR 的用户变量 $Temp 从 id 11 开始
+    expect(inspected.index.variables["11"].name).toBe("$Temp");
   });
+});
+
+// ---------------------------------------------------------------------------
+// KF metadata completeness (实机验收发现：缺元数据文件导致 KF 客户端无法打开)
+// ---------------------------------------------------------------------------
+
+const KF_REQUIRED_METADATA = [
+  "config/GraphicModelManager.json",
+  "config/loginConfig.json",
+  "config/GraphicGroupManager.json",
+  "ImgResourceManager.json",
+  "reportManager.json",
+  "reportGroupManager.json",
+  "resourceGroupManager.json",
+  "userManager.json",
+  "datasourceManager.json",
+  "diffusionManager.json",
+  "globalScriptManager.json",
+  "authManager.json",
+  "resourceManager.json",
+  "securitySectionManager.json",
+  "pageGroupManager.json",
+  "dataSet/dataSet.json",
+  "htDataModel/storage/scenes/default.json",
+];
+
+it("compiled workspace includes the full KF metadata file set", async () => {
+  const result = await compileClientProject(ir, { seed: "metadata-test" });
+  const projectDir = path.join(result.path, "1.0.0.1", "project");
+  for (const rel of KF_REQUIRED_METADATA) {
+    await expect(readFile(path.join(projectDir, rel), "utf8")).resolves.toBeTruthy();
+  }
+});
+
+it("page group wiring is consistent (pageManager.groupId === pageGroupManager.Groups.id)", async () => {
+  const result = await compileClientProject(ir, { seed: "group-test" });
+  const projectDir = path.join(result.path, "1.0.0.1", "project");
+  const pm = JSON.parse(await readFile(path.join(projectDir, "pageManager.json"), "utf8"));
+  const pg = JSON.parse(await readFile(path.join(projectDir, "pageGroupManager.json"), "utf8"));
+  expect(pm.Pages.length).toBeGreaterThan(0);
+  for (const page of pm.Pages) expect(page.groupId).toBe(pg.Groups.id);
+  expect(pg.Groups.pages).toEqual(pm.Pages.map((p) => p.id));
+  const diff = JSON.parse(await readFile(path.join(projectDir, "diffusionManager.json"), "utf8"));
+  for (const page of pm.Pages) expect(Object.keys(diff.page)).toContain(page.id);
+});
+
+it("variables include KF system variables (id 1-10) and user variables start above 10", async () => {
+  const result = await compileClientProject(ir, { seed: "var-test" });
+  const projectDir = path.join(result.path, "1.0.0.1", "project");
+  const entries = await readdir(path.join(projectDir, "Tag", "variables"));
+  const groupFile = path.join(projectDir, "Tag", "variables", entries.find((f) => f.endsWith(".json")));
+  const group = JSON.parse(await readFile(groupFile, "utf8"));
+  const sysNames = ["$Year", "$Month", "$Day", "$Hour", "$Minute", "$Second", "$MilliSecond", "$Date", "$Time", "$DayofWeek"];
+  for (const sys of sysNames) expect(group.Variables.map((v) => v.name)).toContain(sys);
+  expect(group.Variables.slice(0, 10).map((v) => v.id)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  const userVars = group.Variables.slice(10);
+  expect(userVars.length).toBeGreaterThan(0);
+  for (const v of userVars) expect(v.id).toBeGreaterThan(10);
+});
+
+it("metadata dirs are created and determinism still holds", async () => {
+  const a = await compileClientProject(ir, { seed: "determinism-a" });
+  const b = await compileClientProject(ir, { seed: "determinism-a" });
+  expect(await hashDirectory(a.path)).toBe(await hashDirectory(b.path));
+  for (const rel of ["dataSource", "svgs", "res/graphicGroup", "htDataModel/storage/assets"]) {
+    await expect(readdir(path.join(a.path, "1.0.0.1", "project", rel))).resolves.toBeDefined();
+  }
 });
