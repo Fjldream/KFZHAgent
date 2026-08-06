@@ -1,4 +1,4 @@
-import type { ChangePlan } from "@kf/contracts";
+import type { ChangePlan, DesignPlan } from "@kf/contracts";
 import { solutionId } from "@kf/contracts";
 import { deriveGuid } from "@kf/domain-client";
 import type {
@@ -35,6 +35,19 @@ export class DeterministicFakeModelPort implements ModelPort {
       intent: "QUESTION",
       requestedDomains: ["kingclient"],
       reply: "（确定性演示模型）已收到你的问题，请继续描述需求。",
+    });
+  }
+
+  createDesignPlan(_input: ModelPortContext): Promise<DesignPlan> {
+    void _input;
+    return Promise.resolve({
+      schema: "kf-design-plan/v1",
+      displayName: "确定性设计",
+      summary: "确定性设计计划",
+      layoutConcept: "单区布局",
+      styleDirection: "默认风格",
+      sections: [{ id: "main", label: "主区", controls: [{ type: "text", text: "主标题" }] }],
+      signature: "确定性记忆点",
     });
   }
 

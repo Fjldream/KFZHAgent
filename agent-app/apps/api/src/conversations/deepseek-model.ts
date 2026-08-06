@@ -1,5 +1,5 @@
-import type { ChangePlan, ValidationReport } from "@kf/contracts";
-import { changePlanSchema, solutionId } from "@kf/contracts";
+import type { ChangePlan, DesignPlan, ValidationReport } from "@kf/contracts";
+import { changePlanSchema, DesignPlanSchema, solutionId } from "@kf/contracts";
 import type {
   ClassifyIntentResult,
   EditableEntity,
@@ -162,6 +162,27 @@ export class DeepSeekModelPort implements ModelPort {
         requestedDomains: ["kingclient"],
         reply: "（DeepSeek 模型输出未通过校验，已按提问处理）",
       };
+    }
+    return parsed.data;
+  }
+
+  async createDesignPlan(input: ModelPortContext, _opts?: { revising?: boolean }): Promise<DesignPlan> {
+    const lines = [
+      "为一个 KF 客户端工程生成设计计划（不是页面控件，是设计意图）。输出 JSON 符合 kf-design-plan/v1：",
+      "displayName：工程显示名；summary：一句话摘要；layoutConcept：布局概念（含 ASCII 线框）；",
+      "styleDirection：风格方向（配色/基调）；sections：页面分区（≤8 区，每区 ≤12 个控件占位，type 用指定枚举：text/button/inputnumber/switch/checkbox/radio/select/image/tabs/table/richtext/spacer）；",
+      "signature：本方案最特别的 1 个设计决策。",
+      "需求：" + (input.requirementText ?? ""),
+    ].join("\n");
+    const raw = await this.chatJson(SYSTEM_PROMPT, lines);
+    const parsed = DesignPlanSchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new DeepSeekModelOutputError(
+        `design plan failed zod gate: ${parsed.error.issues
+          .slice(0, 3)
+          .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+          .join("; ")}`,
+      );
     }
     return parsed.data;
   }
