@@ -77,7 +77,7 @@
 ### 5.3 情境面板状态可视化（ContextPanel）
 
 - idle：工程概况卡（名称/模式/修订数，StatCard 风格）
-- building：确定性步骤进度——编译 → 校验 → 打包，每步随 `buildJobStatus`（QUEUED/RUNNING/VALIDATING）点亮
+- building：确定性步骤进度——排队（QUEUED）→ 编译（RUNNING）→ 校验（VALIDATING）→ 完成（SUCCEEDED），每步随 `buildJobStatus` 点亮
 - ready/error：校验报告卡片化（现有 ValidationReport 视觉统一到 tokens）
 
 ## 6. 预览增强（PreviewBar）
