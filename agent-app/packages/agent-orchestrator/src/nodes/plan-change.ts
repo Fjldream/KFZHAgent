@@ -52,6 +52,7 @@ export function createPlanChangeNode(deps: SolutionGraphDeps) {
       currentRevisionId: state.currentRevisionId,
       requirementText: latestUserMessage(state),
       editableEntities,
+      designPlan: state.designPlan,
     };
 
     // New workspace: initial design only, no plan/build. The raw design output
