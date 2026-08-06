@@ -1,5 +1,6 @@
 import type { ChangePlan, DesignPlan, ValidationReport } from "@kf/contracts";
 import { changePlanSchema, DesignPlanSchema, solutionId } from "@kf/contracts";
+import { KF_DESIGN_PRINCIPLES_FULL } from "./kf-design-principles.js";
 import type {
   ClassifyIntentResult,
   EditableEntity,
@@ -60,7 +61,9 @@ const SYSTEM_PROMPT = `你是 KingFusion（KF）客户端工程生成 Agent 的�
 输出规则：
 - 只输出合法 JSON，不要 Markdown 围栏、注释或额外说明。
 - 计划中的 entityId 必须是用户提供的实体清单里的 GUID，禁止编造。
-- 修改字段只允许控件受控字段，如 /text、/backgroundColor、/x、/y、/width、/height。`;
+- 修改字段只允许控件受控字段，如 /text、/backgroundColor、/x、/y、/width、/height。
+
+${KF_DESIGN_PRINCIPLES_FULL}`;
 
 /**
  * CLARIFY 输出若漏掉 clarifyingQuestion（模型只声明要澄清却没给问题），
@@ -201,7 +204,7 @@ export class DeepSeekModelPort implements ModelPort {
   async createDesignPlan(input: ModelPortContext, opts?: { revising?: boolean }): Promise<DesignPlan> {
     const revising = opts?.revising === true;
     const lines = [
-      "遵循设计原则：布局有主次、避免模板脸（不要白底等大按钮堆叠）、一个记忆点、控件文案具体可读。",
+      "设计遵循系统提示中的《KF 设计原则（KF_DESIGN_PRINCIPLES_FULL）》章节：布局有主次、避免模板脸（不要白底等大按钮堆叠）、一个记忆点、控件文案具体可读。",
       "为一个 KF 客户端工程生成设计计划（不是页面控件，是设计意图）。输出 JSON 符合 kf-design-plan/v1：",
       "displayName：工程显示名；summary：一句话摘要；layoutConcept：布局概念（含 ASCII 线框）；",
       "styleDirection：风格方向（配色/基调）；sections：页面分区（≤8 区，每区 ≤12 个控件占位，type 用指定枚举：text/button/inputnumber/switch/checkbox/radio/select/image/tabs/table/richtext/spacer）；",
