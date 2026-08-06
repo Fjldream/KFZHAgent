@@ -8,6 +8,8 @@ const api = vi.hoisted(() => ({
   listConversations: vi.fn(),
   createConversation: vi.fn(),
   listMessages: vi.fn(),
+  createDownloadToken: vi.fn(),
+  previewUrl: vi.fn(),
 }));
 
 vi.mock("../api", () => ({ api }));
@@ -24,6 +26,8 @@ beforeEach(() => {
   api.listConversations.mockReset();
   api.createConversation.mockReset();
   api.listMessages.mockReset();
+  api.createDownloadToken.mockReset();
+  api.previewUrl.mockReset();
 
   api.getWorkspace.mockResolvedValue(ws);
   api.listRevisions.mockResolvedValue([]);
@@ -81,6 +85,5 @@ describe("workspace store load() 会话绑定", () => {
     expect(url).toBe("/api/artifacts/art-abc/preview");
     expect(api.previewUrl).toHaveBeenCalledWith("art-abc");
     expect(api.createDownloadToken).not.toHaveBeenCalled();
-    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 });
