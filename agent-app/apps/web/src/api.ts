@@ -132,6 +132,12 @@ export const api = {
       body: JSON.stringify({ workspaceId, ...(title !== undefined ? { title } : {}) }),
     });
   },
+  /** 列出 workspace 下已有会话（最新在前），用于恢复对话历史。 */
+  async listConversations(workspaceId: string): Promise<{ id: string; title: string }[]> {
+    return jsonResponse<{ id: string; title: string }[]>(
+      `/api/conversations?workspaceId=${encodeURIComponent(workspaceId)}`,
+    );
+  },
   async getChangePlan(
     changePlanId: string,
   ): Promise<{
@@ -174,6 +180,10 @@ export const api = {
       `/api/artifacts/${artifactId}/download-token`,
       { method: "POST" },
     );
+  },
+  /** 预览端点 URL（iframe src 直接加载服务端渲染的 HTML）。 */
+  previewUrl(artifactId: string): string {
+    return `${API_BASE}/api/artifacts/${encodeURIComponent(artifactId)}/preview`;
   },
   /** 两段式下载最终 URL（GET 该地址返回制品字节流）。 */
   downloadUrl(token: string): string {

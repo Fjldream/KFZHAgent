@@ -336,15 +336,9 @@ async function downloadArtifact(artifactId: string): Promise<void> {
   anchor.remove();
 }
 
-/** 将预览制品经授权端点转换为 blob URL，供 sandbox iframe 加载。 */
+/** 预览 iframe 直接加载渲染端点（服务端把 ClientProjectIR 渲染为 HTML）。 */
 async function createPreviewUrl(artifactId: string): Promise<string> {
-  const { token } = await api.createDownloadToken(artifactId);
-  const res = await fetch(api.downloadUrl(token), { credentials: "include" });
-  if (!res.ok) {
-    throw new Error(`预览加载失败（HTTP ${res.status}）`);
-  }
-  const blob = await res.blob();
-  return URL.createObjectURL(blob);
+  return await Promise.resolve(api.previewUrl(artifactId));
 }
 
 export function useWorkspace() {
