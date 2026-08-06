@@ -70,13 +70,18 @@ onMounted(() => {
   if (activeWorkspaceId.value !== undefined) void refresh();
 });
 
-// 预览：approval interrupt 携带 previewArtifactId 时加载渲染端点 HTML。
+// 预览：构建成功的新产物（state.previewArtifactId）优先，审批中断携带的
+// 旧产物（pendingApproval.previewArtifactId，修改已有工程场景）兜底。
 watch(
-  () => workspace.state.pendingApproval?.previewArtifactId,
-  async (artifactId) => {
+  () => [
+    workspace.state.previewArtifactId,
+    workspace.state.pendingApproval?.previewArtifactId,
+  ],
+  async ([builtArtifactId, pendingArtifactId]) => {
     if (previewUrl.value !== undefined) {
       previewUrl.value = undefined;
     }
+    const artifactId = builtArtifactId ?? pendingArtifactId;
     if (artifactId === undefined || artifactId === "") return;
     try {
       previewUrl.value = workspace.createPreviewUrl(artifactId);
