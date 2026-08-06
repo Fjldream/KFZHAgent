@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * The eight intents the model can classify a user turn into (brief Step 4).
+ * The intents the model can classify a user turn into (brief Step 4).
  * Deterministic routing switches exclusively on these values; the graph never
  * guesses a route. Unsupported-domain requests keep a supported intent
  * (NEW_REQUIREMENT / MODIFY_REQUIREMENT) but are diverted to pendingRequirements
@@ -9,7 +9,10 @@ import { z } from "zod";
  * model needs more information before it can pick a route. CONFIRM_DESIGN and
  * REVISE_DESIGN drive the design-plan loop (design-review): the user confirms
  * the presented design plan (→ plan-change) or asks for a revision (→ design-plan
- * again with revising=true).
+ * again with revising=true). CONFIRM_BUILD lands the preview-review loop
+ * (Task 9): after the build enqueues and a preview is available, confirming the
+ * result routes to the terminal `done` stage; REVISE_DESIGN / MODIFY_REQUIREMENT
+ * in the preview-review stage loop back to design-plan / plan-change.
  */
 export const IntentSchema = z.enum([
   "QUESTION",
@@ -22,6 +25,7 @@ export const IntentSchema = z.enum([
   "CLARIFY",
   "CONFIRM_DESIGN",
   "REVISE_DESIGN",
+  "CONFIRM_BUILD",
 ]);
 export type Intent = z.infer<typeof IntentSchema>;
 

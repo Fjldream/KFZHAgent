@@ -108,6 +108,8 @@ export const AgentGraphState = new StateSchema({
     .optional(),
   /** Short model reply for the current turn (fallback channel). */
   reply: z.string().optional(),
+  /** True once the client confirmed the built preview (stage=done, landing). */
+  buildConfirmed: z.boolean().optional(),
   /**
    * The design plan produced during design-planning (brief Task 3 contract).
    * `revising` marks an in-progress revision of this plan (used by Task 6).

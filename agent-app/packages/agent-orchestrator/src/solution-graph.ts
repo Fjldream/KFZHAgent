@@ -5,7 +5,7 @@ import {
   isCommand,
   type BaseCheckpointSaver,
 } from "@langchain/langgraph";
-import type { AgentGraphStateValue } from "./state.js";
+import type { AgentGraphStateValue, AgentGraphUpdate } from "./state.js";
 import { AgentGraphState } from "./state.js";
 import type { SolutionGraphDeps } from "./ports.js";
 import { createLoadContextNode } from "./nodes/load-context.js";
@@ -44,7 +44,9 @@ export class ApprovalResumeRequiredError extends Error {
  *   NEW_REQUIREMENT     → plan-change
  *   MODIFY_REQUIREMENT  → plan-change
  *   CONFIRM_DESIGN      → plan-change (design plan confirmed; guard requires designPlanHash)
- *   REVISE_DESIGN       → design-plan (revision loop, revising=true)
+ *   REVISE_DESIGN       → design-plan (revision loop, revising=true; also routes preview feedback)
+ *   CONFIRM_BUILD       → done (preview-review loop lands, stage=done)
+ *   MODIFY_REQUIREMENT  → plan-change (small tweaks; also routes preview feedback)
  *   CONFIRM_PLAN        → approval
  *   CANCEL_PLAN         → cancel-plan
  *   ROLLBACK            → idle + ROLLBACK_NOT_SUPPORTED
@@ -73,6 +75,7 @@ export function compileSolutionGraph(
     .addNode("approval", createApprovalNode())
     .addNode("cancel-plan", createCancelPlanNode(deps))
     .addNode("enqueue-build", createEnqueueBuildNode(deps))
+    .addNode("done", createDoneNode())
     .addEdge(START, "load-context")
     .addEdge("load-context", "classify-intent")
     .addConditionalEdges("classify-intent", routeAfterClassify)
@@ -80,6 +83,7 @@ export function compileSolutionGraph(
     .addConditionalEdges("approval", routeAfterApproval)
     .addEdge("cancel-plan", END)
     .addEdge("enqueue-build", END)
+    .addEdge("done", END)
     .compile(options);
   return guardCompiledGraph(graph);
 }
@@ -103,6 +107,10 @@ function routeAfterClassify(state: AgentGraphStateValue): string {
       return "plan-change";
     case "REVISE_DESIGN":
       return "design-plan";
+    case "CONFIRM_BUILD":
+      // Preview-review landing: END is a langgraph built-in that cannot carry
+      // a state update, so route through the explicit `done` node first.
+      return "done";
     case "CONFIRM_PLAN":
       return "approval";
     case "CANCEL_PLAN":
@@ -122,6 +130,15 @@ function routeAfterClassify(state: AgentGraphStateValue): string {
  */
 function routeAfterPlanChange(state: AgentGraphStateValue): string {
   return state.stage === "approval" ? "approval" : END;
+}
+
+/**
+ * Terminal landing node for the preview-review loop (Task 9): CONFIRM_BUILD
+ * routes here and sets stage=done. Written as a real node instead of routing
+ * CONFIRM_BUILD straight to END because END accepts no state update.
+ */
+function createDoneNode() {
+  return (_state: AgentGraphStateValue): AgentGraphUpdate => ({ stage: "done" });
 }
 
 /** Resume routing after the approval interrupt (brief Step 5). */

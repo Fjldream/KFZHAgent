@@ -457,7 +457,7 @@ describe("api contract", () => {
     const planHash = await planRequirement(cookie, conv.body.id);
 
     const res = await resume(cookie, conv.body.id, { action: "approve", planHash }).expect(200);
-    expect(res.body.stage).toBe("idle");
+    expect(res.body.stage).toBe("preview-review"); // enqueue-build enters the preview feedback loop
     expect(res.body.buildJobId).toBeTruthy();
 
     const job = await request(server)
@@ -878,7 +878,7 @@ describe("hardening fixes", () => {
     expect(statuses).toEqual([200, 409, 409]);
 
     const ok = [r1, r2, r3].find((r) => r.status === 200);
-    expect(ok.body.stage).toBe("idle");
+    expect(ok.body.stage).toBe("preview-review"); // enqueue-build enters preview feedback loop
     expect(ok.body.buildJobId).toBeTruthy();
     const conflicts = [r1, r2, r3].filter((r) => r.status === 409);
     expect(conflicts).toHaveLength(2);

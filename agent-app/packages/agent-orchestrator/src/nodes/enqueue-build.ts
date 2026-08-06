@@ -50,9 +50,18 @@ export function createEnqueueBuildNode(deps: SolutionGraphDeps) {
         changeRequestId: state.activeChangeRequestId,
         status: "APPROVED",
       });
+      // Task 9: the build is enqueued and a preview is available — enter the
+      // preview-review loop so the user can confirm (CONFIRM_BUILD → done) or
+      // ask for tweaks (REVISE_DESIGN / MODIFY_REQUIREMENT → loop back).
+      await deps.workspaceQuery.appendMessage({
+        tenantId: state.tenantId,
+        conversationId: state.conversationId,
+        role: "assistant",
+        content: "构建完成，预览已生成；满意回复「确认落地」，或继续提修改意见。",
+      });
       return {
         buildJobId: job.id,
-        stage: "idle",
+        stage: "preview-review",
         resumeAction: undefined,
         pendingRequirements: undefined,
       };

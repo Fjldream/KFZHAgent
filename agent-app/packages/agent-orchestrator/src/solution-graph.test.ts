@@ -474,8 +474,89 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
       domainKind: "kingclient",
     });
     expect(result.buildJobId).toBe("job-1");
-    expect(result.stage).toBe("idle");
+    expect(result.stage).toBe("preview-review");
     expect(bed.repo.statusOf(payload.changeRequestId)).toBe("APPROVED");
+  });
+
+  it("build success enters preview-review with a hint message; CONFIRM_BUILD lands (stage=done)", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+    const payload = await planNewRequirement(bed, ctx, "新增一个按钮");
+
+    const built = await approve(bed, ctx, payload);
+
+    expect(built.stage).toBe("preview-review");
+    expect(built.buildJobId).toBe("job-1");
+    expect(bed.workspace.appendCalls).toContainEqual(
+      expect.objectContaining({
+        role: "assistant",
+        content: expect.stringContaining("确认落地"),
+      }),
+    );
+
+    // 预览反馈循环：用户确认落地 → 终态 done
+    bed.model.queueIntent("CONFIRM_BUILD");
+    await sendUser(bed, ctx, "确认落地");
+    const landed = await bed.graph.invoke(
+      { ...input(ctx), stage: "preview-review" },
+      config(ctx),
+    );
+
+    expect(landed.stage).toBe("done");
+  });
+
+  it("preview feedback REVISE_DESIGN routes back to design-plan (designRevision+1)", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+    const payload = await planNewRequirement(bed, ctx, "新增一个按钮");
+    await approve(bed, ctx, payload);
+
+    bed.model.queueIntent("REVISE_DESIGN");
+    await sendUser(bed, ctx, "改成浅色风格");
+    const result = await bed.graph.invoke(
+      { ...input(ctx), stage: "preview-review" },
+      config(ctx),
+    );
+
+    expect(result.stage).toBe("design-review");
+    expect(result.designRevision).toBe(1);
+  });
+
+  it("preview feedback MODIFY_REQUIREMENT routes back to plan-change", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+    const payload = await planNewRequirement(bed, ctx, "新增一个按钮");
+    await approve(bed, ctx, payload);
+
+    bed.model.queueIntent("MODIFY_REQUIREMENT");
+    await sendUser(bed, ctx, "把按钮放大一点");
+    const held = await bed.graph.invoke(
+      { ...input(ctx), stage: "preview-review" },
+      config(ctx),
+    );
+    void held;
+    const next = await interruptPayload(bed, ctx);
+
+    expect(next).toBeDefined();
+    expect(next?.type).toBe("plan-approval");
+    expect(bed.model.reviseCalls).toHaveLength(1);
+  });
+
+  it("preview feedback is re-classified by keywords when the model disagrees (preview-review fallback)", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+    const payload = await planNewRequirement(bed, ctx, "新增一个按钮");
+    await approve(bed, ctx, payload);
+
+    // 模型把"确认落地"分类成 QUESTION，但预览阶段的确认词兜底为 CONFIRM_BUILD
+    bed.model.queueIntent("QUESTION");
+    await sendUser(bed, ctx, "确认落地");
+    const result = await bed.graph.invoke(
+      { ...input(ctx), stage: "preview-review" },
+      config(ctx),
+    );
+
+    expect(result.stage).toBe("done");
   });
 
   it("keeps a pending approval resumable when a non-resume message arrives", async () => {
@@ -491,6 +572,9 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
       ApprovalResumeRequiredError,
     );
 
+    // The rejected plain message produced no assistant reply.
+    expect(bed.workspace.appendCalls.filter((call) => call.role === "assistant")).toHaveLength(0);
+
     // The pending approval is intact: the exact planHash resume still enqueues.
     const result = await bed.graph.invoke(
       new Command({ resume: { action: "approve", planHash: payload.planHash } }),
@@ -499,8 +583,6 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     expect(result.buildJobId).toBe("job-1");
     expect(bed.builds.enqueues).toHaveLength(1);
     expect(bed.repo.statusOf(payload.changeRequestId)).toBe("APPROVED");
-    // The rejected plain message produced no assistant reply.
-    expect(bed.workspace.appendCalls.filter((call) => call.role === "assistant")).toHaveLength(0);
   });
 
   it("returns to planning when the enqueued build failed", async () => {

@@ -350,7 +350,7 @@ describe("SolutionGraph Postgres checkpoint recovery", () => {
     );
 
     expect(result.conversationId).toBe(seeded.conversationId);
-    expect(result.stage).toBe("idle");
+    expect(result.stage).toBe("preview-review");
     expect(result.buildJobId).toBeDefined();
 
     // The approved plan made it to the durable build queue under the same
@@ -362,11 +362,11 @@ describe("SolutionGraph Postgres checkpoint recovery", () => {
     expect(job?.planHash).toBe(payload?.planHash);
     expect(job?.baseRevisionId).toBe(seeded.revisionId);
 
-    // Same conversation: the assistant reply for the follow-up question is
-    // appended to the same conversation thread.
+    // Same conversation: the assistant preview hint appended by enqueue-build
+    // is persisted alongside the seeded user message.
     const replyCount = await prisma.message.count({
       where: { conversationId: seeded.conversationId },
     });
-    expect(replyCount).toBe(1);
+    expect(replyCount).toBe(2);
   });
 });

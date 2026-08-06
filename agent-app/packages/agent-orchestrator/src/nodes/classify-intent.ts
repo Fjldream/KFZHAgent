@@ -9,6 +9,40 @@ import { ClassifyIntentResultSchema } from "../schemas/intent.js";
 const CLARIFY_MAX_TURNS = 5;
 
 /**
+ * preview-review 阶段（Task 9）的关键词分档表。用户在构建预览后的自然语言
+ * 反馈按内容确定性地重分类，不依赖真实 LLM 是否感知到阶段上下文：
+ *   - 确认类短回复 → CONFIRM_BUILD（落地）；
+ *   - 含布局/风格/整体/重新设计等大改词 → REVISE_DESIGN（回设计循环）；
+ *   - 具体小改（文案/尺寸/控件等）→ MODIFY_REQUIREMENT（回变更计划）。
+ * 命中顺序为确认 → 大改 → 小改；未命中则保留模型分类（如 preview 阶段的问题）。
+ */
+const PREVIEW_CONFIRM_WORDS = ["确认落地", "确认", "可以了", "满意", "没问题", "就这样", "好的"];
+const PREVIEW_REDESIGN_WORDS = [
+  "重新设计",
+  "重新生成",
+  "重做",
+  "整体",
+  "布局",
+  "风格",
+  "色调",
+  "主题",
+  "大改",
+];
+const PREVIEW_SMALL_CHANGE_WORDS = [
+  "改",
+  "调整",
+  "加",
+  "删",
+  "换",
+  "移动",
+  "缩小",
+  "放大",
+  "文案",
+  "尺寸",
+  "控件",
+];
+
+/**
  * Classifies the current turn through ModelPort.classifyIntent and applies the
  * deterministic routing decisions:
  *   - unsupported-domain NEW/MODIFY requirements → pendingRequirements, idle,
@@ -46,7 +80,19 @@ export function createClassifyIntentNode(deps: SolutionGraphDeps) {
         resumeAction: undefined,
       };
     }
-    const result = parsed.data;
+    let result = parsed.data;
+
+    // preview-review 阶段：对看预览后的反馈做关键词兜底分档（见上面词表）。
+    if (state.stage === "preview-review") {
+      const text = requirementText ?? "";
+      if (PREVIEW_CONFIRM_WORDS.some((word) => text.includes(word))) {
+        result = { ...result, intent: "CONFIRM_BUILD" };
+      } else if (PREVIEW_REDESIGN_WORDS.some((word) => text.includes(word))) {
+        result = { ...result, intent: "REVISE_DESIGN" };
+      } else if (PREVIEW_SMALL_CHANGE_WORDS.some((word) => text.includes(word))) {
+        result = { ...result, intent: "MODIFY_REQUIREMENT" };
+      }
+    }
 
     const wantsChange =
       result.intent === "NEW_REQUIREMENT" || result.intent === "MODIFY_REQUIREMENT";
