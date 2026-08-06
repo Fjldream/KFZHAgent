@@ -131,6 +131,99 @@ describe("DeepSeekModelPort", () => {
     expect(Array.isArray(design.projects)).toBe(true);
   });
 
+  it("createDesignPlan returns a valid DesignPlan", async () => {
+    const plan = {
+      schema: "kf-design-plan/v1",
+      displayName: "监控大屏",
+      summary: "深色工业风",
+      layoutConcept: "顶部标题 + 中部趋势区",
+      styleDirection: "深色工业风",
+      sections: [{ id: "kpi", label: "KPI 区", controls: [{ type: "text", text: "产量" }] }],
+      signature: "趋势联动 KPI",
+    };
+    const port = makePort(plan);
+    const result = await port.createDesignPlan({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [],
+      requirementText: "做一个监控大屏",
+    });
+    expect(result.displayName).toBe("监控大屏");
+    expect(result.sections).toHaveLength(1);
+    expect(result.sections[0].controls[0].type).toBe("text");
+  });
+
+  it("createDesignPlan rejects output that fails the zod gate", async () => {
+    const port = makePort({
+      schema: "kf-design-plan/v1",
+      displayName: "x",
+      summary: "s",
+      layoutConcept: "l",
+      styleDirection: "d",
+      sections: [{ id: "s1", label: "区", controls: [{ type: "gauge" }] }],
+      signature: "sig",
+    });
+    await expect(
+      port.createDesignPlan({ tenantId: "t", userId: "u", workspaceId: "w", conversationId: "c", recentMessages: [] }),
+    ).rejects.toThrow(DeepSeekModelOutputError);
+  });
+
+  it("createDesignPlan injects the previous plan and revision notes when revising", async () => {
+    const previousPlan = {
+      schema: "kf-design-plan/v1",
+      displayName: "监控大屏",
+      summary: "旧版",
+      layoutConcept: "顶部标题 + 中部趋势区",
+      styleDirection: "深色工业风",
+      sections: [{ id: "kpi", label: "KPI 区", controls: [{ type: "text", text: "产量" }] }],
+      signature: "趋势联动 KPI",
+    };
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                ...previousPlan,
+                displayName: "监控大屏v2",
+                summary: "修订版",
+                signature: "大标题吸色",
+              }),
+            },
+          },
+        ],
+      }),
+    });
+    const port = new DeepSeekModelPort({
+      apiKey: "test-key",
+      fetch: fetchImpl,
+      baseUrl: "https://mock.local",
+    });
+    const result = await port.createDesignPlan(
+      {
+        tenantId: "t",
+        userId: "u",
+        workspaceId: "w",
+        conversationId: "c",
+        recentMessages: [],
+        requirementText: "把大标题改成红色",
+        designPlan: previousPlan,
+      },
+      { revising: true },
+    );
+    expect(result.displayName).toBe("监控大屏v2");
+    // 修订上下文必须出现在 user prompt：上一版计划 + 客户修改意见 + 修订指令。
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    const userPrompt = body.messages[1].content;
+    expect(userPrompt).toContain("上一版设计计划");
+    expect(userPrompt).toContain(JSON.stringify(previousPlan));
+    expect(userPrompt).toContain("把大标题改成红色");
+    expect(userPrompt).toContain("在上一版基础上修订");
+  });
+
   it("createChangePlan keeps only operations referencing known entity GUIDs", async () => {
     const knownGuid = "11111111-1111-4111-8111-111111111111";
     const port = makePort({
