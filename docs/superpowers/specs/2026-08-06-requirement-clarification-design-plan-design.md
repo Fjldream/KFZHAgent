@@ -10,10 +10,18 @@
 1. **无需求澄清**：客户输入一句需求（如"生成一个监控大屏"），Agent 直接一次性地生成变更计划/方案，无法通过连续追问确认需求，交互体验差；
 2. **产物与需求偏差大**：生成"监控大屏"只得到几个按钮（按钮文本写"趋势曲线"）——因为 IR 控件类型无图表类、LLM prompt 硬编码只允许 text/button/inputnumber 三种控件、且 DeepSeek 没有任何设计审美引导。
 
-本设计通过三层改动解决（控件能力补全见 §9 后续计划）：
+本设计把 Agent 从"任务型一次性生成"升级为 **Reasonix 式持续对话迭代设计**：设计是一个随对话持续演化的对象，用户通过不断对话（澄清→设计计划→预览）反复调整方案，最终满意后落地工程。
 
-- **层 1（架构）**：LangGraph 增加逐轮需求澄清（CLARIFY 意图 + clarify 节点 + 澄清计数上限），信息不足时 Agent 必须追问而非猜测；
-- **层 2（架构）**：澄清完成后、生成控件方案前，增加"设计计划确认"环节（design-plan 节点 + CONFIRM_DESIGN/REVISE_DESIGN 意图），客户先看到"我理解你要什么 + 打算怎么做"再放行；
+三个目标缺口（已实证，见 §2）：
+
+1. **无澄清**：输入需求直接出方案，无法连续确认需求；
+2. **无设计迭代**：设计一次性生成，用户看不到"我理解你要什么 + 打算怎么做"，也无法反复调整；
+3. **无预览反馈**：构建后没有"看真实效果 → 反馈 → 修订 → 重建"的闭环。
+
+三层改动（控件能力补全见 §9 后续计划）：
+
+- **层 1（架构）**：逐轮需求澄清（CLARIFY 意图 + clarify 节点 + 澄清计数上限），信息不足时 Agent 必须追问而非猜测；
+- **层 2（架构）**：**设计迭代循环**——design-plan 节点产出/修订 DesignPlan（布局/风格/分区/控件清单），SSE 对话内展示；用户自然语言反馈 → REVISE_DESIGN → 修订重新展示（不设上限）；确认 → 生成控件方案 → 批准 → 构建 → **预览反馈循环**（看预览 → 反馈 → 修订 → 重建，满意才落地）；
 - **层 3（模型）**：把 Anthropic 官方 `frontend-design` skill（Apache 2.0）转录为 DeepSeek system prompt 的 `KF_DESIGN_PRINCIPLES` 章节（适配 KF 控件语言），让 DeepSeek 具备设计审美并遵守"两遍流程"。
 
 核心原则不变：Agent 决定做什么；LangGraph 决定何时做；确定性 KF Build Engine 准确地生成、修改、验证和打包工程。
@@ -36,18 +44,23 @@
 | LLM Prompt | create 格式硬编码 `type:"text\|button\|inputnumber"` | 即使有图表类型 prompt 也只让建三种 |
 | KF 侧 | 趋势曲线是运行时图表组件（ChartComponent/EChart/TrendChart，KMEnumChartComponentType.TRENDCHART），非页面 JSON 静态控件；SDB 真实工程无图表样本 | 趋势曲线在页面 JSON 的序列化形式未验证（本设计不解决，见 §9 遗留） |
 
-## 3. 方案总览
+## 3. 方案总览：Reasonix 式迭代对话
 
 ```
 用户输入需求
   → classify ──CLARIFY──► clarify 节点（追问+可选项）→ idle，等客户回答
   → classify（信息足够）──► design-plan 节点（生成设计计划）
-  → SSE 对话内展示设计计划 → idle，stage=design-pending
+  → SSE 对话内展示设计计划 → idle，stage=design-review
+  → 用户自然语言反馈 ──REVISE_DESIGN──► design-plan 修订 → 重新展示（循环，不限次数）
   → CONFIRM_DESIGN ──► plan-change（生成控件方案）→ approval（现有）→ build
-  → REVISE_DESIGN ──► design-plan（带修改意见修订）→ 重新展示
+  → 构建成功 → SSE 展示预览（preview）+ 方案摘要 → idle，stage=preview-review
+  → 预览不满意 → 用户自然语言反馈：
+       REVISE_DESIGN（改设计方向）──► design-plan 修订 → 重新 plan/build（循环）
+       MODIFY_REQUIREMENT（小调整）──► plan-change 增量修改 → approval → build（循环）
+  → 满意 → CONFIRM_BUILD ──► 落地（stage=done，下载产物）
 ```
 
-三层关系：层 1（澄清）与层 2（设计确认）是 graph 拓扑改动；层 3（审美注入）是模型 prompt 改动，独立可先行。
+两个迭代循环是核心：**设计迭代**（design-review 阶段，设计计划随对话演化）与**预览反馈**（preview-review 阶段，看真实效果再修订）。三层关系：层 1/2 是 graph 拓扑改动；层 3 是模型 prompt 改动，独立可先行。
 
 ## 4. 层 1：逐轮需求澄清（CLARIFY）
 
@@ -103,11 +116,11 @@ ClassifyIntentResultSchema = z.object({
 →（信息足够）→ 进入设计计划（层 2）
 ```
 
-## 5. 层 2：设计计划确认（CONFIRM_DESIGN / REVISE_DESIGN）
+## 5. 层 2：设计迭代循环 + 预览反馈循环
 
 ### 5.1 新 Schema：DesignPlan（`packages/contracts/src/design-plan.ts`）
 
-把 frontend-design 的 compact token system 适配成 KF 语言：
+把 frontend-design 的 compact token system 适配成 KF 语言；DesignPlan 是**随对话演化的对象**（修订产生新版本）：
 
 ```ts
 DesignPlanSchema = z.object({
@@ -131,43 +144,67 @@ DesignPlanSchema = z.object({
 
 ### 5.2 Intent 与路由
 
-- `IntentSchema` +2：`CONFIRM_DESIGN`（确认设计计划）、`REVISE_DESIGN`（要求修改设计计划）；
-- 路由：`CONFIRM_DESIGN → "plan-change"`；`REVISE_DESIGN → "design-plan"`（携带修改意见，revise 语义）；
-- 新节点 **design-plan**：职责 =
-  1. 调 `ModelPort.createDesignPlan(context)`（新 ModelPort 方法，见 §5.4）生成 DesignPlan；
-  2. `designPlanHash = sha256(canonical(designPlan))` 存 state；
-  3. SSE 对话内展示（标题 + 分区 + ASCII 布局 + 风格方向 + 记忆点，客户直接回"确认/修改 xx"）；
-  4. `stage = "design-pending"`、回 idle。
+- `IntentSchema` +2：`CONFIRM_DESIGN`（确认设计计划）、`REVISE_DESIGN`（修改设计计划，设计/预览阶段均可）；
+- `IntentSchema` +1：`CONFIRM_BUILD`（预览满意，落地）；
+- 路由：
+  - `CONFIRM_DESIGN → "plan-change"`；
+  - `REVISE_DESIGN → "design-plan"`（修订设计计划，携带用户自然语言修改意见）；
+  - 预览阶段（stage=preview-review）的 `MODIFY_REQUIREMENT` → `"plan-change"`（小调整，增量修改现有 revision）；
+  - `CONFIRM_BUILD → END`（stage=done，落地，下载产物）。
 
-### 5.3 plan-change 守卫
+### 5.3 design-plan 节点（新增）
 
-- `plan-change` 入口校验：`state.designPlanHash` 必须存在（曾生成过）且 `stage === "design-pending"`（CONFIRM_DESIGN 路由进入时 `stage` 置 `"design-planning"`）——无设计计划不允许直接生成控件方案；
-- REVISE_DESIGN 修订后 designPlanHash 更新，plan-change 使用**最新** designPlan 作为上下文（与 planHash 语义一致）。
+1. 调 `ModelPort.createDesignPlan(context, { revising: boolean })` 生成/修订 DesignPlan；
+2. `designPlanHash = sha256(canonical(designPlan))` 存 state（修订产生新版本）；
+3. SSE 对话内展示（标题 + 分区 + ASCII 布局 + 风格方向 + 记忆点）；`stage = "design-review"`、回 idle。
 
-### 5.4 ModelPort 新方法
+修订上下文：revising 时把**上一版 designPlan + 用户自然语言修改意见**注入 prompt（类似 reviseChangePlan 的语义），保证修订是"在上一版基础上改"而非重来。
+
+### 5.4 plan-change 守卫
+
+- `plan-change` 入口校验：存在已确认的 designPlan（`designPlanHash` 非空）且 `stage ∈ {design-review, preview-review}`（由 CONFIRM_DESIGN / MODIFY_REQUIREMENT 路由进入时 stage 置 "planning"）；
+- REVISE_DESIGN 修订后 designPlanHash 更新，plan-change 使用**最新** designPlan 作为上下文。
+
+### 5.5 预览反馈循环（preview-review）
+
+- `enqueue-build` 成功后：SSE 推送 previewUrl（现有 `createPreviewUrl` 能力）+ 方案摘要 + "看预览后继续反馈"提示；`stage = "preview-review"`、回 idle；
+- 用户反馈路由（classify 判定）：
+  - `REVISE_DESIGN`（大改：布局/风格方向变）→ design-plan 修订 → plan-change → approval → build（重建）；
+  - `MODIFY_REQUIREMENT`（小改：改文案/调尺寸/加一个控件）→ plan-change 增量（基于现有 revision + editableEntities）→ approval → build；
+  - `CONFIRM_BUILD`（满意）→ `stage=done`、END，下载产物（现有 token 下载）；
+- **落地语义**：`stage=done` 表示"客户已确认工程"，下载按钮可用（与现有下载一致）。
+
+### 5.6 ModelPort 新方法
 
 ```ts
 interface ModelPort {
   // ...现有五方法不变
-  createDesignPlan(input: ModelPortContext): Promise<DesignPlan>;   // 新增
+  createDesignPlan(input: ModelPortContext, opts?: { revising?: boolean }): Promise<DesignPlan>;   // 新增
 }
 ```
 
 - DeepSeek 实现：system prompt 含 §6 设计原则；输出 zod 预校验（`DesignPlanSchema.safeParse`），失败 → `INVALID_MODEL_OUTPUT`；
 - FakeModelPort（E2E）：确定性输出一个最小 DesignPlan（一个分区、一个 text 控件），保证 E2E 不依赖 LLM。
 
-### 5.5 交互（用户视角）
+### 5.7 交互（用户视角，Reasonix 式）
 
 ```
 （澄清结束）
-→ Agent：设计计划
+→ Agent：设计计划 v1
    "工程名：生产监控大屏
     布局：顶部标题+4 KPI 卡 / 中部 3 条趋势曲线 / 右侧状态灯矩阵 / 底部告警滚动
     风格：深色工业风（#0f172a 底 + 青绿 #10b981 强调）
     记忆点：中部 3 条趋势曲线联动 KPI 高亮
-    回复「确认」或「修改 xx」"
+    回复调整意见或「确认」"
+→ 用户：趋势曲线少一点，改成 2 条，右侧状态灯改成表格
+→ Agent：设计计划 v2（修订，展示差异）
 → 用户：确认
-→（生成控件方案 → 现有批准/构建流程）
+→（生成控件方案 → 批准 → 构建）
+→ Agent：构建完成，预览已生成（链接）
+→ 用户：把标题颜色改红色
+→ Agent：（MODIFY_REQUIREMENT → 增量修改 → 重建）构建完成，预览已更新
+→ 用户：可以了
+→（stage=done，下载）
 ```
 
 ## 6. 层 3：设计原则注入（KF_DESIGN_PRINCIPLES）
@@ -223,7 +260,7 @@ Anthropic 官方 `anthropics/skills/skills/frontend-design/SKILL.md`（Apache 2.
 
 ## 8. 状态与持久化
 
-- `AgentGraphState` 新增：`clarificationCount`、`designPlan`、`designPlanHash`、`stage` 枚举扩展（`clarifying` / `design-pending` / `design-planning`）；
+- `AgentGraphState` 新增：`clarificationCount`、`designPlan`、`designPlanHash`、`stage` 枚举扩展（`clarifying` / `design-review` / `design-planning` / `planning` / `building` / `preview-review` / `done`）；
 - 持久化：designPlan 随 checkpoint 持久化（PostgresSaver），恢复后可继续；designPlanHash 校验语义与 planHash 一致（防止并发/过期确认）；
 - SSE：clarify 追问、design-plan 展示均为 assistant 消息，走现有 SSE 通道。
 
@@ -243,14 +280,15 @@ Anthropic 官方 `anthropics/skills/skills/frontend-design/SKILL.md`（Apache 2.
 
 1. 层 3（审美注入）：仅改 prompt，独立、见效快；
 2. 层 1（澄清）：intent/classify/clarify 节点 + state；
-3. 层 2（设计计划确认）：DesignPlan schema + design-plan 节点 + 守卫 + 路由；
-4. 全量测试 + 真实 LLM 走查（监控大屏需求：澄清→设计计划→确认→方案→批准→构建）。
+3. 层 2（设计迭代）：DesignPlan schema + design-plan 节点 + REVISE_DESIGN 循环 + 守卫 + 路由；
+4. 层 2（预览反馈）：preview-review 阶段 + CONFIRM_BUILD 落地 + 预览反馈路由；
+5. 全量测试 + 真实 LLM 走查（监控大屏需求：澄清→设计计划迭代→确认→方案→批准→构建→预览反馈→落地）。
 
 ## 11. 验收标准
 
 - 输入"生成一个监控大屏"：必先澄清（≥1 轮追问）才出设计计划；设计计划含布局/风格/分区/控件清单；确认后才生成控件方案；
 - 澄清轮次 ≤5；needsClarification 无 question 时优雅失败（INVALID_MODEL_OUTPUT，不展示空追问）；
-- 无已确认设计计划时 plan-change 拒绝进入；
-- REVISE_DESIGN 修订后使用最新 designPlanHash；
+- 设计迭代：REVISE_DESIGN 可反复修订设计计划（v1→v2...），修订后使用最新 designPlanHash；无已确认设计计划时 plan-change 拒绝进入；
+- 预览反馈：构建后进入 preview-review，可 REVISE_DESIGN（大改重建）/ MODIFY_REQUIREMENT（增量重建）/ CONFIRM_BUILD（落地 stage=done）；
 - 全量测试、typecheck、lint 绿；DeepSeek 真实链路走查通过（沿用 MODEL_PORT_MODE=deepseek）；
 - 跨平台约束保持（node:path、无平台专属 API）。
