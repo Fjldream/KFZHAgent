@@ -43,8 +43,16 @@ const renderedMessages = computed<RenderedMessage[]>(() =>
     key: message.id ?? index,
     role: message.role,
     content: message.content,
-    clarify: message.role === "assistant" ? parseClarifyingQuestion(message.content) : null,
-    plan: message.role === "assistant" ? parseDesignPlan(message.content) : null,
+    // 流式拼接期间不做结构化解析：后端消息整条到达，中途按文本渲染可避免
+    // 按钮/卡片分支闪烁（review P2）。
+    clarify:
+      message.role === "assistant" && props.streaming !== true
+        ? parseClarifyingQuestion(message.content)
+        : null,
+    plan:
+      message.role === "assistant" && props.streaming !== true
+        ? parseDesignPlan(message.content)
+        : null,
   })),
 );
 
