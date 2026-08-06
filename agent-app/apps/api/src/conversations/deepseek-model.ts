@@ -285,6 +285,13 @@ export class DeepSeekModelPort implements ModelPort {
       "可修改实体清单（name | type | guid）：",
       entityLines.length > 0 ? entityLines.join("\n") : "（无——只能 create 新控件或说明）",
       "",
+      ...(input.designPlan !== undefined
+        ? [
+            "",
+            "客户已确认的设计计划（必须据此落实为控件，每个分区 → 相应控件；新建场景用 create，修改场景用 update/delete）：",
+            JSON.stringify(input.designPlan, null, 1),
+          ]
+        : []),
       "用户最新需求：" + (input.requirementText ?? ""),
     ].join("\n");
   }
