@@ -15,6 +15,7 @@ function makeState(overrides: Partial<WorkspaceState> = {}): WorkspaceState {
     conversationId: null,
     messages: [],
     streaming: false,
+    phaseHint: null,
     resuming: false,
     pendingApproval: null,
     lastDone: null,

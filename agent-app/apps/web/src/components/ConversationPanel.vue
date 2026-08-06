@@ -20,10 +20,14 @@ import type { ChatMessage, ClarifyingQuestionView, DesignPlanView } from "../typ
  *     （工程名/摘要/布局/风格/分区/记忆点 + 「确认」按钮）；
  *   - 其余助手消息保持原有纯文本转义渲染。
  */
-const props = defineProps<{
-  messages: ChatMessage[];
-  streaming?: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    messages: ChatMessage[];
+    streaming?: boolean;
+    phaseHint?: string | null;
+  }>(),
+  { streaming: false, phaseHint: null },
+);
 
 const emit = defineEmits<{
   (e: "send", content: string): void;
@@ -189,6 +193,13 @@ function submit(): void {
         <span v-else class="content" :class="{ streaming: isStreamingTail(index, message) }">{{ displayContent(message) }}</span>
         <img v-if="message.role === 'user'" class="avatar user" src="/leftIcon.png" alt="我" data-testid="user-avatar" />
       </div>
+      <!-- 节点级流式阶段提示：LLM 回合进行中显示当前阶段 -->
+      <div v-if="streaming && phaseHint !== null" class="message phase-row" data-testid="phase-hint">
+        <img class="avatar" src="/leftIcon.png" alt="智绘" />
+        <span class="content phase-hint">
+          <span class="dot" /><span class="phase-text">{{ phaseHint }}</span>
+        </span>
+      </div>
     </div>
     <div class="composer">
       <input
@@ -245,6 +256,18 @@ function submit(): void {
 .suggestion:active { transform: scale(0.97); }
 .content.streaming::after { content: "▍"; animation: blink 1s steps(1) infinite; margin-left: 0.15rem; }
 @keyframes blink { 50% { opacity: 0; } }
+/* 节点级流式阶段提示：呼吸点 + 次要文案 */
+.phase-row { opacity: 0.9; }
+.phase-hint { display: inline-flex; align-items: center; gap: 0.45rem; color: var(--color-text-secondary); }
+.phase-hint .dot {
+  width: 0.5rem; height: 0.5rem; border-radius: 50%;
+  background: var(--color-accent);
+  animation: phasePulse 1.2s ease-in-out infinite;
+}
+@keyframes phasePulse {
+  0%, 100% { opacity: 0.25; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
 /* Task 10 澄清追问：问题 + 可点选选项按钮（与欢迎屏建议同款胶囊）。 */
 .clarify-question { margin: 0; white-space: pre-wrap; word-break: break-word; }
 .clarify-options { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.55rem; }

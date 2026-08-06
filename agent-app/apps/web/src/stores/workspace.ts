@@ -44,6 +44,8 @@ export interface WorkspaceState {
   conversationId: string | null;
   messages: ChatMessage[];
   streaming: boolean;
+  /** 节点级流式提示：LLM 回合进行中显示的阶段文案（如「正在分析需求…」）。 */
+  phaseHint: string | null;
   /** 批准/改稿/取消请求进行中，防止快速双击并发重复提交（I2）。 */
   resuming: boolean;
   pendingApproval: PendingApproval | null;
@@ -64,6 +66,7 @@ const state: WorkspaceState = reactive({
   conversationId: null,
   messages: [],
   streaming: false,
+  phaseHint: null,
   resuming: false,
   pendingApproval: null,
   lastDone: null,
@@ -181,20 +184,53 @@ async function sendMessage(content: string): Promise<void> {
   // 新用户需求清除本地 approval 状态（brief Step 4）。
   state.pendingApproval = null;
   state.streaming = true;
+  state.phaseHint = "正在提交需求…";
+  // 用户消息乐观上屏（临时 id，done 后 refreshMessages 与服务器同步替换）。
+  const optimisticId = `optimistic-${Date.now()}`;
+  state.messages.push({ id: optimisticId, role: "user", content });
   try {
-    const done = await streamMessageTurn(state.conversationId, content, () => {
-      // 逐帧忽略：最终状态由 done 事件携带；此处保留扩展点。
+    const done = await streamMessageTurn(state.conversationId, content, (data) => {
+      // 节点级流式：state 帧的键是节点名，值含 stage 等字段。
+      // 用节点名映射阶段提示，让用户感知 LLM 回合进度。
+      const hint = phaseHintForNode(data);
+      if (hint !== null) state.phaseHint = hint;
     });
     state.lastDone = done;
     await refreshMessages();
     applyDone(done);
   } catch (error) {
     state.error = errorMessage(error);
+    // 移除乐观消息（避免与服务器状态不一致的残留），再拉取真实列表。
+    const idx = state.messages.findIndex((m) => m.id === optimisticId);
+    if (idx >= 0) state.messages.splice(idx, 1);
     await refreshMessages().catch(() => {});
     throw error;
   } finally {
     state.streaming = false;
+    state.phaseHint = null;
   }
+}
+
+/** 节点名 → 阶段提示文案（节点级流式，非 token 级）。 */
+const NODE_HINTS: Record<string, string> = {
+  "load-context": "正在加载工程上下文…",
+  "classify-intent": "正在理解你的需求…",
+  "design-plan": "正在生成设计计划…",
+  "clarify": "正在确认需求细节…",
+  "plan-change": "正在生成变更计划…",
+  "build": "正在构建工程…",
+  "validate": "正在校验工程…",
+  "preview-review": "正在准备预览…",
+};
+
+/** 从 state 帧提取阶段提示；非节点帧或未知节点返回 null。 */
+function phaseHintForNode(data: unknown): string | null {
+  if (typeof data !== "object" || data === null) return null;
+  const keys = Object.keys(data as Record<string, unknown>);
+  for (const key of keys) {
+    if (key in NODE_HINTS) return NODE_HINTS[key] ?? null;
+  }
+  return null;
 }
 
 /** 将 done 快照路由到审批 / 构建 / 错误等 UI 状态。 */

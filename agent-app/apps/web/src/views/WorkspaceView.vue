@@ -201,7 +201,7 @@ async function onUploadFile(file: File): Promise<void> {
     <TopBar :workspace-name="workspace.state.workspace?.name ?? ''" :stage="stage" @back="() => router.push('/workspaces')" @logout="onLogout" @delete-workspace="onDeleteWorkspace" />
     <main class="shell">
       <section class="conversation-col">
-        <ConversationPanel :messages="workspace.state.messages" :streaming="workspace.state.streaming" @send="onSend" />
+        <ConversationPanel :messages="workspace.state.messages" :streaming="workspace.state.streaming" :phase-hint="workspace.state.phaseHint" @send="onSend" />
         <p v-if="workspace.state.error" class="error" data-testid="shell-error">{{ workspace.state.error }}</p>
       </section>
       <ContextPanel
