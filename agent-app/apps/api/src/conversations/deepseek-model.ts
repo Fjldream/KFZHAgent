@@ -283,6 +283,7 @@ export class DeepSeekModelPort implements ModelPort {
       "create（新增控件）格式：{\"op\":\"create\",\"entityType\":\"control\",\"entityId\":\"新语义id如NewTitle\",\"properties\":{\"pageId\":\"<清单中的页面GUID>\",\"type\":\"text|button|inputnumber|switch|checkbox|radio|select|image|tabs|table|richtext|spacer\",\"text\":\"控件文本\",\"x\":60,\"y\":50,\"width\":300,\"height\":40}}",
       "delete 格式：{\"op\":\"delete\",\"entityId\":\"<清单中的 GUID>\",\"entityType\":\"control\",\"destructiveConfirmed\":true}",
       "规则：update/delete 的 entityId 必须来自下方实体清单的 GUID；create 的 entityId 是新的语义 id，entityType 固定为 control，控件类型放在 properties.type，properties.pageId 必须是清单中页面的 GUID。",
+      "update 的 changes[].path 只能使用受控字段：text、value、visible、disabled、backgroundColor、width、height、x、y、fontInfo（字体大小写在 fontInfo.fontSize，不要单独用 /fontSize 路径）、borderColor、layoutStyle、options/radioData/selectData 等控件自身字段；禁止使用未列出的路径（如 /fontSize、/custom）。",
       "",
       "当前工程摘要：" + (input.revisionSummary ?? "（无）"),
       "",
