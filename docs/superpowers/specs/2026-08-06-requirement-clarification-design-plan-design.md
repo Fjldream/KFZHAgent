@@ -1,14 +1,11 @@
 # 需求澄清、设计计划确认与设计原则注入
 
 日期：2026-08-06
-状态：待用户审查（v1）
+状态：待用户审查（v3：Reasonix 式迭代对话 + 预览反馈循环）
 
 ## 1. 结论
 
-当前 KF Solution Agent（agent-app，LangGraph 单 Agent）存在两个体验问题：
-
-1. **无需求澄清**：客户输入一句需求（如"生成一个监控大屏"），Agent 直接一次性地生成变更计划/方案，无法通过连续追问确认需求，交互体验差；
-2. **产物与需求偏差大**：生成"监控大屏"只得到几个按钮（按钮文本写"趋势曲线"）——因为 IR 控件类型无图表类、LLM prompt 硬编码只允许 text/button/inputnumber 三种控件、且 DeepSeek 没有任何设计审美引导。
+当前 KF Solution Agent（agent-app，LangGraph 单 Agent）是"任务型一次性生成"，达不到设计工具的对话体验。三个目标缺口（均已实证，见 §2）：
 
 本设计把 Agent 从"任务型一次性生成"升级为 **Reasonix 式持续对话迭代设计**：设计是一个随对话持续演化的对象，用户通过不断对话（澄清→设计计划→预览）反复调整方案，最终满意后落地工程。
 
@@ -226,7 +223,7 @@ Anthropic 官方 `anthropics/skills/skills/frontend-design/SKILL.md`（Apache 2.
 - 设计计划：布局/风格有方向而非空泛；
 - 控件方案：同一需求下不再产出"只有按钮文本写趋势曲线"的凑数方案（真正的趋势曲线控件属层 4 遗留，见 §9）。
 
-## 7. 后续计划：静态控件补全（本轮不做，供下轮排期参考）
+## 7. 架构改动清单（按包）
 
 ### 7.1 目标控件（开发态静态控件，非图表子模型）
 
@@ -248,7 +245,7 @@ Anthropic 官方 `anthropics/skills/skills/frontend-design/SKILL.md`（Apache 2.
 - 个别控件（如 map/dropdown）可能也是运行时组件（类似图表子模型）——提取器跑出空模板或无 uiModelType 时，标记"推迟"，不硬接；
 - 模板默认值 ≠ 真实序列化字段集（SDB 无样本）——以 KF 打开验证为准，失败则回退。
 
-## 8. 架构改动清单（按包）
+## 8. 后续计划：静态控件补全（本轮不做，供下轮排期参考）
 
 | 包 | 改动 |
 |---|---|
@@ -258,13 +255,13 @@ Anthropic 官方 `anthropics/skills/skills/frontend-design/SKILL.md`（Apache 2.
 | `apps/web` | 对话流展示设计计划（结构化消息）；澄清追问展示（问题+可选项可点选）；CONFIRM_DESIGN/REVISE_DESIGN 发送 |
 | 测试 | 单元：intent schema、clarify 节点、design-plan 节点、守卫、prompt 断言；集成：graph 全流程（澄清→设计→确认→计划→批准）；E2E：新工程走查含澄清+设计确认 |
 
-## 8. 状态与持久化
+## 9. 状态与持久化
 
 - `AgentGraphState` 新增：`clarificationCount`、`designPlan`、`designPlanHash`、`stage` 枚举扩展（`clarifying` / `design-review` / `design-planning` / `planning` / `building` / `preview-review` / `done`）；
 - 持久化：designPlan 随 checkpoint 持久化（PostgresSaver），恢复后可继续；designPlanHash 校验语义与 planHash 一致（防止并发/过期确认）；
 - SSE：clarify 追问、design-plan 展示均为 assistant 消息，走现有 SSE 通道。
 
-## 9. 范围与遗留
+## 10. 范围与遗留
 
 **本轮做**：层 1-3（澄清 / 设计计划确认 / 审美注入，见 §4-6）。
 
@@ -276,7 +273,7 @@ Anthropic 官方 `anthropics/skills/skills/frontend-design/SKILL.md`（Apache 2.
 
 **交互上限**：澄清 ≤5 轮；设计计划修订不设上限（由客户主导，无死循环风险——每轮都要客户明确输入）。
 
-## 10. 实施顺序（本轮）
+## 11. 实施顺序（本轮）
 
 1. 层 3（审美注入）：仅改 prompt，独立、见效快；
 2. 层 1（澄清）：intent/classify/clarify 节点 + state；
@@ -284,7 +281,7 @@ Anthropic 官方 `anthropics/skills/skills/frontend-design/SKILL.md`（Apache 2.
 4. 层 2（预览反馈）：preview-review 阶段 + CONFIRM_BUILD 落地 + 预览反馈路由；
 5. 全量测试 + 真实 LLM 走查（监控大屏需求：澄清→设计计划迭代→确认→方案→批准→构建→预览反馈→落地）。
 
-## 11. 验收标准
+## 12. 验收标准
 
 - 输入"生成一个监控大屏"：必先澄清（≥1 轮追问）才出设计计划；设计计划含布局/风格/分区/控件清单；确认后才生成控件方案；
 - 澄清轮次 ≤5；needsClarification 无 question 时优雅失败（INVALID_MODEL_OUTPUT，不展示空追问）；
