@@ -71,7 +71,17 @@ ${KF_DESIGN_PRINCIPLES_FULL}`;
  */
 function normalizeClarifyOutput(raw: unknown): unknown {
   const record = (raw ?? {}) as Record<string, unknown>;
-  if (record["intent"] !== "CLARIFY") return raw;
+  if (record["intent"] !== "CLARIFY") {
+    // 防御：模型信息足够（intent 非 CLARIFY）却仍带澄清字段时，剥离它们，
+    // 否则 superRefine 交叉校验会拒绝（非 CLARIFY 不得携带 clarifyingQuestion）。
+    if (record["clarifyingQuestion"] !== undefined || record["needsClarification"] !== undefined) {
+      const { clarifyingQuestion: _cq, needsClarification: _nc, ...rest } = record;
+      void _cq;
+      void _nc;
+      return rest;
+    }
+    return raw;
+  }
   const q = record["clarifyingQuestion"];
   const hasUsableQuestion =
     q !== undefined &&
