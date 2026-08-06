@@ -8,6 +8,7 @@ import TopBar from "../components/TopBar.vue";
 import ContextPanel from "../components/ContextPanel.vue";
 import ConversationPanel from "../components/ConversationPanel.vue";
 import PreviewBar from "../components/PreviewBar.vue";
+import ApprovalSheet from "../components/ApprovalSheet.vue";
 import type { SolutionTreeNode } from "../types";
 
 /**
@@ -188,6 +189,17 @@ async function onUploadFile(file: File): Promise<void> {
       />
     </main>
     <PreviewBar :preview-url="previewUrl" />
+    <ApprovalSheet
+      v-if="workspace.state.pendingApproval !== null"
+      :plan="workspace.state.pendingApproval?.plan ?? null"
+      :plan-hash="workspace.state.pendingApproval?.planHash ?? ''"
+      :summary="workspace.state.pendingApproval?.summary ?? ''"
+      :script-changes="workspace.state.pendingApproval?.scriptChanges ?? []"
+      :busy="workspace.state.streaming"
+      @approve="onApprove"
+      @revise="onRevise"
+      @cancel="onCancel"
+    />
   </div>
 </template>
 
