@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderClientProjectPreview, renderPagePreview } from "./index.js";
+import { kfPageToPageIR, renderClientProjectPreview, renderKfProject, renderPagePreview } from "./index.js";
 import type { ClientProjectIR, PageIR } from "@kf/domain-client";
 
 const page: PageIR = {
@@ -27,6 +27,50 @@ const ir = {
   pages: [page, { ...page, id: "p2", name: "第二页", controls: [] }],
   dependencies: [], variables: [], globalScripts: [],
 } as ClientProjectIR;
+
+describe("KF page conversion", () => {
+  const kfPage = {
+    name: "Page1",
+    width: 1024,
+    height: 768,
+    objects: [
+      {
+        name: "Text1", uiModelType: 6,
+        leftTopPt: { x: 20, y: 30 }, width: 300, height: 40,
+        text: "生产车间实时监控",
+      },
+      {
+        name: "Sw1", uiModelType: 48,
+        leftTopPt: { x: 20, y: 90 }, width: 80, height: 40,
+        value: true, activeText: "开", inactiveText: "关",
+      },
+      {
+        name: "Sel1", uiModelType: 44,
+        leftTopPt: { x: 200, y: 90 }, width: 160, height: 40,
+        options: [{ label: "A", value: "a" }], value: "a",
+      },
+    ],
+  };
+
+  it("maps KF uiModelType and geometry to IR controls", () => {
+    const page = kfPageToPageIR(kfPage);
+    expect(page.id).toBe("Page1");
+    expect(page.width).toBe(1024);
+    expect(page.height).toBe(768);
+    expect(page.controls).toHaveLength(3);
+    expect(page.controls[0]).toMatchObject({ id: "Text1", type: "text", x: 20, y: 30, width: 300, height: 40, text: "生产车间实时监控" });
+    expect(page.controls[1]).toMatchObject({ type: "switch", value: true, activeText: "开", inactiveText: "关" });
+    expect(page.controls[2]).toMatchObject({ type: "select", options: [{ label: "A", value: "a" }] });
+  });
+
+  it("renderKfProject emits the full preview with page and controls", () => {
+    const html = renderKfProject("监控大屏", [kfPage]);
+    expect(html).toContain("生产车间实时监控");
+    expect(html).toContain('data-type="switch"');
+    expect(html).toContain("开");
+    expect(html).not.toContain("<script");
+  });
+});
 
 describe("preview renderer", () => {
   it("renders a page container with the page size and id", () => {

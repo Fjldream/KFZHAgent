@@ -1,3 +1,4 @@
+import { CONTROL_TYPE_BY_UIMODEL_TYPE } from "@kf/domain-client";
 import type { ClientProjectIR, ControlIR, PageIR } from "@kf/domain-client";
 
 const DEFAULT_PAGE_WIDTH = 1024;
@@ -147,4 +148,71 @@ ${nav}
 ${pages}
 </body>
 </html>`;
+}
+
+// ---------------------------------------------------------------------------
+// KF 原生页面 JSON → IR 转换（preview 数据源：构建产物解包后的 page/*.json）
+// ---------------------------------------------------------------------------
+
+/** KF uiModelType → IR 控件类型（fallback "text" 保证可渲染）。 */
+function kfControlType(uiModelType: unknown): string {
+  return typeof uiModelType === "number"
+    ? (CONTROL_TYPE_BY_UIMODEL_TYPE[uiModelType] ?? "text")
+    : "text";
+}
+
+function kfNum(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+/** KF 控件对象 → ControlIR 形状（宽容提取渲染所需字段）。 */
+function kfControlToIR(rec: Record<string, unknown>): Record<string, unknown> {
+  const lp = (rec["leftTopPt"] ?? {}) as Record<string, unknown>;
+  const base: Record<string, unknown> = {
+    id: typeof rec["name"] === "string" ? rec["name"] : `c${Math.floor(kfNum(rec["x"]))}`,
+    type: kfControlType(rec["uiModelType"]),
+    x: kfNum(lp["x"]),
+    y: kfNum(lp["y"]),
+    width: kfNum(rec["width"]),
+    height: kfNum(rec["height"]),
+  };
+  const pickAll = (keys: string[]): void => {
+    for (const key of keys) {
+      if (rec[key] !== undefined) {
+        base[key] = rec[key];
+      }
+    }
+  };
+  // 各类型可选字段（KF 字段名宽容：IR 名优先，兼容 KF 别名；收集全部存在的）
+  pickAll(["text", "value", "activeText", "inactiveText", "label", "checked"]);
+  pickAll(["options", "selectData", "radioData"]);
+  pickAll(["src", "fit", "alt"]);
+  pickAll(["tabs", "activeId"]);
+  if (rec["precision"] !== undefined) base["decimals"] = rec["precision"];
+  return base;
+}
+
+/** 单个 KF 页面 JSON（{name,width,height,objects[]}）→ PageIR 形状。 */
+export function kfPageToPageIR(kfPage: unknown): PageIR {
+  const doc = (kfPage ?? {}) as Record<string, unknown>;
+  const objects = Array.isArray(doc["objects"]) ? (doc["objects"] as unknown[]) : [];
+  return {
+    id: typeof doc["name"] === "string" ? doc["name"] : "page",
+    name: typeof doc["name"] === "string" ? doc["name"] : "页面",
+    width: kfNum(doc["width"]) || 1024,
+    height: kfNum(doc["height"]) || 768,
+    controls: objects.map((o) => kfControlToIR(o as Record<string, unknown>)) as ControlIR[],
+  };
+}
+
+/** 多 KF 页面 → 完整预览 HTML（工程名 + 页面数组）。 */
+export function renderKfProject(projectName: string, kfPages: unknown[]): string {
+  const pages = kfPages.map((p) => kfPageToPageIR(p));
+  const ir: ClientProjectIR = {
+    schema: "kf-client-project-ir/v1",
+    id: projectName,
+    name: projectName,
+    pages,
+  };
+  return renderClientProjectPreview(ir);
 }

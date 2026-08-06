@@ -1,1 +1,1 @@
-export { renderClientProjectPreview, renderPagePreview } from "./renderer.js";
+export { kfPageToPageIR, renderClientProjectPreview, renderKfProject, renderPagePreview } from "./renderer.js";
