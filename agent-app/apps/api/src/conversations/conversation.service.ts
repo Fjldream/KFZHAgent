@@ -143,8 +143,8 @@ export class ConversationService {
     // 保留 checkpoint 的 stage（如 design-review / preview-review），只有首次
     // 消息（无历史 checkpoint）才落到 idle——硬编码 idle 会把 design-review
     // 等用户驱动阶段覆盖掉，导致 CONFIRM_DESIGN 兜底失效。
-    const snapshot = (await graph.getState(config)) as unknown as StateSnapshotLike;
-    const resumedStage = (snapshot?.values as Record<string, unknown> | undefined)?.stage;
+    const resumedSnapshot = (await graph.getState(config)) as unknown as StateSnapshotLike;
+    const resumedStage = (resumedSnapshot?.values as Record<string, unknown> | undefined)?.stage;
     const stage = typeof resumedStage === "string" ? resumedStage : "idle";
 
     const input = {
