@@ -97,6 +97,8 @@ body{color:#e8ecf4;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-se
 section.kf-page{display:none;position:relative;overflow:hidden;background:#1e2430;margin:16px auto;box-shadow:0 0 0 1px #2a3342}
 section.kf-page:target{display:block}
 section.kf-page:first-of-type{display:block}
+/* 有任意页面命中 :target（切到非首页）时，抑制首屏兜底，避免两页堆叠 */
+body:has(section.kf-page:target) section.kf-page:first-of-type{display:none}
 .kf-control{position:absolute}
 .kf-text{display:flex;align-items:center;font-size:16px;color:#e8ecf4;line-height:1.4}
 .kf-btn{width:100%;height:100%;border:1px solid #1d4ed8;border-radius:6px;background:${THEME_COLOR};color:#ffffff;font-size:15px;cursor:pointer}

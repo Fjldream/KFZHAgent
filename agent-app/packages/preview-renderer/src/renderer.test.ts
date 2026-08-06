@@ -52,12 +52,18 @@ describe("preview renderer", () => {
     expect(html).toContain("启用"); // checkbox label
     expect(html).toContain("高"); // radio options
     expect(html).toContain("<b>富文本</b>"); // richtext html passthrough
+    expect(html).toContain('value="0.0" disabled'); // inputnumber
+    expect(html).toContain('src="http://x/y.png"'); // image src
+    expect(html).toContain('class="kf-tab is-active"'); // tabs active highlight
+    expect(html).toContain("<th>列1</th>"); // table header
+    expect(html).toContain('class="kf-spacer"'); // spacer
   });
   it("renders multi-page tabs with CSS :target and no scripts", () => {
     const html = renderClientProjectPreview(ir);
     expect(html).toContain("首页");
     expect(html).toContain("第二页");
     expect(html).toContain(":target");
+    expect(html).toContain(":has(section.kf-page:target)");
     expect(html).not.toContain("<script");
     expect(html).not.toContain("<script>");
   });
