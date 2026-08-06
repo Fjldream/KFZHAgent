@@ -54,7 +54,12 @@ const buildText = computed(() => {
     </template>
 
     <template v-else-if="stage === 'ready' || stage === 'error'">
-      <ValidationReportView :report="report" />
+      <ValidationReportView v-if="report !== null && report !== undefined" :report="report" />
+      <!-- 构建失败且无失败详情（report 缺失，如后端未返回 / 加载失败）时给占位文案（spec §7）。 -->
+      <div v-else-if="stage === 'error'" class="section">
+        <h2>校验报告</h2>
+        <p class="sub">构建失败，请重新描述需求</p>
+      </div>
       <div v-if="stage === 'ready' && artifact" class="section">
         <h2>产物下载</h2>
         <button type="button" data-testid="download-artifact" class="primary" @click="emit('download', artifact.id)">

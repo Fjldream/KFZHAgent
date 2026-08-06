@@ -226,7 +226,7 @@ async function onUploadFile(file: File): Promise<void> {
       :plan-hash="workspace.state.pendingApproval?.planHash ?? ''"
       :summary="workspace.state.pendingApproval?.summary ?? ''"
       :script-changes="workspace.state.pendingApproval?.scriptChanges ?? []"
-      :busy="workspace.state.streaming"
+      :busy="Boolean(workspace.state.streaming || workspace.state.resuming)"
       @approve="onApprove"
       @revise="onRevise"
       @cancel="onCancel"

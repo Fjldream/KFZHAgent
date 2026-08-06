@@ -44,6 +44,8 @@ export interface WorkspaceState {
   conversationId: string | null;
   messages: ChatMessage[];
   streaming: boolean;
+  /** 批准/改稿/取消请求进行中，防止快速双击并发重复提交（I2）。 */
+  resuming: boolean;
   pendingApproval: PendingApproval | null;
   lastDone: SseDonePayload | null;
   buildJobId: string | null;
@@ -62,6 +64,7 @@ const state: WorkspaceState = reactive({
   conversationId: null,
   messages: [],
   streaming: false,
+  resuming: false,
   pendingApproval: null,
   lastDone: null,
   buildJobId: null,
@@ -104,9 +107,16 @@ async function pollBuildJob(jobId: string): Promise<BuildJobStatus> {
     const job = await api.getBuildJob(jobId);
     state.buildJobStatus = job.status;
     if (job.status === "SUCCEEDED" || job.status === "FAILED") {
+      // 终态统一加载最新校验报告：SUCCEEDED/FAILED 后端均返回 report
+      // （FAILED 为 fail report，spec §7 明文缺口修复）。报告加载失败不
+      // 影响 job 状态判断；此时置空以覆盖旧报告，避免残留误导。
       if (job.status === "SUCCEEDED") {
         state.artifacts = await api.listBuildArtifacts(jobId);
+      }
+      try {
         state.validationReport = await api.getBuildJobReport(jobId);
+      } catch {
+        state.validationReport = null;
       }
       await refreshRevisions();
       return job.status;
@@ -226,9 +236,12 @@ async function loadPlanDetails(changePlanId: string): Promise<void> {
 }
 
 async function resumeApproval(action: "approve" | "revise" | "cancel"): Promise<void> {
+  // 防重入：请求进行中直接忽略，避免快速双击发出重复 /resume 请求（I2）。
+  if (state.resuming) return;
   const pending = state.pendingApproval;
   if (pending === undefined || pending === null) return;
   if (state.conversationId === null) throw new Error("对话尚未就绪");
+  state.resuming = true;
   state.error = null;
   try {
     const result = await api.resume(state.conversationId, { action, planHash: pending.planHash });
@@ -258,6 +271,8 @@ async function resumeApproval(action: "approve" | "revise" | "cancel"): Promise<
   } catch (error) {
     state.error = errorMessage(error);
     throw error;
+  } finally {
+    state.resuming = false;
   }
 }
 
