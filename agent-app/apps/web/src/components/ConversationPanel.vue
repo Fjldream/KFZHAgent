@@ -23,19 +23,28 @@ const emit = defineEmits<{
 
 const draft = ref("");
 const messagesEl = ref<HTMLElement | null>(null);
-const { gsap, reduceMotion } = useGsap();
+const { gsap, trackTween, reduceMotion } = useGsap();
 
 // 新消息滑入：最后一条气泡 y:8→0 + 淡入（发送/接收时都有反馈）。
+// flush: "post" 确保在 Vue DOM patch 之后回调，querySelector 拿到的
+// last-of-type 才是刚渲染的新消息（否则会动画到旧消息上）。
+// 首次加载（历史恢复）跳过：messages 从空变历史时不播新消息动画。
+let hasRenderedOnce = false;
 watch(
   () => props.messages.length,
   () => {
+    if (!hasRenderedOnce) {
+      hasRenderedOnce = true;
+      return;
+    }
     const box = messagesEl.value;
     if (box === null || props.messages.length === 0) return;
     if (reduceMotion()) return;
     const tail = box.querySelector(".message:last-of-type");
     if (tail === null) return;
-    gsap.fromTo(tail, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.28, ease: "power3.out" });
+    trackTween(gsap.fromTo(tail, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.28, ease: "power3.out" }));
   },
+  { flush: "post" },
 );
 
 function displayContent(message: ChatMessage): string {

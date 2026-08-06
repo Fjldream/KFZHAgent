@@ -6,7 +6,7 @@ import { onBeforeUnmount } from "vue";
  * 统一 GSAP 入口 + prefers-reduced-motion 短路 + 组件卸载自动清理。
  *
  * 规则（playbook）：只动 transform/opacity；进入用 power3.out；
- * 弹层用 back.out(1.7)；UI 动画 < 300ms；卸载时 kill 所有 timeline。
+ * 弹层用 back.out(1.7)；UI 动画 < 300ms；卸载时 kill 所有 timeline/tween。
  */
 export function useGsap() {
   /** prefers-reduced-motion 时跳过位移动画（只保留淡入淡出或直达终态）。 */
@@ -17,6 +17,7 @@ export function useGsap() {
   }
 
   const timelines: gsap.core.Timeline[] = [];
+  const tweens: gsap.core.Tween[] = [];
 
   /** 注册一条 timeline，组件卸载时自动 kill。 */
   function track(tl: gsap.core.Timeline): gsap.core.Timeline {
@@ -24,12 +25,22 @@ export function useGsap() {
     return tl;
   }
 
+  /** 注册一条 tween（gsap.fromTo/to 的返回值），组件卸载时自动 kill。 */
+  function trackTween(tween: gsap.core.Tween): gsap.core.Tween {
+    tweens.push(tween);
+    return tween;
+  }
+
   onBeforeUnmount(() => {
     for (const tl of timelines) {
       tl.kill();
     }
+    for (const tw of tweens) {
+      tw.kill();
+    }
     timelines.length = 0;
+    tweens.length = 0;
   });
 
-  return { gsap, track, reduceMotion };
+  return { gsap, track, trackTween, reduceMotion };
 }

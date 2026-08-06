@@ -39,7 +39,9 @@ const buildText = computed(() => {
   }
 });
 
-// 情境面板内容容器：stage 切换时旧内容淡出、新内容淡入 + 轻微 y（crossfade）。
+// 情境面板内容切换：新内容淡入 + 轻微 y（flush: "post" 保证回调在 Vue
+// DOM patch 之后——旧内容此刻已不在 DOM，做「旧内容淡出」无意义且会造成
+// 新内容闪灭；v-if 结构下做纯进入动画即可）。
 const { gsap, track, reduceMotion } = useGsap();
 const panelEl = ref<HTMLElement | null>(null);
 
@@ -53,11 +55,10 @@ watch(
       return;
     }
     const tl = gsap.timeline();
-    tl.to(el, { opacity: 0, y: 6, duration: 0.14, ease: "power2.out" })
-      .set(el, { y: -6 })
-      .to(el, { opacity: 1, y: 0, duration: 0.3, ease: "power3.out" });
+    tl.fromTo(el, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.3, ease: "power3.out" });
     track(tl);
   },
+  { flush: "post" },
 );
 </script>
 

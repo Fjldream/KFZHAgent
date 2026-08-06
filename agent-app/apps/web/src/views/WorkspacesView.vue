@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, ref, watch } from "vue";
+import { nextTick, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { api } from "../api";
 import { useSession } from "../stores/session";
@@ -16,6 +16,39 @@ const busy = ref(false);
 const newName = ref("");
 const pageEl = ref<HTMLElement | null>(null);
 
+/** 挂载即播：顶栏/创建卡片不等 API 返回（避免慢网络下整页空白）。 */
+function playChromeEntrance(): void {
+  const el = pageEl.value;
+  if (el === null) return;
+  if (reduceMotion()) {
+    gsap.set(el.querySelectorAll(".topbar, .create-card"), { opacity: 1, y: 0 });
+    return;
+  }
+  const tl = gsap.timeline();
+  tl.fromTo(el.querySelector(".topbar"), { opacity: 0, y: -8 }, { opacity: 1, y: 0, duration: 0.3, ease: "power2.out" })
+    .fromTo(el.querySelector(".create-card"), { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.35, ease: "power3.out" }, "-=0.12");
+  track(tl);
+}
+
+/** 卡片列表加载后 stagger 级联入场（refresh 唯一入口，无重复播放）。 */
+function playCardsEntrance(): void {
+  const el = pageEl.value;
+  if (el === null) return;
+  const cards = el.querySelectorAll(".card");
+  if (cards.length === 0) return;
+  if (reduceMotion()) {
+    gsap.set(cards, { opacity: 1, y: 0, scale: 1 });
+    return;
+  }
+  const tl = gsap.timeline();
+  tl.fromTo(
+    cards,
+    { opacity: 0, y: 14, scale: 0.97 },
+    { opacity: 1, y: 0, scale: 1, stagger: 0.06, duration: 0.35, ease: "power3.out" },
+  );
+  track(tl);
+}
+
 async function refresh(): Promise<void> {
   loading.value = true;
   error.value = null;
@@ -26,28 +59,8 @@ async function refresh(): Promise<void> {
   } finally {
     loading.value = false;
     await nextTick();
-    playEntrance();
+    playCardsEntrance();
   }
-}
-
-/** 全局氛围进入动画：顶栏/创建卡片淡入 + 工程卡片 stagger 级联入场。 */
-function playEntrance(): void {
-  const el = pageEl.value;
-  if (el === null) return;
-  if (reduceMotion()) {
-    gsap.set(el.querySelectorAll(".topbar, .create-card, .card"), { opacity: 1, y: 0 });
-    return;
-  }
-  const tl = gsap.timeline();
-  tl.fromTo(el.querySelector(".topbar"), { opacity: 0, y: -8 }, { opacity: 1, y: 0, duration: 0.3, ease: "power2.out" })
-    .fromTo(el.querySelector(".create-card"), { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.35, ease: "power3.out" }, "-=0.12")
-    .fromTo(
-      el.querySelectorAll(".card"),
-      { opacity: 0, y: 14, scale: 0.97 },
-      { opacity: 1, y: 0, scale: 1, stagger: 0.06, duration: 0.35, ease: "power3.out" },
-      "-=0.18",
-    );
-  track(tl);
 }
 
 async function onCreate(): Promise<void> {
@@ -80,20 +93,9 @@ async function onLogout(): Promise<void> {
 }
 
 onMounted(() => {
+  playChromeEntrance();
   void refresh();
 });
-
-// 卡片列表重新渲染（如删除后返回）时重放动画。
-watch(
-  () => workspaces.value.length,
-  () => {
-    void nextTick(() => {
-      const cards = pageEl.value?.querySelectorAll(".card");
-      if (cards === undefined || cards.length === 0) return;
-      playEntrance();
-    });
-  },
-);
 </script>
 
 <template>

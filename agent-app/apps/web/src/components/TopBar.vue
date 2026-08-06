@@ -10,7 +10,7 @@ const props = defineProps<{
 
 defineEmits<{ (e: "logout"): void; (e: "delete-workspace"): void }>();
 
-const { gsap, track, reduceMotion } = useGsap();
+const { gsap, track, trackTween, reduceMotion } = useGsap();
 const barEl = ref<HTMLElement | null>(null);
 const chipEl = ref<HTMLElement | null>(null);
 
@@ -36,7 +36,7 @@ watch(
   () => {
     const chip = chipEl.value;
     if (chip === null || reduceMotion()) return;
-    gsap.fromTo(chip, { scale: 1 }, { scale: 1.12, duration: 0.18, ease: "power2.out", yoyo: true, repeat: 1 });
+    trackTween(gsap.fromTo(chip, { scale: 1 }, { scale: 1.12, duration: 0.18, ease: "power2.out", yoyo: true, repeat: 1 }));
   },
 );
 </script>
