@@ -57,7 +57,7 @@ export function createEnqueueBuildNode(deps: SolutionGraphDeps) {
         tenantId: state.tenantId,
         conversationId: state.conversationId,
         role: "assistant",
-        content: "构建完成，预览已生成；满意回复「确认落地」，或继续提修改意见。",
+        content: "预览已生成，您可以在右侧查看实际效果；满意的话回复「确认落地」，需要调整也可以直接告诉我。",
       });
       return {
         buildJobId: job.id,

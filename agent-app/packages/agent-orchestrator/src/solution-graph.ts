@@ -75,7 +75,7 @@ export function compileSolutionGraph(
     .addNode("approval", createApprovalNode())
     .addNode("cancel-plan", createCancelPlanNode(deps))
     .addNode("enqueue-build", createEnqueueBuildNode(deps))
-    .addNode("done", createDoneNode())
+    .addNode("done", createDoneNode(deps))
     .addEdge(START, "load-context")
     .addEdge("load-context", "classify-intent")
     .addConditionalEdges("classify-intent", routeAfterClassify)
@@ -136,11 +136,20 @@ function routeAfterPlanChange(state: AgentGraphStateValue): string {
 
 /**
  * Terminal landing node for the preview-review loop (Task 9): CONFIRM_BUILD
- * routes here and sets stage=done. Written as a real node instead of routing
- * CONFIRM_BUILD straight to END because END accepts no state update.
+ * routes here, persists a warm-professional thank-you message, and sets
+ * stage=done. Written as a real node instead of routing CONFIRM_BUILD straight
+ * to END because END accepts no state update.
  */
-function createDoneNode() {
-  return (): AgentGraphUpdate => ({ stage: "done", buildConfirmed: true });
+function createDoneNode(deps: SolutionGraphDeps) {
+  return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
+    await deps.workspaceQuery.appendMessage({
+      tenantId: state.tenantId,
+      conversationId: state.conversationId,
+      role: "assistant" as const,
+      content: "方案已确认落地。感谢您的沟通！后续如需继续调整或新增需求，随时找我。",
+    });
+    return { stage: "done", buildConfirmed: true };
+  };
 }
 
 /** Resume routing after the approval interrupt (brief Step 5). */
