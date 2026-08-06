@@ -22,8 +22,25 @@ const emit = defineEmits<{
 }>();
 
 const draft = ref("");
+const inputEl = ref<HTMLInputElement | null>(null);
 const messagesEl = ref<HTMLElement | null>(null);
 const { gsap, trackTween, reduceMotion } = useGsap();
+
+// 空对话欢迎屏：常用意图作为可点击建议，点选只填 draft 不自动发送。
+const suggestions = [
+  "新建一个设备监控大屏",
+  "给按钮加上报警联动",
+  "在页面底部加一个状态栏",
+];
+
+function useSuggestion(text: string): void {
+  draft.value = text;
+  // 聚焦输入框，让用户确认后 Enter/点击发送。
+  const input = inputEl.value;
+  if (input !== null && props.streaming !== true) {
+    input.focus();
+  }
+}
 
 // 新消息滑入：最后一条气泡 y:8→0 + 淡入（发送/接收时都有反馈）。
 // flush: "post" 确保在 Vue DOM patch 之后回调，querySelector 拿到的
@@ -67,14 +84,29 @@ function submit(): void {
 <template>
   <section class="panel conversation" data-testid="conversation-panel">
     <div ref="messagesEl" class="messages">
+      <div v-if="messages.length === 0" class="welcome" data-testid="conversation-welcome">
+        <h2 class="welcome-title">用一句话，生成你的 KingFusion 工程</h2>
+        <p class="welcome-sub">描述需求，智绘帮你设计、构建并验证完整的客户端工程。</p>
+        <div class="suggestions">
+          <button
+            v-for="s in suggestions"
+            :key="s"
+            type="button"
+            class="suggestion"
+            @click="useSuggestion(s)"
+          >
+            {{ s }}
+          </button>
+        </div>
+      </div>
       <div v-for="(message, index) in messages" :key="message.id ?? index" class="message" :data-role="message.role">
         <span class="role">{{ message.role === "user" ? "我" : "助手" }}</span>
         <span class="content" :class="{ streaming: isStreamingTail(index, message) }">{{ displayContent(message) }}</span>
       </div>
-      <p v-if="messages.length === 0" class="empty">描述你的需求，例如「新建一个工程」或「把按钮改成红色」。</p>
     </div>
     <div class="composer">
       <input
+        ref="inputEl"
         v-model="draft"
         data-testid="message-input"
         type="text"
@@ -102,7 +134,21 @@ function submit(): void {
   box-shadow: var(--shadow-card); padding: 0.55rem 0.9rem; max-width: 78%; white-space: pre-wrap; word-break: break-word;
 }
 .role { display: none; }
-.empty { color: var(--color-text-secondary); font-size: 0.85rem; margin: 0.2rem 0; }
+.welcome {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; gap: 0.55rem; padding: 1rem 0.5rem;
+}
+.welcome-title { margin: 0; font-size: 1.15rem; letter-spacing: -0.02em; }
+.welcome-sub { margin: 0; color: var(--color-text-secondary); font-size: 0.88rem; }
+.suggestions { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem; margin-top: 0.5rem; }
+.suggestion {
+  padding: 0.45rem 0.9rem; border: 1px solid var(--color-border);
+  border-radius: 999px; background: rgba(255, 255, 255, 0.7);
+  color: var(--color-text); font-size: 0.85rem; cursor: pointer;
+  transition: transform 140ms var(--ease-out), background 140ms var(--ease-out);
+}
+.suggestion:hover { background: var(--color-surface); }
+.suggestion:active { transform: scale(0.97); }
 .content.streaming::after { content: "▍"; animation: blink 1s steps(1) infinite; margin-left: 0.15rem; }
 @keyframes blink { 50% { opacity: 0; } }
 .composer {

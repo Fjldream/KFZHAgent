@@ -222,6 +222,16 @@ describe("TopBar", () => {
     expect(chip.attributes("data-stage")).toBe(stage);
     expect(chip.text()).toContain(label);
   });
+
+  it("shows the breadcrumb and emits back from the back-to-list button", async () => {
+    const wrapper = mount(TopBar, {
+      props: { workspaceName: "客户展示大屏", stage: "idle" },
+    });
+    expect(wrapper.text()).toContain("工程列表");
+    expect(wrapper.get('[data-testid="back-to-list"]').attributes("aria-label")).toBe("返回工程列表");
+    await wrapper.get('[data-testid="back-to-list"]').trigger("click");
+    expect(wrapper.emitted("back")).toBeTruthy();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -256,6 +266,22 @@ describe("ContextPanel", () => {
     expect(wrapper.get('[data-testid="revision-list"]').text()).toContain("R1");
   });
 
+  it("idle: shows the project overview card", async () => {
+    const wrapper = mount(ContextPanel, {
+      props: { ...baseProps, stage: "idle", revisions, currentRevisionId: null },
+    });
+    expect(wrapper.text()).toContain("工程概况");
+    expect(wrapper.text()).toContain("模式：新建工程");
+    expect(wrapper.text()).toContain("修订：未开始");
+  });
+
+  it("idle: shows an in-progress revision state once a revision exists", async () => {
+    const wrapper = mount(ContextPanel, {
+      props: { ...baseProps, stage: "idle", revisions, currentRevisionId: "r1" },
+    });
+    expect(wrapper.text()).toContain("修订：进行中");
+  });
+
   it("idle upload mode with a pending upload shows the upload guide", async () => {
     const wrapper = mount(ContextPanel, {
       props: { ...baseProps, stage: "idle", mode: "upload", uploadPending: true },
@@ -268,6 +294,20 @@ describe("ContextPanel", () => {
       props: { ...baseProps, stage: "building", jobStatus: "RUNNING" },
     });
     expect(wrapper.get('[data-testid="build-status"]').text()).toContain("正在生成工程…");
+  });
+
+  it("building: shows the four build steps with the active one highlighted", async () => {
+    const wrapper = mount(ContextPanel, {
+      props: { ...baseProps, stage: "building", jobStatus: "RUNNING" },
+    });
+    const steps = wrapper.get('[data-testid="build-steps"]');
+    const items = steps.findAll("li");
+    expect(items.length).toBe(4);
+    expect(steps.text()).toContain("排队");
+    expect(steps.text()).toContain("编译");
+    expect(steps.text()).toContain("校验");
+    expect(steps.text()).toContain("完成");
+    expect(items[1].classes()).toContain("on");
   });
 
   it("approval: shows the pending plan hint", async () => {
@@ -359,6 +399,24 @@ describe("ConversationPanel", () => {
       props: { messages: [], streaming: true },
     });
     expect(wrapper.get('[data-testid="send-message"]').attributes("disabled")).toBeDefined();
+  });
+
+  it("shows the welcome screen with suggestions when empty", async () => {
+    const wrapper = mount(ConversationPanel, {
+      props: { messages: [], streaming: false },
+    });
+    expect(wrapper.get('[data-testid="conversation-welcome"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain("用一句话，生成你的 KingFusion 工程");
+    expect(wrapper.findAll(".suggestion").length).toBe(3);
+  });
+
+  it("fills the draft from a suggestion without sending", async () => {
+    const wrapper = mount(ConversationPanel, {
+      props: { messages: [], streaming: false },
+    });
+    await wrapper.get(".suggestion").trigger("click");
+    expect(wrapper.get('[data-testid="message-input"]').element.value).toBe("新建一个设备监控大屏");
+    expect(wrapper.emitted("send")).toBeUndefined();
   });
 });
 

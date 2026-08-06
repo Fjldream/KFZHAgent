@@ -8,7 +8,7 @@ const props = defineProps<{
   stage: WorkflowStage;
 }>();
 
-defineEmits<{ (e: "logout"): void; (e: "delete-workspace"): void }>();
+defineEmits<{ (e: "back"): void; (e: "logout"): void; (e: "delete-workspace"): void }>();
 
 const { gsap, track, trackTween, reduceMotion } = useGsap();
 const barEl = ref<HTMLElement | null>(null);
@@ -43,8 +43,13 @@ watch(
 
 <template>
   <header ref="barEl" class="topbar glass">
-    <div class="brand"><span class="logo">◈</span> 智绘</div>
+    <div class="brand">
+      <button type="button" class="back" data-testid="back-to-list" aria-label="返回工程列表" @click="$emit('back')">←</button>
+      <span class="logo">◈</span> 智绘
+    </div>
     <div class="center">
+      <span class="crumb-muted">工程列表</span>
+      <span class="crumb-sep">/</span>
       <span class="ws-name">{{ workspaceName }}</span>
       <span ref="chipEl" class="chip" :data-stage="stage">{{ stageLabel[stage] }}</span>
     </div>
@@ -60,6 +65,15 @@ watch(
 .topbar { display: flex; align-items: center; justify-content: space-between; padding: 0.7rem 1.4rem; gap: 1rem; opacity: 0; }
 .brand { display: flex; align-items: center; gap: 0.5rem; font-weight: 600; }
 .logo { color: var(--color-accent); }
+.back {
+  padding: 0.2rem 0.55rem; border: none; border-radius: 999px;
+  background: var(--color-surface); color: var(--color-text-secondary);
+  box-shadow: var(--shadow-card); cursor: pointer; font-size: 0.95rem; line-height: 1.2;
+}
+.back:hover { color: var(--color-text); }
+.back:active { transform: scale(0.95); }
+.crumb-muted { color: var(--color-text-secondary); font-size: 0.85rem; white-space: nowrap; }
+.crumb-sep { color: var(--color-text-secondary); opacity: 0.6; }
 .center { display: flex; align-items: center; gap: 0.7rem; min-width: 0; }
 .ws-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chip {

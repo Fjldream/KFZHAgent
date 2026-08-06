@@ -71,7 +71,12 @@ watch(
     <template v-else-if="stage === 'building'">
       <div class="section">
         <h2>构建进度</h2>
-        <div class="bar"><div class="fill" /></div>
+        <ol class="steps" data-testid="build-steps">
+          <li :class="{ on: jobStatus === 'QUEUED' }">排队</li>
+          <li :class="{ on: jobStatus === 'RUNNING' }">编译</li>
+          <li :class="{ on: jobStatus === 'VALIDATING' }">校验</li>
+          <li :class="{ on: jobStatus === 'SUCCEEDED' }">完成</li>
+        </ol>
         <p class="sub" data-testid="build-status">{{ buildText }}</p>
       </div>
     </template>
@@ -92,6 +97,11 @@ watch(
     </template>
 
     <template v-else>
+      <div class="section">
+        <h2>工程概况</h2>
+        <p class="sub">模式：{{ mode === "upload" ? "上传工程" : "新建工程" }}</p>
+        <p class="sub">修订：{{ currentRevisionId !== null && currentRevisionId !== undefined ? "进行中" : "未开始" }}</p>
+      </div>
       <UploadGuide v-if="showUpload" @file="emit('upload', $event)" />
       <ProjectTree v-else :tree="tree" />
       <RevisionList
@@ -108,9 +118,20 @@ watch(
 .section { background: var(--color-surface); border-radius: var(--radius-card); box-shadow: var(--shadow-card); padding: 1.2rem; }
 .section h2 { margin: 0 0 0.5rem; font-size: 1rem; }
 .sub { margin: 0; color: var(--color-text-secondary); font-size: 0.85rem; }
-.bar { height: 8px; border-radius: 999px; background: rgba(0, 0, 0, 0.08); overflow: hidden; margin: 0.6rem 0; }
-.fill { height: 100%; width: 60%; border-radius: inherit; background: var(--color-accent); animation: pulse 1.4s ease-in-out infinite alternate; }
-@keyframes pulse { from { transform: translateX(-100%); } to { transform: translateX(120%); } }
+.steps {
+  list-style: none; margin: 0.7rem 0; padding: 0;
+  display: flex; gap: 1rem; flex-wrap: wrap;
+}
+.steps li {
+  display: flex; align-items: center; gap: 0.35rem;
+  font-size: 0.8rem; color: var(--color-text-secondary);
+}
+.steps li::before {
+  content: ""; width: 8px; height: 8px; border-radius: 999px;
+  background: rgba(0, 0, 0, 0.12);
+}
+.steps li.on { color: var(--color-accent); font-weight: 600; }
+.steps li.on::before { background: var(--color-accent); box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.18); }
 .primary {
   width: 100%; padding: 0.6rem; border: none; border-radius: var(--radius-button);
   background: var(--color-success); color: #fff; cursor: pointer;
