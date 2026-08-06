@@ -22,6 +22,7 @@ function makeState(overrides: Partial<WorkspaceState> = {}): WorkspaceState {
     buildJobId: null,
     buildJobStatus: null,
     artifacts: [],
+    previewArtifactId: undefined,
     validationReport: null,
     revisions: [],
     currentRevisionId: null,

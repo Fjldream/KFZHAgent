@@ -10,6 +10,9 @@ const api = vi.hoisted(() => ({
   listMessages: vi.fn(),
   createDownloadToken: vi.fn(),
   previewUrl: vi.fn(),
+  getBuildJob: vi.fn(),
+  listBuildArtifacts: vi.fn(),
+  getBuildJobReport: vi.fn(),
 }));
 
 vi.mock("../api", () => ({ api }));
@@ -28,6 +31,9 @@ beforeEach(() => {
   api.listMessages.mockReset();
   api.createDownloadToken.mockReset();
   api.previewUrl.mockReset();
+  api.getBuildJob.mockReset();
+  api.listBuildArtifacts.mockReset();
+  api.getBuildJobReport.mockReset();
 
   api.getWorkspace.mockResolvedValue(ws);
   api.listRevisions.mockResolvedValue([]);
@@ -76,6 +82,20 @@ describe("workspace store load() 会话绑定", () => {
     await store.load("ws-2");
     expect(store.state.conversationId).toBe("conv-2");
     expect(api.listMessages).toHaveBeenLastCalledWith("conv-2");
+  });
+
+  it("exposes the built client-package artifact as previewArtifactId after a successful build", async () => {
+    api.getBuildJob.mockResolvedValue({ id: "job-1", status: "SUCCEEDED" });
+    api.listBuildArtifacts.mockResolvedValue([
+      { id: "art-pkg", kind: "client-package" },
+      { id: "art-diff", kind: "plan-diff" },
+    ]);
+    api.getBuildJobReport.mockResolvedValue({ outcome: "pass" });
+    api.listRevisions.mockResolvedValue([]);
+    const store = useWorkspace();
+    const status = await store.pollBuildJob("job-1");
+    expect(status).toBe("SUCCEEDED");
+    expect(store.state.previewArtifactId).toBe("art-pkg");
   });
 
   it("delegates createPreviewUrl to the rendered HTML endpoint without blob download", async () => {

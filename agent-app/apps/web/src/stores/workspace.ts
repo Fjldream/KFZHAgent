@@ -53,6 +53,8 @@ export interface WorkspaceState {
   buildJobId: string | null;
   buildJobStatus: BuildJobStatus | null;
   artifacts: ArtifactRow[];
+  /** 最近一次构建产出的 client-package artifact（构建成功后供预览）。 */
+  previewArtifactId: string | undefined;
   validationReport: ValidationReport | null;
   revisions: Revision[];
   currentRevisionId: string | null;
@@ -73,6 +75,7 @@ const state: WorkspaceState = reactive({
   buildJobId: null,
   buildJobStatus: null,
   artifacts: [],
+  previewArtifactId: undefined,
   validationReport: null,
   revisions: [],
   currentRevisionId: null,
@@ -115,6 +118,10 @@ async function pollBuildJob(jobId: string): Promise<BuildJobStatus> {
       // 影响 job 状态判断；此时置空以覆盖旧报告，避免残留误导。
       if (job.status === "SUCCEEDED") {
         state.artifacts = await api.listBuildArtifacts(jobId);
+        const clientPackage = state.artifacts.find((a) => a.kind === "client-package");
+        if (clientPackage !== undefined) {
+          state.previewArtifactId = clientPackage.id;
+        }
       }
       try {
         state.validationReport = await api.getBuildJobReport(jobId);
