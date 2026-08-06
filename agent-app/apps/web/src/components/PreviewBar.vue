@@ -10,6 +10,8 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{ (e: "toggle-fullscreen"): void }>();
 
 const zoom = ref<"fit" | "full">("fit");
+/** 最小化（收起为右下角悬浮球）后再次点击还原弹窗。 */
+const minimized = ref(false);
 const { gsap, trackTween, reduceMotion } = useGsap();
 const barEl = ref<HTMLElement | null>(null);
 
@@ -23,11 +25,33 @@ onMounted(() => {
 function toggleZoom(): void {
   zoom.value = zoom.value === "fit" ? "full" : "fit";
 }
+
+function minimize(): void {
+  minimized.value = true;
+}
+
+function restore(): void {
+  minimized.value = false;
+}
 </script>
 
 <template>
+  <!-- 最小化状态：右下角悬浮球，点击还原弹窗 -->
+  <button
+    v-if="previewUrl !== undefined && previewUrl !== '' && minimized"
+    type="button"
+    class="preview-dock"
+    data-testid="preview-dock"
+    title="打开预览"
+    @click="restore"
+  >
+    <span class="dock-dot" aria-hidden="true" />
+    <span>页面预览</span>
+  </button>
+
+  <!-- 弹窗形态：右下角浮动窗口，可全屏 / 最小化 -->
   <div
-    v-if="previewUrl !== undefined && previewUrl !== ''"
+    v-else-if="previewUrl !== undefined && previewUrl !== ''"
     ref="barEl"
     class="preview-bar"
     :class="{ fullscreen }"
@@ -42,6 +66,7 @@ function toggleZoom(): void {
         <button type="button" class="ctrl" data-testid="preview-fullscreen" @click="emit('toggle-fullscreen')">
           {{ fullscreen ? "退出全屏" : "全屏" }}
         </button>
+        <button type="button" class="ctrl" data-testid="preview-minimize" @click="minimize">最小化</button>
       </div>
     </div>
     <div class="frame-wrap" :class="{ zoomed: zoom === 'full' }">
@@ -51,16 +76,34 @@ function toggleZoom(): void {
 </template>
 
 <style scoped>
+/* 弹窗：固定右下角，可拖动的窗口形态 */
 .preview-bar {
-  background: var(--color-surface); border-radius: var(--radius-card) var(--radius-card) 0 0;
-  box-shadow: var(--shadow-float); overflow: hidden;
-  padding: 0.6rem 1.2rem 0.2rem;
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  width: min(660px, 92vw);
+  height: min(480px, 72vh);
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-float);
+  overflow: hidden;
+  padding: 0.7rem 1.1rem 0.3rem;
+  z-index: 40;
 }
 .preview-bar.fullscreen {
-  position: fixed; inset: 0; z-index: 60;
-  border-radius: 0; display: flex; flex-direction: column;
+  inset: 0;
+  right: 0;
+  bottom: 0;
+  width: auto;
+  height: auto;
+  border-radius: 0;
   padding: 0.8rem 1.2rem;
-  background: rgba(255, 255, 255, 0.92); backdrop-filter: var(--blur-glass);
+  z-index: 60;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: var(--blur-glass);
 }
 .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.4rem; }
 .title { margin: 0; font-size: 0.85rem; color: var(--color-text-secondary); }
@@ -70,9 +113,33 @@ function toggleZoom(): void {
   background: var(--color-surface); color: var(--color-text); font-size: 0.75rem; cursor: pointer;
 }
 .ctrl:active { transform: scale(0.97); }
-.frame-wrap { overflow: auto; }
-.frame { width: 100%; height: 320px; border: none; display: block; }
+.frame-wrap { flex: 1; overflow: auto; min-height: 0; }
+.frame { width: 100%; height: 100%; border: none; display: block; }
 .frame-wrap.zoomed .frame { width: 1280px; height: 720px; }
 .fullscreen .frame-wrap { flex: 1; }
-.fullscreen .frame { height: 100%; }
+
+/* 最小化悬浮球 */
+.preview-dock {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.5rem 0.95rem;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-float);
+  color: var(--color-text);
+  font-size: 0.8rem;
+  cursor: pointer;
+  z-index: 40;
+}
+.preview-dock:active { transform: scale(0.97); }
+.dock-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--color-accent, #00a0e9);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent, #00a0e9) 25%, transparent);
+}
 </style>

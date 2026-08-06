@@ -466,6 +466,30 @@ describe("PreviewBar", () => {
     await zoomBtn.trigger("click");
     expect(zoomBtn.text()).toBe("适应宽度");
   });
+
+  it("minimizes to a docked pill and restores the modal window on click", async () => {
+    const wrapper = mount(PreviewBar, {
+      props: { previewUrl: "/api/artifacts/download/token-abc" },
+    });
+    // 初始为弹窗形态
+    expect(wrapper.get('[data-testid="preview-panel"]').exists()).toBe(true);
+    // 最小化 → 弹窗收起，悬浮球出现
+    await wrapper.get('[data-testid="preview-minimize"]').trigger("click");
+    expect(wrapper.find('[data-testid="preview-panel"]').exists()).toBe(false);
+    const dock = wrapper.get('[data-testid="preview-dock"]');
+    expect(dock.exists()).toBe(true);
+    // 点击悬浮球 → 还原弹窗
+    await dock.trigger("click");
+    expect(wrapper.get('[data-testid="preview-panel"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="preview-dock"]').exists()).toBe(false);
+  });
+
+  it("does not render a dock when no preview is available", async () => {
+    const wrapper = mount(PreviewBar, {
+      props: { previewUrl: undefined },
+    });
+    expect(wrapper.find('[data-testid="preview-dock"]').exists()).toBe(false);
+  });
 });
 
 describe("RevisionList", () => {
