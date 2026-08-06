@@ -92,6 +92,7 @@ export function createClassifyIntentNode(deps: SolutionGraphDeps) {
         reply: result.reply,
         stage: "idle",
         pendingRequirements: undefined,
+        lastErrorCode: undefined,
       };
     }
 

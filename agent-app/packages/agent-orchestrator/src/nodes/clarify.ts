@@ -14,7 +14,7 @@ import type { SolutionGraphDeps } from "../ports.js";
  */
 export function createClarifyNode(deps: SolutionGraphDeps) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
-    const question = state.clarifyingQuestion?.question ?? state.reply ?? "";
+    const question = state.clarifyingQuestion?.question ?? state.reply ?? "请补充更多需求细节";
     const options = state.clarifyingQuestion?.options ?? [];
     const content = options.length > 0 ? `${question}\n${options.join("\n")}` : question;
 
@@ -25,10 +25,13 @@ export function createClarifyNode(deps: SolutionGraphDeps) {
       content,
     });
 
+    // Defensive cap: the schema bounds clarificationCount to 5; Task 5 adds the
+    // real "stop asking past the cap" gate in classify-intent.
     return {
-      clarificationCount: (state.clarificationCount ?? 0) + 1,
+      clarificationCount: Math.min((state.clarificationCount ?? 0) + 1, 5),
       stage: "idle",
       clarifyingQuestion: undefined,
+      reply: undefined,
     };
   };
 }
