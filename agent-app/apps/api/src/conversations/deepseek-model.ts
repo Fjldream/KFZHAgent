@@ -263,9 +263,9 @@ export class DeepSeekModelPort implements ModelPort {
         ? "用户要求修改计划。请基于修订意见输出新的变更计划 JSON。"
         : "请根据需求输出变更计划 JSON。",
       "变更计划 JSON 格式（严格）：",
-      '{"operations":[{"op":"update","entityId":"<清单中的 GUID>","entityType":"text|button|inputnumber","changes":[{"path":"/text","value":"..."}]}]}',
-      "create（新增控件）格式：{\"op\":\"create\",\"entityType\":\"control\",\"entityId\":\"新语义id如NewTitle\",\"properties\":{\"pageId\":\"<清单中的页面GUID>\",\"type\":\"text|button|inputnumber\",\"text\":\"控件文本\",\"x\":60,\"y\":50,\"width\":300,\"height\":40}}",
-      "delete 格式：{\"op\":\"delete\",\"entityId\":\"<清单中的 GUID>\",\"entityType\":\"text|button|inputnumber\",\"destructiveConfirmed\":true}",
+      '{"operations":[{"op":"update","entityId":"<清单中的 GUID>","entityType":"control","changes":[{"path":"/text","value":"..."}]}]}',
+      "create（新增控件）格式：{\"op\":\"create\",\"entityType\":\"control\",\"entityId\":\"新语义id如NewTitle\",\"properties\":{\"pageId\":\"<清单中的页面GUID>\",\"type\":\"text|button|inputnumber|switch|checkbox|radio|select|image|tabs|table|richtext|spacer\",\"text\":\"控件文本\",\"x\":60,\"y\":50,\"width\":300,\"height\":40}}",
+      "delete 格式：{\"op\":\"delete\",\"entityId\":\"<清单中的 GUID>\",\"entityType\":\"control\",\"destructiveConfirmed\":true}",
       "规则：update/delete 的 entityId 必须来自下方实体清单的 GUID；create 的 entityId 是新的语义 id，entityType 固定为 control，控件类型放在 properties.type，properties.pageId 必须是清单中页面的 GUID。",
       "",
       "当前工程摘要：" + (input.revisionSummary ?? "（无）"),
