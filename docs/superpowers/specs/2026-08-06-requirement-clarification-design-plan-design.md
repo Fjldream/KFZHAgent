@@ -10,7 +10,7 @@
 1. **无需求澄清**：客户输入一句需求（如"生成一个监控大屏"），Agent 直接一次性地生成变更计划/方案，无法通过连续追问确认需求，交互体验差；
 2. **产物与需求偏差大**：生成"监控大屏"只得到几个按钮（按钮文本写"趋势曲线"）——因为 IR 控件类型无图表类、LLM prompt 硬编码只允许 text/button/inputnumber 三种控件、且 DeepSeek 没有任何设计审美引导。
 
-本设计通过三层改动解决：
+本设计通过三层改动解决（控件能力补全见 §9 后续计划）：
 
 - **层 1（架构）**：LangGraph 增加逐轮需求澄清（CLARIFY 意图 + clarify 节点 + 澄清计数上限），信息不足时 Agent 必须追问而非猜测；
 - **层 2（架构）**：澄清完成后、生成控件方案前，增加"设计计划确认"环节（design-plan 节点 + CONFIRM_DESIGN/REVISE_DESIGN 意图），客户先看到"我理解你要什么 + 打算怎么做"再放行；
@@ -189,7 +189,29 @@ Anthropic 官方 `anthropics/skills/skills/frontend-design/SKILL.md`（Apache 2.
 - 设计计划：布局/风格有方向而非空泛；
 - 控件方案：同一需求下不再产出"只有按钮文本写趋势曲线"的凑数方案（真正的趋势曲线控件属层 4 遗留，见 §9）。
 
-## 7. 架构改动清单（按包）
+## 7. 后续计划：静态控件补全（本轮不做，供下轮排期参考）
+
+### 7.1 目标控件（开发态静态控件，非图表子模型）
+
+**ElementUI 未接入（12 种）**：`cascader(39)` `datetimepicker(40)` `dropdown` `input(38)` `map` `navmenu(34)` `steps(52)` `tag(50)` `timeline(51)` `transfer(46)` `tree(32)` `upload(45)`（括号内为 uiModelType；dropdown/map 以源码注册为准）
+
+**老式高频（7 种）**：`scale(8)` `time/datetime(5)` `combobox(3)` `list(9)` `treeview(11)` `webcontainer(12)` `gantt(30)`
+
+（控件源码文件与 uiModelType 已在 §2.2 盘点时确认；若个别控件的序列化为运行时复杂对象，按 SDB 无样本处理——模板用构造器默认值，KF 打开验证兜底。）
+
+### 7.2 做法（复用现有模板提取器闭环）
+
+1. **模板**：`kf-template-generator.ts` 的 `CONTROLS` 映射扩展到全部目标控件 → 重跑生成模板（构造器字段 + 基类合并 + 枚举求值，现有逻辑不变）→ 拷贝入 `control-templates/`；
+2. **IR schema**：`client-project-ir.schema.ts` 为每个新类型定义语义字段（沿用现有模式：`BaseControlIR.extend({ type: z.literal(...), ...语义字段 }).strict()`），语义字段尽量少（id/geometry + 类型特有 1-3 个）；
+3. **编译器**：`control-compiler.ts`（模板映射 + TYPE_IR_FIELDS + applySchemaOverrides case）+ `client-compiler.ts`（validateControl 变体）按 12 种模式扩展；
+4. **验证**：编译含新控件的工程 → 导入 KF 3.32 → `getProjectFile` 读回（与 AllControls 实测同闭环）。
+
+### 7.3 风险
+
+- 个别控件（如 map/dropdown）可能也是运行时组件（类似图表子模型）——提取器跑出空模板或无 uiModelType 时，标记"推迟"，不硬接；
+- 模板默认值 ≠ 真实序列化字段集（SDB 无样本）——以 KF 打开验证为准，失败则回退。
+
+## 8. 架构改动清单（按包）
 
 | 包 | 改动 |
 |---|---|
@@ -207,14 +229,17 @@ Anthropic 官方 `anthropics/skills/skills/frontend-design/SKILL.md`（Apache 2.
 
 ## 9. 范围与遗留
 
-**本设计不做**：
-- KF 趋势曲线/图表控件的 IR 支持与序列化验证（层 4，深水区：需先在 KF 客户端实测趋势曲线在页面 JSON 的真实序列化形式，再扩展 IR/模板/编译器；本设计只保证 LLM"不再凑数"，产出仍限于 12 种控件）；
+**本轮做**：层 1-3（澄清 / 设计计划确认 / 审美注入，见 §4-6）。
+
+**后续开发计划（本轮不做，已排期思路）**：
+- **层 4 静态控件补全**：IR 控件类型从 12 种扩展到开发态全部静态控件（ElementUI 未接入 12 种 + 老式高频 7 种，清单见 §7.1），模板提取器重跑 + 编译器接入；
+- **KF 趋势曲线/图表控件（TrendChart/BarChart/PieChart/XYChart/CustomCharts/Reports）**：实证确认是图表子模型（不注册 uiModelType，构造器字段可反推但宿主形式未验证——被 Layout/ChartComponent base 引用，页面 JSON 中的挂载方式待实测样本）。先决条件：在 KF 客户端实测拖一个图表保存导出，解析真实序列化结构后再扩展 IR `chart` 控件 + configureData 生成器；
 - 上传 .gz 工程的 editableEntities 实体清单（modify 流程，独立遗留项）；
-- 设计计划的多方案对比（2-3 个备选让客户选——frontend-design 的两遍流程当前只产出 1 个方案，多方案属后续增强）。
+- 设计计划的多方案对比（2-3 个备选让客户选，后续增强）。
 
 **交互上限**：澄清 ≤5 轮；设计计划修订不设上限（由客户主导，无死循环风险——每轮都要客户明确输入）。
 
-## 10. 实施顺序
+## 10. 实施顺序（本轮）
 
 1. 层 3（审美注入）：仅改 prompt，独立、见效快；
 2. 层 1（澄清）：intent/classify/clarify 节点 + state；
