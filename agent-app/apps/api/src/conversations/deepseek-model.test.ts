@@ -116,6 +116,62 @@ describe("DeepSeekModelPort", () => {
     expect(result.needsClarification).toBe(true);
   });
 
+  it("classifyIntent user prompt enforces polite greeting and numbered clarifying options", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({ intent: "NEW_REQUIREMENT", requestedDomains: ["kingclient"] }),
+            },
+          },
+        ],
+      }),
+    });
+    const port = new DeepSeekModelPort({
+      apiKey: "test-key",
+      fetch: fetchImpl,
+      baseUrl: "https://mock.local",
+    });
+    await port.classifyIntent({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [{ role: "user", content: "做一个大屏" }],
+      requirementText: "做一个大屏",
+    });
+    // 澄清 prompt 约束必须落地：礼貌开场格式、序号强制、序号符号白名单。
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    const userPrompt = body.messages[1].content;
+    expect(userPrompt).toContain("您好，为了帮您把方案做得更贴合需求");
+    expect(userPrompt).toContain("选项必须带序号");
+    expect(userPrompt).toContain("①②③④⑤");
+  });
+
+  it("passes through numbered clarifying options verbatim", async () => {
+    const port = makePort({
+      intent: "CLARIFY",
+      requestedDomains: ["kingclient"],
+      needsClarification: true,
+      clarifyingQuestion: {
+        question: "您希望监控哪个场景？",
+        options: ["① 生产车间监控", "② 机房设备监控", "③ 能源管理"],
+      },
+    });
+    const result = await port.classifyIntent({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [{ role: "user", content: "做一个大屏" }],
+      requirementText: "做一个大屏",
+    });
+    expect(result.intent).toBe("CLARIFY");
+    expect(result.clarifyingQuestion?.options?.[0]).toMatch(/^① /);
+  });
+
   it("createProjectDesign assembles a valid SolutionIR", async () => {
     const port = makePort({ displayName: "演示工程" });
     const design = await port.createProjectDesign({

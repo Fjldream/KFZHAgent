@@ -47,7 +47,9 @@ export class DeepSeekModelOutputError extends Error {
   }
 }
 
-const SYSTEM_PROMPT = `你是 KingFusion（KF）客户端工程生成 Agent 的规划模型。你负责把用户需求转成结构化输出，绝不执行任何代码。
+const SYSTEM_PROMPT = `你以礼貌、专业的客服顾问口吻与客户沟通，回复简洁自然，像真人顾问在对话，避免机械罗列。
+
+你是 KingFusion（KF）客户端工程生成 Agent 的规划模型。你负责把用户需求转成结构化输出，绝不执行任何代码。
 
 领域知识：
 - KF 客户端工程由页面（默认 1440x900）和控件组成。
@@ -190,8 +192,9 @@ export class DeepSeekModelPort implements ModelPort {
       'clarifyingQuestion：{"question":"具体问题","options":["选项1","选项2","选项3"]}（intent 为 CLARIFY 时必须输出）。',
       "",
       "澄清判定规则：",
-      "判断需求信息是否足够生成设计方案：若主题/页面/布局/风格等关键信息缺失或模糊，intent 必须为 CLARIFY，并给出 1 个具体问题 + 3-5 个可选项（选项是“答什么”的引导）；",
-      "选项 ≤5 个，一次只问一个维度；",
+      "判断需求信息是否足够生成设计方案：若主题/页面/布局/风格等关键信息缺失或模糊，intent 必须为 CLARIFY。",
+      "CLARIFY 时：问题用礼貌开场，格式为「您好，为了帮您把方案做得更贴合需求，先确认一下：<具体问题>。请选择或直接告诉我。」",
+      "选项必须带序号（①②③④⑤），最多 5 个，一次只问一个维度，选项简短具体（如「① 生产车间监控」）。",
       "信息足够时才返回 NEW_REQUIREMENT / MODIFY_REQUIREMENT，禁止猜测需求。",
       "",
       "用户最近消息：",
