@@ -3,6 +3,8 @@ import type { ClientProjectIR, ControlIR, PageIR } from "@kf/domain-client";
 
 const DEFAULT_PAGE_WIDTH = 1024;
 const DEFAULT_PAGE_HEIGHT = 768;
+/** 画布自适应时控件边界外的留白。 */
+const EDGE_PADDING = 40;
 const THEME_COLOR = "#2f6fed";
 
 /**
@@ -83,8 +85,20 @@ function renderControl(control: ControlIR): string {
  * back to 1024×768 when the IR omits width/height.
  */
 export function renderPagePreview(page: PageIR): string {
-  const width = page.width ?? DEFAULT_PAGE_WIDTH;
-  const height = page.height ?? DEFAULT_PAGE_HEIGHT;
+  // KF 页面坐标是自由画布：容器尺寸以「页面声明尺寸」为基准，但必须
+  // 至少包住最底部/最右侧控件（超界的按钮等不会溢出不可见）。
+  const declaredWidth = page.width ?? DEFAULT_PAGE_WIDTH;
+  const declaredHeight = page.height ?? DEFAULT_PAGE_HEIGHT;
+  const maxBottom = page.controls.reduce(
+    (max, control) => Math.max(max, control.y + control.height),
+    0,
+  );
+  const maxRight = page.controls.reduce(
+    (max, control) => Math.max(max, control.x + control.width),
+    0,
+  );
+  const width = Math.max(declaredWidth, maxRight + EDGE_PADDING);
+  const height = Math.max(declaredHeight, maxBottom + EDGE_PADDING);
   const controls = page.controls.map(renderControl).join("");
   return `<section class="kf-page" id="page-${escapeHtml(page.id)}" data-testid="kf-page" style="width:${width}px;height:${height}px">${controls}</section>`;
 }

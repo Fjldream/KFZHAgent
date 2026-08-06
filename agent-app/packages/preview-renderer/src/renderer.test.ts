@@ -80,6 +80,19 @@ describe("preview renderer", () => {
     expect(html).toContain("width:1024px");
     expect(html).toContain("height:768px");
   });
+  it("grows the page canvas to keep out-of-bounds controls visible", () => {
+    const html = renderPagePreview({
+      ...page,
+      height: 768,
+      controls: [
+        { id: "c-btn", type: "button", x: 60, y: 800, width: 150, height: 40, text: "刷新数据" },
+      ],
+    });
+    // 按钮 bottom=840 → 容器高度至少 840+40=880；宽度至少 60+150+40=250 → 取声明 1024
+    expect(html).toContain("height:880px");
+    expect(html).toContain("刷新数据");
+  });
+
   it("positions each control absolutely and renders its type", () => {
     const html = renderPagePreview(page);
     expect(html).toContain('data-type="text"');
