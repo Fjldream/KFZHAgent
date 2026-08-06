@@ -10,6 +10,7 @@ import { AgentGraphState } from "./state.js";
 import type { SolutionGraphDeps } from "./ports.js";
 import { createLoadContextNode } from "./nodes/load-context.js";
 import { createClassifyIntentNode } from "./nodes/classify-intent.js";
+import { createClarifyNode } from "./nodes/clarify.js";
 import { createPlanChangeNode } from "./nodes/plan-change.js";
 import { createApprovalNode, createCancelPlanNode } from "./nodes/approval.js";
 import { createEnqueueBuildNode } from "./nodes/enqueue-build.js";
@@ -38,6 +39,7 @@ export class ApprovalResumeRequiredError extends Error {
  *
  * Intent routing (brief Step 4) is fully deterministic:
  *   QUESTION            → idle (assistant reply persisted)
+ *   CLARIFY             → clarify (question persisted, clarificationCount+1, idle)
  *   NEW_REQUIREMENT     → plan-change
  *   MODIFY_REQUIREMENT  → plan-change
  *   CONFIRM_PLAN        → approval
@@ -62,6 +64,7 @@ export function compileSolutionGraph(
   const graph = new StateGraph(AgentGraphState)
     .addNode("load-context", createLoadContextNode(deps))
     .addNode("classify-intent", createClassifyIntentNode(deps))
+    .addNode("clarify", createClarifyNode(deps))
     .addNode("plan-change", createPlanChangeNode(deps))
     .addNode("approval", createApprovalNode())
     .addNode("cancel-plan", createCancelPlanNode(deps))
@@ -87,6 +90,8 @@ function routeAfterClassify(state: AgentGraphStateValue): string {
     case "QUESTION":
     case "ROLLBACK":
       return END;
+    case "CLARIFY":
+      return "clarify";
     case "NEW_REQUIREMENT":
     case "MODIFY_REQUIREMENT":
       return "plan-change";

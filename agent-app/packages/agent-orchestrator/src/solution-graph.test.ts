@@ -150,6 +150,16 @@ class FakeModelPort implements ModelPort {
       return { intent: "MADE_UP_INTENT" as unknown as Intent, requestedDomains: [] };
     }
     const intent = this.intents.shift() ?? "QUESTION";
+    if (intent === "CLARIFY") {
+      return {
+        intent,
+        requestedDomains: [],
+        clarifyingQuestion: {
+          question: "主题是哪种？",
+          options: ["①生产监控", "②设备状态"],
+        },
+      };
+    }
     return { intent, requestedDomains: ["kingclient"], reply: `reply:${intent}` };
   }
 
@@ -341,6 +351,27 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     expect(bed.builds.enqueues).toHaveLength(0);
     expect(bed.workspace.appendCalls).toContainEqual(
       expect.objectContaining({ role: "assistant", content: "reply:QUESTION" }),
+    );
+  });
+
+  it("clarifies with a question+options, bumps the count, and never plans", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+    bed.model.queueIntent("CLARIFY");
+    await sendUser(bed, ctx, "生成一个监控大屏");
+
+    const result = await bed.graph.invoke(input(ctx), config(ctx));
+
+    expect(result.intent).toBe("CLARIFY");
+    expect(result.clarificationCount).toBe(1);
+    expect(result.stage).toBe("idle");
+    expect(bed.model.createCalls).toHaveLength(0);
+    expect(bed.builds.enqueues).toHaveLength(0);
+    expect(bed.workspace.appendCalls).toContainEqual(
+      expect.objectContaining({
+        role: "assistant",
+        content: expect.stringContaining("主题是哪种"),
+      }),
     );
   });
 

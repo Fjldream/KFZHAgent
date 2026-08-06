@@ -96,6 +96,19 @@ export const AgentGraphState = new StateSchema({
    */
   clarificationCount: z.number().int().min(0).max(5).optional(),
   /**
+   * The clarifying question the model asked before it can route the turn.
+   * Carried from classify-intent to the clarify node, which persists it as an
+   * assistant message and then clears it.
+   */
+  clarifyingQuestion: z
+    .object({
+      question: z.string().min(1),
+      options: z.array(z.string()).max(5).optional(),
+    })
+    .optional(),
+  /** Short model reply for the current turn (fallback channel). */
+  reply: z.string().optional(),
+  /**
    * The design plan produced during design-planning (brief Task 3 contract).
    * `revising` marks an in-progress revision of this plan (used by Task 6).
    */

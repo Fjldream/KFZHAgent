@@ -81,6 +81,20 @@ export function createClassifyIntentNode(deps: SolutionGraphDeps) {
       };
     }
 
+    if (result.intent === "CLARIFY") {
+      // The model needs more information before it can pick a route. The
+      // structured question is carried in state for the clarify node, which
+      // persists it as an assistant message and returns the graph to idle.
+      // pendingRequirements is cleared so this turn routes on its own signal.
+      return {
+        intent: result.intent,
+        clarifyingQuestion: result.clarifyingQuestion,
+        reply: result.reply,
+        stage: "idle",
+        pendingRequirements: undefined,
+      };
+    }
+
     if (result.intent === "ROLLBACK") {
       return {
         intent: result.intent,
