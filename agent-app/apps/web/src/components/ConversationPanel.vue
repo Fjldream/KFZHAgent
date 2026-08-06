@@ -141,7 +141,7 @@ function submit(): void {
         </div>
       </div>
       <div v-for="(message, index) in renderedMessages" :key="message.key" class="message" :data-role="message.role">
-        <span class="role">{{ message.role === "user" ? "我" : "助手" }}</span>
+        <img v-if="message.role === 'assistant'" class="avatar" src="/leftIcon.png" alt="智绘" data-testid="assistant-avatar" />
         <template v-if="message.role === 'user'">
           <span class="content">{{ message.content }}</span>
         </template>
@@ -187,6 +187,7 @@ function submit(): void {
           </div>
         </template>
         <span v-else class="content" :class="{ streaming: isStreamingTail(index, message) }">{{ displayContent(message) }}</span>
+        <img v-if="message.role === 'user'" class="avatar user" src="/leftIcon.png" alt="我" data-testid="user-avatar" />
       </div>
     </div>
     <div class="composer">
@@ -208,17 +209,25 @@ function submit(): void {
 
 <style scoped>
 .panel { display: flex; flex-direction: column; background: transparent; flex: 1; min-height: 0; }
-.messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 0.6rem; padding: 0.2rem 0; }
-.message { display: flex; gap: 0.5rem; font-size: 0.92rem; }
+.messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 0.9rem; padding: 0.4rem 0.2rem 0.4rem 0; }
+.message { display: flex; align-items: flex-start; gap: 0.6rem; font-size: 0.95rem; line-height: 1.65; }
 .message[data-role="user"] { justify-content: flex-end; }
+.avatar {
+  flex: 0 0 auto;
+  width: 2.2rem; height: 2.2rem;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: var(--shadow-card);
+  margin-top: 0.15rem;
+}
+.avatar.user { transform: scaleX(-1); }
 .message[data-role="user"] .content {
-  background: var(--color-accent); color: #fff; border-radius: 18px 18px 4px 18px; padding: 0.55rem 0.9rem; max-width: 78%;
+  background: var(--color-accent); color: #fff; border-radius: 18px 18px 4px 18px; padding: 0.6rem 1rem; max-width: 85%;
 }
 .message[data-role="assistant"] .content {
   background: var(--color-surface); color: var(--color-text); border-radius: 18px 18px 18px 4px;
-  box-shadow: var(--shadow-card); padding: 0.55rem 0.9rem; max-width: 78%; white-space: pre-wrap; word-break: break-word;
+  box-shadow: var(--shadow-card); padding: 0.6rem 1rem; max-width: 85%; white-space: pre-wrap; word-break: break-word;
 }
-.role { display: none; }
 .welcome {
   flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
   text-align: center; gap: 0.55rem; padding: 1rem 0.5rem;
