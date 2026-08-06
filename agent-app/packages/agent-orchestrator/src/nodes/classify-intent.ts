@@ -92,9 +92,16 @@ export function createClassifyIntentNode(deps: SolutionGraphDeps) {
       // 按 NEW_REQUIREMENT 继续推进——reply 提示“按当前理解继续”，
       // clarifyingQuestion 不写入 state，clarify 节点不会再次追问。
       if ((state.clarificationCount ?? 0) >= CLARIFY_MAX_TURNS) {
+        const notice = "已尝试多轮澄清，按当前理解继续。";
+        await deps.workspaceQuery.appendMessage({
+          tenantId: state.tenantId,
+          conversationId: state.conversationId,
+          role: "assistant",
+          content: notice,
+        });
         return {
           intent: "NEW_REQUIREMENT",
-          reply: "已尝试多轮澄清，按当前理解继续。",
+          reply: notice,
           stage: "idle",
           pendingRequirements: undefined,
           lastErrorCode: undefined,

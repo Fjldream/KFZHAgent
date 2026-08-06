@@ -69,9 +69,14 @@ const SYSTEM_PROMPT = `你是 KingFusion（KF）客户端工程生成 Agent 的�
 function normalizeClarifyOutput(raw: unknown): unknown {
   const record = (raw ?? {}) as Record<string, unknown>;
   if (record["intent"] !== "CLARIFY") return raw;
-  if (record["clarifyingQuestion"] !== undefined && record["clarifyingQuestion"] !== null) {
-    return raw;
-  }
+  const q = record["clarifyingQuestion"];
+  const hasUsableQuestion =
+    q !== undefined &&
+    q !== null &&
+    typeof q === "object" &&
+    typeof (q as Record<string, unknown>)["question"] === "string" &&
+    ((q as Record<string, unknown>)["question"] as string).length > 0;
+  if (hasUsableQuestion) return raw;
   return {
     ...record,
     needsClarification: true,

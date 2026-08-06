@@ -41,6 +41,13 @@ describe("classify-intent node CLARIFY gate", () => {
     });
   });
 
+  it("clarifies on the first turn (count 0) without gate interference", async () => {
+    const deps = makeClarifyDeps();
+    const update = await createClassifyIntentNode(deps as never)(baseState({}) as never);
+    expect(update.intent).toBe("CLARIFY");
+    expect(update.clarifyingQuestion?.options?.length).toBeGreaterThan(0);
+  });
+
   it("refuses to keep asking at count 5: CLARIFY is routed as NEW_REQUIREMENT", async () => {
     const deps = makeClarifyDeps();
     const update = await createClassifyIntentNode(deps as never)(baseState({ clarificationCount: 5 }) as never);
