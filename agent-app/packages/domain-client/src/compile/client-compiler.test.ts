@@ -231,18 +231,18 @@ describe("client compiler", () => {
   });
 
   it("rejects control types without a reviewed template", async () => {
-    const irWithSwitch = {
+    const irWithUnknown = {
       ...ir,
       pages: [
         {
           ...ir.pages[0],
           controls: [
-            { id: "Sw1", type: "switch", x: 0, y: 0, width: 50, height: 30, value: false },
+            { id: "G1", type: "gauge", x: 0, y: 0, width: 50, height: 30 },
           ],
         },
       ],
     };
-    await expect(compileClientProject(irWithSwitch, { seed: "s" }))
+    await expect(compileClientProject(irWithUnknown, { seed: "s" }))
       .rejects.toThrow(/MODEL_OUTPUT_INVALID/);
   });
 

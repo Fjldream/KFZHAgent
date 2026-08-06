@@ -340,6 +340,69 @@ function validateControl(value: unknown, index: number): ControlIR {
       }
       return { ...base, type: "inputnumber", variableId, decimals };
     }
+    case "switch":
+      return {
+        ...base,
+        type: "switch",
+        value: requireBoolean(rec["value"], "control.value"),
+        ...optionalString(rec["activeText"], "activeText"),
+        ...optionalString(rec["inactiveText"], "inactiveText"),
+      };
+    case "checkbox":
+      return {
+        ...base,
+        type: "checkbox",
+        ...optionalString(rec["label"], "label"),
+        checked: requireBoolean(rec["checked"], "control.checked"),
+      };
+    case "radio":
+      return {
+        ...base,
+        type: "radio",
+        options: requireOptions(rec["options"], "control.options"),
+        ...optionalString(rec["value"], "value"),
+      };
+    case "select":
+      return {
+        ...base,
+        type: "select",
+        options: requireOptions(rec["options"], "control.options"),
+        ...optionalString(rec["value"], "value"),
+        ...(rec["multiple"] === undefined ? {} : { multiple: requireBoolean(rec["multiple"], "control.multiple") }),
+        ...optionalString(rec["placeholder"], "placeholder"),
+      };
+    case "image":
+      return {
+        ...base,
+        type: "image",
+        src: requireString(rec["src"], "control.src"),
+        ...optionalString(rec["fit"], "fit"),
+        ...optionalString(rec["alt"], "alt"),
+      };
+    case "tabs":
+      return {
+        ...base,
+        type: "tabs",
+        tabs: requireArray(rec["tabs"], "control.tabs").map((t, ti) => {
+          const tr = requireRecord(t, `control.tabs[${ti}]`);
+          return {
+            id: requireString(tr["id"], "tabs.id"),
+            label: requireString(tr["label"], "tabs.label"),
+          };
+        }),
+        ...optionalString(rec["activeId"], "activeId"),
+      };
+    case "table":
+      return { ...base, type: "table" };
+    case "richtext":
+      return { ...base, type: "richtext", text: requireString(rec["text"], "control.text") };
+    case "spacer": {
+      const axis = requireString(rec["axis"], "control.axis");
+      if (axis !== "horizontal" && axis !== "vertical") {
+        throw new ModelOutputInvalidError(`control "${id}" has invalid axis (must be horizontal|vertical)`);
+      }
+      return { ...base, type: "spacer", axis };
+    }
     default:
       throw new ModelOutputInvalidError(
         `control type "${type}" has no reviewed template`,
@@ -412,6 +475,34 @@ function requireString(value: unknown, what: string): string {
     throw new ModelOutputInvalidError(`${what} must be a string`);
   }
   return value;
+}
+
+function requireBoolean(value: unknown, what: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new ModelOutputInvalidError(`${what} must be a boolean`);
+  }
+  return value;
+}
+
+/** 可选字符串：undefined 返回空展开，否则必须为非空字符串。 */
+function optionalString(value: unknown, field: string): Record<string, string> {
+  if (value === undefined) return {};
+  return { [field]: requireString(value, `control.${field}`) };
+}
+
+/** radio/select 选项：非空 [{label,value}] 数组。 */
+function requireOptions(value: unknown, what: string): { label: string; value: string }[] {
+  const arr = requireArray(value, what);
+  if (arr.length === 0) {
+    throw new ModelOutputInvalidError(`${what} must be a non-empty array`);
+  }
+  return arr.map((o, oi) => {
+    const rec = requireRecord(o, `${what}[${oi}]`);
+    return {
+      label: requireString(rec["label"], `${what}.label`),
+      value: requireString(rec["value"], `${what}.value`),
+    };
+  });
 }
 
 function requireNumber(value: unknown, what: string): number {
