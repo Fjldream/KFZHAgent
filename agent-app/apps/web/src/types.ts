@@ -202,7 +202,7 @@ export function parseDesignPlan(content: string): DesignPlanView | null {
   const header = lines[headerIndex]!.trim().match(DESIGN_PLAN_HEADER);
 
   const view: DesignPlanView = {
-    version: header[1] ?? null,
+    version: header?.[1] ?? null,
     engineeringName: "",
     summary: "",
     layout: "",

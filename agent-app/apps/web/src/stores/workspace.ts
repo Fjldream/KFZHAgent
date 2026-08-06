@@ -135,7 +135,14 @@ async function load(workspaceId: string): Promise<void> {
   try {
     state.workspace = await api.getWorkspace(workspaceId);
     await refreshRevisions();
-    if (state.conversationId === null) {
+    // 恢复对话历史：每次进入工作区都按 workspaceId 重新绑定会话——优先
+    // 复用最新会话（消息在服务端持久化），无历史才新建。这样刷新/重进
+    // 能看到旧对话，切换工程也不会残留上一个工程的 conversationId。
+    const existing = await api.listConversations(workspaceId);
+    const latest = existing[0];
+    if (latest !== undefined) {
+      state.conversationId = latest.id;
+    } else {
       const conversation = await api.createConversation(workspaceId, "解决方案对话");
       state.conversationId = conversation.id;
     }
@@ -226,7 +233,7 @@ const NODE_HINTS: Record<string, string> = {
 /** 从 state 帧提取阶段提示；非节点帧或未知节点返回 null。 */
 function phaseHintForNode(data: unknown): string | null {
   if (typeof data !== "object" || data === null) return null;
-  const keys = Object.keys(data as Record<string, unknown>);
+  const keys = Object.keys(data);
   for (const key of keys) {
     if (key in NODE_HINTS) return NODE_HINTS[key] ?? null;
   }
