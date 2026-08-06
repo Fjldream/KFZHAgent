@@ -90,6 +90,18 @@ class FakeModelPort {
       reply: `reply:${intent}`,
     };
   }
+  async createDesignPlan(input) {
+    void input;
+    return {
+      schema: "kf-design-plan/v1",
+      displayName: "集成测试设计",
+      summary: "集成测试设计计划",
+      layoutConcept: "单区布局",
+      styleDirection: "默认",
+      sections: [{ id: "main", label: "主区", controls: [{ type: "text", text: "标题" }] }],
+      signature: "集成测试",
+    };
+  }
   async createProjectDesign(input) {
     void input;
     return {
@@ -322,11 +334,16 @@ async function makePackage(): Promise<Buffer> {
 
 /** Plans a NEW_REQUIREMENT turn up to the approval interrupt and returns the planHash. */
 async function planRequirement(cookie: string, conversationId: string): Promise<string> {
+  // 两遍流程（spec §5）：先出设计计划，再确认设计进入 plan-change。
   fakeModel.queueIntent("NEW_REQUIREMENT");
-  const res = await sendMessage(cookie, conversationId, "新增一个按钮");
+  let res = await sendMessage(cookie, conversationId, "新增一个按钮");
   expect(res.status).toBe(200);
-  expect(res.headers["content-type"]).toContain("text/event-stream");
-  const done = doneEvent(res.text);
+  let done = doneEvent(res.text);
+  expect(done.data.stage).toBe("design-review");
+  fakeModel.queueIntent("CONFIRM_DESIGN");
+  res = await sendMessage(cookie, conversationId, "确认");
+  expect(res.status).toBe(200);
+  done = doneEvent(res.text);
   expect(done.data.stage).toBe("approval");
   const planHash = done.data.interrupt?.planHash;
   if (typeof planHash !== "string") throw new Error("expected planHash in SSE done event");
@@ -400,6 +417,8 @@ describe("api contract", () => {
     const uploaded = await uploadPackage(cookie, ws.body.id, await makePackage()).expect(201);
     const conv = await createConversation(cookie, ws.body.id, "SSE");
 
+    // 两遍流程（spec §5）：第一轮 NEW_REQUIREMENT → design-plan（设计计划），
+    // 第二轮 CONFIRM_DESIGN → plan-change → approval 中断。
     fakeModel.queueIntent("NEW_REQUIREMENT");
     const res = await sendMessage(cookie, conv.body.id, "新增一个按钮").expect(200);
     expect(res.headers["content-type"]).toContain("text/event-stream");
@@ -407,28 +426,36 @@ describe("api contract", () => {
     expect(res.text).toContain("event: done");
 
     // Streaming is real: each graph node update is pushed as its own SSE
-    // frame (load-context → classify-intent → plan-change → approval), not
-    // collected and returned as one payload.
+    // frame (load-context → classify-intent → design-plan), not collected
+    // and returned as one payload.
     const events = parseSse(res.text);
     const stateFrames = events.filter((event) => event.event === "state");
     expect(stateFrames.length).toBeGreaterThanOrEqual(3);
     const nodeNames = stateFrames.map((frame) => Object.keys(frame.data as object));
     expect(nodeNames.flat()).toEqual(
-      expect.arrayContaining(["load-context", "classify-intent", "plan-change"]),
+      expect.arrayContaining(["load-context", "classify-intent", "design-plan"]),
     );
 
     const done = doneEvent(res.text);
-    expect(done.data.stage).toBe("approval");
-    expect(done.data.interrupt).toMatchObject({ type: "plan-approval" });
-    expect(done.data.interrupt?.planHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(done.data.stage).toBe("design-review");
+    expect(done.data.designPlanHash).toMatch(/^[0-9a-f]{64}$/);
+
+    fakeModel.queueIntent("CONFIRM_DESIGN");
+    const res2 = await sendMessage(cookie, conv.body.id, "确认").expect(200);
+    const done2 = doneEvent(res2.text);
+    expect(done2.data.stage).toBe("approval");
+    expect(done2.data.interrupt).toMatchObject({ type: "plan-approval" });
+    expect(done2.data.interrupt?.planHash).toMatch(/^[0-9a-f]{64}$/);
 
     // The user message and the approval interrupt payload are both durable.
+    // 两遍流程消息序列：user(需求) + assistant(设计计划) + user(确认)。
     const messages = await request(server)
       .get(`/api/conversations/${conv.body.id}/messages`)
       .set("Cookie", cookie)
       .expect(200);
-    expect(messages.body).toHaveLength(1);
+    expect(messages.body).toHaveLength(3);
     expect(messages.body[0].content).toBe("新增一个按钮");
+    expect(messages.body[2].content).toBe("确认");
     void uploaded;
   });
 
@@ -907,7 +934,9 @@ describe("task 12 api surface", () => {
     const ws = await createWorkspace(cookie, "PlanDetail WS");
     const conv = await createConversation(cookie, ws.body.id, "Plan");
     fakeModel.queueIntent("NEW_REQUIREMENT");
-    const res = await sendMessage(cookie, conv.body.id, "新增一个按钮").expect(200);
+    await sendMessage(cookie, conv.body.id, "新增一个按钮").expect(200);
+    fakeModel.queueIntent("CONFIRM_DESIGN");
+    const res = await sendMessage(cookie, conv.body.id, "确认").expect(200);
     const done = doneEvent(res.text);
     const changePlanId = done.data.changePlanId;
     if (typeof changePlanId !== "string") {

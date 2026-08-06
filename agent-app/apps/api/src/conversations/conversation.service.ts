@@ -392,6 +392,9 @@ function finalStateData(final: StateSnapshotLike): Record<string, unknown> {
     planHash: values.planHash ?? null,
     changePlanId: values.changePlanId ?? null,
     changeRequestId: values.activeChangeRequestId ?? null,
+    designPlanHash: values.designPlanHash ?? null,
+    designRevision: values.designRevision ?? null,
+    clarificationCount: values.clarificationCount ?? null,
     ...(interrupt !== undefined ? { interrupt } : {}),
   };
 }
