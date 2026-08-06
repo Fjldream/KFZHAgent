@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { DesignPlan } from "@kf/contracts";
+import { DesignPlanSchema, type DesignPlan } from "@kf/contracts";
 import type { AgentGraphStateValue, AgentGraphUpdate } from "../state.js";
 import type { SolutionGraphDeps } from "../ports.js";
 
@@ -23,7 +23,7 @@ import type { SolutionGraphDeps } from "../ports.js";
 export function createDesignPlanNode(deps: SolutionGraphDeps) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
     const revising = state.revising === true || state.intent === "REVISE_DESIGN";
-    const plan = await deps.modelPort.createDesignPlan(
+    const rawPlan = await deps.modelPort.createDesignPlan(
       {
         tenantId: state.tenantId,
         userId: state.userId,
@@ -41,6 +41,13 @@ export function createDesignPlanNode(deps: SolutionGraphDeps) {
       },
       { revising },
     );
+    const parsed = DesignPlanSchema.safeParse(rawPlan);
+    if (!parsed.success) {
+      // I1: never persist or hash garbage from the model; return to idle with
+      // INVALID_MODEL_OUTPUT and no side effects.
+      return { stage: "idle", lastErrorCode: "INVALID_MODEL_OUTPUT" };
+    }
+    const plan = parsed.data;
     const revision = (state.designRevision ?? 0) + 1;
     const hash = hashDesignPlan(plan, revision);
     const rendered = formatDesignPlan(plan, revision);
