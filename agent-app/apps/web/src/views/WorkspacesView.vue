@@ -8,6 +8,7 @@ import StatCard from "../components/ui/StatCard.vue";
 import EmptyState from "../components/ui/EmptyState.vue";
 import StatusBadge from "../components/ui/StatusBadge.vue";
 import SkeletonCard from "../components/ui/SkeletonCard.vue";
+import BrandLogo from "../components/BrandLogo.vue";
 import type { Workspace } from "../types";
 
 const router = useRouter();
@@ -170,7 +171,7 @@ onMounted(() => {
 <template>
   <div ref="pageEl" class="page">
     <header class="topbar glass">
-      <div class="brand"><span class="logo">◈</span> 智绘</div>
+      <div class="brand"><BrandLogo :size="26" /></div>
       <div class="user">
         <span>{{ session.state.tenantName }}</span>
         <span>{{ session.state.user?.username ?? "" }}</span>
@@ -264,7 +265,6 @@ onMounted(() => {
 }
 .topbar { display: flex; align-items: center; justify-content: space-between; padding: 0.8rem 1.4rem; opacity: 0; }
 .brand { display: flex; align-items: center; gap: 0.5rem; font-weight: 600; font-size: 1.05rem; }
-.logo { color: var(--color-accent); }
 .user { display: flex; align-items: center; gap: 0.8rem; font-size: 0.85rem; color: var(--color-text-secondary); }
 .user button {
   padding: 0.4rem 0.9rem; border: none; border-radius: var(--radius-button);

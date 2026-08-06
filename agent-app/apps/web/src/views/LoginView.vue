@@ -3,6 +3,7 @@ import { onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useSession } from "../stores/session";
 import { useGsap } from "../composables/useGsap";
+import BrandLogo from "../components/BrandLogo.vue";
 
 const router = useRouter();
 const route = useRoute();
@@ -96,8 +97,7 @@ async function submit(): Promise<void> {
     <!-- 左栏：品牌价值区 -->
     <section class="brand-col" aria-label="智绘介绍">
       <div class="brand-head">
-        <span class="logo">◈</span>
-        <span class="brand-name">智绘</span>
+        <BrandLogo :size="30" text="智绘" />
       </div>
       <h1 class="slogan">用一句话，<br />生成你的 KingFusion 工程</h1>
       <p class="tagline">描述需求，智绘帮你设计、构建并验证完整的客户端工程。</p>
@@ -199,10 +199,6 @@ async function submit(): Promise<void> {
   gap: 0.5rem;
   font-size: 1.15rem;
   font-weight: 600;
-}
-.logo {
-  color: var(--color-accent);
-  font-size: 1.3rem;
 }
 .slogan {
   margin: 0.4rem 0 0;

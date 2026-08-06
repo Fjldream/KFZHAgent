@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from "vue";
 import { useGsap } from "../composables/useGsap";
+import BrandLogo from "./BrandLogo.vue";
 import type { WorkflowStage } from "../stores/stage";
 
 const props = defineProps<{
@@ -45,7 +46,7 @@ watch(
   <header ref="barEl" class="topbar glass">
     <div class="brand">
       <button type="button" class="back" data-testid="back-to-list" aria-label="返回工程列表" @click="$emit('back')">←</button>
-      <span class="logo">◈</span> 智绘
+      <BrandLogo :size="24" text="智绘" />
     </div>
     <div class="center">
       <span class="crumb-muted">工程列表</span>
@@ -64,7 +65,6 @@ watch(
 .glass { background: rgba(255, 255, 255, 0.6); backdrop-filter: var(--blur-glass); border-bottom: 1px solid var(--color-border); }
 .topbar { display: flex; align-items: center; justify-content: space-between; padding: 0.7rem 1.4rem; gap: 1rem; opacity: 0; }
 .brand { display: flex; align-items: center; gap: 0.5rem; font-weight: 600; }
-.logo { color: var(--color-accent); }
 .back {
   padding: 0.2rem 0.55rem; border: none; border-radius: 999px;
   background: var(--color-surface); color: var(--color-text-secondary);

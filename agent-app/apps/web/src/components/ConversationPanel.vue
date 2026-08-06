@@ -1,16 +1,24 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { escapeModelText } from "../security";
 import { useGsap } from "../composables/useGsap";
-import type { ChatMessage } from "../types";
+import { parseClarifyingQuestion, parseDesignPlan } from "../types";
+import type { ChatMessage, ClarifyingQuestionView, DesignPlanView } from "../types";
 
 /**
- * 连续对话面板（brief Step 1/3）。模型输出绝不用 v-html：assistant 内容
- * 经过实体级转义（escapeModelText）后以纯文本插值渲染。
+ * 连续对话面板（brief Step 1/3）。模型输出绝不用 v-html：所有内容以
+ * 实体级转义（escapeModelText）或模板插值（Vue 自动转义）渲染。
  *
  * Task 6 气泡聊天样式：我=右侧 accent 气泡、助手=左侧浅色卡片气泡；
  * 流式阶段最后一条助手消息尾部追加 CSS 打字机光标（逐 token 帧管线
  * 属后端协议变更，超出本次范围，此处仅做视觉提示）。
+ *
+ * Task 10 展示增强（后端消息仍是纯文本，前端渲染层识别后增强）：
+ *   - 澄清追问文本（问题\n①选项\n②选项）→ 问题 + 可点选选项按钮，
+ *     点击选项 emit send(选项文本)；
+ *   - 设计计划文本（formatDesignPlan 输出）→ 结构化卡片
+ *     （工程名/摘要/布局/风格/分区/记忆点 + 「确认」按钮）；
+ *   - 其余助手消息保持原有纯文本转义渲染。
  */
 const props = defineProps<{
   messages: ChatMessage[];
@@ -20,6 +28,25 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: "send", content: string): void;
 }>();
+
+/** 渲染视图模型：每条消息预解析一次，模板只消费结果（纯函数，无副作用）。 */
+interface RenderedMessage {
+  key: string | number;
+  role: "user" | "assistant";
+  content: string;
+  clarify: ClarifyingQuestionView | null;
+  plan: DesignPlanView | null;
+}
+
+const renderedMessages = computed<RenderedMessage[]>(() =>
+  props.messages.map((message, index) => ({
+    key: message.id ?? index,
+    role: message.role,
+    content: message.content,
+    clarify: message.role === "assistant" ? parseClarifyingQuestion(message.content) : null,
+    plan: message.role === "assistant" ? parseDesignPlan(message.content) : null,
+  })),
+);
 
 const draft = ref("");
 const inputEl = ref<HTMLInputElement | null>(null);
@@ -64,13 +91,19 @@ watch(
   { flush: "post" },
 );
 
-function displayContent(message: ChatMessage): string {
+function displayContent(message: RenderedMessage): string {
   return message.role === "assistant" ? escapeModelText(message.content) : message.content;
 }
 
-/** 流式进行中且最后一条为助手消息时显示打字机光标。 */
-function isStreamingTail(index: number, message: ChatMessage): boolean {
-  return props.streaming === true && message.role === "assistant" && index === props.messages.length - 1;
+/** 流式进行中且最后一条为助手消息时显示打字机光标（仅纯文本气泡适用）。 */
+function isStreamingTail(index: number, message: RenderedMessage): boolean {
+  return props.streaming === true && message.role === "assistant" && index === renderedMessages.value.length - 1;
+}
+
+/** 澄清选项 / 计划「确认」的回传：与输入框发送同路径，流式时忽略防误触。 */
+function sendOption(text: string): void {
+  if (props.streaming === true) return;
+  emit("send", text);
 }
 
 function submit(): void {
@@ -99,9 +132,53 @@ function submit(): void {
           </button>
         </div>
       </div>
-      <div v-for="(message, index) in messages" :key="message.id ?? index" class="message" :data-role="message.role">
+      <div v-for="(message, index) in renderedMessages" :key="message.key" class="message" :data-role="message.role">
         <span class="role">{{ message.role === "user" ? "我" : "助手" }}</span>
-        <span class="content" :class="{ streaming: isStreamingTail(index, message) }">{{ displayContent(message) }}</span>
+        <template v-if="message.role === 'user'">
+          <span class="content">{{ message.content }}</span>
+        </template>
+        <template v-else-if="message.clarify !== null">
+          <div class="content clarify" data-testid="clarify-block">
+            <p class="clarify-question">{{ message.clarify.question }}</p>
+            <div class="clarify-options">
+              <button
+                v-for="option in message.clarify.options"
+                :key="option"
+                type="button"
+                class="clarify-option"
+                data-testid="clarify-option"
+                @click="sendOption(option)"
+              >
+                {{ option }}
+              </button>
+            </div>
+          </div>
+        </template>
+        <template v-else-if="message.plan !== null">
+          <div class="content plan-card" data-testid="design-plan-card">
+            <header class="plan-header">
+              <span class="plan-badge">设计计划</span>
+              <span v-if="message.plan.version" class="plan-version">{{ message.plan.version }}</span>
+            </header>
+            <h3 class="plan-name">{{ message.plan.engineeringName }}</h3>
+            <p class="plan-summary">{{ message.plan.summary }}</p>
+            <dl class="plan-meta">
+              <div class="plan-meta-row"><dt>布局</dt><dd>{{ message.plan.layout }}</dd></div>
+              <div class="plan-meta-row"><dt>风格</dt><dd>{{ message.plan.style }}</dd></div>
+            </dl>
+            <ul v-if="message.plan.sections.length > 0" class="plan-sections">
+              <li v-for="section in message.plan.sections" :key="section.label" class="plan-section">
+                <span class="section-label">{{ section.label }}</span>
+                <span class="section-controls">{{ section.controls }}</span>
+              </li>
+            </ul>
+            <p class="plan-signature">记忆点：{{ message.plan.signature }}</p>
+            <button type="button" class="plan-confirm" data-testid="plan-confirm" @click="sendOption('确认')">
+              确认
+            </button>
+          </div>
+        </template>
+        <span v-else class="content" :class="{ streaming: isStreamingTail(index, message) }">{{ displayContent(message) }}</span>
       </div>
     </div>
     <div class="composer">
@@ -151,6 +228,43 @@ function submit(): void {
 .suggestion:active { transform: scale(0.97); }
 .content.streaming::after { content: "▍"; animation: blink 1s steps(1) infinite; margin-left: 0.15rem; }
 @keyframes blink { 50% { opacity: 0; } }
+/* Task 10 澄清追问：问题 + 可点选选项按钮（与欢迎屏建议同款胶囊）。 */
+.clarify-question { margin: 0; white-space: pre-wrap; word-break: break-word; }
+.clarify-options { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.55rem; }
+.clarify-option {
+  padding: 0.35rem 0.8rem; border: 1px solid var(--color-border);
+  border-radius: 999px; background: rgba(255, 255, 255, 0.7);
+  color: var(--color-text); font-size: 0.83rem; cursor: pointer;
+  transition: transform 140ms var(--ease-out), background 140ms var(--ease-out);
+}
+.clarify-option:hover { background: var(--color-surface); }
+.clarify-option:active { transform: scale(0.97); }
+/* Task 10 设计计划卡片：结构化字段 + 分区列表 + 确认落地入口。 */
+.plan-card { display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; }
+.plan-header { display: flex; align-items: center; gap: 0.5rem; }
+.plan-badge {
+  padding: 0.12rem 0.5rem; border-radius: 999px; font-size: 0.72rem; font-weight: 600;
+  background: var(--color-accent); color: #fff;
+}
+.plan-version { color: var(--color-text-secondary); font-size: 0.8rem; }
+.plan-name { margin: 0; font-size: 1.02rem; letter-spacing: -0.01em; }
+.plan-summary { margin: 0; color: var(--color-text-secondary); font-size: 0.85rem; line-height: 1.5; }
+.plan-meta { margin: 0; display: flex; flex-direction: column; gap: 0.25rem; }
+.plan-meta-row { display: flex; gap: 0.5rem; font-size: 0.85rem; }
+.plan-meta-row dt { color: var(--color-text-secondary); flex-shrink: 0; }
+.plan-meta-row dd { margin: 0; }
+.plan-sections { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.3rem; }
+.plan-section { font-size: 0.85rem; }
+.section-label { font-weight: 600; margin-right: 0.4rem; color: var(--color-accent); }
+.plan-signature { margin: 0; font-size: 0.82rem; color: var(--color-text-secondary); }
+.plan-confirm {
+  align-self: flex-start; margin-top: 0.15rem; padding: 0.45rem 1.2rem;
+  border: none; border-radius: 999px; background: var(--color-accent);
+  color: #fff; font-size: 0.88rem; cursor: pointer;
+  transition: transform 140ms var(--ease-out), filter 140ms var(--ease-out);
+}
+.plan-confirm:hover { filter: brightness(1.06); }
+.plan-confirm:active { transform: scale(0.97); }
 .composer {
   display: flex; gap: 0.5rem; margin-top: 0.7rem;
   background: rgba(255, 255, 255, 0.6); backdrop-filter: var(--blur-glass);
