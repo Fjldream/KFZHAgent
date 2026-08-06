@@ -102,7 +102,9 @@ function routeAfterClassify(state: AgentGraphStateValue): string {
       return "clarify";
     case "NEW_REQUIREMENT":
     case "MODIFY_REQUIREMENT":
-      return "plan-change";
+      // 两遍流程（spec §5）：首次需求（无已确认设计计划）必须先出设计计划，
+      // 客户确认后再进 plan-change；已有确认过的设计（如预览反馈小改）直接 plan-change。
+      return state.designPlanHash === undefined ? "design-plan" : "plan-change";
     case "CONFIRM_DESIGN":
       return "plan-change";
     case "REVISE_DESIGN":

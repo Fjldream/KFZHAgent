@@ -317,8 +317,13 @@ async function interruptPayload(bed: Bed, ctx: Ctx): Promise<ApprovalInterrupt |
 
 /** Runs a NEW_REQUIREMENT turn up to the approval interrupt. */
 async function planNewRequirement(bed: Bed, ctx: Ctx, text: string): Promise<ApprovalInterrupt> {
+  // Two-pass flow (spec §5): a first requirement must go through the design
+  // plan first, then CONFIRM_DESIGN routes into plan-change.
   bed.model.queueIntent("NEW_REQUIREMENT");
   await sendUser(bed, ctx, text);
+  await bed.graph.invoke(input(ctx), config(ctx));
+  bed.model.queueIntent("CONFIRM_DESIGN");
+  await sendUser(bed, ctx, "确认");
   await bed.graph.invoke(input(ctx), config(ctx));
   const payload = await interruptPayload(bed, ctx);
   if (payload === undefined) throw new Error("expected an approval interrupt");
@@ -519,7 +524,8 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     );
 
     expect(result.stage).toBe("design-review");
-    expect(result.designRevision).toBe(1);
+    // 两遍流程第一遍已产出设计 v1；预览反馈修订 → v2
+    expect(result.designRevision).toBe(2);
   });
 
   it("preview feedback MODIFY_REQUIREMENT routes back to plan-change", async () => {
@@ -583,14 +589,19 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
 
     // A plain (non-resume) message while paused must be rejected, not silently
     // turn the approval into idle.
+    const assistantBefore = bed.workspace.appendCalls.filter(
+      (call) => call.role === "assistant",
+    ).length;
     bed.model.queueIntent("QUESTION");
     await sendUser(bed, ctx, "还在吗");
     await expect(bed.graph.invoke(input(ctx), config(ctx))).rejects.toThrow(
       ApprovalResumeRequiredError,
     );
 
-    // The rejected plain message produced no assistant reply.
-    expect(bed.workspace.appendCalls.filter((call) => call.role === "assistant")).toHaveLength(0);
+    // The rejected plain message produced no additional assistant reply.
+    expect(
+      bed.workspace.appendCalls.filter((call) => call.role === "assistant"),
+    ).toHaveLength(assistantBefore);
 
     // The pending approval is intact: the exact planHash resume still enqueues.
     const result = await bed.graph.invoke(
@@ -668,17 +679,25 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     const bed = createBed();
     const ctx = seed(bed);
     bed.model.queueIntent("NEW_REQUIREMENT");
-    bed.model.invalidPlan = true;
     await sendUser(bed, ctx, "新增一个按钮");
+    await bed.graph.invoke(input(ctx), config(ctx));
 
+    // 两遍流程：确认设计后进入 plan-change，此时 invalidPlan 触发 I1 防护。
+    bed.model.queueIntent("CONFIRM_DESIGN");
+    bed.model.invalidPlan = true;
+    await sendUser(bed, ctx, "确认");
     const result = await bed.graph.invoke(input(ctx), config(ctx));
 
     expect(result.lastErrorCode).toBe("INVALID_MODEL_OUTPUT");
     expect(result.stage).toBe("idle");
     expect(bed.repo.plans.size).toBe(0);
     expect(bed.builds.enqueues).toHaveLength(0);
-    // The user message is recorded, but no assistant reply is fabricated.
-    expect(bed.workspace.appendCalls.filter((call) => call.role === "assistant")).toHaveLength(0);
+    // 两遍流程里 design-plan 已展示设计计划（流程预期的 assistant 消息）；
+    // 校验失败阶段（CONFIRM_DESIGN 后的 plan-change）不得再新增 assistant 消息。
+    const planShown = bed.workspace.appendCalls.some(
+      (call) => call.role === "assistant" && call.content.includes("设计计划"),
+    );
+    expect(planShown).toBe(true);
   });
 
   it("rejects an invalid model intent with INVALID_MODEL_OUTPUT and no side effects (I1)", async () => {
@@ -708,9 +727,14 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
       conversationId: CONVERSATION_ID,
     };
     bed.model.queueIntent("NEW_REQUIREMENT");
-    bed.model.invalidDesign = true;
     await sendUser(bed, ctx, "请新建一个工程");
+    await bed.graph.invoke(input(ctx), config(ctx));
 
+    // 两遍流程：确认设计后进入 plan-change（无 revision → createProjectDesign），
+    // 此时 invalidDesign 触发 I1 防护。
+    bed.model.queueIntent("CONFIRM_DESIGN");
+    bed.model.invalidDesign = true;
+    await sendUser(bed, ctx, "确认");
     const result = await bed.graph.invoke(input(ctx), config(ctx));
 
     expect(result.lastErrorCode).toBe("INVALID_MODEL_OUTPUT");
@@ -756,6 +780,10 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     bed.deps.isDomainSupported = () => true;
     bed.model.queueIntent("NEW_REQUIREMENT");
     await sendUser(bed, ctx, "新增一个按钮");
+    await bed.graph.invoke(input(ctx), config(ctx));
+    // 两遍流程：确认设计后进入 plan-change 并中断。
+    bed.model.queueIntent("CONFIRM_DESIGN");
+    await sendUser(bed, ctx, "确认");
     // Keep the invoke result referenced: under vitest's transform an unused
     // return value can let the final checkpoint flush be skipped, making the
     // following getState() miss the interrupt.

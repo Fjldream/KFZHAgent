@@ -290,6 +290,7 @@ function makeDeps() {
   const ports = makePrismaPorts();
   const model = new StubModelPort();
   model.queueIntent("NEW_REQUIREMENT");
+  model.queueIntent("CONFIRM_DESIGN"); // 两遍流程：设计计划后确认再进 plan-change
   const deps: SolutionGraphDeps = {
     modelPort: model,
     workspaceQuery: ports.workspaceQuery,
@@ -327,6 +328,8 @@ describe("SolutionGraph Postgres checkpoint recovery", () => {
     const graph1: CompiledGraph = compileSolutionGraph(deps, { checkpointer: saver1 });
     const config = graphConfig(seeded.conversationId);
 
+    await graph1.invoke(graphInput(seeded), config);
+    // 两遍流程第二步：CONFIRM_DESIGN 进入 plan-change 并停在审批中断。
     await graph1.invoke(graphInput(seeded), config);
     const snapshot = await graph1.getState(config);
     const payload = snapshot.tasks[0]?.interrupts[0]?.value as ApprovalInterrupt | undefined;
@@ -367,6 +370,7 @@ describe("SolutionGraph Postgres checkpoint recovery", () => {
     const replyCount = await prisma.message.count({
       where: { conversationId: seeded.conversationId },
     });
-    expect(replyCount).toBe(2);
+    // 两遍流程：设计计划展示 + 确认后的构建提示（enqueue-build）。
+    expect(replyCount).toBe(3);
   });
 });
