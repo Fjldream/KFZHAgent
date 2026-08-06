@@ -79,7 +79,8 @@ describe("design-plan node", () => {
     expect(content).toContain("监控大屏");
     expect(content).toContain("深色工业风");
     expect(content).toContain("KPI 区");
-    expect(content).toContain("回复调整意见或「确认」");
+    expect(content).toContain("您好，我已根据您的需求整理出一份设计草案，请您过目：");
+    expect(content).toContain("确认没问题的话，回复「确认」即可。");
   });
 
   it("revises (not regenerates) when revising=true, bumping revision and changing the hash", async () => {

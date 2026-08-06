@@ -11,7 +11,8 @@ import type { SolutionGraphDeps } from "../ports.js";
  *   - `designPlanHash = sha256(canonical(designPlan))` is stored (a revision
  *     produces a new hash/version),
  *   - the plan is rendered as a bounded assistant message inside the
- *     conversation (title + sections + style + signature + "回复调整意见或「确认」"),
+ *     conversation (greeting + title + sections + style + signature + a
+ *     warm closing line inviting adjustments or a "确认" confirmation),
  *   - the node ends in the `design-review` stage where the user can confirm
  *     (CONFIRM_DESIGN → plan-change) or revise again (REVISE_DESIGN → this node).
  *
@@ -106,6 +107,7 @@ function formatDesignPlan(plan: DesignPlan, revision: number): string {
     )
     .join("\n");
   return [
+    "您好，我已根据您的需求整理出一份设计草案，请您过目：",
     `设计计划 v${revision}`,
     `工程名：${plan.displayName}`,
     `摘要：${plan.summary}`,
@@ -113,7 +115,7 @@ function formatDesignPlan(plan: DesignPlan, revision: number): string {
     `风格：${plan.styleDirection}`,
     `分区：\n${sections}`,
     `记忆点：${plan.signature}`,
-    "回复调整意见或「确认」",
+    "您可以随时告诉我哪里需要调整；确认没问题的话，回复「确认」即可。",
   ].join("\n");
 }
 
