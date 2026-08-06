@@ -145,7 +145,10 @@ export class ConversationService {
     // 等用户驱动阶段覆盖掉，导致 CONFIRM_DESIGN 兜底失效。
     const resumedSnapshot = (await graph.getState(config)) as unknown as StateSnapshotLike;
     const resumedStage = (resumedSnapshot?.values as Record<string, unknown> | undefined)?.stage;
-    const stage = typeof resumedStage === "string" ? resumedStage : "idle";
+    // checkpoint 的 stage 本就是 AgentGraphState 的合法值，收窄类型即可。
+    const stage = (
+      typeof resumedStage === "string" ? resumedStage : "idle"
+    ) as AgentGraphUpdate["stage"];
 
     const input = {
       tenantId: principal.tenantId,
