@@ -1,49 +1,78 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
-import { renderClientProjectPreview } from "@kf/preview-renderer";
+import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { readdir, readFile } from "node:fs/promises";
+import path from "node:path";
+import { tmpdir } from "node:os";
+import { mkdtemp } from "node:fs/promises";
+import { importNativeClientPackage } from "@kf/domain-client";
+import type { ArtifactStorage } from "@kf/artifact-storage";
+import { renderKfProject } from "@kf/preview-renderer";
 import { PrismaService } from "../prisma/prisma.service.js";
-
-const PROJECT_IR_SCHEMA = "kf-client-project-ir/v1";
+import { ARTIFACT_STORAGE } from "./artifact-storage.js";
 
 /**
  * Renders a built artifact's client project as a static HTML preview.
  *
- * Data-source chain: Artifact -> BuildJob -> the latest SolutionRevision for
- * (workspaceId + changePlanId). Tenant ownership is revalidated at every hop
- * (the same scoping DownloadTokenService uses), and only revisions whose
- * state is a `kf-client-project-ir/v1` document are renderable. Upload-mode
- * projects (source revisions with a summary state) are not previewable yet.
+ * Data source: the artifact itself — it is unpacked and its `project/page/*.json`
+ * documents are converted (KF native page JSON -> IR shapes) and rendered as a
+ * self-contained HTML page. This covers compile-mode builds (the revision state
+ * only carries plan/mode metadata, not the compiled project).
  */
 @Injectable()
 export class PreviewService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(ARTIFACT_STORAGE) private readonly storage: ArtifactStorage,
+  ) {}
 
   async render(tenantId: string, artifactId: string): Promise<string> {
-    const artifact = await this.prisma.artifact.findFirst({
+    // 路由参数是 DB Artifact.id；存储按 storageKey（工件唯一名）寻址。
+    const row = await this.prisma.artifact.findFirst({
       where: { id: artifactId, tenantId },
     });
-    if (artifact === null) {
+    if (row === null) throw new NotFoundException("artifact not found");
+    const stream = await this.storage.open(tenantId, row.storageKey).catch(() => {
       throw new NotFoundException("artifact not found");
-    }
-    const job = await this.prisma.buildJob.findFirst({
-      where: { id: artifact.buildJobId, tenantId },
     });
-    if (job === null) {
-      throw new NotFoundException("build job not found");
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream as AsyncIterable<Buffer | string>) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     }
-    const revision = await this.prisma.solutionRevision.findFirst({
-      where: { workspaceId: job.workspaceId, changePlanId: job.changePlanId, tenantId },
-      orderBy: { revisionNumber: "desc" },
-    });
-    const state = revision?.state;
-    if (
-      typeof state !== "object" ||
-      state === null ||
-      (state as Record<string, unknown>)["schema"] !== PROJECT_IR_SCHEMA
-    ) {
-      throw new NotFoundException(
-        "no renderable project IR for this artifact (upload-mode projects are not previewable yet)",
-      );
+    const bytes = Buffer.concat(chunks);
+    const destDir = await mkdtemp(path.join(tmpdir(), "kf-preview-"));
+    const rootDir = await importNativeClientPackage(bytes, destDir);
+
+    // 扫描 <版本目录>/project/page/*.json（版本目录由解包器校验为唯一）。
+    const pageFiles = await collectPageFiles(rootDir);
+    if (pageFiles.length === 0) {
+      throw new NotFoundException("no renderable pages found in this artifact");
     }
-    return renderClientProjectPreview(state as never);
+    const pages: unknown[] = [];
+    for (const file of pageFiles) {
+      pages.push(JSON.parse(await readFile(file, "utf8")));
+    }
+    return renderKfProject(path.basename(rootDir), pages);
   }
+}
+
+/** 在解包目录下定位「版本目录/project/page」下的 JSON 页面文件。 */
+async function collectPageFiles(rootDir: string): Promise<string[]> {
+  const versionEntries = await readdir(rootDir, { withFileTypes: true });
+  const found: string[] = [];
+  for (const entry of versionEntries) {
+    if (!entry.isDirectory()) continue;
+    const pageDir = path.join(rootDir, entry.name, "project", "page");
+    try {
+      const files = await readdir(pageDir);
+      found.push(
+        ...files
+          .filter(
+            (f) => f.endsWith(".json") && f !== "pageGroupManager.json" && f !== "pageManager.json",
+          )
+          .map((f) => path.join(pageDir, f)),
+      );
+    } catch {
+      // 该版本目录无 page 目录，跳过
+    }
+  }
+  return found;
 }
