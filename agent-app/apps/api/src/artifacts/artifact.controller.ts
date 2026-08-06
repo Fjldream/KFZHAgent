@@ -86,6 +86,13 @@ export class ArtifactController {
    */
   @Get(":id/preview")
   @Header("Content-Type", "text/html; charset=utf-8")
+  @Header("Cache-Control", "no-store")
+  // 渲染器零脚本自洽：即使不经 sandbox iframe 直接打开，也不允许脚本/外链执行
+  //（richtext 为 verbatim HTML 透传，由 CSP 兜底）。
+  @Header(
+    "Content-Security-Policy",
+    "default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; base-uri 'none'; form-action 'none'",
+  )
   @HttpCode(HttpStatus.OK)
   async preview(
     @Param("id") artifactId: string,

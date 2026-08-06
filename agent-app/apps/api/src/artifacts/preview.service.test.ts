@@ -296,6 +296,8 @@ describe("preview endpoint (integration)", () => {
       .set("Cookie", cookie)
       .expect(200);
     expect(res.headers["content-type"]).toContain("text/html");
+    expect(res.headers["content-type"]).toContain("charset=utf-8");
+    expect(res.headers["cache-control"]).toContain("no-store");
     expect(res.text).toContain("监控大屏");
     expect(res.text).toContain("首页");
     expect(res.text).toContain('data-type="text"');
