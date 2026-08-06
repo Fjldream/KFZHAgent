@@ -138,7 +138,7 @@ function routeAfterPlanChange(state: AgentGraphStateValue): string {
  * CONFIRM_BUILD straight to END because END accepts no state update.
  */
 function createDoneNode() {
-  return (_state: AgentGraphStateValue): AgentGraphUpdate => ({ stage: "done" });
+  return (): AgentGraphUpdate => ({ stage: "done", buildConfirmed: true });
 }
 
 /** Resume routing after the approval interrupt (brief Step 5). */

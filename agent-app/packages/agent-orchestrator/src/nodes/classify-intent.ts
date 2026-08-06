@@ -16,7 +16,7 @@ const CLARIFY_MAX_TURNS = 5;
  *   - 具体小改（文案/尺寸/控件等）→ MODIFY_REQUIREMENT（回变更计划）。
  * 命中顺序为确认 → 大改 → 小改；未命中则保留模型分类（如 preview 阶段的问题）。
  */
-const PREVIEW_CONFIRM_WORDS = ["确认落地", "确认", "可以了", "满意", "没问题", "就这样", "好的"];
+const PREVIEW_CONFIRM_WORDS = ["确认落地", "可以落地", "落地", "没问题", "就这样吧", "可以了", "满意"];
 const PREVIEW_REDESIGN_WORDS = [
   "重新设计",
   "重新生成",
@@ -83,11 +83,18 @@ export function createClassifyIntentNode(deps: SolutionGraphDeps) {
     let result = parsed.data;
 
     // preview-review 阶段：对看预览后的反馈做关键词兜底分档（见上面词表）。
+    // 误判防护：确认词只在短消息（≤20 字符）命中时生效，避免
+    // "好的，把按钮再放大一点"这类含确认前缀的修改被终结为落地；
+    // 大改词命中时排除"发我/给我/看看/方案"索取句式（"把整体方案发给我"）。
     if (state.stage === "preview-review") {
       const text = requirementText ?? "";
-      if (PREVIEW_CONFIRM_WORDS.some((word) => text.includes(word))) {
+      const requestsSomething = /发我|给我|看看|方案/.test(text);
+      if (PREVIEW_CONFIRM_WORDS.some((word) => text.includes(word)) && text.length <= 20) {
         result = { ...result, intent: "CONFIRM_BUILD" };
-      } else if (PREVIEW_REDESIGN_WORDS.some((word) => text.includes(word))) {
+      } else if (
+        !requestsSomething &&
+        PREVIEW_REDESIGN_WORDS.some((word) => text.includes(word))
+      ) {
         result = { ...result, intent: "REVISE_DESIGN" };
       } else if (PREVIEW_SMALL_CHANGE_WORDS.some((word) => text.includes(word))) {
         result = { ...result, intent: "MODIFY_REQUIREMENT" };

@@ -559,6 +559,23 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     expect(result.stage).toBe("done");
   });
 
+  it("does not land when a confirm-prefixed message asks for a small change (P2-3)", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+    const payload = await planNewRequirement(bed, ctx, "新增一个按钮");
+    await approve(bed, ctx, payload);
+
+    // "好的，把按钮再放大一点" 含确认前缀但意图是修改：不得被终结为落地。
+    bed.model.queueIntent("QUESTION");
+    await sendUser(bed, ctx, "好的，把按钮再放大一点");
+    const result = await bed.graph.invoke(
+      { ...input(ctx), stage: "preview-review" },
+      config(ctx),
+    );
+
+    expect(result.stage).not.toBe("done");
+  });
+
   it("keeps a pending approval resumable when a non-resume message arrives", async () => {
     const bed = createBed();
     const ctx = seed(bed);
