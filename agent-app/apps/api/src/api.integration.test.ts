@@ -411,6 +411,40 @@ describe("api contract", () => {
     expect(listed.body.id).toBe(created.body.id);
   });
 
+  it("lists conversations per workspace (newest first) for history restore", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createWorkspace(cookie, "List WS");
+
+    await createConversation(cookie, ws.body.id, "第一轮");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const conv2 = await createConversation(cookie, ws.body.id, "第二轮");
+
+    const res = await request(server)
+      .get(`/api/conversations?workspaceId=${ws.body.id}`)
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body).toHaveLength(2);
+    // Newest first：客户端直接取第一项恢复历史。
+    expect(res.body[0].id).toBe(conv2.body.id);
+    expect(res.body[0].title).toBe("第二轮");
+
+    // 其它 workspace 的会话不应混入。
+    const other = await createWorkspace(cookie, "List WS Other");
+    const otherRes = await request(server)
+      .get(`/api/conversations?workspaceId=${other.body.id}`)
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(otherRes.body).toHaveLength(0);
+
+    // 跨租户：别的 tenant 查不到该 workspace 的会话。
+    const cookieB = await login(TENANT_B);
+    await request(server)
+      .get(`/api/conversations?workspaceId=${ws.body.id}`)
+      .set("Cookie", cookieB)
+      .expect(404);
+  });
+
   it("streams a message turn through SSE and stops at the approval interrupt", async () => {
     const cookie = await login(TENANT_A_MEMBER);
     const ws = await createUploadWorkspace(cookie, "SSE WS");
