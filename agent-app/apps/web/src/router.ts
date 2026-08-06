@@ -6,6 +6,7 @@ import {
 } from "./stores/session";
 import LoginView from "./views/LoginView.vue";
 import ChangePasswordView from "./views/ChangePasswordView.vue";
+import WorkspacesView from "./views/WorkspacesView.vue";
 import WorkspaceView from "./views/WorkspaceView.vue";
 
 /**
@@ -25,7 +26,7 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
       { path: "/", redirect: "/workspaces" },
       { path: "/login", name: "login", component: LoginView },
       { path: "/change-password", name: "change-password", component: ChangePasswordView, meta: { requiresAuth: true } },
-      { path: "/workspaces", name: "workspaces", component: WorkspaceView, meta: { requiresAuth: true } },
+      { path: "/workspaces", name: "workspaces", component: WorkspacesView, meta: { requiresAuth: true } },
       { path: "/workspaces/:id", name: "workspace", component: WorkspaceView, props: true, meta: { requiresAuth: true } },
       { path: "/:pathMatch(.*)*", redirect: "/workspaces" },
     ],

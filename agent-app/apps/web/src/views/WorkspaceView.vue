@@ -13,9 +13,8 @@ import ValidationReport from "../components/ValidationReport.vue";
 import type { SolutionTreeNode } from "../types";
 
 /**
- * 客户解决方案工作区（brief Step 3）：
- *  - 无工作区：提供「新建工程 / 上传工程」两个入口；
- *  - 有工作区：conversation、plan、preview、revisions、report 同屏可见不跳转。
+ * 客户解决方案工作区：conversation、plan、preview、revisions、report 同屏可见不跳转。
+ * 入口（新建/上传）由 /workspaces 列表页（WorkspacesView）承担；本页经路由保证必有 workspaceId。
  */
 const props = defineProps<{ workspaceId?: string }>();
 
@@ -24,8 +23,6 @@ const router = useRouter();
 const session = useSession();
 const workspace = useWorkspace();
 
-const newName = ref("");
-const busy = ref(false);
 const deleteArmed = ref(false);
 const previewUrl = ref<string | undefined>(undefined);
 
@@ -84,41 +81,6 @@ watch(
     }
   },
 );
-
-async function onCreate(): Promise<void> {
-  const name = newName.value.trim();
-  if (name.length === 0) return;
-  busy.value = true;
-  try {
-    const created = await workspace.createWorkspace({ name, mode: "new" });
-    await router.push(`/workspaces/${created.id}`);
-  } finally {
-    busy.value = false;
-  }
-}
-
-async function onCreateUpload(): Promise<void> {
-  const name = newName.value.trim();
-  if (name.length === 0) return;
-  busy.value = true;
-  try {
-    const created = await workspace.createWorkspace({ name, mode: "upload" });
-    await router.push(`/workspaces/${created.id}`);
-  } finally {
-    busy.value = false;
-  }
-}
-
-async function onUploadFile(event: Event): Promise<void> {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
-  if (file === undefined) return;
-  try {
-    await workspace.uploadSource(file);
-  } finally {
-    input.value = "";
-  }
-}
 
 async function onSend(content: string): Promise<void> {
   try {
@@ -204,33 +166,9 @@ function onSelectRevision(_revisionId: string): void {
       </div>
     </header>
 
-    <main v-if="!hasWorkspace" class="entry" data-testid="workspace-entry">
-      <h2>开始一个新方案</h2>
-      <input
-        v-model="newName"
-        data-testid="workspace-name"
-        type="text"
-        placeholder="方案名称，例如 客户展示大屏"
-      />
-      <div class="entry-actions">
-        <button type="button" data-testid="create-workspace" :disabled="busy || newName.trim() === ''" @click="onCreate">
-          新建工程
-        </button>
-        <button type="button" data-testid="upload-workspace" :disabled="busy || newName.trim() === ''" @click="onCreateUpload">
-          上传工程
-        </button>
-      </div>
-      <p class="hint">新建工程从确定性初始设计开始；上传工程导入 KF 原生 .gz 客户端包（无损保留未知字段）。</p>
-      <p v-if="workspace.state.error" class="error" data-testid="workspace-error">{{ workspace.state.error }}</p>
-    </main>
-
-    <main v-else class="shell">
+    <main class="shell">
       <div class="left">
         <ProjectTree :tree="solutionTree" />
-        <div v-if="workspace.state.workspace?.mode === 'upload' && workspace.state.currentRevisionId === null" class="upload-zone">
-          <h3>上传 KF 源包</h3>
-          <input ref="fileInput" type="file" accept=".gz" data-testid="upload-input" @change="onUploadFile" />
-        </div>
         <RevisionList
           :revisions="workspace.state.revisions"
           :current-revision-id="workspace.state.currentRevisionId"
@@ -307,41 +245,6 @@ function onSelectRevision(_revisionId: string): void {
 .user button.danger {
   background: #7f1d1d;
 }
-.entry {
-  max-width: 40rem;
-  margin: 4rem auto;
-  background: #ffffff;
-  border-radius: 12px;
-  padding: 2rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-.entry input {
-  padding: 0.6rem;
-  border: 1px solid #cbd5e1;
-  border-radius: 6px;
-}
-.entry-actions {
-  display: flex;
-  gap: 0.8rem;
-}
-.entry-actions button {
-  padding: 0.55rem 1.1rem;
-  border-radius: 6px;
-  border: none;
-  background: #2563eb;
-  color: #ffffff;
-  cursor: pointer;
-}
-.entry-actions button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.hint {
-  color: #64748b;
-  font-size: 0.85rem;
-}
 .error {
   color: #b91c1c;
   font-size: 0.85rem;
@@ -374,15 +277,5 @@ function onSelectRevision(_revisionId: string): void {
 }
 .bottom {
   grid-column: 1 / -1;
-}
-.upload-zone {
-  border: 1px dashed #cbd5e1;
-  border-radius: 10px;
-  padding: 0.8rem;
-  background: #ffffff;
-}
-.upload-zone h3 {
-  margin: 0 0 0.5rem;
-  font-size: 0.95rem;
 }
 </style>
