@@ -199,18 +199,22 @@ export class DeepSeekModelPort implements ModelPort {
   }
 
   async createDesignPlan(input: ModelPortContext, opts?: { revising?: boolean }): Promise<DesignPlan> {
+    const revising = opts?.revising === true;
     const lines = [
       "遵循设计原则：布局有主次、避免模板脸（不要白底等大按钮堆叠）、一个记忆点、控件文案具体可读。",
       "为一个 KF 客户端工程生成设计计划（不是页面控件，是设计意图）。输出 JSON 符合 kf-design-plan/v1：",
       "displayName：工程显示名；summary：一句话摘要；layoutConcept：布局概念（含 ASCII 线框）；",
       "styleDirection：风格方向（配色/基调）；sections：页面分区（≤8 区，每区 ≤12 个控件占位，type 用指定枚举：text/button/inputnumber/switch/checkbox/radio/select/image/tabs/table/richtext/spacer）；",
       "signature：本方案最特别的 1 个设计决策。",
-      "需求：" + (input.requirementText ?? ""),
     ];
-    if (opts?.revising === true) {
-      lines.push("上一版设计计划：" + JSON.stringify(input.designPlan));
-      lines.push("客户修改意见：" + (input.requirementText ?? ""));
-      lines.push("在上一版基础上修订，不要重来；把改动体现在设计计划中。");
+    if (revising) {
+      lines.push(
+        "客户修改意见：" + (input.requirementText ?? ""),
+        "上一版设计计划：" + JSON.stringify(input.designPlan ?? "（无）"),
+        "在上一版基础上修订，不要重来；把改动体现在设计计划中。",
+      );
+    } else {
+      lines.push("需求：" + (input.requirementText ?? ""));
     }
     const raw = await this.chatJson(SYSTEM_PROMPT, lines.join("\n"));
     const parsed = DesignPlanSchema.safeParse(raw);
