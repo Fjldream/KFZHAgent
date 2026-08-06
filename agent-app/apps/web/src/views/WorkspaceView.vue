@@ -23,6 +23,7 @@ const session = useSession();
 const workspace = useWorkspace();
 
 const previewUrl = ref<string | undefined>(undefined);
+const previewFullscreen = ref(false);
 const deleteConfirmOpen = ref(false);
 const deleting = ref(false);
 const deleteSheetEl = ref<HTMLElement | null>(null);
@@ -219,7 +220,11 @@ async function onUploadFile(file: File): Promise<void> {
         @download="onDownload"
       />
     </main>
-    <PreviewBar :preview-url="previewUrl" />
+    <PreviewBar
+      :preview-url="previewUrl"
+      :fullscreen="previewFullscreen"
+      @toggle-fullscreen="previewFullscreen = !previewFullscreen"
+    />
     <ApprovalSheet
       v-if="workspace.state.pendingApproval !== null"
       :plan="workspace.state.pendingApproval?.plan ?? null"

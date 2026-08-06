@@ -443,6 +443,29 @@ describe("PreviewBar", () => {
     expect(wrapper.find('[data-testid="preview-panel"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="preview-frame"]').exists()).toBe(false);
   });
+
+  it("emits toggle-fullscreen when the fullscreen button is clicked", async () => {
+    const wrapper = mount(PreviewBar, {
+      props: { previewUrl: "/api/artifacts/download/token-abc" },
+    });
+    await wrapper.get('[data-testid="preview-fullscreen"]').trigger("click");
+    expect(wrapper.emitted("toggle-fullscreen")).toBeTruthy();
+    // fullscreen 文案随 prop 切换（退出全屏 / 全屏）。
+    await wrapper.setProps({ fullscreen: true });
+    expect(wrapper.get('[data-testid="preview-fullscreen"]').text()).toBe("退出全屏");
+  });
+
+  it("toggles the zoom label between 适应宽度 and 100%", async () => {
+    const wrapper = mount(PreviewBar, {
+      props: { previewUrl: "/api/artifacts/download/token-abc" },
+    });
+    const zoomBtn = wrapper.get('[data-testid="preview-zoom"]');
+    expect(zoomBtn.text()).toBe("适应宽度");
+    await zoomBtn.trigger("click");
+    expect(zoomBtn.text()).toBe("100%");
+    await zoomBtn.trigger("click");
+    expect(zoomBtn.text()).toBe("适应宽度");
+  });
 });
 
 describe("RevisionList", () => {
