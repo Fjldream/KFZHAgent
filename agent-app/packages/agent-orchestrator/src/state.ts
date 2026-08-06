@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { pendingRequirementSchema } from "@kf/contracts";
+import { pendingRequirementSchema, DesignPlanSchema, type DesignPlan } from "@kf/contracts";
 import { StateSchema } from "@langchain/langgraph";
 import { IntentSchema } from "./schemas/intent.js";
 
@@ -17,8 +17,20 @@ export type GraphMessage = z.infer<typeof MessageSchema>;
 /**
  * Workflow stage the graph is in. `approval` is the interrupt point where the
  * graph waits for the user to approve/revise/cancel the pending change plan.
+ * The design-flow stages (`clarifying` … `done`) are appended on top of the
+ * legacy values so existing routing keeps working.
  */
-export const StageSchema = z.enum(["idle", "planning", "approval", "building"]);
+export const StageSchema = z.enum([
+  "idle",
+  "planning",
+  "approval",
+  "building",
+  "clarifying",
+  "design-review",
+  "design-planning",
+  "preview-review",
+  "done",
+]);
 export type Stage = z.infer<typeof StageSchema>;
 
 /**
@@ -78,6 +90,19 @@ export const AgentGraphState = new StateSchema({
   planHash: z.string().optional(),
   buildJobId: z.string().optional(),
   intent: IntentSchema.optional(),
+  /**
+   * How many clarifying turns have been spent on the current request (max 5;
+   * the classify node refuses to keep asking past the cap).
+   */
+  clarificationCount: z.number().int().min(0).max(5).optional(),
+  /**
+   * The design plan produced during design-planning (brief Task 3 contract).
+   * `revising` marks an in-progress revision of this plan (used by Task 6).
+   */
+  designPlan: DesignPlanSchema.optional(),
+  designPlanHash: z.string().optional(),
+  designRevision: z.number().int().min(0).optional(),
+  revising: z.boolean().optional(),
   stage: StageSchema,
   recentMessages: z.array(MessageSchema),
   conversationSummary: z.string().optional(),
@@ -93,3 +118,10 @@ export const AgentGraphState = new StateSchema({
 
 export type AgentGraphStateValue = typeof AgentGraphState.State;
 export type AgentGraphUpdate = typeof AgentGraphState.Update;
+
+/**
+ * The design plan carried on `AgentGraphState.designPlan` (brief Task 3
+ * contract). Re-exported for node implementers — Task 6's compile step reads
+ * this field to build the ClientProjectIR/ControlIR.
+ */
+export type DesignPlanField = DesignPlan;
