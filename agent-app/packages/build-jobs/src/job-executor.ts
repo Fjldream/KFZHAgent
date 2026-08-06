@@ -184,7 +184,17 @@ export class BuildExecutor {
   }
 
   private async unpackBase(tenantId: string, artifactId: string): Promise<string> {
-    const stream = await this.#deps.storage.open(tenantId, artifactId);
+    let stream: NodeJS.ReadableStream;
+    try {
+      stream = await this.#deps.storage.open(tenantId, artifactId);
+    } catch (error) {
+      // 基础工程包缺失（artifact 不在存储中——如部署/清理后）时给出明确错误，
+      // 而不是把原始 ENOENT 抛给用户。
+      throw new Error(
+        `基础工程包缺失（artifact ${artifactId} 不在存储中）：可能由部署切换或存储清理导致，请重新上传工程或新建工作区`,
+        { cause: error },
+      );
+    }
     const chunks: Buffer[] = [];
     for await (const chunk of stream as AsyncIterable<Buffer | string>) {
       chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));

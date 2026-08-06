@@ -9,8 +9,8 @@ const ARTIFACT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 
 /** Structured error raised by LocalArtifactStorage. */
 export class ArtifactStorageError extends Error {
-  constructor(message: string) {
-    super(`ARTIFACT_STORAGE_ERROR: ${message}`);
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(`ARTIFACT_STORAGE_ERROR: ${message}`, options);
     this.name = "ArtifactStorageError";
   }
 }
@@ -84,7 +84,14 @@ export class LocalArtifactStorage implements ArtifactStorage {
 
   async open(tenantId: string, artifactId: string): Promise<NodeJS.ReadableStream> {
     const p = this.artifactPath(tenantId, artifactId);
-    await stat(p);
+    // 文件缺失必须抛可辨识的 ArtifactStorageError（而非裸 ENOENT），
+    // 让上层（构建/下载）能给出明确错误而不是原始系统错误。
+    await stat(p).catch((cause: unknown) => {
+      throw new ArtifactStorageError(
+        `ARTIFACT_NOT_FOUND: artifact ${artifactId} does not exist in storage`,
+        { cause },
+      );
+    });
     return createReadStream(p);
   }
 

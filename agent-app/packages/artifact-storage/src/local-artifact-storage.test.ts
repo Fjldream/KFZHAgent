@@ -157,7 +157,9 @@ describe("LocalArtifactStorage", () => {
     });
 
     await storage.delete("tenant-a", artifactId);
-    await expect(storage.open("tenant-a", artifactId)).rejects.toThrow();
+    await expect(storage.open("tenant-a", artifactId)).rejects.toThrow(
+      /ARTIFACT_NOT_FOUND/,
+    );
     const entries = await readdir(path.join(root, "tenant-a"));
     expect(entries).toEqual([]);
   });
