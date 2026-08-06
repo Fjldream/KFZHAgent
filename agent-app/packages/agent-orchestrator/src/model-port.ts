@@ -21,6 +21,8 @@ export interface ModelPortContext {
   currentRevisionId?: string | undefined;
   /** The user's latest turn, used as the requirement text for planning. */
   requirementText?: string | undefined;
+  /** Previous design plan when revising (REVISE_DESIGN / design iteration). */
+  designPlan?: DesignPlan | undefined;
   /**
    * Model-editable entities of the current revision (controls/pages with their
    * KF GUIDs). A real LLM must reference these exact GUIDs in change plans —

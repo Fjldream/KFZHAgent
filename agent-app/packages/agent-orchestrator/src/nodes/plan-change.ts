@@ -20,6 +20,19 @@ import { ProjectDesignSchema } from "../schemas/project-design.js";
  */
 export function createPlanChangeNode(deps: SolutionGraphDeps) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
+    // Design-flow guard (spec §5.4): a design-plan confirmation must have a
+    // confirmed plan to plan against. CONFIRM_DESIGN can only be routed into
+    // plan-change from the design loop (the design-plan node set designPlanHash
+    // and stage=design-review), so the guard is scoped to that entry: confirming
+    // a plan that was never generated is a graph-integrity violation and the
+    // node refuses instead of fabricating a control plan. The legacy entry
+    // paths (NEW_REQUIREMENT / MODIFY_REQUIREMENT / approval revise resume) do
+    // not pass through the design loop yet and keep working unchanged — the
+    // spec's NEW_REQUIREMENT → design-plan re-routing is a later task.
+    if (state.intent === "CONFIRM_DESIGN" && state.designPlanHash === undefined) {
+      return { stage: "idle", lastErrorCode: "DESIGN_NOT_CONFIRMED" };
+    }
+
     const editableEntities =
       state.currentRevisionId !== undefined
         ? await deps.workspaceQuery.getRevisionEntities({

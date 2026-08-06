@@ -12,6 +12,7 @@ import { createLoadContextNode } from "./nodes/load-context.js";
 import { createClassifyIntentNode } from "./nodes/classify-intent.js";
 import { createClarifyNode } from "./nodes/clarify.js";
 import { createPlanChangeNode } from "./nodes/plan-change.js";
+import { createDesignPlanNode } from "./nodes/design-plan.js";
 import { createApprovalNode, createCancelPlanNode } from "./nodes/approval.js";
 import { createEnqueueBuildNode } from "./nodes/enqueue-build.js";
 
@@ -35,13 +36,15 @@ export class ApprovalResumeRequiredError extends Error {
  * Graph shape:
  *
  *   START → load-context → classify-intent ──(conditional)──► ...
- *        ... plan-change → approval ──(conditional)──► enqueue-build / plan-change / cancel-plan / END
+ *        ... design-plan → plan-change ──(conditional)──► approval ──(conditional)──► enqueue-build / plan-change / cancel-plan / END
  *
- * Intent routing (brief Step 4) is fully deterministic:
+ * Intent routing (brief Step 4 + design flow spec §5.2) is fully deterministic:
  *   QUESTION            → idle (assistant reply persisted)
  *   CLARIFY             → clarify (question persisted, clarificationCount+1, idle)
  *   NEW_REQUIREMENT     → plan-change
  *   MODIFY_REQUIREMENT  → plan-change
+ *   CONFIRM_DESIGN      → plan-change (design plan confirmed; guard requires designPlanHash)
+ *   REVISE_DESIGN       → design-plan (revision loop, revising=true)
  *   CONFIRM_PLAN        → approval
  *   CANCEL_PLAN         → cancel-plan
  *   ROLLBACK            → idle + ROLLBACK_NOT_SUPPORTED
@@ -65,6 +68,7 @@ export function compileSolutionGraph(
     .addNode("load-context", createLoadContextNode(deps))
     .addNode("classify-intent", createClassifyIntentNode(deps))
     .addNode("clarify", createClarifyNode(deps))
+    .addNode("design-plan", createDesignPlanNode(deps))
     .addNode("plan-change", createPlanChangeNode(deps))
     .addNode("approval", createApprovalNode())
     .addNode("cancel-plan", createCancelPlanNode(deps))
@@ -72,15 +76,15 @@ export function compileSolutionGraph(
     .addEdge(START, "load-context")
     .addEdge("load-context", "classify-intent")
     .addConditionalEdges("classify-intent", routeAfterClassify)
+    .addConditionalEdges("plan-change", routeAfterPlanChange)
     .addConditionalEdges("approval", routeAfterApproval)
-    .addEdge("plan-change", "approval")
     .addEdge("cancel-plan", END)
     .addEdge("enqueue-build", END)
     .compile(options);
   return guardCompiledGraph(graph);
 }
 
-/** Deterministic intent routing after classification (brief Step 4). */
+/** Deterministic intent routing after classification (brief Step 4 + spec §5.2). */
 function routeAfterClassify(state: AgentGraphStateValue): string {
   if (state.pendingRequirements !== undefined && state.pendingRequirements.length > 0) {
     // Unsupported domain requests never reach planning or the build queue.
@@ -95,6 +99,10 @@ function routeAfterClassify(state: AgentGraphStateValue): string {
     case "NEW_REQUIREMENT":
     case "MODIFY_REQUIREMENT":
       return "plan-change";
+    case "CONFIRM_DESIGN":
+      return "plan-change";
+    case "REVISE_DESIGN":
+      return "design-plan";
     case "CONFIRM_PLAN":
       return "approval";
     case "CANCEL_PLAN":
@@ -104,6 +112,16 @@ function routeAfterClassify(state: AgentGraphStateValue): string {
     default:
       return END;
   }
+}
+
+/**
+ * Routes plan-change output. A successful plan ends in `approval` (where the
+ * approval interrupt waits); a guarded/early return (DESIGN_NOT_CONFIRMED,
+ * INVALID_MODEL_OUTPUT, INITIAL_DESIGN_CREATED) ends the run at `idle` so the
+ * lastErrorCode is preserved instead of being overwritten by the approval node.
+ */
+function routeAfterPlanChange(state: AgentGraphStateValue): string {
+  return state.stage === "approval" ? "approval" : END;
 }
 
 /** Resume routing after the approval interrupt (brief Step 5). */

@@ -6,7 +6,10 @@ import { z } from "zod";
  * guesses a route. Unsupported-domain requests keep a supported intent
  * (NEW_REQUIREMENT / MODIFY_REQUIREMENT) but are diverted to pendingRequirements
  * by the classify node when no requested domain is supported. CLARIFY means the
- * model needs more information before it can pick a route.
+ * model needs more information before it can pick a route. CONFIRM_DESIGN and
+ * REVISE_DESIGN drive the design-plan loop (design-review): the user confirms
+ * the presented design plan (→ plan-change) or asks for a revision (→ design-plan
+ * again with revising=true).
  */
 export const IntentSchema = z.enum([
   "QUESTION",
@@ -17,6 +20,8 @@ export const IntentSchema = z.enum([
   "ROLLBACK",
   "BUILD",
   "CLARIFY",
+  "CONFIRM_DESIGN",
+  "REVISE_DESIGN",
 ]);
 export type Intent = z.infer<typeof IntentSchema>;
 
