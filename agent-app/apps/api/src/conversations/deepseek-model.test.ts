@@ -56,6 +56,66 @@ describe("DeepSeekModelPort", () => {
     expect(result.intent).toBe("QUESTION");
   });
 
+  it("classifyIntent returns CLARIFY with a question when the requirement is underspecified", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                intent: "CLARIFY",
+                requestedDomains: ["kingclient"],
+                needsClarification: true,
+                clarifyingQuestion: {
+                  question: "主题是哪种？",
+                  options: ["①生产监控", "②设备状态", "③能源管理"],
+                },
+              }),
+            },
+          },
+        ],
+      }),
+    });
+    const port = new DeepSeekModelPort({
+      apiKey: "test-key",
+      fetch: fetchImpl,
+      baseUrl: "https://mock.local",
+    });
+    const result = await port.classifyIntent({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [{ role: "user", content: "做一个大屏" }],
+      requirementText: "做一个大屏",
+    });
+    expect(result.intent).toBe("CLARIFY");
+    expect(result.clarifyingQuestion?.question).toBe("主题是哪种？");
+    expect(result.clarifyingQuestion?.options?.length).toBeGreaterThan(0);
+    expect(result.needsClarification).toBe(true);
+    // 澄清引导必须出现在 prompt 里：CLARIFY 是可选意图，且信息不足时禁止猜测需求。
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    const userPrompt = body.messages[1].content;
+    expect(userPrompt).toContain("CLARIFY");
+    expect(userPrompt).toContain("禁止猜测需求");
+  });
+
+  it("classifyIntent backfills a default question when the model emits CLARIFY without one", async () => {
+    const port = makePort({ intent: "CLARIFY", requestedDomains: ["kingclient"] });
+    const result = await port.classifyIntent({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [{ role: "user", content: "做一个大屏" }],
+      requirementText: "做一个大屏",
+    });
+    expect(result.intent).toBe("CLARIFY");
+    expect(result.clarifyingQuestion?.question.length).toBeGreaterThan(0);
+    expect(result.needsClarification).toBe(true);
+  });
+
   it("createProjectDesign assembles a valid SolutionIR", async () => {
     const port = makePort({ displayName: "演示工程" });
     const design = await port.createProjectDesign({

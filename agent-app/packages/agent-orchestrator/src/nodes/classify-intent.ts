@@ -3,6 +3,12 @@ import type { SolutionGraphDeps } from "../ports.js";
 import { ClassifyIntentResultSchema } from "../schemas/intent.js";
 
 /**
+ * 澄清追问轮数上限（Task 5）：state.clarificationCount 达到该值后，模型再
+ * 要求澄清也不接受追问，按 NEW_REQUIREMENT 继续推进，避免无限澄清循环。
+ */
+const CLARIFY_MAX_TURNS = 5;
+
+/**
  * Classifies the current turn through ModelPort.classifyIntent and applies the
  * deterministic routing decisions:
  *   - unsupported-domain NEW/MODIFY requirements → pendingRequirements, idle,
@@ -82,6 +88,18 @@ export function createClassifyIntentNode(deps: SolutionGraphDeps) {
     }
 
     if (result.intent === "CLARIFY") {
+      // 5 轮上限 gate（Task 5）：用户反复追问后仍信息不足时，不再接受澄清，
+      // 按 NEW_REQUIREMENT 继续推进——reply 提示“按当前理解继续”，
+      // clarifyingQuestion 不写入 state，clarify 节点不会再次追问。
+      if ((state.clarificationCount ?? 0) >= CLARIFY_MAX_TURNS) {
+        return {
+          intent: "NEW_REQUIREMENT",
+          reply: "已尝试多轮澄清，按当前理解继续。",
+          stage: "idle",
+          pendingRequirements: undefined,
+          lastErrorCode: undefined,
+        };
+      }
       // The model needs more information before it can pick a route. The
       // structured question is carried in state for the clarify node, which
       // persists it as an assistant message and returns the graph to idle.

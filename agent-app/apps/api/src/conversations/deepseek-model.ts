@@ -62,6 +62,26 @@ const SYSTEM_PROMPT = `你是 KingFusion（KF）客户端工程生成 Agent 的�
 - 计划中的 entityId 必须是用户提供的实体清单里的 GUID，禁止编造。
 - 修改字段只允许控件受控字段，如 /text、/backgroundColor、/x、/y、/width、/height。`;
 
+/**
+ * CLARIFY 输出若漏掉 clarifyingQuestion（模型只声明要澄清却没给问题），
+ * 回填一个默认问题，防止“只澄清、没有问题”的空追问（Task 5）。
+ */
+function normalizeClarifyOutput(raw: unknown): unknown {
+  const record = (raw ?? {}) as Record<string, unknown>;
+  if (record["intent"] !== "CLARIFY") return raw;
+  if (record["clarifyingQuestion"] !== undefined && record["clarifyingQuestion"] !== null) {
+    return raw;
+  }
+  return {
+    ...record,
+    needsClarification: true,
+    clarifyingQuestion: {
+      question: "请补充需求信息（例如主题、页面或布局方向），以便生成设计方案。",
+      options: ["①补充主题/业务场景", "②补充页面结构", "③补充风格偏好"],
+    },
+  };
+}
+
 /** 从 LLM 回复中提取 JSON（容忍 ```json 围栏与前后杂文本）。 */
 export function extractJson(content: string): unknown {
   const trimmed = content.trim();
@@ -145,16 +165,23 @@ export class DeepSeekModelPort implements ModelPort {
   async classifyIntent(input: ModelPortContext): Promise<ClassifyIntentResult> {
     const userPrompt = [
       "根据用户最近的需求，判断意图（intent），可选值：",
-      'QUESTION（提问/闲聊）、NEW_REQUIREMENT（新建工程需求）、MODIFY_REQUIREMENT（修改已有工程）、CONFIRM_PLAN（确认计划）、CANCEL_PLAN（取消计划）、ROLLBACK（回滚）、BUILD（要求构建）。',
-      "requestedDomains：涉及的产品域（客户端工程为 [\"kingclient\"]）。",
+      'QUESTION（提问/闲聊）、NEW_REQUIREMENT（新建工程需求）、MODIFY_REQUIREMENT（修改已有工程）、CONFIRM_PLAN（确认计划）、CANCEL_PLAN（取消计划）、ROLLBACK（回滚）、BUILD（要求构建）、CLARIFY（需求信息不足，需澄清）。',
+      'requestedDomains：涉及的产品域（客户端工程为 ["kingclient"]）。',
       "reply：给用户的一句简短回复（可选）。",
+      "needsClarification：是否需要补充信息（intent 为 CLARIFY 时为 true）。",
+      'clarifyingQuestion：{"question":"具体问题","options":["选项1","选项2","选项3"]}（intent 为 CLARIFY 时必须输出）。',
+      "",
+      "澄清判定规则：",
+      "判断需求信息是否足够生成设计方案：若主题/页面/布局/风格等关键信息缺失或模糊，intent 必须为 CLARIFY，并给出 1 个具体问题 + 3-5 个可选项（选项是“答什么”的引导）；",
+      "选项 ≤5 个，一次只问一个维度；",
+      "信息足够时才返回 NEW_REQUIREMENT / MODIFY_REQUIREMENT，禁止猜测需求。",
       "",
       "用户最近消息：",
       input.recentMessages.map((m) => `${m.role}: ${m.content}`).join("\n"),
       "最新需求：" + (input.requirementText ?? ""),
     ].join("\n");
     const raw = await this.chatJson(SYSTEM_PROMPT, userPrompt);
-    const parsed = ClassifyIntentResultSchema.safeParse(raw);
+    const parsed = ClassifyIntentResultSchema.safeParse(normalizeClarifyOutput(raw));
     if (!parsed.success) {
       // 安全回退：无法理解时当作提问，绝不触碰构建路径。
       return {
