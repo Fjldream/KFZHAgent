@@ -8,7 +8,7 @@ process.env.DATABASE_URL =
 import { Command } from "@langchain/langgraph";
 import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
 import { BuildJobService } from "@kf/build-jobs";
-import { solutionId, type ChangePlan, type SolutionIR } from "@kf/contracts";
+import { solutionId, type ChangePlan, type DesignPlan, type SolutionIR } from "@kf/contracts";
 import { PrismaClient, Prisma } from "@prisma/client";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import pg from "pg";
@@ -186,6 +186,17 @@ class StubModelPort implements ModelPort {
     const intent = this.intents.shift() ?? "QUESTION";
     void input;
     return { intent, requestedDomains: ["kingclient"] };
+  }
+  async createDesignPlan(): Promise<DesignPlan> {
+    return {
+      schema: "kf-design-plan/v1",
+      displayName: "设计",
+      summary: "设计",
+      layoutConcept: "布局",
+      styleDirection: "风格",
+      sections: [{ id: "main", label: "主区", controls: [{ type: "text" }] }],
+      signature: "签名",
+    };
   }
   async createProjectDesign(): Promise<SolutionIR> {
     return {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Command, MemorySaver } from "@langchain/langgraph";
 import { deriveGuid, planHash } from "@kf/domain-client";
-import { solutionId, type ChangePlan, type SolutionIR } from "@kf/contracts";
+import { solutionId, type ChangePlan, type DesignPlan, type SolutionIR } from "@kf/contracts";
 import type {
   AppendMessageInput,
   BuildJobInfo,
@@ -153,6 +153,17 @@ class FakeModelPort implements ModelPort {
     return { intent, requestedDomains: ["kingclient"], reply: `reply:${intent}` };
   }
 
+  async createDesignPlan(): Promise<DesignPlan> {
+    return {
+      schema: "kf-design-plan/v1",
+      displayName: "设计",
+      summary: "设计",
+      layoutConcept: "布局",
+      styleDirection: "风格",
+      sections: [{ id: "main", label: "主区", controls: [{ type: "text" }] }],
+      signature: "签名",
+    };
+  }
   async createProjectDesign(): Promise<SolutionIR> {
     if (this.invalidDesign) {
       // Malformed design (wrong schema version) a real LLM could emit.

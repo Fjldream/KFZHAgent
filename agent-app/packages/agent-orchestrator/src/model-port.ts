@@ -1,4 +1,4 @@
-import type { ChangePlan, ValidationReport } from "@kf/contracts";
+import type { ChangePlan, DesignPlan, ValidationReport } from "@kf/contracts";
 import type { ClassifyIntentResult, Intent } from "./schemas/intent.js";
 import type { ProjectDesign } from "./schemas/project-design.js";
 import type { GraphMessage } from "./state.js";
@@ -44,6 +44,9 @@ export interface ModelPort {
   createProjectDesign(input: ModelPortContext): Promise<ProjectDesign>;
   createChangePlan(input: ModelPortContext): Promise<ChangePlan>;
   reviseChangePlan(input: ModelPortContext): Promise<ChangePlan>;
+  /** Plan the initial page design from a requirement; `revising` switches the
+   * prompt toward amending the current revision rather than starting fresh. */
+  createDesignPlan(input: ModelPortContext, opts?: { revising?: boolean }): Promise<DesignPlan>;
   explainValidation(input: { tenantId: string; report: ValidationReport }): Promise<string>;
 }
 
