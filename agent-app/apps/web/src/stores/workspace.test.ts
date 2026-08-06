@@ -81,7 +81,7 @@ describe("workspace store load() 会话绑定", () => {
   it("delegates createPreviewUrl to the rendered HTML endpoint without blob download", async () => {
     api.previewUrl.mockReturnValue("/api/artifacts/art-abc/preview");
     const store = useWorkspace();
-    const url = await store.createPreviewUrl("art-abc");
+    const url = store.createPreviewUrl("art-abc");
     expect(url).toBe("/api/artifacts/art-abc/preview");
     expect(api.previewUrl).toHaveBeenCalledWith("art-abc");
     expect(api.createDownloadToken).not.toHaveBeenCalled();
