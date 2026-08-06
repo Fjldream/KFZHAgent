@@ -81,8 +81,11 @@ async function submit(): Promise<void> {
 
 <style scoped>
 .login-page {
+  position: relative;
+  z-index: 1;
   min-height: 100vh; display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(180deg, #e8edf5 0%, var(--color-bg) 60%);
+  /* 氛围背景由 AmbientBackground 提供，这里只留极淡的顶部提亮。 */
+  background: linear-gradient(180deg, rgba(232, 237, 245, 0.5) 0%, transparent 60%);
 }
 .login-card {
   width: 24rem; background: rgba(255, 255, 255, 0.72);

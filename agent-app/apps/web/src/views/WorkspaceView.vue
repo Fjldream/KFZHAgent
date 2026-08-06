@@ -249,7 +249,7 @@ async function onUploadFile(file: File): Promise<void> {
 </template>
 
 <style scoped>
-.app-shell { min-height: 100vh; display: flex; flex-direction: column; background: var(--color-bg); }
+.app-shell { position: relative; z-index: 1; min-height: 100vh; display: flex; flex-direction: column; background: transparent; }
 .shell {
   flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 22rem; gap: 1.2rem;
   padding: 1.2rem 1.4rem; min-height: 0;

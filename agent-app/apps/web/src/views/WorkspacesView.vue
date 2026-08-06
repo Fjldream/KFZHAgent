@@ -154,7 +154,7 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.page { min-height: 100vh; display: flex; flex-direction: column; }
+.page { position: relative; z-index: 1; min-height: 100vh; display: flex; flex-direction: column; }
 .glass {
   background: rgba(255, 255, 255, 0.6);
   backdrop-filter: var(--blur-glass);
