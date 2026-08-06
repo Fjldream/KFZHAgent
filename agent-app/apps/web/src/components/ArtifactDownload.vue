@@ -5,6 +5,8 @@ import type { BuildJobStatus } from "../types";
 /**
  * 下载入口（brief Step 5）：下载只通过授权 artifact 端点。
  * 仅当构建成功且存在制品时显示下载按钮。
+ *
+ * Task 6：面板容器已由 ContextPanel 承载，本组件仅保留按钮部分。
  */
 const props = withDefaults(
   defineProps<{
@@ -32,41 +34,32 @@ function onDownload(): void {
 </script>
 
 <template>
-  <section class="panel download" data-testid="artifact-download">
-    <h2>产物下载</h2>
+  <div class="download" data-testid="artifact-download">
     <button
       v-if="ready"
       type="button"
       data-testid="download-artifact"
       @click="onDownload"
     >
-      下载客户端包（{{ fileName ?? "artifact.gz" }}）
+      下载客户端包{{ fileName !== "" ? `（${fileName}）` : "" }}
     </button>
     <p v-else class="empty">{{ jobStatus === 'SUCCEEDED' ? '暂无制品' : '构建完成后可下载' }}</p>
-  </section>
+  </div>
 </template>
 
 <style scoped>
-.panel {
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  padding: 1rem;
-  background: #ffffff;
-}
-.panel h2 {
-  margin: 0 0 0.6rem;
-  font-size: 1rem;
-}
-.panel button {
-  padding: 0.45rem 0.9rem;
-  border-radius: 6px;
+.download button {
+  padding: 0.5rem 1.1rem;
   border: none;
-  background: #059669;
+  border-radius: var(--radius-button);
+  background: var(--color-success);
   color: #ffffff;
   cursor: pointer;
+  font-size: 0.9rem;
 }
+.download button:active { transform: scale(0.97); }
 .empty {
-  color: #94a3b8;
+  color: var(--color-text-secondary);
   font-size: 0.85rem;
   margin: 0;
 }

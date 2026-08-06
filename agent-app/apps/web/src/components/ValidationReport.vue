@@ -42,27 +42,31 @@ const detailsText = computed(() => {
 
 <style scoped>
 .panel {
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
   padding: 1rem;
-  background: #ffffff;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
 }
 .panel h2 {
   margin: 0 0 0.6rem;
   font-size: 1rem;
 }
 .pass {
-  color: #047857;
+  color: var(--color-success);
   margin: 0;
 }
 .fail {
-  color: #b91c1c;
+  color: var(--color-danger);
+  margin: 0;
+}
+.fail p {
   margin: 0;
 }
 .details {
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  border-radius: 6px;
+  background: rgba(255, 59, 48, 0.08);
+  border: 1px solid rgba(255, 59, 48, 0.25);
+  border-radius: var(--radius-button);
   padding: 0.5rem;
   font-size: 0.8rem;
   white-space: pre-wrap;

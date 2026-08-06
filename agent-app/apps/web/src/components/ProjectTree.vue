@@ -27,10 +27,11 @@ defineProps<{
 
 <style scoped>
 .panel {
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
   padding: 1rem;
-  background: #ffffff;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
 }
 .panel h2 {
   margin: 0 0 0.6rem;
@@ -52,7 +53,7 @@ defineProps<{
   display: inline-block;
 }
 .capability[disabled] {
-  color: #94a3b8;
+  color: var(--color-text-secondary);
   cursor: not-allowed;
 }
 </style>

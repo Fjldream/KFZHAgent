@@ -58,10 +58,11 @@ function onSelect(revision: Revision): void {
 
 <style scoped>
 .panel {
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
   padding: 1rem;
-  background: #ffffff;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
 }
 .panel h2 {
   margin: 0 0 0.6rem;
@@ -81,26 +82,26 @@ function onSelect(revision: Revision): void {
   align-items: center;
   font-size: 0.85rem;
   padding: 0.35rem 0.5rem;
-  border-radius: 6px;
+  border-radius: var(--radius-button);
   cursor: pointer;
 }
 .revision.current {
-  background: #eef2ff;
-  border: 1px solid #c7d2fe;
+  background: rgba(10, 132, 255, 0.08);
+  border: 1px solid rgba(10, 132, 255, 0.25);
 }
 .rev-number {
   font-weight: 700;
-  color: #4338ca;
+  color: var(--color-accent);
 }
 .rev-kind {
-  color: #334155;
+  color: var(--color-text);
 }
 .rev-time {
-  color: #94a3b8;
+  color: var(--color-text-secondary);
   font-size: 0.75rem;
 }
 .empty {
-  color: #94a3b8;
+  color: var(--color-text-secondary);
   font-size: 0.85rem;
 }
 </style>
