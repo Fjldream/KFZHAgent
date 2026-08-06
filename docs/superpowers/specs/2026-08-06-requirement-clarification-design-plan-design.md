@@ -15,7 +15,7 @@
 2. **无设计迭代**：设计一次性生成，用户看不到"我理解你要什么 + 打算怎么做"，也无法反复调整；
 3. **无预览反馈**：构建后没有"看真实效果 → 反馈 → 修订 → 重建"的闭环。
 
-三层改动（控件能力补全见 §9 后续计划）：
+三层改动（控件能力补全见 §8 后续计划）：
 
 - **层 1（架构）**：逐轮需求澄清（CLARIFY 意图 + clarify 节点 + 澄清计数上限），信息不足时 Agent 必须追问而非猜测；
 - **层 2（架构）**：**设计迭代循环**——design-plan 节点产出/修订 DesignPlan（布局/风格/分区/控件清单），SSE 对话内展示；用户自然语言反馈 → REVISE_DESIGN → 修订重新展示（不设上限）；确认 → 生成控件方案 → 批准 → 构建 → **预览反馈循环**（看预览 → 反馈 → 修订 → 重建，满意才落地）；
@@ -39,7 +39,7 @@
 |---|---|---|
 | IR 控件类型 | 12 种（text/button/inputnumber/switch/checkbox/radio/select/image/tabs/table/richtext/spacer），无图表/趋势曲线类 | LLM 想画趋势曲线也没有"笔" |
 | LLM Prompt | create 格式硬编码 `type:"text\|button\|inputnumber"` | 即使有图表类型 prompt 也只让建三种 |
-| KF 侧 | 趋势曲线是运行时图表组件（ChartComponent/EChart/TrendChart，KMEnumChartComponentType.TRENDCHART），非页面 JSON 静态控件；SDB 真实工程无图表样本 | 趋势曲线在页面 JSON 的序列化形式未验证（本设计不解决，见 §9 遗留） |
+| KF 侧 | 趋势曲线是运行时图表组件（ChartComponent/EChart/TrendChart，KMEnumChartComponentType.TRENDCHART），非页面 JSON 静态控件；SDB 真实工程无图表样本 | 趋势曲线在页面 JSON 的序列化形式未验证（见 §10 范围与遗留） |
 
 ## 3. 方案总览：Reasonix 式迭代对话
 
@@ -221,7 +221,7 @@ Anthropic 官方 `anthropics/skills/skills/frontend-design/SKILL.md`（Apache 2.
 
 - 澄清阶段：问的问题更聚焦设计决策；
 - 设计计划：布局/风格有方向而非空泛；
-- 控件方案：同一需求下不再产出"只有按钮文本写趋势曲线"的凑数方案（真正的趋势曲线控件属层 4 遗留，见 §9）。
+- 控件方案：同一需求下不再产出"只有按钮文本写趋势曲线"的凑数方案（真正的趋势曲线控件属后续计划，见 §8/§10）。
 
 ## 7. 架构改动清单（按包）
 
@@ -231,7 +231,7 @@ Anthropic 官方 `anthropics/skills/skills/frontend-design/SKILL.md`（Apache 2.
 
 **老式高频（7 种）**：`scale(8)` `time/datetime(5)` `combobox(3)` `list(9)` `treeview(11)` `webcontainer(12)` `gantt(30)`
 
-（控件源码文件与 uiModelType 已在 §2.2 盘点时确认；若个别控件的序列化为运行时复杂对象，按 SDB 无样本处理——模板用构造器默认值，KF 打开验证兜底。）
+（控件源码文件与 uiModelType 已在 §2 盘点时确认；若个别控件的序列化为运行时复杂对象，按 SDB 无样本处理——模板用构造器默认值，KF 打开验证兜底。）
 
 ### 7.2 做法（复用现有模板提取器闭环）
 
@@ -266,7 +266,7 @@ Anthropic 官方 `anthropics/skills/skills/frontend-design/SKILL.md`（Apache 2.
 **本轮做**：层 1-3（澄清 / 设计计划确认 / 审美注入，见 §4-6）。
 
 **后续开发计划（本轮不做，已排期思路）**：
-- **层 4 静态控件补全**：IR 控件类型从 12 种扩展到开发态全部静态控件（ElementUI 未接入 12 种 + 老式高频 7 种，清单见 §7.1），模板提取器重跑 + 编译器接入；
+- **层 4 静态控件补全**：IR 控件类型从 12 种扩展到开发态全部静态控件（ElementUI 未接入 12 种 + 老式高频 7 种，清单见 §8.1），模板提取器重跑 + 编译器接入；
 - **KF 趋势曲线/图表控件（TrendChart/BarChart/PieChart/XYChart/CustomCharts/Reports）**：实证确认是图表子模型（不注册 uiModelType，构造器字段可反推但宿主形式未验证——被 Layout/ChartComponent base 引用，页面 JSON 中的挂载方式待实测样本）。先决条件：在 KF 客户端实测拖一个图表保存导出，解析真实序列化结构后再扩展 IR `chart` 控件 + configureData 生成器；
 - 上传 .gz 工程的 editableEntities 实体清单（modify 流程，独立遗留项）；
 - 设计计划的多方案对比（2-3 个备选让客户选，后续增强）。
