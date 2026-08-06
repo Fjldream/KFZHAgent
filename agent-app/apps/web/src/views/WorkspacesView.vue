@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { api } from "../api";
 import { useSession } from "../stores/session";
@@ -96,6 +96,21 @@ function playCardsEntrance(): void {
   );
   track(tl);
 }
+
+// 搜索过滤后新渲染的 .card 无 inline opacity，CSS 初始 opacity:0 会使其永久隐形。
+// watch filtered 并重播入场动画（首次渲染由 refresh 的 playCardsEntrance 播放，
+// 此处仅处理过滤结果变化）。
+let firstFilteredRender = true;
+watch(
+  filtered,
+  () => {
+    if (firstFilteredRender) {
+      firstFilteredRender = false;
+      return;
+    }
+    void nextTick(() => playCardsEntrance());
+  },
+);
 
 async function refresh(): Promise<void> {
   loading.value = true;
