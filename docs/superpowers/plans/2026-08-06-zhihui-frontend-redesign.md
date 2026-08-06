@@ -580,7 +580,7 @@ function onPick(e: Event): void {
   >
     <h2>上传 KF 源包</h2>
     <p class="sub">把 .gz 客户端包拖到这里，或点击选择文件。</p>
-    <input ref="input" type="file" accept=".gz" data-testid="upload-input" hidden @change="onPick" />
+    <input ref="input" id="upload-input" type="file" accept=".gz" data-testid="upload-input" hidden @change="onPick" />
     <label class="pick" data-testid="upload-pick" for="upload-input">选择文件</label>
   </div>
 </template>
@@ -671,7 +671,7 @@ const buildText = computed(() => {
     </template>
 
     <template v-else>
-      <UploadGuide v-if="showUpload" data-testid="upload-guide" @file="emit('upload', $event)" />
+      <UploadGuide v-if="showUpload" @file="emit('upload', $event)" />
       <ProjectTree v-else :tree="tree" />
       <RevisionList
         :revisions="revisions"
@@ -698,7 +698,7 @@ const buildText = computed(() => {
 </style>
 ```
 
-> 注：`UploadGuide` 用 `v-if="showUpload"` 时 `data-testid="upload-guide"` 与组件根节点重复，把该 testid 从组件根移除、仅保留在 ContextPanel 的 `<UploadGuide>` 包装上（见下方 Step 5 说明）。
+> 注：`data-testid="upload-guide"` 保留在 `UploadGuide` 根节点，`ContextPanel` 的 `<UploadGuide>` 上不重复包裹 testid（Vue attr fallthrough 会覆盖，避免歧义）。`UploadGuide` 的 `<label for="upload-input">` 必须搭配 `<input id="upload-input" ...>`（`for` 指向 `id`，不是 `data-testid`），否则点击 label 无法触发文件选择。
 
 - [ ] **Step 4: 写 PreviewBar.vue**
 
@@ -769,7 +769,7 @@ defineProps<{ previewUrl?: string }>();
 </style>
 ```
 
-> 说明：`ApprovalSheet`（Task 7）会作为兄弟节点加在 `PreviewBar` 之后；`previewUrl` 的现有 watch 逻辑保留。`UploadGuide` 的 `data-testid="upload-guide"` 保留在其根元素，ContextPanel 里不再重复包裹。
+> 说明：`ApprovalSheet`（Task 7）会作为兄弟节点加在 `PreviewBar` 之后；`previewUrl` 的现有 watch 逻辑保留。`UploadGuide` 根节点保留 `data-testid="upload-guide"`，`ContextPanel` 里不重复包裹 testid。
 
 - [ ] **Step 6: 美化 ConversationPanel**
 
