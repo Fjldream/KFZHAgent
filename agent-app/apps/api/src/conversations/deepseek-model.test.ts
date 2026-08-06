@@ -146,8 +146,11 @@ describe("DeepSeekModelPort", () => {
     const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
     const userPrompt = body.messages[1].content;
     expect(userPrompt).toContain("您好，为了帮您把方案做得更贴合需求");
+    expect(userPrompt).toContain("请选择或直接告诉我");
     expect(userPrompt).toContain("选项必须带序号");
     expect(userPrompt).toContain("①②③④⑤");
+    // persona 首句（客服顾问口吻）必须注入 SYSTEM_PROMPT
+    expect(body.messages[0].content).toContain("你以礼貌、专业的客服顾问口吻与客户沟通");
   });
 
   it("passes through numbered clarifying options verbatim", async () => {
@@ -169,7 +172,12 @@ describe("DeepSeekModelPort", () => {
       requirementText: "做一个大屏",
     });
     expect(result.intent).toBe("CLARIFY");
-    expect(result.clarifyingQuestion?.options?.[0]).toMatch(/^① /);
+    // 全部选项原样透传（含序号），证明「verbatim」语义
+    expect(result.clarifyingQuestion?.options).toEqual([
+      "① 生产车间监控",
+      "② 机房设备监控",
+      "③ 能源管理",
+    ]);
   });
 
   it("createProjectDesign assembles a valid SolutionIR", async () => {
