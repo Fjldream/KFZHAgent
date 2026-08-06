@@ -88,7 +88,7 @@ describe("parseDesignPlan", () => {
     );
     expect(view).not.toBeNull();
     expect(view?.engineeringName).toBe("监控大屏");
-    expect(view?.version).toBe("1");
+    expect(view?.version).toBe("v1");
   });
 
   it("returns null when the header matches but no plan fields follow", () => {
