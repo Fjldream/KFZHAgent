@@ -69,10 +69,13 @@ export class DownloadTokenService {
       throw new UnauthorizedException("download token already used");
     }
 
+    // Resolve the artifact's storage key: the token stores the API artifact id,
+    // but the storage file is named by storageKey (LocalArtifactStorage path).
     const artifact = await this.prisma.artifact.findFirst({
-      where: { storageKey: row.artifactId, tenantId: input.tenantId },
+      where: { OR: [{ id: row.artifactId }, { storageKey: row.artifactId }], tenantId: input.tenantId },
     });
-    const stream = await this.storage.open(input.tenantId, row.artifactId);
+    const storageKey = artifact?.storageKey ?? row.artifactId;
+    const stream = await this.storage.open(input.tenantId, storageKey);
     return {
       stream,
       fileName: `${row.artifactId}.gz`,
@@ -84,7 +87,9 @@ export class DownloadTokenService {
   /** The artifact must exist under the tenant via Artifact or DomainProjectRevision. */
   private async assertArtifactInTenant(tenantId: string, artifactId: string): Promise<void> {
     const [artifact, domainProject] = await Promise.all([
-      this.prisma.artifact.findFirst({ where: { storageKey: artifactId, tenantId } }),
+      this.prisma.artifact.findFirst({
+        where: { OR: [{ id: artifactId }, { storageKey: artifactId }], tenantId },
+      }),
       this.prisma.domainProjectRevision.findFirst({ where: { packageUrl: artifactId, tenantId } }),
     ]);
     if (artifact === null && domainProject === null) {
