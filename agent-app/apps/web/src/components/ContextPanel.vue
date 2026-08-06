@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
+import { useGsap } from "../composables/useGsap";
 import type { WorkflowStage } from "../stores/stage";
 import type { ArtifactRow, BuildJobStatus, Revision, ValidationReport, Workspace, SolutionTreeNode } from "../types";
 import ProjectTree from "./ProjectTree.vue";
@@ -37,10 +38,31 @@ const buildText = computed(() => {
     default: return "";
   }
 });
+
+// 情境面板内容容器：stage 切换时旧内容淡出、新内容淡入 + 轻微 y（crossfade）。
+const { gsap, track, reduceMotion } = useGsap();
+const panelEl = ref<HTMLElement | null>(null);
+
+watch(
+  () => props.stage,
+  () => {
+    const el = panelEl.value;
+    if (el === null) return;
+    if (reduceMotion()) {
+      gsap.set(el, { opacity: 1, y: 0 });
+      return;
+    }
+    const tl = gsap.timeline();
+    tl.to(el, { opacity: 0, y: 6, duration: 0.14, ease: "power2.out" })
+      .set(el, { y: -6 })
+      .to(el, { opacity: 1, y: 0, duration: 0.3, ease: "power3.out" });
+    track(tl);
+  },
+);
 </script>
 
 <template>
-  <aside class="context" data-testid="context-panel">
+  <aside ref="panelEl" class="context" data-testid="context-panel">
     <template v-if="stage === 'approval'">
       <div class="section"><h2>待确认计划</h2><p class="sub">已生成变更计划，请在弹层中审阅并确认。</p></div>
     </template>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { useGsap } from "../composables/useGsap";
 import type { ChangePlanDisplay, ScriptChange } from "../types";
 
 const props = withDefaults(
@@ -22,20 +23,33 @@ const emit = defineEmits<{
 const hasPlanHash = computed(() => props.planHash !== "");
 const hasDestructive = computed(() => props.plan?.operations.some((op) => op.op === "delete") ?? false);
 const hasScriptChanges = computed(() => props.scriptChanges.length > 0);
+const scrimEl = ref<HTMLElement | null>(null);
 const sheetEl = ref<HTMLElement | null>(null);
+const { gsap, track, reduceMotion } = useGsap();
 
-/** 进入动画：iOS 风格 spring 近似（WAAPI，可中断）。 */
+/** 进入动画（GSAP 时间线）：scrim 淡入 → sheet spring 弹入 → 内容 stagger 级联。 */
 onMounted(() => {
-  const el = sheetEl.value;
-  if (!el) return;
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  el.animate(
-    [
-      { opacity: 0, transform: "scale(0.92) translateY(28px)" },
-      { opacity: 1, transform: "scale(1) translateY(0)" },
-    ],
-    { duration: 380, easing: "cubic-bezier(0.16, 1, 0.3, 1)", fill: "backwards" },
+  const sheet = sheetEl.value;
+  const scrim = scrimEl.value;
+  if (sheet === null) return;
+  if (reduceMotion()) {
+    gsap.set([sheet, scrim], { opacity: 1, scale: 1, y: 0 });
+    return;
+  }
+  const tl = gsap.timeline();
+  if (scrim !== null) tl.fromTo(scrim, { opacity: 0 }, { opacity: 1, duration: 0.22, ease: "power2.out" });
+  tl.fromTo(
+    sheet,
+    { opacity: 0, scale: 0.92, y: 28 },
+    { opacity: 1, scale: 1, y: 0, duration: 0.4, ease: "back.out(1.6)" },
+    "-=0.1",
+  ).fromTo(
+    sheet.querySelectorAll(".sheet-head, .operations, .script-changes, .warning, .plan-hash, .actions"),
+    { opacity: 0, y: 8 },
+    { opacity: 1, y: 0, stagger: 0.05, duration: 0.28, ease: "power2.out" },
+    "-=0.22",
   );
+  track(tl);
 });
 
 function isScriptPath(path: string): boolean {
@@ -61,7 +75,7 @@ function action(kind: "approve" | "revise" | "cancel"): void {
 </script>
 
 <template>
-  <div class="scrim" data-testid="change-plan-panel">
+  <div ref="scrimEl" class="scrim" data-testid="change-plan-panel">
     <section ref="sheetEl" class="sheet">
       <header class="sheet-head">
         <h2>确认变更计划</h2>

@@ -1,17 +1,20 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { nextTick, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { api } from "../api";
 import { useSession } from "../stores/session";
+import { useGsap } from "../composables/useGsap";
 import type { Workspace } from "../types";
 
 const router = useRouter();
 const session = useSession();
+const { gsap, track, reduceMotion } = useGsap();
 const workspaces = ref<Workspace[]>([]);
 const loading = ref(true);
 const error = ref<string | null>(null);
 const busy = ref(false);
 const newName = ref("");
+const pageEl = ref<HTMLElement | null>(null);
 
 async function refresh(): Promise<void> {
   loading.value = true;
@@ -22,7 +25,29 @@ async function refresh(): Promise<void> {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
     loading.value = false;
+    await nextTick();
+    playEntrance();
   }
+}
+
+/** 全局氛围进入动画：顶栏/创建卡片淡入 + 工程卡片 stagger 级联入场。 */
+function playEntrance(): void {
+  const el = pageEl.value;
+  if (el === null) return;
+  if (reduceMotion()) {
+    gsap.set(el.querySelectorAll(".topbar, .create-card, .card"), { opacity: 1, y: 0 });
+    return;
+  }
+  const tl = gsap.timeline();
+  tl.fromTo(el.querySelector(".topbar"), { opacity: 0, y: -8 }, { opacity: 1, y: 0, duration: 0.3, ease: "power2.out" })
+    .fromTo(el.querySelector(".create-card"), { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.35, ease: "power3.out" }, "-=0.12")
+    .fromTo(
+      el.querySelectorAll(".card"),
+      { opacity: 0, y: 14, scale: 0.97 },
+      { opacity: 1, y: 0, scale: 1, stagger: 0.06, duration: 0.35, ease: "power3.out" },
+      "-=0.18",
+    );
+  track(tl);
 }
 
 async function onCreate(): Promise<void> {
@@ -54,11 +79,25 @@ async function onLogout(): Promise<void> {
   await router.push("/login");
 }
 
-onMounted(refresh);
+onMounted(() => {
+  void refresh();
+});
+
+// 卡片列表重新渲染（如删除后返回）时重放动画。
+watch(
+  () => workspaces.value.length,
+  () => {
+    void nextTick(() => {
+      const cards = pageEl.value?.querySelectorAll(".card");
+      if (cards === undefined || cards.length === 0) return;
+      playEntrance();
+    });
+  },
+);
 </script>
 
 <template>
-  <div class="page">
+  <div ref="pageEl" class="page">
     <header class="topbar glass">
       <div class="brand"><span class="logo">◈</span> 智绘</div>
       <div class="user">
@@ -119,7 +158,7 @@ onMounted(refresh);
   backdrop-filter: var(--blur-glass);
   border-bottom: 1px solid var(--color-border);
 }
-.topbar { display: flex; align-items: center; justify-content: space-between; padding: 0.8rem 1.4rem; }
+.topbar { display: flex; align-items: center; justify-content: space-between; padding: 0.8rem 1.4rem; opacity: 0; }
 .brand { display: flex; align-items: center; gap: 0.5rem; font-weight: 600; font-size: 1.05rem; }
 .logo { color: var(--color-accent); }
 .user { display: flex; align-items: center; gap: 0.8rem; font-size: 0.85rem; color: var(--color-text-secondary); }
@@ -133,6 +172,7 @@ onMounted(refresh);
 .create-card {
   background: var(--color-surface); border-radius: var(--radius-card); box-shadow: var(--shadow-card);
   padding: 2rem; display: flex; flex-direction: column; gap: 0.9rem;
+  opacity: 0; /* GSAP 进入动画起点 */
 }
 .create-card h1 { margin: 0; font-size: 1.6rem; }
 .sub { margin: 0; color: var(--color-text-secondary); }
@@ -156,6 +196,11 @@ onMounted(refresh);
   display: flex; flex-direction: column; gap: 0.3rem; text-align: left;
   background: var(--color-surface); border: none; border-radius: var(--radius-card);
   box-shadow: var(--shadow-card); padding: 1.2rem; cursor: pointer; color: inherit;
+  opacity: 0; /* GSAP stagger 进入动画起点 */
+  transition: transform 160ms var(--ease-out), box-shadow 160ms var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .card:hover { transform: translateY(-3px); box-shadow: var(--shadow-float); }
 }
 .card:active { transform: scale(0.98); }
 .card-name { font-weight: 600; font-size: 1rem; }

@@ -1,14 +1,37 @@
 <script setup lang="ts">
-import { reactive, ref } from "vue";
+import { onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useSession } from "../stores/session";
+import { useGsap } from "../composables/useGsap";
 
 const router = useRouter();
 const route = useRoute();
 const session = useSession();
+const { gsap, track, reduceMotion } = useGsap();
 
 const form = reactive({ tenant: "", username: "", password: "" });
 const errorMessage = ref<string | null>(null);
+const cardEl = ref<HTMLElement | null>(null);
+
+onMounted(() => {
+  const el = cardEl.value;
+  if (el === null) return;
+  if (reduceMotion()) {
+    gsap.set(el, { opacity: 1, y: 0 });
+    return;
+  }
+  // 卡片进入：scale 0.95→1 + 淡入 + 轻微 y 抬升（power3.out，380ms）。
+  // 表单项 stagger 级联入场（60ms 间隔）。
+  const tl = gsap.timeline();
+  tl.fromTo(el, { opacity: 0, y: 16, scale: 0.95 }, { opacity: 1, y: 0, scale: 1, duration: 0.38, ease: "power3.out" })
+    .fromTo(
+      el.querySelectorAll("h1, .subtitle, label, button"),
+      { opacity: 0, y: 8 },
+      { opacity: 1, y: 0, stagger: 0.06, duration: 0.3, ease: "power2.out" },
+      "-=0.15",
+    );
+  track(tl);
+});
 
 async function submit(): Promise<void> {
   errorMessage.value = null;
@@ -33,8 +56,8 @@ async function submit(): Promise<void> {
 
 <template>
   <main class="login-page">
-    <form class="login-card" data-testid="login-form" @submit.prevent="submit">
-      <h1>KF Solution Agent</h1>
+    <form ref="cardEl" class="login-card" data-testid="login-form" @submit.prevent="submit">
+      <h1>智绘</h1>
       <p class="subtitle">客户解决方案工作台</p>
       <label>
         租户
@@ -66,6 +89,7 @@ async function submit(): Promise<void> {
   backdrop-filter: var(--blur-glass);
   border-radius: var(--radius-sheet); box-shadow: var(--shadow-float);
   padding: 2.4rem; display: flex; flex-direction: column; gap: 1rem;
+  opacity: 0; /* GSAP 进入动画起点；reduced-motion 时由 gsap.set 直达终态 */
 }
 .login-card h1 { margin: 0; font-size: 1.8rem; display: flex; align-items: center; gap: 0.5rem; }
 .login-card h1::before { content: "◈"; color: var(--color-accent); }

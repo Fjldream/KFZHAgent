@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import { escapeModelText } from "../security";
+import { useGsap } from "../composables/useGsap";
 import type { ChatMessage } from "../types";
 
 /**
@@ -21,6 +22,21 @@ const emit = defineEmits<{
 }>();
 
 const draft = ref("");
+const messagesEl = ref<HTMLElement | null>(null);
+const { gsap, reduceMotion } = useGsap();
+
+// 新消息滑入：最后一条气泡 y:8→0 + 淡入（发送/接收时都有反馈）。
+watch(
+  () => props.messages.length,
+  () => {
+    const box = messagesEl.value;
+    if (box === null || props.messages.length === 0) return;
+    if (reduceMotion()) return;
+    const tail = box.querySelector(".message:last-of-type");
+    if (tail === null) return;
+    gsap.fromTo(tail, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.28, ease: "power3.out" });
+  },
+);
 
 function displayContent(message: ChatMessage): string {
   return message.role === "assistant" ? escapeModelText(message.content) : message.content;
@@ -41,7 +57,7 @@ function submit(): void {
 
 <template>
   <section class="panel conversation" data-testid="conversation-panel">
-    <div class="messages">
+    <div ref="messagesEl" class="messages">
       <div v-for="(message, index) in messages" :key="message.id ?? index" class="message" :data-role="message.role">
         <span class="role">{{ message.role === "user" ? "我" : "助手" }}</span>
         <span class="content" :class="{ streaming: isStreamingTail(index, message) }">{{ displayContent(message) }}</span>

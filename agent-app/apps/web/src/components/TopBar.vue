@@ -1,24 +1,52 @@
 <script setup lang="ts">
+import { onMounted, ref, watch } from "vue";
+import { useGsap } from "../composables/useGsap";
 import type { WorkflowStage } from "../stores/stage";
 
-defineProps<{
+const props = defineProps<{
   workspaceName: string;
   stage: WorkflowStage;
 }>();
 
 defineEmits<{ (e: "logout"): void; (e: "delete-workspace"): void }>();
 
+const { gsap, track, reduceMotion } = useGsap();
+const barEl = ref<HTMLElement | null>(null);
+const chipEl = ref<HTMLElement | null>(null);
+
 const stageLabel: Record<WorkflowStage, string> = {
   idle: "对话中", approval: "待确认", building: "构建中", ready: "已完成", error: "出错",
 };
+
+onMounted(() => {
+  const el = barEl.value;
+  if (el === null) return;
+  if (reduceMotion()) {
+    gsap.set(el, { opacity: 1, y: 0 });
+    return;
+  }
+  const tl = gsap.timeline();
+  tl.fromTo(el, { opacity: 0, y: -10 }, { opacity: 1, y: 0, duration: 0.35, ease: "power3.out" });
+  track(tl);
+});
+
+// 状态胶囊变化：轻弹反馈（scale 脉冲），让阶段切换有「手感」。
+watch(
+  () => props.stage,
+  () => {
+    const chip = chipEl.value;
+    if (chip === null || reduceMotion()) return;
+    gsap.fromTo(chip, { scale: 1 }, { scale: 1.12, duration: 0.18, ease: "power2.out", yoyo: true, repeat: 1 });
+  },
+);
 </script>
 
 <template>
-  <header class="topbar glass">
+  <header ref="barEl" class="topbar glass">
     <div class="brand"><span class="logo">◈</span> 智绘</div>
     <div class="center">
       <span class="ws-name">{{ workspaceName }}</span>
-      <span class="chip" :data-stage="stage">{{ stageLabel[stage] }}</span>
+      <span ref="chipEl" class="chip" :data-stage="stage">{{ stageLabel[stage] }}</span>
     </div>
     <div class="user">
       <button type="button" class="quiet" data-testid="delete-workspace" @click="$emit('delete-workspace')">删除</button>
@@ -29,7 +57,7 @@ const stageLabel: Record<WorkflowStage, string> = {
 
 <style scoped>
 .glass { background: rgba(255, 255, 255, 0.6); backdrop-filter: var(--blur-glass); border-bottom: 1px solid var(--color-border); }
-.topbar { display: flex; align-items: center; justify-content: space-between; padding: 0.7rem 1.4rem; gap: 1rem; }
+.topbar { display: flex; align-items: center; justify-content: space-between; padding: 0.7rem 1.4rem; gap: 1rem; opacity: 0; }
 .brand { display: flex; align-items: center; gap: 0.5rem; font-weight: 600; }
 .logo { color: var(--color-accent); }
 .center { display: flex; align-items: center; gap: 0.7rem; min-width: 0; }
