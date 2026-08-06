@@ -58,44 +58,28 @@ async function submit(): Promise<void> {
 
 <style scoped>
 .login-page {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #0f172a;
+  min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(180deg, #e8edf5 0%, var(--color-bg) 60%);
 }
 .login-card {
-  width: 22rem;
-  background: #ffffff;
-  border-radius: 12px;
-  padding: 2rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
+  width: 24rem; background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: var(--blur-glass);
+  border-radius: var(--radius-sheet); box-shadow: var(--shadow-float);
+  padding: 2.4rem; display: flex; flex-direction: column; gap: 1rem;
 }
-.login-card h1 {
-  margin: 0;
-  font-size: 1.4rem;
-}
-.subtitle {
-  margin: 0;
-  color: #64748b;
-  font-size: 0.9rem;
-}
-.login-card label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  font-size: 0.85rem;
-}
+.login-card h1 { margin: 0; font-size: 1.8rem; display: flex; align-items: center; gap: 0.5rem; }
+.login-card h1::before { content: "◈"; color: var(--color-accent); }
+.subtitle { margin: 0; color: var(--color-text-secondary); font-size: 0.9rem; }
+.login-card label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.85rem; }
 .login-card input {
-  padding: 0.5rem;
-  border: 1px solid #cbd5e1;
-  border-radius: 6px;
+  padding: 0.65rem 0.85rem; border: 1px solid var(--color-border); border-radius: var(--radius-button); font-size: 1rem;
 }
-.error {
-  color: #b91c1c;
-  margin: 0;
-  font-size: 0.85rem;
+.login-card input:focus { outline: 2px solid var(--color-accent); outline-offset: -1px; border-color: transparent; }
+.login-card button {
+  padding: 0.65rem; border: none; border-radius: var(--radius-button);
+  background: var(--color-accent); color: #fff; font-size: 1rem; cursor: pointer;
 }
+.login-card button:active { transform: scale(0.98); background: var(--color-accent-pressed); }
+.login-card button:disabled { opacity: 0.5; cursor: not-allowed; }
+.error { color: var(--color-danger); margin: 0; font-size: 0.85rem; }
 </style>
