@@ -25,6 +25,9 @@ export interface Workspace {
   description?: string | null;
   mode: string;
   currentRevisionId?: string | null;
+  /** 后端 SolutionWorkspace 返回含这些字段（前端仅展示用）。 */
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface ChatMessage {

@@ -52,8 +52,37 @@ describe("WorkspacesView", () => {
     listWorkspacesMock.mockResolvedValue([]);
     const wrapper = mount(WorkspacesView);
     await flushPromises();
-    expect(wrapper.text()).toContain("还没有工程，先新建一个吧。");
+    expect(wrapper.get('[data-testid="empty-state"]').text()).toContain("还没有工程");
     expect(wrapper.find("[data-workspace-id]").exists()).toBe(false);
+  });
+
+  it("filters workspace cards by search query", async () => {
+    listWorkspacesMock.mockResolvedValue([wsA, wsB]);
+    const wrapper = mount(WorkspacesView);
+    await flushPromises();
+    expect(wrapper.findAll("[data-workspace-id]").length).toBe(2);
+
+    await wrapper.get('[data-testid="workspace-search"]').setValue("设备");
+    await flushPromises();
+    const cards = wrapper.findAll("[data-workspace-id]");
+    expect(cards.length).toBe(1);
+    expect(cards[0].attributes("data-workspace-id")).toBe("ws-2");
+
+    await wrapper.get('[data-testid="workspace-search"]').setValue("不存在的工程");
+    await flushPromises();
+    expect(wrapper.findAll("[data-workspace-id]").length).toBe(0);
+    expect(wrapper.get('[data-testid="empty-state"]').text()).toContain("没有匹配的工程");
+  });
+
+  it("creates a workspace from the empty-state action with a fallback name", async () => {
+    listWorkspacesMock.mockResolvedValue([]);
+    createWorkspaceMock.mockResolvedValue({ ...wsA, id: "ws-empty", name: "未命名方案" });
+    const wrapper = mount(WorkspacesView);
+    await flushPromises();
+    await wrapper.get('[data-testid="empty-action"]').trigger("click");
+    await flushPromises();
+    expect(createWorkspaceMock).toHaveBeenCalledWith({ name: "未命名方案", mode: "new" });
+    expect(pushMock).toHaveBeenCalledWith("/workspaces/ws-empty");
   });
 
   it("creates a new workspace and navigates to /workspaces/{id}", async () => {
