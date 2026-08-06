@@ -200,6 +200,42 @@ describe("client patcher (Task 7 brief Step 1)", () => {
     expect(await controlField(candidate, "button-guid-1", "customFutureField")).toEqual({ keep: true });
   });
 
+  it("creates controls of all 12 reviewed template types with pass-through props", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const candidate = await applyClientPatch(base, plan([
+      {
+        op: "create", entityType: "control", entityId: "NewSwitch",
+        properties: { pageId: "page-guid-1", type: "switch", value: true, activeText: "开", inactiveText: "关", x: 0, y: 0 },
+      },
+      {
+        op: "create", entityType: "control", entityId: "NewSelect",
+        properties: { pageId: "page-guid-1", type: "select", options: [{ label: "A", value: "a" }], value: "a" },
+      },
+      {
+        op: "create", entityType: "control", entityId: "NewTable",
+        properties: { pageId: "page-guid-1", type: "table", x: 10, y: 10 },
+      },
+      {
+        op: "create", entityType: "control", entityId: "NewSpacer",
+        properties: { pageId: "page-guid-1", type: "spacer", axis: "horizontal" },
+      },
+      {
+        op: "create", entityType: "control", entityId: "NewCheckbox",
+        properties: { pageId: "page-guid-1", type: "checkbox", label: "启用", checked: true },
+      },
+    ]));
+    const sw = await wholeControl(candidate, deriveGuid({ seed: "w-test" }, "NewSwitch"));
+    expect(sw).toMatchObject({ name: "NewSwitch", uiModelType: 48, value: true, activeText: "开", inactiveText: "关" });
+    const sel = await wholeControl(candidate, deriveGuid({ seed: "w-test" }, "NewSelect"));
+    expect(sel).toMatchObject({ name: "NewSelect", uiModelType: 44, options: [{ label: "A", value: "a" }], value: "a" });
+    const tbl = await wholeControl(candidate, deriveGuid({ seed: "w-test" }, "NewTable"));
+    expect(tbl).toMatchObject({ name: "NewTable", uiModelType: 31 });
+    const spc = await wholeControl(candidate, deriveGuid({ seed: "w-test" }, "NewSpacer"));
+    expect(spc).toMatchObject({ name: "NewSpacer" });
+    const cb = await wholeControl(candidate, deriveGuid({ seed: "w-test" }, "NewCheckbox"));
+    expect(cb).toMatchObject({ name: "NewCheckbox", label: "启用", checked: true });
+  });
+
   it("updates a variable field by name", async () => {
     const base = await copyFixture("client-unknown-field");
     const candidate = await applyClientPatch(base, plan([

@@ -9,7 +9,16 @@ import { deriveGuid } from "../compile/guid-factory.js";
 import { mergeControlTemplate, type TemplateJson } from "../templates/merge-template.js";
 import baseFieldsJson from "../templates/base-fields.json" with { type: "json" };
 import buttonTemplate from "../templates/control-templates/button.json" with { type: "json" };
+import checkboxTemplate from "../templates/control-templates/checkbox.json" with { type: "json" };
+import imageTemplate from "../templates/control-templates/image.json" with { type: "json" };
 import inputNumberTemplate from "../templates/control-templates/inputnumber.json" with { type: "json" };
+import radioTemplate from "../templates/control-templates/radio.json" with { type: "json" };
+import richtextTemplate from "../templates/control-templates/richtext.json" with { type: "json" };
+import selectTemplate from "../templates/control-templates/select.json" with { type: "json" };
+import spacerTemplate from "../templates/control-templates/spacer.json" with { type: "json" };
+import switchTemplate from "../templates/control-templates/switch.json" with { type: "json" };
+import tableTemplate from "../templates/control-templates/table.json" with { type: "json" };
+import tabsTemplate from "../templates/control-templates/tabs.json" with { type: "json" };
 import textTemplate from "../templates/control-templates/text.json" with { type: "json" };
 import pageSkeleton from "../templates/page-skeleton.json" with { type: "json" };
 import { allowedFieldsFor, resolveControlPath } from "./allowlist.js";
@@ -173,6 +182,28 @@ const CONTROL_TEMPLATES: Readonly<Record<string, TemplateJson>> = {
   text: textTemplate,
   button: buttonTemplate,
   inputnumber: inputNumberTemplate,
+  switch: switchTemplate,
+  checkbox: checkboxTemplate,
+  radio: radioTemplate,
+  select: selectTemplate,
+  image: imageTemplate,
+  tabs: tabsTemplate,
+  table: tableTemplate,
+  richtext: richtextTemplate,
+  spacer: spacerTemplate,
+};
+
+/** create 时允许从 IR properties 透传覆盖的控件属性（与 client-project-ir schema 同名）。 */
+const CREATE_PASS_THROUGH: Readonly<Record<string, readonly string[]>> = {
+  switch: ["value", "activeText", "inactiveText"],
+  checkbox: ["label", "checked"],
+  radio: ["options", "value"],
+  select: ["options", "value", "multiple", "placeholder"],
+  image: ["src", "fit", "alt"],
+  tabs: ["tabs", "activeId"],
+  table: [],
+  richtext: ["text"],
+  spacer: ["axis"],
 };
 
 // ---------------------------------------------------------------------------
@@ -395,6 +426,10 @@ async function applyCreate(
       }
       if (type === "inputnumber") {
         if (typeof op.properties["precision"] === "number") overrides["precision"] = op.properties["precision"];
+      }
+      for (const key of CREATE_PASS_THROUGH[type] ?? []) {
+        const value = op.properties[key];
+        if (value !== undefined) (overrides as Record<string, unknown>)[key] = value;
       }
       const control = mergeControlTemplate(mergeControlTemplate(BASE_FIELDS, template), overrides);
       objects.push(control);
