@@ -2,6 +2,7 @@ import type { ChangePlan, ValidationReport } from "@kf/contracts";
 import type { ClassifyIntentResult, Intent } from "./schemas/intent.js";
 import type { ProjectDesign } from "./schemas/project-design.js";
 import type { GraphMessage } from "./state.js";
+import type { EditableEntity } from "./ports.js";
 
 /**
  * Bounded, already-sandboxed context handed to the model port. It never
@@ -20,6 +21,12 @@ export interface ModelPortContext {
   currentRevisionId?: string | undefined;
   /** The user's latest turn, used as the requirement text for planning. */
   requirementText?: string | undefined;
+  /**
+   * Model-editable entities of the current revision (controls/pages with their
+   * KF GUIDs). A real LLM must reference these exact GUIDs in change plans —
+   * hallucinated ids are rejected by the ModelPort before the graph gate.
+   */
+  editableEntities?: EditableEntity[] | undefined;
 }
 
 /**

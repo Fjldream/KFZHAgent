@@ -1,6 +1,8 @@
 import type { BuildJobPort, WorkspaceQueryPort } from "@kf/agent-orchestrator";
 import type { ChangePlanRepository } from "@kf/agent-orchestrator";
+import type { EditableEntity } from "@kf/agent-orchestrator";
 import type { GraphMessage } from "@kf/agent-orchestrator";
+import { deriveGuid } from "@kf/domain-client";
 import type { ChangePlan } from "@kf/contracts";
 import type { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service.js";
@@ -65,6 +67,42 @@ export function createGraphPorts(prisma: PrismaService): GraphPorts {
         return undefined;
       }
       return makeBoundedRevisionSummary(revision.state);
+    },
+    async getRevisionEntities({ tenantId, revisionId, workspaceId }) {
+      const revision = await prisma.solutionRevision.findFirst({
+        where: { id: revisionId, tenantId },
+      });
+      if (revision === null || revision.state === null || typeof revision.state !== "object") {
+        return [];
+      }
+      // compile-mode revisions store the ClientProjectIR in state; its control
+      // GUIDs are deterministic per workspace: deriveGuid({ seed: workspaceId }, id).
+      const record = revision.state as Record<string, unknown>;
+      if (!Array.isArray(record["pages"])) return [];
+      const entities: EditableEntity[] = [];
+      for (const page of record["pages"] as Record<string, unknown>[]) {
+        const pageName = typeof page["name"] === "string" ? page["name"] : "";
+        if (pageName !== "") {
+          entities.push({
+            kind: "page",
+            name: pageName,
+            type: "page",
+            guid: deriveGuid({ seed: workspaceId }, pageName),
+          });
+        }
+        const controls = Array.isArray(page["controls"]) ? page["controls"] : [];
+        for (const control of controls as Record<string, unknown>[]) {
+          const id = typeof control["id"] === "string" ? control["id"] : "";
+          if (id === "") continue;
+          entities.push({
+            kind: "control",
+            name: id,
+            type: typeof control["type"] === "string" ? control["type"] : "?",
+            guid: deriveGuid({ seed: workspaceId }, id),
+          });
+        }
+      }
+      return entities;
     },
   };
 

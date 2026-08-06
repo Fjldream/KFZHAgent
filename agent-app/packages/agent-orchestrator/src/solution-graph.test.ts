@@ -7,6 +7,7 @@ import type {
   BuildJobInfo,
   BuildJobPort,
   ChangePlanRepository,
+  EditableEntity,
   EnqueueBuildInput,
   SolutionGraphDeps,
   WorkspaceQueryPort,
@@ -55,6 +56,9 @@ class FakeWorkspaceQuery implements WorkspaceQueryPort {
   }
   async getRevisionSummary({ revisionId }: { revisionId: string }): Promise<string | undefined> {
     return this.revisionSummaries.get(revisionId);
+  }
+  async getRevisionEntities(): Promise<EditableEntity[]> {
+    return [];
   }
 }
 

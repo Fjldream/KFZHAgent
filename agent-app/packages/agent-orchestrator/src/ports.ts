@@ -22,6 +22,21 @@ export interface ListRecentMessagesInput {
   limit: number;
 }
 
+/**
+ * A model-editable entity of the current revision. Fed to the ModelPort so a
+ * real LLM can reference exact KF GUIDs instead of hallucinating them.
+ * (compile-mode GUIDs are deterministic: deriveGuid({ seed: workspaceId }, id).)
+ */
+export interface EditableEntity {
+  kind: "control" | "page" | "variable";
+  /** Semantic id: control id / page name / variable name. */
+  name: string;
+  /** Control type (text/button/inputnumber) or "page"/"variable". */
+  type: string;
+  /** KF GUID the change plan must reference. */
+  guid: string;
+}
+
 export interface AppendMessageInput {
   tenantId: string;
   conversationId: string;
@@ -53,6 +68,12 @@ export interface WorkspaceQueryPort {
     tenantId: string;
     revisionId: string;
   }): Promise<string | undefined>;
+  /** Model-editable entities of a revision (controls/pages/variables with KF GUIDs). */
+  getRevisionEntities(input: {
+    tenantId: string;
+    revisionId: string;
+    workspaceId: string;
+  }): Promise<EditableEntity[]>;
 }
 
 export interface OpenChangeRequest {

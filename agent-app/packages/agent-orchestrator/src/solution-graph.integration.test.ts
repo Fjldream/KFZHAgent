@@ -105,6 +105,9 @@ function makePrismaPorts() {
       if (revision?.state === null || typeof revision?.state !== "object") return undefined;
       return makeBoundedRevisionSummary(revision.state);
     },
+    async getRevisionEntities() {
+      return [];
+    },
   };
 
   const changePlanRepository: ChangePlanRepository = {

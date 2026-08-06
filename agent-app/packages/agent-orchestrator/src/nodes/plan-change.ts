@@ -20,6 +20,14 @@ import { ProjectDesignSchema } from "../schemas/project-design.js";
  */
 export function createPlanChangeNode(deps: SolutionGraphDeps) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
+    const editableEntities =
+      state.currentRevisionId !== undefined
+        ? await deps.workspaceQuery.getRevisionEntities({
+            tenantId: state.tenantId,
+            revisionId: state.currentRevisionId,
+            workspaceId: state.workspaceId,
+          })
+        : undefined;
     const modelContext = {
       tenantId: state.tenantId,
       userId: state.userId,
@@ -30,6 +38,7 @@ export function createPlanChangeNode(deps: SolutionGraphDeps) {
       revisionSummary: state.revisionSummary,
       currentRevisionId: state.currentRevisionId,
       requirementText: latestUserMessage(state),
+      editableEntities,
     };
 
     // New workspace: initial design only, no plan/build. The raw design output
