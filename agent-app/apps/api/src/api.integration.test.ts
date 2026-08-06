@@ -618,6 +618,37 @@ describe("api security", () => {
       .expect(404);
   });
 
+  it("lists workspaces scoped to the caller's tenant", async () => {
+    const cookieA = await login(TENANT_A_MEMBER);
+    const cookieB = await login(TENANT_B);
+
+    const wsA1 = await createWorkspace(cookieA, "Tenant A list WS 1");
+    const wsA2 = await createWorkspace(cookieA, "Tenant A list WS 2");
+    const wsB1 = await createWorkspace(cookieB, "Tenant B list WS 1");
+
+    const listA = await request(server)
+      .get("/api/workspaces")
+      .set("Cookie", cookieA)
+      .expect(200);
+    expect(Array.isArray(listA.body)).toBe(true);
+    const idsA = listA.body.map((row: { id: string }) => row.id);
+    expect(idsA).toHaveLength(2);
+    expect(idsA).toContain(wsA1.body.id);
+    expect(idsA).toContain(wsA2.body.id);
+    expect(idsA).not.toContain(wsB1.body.id);
+
+    const listB = await request(server)
+      .get("/api/workspaces")
+      .set("Cookie", cookieB)
+      .expect(200);
+    expect(Array.isArray(listB.body)).toBe(true);
+    const idsB = listB.body.map((row: { id: string }) => row.id);
+    expect(idsB).toHaveLength(1);
+    expect(idsB).toContain(wsB1.body.id);
+    expect(idsB).not.toContain(wsA1.body.id);
+    expect(idsB).not.toContain(wsA2.body.id);
+  });
+
   it("rejects oversized uploads with 413", async () => {
     const cookie = await login(TENANT_A_MEMBER);
     const ws = await createUploadWorkspace(cookie, "Oversize WS");

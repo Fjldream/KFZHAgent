@@ -93,6 +93,9 @@ export const api = {
   },
 
   // ---- 工作区 -------------------------------------------------------------
+  async listWorkspaces(): Promise<Workspace[]> {
+    return jsonResponse<Workspace[]>("/api/workspaces");
+  },
   async createWorkspace(input: { name: string; description?: string; mode?: "new" | "upload" }): Promise<Workspace> {
     return jsonResponse<Workspace>("/api/workspaces", {
       method: "POST",

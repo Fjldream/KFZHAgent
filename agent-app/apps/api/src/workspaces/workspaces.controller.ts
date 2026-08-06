@@ -30,6 +30,11 @@ export class WorkspacesController {
     private readonly audit: AuditService,
   ) {}
 
+  @Get()
+  async listWorkspaces(@Req() req: AuthenticatedRequest): Promise<Record<string, unknown>[]> {
+    return await this.workspaces.list(req.principal.tenantId);
+  }
+
   @Get(":id")
   async getWorkspace(
     @Param("id") id: string,
