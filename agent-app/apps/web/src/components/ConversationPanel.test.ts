@@ -46,7 +46,9 @@ describe("parseClarifyingQuestion", () => {
 // ---------------------------------------------------------------------------
 
 describe("parseDesignPlan", () => {
+  // 与 formatDesignPlan 真实输出一致：问候语首行 + 「设计计划 v1」标题行
   const planText = [
+    "您好，我已根据您的需求整理出一份设计草案，请您过目：",
     "设计计划 v1",
     "工程名：客户展示大屏",
     "摘要：面向展厅的大屏监控界面，展示实时数据",
@@ -57,7 +59,7 @@ describe("parseDesignPlan", () => {
     "  监控区：Chart(能耗趋势)、Gauge(设备负载)",
     "  状态区：Text(系统状态)",
     "记忆点：深色底 + 蓝紫渐变 + 实时数据",
-    "回复调整意见或「确认」",
+    "您可以随时告诉我哪里需要调整；确认没问题的话，回复「确认」即可。",
   ].join("\n");
 
   it("parses the full design plan format and extracts every field", () => {
@@ -78,6 +80,15 @@ describe("parseDesignPlan", () => {
 
   it("returns null for content that does not start with 设计计划", () => {
     expect(parseDesignPlan("好的，我来设计一个监控大屏")).toBeNull();
+  });
+
+  it("parses a design plan whose first line is a greeting (warm-professional copy)", () => {
+    const view = parseDesignPlan(
+      "您好，我已根据您的需求整理出一份设计草案，请您过目：\n设计计划 v1\n工程名：监控大屏\n分区：\n  中部趋势区：text\n记忆点：深色工业风",
+    );
+    expect(view).not.toBeNull();
+    expect(view?.engineeringName).toBe("监控大屏");
+    expect(view?.version).toBe("1");
   });
 
   it("returns null when the header matches but no plan fields follow", () => {

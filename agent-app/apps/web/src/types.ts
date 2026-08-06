@@ -189,14 +189,17 @@ const SECTION_LINE = /^\s{2,}([^：:]+)[：:]\s*(.+)$/;
 const FIELD_LINE = /^([^：:]+)[：:]\s*(.*)$/;
 
 /**
- * 识别设计计划文本（formatDesignPlan 输出）：首行以「设计计划」开头，
- * 逐行提取 工程名/摘要/布局/风格/记忆点 与「分区：」下的缩进分区。
+ * 识别设计计划文本（formatDesignPlan 输出）：文本含「设计计划」标题行
+ * （前面可能有问候语等非计划内容，如「您好，我已根据您的需求整理出
+ * 一份设计草案，请您过目：」），扫描首个匹配「设计计划 vN」的行作为
+ * 标题；逐行提取 工程名/摘要/布局/风格/记忆点 与「分区：」下的缩进分区。
  * 至少要提取到一个计划字段才算命中，否则返回 null。
  */
 export function parseDesignPlan(content: string): DesignPlanView | null {
   const lines = content.split("\n");
-  const header = lines[0]?.trim().match(DESIGN_PLAN_HEADER);
-  if (header === undefined || header === null) return null;
+  const headerIndex = lines.findIndex((line) => DESIGN_PLAN_HEADER.test(line.trim()));
+  if (headerIndex === -1) return null;
+  const header = lines[headerIndex]!.trim().match(DESIGN_PLAN_HEADER);
 
   const view: DesignPlanView = {
     version: header[1] ?? null,
@@ -209,7 +212,7 @@ export function parseDesignPlan(content: string): DesignPlanView | null {
   };
 
   let inSections = false;
-  for (let i = 1; i < lines.length; i += 1) {
+  for (let i = headerIndex + 1; i < lines.length; i += 1) {
     const line = lines[i]!;
     if (inSections) {
       const section = line.match(SECTION_LINE);
