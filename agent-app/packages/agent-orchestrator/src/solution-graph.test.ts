@@ -495,7 +495,7 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     expect(bed.workspace.appendCalls).toContainEqual(
       expect.objectContaining({
         role: "assistant",
-        content: expect.stringContaining("预览已生成，您可以在右侧查看实际效果"),
+        content: "预览已生成，您可以在右侧查看实际效果；满意的话回复「确认落地」，需要调整也可以直接告诉我。",
       }),
     );
 
@@ -512,7 +512,7 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     expect(bed.workspace.appendCalls).toContainEqual(
       expect.objectContaining({
         role: "assistant",
-        content: expect.stringContaining("方案已确认落地。感谢您的沟通！"),
+        content: "方案已确认落地。感谢您的沟通！后续如需继续调整或新增需求，随时找我。",
       }),
     );
   });
