@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Header,
   HttpCode,
   HttpStatus,
   NotFoundException,
@@ -14,6 +15,7 @@ import type { Response } from "express";
 import { AUDIT_ACTIONS, AuditService } from "../audit/audit.service.js";
 import { TenantGuard, type AuthenticatedRequest } from "../auth/tenant.guard.js";
 import { DownloadTokenService } from "./download-token.service.js";
+import { PreviewService } from "./preview.service.js";
 
 /**
  * Artifact download flow.
@@ -41,6 +43,7 @@ export class ArtifactController {
   constructor(
     private readonly downloads: DownloadTokenService,
     private readonly audit: AuditService,
+    private readonly previewService: PreviewService,
   ) {}
 
   @Post(":id/download-token")
@@ -73,6 +76,22 @@ export class ArtifactController {
     throw new NotFoundException(
       "direct artifact downloads are not supported; use POST /api/artifacts/:id/download-token then GET /api/artifacts/download/:token",
     );
+  }
+
+  /**
+   * Static HTML preview of the artifact's client project (browser visual
+   * preview). Tenant ownership is revalidated at every data-source hop
+   * (Artifact -> BuildJob -> SolutionRevision); upload-mode projects without
+   * a renderable ClientProjectIR state return 404.
+   */
+  @Get(":id/preview")
+  @Header("Content-Type", "text/html; charset=utf-8")
+  @HttpCode(HttpStatus.OK)
+  async preview(
+    @Param("id") artifactId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<string> {
+    return this.previewService.render(req.principal.tenantId, artifactId);
   }
 
   @Get("download/:token")
