@@ -1,7 +1,14 @@
 {
   "uiModelType": 6,
+  "lock": false,
+  "visible": true,
+  "enable": true,
+  "comment": "",
+  "width": 180,
+  "height": 40,
+  "isChangeFixedSize": false,
+  "isChangeFont": false,
   "prototypeName": "Label",
-  "showUiExtendType": "标签条",
   "text": "Text",
   "readOnly": false,
   "maxLen": 2147483647,
@@ -11,13 +18,35 @@
     "textColor": "rgba(0,0,0,1)"
   },
   "bkColor": "rgba(255,255,255,0)",
+  "borderColor": "rgba(220,220,220,1)",
+  "sizePolicy": {
+    "sizePolicy": [
+      3,
+      3,
+      0,
+      0
+    ],
+    "minSize": [
+      5,
+      5
+    ],
+    "maxSize": [
+      16777215,
+      16777215
+    ],
+    "fixedSize": [
+      40,
+      30
+    ]
+  },
+  "isControl": false,
+  "resDescription": {},
+  "isShowBorder": false,
+  "inputCount": 0,
+  "toolTipText": "",
+  "toolTipEnable": false,
+  "showUiExtendType": "标签条",
   "type": "文本",
   "borderStyle": 0,
-  "borderColor": "rgba(220,220,220,1)",
-  "layoutStyle": "居左",
-  "isShowBorder": false,
-  "toolTipEnable": false,
-  "toolTipText": "",
-  "sizePolicy": [3, 3, 0, 0],
-  "fixedSize": [40, 30]
+  "layoutStyle": "居左"
 }

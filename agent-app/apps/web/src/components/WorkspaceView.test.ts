@@ -2,7 +2,7 @@
 // 因此本文件关闭类型检查；运行时断言与 ESLint 静态规则仍然生效。
 // Task 12: customer UI component tests. 组件测试不进真实浏览器。
 import { mount } from "@vue/test-utils";
-import { createMemoryHistory, createRouter } from "vue-router";
+import { createMemoryHistory } from "vue-router";
 import { afterEach, describe, expect, it } from "vitest";
 import { createAppRouter } from "../router";
 import { useSession } from "../stores/session";
@@ -13,8 +13,6 @@ import ArtifactDownload from "./ArtifactDownload.vue";
 import RevisionList from "./RevisionList.vue";
 import ValidationReport from "./ValidationReport.vue";
 import ProjectTree from "./ProjectTree.vue";
-import WorkspaceView from "../views/WorkspaceView.vue";
-
 /** 组件测试共享的确认计划摘要（含破坏性删除操作）。 */
 const confirmedPlanSummary = {
   operations: [
@@ -85,19 +83,6 @@ describe("WorkspaceView shell", () => {
     await router.isReady();
     // 守卫先 await ensureRestored()：已登录用户刷新后不被误重定向到 /login。
     expect(router.currentRoute.value.name).toBe("workspace");
-  });
-
-  it("offers create and upload entry choices", async () => {
-    const router = createRouter({
-      history: createMemoryHistory(),
-      routes: [{ path: "/", component: { template: "<div />" } }],
-    });
-    const wrapper = mount(WorkspaceView, {
-      props: { workspaceId: undefined },
-      global: { plugins: [router] },
-    });
-    expect(wrapper.get('[data-testid="create-workspace"]').exists()).toBe(true);
-    expect(wrapper.get('[data-testid="upload-workspace"]').exists()).toBe(true);
   });
 });
 

@@ -1,6 +1,15 @@
 import baseFields from "../templates/base-fields.json" with { type: "json" };
 import buttonTemplate from "../templates/control-templates/button.json" with { type: "json" };
+import checkboxTemplate from "../templates/control-templates/checkbox.json" with { type: "json" };
+import imageTemplate from "../templates/control-templates/image.json" with { type: "json" };
 import inputNumberTemplate from "../templates/control-templates/inputnumber.json" with { type: "json" };
+import radioTemplate from "../templates/control-templates/radio.json" with { type: "json" };
+import richtextTemplate from "../templates/control-templates/richtext.json" with { type: "json" };
+import selectTemplate from "../templates/control-templates/select.json" with { type: "json" };
+import spacerTemplate from "../templates/control-templates/spacer.json" with { type: "json" };
+import switchTemplate from "../templates/control-templates/switch.json" with { type: "json" };
+import tableTemplate from "../templates/control-templates/table.json" with { type: "json" };
+import tabsTemplate from "../templates/control-templates/tabs.json" with { type: "json" };
 import textTemplate from "../templates/control-templates/text.json" with { type: "json" };
 import type { ControlIR, RestrictedAction } from "../ir/client-project-ir.js";
 import { mergeControlTemplate, type TemplateJson } from "../templates/merge-template.js";
@@ -64,6 +73,15 @@ const CONTROL_TEMPLATES: Readonly<Record<string, TemplateJson>> = {
   text: textTemplate,
   button: buttonTemplate,
   inputnumber: inputNumberTemplate,
+  switch: switchTemplate,
+  checkbox: checkboxTemplate,
+  radio: radioTemplate,
+  select: selectTemplate,
+  image: imageTemplate,
+  tabs: tabsTemplate,
+  table: tableTemplate,
+  richtext: richtextTemplate,
+  spacer: spacerTemplate,
 };
 
 /** IR fields every control variant carries (everything the schema defines). */
@@ -72,6 +90,15 @@ const TYPE_IR_FIELDS: Readonly<Record<string, ReadonlySet<string>>> = {
   text: new Set(["text"]),
   button: new Set(["text", "action"]),
   inputnumber: new Set(["variableId", "decimals"]),
+  switch: new Set(["value", "activeText", "inactiveText"]),
+  checkbox: new Set(["label", "checked"]),
+  radio: new Set(["options", "value"]),
+  select: new Set(["options", "value", "multiple", "placeholder"]),
+  image: new Set(["src", "fit", "alt"]),
+  tabs: new Set(["tabs", "activeId"]),
+  table: new Set([]),
+  richtext: new Set(["text"]),
+  spacer: new Set(["axis"]),
 };
 
 /**
@@ -151,9 +178,47 @@ function applySchemaOverrides(
     }
     case "inputnumber":
       return { ...common, precision: control.decimals };
+    case "switch":
+      return {
+        ...common,
+        value: control.value,
+        ...(control.activeText !== undefined ? { activeText: control.activeText } : {}),
+        ...(control.inactiveText !== undefined ? { inactiveText: control.inactiveText } : {}),
+      };
+    case "checkbox":
+      return { ...common };
+    case "radio": {
+      const radioData = control.options.map((o) => ({
+        text: o.label,
+        disabled: false,
+        visible: true,
+      }));
+      return { ...common, radioData };
+    }
+    case "select":
+      return { ...common };
+    case "image":
+      return {
+        ...common,
+        src: control.src,
+        ...(control.fit !== undefined ? { fit: control.fit } : {}),
+        ...(control.alt !== undefined ? { alt: control.alt } : {}),
+      };
+    case "tabs":
+    case "table":
+      return { ...common };
+    case "richtext":
+      return { ...common, text: control.text };
+    case "spacer":
+      // KF spacers carry no name/axis; axis maps to uiModelType 13/14
+      return {
+        ...common,
+        name: control.id,
+        uiModelType: control.axis === "horizontal" ? 13 : 14,
+      };
     default:
       throw new ModelOutputInvalidError(
-        `control type "${control.type}" has no reviewed template`,
+        `control type "${String((control as { type?: string }).type)}" has no reviewed template`,
       );
   }
 }

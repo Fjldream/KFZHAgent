@@ -1,0 +1,66 @@
+{
+  "uiModelType": 31,
+  "adaptFontSize": false,
+  "miniFontSize": 10,
+  "propertys": [
+    "leftTopPt",
+    "comment",
+    "memberAccess",
+    "name",
+    "uiModelType",
+    "configureData",
+    "lock",
+    "sizePolicy",
+    "width",
+    "height",
+    "visible",
+    "runVisible",
+    "guid",
+    "styleData",
+    "isControl",
+    "resDescription",
+    "enable"
+  ],
+  "pagination_change": false,
+  "editing": null,
+  "sizePolicy": {
+    "sizePolicy": [
+      3,
+      3,
+      0,
+      0
+    ],
+    "minSize": [
+      5,
+      5
+    ],
+    "maxSize": [
+      16777215,
+      16777215
+    ],
+    "fixedSize": [
+      900,
+      400
+    ]
+  },
+  "showUiExtendType": "ElementUI_Table",
+  "width": 900,
+  "height": 400,
+  "isControl": false,
+  "resDescription": {},
+  "prototypeName": "Table",
+  "attributes": [
+    "stripe",
+    "border",
+    "fit",
+    "show-header",
+    "highlight-current-row",
+    "empty-text",
+    "show-summary",
+    "sum-text",
+    "pagination",
+    "default-expand-all",
+    "custom-pagination"
+  ],
+  "show": true
+}
