@@ -148,7 +148,7 @@ export class ConversationService {
     // checkpoint 的 stage 本就是 AgentGraphState 的合法值，收窄类型即可。
     const stage = (
       typeof resumedStage === "string" ? resumedStage : "idle"
-    ) as AgentGraphUpdate["stage"];
+    ) as Exclude<AgentGraphUpdate["stage"], undefined>;
 
     const input = {
       tenantId: principal.tenantId,
