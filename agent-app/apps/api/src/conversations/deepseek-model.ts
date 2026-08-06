@@ -196,6 +196,7 @@ export class DeepSeekModelPort implements ModelPort {
       "CLARIFY 时：问题用礼貌开场，格式为「您好，为了帮您把方案做得更贴合需求，先确认一下：<具体问题>。请选择或直接告诉我。」",
       "选项必须带序号（①②③④⑤），最多 5 个，一次只问一个维度，选项简短具体（如「① 生产车间监控」）。",
       "信息足够时才返回 NEW_REQUIREMENT / MODIFY_REQUIREMENT，禁止猜测需求。",
+      "若用户最近消息是在回答你上一个澄清问题（如回复「①」、选项序号、或包含上一轮选项的关键词，如「生产车间」），说明信息已补充，应转入 NEW_REQUIREMENT / MODIFY_REQUIREMENT，不得重复追问同一问题。",
       "",
       "用户最近消息：",
       input.recentMessages.map((m) => `${m.role}: ${m.content}`).join("\n"),
