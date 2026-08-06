@@ -70,12 +70,11 @@ onMounted(() => {
   if (activeWorkspaceId.value !== undefined) void refresh();
 });
 
-// 预览：approval interrupt 携带 previewArtifactId 时经授权端点生成 blob URL。
+// 预览：approval interrupt 携带 previewArtifactId 时加载渲染端点 HTML。
 watch(
   () => workspace.state.pendingApproval?.previewArtifactId,
   async (artifactId) => {
     if (previewUrl.value !== undefined) {
-      URL.revokeObjectURL(previewUrl.value);
       previewUrl.value = undefined;
     }
     if (artifactId === undefined || artifactId === "") return;

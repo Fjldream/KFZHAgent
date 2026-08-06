@@ -338,7 +338,7 @@ async function downloadArtifact(artifactId: string): Promise<void> {
 
 /** 预览 iframe 直接加载渲染端点（服务端把 ClientProjectIR 渲染为 HTML）。 */
 async function createPreviewUrl(artifactId: string): Promise<string> {
-  return await Promise.resolve(api.previewUrl(artifactId));
+  return api.previewUrl(artifactId);
 }
 
 export function useWorkspace() {
