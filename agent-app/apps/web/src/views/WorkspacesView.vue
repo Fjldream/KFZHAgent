@@ -6,9 +6,9 @@ import { useSession } from "../stores/session";
 import { useGsap } from "../composables/useGsap";
 import StatCard from "../components/ui/StatCard.vue";
 import EmptyState from "../components/ui/EmptyState.vue";
-import StatusBadge from "../components/ui/StatusBadge.vue";
 import SkeletonCard from "../components/ui/SkeletonCard.vue";
 import BrandLogo from "../components/BrandLogo.vue";
+import WorkspaceTable from "../components/WorkspaceTable.vue";
 import type { Workspace } from "../types";
 
 const router = useRouter();
@@ -79,28 +79,28 @@ function playChromeEntrance(): void {
   track(tl);
 }
 
-/** 卡片列表加载后 stagger 级联入场（refresh 唯一入口，无重复播放）。 */
+/** 卡片列表加载后 stagger 级联入场（refresh 唯一入口，无重复播放）。
+ * 表格行入场：逐行淡入（用 tbody tr 选择器）。 */
 function playCardsEntrance(): void {
   const el = pageEl.value;
   if (el === null) return;
-  const cards = el.querySelectorAll(".card");
-  if (cards.length === 0) return;
+  const rows = el.querySelectorAll(".table tbody tr");
+  if (rows.length === 0) return;
   if (reduceMotion()) {
-    gsap.set(cards, { opacity: 1, y: 0, scale: 1 });
+    gsap.set(rows, { opacity: 1, y: 0 });
     return;
   }
   const tl = gsap.timeline();
   tl.fromTo(
-    cards,
-    { opacity: 0, y: 14, scale: 0.97 },
-    { opacity: 1, y: 0, scale: 1, stagger: 0.06, duration: 0.35, ease: "power3.out" },
+    rows,
+    { opacity: 0, y: 8 },
+    { opacity: 1, y: 0, stagger: 0.05, duration: 0.3, ease: "power3.out" },
   );
   track(tl);
 }
 
-// 搜索过滤后新渲染的 .card 无 inline opacity，CSS 初始 opacity:0 会使其永久隐形。
-// watch filtered 并重播入场动画（首次渲染由 refresh 的 playCardsEntrance 播放，
-// 此处仅处理过滤结果变化）。
+// 搜索过滤后新渲染的行无 inline opacity，CSS 无初始隐藏（表格行不设 opacity:0），
+// 但排序变化时重播入场动画增强反馈。watch filtered 引用变化时重播。
 let firstFilteredRender = true;
 watch(
   filtered,
@@ -162,6 +162,35 @@ async function onLogout(): Promise<void> {
   await router.push("/login");
 }
 
+/** 列表页删除：点击卡片上的删除按钮打开确认弹层（卡片本体点击仍进入详情）。 */
+const deletingWs = ref<Workspace | null>(null);
+const deleteBusy = ref(false);
+const listError = ref<string | null>(null);
+
+function onDeleteCard(ws: Workspace): void {
+  deletingWs.value = ws;
+}
+
+async function onConfirmDelete(): Promise<void> {
+  if (deleteBusy.value || deletingWs.value === null) return;
+  deleteBusy.value = true;
+  listError.value = null;
+  try {
+    await api.deleteWorkspace(deletingWs.value.id);
+    deletingWs.value = null;
+    await refresh();
+  } catch (e) {
+    listError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    deleteBusy.value = false;
+  }
+}
+
+function onCancelDelete(): void {
+  if (deleteBusy.value) return;
+  deletingWs.value = null;
+}
+
 onMounted(() => {
   playChromeEntrance();
   void refresh();
@@ -221,6 +250,13 @@ onMounted(() => {
         </div>
         <SkeletonCard v-if="loading" />
         <EmptyState
+          v-else-if="error !== null"
+          title="加载失败"
+          :desc="error"
+          action-text="重试"
+          @action="refresh"
+        />
+        <EmptyState
           v-else-if="workspaces.length === 0"
           title="还没有工程"
           desc="新建一个方案，或上传 KF 原生工程包开始编辑。"
@@ -232,27 +268,24 @@ onMounted(() => {
           title="没有匹配的工程"
           :desc="`没有找到包含「${query}」的工程。`"
         />
-        <div v-else class="cards">
-          <button
-            v-for="ws in filtered"
-            :key="ws.id"
-            type="button"
-            class="card"
-            :data-workspace-id="ws.id"
-            @click="router.push(`/workspaces/${ws.id}`)"
-          >
-            <span class="card-top">
-              <span class="card-name">{{ ws.name }}</span>
-              <StatusBadge :status="ws.mode === 'upload' ? 'info' : 'active'" :label="ws.mode === 'upload' ? '上传工程' : '新建工程'" />
-            </span>
-            <span class="card-bottom">
-              <span class="card-rev">修订 {{ ws.currentRevisionId ? "进行中" : "—" }}</span>
-              <span class="card-time">{{ relativeTime(ws.createdAt) }}</span>
-            </span>
-          </button>
-        </div>
+        <WorkspaceTable v-else :workspaces="filtered" @delete="onDeleteCard" />
       </section>
     </main>
+
+    <!-- 列表页删除确认弹层（Task：列表页删除入口，与详情页交互一致）。 -->
+    <div v-if="deletingWs !== null" class="delete-scrim" data-testid="delete-confirm-list" @click.self="onCancelDelete">
+      <section class="delete-sheet" role="alertdialog" aria-modal="true" aria-labelledby="delete-confirm-list-title">
+        <h2 id="delete-confirm-list-title">删除工程</h2>
+        <p class="delete-warning">删除后不可恢复，确定要删除「{{ deletingWs.name }}」吗？</p>
+        <p v-if="listError" class="error" data-testid="delete-list-error">{{ listError }}</p>
+        <footer class="delete-actions">
+          <button type="button" class="delete-cancel" :disabled="deleteBusy" @click="onCancelDelete">取消</button>
+          <button type="button" class="delete-confirm" data-testid="delete-confirm-list-action" :disabled="deleteBusy" @click="onConfirmDelete">
+            {{ deleteBusy ? "删除中…" : "确认删除" }}
+          </button>
+        </footer>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -304,21 +337,24 @@ onMounted(() => {
   padding: 0.45rem 0.8rem; border: 1px solid var(--color-border); border-radius: var(--radius-button);
   font-size: 0.9rem; background: var(--color-bg); min-width: 12rem;
 }
-.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 1rem; }
-.card {
-  display: flex; flex-direction: column; gap: 0.9rem; text-align: left;
-  background: var(--color-surface); border: none; border-radius: var(--radius-card);
-  box-shadow: var(--shadow-card); padding: 1.2rem; cursor: pointer; color: inherit;
-  opacity: 0; /* GSAP stagger 进入动画起点 */
-  transition: transform 160ms var(--ease-out), box-shadow 160ms var(--ease-out);
+/* 列表页删除确认弹层：复用详情页 delete-scrim/sheet 模式。 */
+.delete-scrim {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgba(0, 0, 0, 0.35); backdrop-filter: blur(6px);
+  display: flex; align-items: center; justify-content: center; padding: 1.5rem;
 }
-@media (hover: hover) and (pointer: fine) {
-  .card:hover { transform: translateY(-3px); box-shadow: var(--shadow-float); }
+.delete-sheet {
+  width: min(24rem, 92vw);
+  background: rgba(255, 255, 255, 0.92); backdrop-filter: var(--blur-glass);
+  border-radius: var(--radius-sheet); box-shadow: var(--shadow-float);
+  padding: 1.4rem 1.5rem 1.3rem;
 }
-.card:active { transform: scale(0.98); }
-.card-top { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
-.card-name { font-weight: 600; font-size: 1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.card-bottom { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
-.card-rev { color: var(--color-text-secondary); font-size: 0.8rem; }
-.card-time { color: var(--color-text-secondary); font-size: 0.75rem; }
+.delete-sheet h2 { margin: 0 0 0.4rem; font-size: 1.15rem; }
+.delete-warning { margin: 0; color: var(--color-text-secondary); font-size: 0.9rem; line-height: 1.5; }
+.delete-actions { display: flex; justify-content: flex-end; gap: 0.6rem; margin-top: 1.1rem; }
+.delete-actions button { padding: 0.55rem 1.1rem; border-radius: 999px; font-size: 0.9rem; cursor: pointer; }
+.delete-confirm { border: none; background: var(--color-danger); color: #fff; }
+.delete-cancel { border: 1px solid var(--color-border); background: transparent; color: var(--color-text); }
+.delete-actions button:active { transform: scale(0.97); }
+.delete-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

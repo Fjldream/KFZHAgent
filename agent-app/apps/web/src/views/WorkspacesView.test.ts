@@ -7,6 +7,7 @@ import WorkspacesView from "./WorkspacesView.vue";
 const pushMock = vi.hoisted(() => vi.fn());
 const listWorkspacesMock = vi.hoisted(() => vi.fn());
 const createWorkspaceMock = vi.hoisted(() => vi.fn());
+const deleteWorkspaceMock = vi.hoisted(() => vi.fn());
 const sessionState = vi.hoisted(() => ({
   tenantName: "E2E Acme",
   user: { username: "alice" },
@@ -20,6 +21,7 @@ vi.mock("../api", () => ({
   api: {
     listWorkspaces: listWorkspacesMock,
     createWorkspace: createWorkspaceMock,
+    deleteWorkspace: deleteWorkspaceMock,
   },
 }));
 vi.mock("../stores/session", () => ({
@@ -33,6 +35,7 @@ afterEach(() => {
   pushMock.mockClear();
   listWorkspacesMock.mockReset();
   createWorkspaceMock.mockReset();
+  deleteWorkspaceMock.mockReset();
 });
 
 describe("WorkspacesView", () => {
@@ -114,5 +117,59 @@ describe("WorkspacesView", () => {
     const wrapper = mount(WorkspacesView);
     await flushPromises();
     expect(wrapper.get('[data-testid="workspace-error"]').text()).toContain("数据库连接失败");
+  });
+
+  it("deletes a workspace from the card and refreshes the list", async () => {
+    listWorkspacesMock.mockResolvedValue([wsA, wsB]);
+    const wrapper = mount(WorkspacesView);
+    await flushPromises();
+
+    // 打开行操作菜单 → 点击删除 → 打开确认弹层，且不触发进入详情页的跳转。
+    await wrapper.get('[data-testid="workspace-menu-ws-1"]').trigger("click");
+    await wrapper.get('[data-testid="menu-delete"]').trigger("click");
+    expect(pushMock).not.toHaveBeenCalled();
+    expect(wrapper.get('[data-testid="delete-confirm-list"]').text()).toContain("客户展示大屏");
+
+    // 确认删除 → 调用 API 并刷新列表（ws-1 消失）。
+    deleteWorkspaceMock.mockResolvedValue(undefined);
+    listWorkspacesMock.mockResolvedValue([wsB]);
+    await wrapper.get('[data-testid="delete-confirm-list-action"]').trigger("click");
+    await flushPromises();
+    expect(deleteWorkspaceMock).toHaveBeenCalledWith("ws-1");
+    expect(wrapper.findAll("[data-workspace-id]").length).toBe(1);
+    expect(wrapper.find('[data-testid="delete-confirm-list"]').exists()).toBe(false);
+  });
+
+  it("keeps the dialog open and shows the error when deletion fails", async () => {
+    listWorkspacesMock.mockResolvedValue([wsA]);
+    const wrapper = mount(WorkspacesView);
+    await flushPromises();
+
+    await wrapper.get('[data-testid="workspace-menu-ws-1"]').trigger("click");
+    await wrapper.get('[data-testid="menu-delete"]').trigger("click");
+    deleteWorkspaceMock.mockRejectedValue(new Error("删除失败"));
+    await wrapper.get('[data-testid="delete-confirm-list-action"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[data-testid="delete-list-error"]').text()).toContain("删除失败");
+    // 弹层保持打开，允许重试或取消。
+    expect(wrapper.get('[data-testid="delete-confirm-list"]').exists()).toBe(true);
+  });
+
+  it("card delete button click does not navigate into the workspace", async () => {
+    listWorkspacesMock.mockResolvedValue([wsA]);
+    const wrapper = mount(WorkspacesView);
+    await flushPromises();
+    await wrapper.get('[data-testid="workspace-menu-ws-1"]').trigger("click");
+    await wrapper.get('[data-testid="menu-delete"]').trigger("click");
+    expect(pushMock).not.toHaveBeenCalled();
+    expect(wrapper.get('[data-testid="delete-confirm-list"]').exists()).toBe(true);
+  });
+
+  it("card Enter key navigates into the workspace", async () => {
+    listWorkspacesMock.mockResolvedValue([wsA]);
+    const wrapper = mount(WorkspacesView);
+    await flushPromises();
+    await wrapper.get('[data-workspace-id="ws-1"]').trigger("keydown", { key: "Enter" });
+    expect(pushMock).toHaveBeenCalledWith("/workspaces/ws-1");
   });
 });
