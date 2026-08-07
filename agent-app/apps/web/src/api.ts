@@ -17,8 +17,13 @@ import type {
  * 下载只走两段式短时 token 协议（Task 11）。
  */
 
+/**
+ * API 基地址。默认走同源相对路径（dev 下由 vite proxy 转发到后端，
+ * 保证无论页面从 localhost 还是 127.0.0.1 打开都同源，SameSite cookie
+ * 正常携带）；生产部署可用 VITE_API_BASE 指向独立 API 域。
+ */
 export const API_BASE: string =
-  (import.meta.env.VITE_API_BASE as string | undefined) ?? "http://localhost:3000";
+  (import.meta.env.VITE_API_BASE as string | undefined) ?? "";
 
 export class ApiError extends Error {
   readonly status: number;
