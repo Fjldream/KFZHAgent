@@ -1,6 +1,5 @@
 import type {
   ArtifactStorage,
-  ArtifactKind,
   StoredArtifact,
 } from "@kf/artifact-storage";
 import type {
@@ -106,8 +105,8 @@ export class BuildExecutor {
       const packaged = await pack.package({ workspace: candidate.candidateWorkspace });
       const stored = await this.#deps.storage.put({
         tenantId: job.tenantId,
-        kind: packaged.artifactKind as ArtifactKind,
-        stream: Readable.from([Buffer.from(packaged.bytes)]),
+        kind: packaged.artifactKind,
+        stream: Readable.from([packaged.bytes]),
         maxBytes: this.#deps.maxArtifactBytes ?? DEFAULT_MAX_ARTIFACT_BYTES,
       });
 

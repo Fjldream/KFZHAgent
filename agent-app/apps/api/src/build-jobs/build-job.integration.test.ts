@@ -12,7 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
-import { LocalArtifactStorage } from "@kf/artifact-storage";
+import { LocalArtifactStorage, type ArtifactStorage } from "@kf/artifact-storage";
 import { BuildExecutor } from "@kf/build-jobs";
 import {
   createKingClientDomainPack,
@@ -128,7 +128,10 @@ function tracingPack(
   };
 }
 
-function calculationPack(expectedProjectIr: unknown): DomainPack {
+function calculationPack(
+  expectedProjectIr: unknown,
+  bytes = new Uint8Array([80, 75, 3, 4]),
+): DomainPack {
   const baseWorkspace = {
     id: "calculation-base",
     rootDir: "/calculation/base",
@@ -177,7 +180,7 @@ function calculationPack(expectedProjectIr: unknown): DomainPack {
       domainProjectKind: "calculation-package",
       mediaType: "application/octet-stream",
       fileExtension: ".zip",
-      bytes: new Uint8Array([80, 75, 3, 4]),
+      bytes,
     }),
   };
 }
@@ -524,6 +527,58 @@ describe("full build chain", () => {
 });
 
 describe("domain pack delegation", () => {
+  it("emits a sliced opaque artifact as its original single stream chunk", async () => {
+    const privateCalculationIr = {
+      schema: "kf-calculation-project/v1",
+      model: { vendorExtension: { retainExactly: true } },
+    };
+    const backing = new Uint8Array([0xff, 0x00, 0x80, 0x50, 0x4b, 0x03, 0x04, 0xee]);
+    const packagedBytes = backing.subarray(1, 7);
+    const streamedChunks: Uint8Array[] = [];
+    const captureStorage: ArtifactStorage = {
+      async put({ stream }) {
+        for await (const chunk of stream as AsyncIterable<Uint8Array>) {
+          streamedChunks.push(chunk);
+        }
+        return {
+          artifactId: "calculation-stream-artifact",
+          sha256: "baf3a6277cc7a9ce2cfd382cf6011839b5fbf46b2517419ab4cbe83eeb67a4b3",
+          size: packagedBytes.byteLength,
+        };
+      },
+      async open() {
+        throw new Error("not needed for a new-flow build");
+      },
+      async delete() {},
+    };
+    const localRegistry = new DomainRegistry();
+    localRegistry.register(calculationPack(privateCalculationIr, packagedBytes));
+    const { tenant, workspace } = await seedWorkspace("new");
+    await prisma.solutionRevision.update({
+      where: { id: workspace.currentRevisionId },
+      data: { state: privateCalculationIr },
+    });
+    const { plan, hash } = await seedPlan(tenant.id, workspace.id);
+    const input = {
+      ...seedInput({
+        tenantId: tenant.id,
+        workspaceId: workspace.id,
+        baseRevisionId: workspace.currentRevisionId,
+        changePlanId: plan.id,
+        planHashValue: hash,
+      }),
+      domainKind: "kingcalculation",
+    };
+    await jobs.enqueue(input);
+    const leased = await jobs.leaseNext("calculation-domain", new Date());
+    const executor = new BuildExecutor({ prisma, storage: captureStorage, registry: localRegistry });
+
+    expect((await executor.execute(leased)).status).toBe("SUCCEEDED");
+    expect(streamedChunks).toHaveLength(1);
+    expect(streamedChunks[0]).toBe(packagedBytes);
+    expect(streamedChunks[0]).toEqual(new Uint8Array([0x00, 0x80, 0x50, 0x4b, 0x03, 0x04]));
+  });
+
   it("stores an opaque calculation artifact without parsing domain-private JSON", async () => {
     const privateCalculationIr = {
       schema: "kf-calculation-project/v1",

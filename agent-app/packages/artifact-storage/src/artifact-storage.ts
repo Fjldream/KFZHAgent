@@ -6,8 +6,13 @@
  * return types: callers interact with opaque identifiers only.
  */
 
-/** The kinds of private artifacts that can be stored per tenant. */
-export type ArtifactKind = "client-package" | "source-package";
+/**
+ * The kind of a private artifact stored per tenant.
+ *
+ * Domain packs own this value, so it must remain open to future domain
+ * artifact formats instead of enumerating today's client-only formats here.
+ */
+export type ArtifactKind = string;
 
 /** Result of a successful artifact write. */
 export type StoredArtifact = {

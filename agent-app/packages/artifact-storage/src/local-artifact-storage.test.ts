@@ -5,7 +5,7 @@ import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { LocalArtifactStorage } from "./local-artifact-storage.js";
 
-const KIND = "client-package" as const;
+const KIND = "calculation-package" as const;
 
 async function tempRoot(): Promise<string> {
   return mkdtemp(path.join(tmpdir(), "kf-artifact-storage-"));
@@ -17,6 +17,14 @@ async function readAll(stream: NodeJS.ReadableStream): Promise<string> {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
   return Buffer.concat(chunks).toString("utf8");
+}
+
+async function readBytes(stream: NodeJS.ReadableStream): Promise<Buffer> {
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of stream as AsyncIterable<Uint8Array>) {
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
 }
 
 async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 2000): Promise<void> {
@@ -37,6 +45,41 @@ async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 2000): Pro
 }
 
 describe("LocalArtifactStorage", () => {
+  it("preserves an opaque sliced Uint8Array at the maxBytes boundary", async () => {
+    const root = await tempRoot();
+    const storage = new LocalArtifactStorage(root);
+    const backing = new Uint8Array([0xff, 0x00, 0x80, 0x50, 0x4b, 0x03, 0x04, 0xee]);
+    const bytes = backing.subarray(1, 7);
+
+    const stored = await storage.put({
+      tenantId: "tenant-a",
+      kind: KIND,
+      stream: Readable.from([bytes]),
+      maxBytes: bytes.byteLength,
+    });
+
+    expect(stored.size).toBe(6);
+    expect(stored.sha256).toBe("baf3a6277cc7a9ce2cfd382cf6011839b5fbf46b2517419ab4cbe83eeb67a4b3");
+    await expect(readBytes(await storage.open("tenant-a", stored.artifactId)))
+      .resolves.toEqual(Buffer.from([0x00, 0x80, 0x50, 0x4b, 0x03, 0x04]));
+  });
+
+  it("rejects an opaque sliced Uint8Array one byte above maxBytes", async () => {
+    const root = await tempRoot();
+    const storage = new LocalArtifactStorage(root);
+    const backing = new Uint8Array([0xff, 0x00, 0x80, 0x50, 0x4b, 0x03, 0x04, 0xee]);
+    const bytes = backing.subarray(1, 7);
+
+    await expect(storage.put({
+      tenantId: "tenant-a",
+      kind: KIND,
+      stream: Readable.from([bytes]),
+      maxBytes: bytes.byteLength - 1,
+    })).rejects.toThrow("ARTIFACT_TOO_LARGE");
+
+    expect(await readdir(path.join(root, "tenant-a"))).toEqual([]);
+  });
+
   it("isolates artifacts by tenant", async () => {
     const root = await tempRoot();
     const storage = new LocalArtifactStorage(root);
