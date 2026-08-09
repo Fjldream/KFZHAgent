@@ -8,10 +8,11 @@ export class DomainRegistry {
   readonly #entries = new Map<DomainKind, RegistryEntry>();
 
   register(pack: DomainPack): void {
-    if (this.#entries.has(pack.kind)) {
-      throw new Error(`domain already registered: ${pack.kind}`);
+    const kind = pack.metadata.kind;
+    if (this.#entries.has(kind)) {
+      throw new Error(`domain already registered: ${kind}`);
     }
-    this.#entries.set(pack.kind, { type: "pack", pack });
+    this.#entries.set(kind, { type: "pack", pack });
   }
 
   registerMetadata(metadata: DomainMetadata): void {
@@ -37,7 +38,7 @@ export class DomainRegistry {
     if (!entry) {
       throw new Error(`domain not registered: ${kind}`);
     }
-    return entry.type === "pack" ? entry.pack : entry.metadata;
+    return entry.type === "pack" ? entry.pack.metadata : entry.metadata;
   }
 
   has(kind: DomainKind): boolean {
