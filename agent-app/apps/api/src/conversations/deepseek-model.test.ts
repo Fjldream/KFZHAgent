@@ -153,6 +153,44 @@ describe("DeepSeekModelPort", () => {
     expect(body.messages[0].content).toContain("你以礼貌、专业的客服顾问口吻与客户沟通");
   });
 
+  it("classifyIntent prompt includes design-review and preview-review intents", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                intent: "REVISE_DESIGN",
+                requestedDomains: ["kingclient"],
+              }),
+            },
+          },
+        ],
+      }),
+    });
+    const port = new DeepSeekModelPort({
+      apiKey: "test-key",
+      fetch: fetchImpl,
+      baseUrl: "https://mock.local",
+    });
+
+    await port.classifyIntent({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [{ role: "user", content: "增加项目经历" }],
+      requirementText: "增加项目经历",
+    });
+
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    const userPrompt = body.messages[1].content;
+    expect(userPrompt).toContain("CONFIRM_DESIGN");
+    expect(userPrompt).toContain("REVISE_DESIGN");
+    expect(userPrompt).toContain("CONFIRM_BUILD");
+  });
+
   it("passes through numbered clarifying options verbatim", async () => {
     const port = makePort({
       intent: "CLARIFY",
@@ -217,6 +255,47 @@ describe("DeepSeekModelPort", () => {
     expect(result.displayName).toBe("监控大屏");
     expect(result.sections).toHaveLength(1);
     expect(result.sections[0].controls[0].type).toBe("text");
+  });
+
+  it("createDesignPlan prompt preserves the initial requirement and clarification answer", async () => {
+    const plan = {
+      schema: "kf-design-plan/v1",
+      displayName: "个人简历网站",
+      summary: "求职简历展示",
+      layoutConcept: "单页简历布局",
+      styleDirection: "专业简洁",
+      sections: [{ id: "profile", label: "个人信息", controls: [{ type: "text" }] }],
+      signature: "项目时间轴",
+    };
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: JSON.stringify(plan) } }],
+      }),
+    });
+    const port = new DeepSeekModelPort({
+      apiKey: "test-key",
+      fetch: fetchImpl,
+      baseUrl: "https://mock.local",
+    });
+
+    await port.createDesignPlan({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [
+        { role: "user", content: "个人简历网站" },
+        { role: "assistant", content: "网站主要面向什么场景？" },
+        { role: "user", content: "① 求职应聘" },
+      ],
+      requirementText: "① 求职应聘",
+    });
+
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    const userPrompt = body.messages[1].content;
+    expect(userPrompt).toContain("个人简历网站");
+    expect(userPrompt).toContain("① 求职应聘");
   });
 
   it("createDesignPlan rejects output that fails the zod gate", async () => {

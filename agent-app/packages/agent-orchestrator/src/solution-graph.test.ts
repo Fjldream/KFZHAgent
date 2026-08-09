@@ -568,6 +568,34 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     );
   });
 
+  it("revises the design instead of creating a ChangePlan when requirements are added during design review", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+
+    bed.model.queueIntent("NEW_REQUIREMENT");
+    await sendUser(bed, ctx, "个人简历网站");
+    const first = await bed.graph.invoke(input(ctx), config(ctx));
+    expect(first.stage).toBe("design-review");
+    expect(first.designRevision).toBe(1);
+
+    bed.model.queueIntent("MODIFY_REQUIREMENT");
+    await sendUser(
+      bed,
+      ctx,
+      "我希望有我的产品，项目经历，可以使用假的数据占位，但是内容要充实",
+    );
+    const second = await bed.graph.invoke(
+      { ...input(ctx), stage: first.stage },
+      config(ctx),
+    );
+
+    expect(second.stage).toBe("design-review");
+    expect(second.designRevision).toBe(2);
+    expect(bed.repo.requests.size).toBe(0);
+    expect(bed.repo.plans.size).toBe(0);
+    expect(bed.builds.enqueues).toHaveLength(0);
+  });
+
   it("preview feedback REVISE_DESIGN routes back to design-plan (designRevision+1)", async () => {
     const bed = createBed();
     const ctx = seed(bed);

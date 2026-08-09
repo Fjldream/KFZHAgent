@@ -185,7 +185,7 @@ export class DeepSeekModelPort implements ModelPort {
   async classifyIntent(input: ModelPortContext): Promise<ClassifyIntentResult> {
     const userPrompt = [
       "根据用户最近的需求，判断意图（intent），可选值：",
-      'QUESTION（提问/闲聊）、NEW_REQUIREMENT（新建工程需求）、MODIFY_REQUIREMENT（修改已有工程）、CONFIRM_PLAN（确认计划）、CANCEL_PLAN（取消计划）、ROLLBACK（回滚）、BUILD（要求构建）、CLARIFY（需求信息不足，需澄清）。',
+      'QUESTION（提问/闲聊）、NEW_REQUIREMENT（新建工程需求）、MODIFY_REQUIREMENT（修改已有工程）、CONFIRM_DESIGN（明确确认设计蓝图）、REVISE_DESIGN（设计确认前补充或修改设计需求）、CONFIRM_PLAN（确认工程变更计划）、CANCEL_PLAN（取消计划）、BUILD（要求构建）、CONFIRM_BUILD（确认构建预览落地）、ROLLBACK（回滚）、CLARIFY（需求信息不足，需澄清）。',
       'requestedDomains：涉及的产品域（客户端工程为 ["kingclient"]）。',
       "reply：给用户的一句简短回复（可选）。",
       "needsClarification：是否需要补充信息（intent 为 CLARIFY 时为 true）。",
@@ -197,6 +197,8 @@ export class DeepSeekModelPort implements ModelPort {
       "选项必须带序号（①②③④⑤），最多 5 个，一次只问一个维度，选项简短具体（如「① 生产车间监控」）。",
       "信息足够时才返回 NEW_REQUIREMENT / MODIFY_REQUIREMENT，禁止猜测需求。",
       "若用户最近消息是在回答你上一个澄清问题（如回复「①」、选项序号、或包含上一轮选项的关键词，如「生产车间」），说明信息已补充，应转入 NEW_REQUIREMENT / MODIFY_REQUIREMENT，不得重复追问同一问题。",
+      "若上一轮助手正在展示设计草案：只有用户明确表示确认时返回 CONFIRM_DESIGN；用户继续补充内容、布局、风格或模块时返回 REVISE_DESIGN。",
+      "CONFIRM_PLAN 只用于用户明确批准已经展示的工程变更计划，不能用于确认设计草案。",
       "",
       "用户最近消息：",
       input.recentMessages.map((m) => `${m.role}: ${m.content}`).join("\n"),
@@ -217,6 +219,10 @@ export class DeepSeekModelPort implements ModelPort {
 
   async createDesignPlan(input: ModelPortContext, opts?: { revising?: boolean }): Promise<DesignPlan> {
     const revising = opts?.revising === true;
+    const recentConversation = input.recentMessages
+      .slice(-20)
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
     const lines = [
       "设计遵循系统提示中的《KF 设计原则（KF_DESIGN_PRINCIPLES_FULL）》章节：布局有主次、避免模板脸（不要白底等大按钮堆叠）、一个记忆点、控件文案具体可读。",
       "为一个 KF 客户端工程生成设计计划（不是页面控件，是设计意图）。输出 JSON 对象，所有字段必须齐全：",
@@ -225,6 +231,8 @@ export class DeepSeekModelPort implements ModelPort {
       "sections：页面分区数组（1-8 区；每区必须是对象，含 id、label（区名，如 \"中部趋势区\"）、controls 数组（≤12 个占位，每个必须含 type，type 用枚举：text/button/inputnumber/switch/checkbox/radio/select/image/tabs/table/richtext/spacer））；",
       "signature：本方案最特别的 1 个设计决策。所有字段值必须是字符串或数组，禁止省略字段，禁止用 null 占位。",
       "signature：本方案最特别的 1 个设计决策。",
+      "最近会话上下文：",
+      recentConversation.length > 0 ? recentConversation : "（无）",
     ];
     if (revising) {
       lines.push(

@@ -56,3 +56,33 @@ describe("classify-intent node CLARIFY gate", () => {
     expect(update.reply).toContain("已尝试多轮澄清");
   });
 });
+
+describe("classify-intent node design-review routing", () => {
+  it("treats supplemental requirements as a design revision before design confirmation", async () => {
+    const deps = {
+      modelPort: {
+        classifyIntent: vi.fn().mockResolvedValue({
+          intent: "MODIFY_REQUIREMENT",
+          requestedDomains: ["kingclient"],
+        } satisfies ClassifyIntentResult),
+      },
+      workspaceQuery: { appendMessage: vi.fn().mockResolvedValue(undefined) },
+      isDomainSupported: () => true,
+    };
+
+    const update = await createClassifyIntentNode(deps as never)(
+      baseState({
+        stage: "design-review",
+        designPlanHash: "a".repeat(64),
+        recentMessages: [
+          {
+            role: "user",
+            content: "我希望有我的产品，项目经历，可以使用假的数据占位，但是内容要充实",
+          },
+        ],
+      }) as never,
+    );
+
+    expect(update.intent).toBe("REVISE_DESIGN");
+  });
+});

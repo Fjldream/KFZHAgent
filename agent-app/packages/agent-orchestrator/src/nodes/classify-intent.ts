@@ -110,6 +110,11 @@ export function createClassifyIntentNode(deps: SolutionGraphDeps) {
         /确认|可以|没问题|同意|就这样|挺好的|就按这个/.test(text)
       ) {
         result = { ...result, intent: "CONFIRM_DESIGN" };
+      } else if (
+        result.intent === "NEW_REQUIREMENT" ||
+        result.intent === "MODIFY_REQUIREMENT"
+      ) {
+        result = { ...result, intent: "REVISE_DESIGN" };
       }
     }
 
