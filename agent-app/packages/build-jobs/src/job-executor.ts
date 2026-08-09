@@ -1,21 +1,16 @@
 import type {
   ArtifactStorage,
+  ArtifactKind,
   StoredArtifact,
 } from "@kf/artifact-storage";
-import type { ValidationReport } from "@kf/contracts";
-import type { ClientProjectIR } from "@kf/domain-client";
-import {
-  applyClientPatch,
-  compileClientProject,
-  importNativeClientPackage,
-  packageNativeClientProject,
-  validateClientProject,
-} from "@kf/domain-client";
+import type {
+  DomainPack,
+  DomainWorkspace,
+  PackagedDomainArtifact,
+  ValidationReport,
+} from "@kf/contracts";
 import type { DomainRegistry } from "@kf/domain-registry";
 import { Prisma, type BuildJob, type PrismaClient } from "@prisma/client";
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import { Readable } from "node:stream";
 import { BuildJobService } from "./build-job.service.js";
 
@@ -72,7 +67,6 @@ export class BuildExecutor {
     try {
       // Resolve the domain capabilities (throws for unknown/unsupported kinds).
       const pack = this.#deps.registry.require(job.domainKind);
-      void pack;
 
       const baseRevision = await this.#deps.prisma.solutionRevision.findUnique({
         where: { id: job.baseRevisionId },
@@ -97,24 +91,23 @@ export class BuildExecutor {
         });
       }
 
-      const candidate = await this.buildCandidate(job, baseRevision, plan);
+      const candidate = await this.buildCandidate(job, baseRevision, plan, pack);
       await this.markValidating(job);
 
-      const report = await validateClientProject(
-        candidate.baseDir,
-        candidate.candidateDir,
-        candidate.planInput,
-        { skipRoundTrip: false },
-      );
+      const report = await pack.validate({
+        baseWorkspace: candidate.baseWorkspace,
+        candidateWorkspace: candidate.candidateWorkspace,
+        changePlan: candidate.planInput,
+      });
       if (report.status === "fail") {
         return this.complete(job, { status: "FAILED", report });
       }
 
-      const pkg = await packageNativeClientProject(candidate.candidateDir);
+      const packaged = await pack.package({ workspace: candidate.candidateWorkspace });
       const stored = await this.#deps.storage.put({
         tenantId: job.tenantId,
-        kind: "client-package",
-        stream: Readable.from(pkg),
+        kind: packaged.artifactKind as ArtifactKind,
+        stream: Readable.from(packaged.bytes),
         maxBytes: this.#deps.maxArtifactBytes ?? DEFAULT_MAX_ARTIFACT_BYTES,
       });
 
@@ -127,6 +120,7 @@ export class BuildExecutor {
         stored,
         plan,
         mode: candidate.mode,
+        packaged,
       });
     } catch (error) {
       if (error instanceof BuildWorkerCrash) throw error;
@@ -138,25 +132,39 @@ export class BuildExecutor {
     job: BuildJob,
     baseRevision: { id: string; kind: string; state: Prisma.JsonValue | null },
     plan: { plan: Prisma.JsonValue | null },
-  ): Promise<{ baseDir: string; candidateDir: string; planInput: unknown; mode: string }> {
+    pack: DomainPack,
+  ): Promise<{
+    baseWorkspace: DomainWorkspace;
+    candidateWorkspace: DomainWorkspace;
+    planInput: unknown;
+    mode: string;
+  }> {
     const planInput = plan.plan ?? {};
+    const workRoot =
+      this.#deps.workRoot === undefined ? {} : { workRoot: this.#deps.workRoot };
     if (baseRevision.kind === "initial") {
       // New flow: compile the solution IR into a fresh client project. The
       // seed is the workspace id so derived GUIDs are deterministic per
       // workspace (a retried job rebuilds identical bytes).
-      const ir = (baseRevision.state ?? {}) as unknown as ClientProjectIR;
-      const built = await compileClientProject(ir, { seed: job.workspaceId });
+      const baseWorkspace = await pack.compile({
+        projectIr: baseRevision.state ?? {},
+        buildSeed: job.workspaceId,
+        ...workRoot,
+      });
       // C1: the confirmed change plan must really land in the build artifact.
       // Apply it to the compiled tree with the same patch path as the
       // upload/modify flow (planHash-verified); the compiled tree becomes the
       // verification base and the patched tree the candidate, so
       // verifyChangeScope can prove nothing outside the approved plan moved.
-      const patched = await applyClientPatch(built.rootDir, planInput, {
-        planHash: job.planHash,
+      const candidateWorkspace = await pack.patch({
+        baseWorkspace,
+        changePlan: planInput,
+        expectedPlanHash: job.planHash,
+        ...workRoot,
       });
       return {
-        baseDir: built.rootDir,
-        candidateDir: patched.rootDir,
+        baseWorkspace,
+        candidateWorkspace,
         planInput,
         mode: "compile",
       };
@@ -171,19 +179,26 @@ export class BuildExecutor {
     if (domainProject === null || domainProject.packageUrl === null) {
       throw new Error(`base revision ${baseRevision.id} has no package`);
     }
-    const sourceDir = await this.unpackBase(job.tenantId, domainProject.packageUrl);
-    const patched = await applyClientPatch(sourceDir, planInput, {
-      planHash: job.planHash,
+    const packageBytes = await this.readBasePackage(job.tenantId, domainProject.packageUrl);
+    const baseWorkspace = await pack.importPackage({
+      bytes: packageBytes,
+      ...workRoot,
+    });
+    const candidateWorkspace = await pack.patch({
+      baseWorkspace,
+      changePlan: planInput,
+      expectedPlanHash: job.planHash,
+      ...workRoot,
     });
     return {
-      baseDir: sourceDir,
-      candidateDir: patched.rootDir,
+      baseWorkspace,
+      candidateWorkspace,
       planInput,
       mode: "patch",
     };
   }
 
-  private async unpackBase(tenantId: string, artifactId: string): Promise<string> {
+  private async readBasePackage(tenantId: string, artifactId: string): Promise<Uint8Array> {
     let stream: NodeJS.ReadableStream;
     try {
       stream = await this.#deps.storage.open(tenantId, artifactId);
@@ -199,10 +214,7 @@ export class BuildExecutor {
     for await (const chunk of stream as AsyncIterable<Buffer | string>) {
       chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     }
-    const bytes = Buffer.concat(chunks);
-    const workRoot = this.#deps.workRoot ?? tmpdir();
-    const destDir = await mkdtemp(path.join(workRoot, "kf-job-base-"));
-    return importNativeClientPackage(bytes, destDir);
+    return Buffer.concat(chunks);
   }
 
   private async markValidating(job: BuildJob): Promise<void> {
@@ -225,6 +237,7 @@ export class BuildExecutor {
       stored?: StoredArtifact;
       plan?: { plan: Prisma.JsonValue | null };
       mode?: string;
+      packaged?: PackagedDomainArtifact;
     },
   ): Promise<BuildJob> {
     const details: Record<string, unknown> = {};
@@ -235,7 +248,10 @@ export class BuildExecutor {
       if (opts.stored === undefined) {
         throw new Error("SUCCEEDED completion requires a stored artifact");
       }
-      const { stored } = opts;
+      if (opts.packaged === undefined) {
+        throw new Error("SUCCEEDED completion requires packaged artifact metadata");
+      }
+      const { stored, packaged } = opts;
       return this.#buildJobs.completeBuild({
         jobId: job.id,
         tenantId: job.tenantId,
@@ -253,11 +269,11 @@ export class BuildExecutor {
             mode: opts.mode ?? "patch",
           },
           domainKind: job.domainKind,
-          domainProjectKind: "client-package",
+          domainProjectKind: packaged.domainProjectKind,
           packageHash: stored.sha256,
           packageUrl: stored.artifactId,
           artifact: {
-            kind: "client-package",
+            kind: packaged.artifactKind,
             storageKey: stored.artifactId,
             sizeBytes: stored.size,
             sha256: stored.sha256,

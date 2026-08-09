@@ -231,9 +231,6 @@ importers:
       '@kf/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@kf/domain-client':
-        specifier: workspace:*
-        version: link:../domain-client
       '@kf/domain-registry':
         specifier: workspace:*
         version: link:../domain-registry

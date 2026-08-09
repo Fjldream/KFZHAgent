@@ -14,7 +14,6 @@
   "dependencies": {
     "@kf/artifact-storage": "workspace:*",
     "@kf/contracts": "workspace:*",
-    "@kf/domain-client": "workspace:*",
     "@kf/domain-registry": "workspace:*",
     "@prisma/client": "^6.19.3"
   }

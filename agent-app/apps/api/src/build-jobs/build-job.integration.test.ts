@@ -14,9 +14,14 @@ import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { LocalArtifactStorage } from "@kf/artifact-storage";
 import { BuildExecutor } from "@kf/build-jobs";
-import { deriveGuid, planHash, packageNativeClientProject } from "@kf/domain-client";
+import {
+  createKingClientDomainPack,
+  deriveGuid,
+  planHash,
+  packageNativeClientProject,
+} from "@kf/domain-client";
 import { DomainRegistry } from "@kf/domain-registry";
-import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppModule } from "../app.module.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { BuildJobService } from "./build-job.service.js";
@@ -89,33 +94,33 @@ beforeEach(async () => {
 });
 
 function clientPack() {
+  return createKingClientDomainPack({ nativeAccepted: true });
+}
+
+function tracingPack(calls: string[]) {
+  const real = createKingClientDomainPack({ nativeAccepted: true });
   return {
-    kind: "kingclient",
-    displayName: "KingFusion Client",
-    supported: true,
-    capabilities: {
-      create: true,
-      import: true,
-      modify: true,
-      validate: true,
-      package: true,
-    },
-    inspect: async () => ({}),
-    compile: async () => ({}),
-    patch: async () => ({}),
-    validate: async () => ({
-      status: "pass",
-      checks: {
-        packageStructure: "pass",
-        jsonSchema: "pass",
-        references: "pass",
-        businessRules: "pass",
-        changeScope: "pass",
-        roundTrip: "pass",
-      },
-      warnings: [],
+    ...real,
+    compile: vi.fn(async (input) => {
+      calls.push("compile");
+      return real.compile(input);
     }),
-    package: async () => "",
+    importPackage: vi.fn(async (input) => {
+      calls.push("importPackage");
+      return real.importPackage(input);
+    }),
+    patch: vi.fn(async (input) => {
+      calls.push("patch");
+      return real.patch(input);
+    }),
+    validate: vi.fn(async (input) => {
+      calls.push("validate");
+      return real.validate(input);
+    }),
+    package: vi.fn(async (input) => {
+      calls.push("package");
+      return real.package(input);
+    }),
   };
 }
 
@@ -457,5 +462,74 @@ describe("full build chain", () => {
     });
     expect(latest.kind).toBe("built");
     expect(latest.parentRevisionId).toBe(sourceRevision.revision.id);
+  });
+});
+
+describe("domain pack delegation", () => {
+  it("delegates a new build to compile, patch, validate, and package", async () => {
+    const calls: string[] = [];
+    const pack = tracingPack(calls);
+    const localRegistry = new DomainRegistry();
+    localRegistry.register(pack);
+    const { tenant, workspace } = await seedWorkspace("new");
+    const { plan, hash } = await seedPlan(tenant.id, workspace.id);
+    const input = seedInput({
+      tenantId: tenant.id,
+      workspaceId: workspace.id,
+      baseRevisionId: workspace.currentRevisionId,
+      changePlanId: plan.id,
+      planHashValue: hash,
+    });
+    await jobs.enqueue(input);
+    const leased = await jobs.leaseNext("domain-delegation", new Date());
+    const executor = new BuildExecutor({ prisma, storage, registry: localRegistry });
+
+    expect((await executor.execute(leased)).status).toBe("SUCCEEDED");
+    expect(calls).toEqual(["compile", "patch", "validate", "package"]);
+    expect(pack.compile).toHaveBeenCalledWith(expect.objectContaining({
+      buildSeed: workspace.id,
+    }));
+    expect(pack.patch).toHaveBeenCalledWith(expect.objectContaining({
+      expectedPlanHash: hash,
+    }));
+  });
+
+  it("delegates an upload build to importPackage, patch, validate, and package", async () => {
+    const calls: string[] = [];
+    const pack = tracingPack(calls);
+    const localRegistry = new DomainRegistry();
+    localRegistry.register(pack);
+    const { tenant, workspace } = await seedWorkspace("upload");
+    const source = await packageNativeClientProject(unknownFieldClientDir);
+    const sourceRevision = await workspaces.createSourceRevision({
+      tenantId: tenant.id,
+      workspaceId: workspace.id,
+      source,
+    });
+    const { plan, hash } = await seedPlan(tenant.id, workspace.id, [
+      {
+        op: "update",
+        entityId: "button-guid-1",
+        entityType: "button",
+        changes: [{ path: "/text", value: "Patched" }],
+      },
+    ]);
+    const input = seedInput({
+      tenantId: tenant.id,
+      workspaceId: workspace.id,
+      baseRevisionId: sourceRevision.revision.id,
+      changePlanId: plan.id,
+      planHashValue: hash,
+    });
+    await jobs.enqueue(input);
+    const leased = await jobs.leaseNext("domain-delegation", new Date());
+    const executor = new BuildExecutor({ prisma, storage, registry: localRegistry });
+
+    expect((await executor.execute(leased)).status).toBe("SUCCEEDED");
+    expect(calls).toEqual(["importPackage", "patch", "validate", "package"]);
+    expect(pack.compile).not.toHaveBeenCalled();
+    expect(pack.importPackage).toHaveBeenCalledWith(expect.objectContaining({
+      bytes: expect.any(Uint8Array),
+    }));
   });
 });
