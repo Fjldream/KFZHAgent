@@ -395,6 +395,8 @@ export class WorkspaceService {
           solutionRevisionId: revision.id,
           domainKind: input.domainKind,
           kind: "source-package",
+          mediaType: "application/zip",
+          fileExtension: ".gz",
           packageHash: input.stored.sha256,
           packageUrl: input.stored.artifactId,
         },

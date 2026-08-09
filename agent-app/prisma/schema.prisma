@@ -46,6 +46,7 @@ model User {
   sessions           UserSession[]
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
+
   @@unique([tenantId, username])
 }
 
@@ -58,20 +59,22 @@ model UserSession {
   createdAt  DateTime  @default(now())
   lastUsedAt DateTime  @default(now())
   revokedAt  DateTime?
+
   @@index([userId])
   @@index([expiresAt])
 }
 
 model SolutionWorkspace {
-  id               String    @id @default(uuid())
-  tenantId         String
-  tenant           Tenant    @relation(fields: [tenantId], references: [id])
-  name             String
-  description      String?
-  mode             String    @default("new") // "new" (generative) | "upload" (imported source)
+  id                String   @id @default(uuid())
+  tenantId          String
+  tenant            Tenant   @relation(fields: [tenantId], references: [id])
+  name              String
+  description       String?
+  mode              String   @default("new") // "new" (generative) | "upload" (imported source)
   currentRevisionId String? // advanced only after validation passes
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
   @@unique([tenantId, name])
 }
 
@@ -83,6 +86,7 @@ model Conversation {
   summary     String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
   @@index([tenantId, workspaceId])
 }
 
@@ -98,6 +102,7 @@ model DownloadToken {
   expiresAt  DateTime
   usedAt     DateTime?
   createdAt  DateTime  @default(now())
+
   @@index([tenantId, expiresAt])
 }
 
@@ -108,6 +113,7 @@ model Message {
   role           String
   content        String
   createdAt      DateTime @default(now())
+
   @@index([tenantId, conversationId])
 }
 
@@ -119,6 +125,7 @@ model ChangeRequest {
   status      String   @default("OPEN")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
   @@index([tenantId, workspaceId])
 }
 
@@ -130,6 +137,7 @@ model ChangePlan {
   planHash        String
   plan            Json?
   createdAt       DateTime @default(now())
+
   @@index([tenantId, workspaceId])
 }
 
@@ -143,6 +151,7 @@ model SolutionRevision {
   parentRevisionId String? // immutable chain link; rollback points at the historical revision
   state            Json?
   createdAt        DateTime @default(now())
+
   @@index([tenantId, workspaceId])
 }
 
@@ -152,52 +161,60 @@ model DomainProjectRevision {
   solutionRevisionId String
   domainKind         String
   kind               String   @default("client-package") // "source-package" | "client-package"
+  mediaType          String   @default("application/octet-stream")
+  fileExtension      String   @default(".gz")
   packageHash        String?
   packageUrl         String?
   createdAt          DateTime @default(now())
+
   @@index([tenantId, solutionRevisionId])
 }
 
 model BuildJob {
-  id              String   @id @default(uuid())
-  tenantId        String
-  workspaceId     String
-  baseRevisionId  String
-  changePlanId    String
-  planHash        String
-  domainKind      String
-  idempotencyKey  String   @unique
-  status          JobStatus
-  leaseOwner      String?
-  leaseExpiresAt  DateTime?
-  attemptCount    Int      @default(0)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String    @id @default(uuid())
+  tenantId       String
+  workspaceId    String
+  baseRevisionId String
+  changePlanId   String
+  planHash       String
+  domainKind     String
+  idempotencyKey String    @unique
+  status         JobStatus
+  leaseOwner     String?
+  leaseExpiresAt DateTime?
+  attemptCount   Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
   @@index([status, leaseExpiresAt])
   @@index([tenantId, workspaceId])
 }
 
 model Artifact {
-  id         String   @id @default(uuid())
-  tenantId   String
-  buildJobId String
-  kind       String
-  storageKey String
-  sizeBytes  Int?
-  sha256     String?
-  createdAt  DateTime @default(now())
+  id            String   @id @default(uuid())
+  tenantId      String
+  buildJobId    String
+  kind          String
+  mediaType     String   @default("application/octet-stream")
+  fileExtension String   @default(".gz")
+  storageKey    String
+  sizeBytes     Int?
+  sha256        String?
+  createdAt     DateTime @default(now())
+
   @@index([tenantId, buildJobId])
 }
 
 model ValidationReport {
-  id            String   @id @default(uuid())
-  tenantId      String
-  buildJobId    String?
-  changePlanId  String?
-  outcome       String
-  summary       String?
-  details       Json?
-  createdAt     DateTime @default(now())
+  id           String   @id @default(uuid())
+  tenantId     String
+  buildJobId   String?
+  changePlanId String?
+  outcome      String
+  summary      String?
+  details      Json?
+  createdAt    DateTime @default(now())
+
   @@index([tenantId, buildJobId])
 }
 
@@ -210,5 +227,6 @@ model AuditLog {
   resourceId   String?
   detail       Json?
   createdAt    DateTime @default(now())
+
   @@index([tenantId, createdAt])
 }

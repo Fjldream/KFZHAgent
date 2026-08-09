@@ -1,6 +1,10 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { Artifact, Prisma } from "@prisma/client";
 import type { ArtifactStorage } from "@kf/artifact-storage";
+import {
+  normalizeArtifactFileExtension,
+  normalizeArtifactMediaType,
+} from "@kf/contracts";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { ARTIFACT_STORAGE } from "./artifact-storage.js";
 
@@ -20,6 +24,8 @@ export class ArtifactService {
     tenantId: string;
     buildJobId: string;
     kind: string;
+    mediaType?: string;
+    fileExtension?: string;
     storageKey: string;
     sizeBytes?: number;
     sha256?: string;
@@ -29,6 +35,8 @@ export class ArtifactService {
         tenantId: input.tenantId,
         buildJobId: input.buildJobId,
         kind: input.kind,
+        mediaType: normalizeArtifactMediaType(input.mediaType),
+        fileExtension: normalizeArtifactFileExtension(input.fileExtension),
         storageKey: input.storageKey,
         ...(input.sizeBytes !== undefined ? { sizeBytes: input.sizeBytes } : {}),
         ...(input.sha256 !== undefined ? { sha256: input.sha256 } : {}),

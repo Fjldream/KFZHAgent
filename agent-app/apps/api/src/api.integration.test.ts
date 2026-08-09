@@ -279,6 +279,12 @@ function uploadPackage(
   return req.send(body);
 }
 
+function parseBinary(res, callback) {
+  const chunks = [];
+  res.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+  res.on("end", () => callback(null, Buffer.concat(chunks)));
+}
+
 async function createConversation(cookie: string, workspaceId: string, title: string) {
   return request(server)
     .post("/api/conversations")
@@ -555,8 +561,10 @@ describe("api contract", () => {
     const dl = await request(server)
       .get(`/api/artifacts/download/${tokenRes.body.token}`)
       .set("Cookie", cookie)
+      .buffer(true)
+      .parse(parseBinary)
       .expect(200);
-    expect(dl.headers["content-type"]).toContain("application/octet-stream");
+    expect(dl.headers["content-type"]).toContain("application/zip");
     expect(dl.body.length).toBeGreaterThan(1000);
 
     // Single-use: the second download with the same token fails.
@@ -569,6 +577,65 @@ describe("api contract", () => {
     await request(server)
       .get(`/api/artifacts/download/${tokenRes.body.token}`)
       .expect(401);
+  });
+
+  it("downloads a calculation ZIP with its persisted response metadata", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const tenant = await prisma.tenant.findUnique({ where: { name: TENANT_A.tenant } });
+    const workspace = await createWorkspace(cookie, "Calculation Download WS");
+    const revisionId = workspace.body.currentRevisionId as string;
+    const packagedBytes = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0xca, 0x1c]);
+    const stored = await storage.put({
+      tenantId: tenant.id,
+      kind: "calculation-package",
+      stream: Readable.from([packagedBytes]),
+      maxBytes: 1024,
+    });
+    const job = await prisma.buildJob.create({
+      data: {
+        tenantId: tenant.id,
+        workspaceId: workspace.body.id,
+        baseRevisionId: revisionId,
+        changePlanId: "calculation-download-plan",
+        planHash: "c".repeat(64),
+        domainKind: "kingcalculation",
+        idempotencyKey: `calculation-download-${Date.now()}`,
+        status: "SUCCEEDED",
+      },
+    });
+    const artifact = await prisma.artifact.create({
+      data: {
+        tenantId: tenant.id,
+        buildJobId: job.id,
+        kind: "calculation-package",
+        storageKey: stored.artifactId,
+        sizeBytes: stored.size,
+        sha256: stored.sha256,
+        mediaType: "application/zip",
+        fileExtension: ".zip",
+      },
+    });
+
+    const issued = await request(server)
+      .post(`/api/artifacts/${artifact.id}/download-token`)
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(issued.body).toMatchObject({
+      artifactId: artifact.id,
+      mediaType: "application/zip",
+      fileExtension: ".zip",
+      fileName: `${artifact.id}.zip`,
+    });
+
+    const downloaded = await request(server)
+      .get(`/api/artifacts/download/${issued.body.token}`)
+      .set("Cookie", cookie)
+      .buffer(true)
+      .parse(parseBinary)
+      .expect(200);
+    expect(downloaded.headers["content-type"]).toContain("application/zip");
+    expect(downloaded.headers["content-disposition"]).toContain(`${artifact.id}.zip`);
+    expect(downloaded.body).toEqual(packagedBytes);
   });
 
   it("deletes a workspace only after destructive confirmation", async () => {

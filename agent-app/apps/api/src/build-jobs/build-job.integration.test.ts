@@ -178,7 +178,7 @@ function calculationPack(
     package: async () => ({
       artifactKind: "calculation-package",
       domainProjectKind: "calculation-package",
-      mediaType: "application/octet-stream",
+      mediaType: "application/zip",
       fileExtension: ".zip",
       bytes,
     }),
@@ -614,6 +614,8 @@ describe("domain pack delegation", () => {
 
     const artifact = await prisma.artifact.findFirst({ where: { buildJobId: done.id } });
     expect(artifact?.kind).toBe("calculation-package");
+    expect(artifact?.mediaType).toBe("application/zip");
+    expect(artifact?.fileExtension).toBe(".zip");
     const storedBytes = await storage.open(tenant.id, artifact!.storageKey);
     const chunks: Buffer[] = [];
     for await (const chunk of storedBytes) {
@@ -628,6 +630,8 @@ describe("domain pack delegation", () => {
       where: { solutionRevisionId: builtRevision?.id },
     });
     expect(domainProject?.kind).toBe("calculation-package");
+    expect(domainProject?.mediaType).toBe("application/zip");
+    expect(domainProject?.fileExtension).toBe(".zip");
   });
 
   it("delegates a new build to compile, patch, validate, and package", async () => {

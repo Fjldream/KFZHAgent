@@ -61,6 +61,9 @@ export class ArtifactController {
       token: result.token,
       expiresAt: result.expiresAt.toISOString(),
       artifactId: result.artifactId,
+      mediaType: result.mediaType,
+      fileExtension: result.fileExtension,
+      fileName: result.fileName,
     };
   }
 
@@ -108,7 +111,7 @@ export class ArtifactController {
     @Req() req: AuthenticatedRequest,
     @Res() res: Response,
   ): Promise<void> {
-    const { stream, fileName, artifactId, sizeBytes } = await this.downloads.consume({
+    const { stream, fileName, artifactId, sizeBytes, mediaType } = await this.downloads.consume({
       token,
       tenantId: req.principal.tenantId,
       userId: req.principal.userId,
@@ -121,7 +124,7 @@ export class ArtifactController {
       resourceId: artifactId,
       detail: { fileName },
     });
-    res.setHeader("Content-Type", "application/octet-stream");
+    res.setHeader("Content-Type", mediaType);
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     if (sizeBytes !== null) {
       res.setHeader("Content-Length", String(sizeBytes));

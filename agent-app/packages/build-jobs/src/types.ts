@@ -26,10 +26,14 @@ export interface SuccessfulBuildResult {
   state: unknown;
   domainKind: string;
   domainProjectKind: string;
+  mediaType: string;
+  fileExtension: string;
   packageHash: string;
   packageUrl: string;
   artifact: {
     kind: string;
+    mediaType: string;
+    fileExtension: string;
     storageKey: string;
     sizeBytes: number;
     sha256: string;

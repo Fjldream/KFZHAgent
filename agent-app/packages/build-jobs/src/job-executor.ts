@@ -8,6 +8,10 @@ import type {
   PackagedDomainArtifact,
   ValidationReport,
 } from "@kf/contracts";
+import {
+  normalizeArtifactFileExtension,
+  normalizeArtifactMediaType,
+} from "@kf/contracts";
 import type { DomainRegistry } from "@kf/domain-registry";
 import { Prisma, type BuildJob, type PrismaClient } from "@prisma/client";
 import { Readable } from "node:stream";
@@ -102,7 +106,12 @@ export class BuildExecutor {
         return this.complete(job, { status: "FAILED", report });
       }
 
-      const packaged = await pack.package({ workspace: candidate.candidateWorkspace });
+      const emitted = await pack.package({ workspace: candidate.candidateWorkspace });
+      const packaged = {
+        ...emitted,
+        mediaType: normalizeArtifactMediaType(emitted.mediaType),
+        fileExtension: normalizeArtifactFileExtension(emitted.fileExtension),
+      };
       const stored = await this.#deps.storage.put({
         tenantId: job.tenantId,
         kind: packaged.artifactKind,
@@ -269,10 +278,14 @@ export class BuildExecutor {
           },
           domainKind: job.domainKind,
           domainProjectKind: packaged.domainProjectKind,
+          mediaType: packaged.mediaType,
+          fileExtension: packaged.fileExtension,
           packageHash: stored.sha256,
           packageUrl: stored.artifactId,
           artifact: {
             kind: packaged.artifactKind,
+            mediaType: packaged.mediaType,
+            fileExtension: packaged.fileExtension,
             storageKey: stored.artifactId,
             sizeBytes: stored.size,
             sha256: stored.sha256,

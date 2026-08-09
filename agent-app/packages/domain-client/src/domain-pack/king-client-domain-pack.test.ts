@@ -91,6 +91,7 @@ describe("KingClient domain pack", () => {
     expect(report.status).toBe("pass");
     expect(artifact.artifactKind).toBe("client-package");
     expect(artifact.domainProjectKind).toBe("client-package");
+    expect(artifact.mediaType).toBe("application/zip");
     expect(artifact.fileExtension).toBe(".gz");
     expect(artifact.bytes.byteLength).toBeGreaterThan(0);
   });

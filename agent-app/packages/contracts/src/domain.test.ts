@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  normalizeArtifactFileExtension,
+  normalizeArtifactMediaType,
   domainMetadataSchema,
   type DomainPack,
   type DomainWorkspace,
@@ -12,6 +14,14 @@ const workspace: DomainWorkspace = {
 };
 
 describe("domain execution contracts", () => {
+  it("normalizes artifact response metadata without permitting unsafe extensions", () => {
+    expect(normalizeArtifactMediaType("application/zip")).toBe("application/zip");
+    expect(normalizeArtifactMediaType("text/plain\r\nX-Evil: injected"))
+      .toBe("application/octet-stream");
+    expect(normalizeArtifactFileExtension(".ZIP")).toBe(".zip");
+    expect(normalizeArtifactFileExtension("../../payload.exe")).toBe(".gz");
+  });
+
   it("accepts metadata for a reserved unsupported domain", () => {
     expect(domainMetadataSchema.parse({
       kind: "kingcalculation",

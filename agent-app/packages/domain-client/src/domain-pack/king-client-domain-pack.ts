@@ -71,7 +71,8 @@ export function createKingClientDomainPack(options: {
       return {
         artifactKind: "client-package",
         domainProjectKind: "client-package",
-        mediaType: "application/gzip",
+        // KF's native `.gz` filename is a ZIP container, not a gzip stream.
+        mediaType: "application/zip",
         fileExtension: ".gz",
         bytes,
       };

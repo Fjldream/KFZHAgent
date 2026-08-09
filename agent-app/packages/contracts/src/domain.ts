@@ -66,6 +66,27 @@ export interface PackagedDomainArtifact {
   bytes: Uint8Array;
 }
 
+export const DEFAULT_ARTIFACT_MEDIA_TYPE = "application/octet-stream";
+export const DEFAULT_ARTIFACT_FILE_EXTENSION = ".gz";
+
+const MEDIA_TYPE_PATTERN =
+  /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/i;
+const FILE_EXTENSION_PATTERN = /^\.[a-z0-9]{1,10}$/i;
+
+/** Header-safe MIME with a compatibility fallback for rows created before metadata persistence. */
+export function normalizeArtifactMediaType(value: string | null | undefined): string {
+  return typeof value === "string" && MEDIA_TYPE_PATTERN.test(value)
+    ? value.toLowerCase()
+    : DEFAULT_ARTIFACT_MEDIA_TYPE;
+}
+
+/** A single, short suffix only; path separators and header characters fall back to legacy `.gz`. */
+export function normalizeArtifactFileExtension(value: string | null | undefined): string {
+  return typeof value === "string" && FILE_EXTENSION_PATTERN.test(value)
+    ? value.toLowerCase()
+    : DEFAULT_ARTIFACT_FILE_EXTENSION;
+}
+
 export interface DomainPack {
   readonly metadata: DomainMetadata;
   importPackage(input: DomainImportInput): Promise<DomainWorkspace>;

@@ -1,5 +1,9 @@
 import { Inject, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
 import type { ArtifactStorage } from "@kf/artifact-storage";
+import {
+  normalizeArtifactFileExtension,
+  normalizeArtifactMediaType,
+} from "@kf/contracts";
 import { createHash, randomBytes } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { ARTIFACT_STORAGE } from "./artifact-storage.js";
@@ -23,8 +27,15 @@ export class DownloadTokenService {
     tenantId: string;
     userId: string;
     artifactId: string;
-  }): Promise<{ token: string; expiresAt: Date; artifactId: string }> {
-    await this.assertArtifactInTenant(input.tenantId, input.artifactId);
+  }): Promise<{
+    token: string;
+    expiresAt: Date;
+    artifactId: string;
+    mediaType: string;
+    fileExtension: string;
+    fileName: string;
+  }> {
+    const artifact = await this.resolveArtifact(input.tenantId, input.artifactId);
     const token = randomBytes(32).toString("base64url");
     const expiresAt = new Date(Date.now() + DOWNLOAD_TOKEN_TTL_MS);
     await this.prisma.downloadToken.create({
@@ -36,7 +47,14 @@ export class DownloadTokenService {
         expiresAt,
       },
     });
-    return { token, expiresAt, artifactId: input.artifactId };
+    return {
+      token,
+      expiresAt,
+      artifactId: input.artifactId,
+      mediaType: artifact.mediaType,
+      fileExtension: artifact.fileExtension,
+      fileName: artifactFileName(input.artifactId, artifact.fileExtension),
+    };
   }
 
   /**
@@ -48,7 +66,14 @@ export class DownloadTokenService {
     token: string;
     tenantId: string;
     userId: string;
-  }): Promise<{ stream: NodeJS.ReadableStream; fileName: string; artifactId: string; sizeBytes: number | null }> {
+  }): Promise<{
+    stream: NodeJS.ReadableStream;
+    fileName: string;
+    artifactId: string;
+    sizeBytes: number | null;
+    mediaType: string;
+    fileExtension: string;
+  }> {
     const row = await this.prisma.downloadToken.findUnique({
       where: { tokenHash: hashToken(input.token) },
     });
@@ -58,7 +83,7 @@ export class DownloadTokenService {
     if (row.tenantId !== input.tenantId || row.userId !== input.userId) {
       throw new UnauthorizedException("download token does not match the active session");
     }
-    await this.assertArtifactInTenant(input.tenantId, row.artifactId);
+    const artifact = await this.resolveArtifact(input.tenantId, row.artifactId);
 
     // Atomic single-use claim: only one consumer can flip usedAt.
     const claimed = await this.prisma.downloadToken.updateMany({
@@ -69,23 +94,24 @@ export class DownloadTokenService {
       throw new UnauthorizedException("download token already used");
     }
 
-    // Resolve the artifact's storage key: the token stores the API artifact id,
-    // but the storage file is named by storageKey (LocalArtifactStorage path).
-    const artifact = await this.prisma.artifact.findFirst({
-      where: { OR: [{ id: row.artifactId }, { storageKey: row.artifactId }], tenantId: input.tenantId },
-    });
-    const storageKey = artifact?.storageKey ?? row.artifactId;
-    const stream = await this.storage.open(input.tenantId, storageKey);
+    const stream = await this.storage.open(input.tenantId, artifact.storageKey);
     return {
       stream,
-      fileName: `${row.artifactId}.gz`,
+      fileName: artifactFileName(row.artifactId, artifact.fileExtension),
       artifactId: row.artifactId,
-      sizeBytes: artifact?.sizeBytes ?? null,
+      sizeBytes: artifact.sizeBytes,
+      mediaType: artifact.mediaType,
+      fileExtension: artifact.fileExtension,
     };
   }
 
   /** The artifact must exist under the tenant via Artifact or DomainProjectRevision. */
-  private async assertArtifactInTenant(tenantId: string, artifactId: string): Promise<void> {
+  private async resolveArtifact(tenantId: string, artifactId: string): Promise<{
+    storageKey: string;
+    sizeBytes: number | null;
+    mediaType: string;
+    fileExtension: string;
+  }> {
     const [artifact, domainProject] = await Promise.all([
       this.prisma.artifact.findFirst({
         where: { OR: [{ id: artifactId }, { storageKey: artifactId }], tenantId },
@@ -95,7 +121,20 @@ export class DownloadTokenService {
     if (artifact === null && domainProject === null) {
       throw new NotFoundException("artifact");
     }
+    return {
+      storageKey: artifact?.storageKey ?? artifactId,
+      sizeBytes: artifact?.sizeBytes ?? null,
+      mediaType: normalizeArtifactMediaType(artifact?.mediaType ?? domainProject?.mediaType),
+      fileExtension: normalizeArtifactFileExtension(
+        artifact?.fileExtension ?? domainProject?.fileExtension,
+      ),
+    };
   }
+}
+
+function artifactFileName(artifactId: string, fileExtension: string): string {
+  const safeBase = artifactId.replace(/[^a-zA-Z0-9._-]/g, "_");
+  return `${safeBase}${normalizeArtifactFileExtension(fileExtension)}`;
 }
 
 function hashToken(token: string): string {
