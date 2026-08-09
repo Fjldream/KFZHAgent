@@ -101,9 +101,24 @@ export function createClassifyIntentNode(deps: SolutionGraphDeps) {
       }
     }
 
+    const wantsChange =
+      result.intent === "NEW_REQUIREMENT" || result.intent === "MODIFY_REQUIREMENT";
+    const unsupported =
+      wantsChange &&
+      result.requestedDomains.length > 0 &&
+      result.requestedDomains.every((domain) => !deps.isDomainSupported(domain));
+
     // design-review 阶段：用户短消息确认词指"确认设计计划"（CONFIRM_DESIGN），
     // 而非批准变更计划（CONFIRM_PLAN）——真实 LLM 常把"确认"误判为后者。
-    if (state.stage === "design-review") {
+    const hasUncommittedDesign =
+      state.designPlanHash !== undefined &&
+      state.planHash === undefined &&
+      state.buildJobId === undefined;
+    if (
+      !unsupported &&
+      (state.stage === "design-review" ||
+        (state.stage === "idle" && hasUncommittedDesign))
+    ) {
       const text = requirementText ?? "";
       if (
         text.length <= 12 &&
@@ -117,13 +132,6 @@ export function createClassifyIntentNode(deps: SolutionGraphDeps) {
         result = { ...result, intent: "REVISE_DESIGN" };
       }
     }
-
-    const wantsChange =
-      result.intent === "NEW_REQUIREMENT" || result.intent === "MODIFY_REQUIREMENT";
-    const unsupported =
-      wantsChange &&
-      result.requestedDomains.length > 0 &&
-      result.requestedDomains.every((domain) => !deps.isDomainSupported(domain));
 
     if (unsupported) {
       const pendingRequirements = result.requestedDomains.map((domain) => ({

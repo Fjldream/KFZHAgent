@@ -85,4 +85,29 @@ describe("classify-intent node design-review routing", () => {
 
     expect(update.intent).toBe("REVISE_DESIGN");
   });
+
+  it("recovers a cancelled legacy plan checkpoint back into design revision", async () => {
+    const deps = {
+      modelPort: {
+        classifyIntent: vi.fn().mockResolvedValue({
+          intent: "MODIFY_REQUIREMENT",
+          requestedDomains: ["kingclient"],
+        } satisfies ClassifyIntentResult),
+      },
+      workspaceQuery: { appendMessage: vi.fn().mockResolvedValue(undefined) },
+      isDomainSupported: () => true,
+    };
+
+    const update = await createClassifyIntentNode(deps as never)(
+      baseState({
+        stage: "idle",
+        designPlanHash: "a".repeat(64),
+        planHash: undefined,
+        buildJobId: undefined,
+        recentMessages: [{ role: "user", content: "再增加我的产品介绍" }],
+      }) as never,
+    );
+
+    expect(update.intent).toBe("REVISE_DESIGN");
+  });
 });

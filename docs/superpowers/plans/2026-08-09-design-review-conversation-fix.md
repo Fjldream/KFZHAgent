@@ -31,6 +31,7 @@
 - [ ] Run the focused test and confirm it fails with `MODIFY_REQUIREMENT`.
 - [ ] Add the minimal stage-aware normalization after the explicit-confirmation branch.
 - [ ] Add a graph regression asserting a second DesignPlan is emitted and no ChangePlan/approval interrupt is created.
+- [ ] Add a cancelled-plan checkpoint regression asserting `idle + designPlanHash + no plan/build` resumes design revision without bypassing unsupported-domain guards.
 - [ ] Run orchestrator focused and full tests.
 
 ### Task 2: Preserve full requirement context in DeepSeek prompts
@@ -48,4 +49,3 @@
 - [ ] Add a bounded recent-conversation block to the design prompt and complete the intent vocabulary.
 - [ ] Run model tests, API typecheck, and ESLint.
 - [ ] Run the real “个人网站” scenario against DeepSeek and confirm supplemental feedback yields `design-review` v2 without a ChangePlan.
-

@@ -896,7 +896,16 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     bed.deps.isDomainSupported = () => true;
     bed.model.queueIntent("NEW_REQUIREMENT");
     await sendUser(bed, ctx, "新增一个文本框");
-    const held4 = await bed.graph.invoke(input(ctx), config(ctx));
+    const revised4 = await bed.graph.invoke(input(ctx), config(ctx));
+    expect(revised4.stage).toBe("design-review");
+    expect(bed.model.createCalls).toHaveLength(1);
+
+    bed.model.queueIntent("CONFIRM_DESIGN");
+    await sendUser(bed, ctx, "确认");
+    const held4 = await bed.graph.invoke(
+      { ...input(ctx), stage: revised4.stage },
+      config(ctx),
+    );
     void held4;
     const payload4 = await interruptPayload(bed, ctx);
     expect(payload4).toBeDefined();
