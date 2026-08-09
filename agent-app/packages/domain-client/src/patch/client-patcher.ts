@@ -237,6 +237,7 @@ function asNumber(value: unknown): number {
 
 /** Container keys under which controls nest inside a page tree. */
 const CONTROL_CONTAINER_KEYS = ["objects", "children", "layoutItems", "insiderObjects"] as const;
+const PAGE_EDGE_PADDING = 40;
 
 /** A located entity inside a candidate document: parent array + index + root. */
 interface EntityRef {
@@ -267,6 +268,74 @@ function findControlRef(node: unknown, guid: string): EntityRef | undefined {
     }
   }
   return undefined;
+}
+
+function controlBounds(node: unknown): { right: number; bottom: number } {
+  let right = 0;
+  let bottom = 0;
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (!isObject(value)) return;
+    if (typeof value["uiModelType"] === "number") {
+      const leftTop = asRecord(value["leftTopPt"]);
+      right = Math.max(right, asNumber(leftTop["x"]) + asNumber(value["width"]));
+      bottom = Math.max(bottom, asNumber(leftTop["y"]) + asNumber(value["height"]));
+    }
+    for (const key of CONTROL_CONTAINER_KEYS) {
+      if (key in value) visit(value[key]);
+    }
+  };
+  visit(node);
+  return { right, bottom };
+}
+
+async function growPagesToFitControls(
+  candidate: string,
+  versionDir: string,
+  inspection: InspectResult,
+  pageGuids: ReadonlySet<string>,
+): Promise<void> {
+  const manager = await readJsonFile(candidate, versionDir, "project/pageManager.json");
+  const managerPages = Array.isArray(manager["Pages"])
+    ? (manager["Pages"] as Array<Record<string, unknown>>)
+    : [];
+  let managerChanged = false;
+
+  for (const page of Object.values(inspection.index.pages)) {
+    if (!pageGuids.has(page.guid)) continue;
+    const doc = await readJsonFile(candidate, versionDir, page.file);
+    const pageProperty = asRecord(doc["pageProperty"]);
+    const pageSize = asRecord(pageProperty["pageSize"]);
+    const currentWidth = asNumber(pageSize["width"]) || asNumber(doc["pageViewWidth"]);
+    const currentHeight = asNumber(pageSize["height"]) || asNumber(doc["pageViewHeight"]);
+    const bounds = controlBounds(doc["objects"]);
+    const width = bounds.right > currentWidth
+      ? bounds.right + PAGE_EDGE_PADDING
+      : currentWidth;
+    const height = bounds.bottom > currentHeight
+      ? bounds.bottom + PAGE_EDGE_PADDING
+      : currentHeight;
+    if (width === currentWidth && height === currentHeight) continue;
+
+    pageProperty["pageSize"] = { width, height };
+    pageProperty["windowSize"] = { width, height };
+    await writeJsonFile(candidate, versionDir, page.file, doc);
+
+    const managerPage = managerPages.find((entry) => entry["id"] === page.guid);
+    if (managerPage !== undefined) {
+      managerPage["width"] = width;
+      managerPage["height"] = height;
+      managerPage["resolution"] = `${width} * ${height}`;
+      managerChanged = true;
+    }
+  }
+
+  if (managerChanged) {
+    await writeJsonFile(candidate, versionDir, "project/pageManager.json", manager);
+  }
 }
 
 /** Locates a variable by its semantic name inside a Tag file's Variables array. */
@@ -521,6 +590,12 @@ export async function applyClientPatch(
 
   const versionDir = await resolveVersionDirName(base);
   const inspection = await inspectClientProject(base);
+  const pagesNeedingBoundsCheck = new Set(
+    plan.operations
+      .filter((op) => op.op === "create" && op.entityType === "control")
+      .map((op) => op.properties["pageId"])
+      .filter((pageId): pageId is string => typeof pageId === "string"),
+  );
   const candidate = await mkdtemp(
     path.join(options?.workRoot ?? tmpdir(), "kf-client-candidate-"),
   );
@@ -535,6 +610,8 @@ export async function applyClientPatch(
       await applyDelete(candidate, versionDir, inspection, base, op);
     }
   }
+
+  await growPagesToFitControls(candidate, versionDir, inspection, pagesNeedingBoundsCheck);
 
   return { id: plan.workspaceId, rootDir: candidate, mode: "candidate", path: candidate };
 }

@@ -96,6 +96,54 @@ describe("KingClient domain pack", () => {
     expect(artifact.bytes.byteLength).toBeGreaterThan(0);
   });
 
+  it("grows the native page when a confirmed control is created below its current bounds", async () => {
+    const pack = createKingClientDomainPack({ nativeAccepted: true });
+    const base = await pack.compile({
+      projectIr: {
+        ...ir,
+        pages: ir.pages.map((page) => ({ ...page, width: 1440, height: 900 })),
+      },
+      buildSeed: "workspace-tall-page",
+    });
+    const baseInspection = await pack.inspect({ workspace: base });
+    const [pageGuid] = Object.keys(baseInspection.index.pages);
+    const changePlan = {
+      schema: "kf-change-plan/v1",
+      workspaceId: "workspace-tall-page",
+      operations: [{
+        op: "create",
+        entityType: "control",
+        entityId: "ContactFormName",
+        properties: {
+          pageId: pageGuid,
+          type: "text",
+          text: "姓名",
+          x: 60,
+          y: 970,
+          width: 200,
+          height: 40,
+        },
+      }],
+    };
+
+    const candidate = await pack.patch({
+      baseWorkspace: base,
+      changePlan,
+      expectedPlanHash: planHash(changePlan),
+    });
+    const report = await pack.validate({
+      baseWorkspace: base,
+      candidateWorkspace: candidate,
+      changePlan,
+    });
+    const inspection = await pack.inspect({ workspace: candidate });
+    const managerPage = inspection.raw.pageManager.Pages[0];
+
+    expect(report.status).toBe("pass");
+    expect(inspection.summary.pages[0].height).toBe(1050);
+    expect(managerPage).toMatchObject({ height: 1050, resolution: "1440 * 1050" });
+  });
+
   it("imports a packaged workspace that the adapter can inspect", async () => {
     const pack = createKingClientDomainPack({ nativeAccepted: true });
     const workspace = await pack.compile({

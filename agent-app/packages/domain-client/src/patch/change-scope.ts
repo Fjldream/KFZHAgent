@@ -312,6 +312,58 @@ function relFile(file: string, versionDir: string): string {
   return versionDir === "." ? file : `${versionDir}/${file}`;
 }
 
+function finiteNumber(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+async function trackDerivedPageGrowth(
+  baseRoot: string,
+  versionDir: string,
+  page: { guid: string; file: string },
+  geometry: { x: number; y: number; width: number; height: number },
+  touchPointer: (file: string, pointer: string) => void,
+): Promise<void> {
+  const pageDoc = (await readJsonAt(baseRoot, versionDir, page.file)) as Record<string, unknown>;
+  const pageProperty = isObject(pageDoc["pageProperty"])
+    ? pageDoc["pageProperty"]
+    : {};
+  const pageSize = isObject(pageProperty["pageSize"])
+    ? pageProperty["pageSize"]
+    : {};
+  const managerPages = await pageManagerPages(baseRoot, versionDir);
+  const managerIndex = managerPages.findIndex((entry) => entry["id"] === page.guid);
+  const managerPage = managerIndex >= 0 ? managerPages[managerIndex]! : {};
+  const currentWidth =
+    finiteNumber(pageSize["width"]) ||
+    finiteNumber(pageDoc["pageViewWidth"]) ||
+    finiteNumber(managerPage["width"]);
+  const currentHeight =
+    finiteNumber(pageSize["height"]) ||
+    finiteNumber(pageDoc["pageViewHeight"]) ||
+    finiteNumber(managerPage["height"]);
+  const growsWidth = geometry.x + geometry.width > currentWidth;
+  const growsHeight = geometry.y + geometry.height > currentHeight;
+  if (!growsWidth && !growsHeight) return;
+
+  if (growsWidth) {
+    touchPointer(page.file, "#/pageProperty/pageSize/width");
+    touchPointer(page.file, "#/pageProperty/windowSize/width");
+    if (managerIndex >= 0) {
+      touchPointer("project/pageManager.json", `#/Pages/${managerIndex}/width`);
+    }
+  }
+  if (growsHeight) {
+    touchPointer(page.file, "#/pageProperty/pageSize/height");
+    touchPointer(page.file, "#/pageProperty/windowSize/height");
+    if (managerIndex >= 0) {
+      touchPointer("project/pageManager.json", `#/Pages/${managerIndex}/height`);
+    }
+  }
+  if (managerIndex >= 0) {
+    touchPointer("project/pageManager.json", `#/Pages/${managerIndex}/resolution`);
+  }
+}
+
 /** Per-array confirmed-delete/create counters used to shift create landing spots. */
 interface CreateShiftContext {
   deleteCountByPage: Map<string, number>;
@@ -347,6 +399,18 @@ async function trackCreate(
       const creates = shift.createCountByPage.get(pageId) ?? 0;
       const insertion = Math.max(0, objects.length - deletes + creates);
       touchPointer(page.file, `#/objects/${insertion}`);
+      await trackDerivedPageGrowth(
+        baseRoot,
+        versionDir,
+        page,
+        {
+          x: finiteNumber(op.properties?.["x"]),
+          y: finiteNumber(op.properties?.["y"]),
+          width: finiteNumber(op.properties?.["width"]) || 90,
+          height: finiteNumber(op.properties?.["height"]) || 60,
+        },
+        touchPointer,
+      );
       shift.createCountByPage.set(pageId, creates + 1);
       break;
     }
