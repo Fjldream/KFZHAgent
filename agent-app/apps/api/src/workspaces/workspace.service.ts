@@ -193,20 +193,14 @@ export class WorkspaceService {
     }
 
     const workDir = await mkdtemp(path.join(tmpdir(), "kf-source-import-"));
+    let summary: ClientProjectSummary;
     try {
       const bytes = await collectStream(await this.storage.open(input.tenantId, stored.artifactId));
       const sourceDir = await importNativeClientPackage(bytes, workDir);
       const inspected = await inspectClientProject(sourceDir);
-      return await this.commitSourceRevision({
-        tenantId: input.tenantId,
-        workspaceId: input.workspaceId,
-        domainKind,
-        projectKey: input.projectKey ?? domainKind,
-        stored,
-        summary: inspected.summary,
-      });
+      summary = inspected.summary;
     } catch (error) {
-      await this.storage.delete(input.tenantId, stored.artifactId).catch(() => {});
+      await this.cleanupUnadoptedSourceArtifact(input.tenantId, stored.artifactId);
       if (error instanceof HttpException) {
         throw error;
       }
@@ -218,6 +212,20 @@ export class WorkspaceService {
       // I2: always remove the unpack directory tree (success or failure) so
       // uploads cannot leak tens of KB per request into TMPDIR.
       await rm(workDir, { recursive: true, force: true }).catch(() => {});
+    }
+
+    try {
+      return await this.commitSourceRevision({
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        domainKind,
+        projectKey: input.projectKey ?? domainKind,
+        stored,
+        summary,
+      });
+    } catch (error) {
+      await this.cleanupUnadoptedSourceArtifact(input.tenantId, stored.artifactId);
+      throw error;
     }
   }
 
@@ -267,7 +275,7 @@ export class WorkspaceService {
         summary: inspected.summary,
       });
     } catch (error) {
-      await this.storage.delete(input.tenantId, stored.artifactId).catch(() => {});
+      await this.cleanupUnadoptedSourceArtifact(input.tenantId, stored.artifactId);
       throw error;
     } finally {
       // I2: always remove the unpack directory tree on this variant too.
@@ -434,6 +442,28 @@ export class WorkspaceService {
       });
       return { revision, domainProject, summary: input.summary };
     });
+  }
+
+  /**
+   * Compensates a source write only when the database can prove no revision
+   * adopted its storage key. A lookup failure is ambiguous, so it retains the
+   * blob; deletion is best-effort and never replaces the caller's exception.
+   */
+  private async cleanupUnadoptedSourceArtifact(
+    tenantId: string,
+    storageKey: string,
+  ): Promise<void> {
+    let adopted: { id: string } | null;
+    try {
+      adopted = await this.prisma.domainProjectRevision.findFirst({
+        where: { tenantId, packageUrl: storageKey },
+        select: { id: true },
+      });
+    } catch {
+      return;
+    }
+    if (adopted !== null) return;
+    await this.storage.delete(tenantId, storageKey).catch(() => {});
   }
 }
 

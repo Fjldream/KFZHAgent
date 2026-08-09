@@ -378,6 +378,52 @@ async function waitForBlockedQueries(expectations) {
   throw new Error(`timed out waiting for blocked queries: ${JSON.stringify(expectations)}`);
 }
 
+function workspaceServiceWithTransactionFailure(error, options = {}) {
+  const prismaProxy = new Proxy(prisma, {
+    get(target, property, receiver) {
+      if (property === "$transaction") {
+        return async (...args) => {
+          if (options.afterCommit === true) {
+            await target.$transaction(...args);
+          }
+          throw error;
+        };
+      }
+      if (property === "domainProjectRevision" && options.failReferenceLookup === true) {
+        return new Proxy(target.domainProjectRevision, {
+          get(model, modelProperty, modelReceiver) {
+            if (modelProperty === "findFirst") {
+              return async () => {
+                throw new Error("reference lookup unavailable");
+              };
+            }
+            const value = Reflect.get(model, modelProperty, modelReceiver);
+            return typeof value === "function" ? value.bind(model) : value;
+          },
+        });
+      }
+      const value = Reflect.get(target, property, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  return new WorkspaceService(prismaProxy, storage);
+}
+
+async function expectCommittedSourceBlobRetained(tenantId, workspaceId) {
+  const revision = await prisma.solutionRevision.findFirstOrThrow({
+    where: { tenantId, workspaceId, kind: "source" },
+  });
+  const domainProject = await prisma.domainProjectRevision.findFirstOrThrow({
+    where: { tenantId, solutionRevisionId: revision.id },
+  });
+  expect(domainProject.packageUrl).not.toBeNull();
+  const stream = await storage.open(tenantId, domainProject.packageUrl);
+  stream.destroy();
+  expect(await readdir(path.join(storageRoot, tenantId))).toEqual([domainProject.packageUrl]);
+  expect((await prisma.solutionWorkspace.findUnique({ where: { id: workspaceId } }))
+    ?.currentRevisionId).toBe(revision.id);
+}
+
 async function runToSuccess({ tenantId, workspaceId, baseRevisionId, changePlanId, planHashValue, hooks }) {
   const input = seedInput({ tenantId, workspaceId, baseRevisionId, changePlanId, planHashValue });
   const queued = await jobs.enqueue(input);
@@ -836,6 +882,81 @@ describe("full build chain", () => {
     });
     expect(latest.kind).toBe("built");
     expect(latest.parentRevisionId).toBe(sourceRevision.revision.id);
+  });
+
+  it("keeps a buffered source blob when commit succeeded before the response was lost", async () => {
+    const { tenant, workspace } = await seedWorkspace("upload");
+    const source = await packageNativeClientProject(unknownFieldClientDir);
+    const responseLost = new Error("buffered source commit response lost");
+    const lossyWorkspaces = workspaceServiceWithTransactionFailure(responseLost, {
+      afterCommit: true,
+    });
+
+    await expect(lossyWorkspaces.createSourceRevision({
+      tenantId: tenant.id,
+      workspaceId: workspace.id,
+      source,
+    })).rejects.toBe(responseLost);
+
+    await expectCommittedSourceBlobRetained(tenant.id, workspace.id);
+  });
+
+  it("keeps a streaming source blob when commit succeeded before the response was lost", async () => {
+    const { tenant, workspace } = await seedWorkspace("upload");
+    const source = await packageNativeClientProject(unknownFieldClientDir);
+    const responseLost = new Error("streaming source commit response lost");
+    const lossyWorkspaces = workspaceServiceWithTransactionFailure(responseLost, {
+      afterCommit: true,
+    });
+
+    await expect(lossyWorkspaces.uploadSourceRevision({
+      tenantId: tenant.id,
+      workspaceId: workspace.id,
+      stream: Readable.from([source]),
+    })).rejects.toBe(responseLost);
+
+    await expectCommittedSourceBlobRetained(tenant.id, workspace.id);
+  });
+
+  it("keeps a buffered source blob when reference lookup is unavailable", async () => {
+    const { tenant, workspace } = await seedWorkspace("upload");
+    const source = await packageNativeClientProject(unknownFieldClientDir);
+    const commitError = new Error("buffered source commit status unknown");
+    const uncertainWorkspaces = workspaceServiceWithTransactionFailure(commitError, {
+      failReferenceLookup: true,
+    });
+
+    await expect(uncertainWorkspaces.createSourceRevision({
+      tenantId: tenant.id,
+      workspaceId: workspace.id,
+      source,
+    })).rejects.toBe(commitError);
+
+    expect(await prisma.solutionRevision.count({ where: { workspaceId: workspace.id } })).toBe(0);
+    expect(await readdir(path.join(storageRoot, tenant.id))).toHaveLength(1);
+  });
+
+  it("does not mask a streaming commit error when loser blob deletion fails", async () => {
+    const { tenant, workspace } = await seedWorkspace("upload");
+    const source = await packageNativeClientProject(unknownFieldClientDir);
+    const commitError = new Error("streaming source commit failed");
+    const failedWorkspaces = workspaceServiceWithTransactionFailure(commitError);
+    const deleteFailure = vi.spyOn(storage, "delete").mockRejectedValueOnce(
+      new Error("source blob delete failed"),
+    );
+
+    try {
+      await expect(failedWorkspaces.uploadSourceRevision({
+        tenantId: tenant.id,
+        workspaceId: workspace.id,
+        stream: Readable.from([source]),
+      })).rejects.toBe(commitError);
+    } finally {
+      deleteFailure.mockRestore();
+    }
+
+    expect(await prisma.solutionRevision.count({ where: { workspaceId: workspace.id } })).toBe(0);
+    expect(await readdir(path.join(storageRoot, tenant.id))).toHaveLength(1);
   });
 
   it("commits only one source revision when two imports race on an empty workspace", async () => {
