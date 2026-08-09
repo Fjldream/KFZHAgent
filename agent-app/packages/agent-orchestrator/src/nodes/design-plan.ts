@@ -44,42 +44,64 @@ export function createDesignPlanNode(deps: SolutionGraphDeps) {
         | import("../ports.js").EditableEntity[]
         | undefined,
     };
-    const rawPlan = await deps.modelPort.createDesignPlan(modelInput, { revising });
-    let parsed = CustomerEffectBlueprintSchema.safeParse(rawPlan);
-    if (!parsed.success) {
-      // I1: never persist or hash garbage from the model; return to idle with
-      // INVALID_MODEL_OUTPUT and no side effects.
-      return { stage: "idle", lastErrorCode: "INVALID_MODEL_OUTPUT" };
+    let rawPlan: unknown;
+    let modelCallFailed = false;
+    try {
+      rawPlan = await deps.modelPort.createDesignPlan(modelInput, { revising });
+    } catch {
+      modelCallFailed = true;
     }
-    let plan = parsed.data;
-    if (revising && state.designPlan !== undefined) {
-      let rejectionReasons = assessBlueprintRevision(state.designPlan, plan);
-      if (rejectionReasons.length > 0) {
-        const retried = await deps.modelPort.createDesignPlan(modelInput, {
-          revising: true,
+    let parsed = CustomerEffectBlueprintSchema.safeParse(rawPlan);
+    let rejectionReasons = modelCallFailed
+      ? ["模型未返回完整客户效果蓝图"]
+      : parsed.success
+        ? []
+        : ["候选蓝图不符合完整客户效果蓝图结构"];
+    if (parsed.success && revising && state.designPlan !== undefined) {
+      rejectionReasons = assessBlueprintRevision(state.designPlan, parsed.data);
+    }
+
+    if (rejectionReasons.length > 0) {
+      let retried: unknown;
+      modelCallFailed = false;
+      try {
+        retried = await deps.modelPort.createDesignPlan(modelInput, {
+          revising,
           rejectionReasons,
         });
-        parsed = CustomerEffectBlueprintSchema.safeParse(retried);
-        if (parsed.success) {
-          plan = parsed.data;
-          rejectionReasons = assessBlueprintRevision(state.designPlan, plan);
-        }
+      } catch {
+        modelCallFailed = true;
       }
-      if (!parsed.success || rejectionReasons.length > 0) {
-        await deps.workspaceQuery.appendMessage({
-          tenantId: state.tenantId,
-          conversationId: state.conversationId,
-          role: "assistant",
-          content:
-            "抱歉，您刚才提出的修改还没有充分体现到新蓝图中，因此我保留了上一版有效方案，没有进入工程计划。请再补充一下希望新增或调整的具体内容，我会继续为您完善。",
-        });
-        return {
-          stage: "design-review",
-          revising: undefined,
-          lastErrorCode: "DESIGN_REVISION_NOT_APPLIED",
-        };
-      }
+      parsed = CustomerEffectBlueprintSchema.safeParse(retried);
+      rejectionReasons = modelCallFailed
+        ? ["模型未返回完整客户效果蓝图"]
+        : parsed.success
+          ? revising && state.designPlan !== undefined
+            ? assessBlueprintRevision(state.designPlan, parsed.data)
+            : []
+          : ["候选蓝图不符合完整客户效果蓝图结构"];
     }
+
+    if (!parsed.success || rejectionReasons.length > 0) {
+      if (!revising || state.designPlan === undefined) {
+        // I1: never persist or hash garbage from the model. A first blueprint
+        // gets one repair attempt, then safely returns without side effects.
+        return { stage: "idle", lastErrorCode: "INVALID_MODEL_OUTPUT" };
+      }
+      await deps.workspaceQuery.appendMessage({
+        tenantId: state.tenantId,
+        conversationId: state.conversationId,
+        role: "assistant",
+        content:
+          "抱歉，您刚才提出的修改还没有充分体现到新蓝图中，因此我保留了上一版有效方案，没有进入工程计划。请再补充一下希望新增或调整的具体内容，我会继续为您完善。",
+      });
+      return {
+        stage: "design-review",
+        revising: undefined,
+        lastErrorCode: "DESIGN_REVISION_NOT_APPLIED",
+      };
+    }
+    const plan = parsed.data;
     const revision = (state.designRevision ?? 0) + 1;
     const hash = hashDesignPlan(plan, revision);
     const rendered = encodeBlueprintMessage(plan, revision);

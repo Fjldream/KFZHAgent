@@ -171,7 +171,7 @@ class FakeModelPort implements ModelPort {
   }
 
   async createDesignPlan(
-    _input: ModelPortContext,
+    input: ModelPortContext,
     opts?: { revising?: boolean },
   ): Promise<DesignPlan> {
     const base: CustomerEffectBlueprint = {
@@ -205,6 +205,50 @@ class FakeModelPort implements ModelPort {
       openQuestions: [],
     };
     if (opts?.revising !== true) return base;
+    if (/产品|项目经历|内容要充实/.test(input.requirementText ?? "")) {
+      return {
+        ...base,
+        displayName: "个人求职作品集",
+        overview: {
+          objective: "让招聘经理完整了解候选人的产品能力和项目成果",
+          audiences: ["招聘经理", "面试官"],
+          scenarios: ["求职应聘"],
+          valueProposition: "用完整案例证明候选人的实际贡献",
+        },
+        informationArchitecture: {
+          narrative: "从个人定位到产品、项目、履历和联系方式",
+          wireframe: "首屏 → 我的产品 → 项目经历 → 履历 → 联系方式",
+        },
+        modules: [
+          {
+            id: "products",
+            name: "我的产品",
+            purpose: "展示主导或参与的代表产品",
+            content: ["产品定位", "个人职责", "核心能力", "量化成果"],
+            sampleData: [{ label: "产品名称", value: "KingFusion 工业低代码平台" }],
+            interactions: ["点击产品卡片展开详情"],
+            presentation: "大尺寸产品卡片",
+          },
+          {
+            id: "projects",
+            name: "项目经历",
+            purpose: "用完整项目案例证明交付能力",
+            content: ["项目背景", "个人职责", "解决方案", "量化成果"],
+            sampleData: [{ label: "项目名称", value: "汽车工厂能源管理平台" }],
+            interactions: ["展开项目详情"],
+            presentation: "纵向时间线",
+          },
+        ],
+        revisionNotes: {
+          added: ["新增独立的我的产品模块"],
+          changed: ["项目经历补充背景、职责、方案和成果"],
+          retained: ["保留专业清晰的视觉方向"],
+        },
+        acceptanceCriteria: [
+          "至少展示两个产品案例和三个包含背景、职责、方案、成果的项目案例",
+        ],
+      };
+    }
     return {
       ...base,
       modules: [
@@ -626,6 +670,13 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     const first = await bed.graph.invoke(input(ctx), config(ctx));
     expect(first.stage).toBe("design-review");
     expect(first.designRevision).toBe(1);
+    expect(first.designPlan?.schema).toBe("kf-design-plan/v2");
+    if (first.designPlan?.schema !== "kf-design-plan/v2") {
+      throw new Error("expected a complete first customer effect blueprint");
+    }
+    expect(first.designPlan.overview.objective.length).toBeGreaterThan(10);
+    expect(first.designPlan.modules[0]?.sampleData.length).toBeGreaterThan(0);
+    expect(first.designPlan.acceptanceCriteria.length).toBeGreaterThan(0);
 
     bed.model.queueIntent("MODIFY_REQUIREMENT");
     await sendUser(
@@ -640,6 +691,22 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
 
     expect(second.stage).toBe("design-review");
     expect(second.designRevision).toBe(2);
+    if (second.designPlan?.schema !== "kf-design-plan/v2") {
+      throw new Error("expected a revised customer effect blueprint");
+    }
+    expect(second.designPlan.modules.map((module) => module.name)).toEqual(
+      expect.arrayContaining(["我的产品", "项目经历"]),
+    );
+    const products = second.designPlan.modules.find((module) => module.name === "我的产品");
+    const projects = second.designPlan.modules.find((module) => module.name === "项目经历");
+    expect(products?.sampleData.length).toBeGreaterThan(0);
+    expect(projects?.content).toEqual(
+      expect.arrayContaining(["项目背景", "个人职责", "解决方案", "量化成果"]),
+    );
+    expect(second.designPlan.revisionNotes.added).toContain("新增独立的我的产品模块");
+    expect(second.designPlan.acceptanceCriteria).toContain(
+      "至少展示两个产品案例和三个包含背景、职责、方案、成果的项目案例",
+    );
     expect(bed.repo.requests.size).toBe(0);
     expect(bed.repo.plans.size).toBe(0);
     expect(bed.builds.enqueues).toHaveLength(0);

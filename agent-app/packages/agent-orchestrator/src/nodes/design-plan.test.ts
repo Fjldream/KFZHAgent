@@ -169,6 +169,59 @@ describe("design-plan node", () => {
     expect(third.designPlanHash).not.toBe(first.designPlanHash);
   });
 
+  it("retries once when the first customer blueprint does not match the detailed schema", async () => {
+    const { deps, modelPort, workspaceQuery } = makeDesignDeps();
+    modelPort.createDesignPlan
+      .mockResolvedValueOnce({
+        schema: "kf-design-plan/v1",
+        displayName: "简略方案",
+        summary: "只有一句摘要",
+        layoutConcept: "单页",
+        styleDirection: "专业",
+        sections: [{ id: "main", label: "主区", controls: [{ type: "text" }] }],
+        signature: "无",
+      })
+      .mockResolvedValueOnce(designPlan);
+    const node = createDesignPlanNode(deps);
+
+    const update = await node(baseState() as never);
+
+    expect(modelPort.createDesignPlan).toHaveBeenCalledTimes(2);
+    expect(modelPort.createDesignPlan).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      expect.objectContaining({
+        revising: false,
+        rejectionReasons: ["候选蓝图不符合完整客户效果蓝图结构"],
+      }),
+    );
+    expect(update.designPlan).toEqual(designPlan);
+    expect(update.designRevision).toBe(1);
+    expect(workspaceQuery.appendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries once when the model adapter rejects the first malformed blueprint", async () => {
+    const { deps, modelPort } = makeDesignDeps();
+    modelPort.createDesignPlan
+      .mockRejectedValueOnce(new Error("design plan failed zod gate"))
+      .mockResolvedValueOnce(designPlan);
+    const node = createDesignPlanNode(deps);
+
+    const update = await node(baseState() as never);
+
+    expect(modelPort.createDesignPlan).toHaveBeenCalledTimes(2);
+    expect(modelPort.createDesignPlan).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      expect.objectContaining({
+        revising: false,
+        rejectionReasons: ["模型未返回完整客户效果蓝图"],
+      }),
+    );
+    expect(update.designPlan).toEqual(designPlan);
+    expect(update.stage).toBe("design-review");
+  });
+
   it("retries once with quality reasons when a revision body is unchanged", async () => {
     const { deps, modelPort } = makeDesignDeps();
     modelPort.createDesignPlan
