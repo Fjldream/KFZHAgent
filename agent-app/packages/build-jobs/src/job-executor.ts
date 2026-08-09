@@ -16,6 +16,7 @@ import type { DomainRegistry } from "@kf/domain-registry";
 import { Prisma, type BuildJob, type PrismaClient } from "@prisma/client";
 import { Readable } from "node:stream";
 import { BuildJobService } from "./build-job.service.js";
+import { resolveRevisionProjectIr } from "./revision-state.js";
 
 /**
  * Thrown by the crash-injection hook to simulate a worker terminating after
@@ -150,13 +151,28 @@ export class BuildExecutor {
     const planInput = plan.plan ?? {};
     const workRoot =
       this.#deps.workRoot === undefined ? {} : { workRoot: this.#deps.workRoot };
-    if (baseRevision.kind === "initial") {
-      // New flow: compile the solution IR into a fresh client project. The
-      // seed is the workspace id so derived GUIDs are deterministic per
-      // workspace (a retried job rebuilds identical bytes).
+    const domainProject = await this.#deps.prisma.domainProjectRevision.findFirst({
+      where: {
+        solutionRevisionId: baseRevision.id,
+        tenantId: job.tenantId,
+        projectKey: job.projectKey,
+        domainKind: job.domainKind,
+      },
+    });
+    if (domainProject === null) {
+      // No package exists for this exact project yet: compile only its IR.
+      // The legacy single-project seed remains the workspace id; explicit
+      // project keys extend it so two projects cannot derive colliding ids.
       const baseWorkspace = await pack.compile({
-        projectIr: baseRevision.state ?? {},
-        buildSeed: job.workspaceId,
+        projectIr: resolveRevisionProjectIr(
+          baseRevision.state,
+          job.projectKey,
+          job.domainKind,
+        ),
+        buildSeed:
+          job.projectKey === job.domainKind
+            ? job.workspaceId
+            : `${job.workspaceId}:${job.projectKey}`,
         ...workRoot,
       });
       // C1: the confirmed change plan must really land in the build artifact.
@@ -180,11 +196,7 @@ export class BuildExecutor {
 
     // Upload/modify flow: fetch the base package, unpack it, and apply the
     // confirmed change plan to a fresh candidate copy.
-    const domainProject = await this.#deps.prisma.domainProjectRevision.findFirst({
-      where: { solutionRevisionId: baseRevision.id, tenantId: job.tenantId },
-      orderBy: { createdAt: "desc" },
-    });
-    if (domainProject === null || domainProject.packageUrl === null) {
+    if (domainProject.packageUrl === null) {
       throw new Error(`base revision ${baseRevision.id} has no package`);
     }
     const packageBytes = await this.readBasePackage(job.tenantId, domainProject.packageUrl);

@@ -4,6 +4,7 @@ import type {
   CompleteBuildInput,
   EnqueueBuildInput,
 } from "./types.js";
+import { replaceRevisionProjectBuildState } from "./revision-state.js";
 
 /**
  * Durable build-job lease and commit logic, shared by the API (enqueue) and
@@ -53,13 +54,12 @@ export class BuildJobService {
 
   /** Enqueues a build job; idempotent on idempotencyKey. */
   async enqueue(input: EnqueueBuildInput): Promise<BuildJob> {
+    const projectKey = normalizeProjectKey(input.projectKey, input.domainKind);
     const existing = await this.prisma.buildJob.findUnique({
       where: { idempotencyKey: input.idempotencyKey },
     });
     if (existing !== null) {
-      if (existing.tenantId !== input.tenantId) {
-        throw new BuildJobConflictError("idempotency key already used by another tenant");
-      }
+      assertIdempotencyBinding(existing, input, projectKey);
       return existing;
     }
 
@@ -91,7 +91,7 @@ export class BuildJobService {
 
     try {
       return await this.prisma.buildJob.create({
-        data: { ...input, status: "QUEUED" },
+        data: { ...input, projectKey, status: "QUEUED" },
       });
     } catch (error) {
       // Concurrent enqueue of the same key: the UNIQUE index is the final
@@ -100,7 +100,10 @@ export class BuildJobService {
         const winner = await this.prisma.buildJob.findUnique({
           where: { idempotencyKey: input.idempotencyKey },
         });
-        if (winner !== null) return winner;
+        if (winner !== null) {
+          assertIdempotencyBinding(winner, input, projectKey);
+          return winner;
+        }
       }
       throw error;
     }
@@ -197,8 +200,18 @@ export class BuildJobService {
           throw new BuildJobConflictError("SUCCEEDED completion requires a build result");
         }
         const { result, validationReport } = input;
+        const baseRevision = await tx.solutionRevision.findFirst({
+          where: {
+            id: job.baseRevisionId,
+            tenantId: job.tenantId,
+            workspaceId: job.workspaceId,
+          },
+        });
+        if (baseRevision === null) {
+          throw new BuildJobNotFoundError("base revision");
+        }
         const latest = await tx.solutionRevision.findFirst({
-          where: { workspaceId: job.workspaceId },
+          where: { workspaceId: job.workspaceId, tenantId: job.tenantId },
           orderBy: { revisionNumber: "desc" },
         });
         const revision = await tx.solutionRevision.create({
@@ -209,13 +222,45 @@ export class BuildJobService {
             revisionNumber: (latest?.revisionNumber ?? 0) + 1,
             kind: result.kind,
             parentRevisionId: job.baseRevisionId,
-            state: result.state as Prisma.InputJsonValue,
+            state: toInputJsonValue(
+              replaceRevisionProjectBuildState(
+                baseRevision.state,
+                job.projectKey,
+                job.domainKind,
+                result.state,
+              ),
+            ),
           },
         });
+        const baseProjects = await tx.domainProjectRevision.findMany({
+          where: {
+            tenantId: job.tenantId,
+            solutionRevisionId: job.baseRevisionId,
+          },
+        });
+        const preservedProjects = baseProjects.filter(
+          (project) => project.projectKey !== job.projectKey,
+        );
+        if (preservedProjects.length > 0) {
+          await tx.domainProjectRevision.createMany({
+            data: preservedProjects.map((project) => ({
+              tenantId: job.tenantId,
+              solutionRevisionId: revision.id,
+              projectKey: project.projectKey,
+              domainKind: project.domainKind,
+              kind: project.kind,
+              mediaType: project.mediaType,
+              fileExtension: project.fileExtension,
+              packageHash: project.packageHash,
+              packageUrl: project.packageUrl,
+            })),
+          });
+        }
         await tx.domainProjectRevision.create({
           data: {
             tenantId: job.tenantId,
             solutionRevisionId: revision.id,
+            projectKey: job.projectKey,
             domainKind: result.domainKind,
             kind: result.domainProjectKind,
             mediaType: result.mediaType,
@@ -292,6 +337,7 @@ interface BuildJobRow {
   baseRevisionId: string;
   changePlanId: string;
   planHash: string;
+  projectKey: string;
   domainKind: string;
   idempotencyKey: string;
   status: JobStatus;
@@ -300,6 +346,62 @@ interface BuildJobRow {
   attemptCount: number;
   createdAt: Date;
   updatedAt: Date;
+}
+
+function normalizeProjectKey(projectKey: string | undefined, domainKind: string): string {
+  const normalized = projectKey?.trim() ?? domainKind.trim();
+  if (normalized.length === 0 || normalized.length > 128) {
+    throw new BuildJobConflictError("projectKey must contain 1 to 128 characters");
+  }
+  return normalized;
+}
+
+function assertIdempotencyBinding(
+  existing: BuildJob,
+  input: EnqueueBuildInput,
+  projectKey: string,
+): void {
+  if (existing.tenantId !== input.tenantId) {
+    throw new BuildJobConflictError("idempotency key already used by another tenant");
+  }
+  if (
+    existing.workspaceId !== input.workspaceId ||
+    existing.baseRevisionId !== input.baseRevisionId ||
+    existing.changePlanId !== input.changePlanId ||
+    existing.planHash !== input.planHash ||
+    existing.projectKey !== projectKey ||
+    existing.domainKind !== input.domainKind
+  ) {
+    throw new BuildJobConflictError("idempotency key already used by another build");
+  }
+}
+
+function toInputJsonValue(value: unknown): Prisma.InputJsonValue {
+  if (value === null) {
+    throw new BuildJobConflictError("revision state must not be null");
+  }
+  if (typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new BuildJobConflictError("revision state numbers must be finite");
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) =>
+      entry === null || entry === undefined ? null : toInputJsonValue(entry),
+    );
+  }
+  if (typeof value === "object") {
+    const output: Record<string, Prisma.InputJsonValue | null> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      if (entry !== undefined) {
+        output[key] = entry === null ? null : toInputJsonValue(entry);
+      }
+    }
+    return output;
+  }
+  throw new BuildJobConflictError("revision state must be JSON serializable");
 }
 
 function isUniqueViolation(error: unknown): boolean {

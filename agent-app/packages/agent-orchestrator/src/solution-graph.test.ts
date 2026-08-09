@@ -476,6 +476,7 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
       baseRevisionId: REVISION_1,
       changePlanId: `plan:${WORKSPACE_ID}:${payload.planHash}`,
       planHash: payload.planHash,
+      projectKey: "kingclient",
       domainKind: "kingclient",
     });
     expect(result.buildJobId).toBe("job-1");

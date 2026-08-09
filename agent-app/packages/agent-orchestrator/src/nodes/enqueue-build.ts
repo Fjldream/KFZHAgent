@@ -34,7 +34,10 @@ export function createEnqueueBuildNode(deps: SolutionGraphDeps) {
       return { lastErrorCode: "INCOMPLETE_PLAN", stage: "idle" };
     }
 
-    const idempotencyKey = `${state.conversationId}:${state.changePlanId}:${state.planHash}`;
+    const domainKind = deps.defaultDomainKind ?? "kingclient";
+    const projectKey = deps.defaultProjectKey ?? domainKind;
+    const idempotencyKey =
+      `${state.conversationId}:${projectKey}:${state.changePlanId}:${state.planHash}`;
     try {
       const job = await deps.buildJobPort.enqueue({
         tenantId: state.tenantId,
@@ -42,7 +45,8 @@ export function createEnqueueBuildNode(deps: SolutionGraphDeps) {
         baseRevisionId: state.currentRevisionId,
         changePlanId: state.changePlanId,
         planHash: state.planHash,
-        domainKind: deps.defaultDomainKind ?? "kingclient",
+        projectKey,
+        domainKind,
         idempotencyKey,
       });
       await deps.changePlanRepository.setChangeRequestStatus({

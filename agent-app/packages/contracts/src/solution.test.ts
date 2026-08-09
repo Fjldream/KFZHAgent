@@ -24,6 +24,22 @@ describe("solutionIRSchema", () => {
     expect(ir.projects[0]?.domain).toBe("kingclient");
   });
 
+  it("derives a stable projectKey from the legacy project id", () => {
+    const ir = solutionIRSchema.parse(validIRInput);
+    expect(ir.projects[0]?.projectKey).toBe("p1");
+  });
+
+  it("keeps explicit keys distinct for multiple projects in one domain", () => {
+    const ir = solutionIRSchema.parse({
+      ...validIRInput,
+      projects: [
+        { id: "calc-a", projectKey: "primary", name: "主计算", domain: "kingcalculation" },
+        { id: "calc-b", projectKey: "secondary", name: "备用计算", domain: "kingcalculation" },
+      ],
+    });
+    expect(ir.projects.map((project) => project.projectKey)).toEqual(["primary", "secondary"]);
+  });
+
   it("rejects an empty solution id", () => {
     expect(() => solutionIRSchema.parse({ ...validIRInput, solutionId: "" })).toThrow(
       "solution id is required"

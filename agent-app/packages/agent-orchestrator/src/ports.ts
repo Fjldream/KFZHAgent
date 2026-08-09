@@ -162,4 +162,6 @@ export interface SolutionGraphDeps {
   isDomainSupported: (domain: string) => boolean;
   /** Domain used when enqueueing a build (defaults to the KF client domain). */
   defaultDomainKind?: string;
+  /** Stable project identity used with the default domain (defaults to domain kind). */
+  defaultProjectKey?: string;
 }

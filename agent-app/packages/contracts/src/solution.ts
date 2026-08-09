@@ -11,13 +11,24 @@ export const solutionIdSchema = z
   .refine((value) => value.trim().length > 0, "solution id is required")
   .transform((value) => solutionId(value));
 
-export const solutionProjectSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  domain: z.string(),
-  path: z.string().optional()
-});
-export type SolutionProject = z.infer<typeof solutionProjectSchema>;
+export const projectBlueprintSchema = z
+  .object({
+    id: z.string().min(1),
+    projectKey: z.string().trim().min(1).max(128).optional(),
+    name: z.string(),
+    domain: z.string(),
+    path: z.string().optional(),
+    projectIr: z.unknown().optional(),
+  })
+  .transform((project) => ({
+    ...project,
+    projectKey: project.projectKey ?? project.id,
+  }));
+export type ProjectBlueprint = z.infer<typeof projectBlueprintSchema>;
+
+/** Backward-compatible name retained for v1 SolutionIR consumers. */
+export const solutionProjectSchema = projectBlueprintSchema;
+export type SolutionProject = ProjectBlueprint;
 
 export const solutionDependencySchema = z.object({
   from: z.string(),

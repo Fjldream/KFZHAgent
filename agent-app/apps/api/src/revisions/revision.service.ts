@@ -99,8 +99,10 @@ export class RevisionService {
     if (target.kind === "initial") {
       throw new BadRequestException("cannot roll back to an empty initial revision");
     }
-    const targetDomain = await this.getDomainProject(input.tenantId, target.id);
-    if (targetDomain === null || targetDomain.packageUrl === null) {
+    const targetDomains = await this.prisma.domainProjectRevision.findMany({
+      where: { tenantId: input.tenantId, solutionRevisionId: target.id },
+    });
+    if (targetDomains.length === 0 || targetDomains.some((domain) => domain.packageUrl === null)) {
       throw new BadRequestException("target revision has no package");
     }
 
@@ -120,15 +122,18 @@ export class RevisionService {
           ...(target.state !== null ? { state: target.state as object } : {}),
         },
       });
-      await tx.domainProjectRevision.create({
-        data: {
+      await tx.domainProjectRevision.createMany({
+        data: targetDomains.map((targetDomain) => ({
           tenantId: input.tenantId,
           solutionRevisionId: revision.id,
+          projectKey: targetDomain.projectKey,
           domainKind: targetDomain.domainKind,
           kind: targetDomain.kind,
+          mediaType: targetDomain.mediaType,
+          fileExtension: targetDomain.fileExtension,
           packageHash: targetDomain.packageHash,
           packageUrl: targetDomain.packageUrl,
-        },
+        })),
       });
       await tx.solutionWorkspace.update({
         where: { id: input.workspaceId },

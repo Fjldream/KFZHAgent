@@ -9,6 +9,8 @@ export interface EnqueueBuildInput {
   baseRevisionId: string;
   changePlanId: string;
   planHash: string;
+  /** Stable project identity. Omitted legacy calls default to domainKind. */
+  projectKey?: string;
   domainKind: string;
   idempotencyKey: string;
 }

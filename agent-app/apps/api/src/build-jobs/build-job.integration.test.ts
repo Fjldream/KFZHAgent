@@ -185,6 +185,73 @@ function calculationPack(
   };
 }
 
+function trackingDomainPack(domainKind, calls) {
+  const versions = new Map();
+  return {
+    metadata: {
+      kind: domainKind,
+      displayName: domainKind,
+      supported: true,
+      capabilities: {
+        create: true,
+        import: true,
+        modify: true,
+        validate: true,
+        package: true,
+      },
+    },
+    async importPackage({ bytes }) {
+      const packageMarker = Buffer.from(bytes).toString("utf8");
+      const [, projectMarker] = packageMarker.split(":");
+      calls.push({ phase: "import", projectMarker, packageMarker });
+      return { id: projectMarker, rootDir: `/${domainKind}/${projectMarker}/base`, mode: "base" };
+    },
+    async inspect() {
+      return {};
+    },
+    async compile({ projectIr }) {
+      const projectMarker = projectIr?.marker;
+      calls.push({ phase: "compile", projectMarker, projectIr });
+      return { id: projectMarker, rootDir: `/${domainKind}/${projectMarker}/compiled`, mode: "base" };
+    },
+    async patch({ baseWorkspace }) {
+      calls.push({ phase: "patch", projectMarker: baseWorkspace.id });
+      return {
+        id: baseWorkspace.id,
+        rootDir: `/${domainKind}/${baseWorkspace.id}/candidate`,
+        mode: "candidate",
+      };
+    },
+    async validate() {
+      return {
+        status: "pass",
+        checks: {
+          packageStructure: "pass",
+          jsonSchema: "pass",
+          references: "pass",
+          businessRules: "pass",
+          changeScope: "pass",
+          roundTrip: "pass",
+        },
+        warnings: [],
+      };
+    },
+    async package({ workspace }) {
+      const nextVersion = (versions.get(workspace.id) ?? 0) + 1;
+      versions.set(workspace.id, nextVersion);
+      const packageMarker = `pkg:${workspace.id}:${nextVersion}`;
+      calls.push({ phase: "package", projectMarker: workspace.id, packageMarker });
+      return {
+        artifactKind: `${domainKind}-package`,
+        domainProjectKind: `${domainKind}-project`,
+        mediaType: "application/zip",
+        fileExtension: ".zip",
+        bytes: Buffer.from(packageMarker),
+      };
+    },
+  };
+}
+
 async function seedWorkspace(mode = "new") {
   counter += 1;
   const tenant = await prisma.tenant.create({
@@ -248,6 +315,36 @@ async function runToSuccess({ tenantId, workspaceId, baseRevisionId, changePlanI
   const done = await executor.execute(leased);
   expect(done.status).toBe("SUCCEEDED");
   return { input, queued, done };
+}
+
+async function runProjectBuild({
+  tenantId,
+  workspaceId,
+  baseRevisionId,
+  domainKind,
+  projectKey,
+  localRegistry,
+}) {
+  const { plan, hash } = await seedPlan(tenantId, workspaceId);
+  const input = {
+    ...seedInput({
+      tenantId,
+      workspaceId,
+      baseRevisionId,
+      changePlanId: plan.id,
+      planHashValue: hash,
+    }),
+    domainKind,
+    projectKey,
+  };
+  const queued = await jobs.enqueue(input);
+  const leased = await jobs.leaseNext(`worker-${projectKey}`, new Date());
+  expect(leased?.id).toBe(queued.id);
+  const executor = new BuildExecutor({ prisma, storage, registry: localRegistry });
+  const done = await executor.execute(leased);
+  expect(done.status).toBe("SUCCEEDED");
+  const workspace = await prisma.solutionWorkspace.findUnique({ where: { id: workspaceId } });
+  return workspace.currentRevisionId;
 }
 
 // ---------------------------------------------------------------------------
@@ -411,6 +508,25 @@ describe("build job idempotency and leases", () => {
     expect(second.id).toBe(first.id);
   });
 
+  it("rejects reusing an idempotency key for another project", async () => {
+    const { tenant, workspace } = await seedWorkspace("new");
+    const { plan, hash } = await seedPlan(tenant.id, workspace.id);
+    const input = {
+      ...seedInput({
+        tenantId: tenant.id,
+        workspaceId: workspace.id,
+        baseRevisionId: workspace.currentRevisionId,
+        changePlanId: plan.id,
+        planHashValue: hash,
+      }),
+      projectKey: "primary",
+    };
+    await jobs.enqueue(input);
+
+    await expect(jobs.enqueue({ ...input, projectKey: "secondary" }))
+      .rejects.toThrow("idempotency key already used by another build");
+  });
+
   it("allows recovery only after a lease expires", async () => {
     const { tenant, workspace } = await seedWorkspace("new");
     const { plan, hash } = await seedPlan(tenant.id, workspace.id);
@@ -527,6 +643,172 @@ describe("full build chain", () => {
 });
 
 describe("domain pack delegation", () => {
+  it("builds and modifies two domain projects without losing or cross-loading either base", async () => {
+    const clientCalls = [];
+    const calculationCalls = [];
+    const localRegistry = new DomainRegistry();
+    localRegistry.register(trackingDomainPack("kingclient", clientCalls));
+    localRegistry.register(trackingDomainPack("kingcalculation", calculationCalls));
+    const { tenant, workspace } = await seedWorkspace("new");
+    await prisma.solutionRevision.update({
+      where: { id: workspace.currentRevisionId },
+      data: {
+        state: {
+          schema: "kf-solution-revision-state/v1",
+          projects: [
+            {
+              projectKey: "client-main",
+              domainKind: "kingclient",
+              projectIr: { schema: "client-test/v1", marker: "client-main" },
+            },
+            {
+              projectKey: "calculation-main",
+              domainKind: "kingcalculation",
+              projectIr: { schema: "calculation-test/v1", marker: "calculation-main" },
+            },
+          ],
+        },
+      },
+    });
+
+    const clientRevision = await runProjectBuild({
+      tenantId: tenant.id,
+      workspaceId: workspace.id,
+      baseRevisionId: workspace.currentRevisionId,
+      domainKind: "kingclient",
+      projectKey: "client-main",
+      localRegistry,
+    });
+    expect(clientCalls[0]).toMatchObject({
+      phase: "compile",
+      projectMarker: "client-main",
+      projectIr: { marker: "client-main" },
+    });
+
+    const bothCreatedRevision = await runProjectBuild({
+      tenantId: tenant.id,
+      workspaceId: workspace.id,
+      baseRevisionId: clientRevision,
+      domainKind: "kingcalculation",
+      projectKey: "calculation-main",
+      localRegistry,
+    });
+    expect(calculationCalls[0]).toMatchObject({
+      phase: "compile",
+      projectMarker: "calculation-main",
+      projectIr: { marker: "calculation-main" },
+    });
+    const bothCreated = await prisma.domainProjectRevision.findMany({
+      where: { solutionRevisionId: bothCreatedRevision },
+      orderBy: { projectKey: "asc" },
+    });
+    expect(bothCreated.map(({ projectKey }) => projectKey)).toEqual([
+      "calculation-main",
+      "client-main",
+    ]);
+    const calculationBeforeClientModify = bothCreated.find(
+      ({ projectKey }) => projectKey === "calculation-main",
+    );
+
+    const clientModifiedRevision = await runProjectBuild({
+      tenantId: tenant.id,
+      workspaceId: workspace.id,
+      baseRevisionId: bothCreatedRevision,
+      domainKind: "kingclient",
+      projectKey: "client-main",
+      localRegistry,
+    });
+    expect(clientCalls.filter(({ phase }) => phase === "import")).toEqual([
+      expect.objectContaining({ projectMarker: "client-main", packageMarker: "pkg:client-main:1" }),
+    ]);
+    const afterClientModify = await prisma.domainProjectRevision.findMany({
+      where: { solutionRevisionId: clientModifiedRevision },
+    });
+    expect(afterClientModify.find(({ projectKey }) => projectKey === "calculation-main"))
+      .toMatchObject({
+        packageUrl: calculationBeforeClientModify.packageUrl,
+        packageHash: calculationBeforeClientModify.packageHash,
+      });
+
+    const calculationModifiedRevision = await runProjectBuild({
+      tenantId: tenant.id,
+      workspaceId: workspace.id,
+      baseRevisionId: clientModifiedRevision,
+      domainKind: "kingcalculation",
+      projectKey: "calculation-main",
+      localRegistry,
+    });
+    expect(calculationCalls.filter(({ phase }) => phase === "import")).toEqual([
+      expect.objectContaining({
+        projectMarker: "calculation-main",
+        packageMarker: "pkg:calculation-main:1",
+      }),
+    ]);
+    const finalProjects = await prisma.domainProjectRevision.findMany({
+      where: { solutionRevisionId: calculationModifiedRevision },
+    });
+    expect(finalProjects).toHaveLength(2);
+    expect(finalProjects.find(({ projectKey }) => projectKey === "client-main")?.packageUrl)
+      .toBe(afterClientModify.find(({ projectKey }) => projectKey === "client-main")?.packageUrl);
+  });
+
+  it("selects the exact base among two projects in the same domain", async () => {
+    const calls = [];
+    const localRegistry = new DomainRegistry();
+    localRegistry.register(trackingDomainPack("kingcalculation", calls));
+    const { tenant, workspace } = await seedWorkspace("new");
+    await prisma.solutionRevision.update({
+      where: { id: workspace.currentRevisionId },
+      data: {
+        state: {
+          schema: "kf-solution-revision-state/v1",
+          projects: [
+            {
+              projectKey: "primary",
+              domainKind: "kingcalculation",
+              projectIr: { marker: "primary" },
+            },
+            {
+              projectKey: "secondary",
+              domainKind: "kingcalculation",
+              projectIr: { marker: "secondary" },
+            },
+          ],
+        },
+      },
+    });
+    const primaryRevision = await runProjectBuild({
+      tenantId: tenant.id,
+      workspaceId: workspace.id,
+      baseRevisionId: workspace.currentRevisionId,
+      domainKind: "kingcalculation",
+      projectKey: "primary",
+      localRegistry,
+    });
+    const bothRevision = await runProjectBuild({
+      tenantId: tenant.id,
+      workspaceId: workspace.id,
+      baseRevisionId: primaryRevision,
+      domainKind: "kingcalculation",
+      projectKey: "secondary",
+      localRegistry,
+    });
+    await runProjectBuild({
+      tenantId: tenant.id,
+      workspaceId: workspace.id,
+      baseRevisionId: bothRevision,
+      domainKind: "kingcalculation",
+      projectKey: "primary",
+      localRegistry,
+    });
+
+    expect(calls.filter(({ phase }) => phase === "compile").map(({ projectMarker }) => projectMarker))
+      .toEqual(["primary", "secondary"]);
+    expect(calls.filter(({ phase }) => phase === "import")).toEqual([
+      expect.objectContaining({ projectMarker: "primary", packageMarker: "pkg:primary:1" }),
+    ]);
+  });
+
   it("emits a sliced opaque artifact as its original single stream chunk", async () => {
     const privateCalculationIr = {
       schema: "kf-calculation-project/v1",

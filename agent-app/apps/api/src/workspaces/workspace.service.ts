@@ -149,6 +149,7 @@ export class WorkspaceService {
     stream: NodeJS.ReadableStream;
     maxBytes?: number;
     domainKind?: string;
+    projectKey?: string;
   }): Promise<SourceRevisionResult> {
     const workspace = await this.prisma.solutionWorkspace.findFirst({
       where: { id: input.workspaceId, tenantId: input.tenantId },
@@ -199,6 +200,7 @@ export class WorkspaceService {
         tenantId: input.tenantId,
         workspaceId: input.workspaceId,
         domainKind,
+        projectKey: input.projectKey ?? domainKind,
         stored,
         summary: inspected.summary,
       });
@@ -225,6 +227,7 @@ export class WorkspaceService {
     workspaceId: string;
     source: Uint8Array;
     domainKind?: string;
+    projectKey?: string;
     maxBytes?: number;
   }): Promise<SourceRevisionResult> {
     const workspace = await this.prisma.solutionWorkspace.findFirst({
@@ -255,6 +258,7 @@ export class WorkspaceService {
         tenantId: input.tenantId,
         workspaceId: input.workspaceId,
         domainKind,
+        projectKey: input.projectKey ?? domainKind,
         stored,
         summary: inspected.summary,
       });
@@ -376,6 +380,7 @@ export class WorkspaceService {
     tenantId: string;
     workspaceId: string;
     domainKind: string;
+    projectKey: string;
     stored: StoredArtifact;
     summary: ClientProjectSummary;
   }): Promise<SourceRevisionResult> {
@@ -393,6 +398,7 @@ export class WorkspaceService {
         data: {
           tenantId: input.tenantId,
           solutionRevisionId: revision.id,
+          projectKey: input.projectKey,
           domainKind: input.domainKind,
           kind: "source-package",
           mediaType: "application/zip",

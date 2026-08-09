@@ -159,6 +159,7 @@ model DomainProjectRevision {
   id                 String   @id @default(uuid())
   tenantId           String
   solutionRevisionId String
+  projectKey         String   @default("kingclient")
   domainKind         String
   kind               String   @default("client-package") // "source-package" | "client-package"
   mediaType          String   @default("application/octet-stream")
@@ -167,6 +168,7 @@ model DomainProjectRevision {
   packageUrl         String?
   createdAt          DateTime @default(now())
 
+  @@unique([tenantId, solutionRevisionId, projectKey])
   @@index([tenantId, solutionRevisionId])
 }
 
@@ -177,6 +179,7 @@ model BuildJob {
   baseRevisionId String
   changePlanId   String
   planHash       String
+  projectKey     String    @default("kingclient")
   domainKind     String
   idempotencyKey String    @unique
   status         JobStatus
