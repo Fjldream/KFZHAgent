@@ -472,7 +472,7 @@ describe("domain pack delegation", () => {
   it("delegates a new build to compile, patch, validate, and package", async () => {
     const calls: string[] = [];
     const pack = tracingPack(calls, {
-      artifactKind: "source-package",
+      artifactKind: "sentinel-artifact-kind",
       domainProjectKind: "sentinel-domain-project",
     });
     const localRegistry = new DomainRegistry();
@@ -501,11 +501,11 @@ describe("domain pack delegation", () => {
       expectedPlanHash: hash,
     }));
     expect(put).toHaveBeenCalledWith(expect.objectContaining({
-      kind: "source-package",
+      kind: "sentinel-artifact-kind",
     }));
 
     const artifact = await prisma.artifact.findFirst({ where: { buildJobId: done.id } });
-    expect(artifact?.kind).toBe("source-package");
+    expect(artifact?.kind).toBe("sentinel-artifact-kind");
     const builtRevision = await prisma.solutionRevision.findFirst({
       where: { workspaceId: workspace.id, kind: "built" },
     });
