@@ -36,3 +36,9 @@ export {
   type EditableEntity,
 } from "./ports.js";
 export { compileSolutionGraph, ApprovalResumeRequiredError } from "./solution-graph.js";
+export { assessBlueprintRevision } from "./blueprint-quality.js";
+export {
+  encodeBlueprintMessage,
+  decodeBlueprintMessage,
+  type DecodedBlueprintMessage,
+} from "./blueprint-message.js";

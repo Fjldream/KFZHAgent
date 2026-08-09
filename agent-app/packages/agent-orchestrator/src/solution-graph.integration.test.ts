@@ -8,7 +8,13 @@ process.env.DATABASE_URL =
 import { Command } from "@langchain/langgraph";
 import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
 import { BuildJobService } from "@kf/build-jobs";
-import { solutionId, type ChangePlan, type DesignPlan, type SolutionIR } from "@kf/contracts";
+import {
+  solutionId,
+  type ChangePlan,
+  type CustomerEffectBlueprint,
+  type DesignPlan,
+  type SolutionIR,
+} from "@kf/contracts";
 import { PrismaClient, Prisma } from "@prisma/client";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import pg from "pg";
@@ -188,15 +194,37 @@ class StubModelPort implements ModelPort {
     return { intent, requestedDomains: ["kingclient"] };
   }
   async createDesignPlan(): Promise<DesignPlan> {
-    return {
-      schema: "kf-design-plan/v1",
-      displayName: "设计",
-      summary: "设计",
-      layoutConcept: "布局",
-      styleDirection: "风格",
-      sections: [{ id: "main", label: "主区", controls: [{ type: "text" }] }],
-      signature: "签名",
+    const blueprint: CustomerEffectBlueprint = {
+      schema: "kf-design-plan/v2",
+      displayName: "客户效果方案",
+      overview: {
+        objective: "说明最终效果",
+        audiences: ["业务用户"],
+        scenarios: ["方案确认"],
+        valueProposition: "提供完整方案信息",
+      },
+      informationArchitecture: { narrative: "总览到详情", wireframe: "总览 → 详情" },
+      modules: [{
+        id: "main",
+        name: "核心内容",
+        purpose: "展示主要信息",
+        content: ["标题", "说明"],
+        sampleData: [{ label: "指标", value: "98%" }],
+        interactions: ["查看详情"],
+        presentation: "重点卡片",
+      }],
+      visualDirection: {
+        tone: "专业",
+        colors: ["深蓝"],
+        typography: "清晰层级",
+        spacingAndSurfaces: "卡片留白",
+      },
+      highlights: ["信息清晰"],
+      revisionNotes: { added: ["核心内容"], changed: [], retained: [] },
+      acceptanceCriteria: ["完整展示核心信息"],
+      openQuestions: [],
     };
+    return blueprint;
   }
   async createProjectDesign(): Promise<SolutionIR> {
     return {

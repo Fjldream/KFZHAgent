@@ -1,7 +1,12 @@
 import { createHash } from "node:crypto";
-import { DesignPlanSchema, type DesignPlan } from "@kf/contracts";
+import {
+  CustomerEffectBlueprintSchema,
+  type DesignPlan,
+} from "@kf/contracts";
 import type { AgentGraphStateValue, AgentGraphUpdate } from "../state.js";
 import type { SolutionGraphDeps } from "../ports.js";
+import { assessBlueprintRevision } from "../blueprint-quality.js";
+import { encodeBlueprintMessage } from "../blueprint-message.js";
 
 /**
  * Generates or revises a DesignPlan (spec §5.3) and hands it back to the user:
@@ -24,34 +29,60 @@ import type { SolutionGraphDeps } from "../ports.js";
 export function createDesignPlanNode(deps: SolutionGraphDeps) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
     const revising = state.revising === true || state.intent === "REVISE_DESIGN";
-    const rawPlan = await deps.modelPort.createDesignPlan(
-      {
-        tenantId: state.tenantId,
-        userId: state.userId,
-        workspaceId: state.workspaceId,
-        conversationId: state.conversationId,
-        recentMessages: state.recentMessages,
-        requirementText: latestUserMessage(state),
-        revisionSummary: state.revisionSummary,
-        designPlan: state.designPlan,
-        // editableEntities may not be materialised on state yet; the context
-        // field stays optional so a future wiring can feed it through.
-        editableEntities: (state as { editableEntities?: unknown }).editableEntities as
-          | import("../ports.js").EditableEntity[]
-          | undefined,
-      },
-      { revising },
-    );
-    const parsed = DesignPlanSchema.safeParse(rawPlan);
+    const modelInput = {
+      tenantId: state.tenantId,
+      userId: state.userId,
+      workspaceId: state.workspaceId,
+      conversationId: state.conversationId,
+      recentMessages: state.recentMessages,
+      requirementText: latestUserMessage(state),
+      revisionSummary: state.revisionSummary,
+      designPlan: state.designPlan,
+      // editableEntities may not be materialised on state yet; the context
+      // field stays optional so a future wiring can feed it through.
+      editableEntities: (state as { editableEntities?: unknown }).editableEntities as
+        | import("../ports.js").EditableEntity[]
+        | undefined,
+    };
+    const rawPlan = await deps.modelPort.createDesignPlan(modelInput, { revising });
+    let parsed = CustomerEffectBlueprintSchema.safeParse(rawPlan);
     if (!parsed.success) {
       // I1: never persist or hash garbage from the model; return to idle with
       // INVALID_MODEL_OUTPUT and no side effects.
       return { stage: "idle", lastErrorCode: "INVALID_MODEL_OUTPUT" };
     }
-    const plan = parsed.data;
+    let plan = parsed.data;
+    if (revising && state.designPlan !== undefined) {
+      let rejectionReasons = assessBlueprintRevision(state.designPlan, plan);
+      if (rejectionReasons.length > 0) {
+        const retried = await deps.modelPort.createDesignPlan(modelInput, {
+          revising: true,
+          rejectionReasons,
+        });
+        parsed = CustomerEffectBlueprintSchema.safeParse(retried);
+        if (parsed.success) {
+          plan = parsed.data;
+          rejectionReasons = assessBlueprintRevision(state.designPlan, plan);
+        }
+      }
+      if (!parsed.success || rejectionReasons.length > 0) {
+        await deps.workspaceQuery.appendMessage({
+          tenantId: state.tenantId,
+          conversationId: state.conversationId,
+          role: "assistant",
+          content:
+            "抱歉，您刚才提出的修改还没有充分体现到新蓝图中，因此我保留了上一版有效方案，没有进入工程计划。请再补充一下希望新增或调整的具体内容，我会继续为您完善。",
+        });
+        return {
+          stage: "design-review",
+          revising: undefined,
+          lastErrorCode: "DESIGN_REVISION_NOT_APPLIED",
+        };
+      }
+    }
     const revision = (state.designRevision ?? 0) + 1;
     const hash = hashDesignPlan(plan, revision);
-    const rendered = formatDesignPlan(plan, revision);
+    const rendered = encodeBlueprintMessage(plan, revision);
     await deps.workspaceQuery.appendMessage({
       tenantId: state.tenantId,
       conversationId: state.conversationId,
@@ -94,29 +125,6 @@ function stableStringify(value: unknown): string {
     return `{${parts.join(",")}}`;
   }
   return JSON.stringify(value);
-}
-
-/** Bounded, human-readable plan for the conversation (spec §5.7). */
-function formatDesignPlan(plan: DesignPlan, revision: number): string {
-  const sections = plan.sections
-    .map(
-      (section) =>
-        `  ${section.label}：${section.controls
-          .map((control) => `${control.type}${control.text !== undefined ? `(${control.text})` : ""}`)
-          .join("、")}`,
-    )
-    .join("\n");
-  return [
-    "您好，我已根据您的需求整理出一份设计草案，请您过目：",
-    `设计计划 v${revision}`,
-    `工程名：${plan.displayName}`,
-    `摘要：${plan.summary}`,
-    `布局：${plan.layoutConcept}`,
-    `风格：${plan.styleDirection}`,
-    `分区：\n${sections}`,
-    `记忆点：${plan.signature}`,
-    "您可以随时告诉我哪里需要调整；确认没问题的话，回复「确认」即可。",
-  ].join("\n");
 }
 
 /** The latest user turn, used as the requirement text for the model. */

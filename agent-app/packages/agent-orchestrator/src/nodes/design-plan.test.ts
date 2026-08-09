@@ -2,16 +2,63 @@ import { describe, expect, it, vi } from "vitest";
 import { createDesignPlanNode } from "./design-plan.js";
 import { createPlanChangeNode } from "./plan-change.js";
 import { intentValues } from "../schemas/intent.js";
-import type { DesignPlan } from "@kf/contracts";
+import type { CustomerEffectBlueprint } from "@kf/contracts";
+import { decodeBlueprintMessage } from "../blueprint-message.js";
 
-const designPlan: DesignPlan = {
-  schema: "kf-design-plan/v1",
-  displayName: "监控大屏",
-  summary: "深色工业风",
-  layoutConcept: "顶部标题 + 中部趋势区",
-  styleDirection: "深色工业风",
-  sections: [{ id: "kpi", label: "KPI 区", controls: [{ type: "text", text: "产量" }] }],
-  signature: "趋势联动 KPI",
+const designPlan: CustomerEffectBlueprint = {
+  schema: "kf-design-plan/v2",
+  displayName: "生产监控大屏",
+  overview: {
+    objective: "让值班人员快速掌握生产状态",
+    audiences: ["值班人员"],
+    scenarios: ["生产监控"],
+    valueProposition: "集中呈现产量、趋势和异常",
+  },
+  informationArchitecture: {
+    narrative: "从总览到趋势和异常",
+    wireframe: "总览 → 趋势 → 异常",
+  },
+  modules: [{
+    id: "kpi",
+    name: "生产 KPI",
+    purpose: "展示关键生产指标",
+    content: ["产量", "达成率", "异常数"],
+    sampleData: [{ label: "当日产量", value: "12,680 件" }],
+    interactions: ["点击指标查看详情"],
+    presentation: "顶部指标卡片",
+  }],
+  visualDirection: {
+    tone: "专业工业感",
+    colors: ["深蓝", "青绿"],
+    typography: "指标数字突出",
+    spacingAndSurfaces: "深色卡片与清晰留白",
+  },
+  highlights: ["指标与趋势联动"],
+  revisionNotes: { added: ["生产 KPI 模块"], changed: [], retained: [] },
+  acceptanceCriteria: ["首屏展示产量、达成率和异常数"],
+  openQuestions: [],
+};
+
+const revisedDesignPlan: CustomerEffectBlueprint = {
+  ...designPlan,
+  modules: [
+    ...designPlan.modules,
+    {
+      id: "alerts",
+      name: "异常追踪",
+      purpose: "说明当前异常与处理状态",
+      content: ["异常名称", "级别", "负责人"],
+      sampleData: [{ label: "异常", value: "二号线温度偏高" }],
+      interactions: ["点击查看处置过程"],
+      presentation: "右侧异常列表",
+    },
+  ],
+  revisionNotes: {
+    added: ["异常追踪模块"],
+    changed: [],
+    retained: ["保留生产 KPI 模块"],
+  },
+  acceptanceCriteria: [...designPlan.acceptanceCriteria, "展示异常级别和负责人"],
 };
 
 function makeDesignDeps() {
@@ -59,33 +106,26 @@ describe("design-plan node", () => {
       expect.objectContaining({ requirementText: "生成监控大屏", conversationId: "c1" }),
       { revising: false },
     );
-    expect(workspaceQuery.appendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        tenantId: "t1",
-        conversationId: "c1",
-        role: "assistant",
-        content: expect.stringContaining("设计计划"),
-      }),
-    );
+    const message = workspaceQuery.appendMessage.mock.calls[0]?.[0];
+    expect(message).toEqual(expect.objectContaining({ tenantId: "t1", conversationId: "c1", role: "assistant" }));
+    expect(decodeBlueprintMessage(message?.content as string)).toEqual({ blueprint: designPlan, revision: 1 });
   });
 
-  it("shows the display name, style, sections and the confirm/revise prompt", async () => {
+  it("encodes the complete first customer blueprint instead of a shallow control list", async () => {
     const { deps, workspaceQuery } = makeDesignDeps();
     const node = createDesignPlanNode(deps);
     await node(baseState() as never);
 
     const content = workspaceQuery.appendMessage.mock.calls[0]?.[0]?.content as string;
-    expect(content).toContain("设计计划 v1");
-    expect(content).toContain("监控大屏");
-    expect(content).toContain("深色工业风");
-    expect(content).toContain("KPI 区");
-    expect(content).toContain("您好，我已根据您的需求整理出一份设计草案，请您过目：");
-    expect(content).toContain("确认没问题的话，回复「确认」即可。");
+    const decoded = decodeBlueprintMessage(content);
+    expect(decoded?.blueprint.overview.objective).toBe("让值班人员快速掌握生产状态");
+    expect(decoded?.blueprint.modules[0]?.sampleData).toEqual([{ label: "当日产量", value: "12,680 件" }]);
+    expect(decoded?.blueprint.acceptanceCriteria).toEqual(["首屏展示产量、达成率和异常数"]);
   });
 
   it("revises (not regenerates) when revising=true, bumping revision and changing the hash", async () => {
     const { deps, modelPort, workspaceQuery } = makeDesignDeps();
-    modelPort.createDesignPlan.mockResolvedValue({ ...designPlan, summary: "修订版" });
+    modelPort.createDesignPlan.mockResolvedValue(revisedDesignPlan);
     const node = createDesignPlanNode(deps);
     const update = await node(
       baseState({
@@ -97,7 +137,7 @@ describe("design-plan node", () => {
       }) as never,
     );
 
-    expect(update.designPlan?.summary).toBe("修订版");
+    expect(update.designPlan).toEqual(revisedDesignPlan);
     expect(update.designRevision).toBe(2);
     expect(update.designPlanHash).not.toBe("a".repeat(64));
     expect(modelPort.createDesignPlan).toHaveBeenCalledWith(
@@ -124,9 +164,65 @@ describe("design-plan node", () => {
     const second = await node(baseState() as never);
     expect(first.designPlanHash).toBe(second.designPlanHash);
 
-    modelPort.createDesignPlan.mockResolvedValue({ ...designPlan, summary: "改了" });
+    modelPort.createDesignPlan.mockResolvedValue(revisedDesignPlan);
     const third = await node(baseState() as never);
     expect(third.designPlanHash).not.toBe(first.designPlanHash);
+  });
+
+  it("retries once with quality reasons when a revision body is unchanged", async () => {
+    const { deps, modelPort } = makeDesignDeps();
+    modelPort.createDesignPlan
+      .mockResolvedValueOnce(designPlan)
+      .mockResolvedValueOnce(revisedDesignPlan);
+    const node = createDesignPlanNode(deps);
+
+    const update = await node(
+      baseState({
+        intent: "REVISE_DESIGN",
+        designPlan,
+        designPlanHash: "a".repeat(64),
+        designRevision: 1,
+      }) as never,
+    );
+
+    expect(modelPort.createDesignPlan).toHaveBeenCalledTimes(2);
+    expect(modelPort.createDesignPlan).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ designPlan }),
+      expect.objectContaining({
+        revising: true,
+        rejectionReasons: expect.arrayContaining(["蓝图主体没有实质变化"]),
+      }),
+    );
+    expect(update.designPlan).toEqual(revisedDesignPlan);
+    expect(update.designRevision).toBe(2);
+  });
+
+  it("keeps the previous valid blueprint when both revision candidates are unchanged", async () => {
+    const { deps, modelPort, workspaceQuery } = makeDesignDeps();
+    modelPort.createDesignPlan.mockResolvedValue(designPlan);
+    const node = createDesignPlanNode(deps);
+
+    const update = await node(
+      baseState({
+        intent: "REVISE_DESIGN",
+        designPlan,
+        designPlanHash: "a".repeat(64),
+        designRevision: 1,
+      }) as never,
+    );
+
+    expect(modelPort.createDesignPlan).toHaveBeenCalledTimes(2);
+    expect(update).toEqual({
+      stage: "design-review",
+      revising: undefined,
+      lastErrorCode: "DESIGN_REVISION_NOT_APPLIED",
+    });
+    expect(workspaceQuery.appendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining("没有充分体现到新蓝图中"),
+      }),
+    );
   });
 });
 

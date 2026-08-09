@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { Command, MemorySaver } from "@langchain/langgraph";
 import { deriveGuid, planHash } from "@kf/domain-client";
-import { solutionId, type ChangePlan, type DesignPlan, type SolutionIR } from "@kf/contracts";
+import {
+  solutionId,
+  type ChangePlan,
+  type CustomerEffectBlueprint,
+  type DesignPlan,
+  type SolutionIR,
+} from "@kf/contracts";
 import type {
   AppendMessageInput,
   BuildJobInfo,
@@ -16,6 +22,7 @@ import type { ModelPort, ModelPortContext } from "./model-port.js";
 import type { GraphMessage, ApprovalInterrupt } from "./state.js";
 import type { Intent } from "./schemas/intent.js";
 import { compileSolutionGraph, ApprovalResumeRequiredError } from "./solution-graph.js";
+import { decodeBlueprintMessage } from "./blueprint-message.js";
 
 type CompiledGraph = ReturnType<typeof compileSolutionGraph>;
 
@@ -163,15 +170,57 @@ class FakeModelPort implements ModelPort {
     return { intent, requestedDomains: ["kingclient"], reply: `reply:${intent}` };
   }
 
-  async createDesignPlan(): Promise<DesignPlan> {
+  async createDesignPlan(
+    _input: ModelPortContext,
+    opts?: { revising?: boolean },
+  ): Promise<DesignPlan> {
+    const base: CustomerEffectBlueprint = {
+      schema: "kf-design-plan/v2",
+      displayName: "客户效果方案",
+      overview: {
+        objective: "让客户快速理解方案效果",
+        audiences: ["业务用户"],
+        scenarios: ["方案确认"],
+        valueProposition: "用完整内容说明最终效果",
+      },
+      informationArchitecture: { narrative: "从总览到详情", wireframe: "总览 → 详情" },
+      modules: [{
+        id: "main",
+        name: "核心内容",
+        purpose: "展示主要信息",
+        content: ["标题", "说明", "关键指标"],
+        sampleData: [{ label: "示例指标", value: "98%" }],
+        interactions: ["点击查看详情"],
+        presentation: "重点卡片",
+      }],
+      visualDirection: {
+        tone: "专业清晰",
+        colors: ["深蓝"],
+        typography: "标题突出",
+        spacingAndSurfaces: "清晰留白",
+      },
+      highlights: ["信息层级清晰"],
+      revisionNotes: { added: ["完整核心内容"], changed: [], retained: [] },
+      acceptanceCriteria: ["客户能看到完整核心信息"],
+      openQuestions: [],
+    };
+    if (opts?.revising !== true) return base;
     return {
-      schema: "kf-design-plan/v1",
-      displayName: "设计",
-      summary: "设计",
-      layoutConcept: "布局",
-      styleDirection: "风格",
-      sections: [{ id: "main", label: "主区", controls: [{ type: "text" }] }],
-      signature: "签名",
+      ...base,
+      modules: [
+        ...base.modules,
+        {
+          id: "detail",
+          name: "补充详情",
+          purpose: "落实客户新增内容",
+          content: ["详细说明", "补充数据"],
+          sampleData: [{ label: "补充项", value: "完整示例" }],
+          interactions: ["展开补充详情"],
+          presentation: "详情卡片",
+        },
+      ],
+      revisionNotes: { added: ["补充详情模块"], changed: [], retained: ["核心内容"] },
+      acceptanceCriteria: [...base.acceptanceCriteria, "补充详情可展开查看"],
     };
   }
   async createProjectDesign(): Promise<SolutionIR> {
@@ -778,10 +827,10 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     expect(result.stage).toBe("idle");
     expect(bed.repo.plans.size).toBe(0);
     expect(bed.builds.enqueues).toHaveLength(0);
-    // 两遍流程里 design-plan 已展示设计计划（流程预期的 assistant 消息）；
+    // 两遍流程里 design-plan 已展示客户效果蓝图（流程预期的 assistant 消息）；
     // 校验失败阶段（CONFIRM_DESIGN 后的 plan-change）不得再新增 assistant 消息。
     const planShown = bed.workspace.appendCalls.some(
-      (call) => call.role === "assistant" && call.content.includes("设计计划"),
+      (call) => call.role === "assistant" && decodeBlueprintMessage(call.content) !== null,
     );
     expect(planShown).toBe(true);
   });

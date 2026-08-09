@@ -48,7 +48,10 @@ export interface ModelPort {
   reviseChangePlan(input: ModelPortContext): Promise<ChangePlan>;
   /** Plan the initial page design from a requirement; `revising` switches the
    * prompt toward amending the current revision rather than starting fresh. */
-  createDesignPlan(input: ModelPortContext, opts?: { revising?: boolean }): Promise<DesignPlan>;
+  createDesignPlan(
+    input: ModelPortContext,
+    opts?: { revising?: boolean; rejectionReasons?: string[] },
+  ): Promise<DesignPlan>;
   explainValidation(input: { tenantId: string; report: ValidationReport }): Promise<string>;
 }
 
