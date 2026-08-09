@@ -20,6 +20,7 @@ import {
   planHash,
   packageNativeClientProject,
 } from "@kf/domain-client";
+import type { DomainPack } from "@kf/contracts";
 import { DomainRegistry } from "@kf/domain-registry";
 import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppModule } from "../app.module.js";
@@ -123,6 +124,60 @@ function tracingPack(
     package: vi.fn(async (input) => {
       calls.push("package");
       return { ...(await real.package(input)), ...packagedMetadata };
+    }),
+  };
+}
+
+function calculationPack(expectedProjectIr: unknown): DomainPack {
+  const baseWorkspace = {
+    id: "calculation-base",
+    rootDir: "/calculation/base",
+    mode: "base" as const,
+  };
+  const candidateWorkspace = {
+    id: "calculation-candidate",
+    rootDir: "/calculation/candidate",
+    mode: "candidate" as const,
+  };
+
+  return {
+    metadata: {
+      kind: "kingcalculation",
+      displayName: "KingFusion Calculation",
+      supported: true,
+      capabilities: {
+        create: true,
+        import: true,
+        modify: true,
+        validate: true,
+        package: true,
+      },
+    },
+    importPackage: async () => baseWorkspace,
+    inspect: async () => ({ privateCalculationJson: true }),
+    compile: async ({ projectIr }) => {
+      expect(projectIr).toEqual(expectedProjectIr);
+      return baseWorkspace;
+    },
+    patch: async () => candidateWorkspace,
+    validate: async () => ({
+      status: "pass",
+      checks: {
+        packageStructure: "pass",
+        jsonSchema: "pass",
+        references: "pass",
+        businessRules: "pass",
+        changeScope: "pass",
+        roundTrip: "pass",
+      },
+      warnings: [],
+    }),
+    package: async () => ({
+      artifactKind: "calculation-package",
+      domainProjectKind: "calculation-package",
+      mediaType: "application/octet-stream",
+      fileExtension: ".zip",
+      bytes: new Uint8Array([80, 75, 3, 4]),
     }),
   };
 }
@@ -469,6 +524,57 @@ describe("full build chain", () => {
 });
 
 describe("domain pack delegation", () => {
+  it("stores an opaque calculation artifact without parsing domain-private JSON", async () => {
+    const privateCalculationIr = {
+      schema: "kf-calculation-project/v1",
+      model: {
+        formula: { $opaque: ["mass", "*", "acceleration"] },
+        vendorExtension: { retainExactly: true },
+      },
+    };
+    const localRegistry = new DomainRegistry();
+    localRegistry.register(calculationPack(privateCalculationIr));
+    const { tenant, workspace } = await seedWorkspace("new");
+    await prisma.solutionRevision.update({
+      where: { id: workspace.currentRevisionId },
+      data: { state: privateCalculationIr },
+    });
+    const { plan, hash } = await seedPlan(tenant.id, workspace.id);
+    const input = {
+      ...seedInput({
+        tenantId: tenant.id,
+        workspaceId: workspace.id,
+        baseRevisionId: workspace.currentRevisionId,
+        changePlanId: plan.id,
+        planHashValue: hash,
+      }),
+      domainKind: "kingcalculation",
+    };
+    await jobs.enqueue(input);
+    const leased = await jobs.leaseNext("calculation-domain", new Date());
+    const executor = new BuildExecutor({ prisma, storage, registry: localRegistry });
+
+    const done = await executor.execute(leased);
+    expect(done.status).toBe("SUCCEEDED");
+
+    const artifact = await prisma.artifact.findFirst({ where: { buildJobId: done.id } });
+    expect(artifact?.kind).toBe("calculation-package");
+    const storedBytes = await storage.open(tenant.id, artifact!.storageKey);
+    const chunks: Buffer[] = [];
+    for await (const chunk of storedBytes) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    expect(Buffer.concat(chunks)).toEqual(Buffer.from([80, 75, 3, 4]));
+
+    const builtRevision = await prisma.solutionRevision.findFirst({
+      where: { workspaceId: workspace.id, kind: "built" },
+    });
+    const domainProject = await prisma.domainProjectRevision.findFirst({
+      where: { solutionRevisionId: builtRevision?.id },
+    });
+    expect(domainProject?.kind).toBe("calculation-package");
+  });
+
   it("delegates a new build to compile, patch, validate, and package", async () => {
     const calls: string[] = [];
     const pack = tracingPack(calls, {

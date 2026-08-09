@@ -16,12 +16,12 @@ import {
   BuildWorkerCrash,
 } from "@kf/build-jobs";
 import {
+  createKingClientDomainPack,
   deriveGuid,
   importNativeClientPackage,
   planHash,
   resolveVersionDirName,
 } from "@kf/domain-client";
-import type { DomainPack } from "@kf/contracts";
 import { DomainRegistry } from "@kf/domain-registry";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -68,35 +68,8 @@ beforeEach(async () => {
   }
 });
 
-function clientPack(): DomainPack {
-  return {
-    kind: "kingclient",
-    displayName: "KingFusion Client",
-    supported: true,
-    capabilities: {
-      create: true,
-      import: true,
-      modify: true,
-      validate: true,
-      package: true,
-    },
-    inspect: async () => ({}),
-    compile: async () => ({}),
-    patch: async () => ({}),
-    validate: async () => ({
-      status: "pass",
-      checks: {
-        packageStructure: "pass",
-        jsonSchema: "pass",
-        references: "pass",
-        businessRules: "pass",
-        changeScope: "pass",
-        roundTrip: "pass",
-      },
-      warnings: [],
-    }),
-    package: async () => "",
-  };
+function clientPack() {
+  return createKingClientDomainPack({ nativeAccepted: true });
 }
 
 const INITIAL_IR = {

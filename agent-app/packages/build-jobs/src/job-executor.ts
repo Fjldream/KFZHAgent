@@ -107,7 +107,7 @@ export class BuildExecutor {
       const stored = await this.#deps.storage.put({
         tenantId: job.tenantId,
         kind: packaged.artifactKind as ArtifactKind,
-        stream: Readable.from(packaged.bytes),
+        stream: Readable.from([Buffer.from(packaged.bytes)]),
         maxBytes: this.#deps.maxArtifactBytes ?? DEFAULT_MAX_ARTIFACT_BYTES,
       });
 
