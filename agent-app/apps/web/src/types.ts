@@ -159,6 +159,37 @@ export interface DesignPlanView {
   signature: string;
 }
 
+export interface CustomerEffectBlueprintView {
+  revision: number;
+  displayName: string;
+  overview: {
+    objective: string;
+    audiences: string[];
+    scenarios: string[];
+    valueProposition: string;
+  };
+  informationArchitecture: { narrative: string; wireframe: string };
+  modules: Array<{
+    id: string;
+    name: string;
+    purpose: string;
+    content: string[];
+    sampleData: Array<{ label: string; value: string }>;
+    interactions: string[];
+    presentation: string;
+  }>;
+  visualDirection: {
+    tone: string;
+    colors: string[];
+    typography: string;
+    spacingAndSurfaces: string;
+  };
+  highlights: string[];
+  revisionNotes: { added: string[]; changed: string[]; retained: string[] };
+  acceptanceCriteria: string[];
+  openQuestions: string[];
+}
+
 const OPTION_CIRCLED = /^[①-⑩]/;
 const OPTION_NUMERIC = /^\d+[.、]/;
 const MAX_OPTIONS = 5;
@@ -238,4 +269,157 @@ export function parseDesignPlan(content: string): DesignPlanView | null {
   const hasPlanContent =
     view.engineeringName !== "" || view.summary !== "" || view.signature !== "";
   return hasPlanContent ? view : null;
+}
+
+const BLUEPRINT_MESSAGE_PREFIX = "KF_BLUEPRINT_MESSAGE/1\n";
+
+/** Decode the internal transport envelope into a customer-only view model. */
+export function parseCustomerEffectBlueprint(
+  content: string,
+): CustomerEffectBlueprintView | null {
+  if (!content.startsWith(BLUEPRINT_MESSAGE_PREFIX)) return null;
+  try {
+    const envelope = JSON.parse(content.slice(BLUEPRINT_MESSAGE_PREFIX.length)) as unknown;
+    if (!isRecord(envelope)) return null;
+    if (envelope["kind"] !== "kf-customer-effect-blueprint" || envelope["version"] !== 1) {
+      return null;
+    }
+    const revision = envelope["revision"];
+    const blueprint = envelope["blueprint"];
+    if (
+      typeof revision !== "number" ||
+      !Number.isInteger(revision) ||
+      revision < 1 ||
+      !isRecord(blueprint) ||
+      blueprint["schema"] !== "kf-design-plan/v2"
+    ) {
+      return null;
+    }
+
+    const overview = blueprint["overview"];
+    const architecture = blueprint["informationArchitecture"];
+    const visual = blueprint["visualDirection"];
+    const notes = blueprint["revisionNotes"];
+    const modules = blueprint["modules"];
+    if (
+      typeof blueprint["displayName"] !== "string" ||
+      !isRecord(overview) ||
+      !isRecord(architecture) ||
+      !isRecord(visual) ||
+      !isRecord(notes) ||
+      !Array.isArray(modules)
+    ) {
+      return null;
+    }
+
+    const audiences = asStringArray(overview["audiences"]);
+    const scenarios = asStringArray(overview["scenarios"]);
+    const colors = asStringArray(visual["colors"]);
+    const highlights = asStringArray(blueprint["highlights"]);
+    const added = asStringArray(notes["added"]);
+    const changed = asStringArray(notes["changed"]);
+    const retained = asStringArray(notes["retained"]);
+    const acceptanceCriteria = asStringArray(blueprint["acceptanceCriteria"]);
+    const openQuestions = asStringArray(blueprint["openQuestions"]);
+    if (
+      typeof overview["objective"] !== "string" ||
+      typeof overview["valueProposition"] !== "string" ||
+      typeof architecture["narrative"] !== "string" ||
+      typeof architecture["wireframe"] !== "string" ||
+      typeof visual["tone"] !== "string" ||
+      typeof visual["typography"] !== "string" ||
+      typeof visual["spacingAndSurfaces"] !== "string" ||
+      audiences === null ||
+      scenarios === null ||
+      colors === null ||
+      highlights === null ||
+      added === null ||
+      changed === null ||
+      retained === null ||
+      acceptanceCriteria === null ||
+      openQuestions === null
+    ) {
+      return null;
+    }
+
+    const parsedModules = modules.map(parseBlueprintModule);
+    if (parsedModules.some((module) => module === null)) return null;
+    return {
+      revision,
+      displayName: blueprint["displayName"],
+      overview: {
+        objective: overview["objective"],
+        audiences,
+        scenarios,
+        valueProposition: overview["valueProposition"],
+      },
+      informationArchitecture: {
+        narrative: architecture["narrative"],
+        wireframe: architecture["wireframe"],
+      },
+      modules: parsedModules as CustomerEffectBlueprintView["modules"],
+      visualDirection: {
+        tone: visual["tone"],
+        colors,
+        typography: visual["typography"],
+        spacingAndSurfaces: visual["spacingAndSurfaces"],
+      },
+      highlights,
+      revisionNotes: { added, changed, retained },
+      acceptanceCriteria,
+      openQuestions,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function asStringArray(value: unknown): string[] | null {
+  return Array.isArray(value) && value.every((item) => typeof item === "string")
+    ? value
+    : null;
+}
+
+function parseBlueprintModule(
+  value: unknown,
+): CustomerEffectBlueprintView["modules"][number] | null {
+  if (!isRecord(value)) return null;
+  const content = asStringArray(value["content"]);
+  const interactions = asStringArray(value["interactions"]);
+  const sampleData = value["sampleData"];
+  if (
+    typeof value["id"] !== "string" ||
+    typeof value["name"] !== "string" ||
+    typeof value["purpose"] !== "string" ||
+    typeof value["presentation"] !== "string" ||
+    content === null ||
+    interactions === null ||
+    !Array.isArray(sampleData)
+  ) {
+    return null;
+  }
+  const samples = sampleData.map((sample) => {
+    if (
+      !isRecord(sample) ||
+      typeof sample["label"] !== "string" ||
+      typeof sample["value"] !== "string"
+    ) {
+      return null;
+    }
+    return { label: sample["label"], value: sample["value"] };
+  });
+  if (samples.some((sample) => sample === null)) return null;
+  return {
+    id: value["id"],
+    name: value["name"],
+    purpose: value["purpose"],
+    content,
+    sampleData: samples as Array<{ label: string; value: string }>,
+    interactions,
+    presentation: value["presentation"],
+  };
 }

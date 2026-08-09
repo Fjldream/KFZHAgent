@@ -4,7 +4,56 @@
 import { describe, expect, it } from "vitest";
 import { mount } from "@vue/test-utils";
 import ConversationPanel from "./ConversationPanel.vue";
-import { parseClarifyingQuestion, parseDesignPlan } from "../types";
+import {
+  parseClarifyingQuestion,
+  parseCustomerEffectBlueprint,
+  parseDesignPlan,
+} from "../types";
+
+function blueprintMessage(revision = 1): string {
+  return `KF_BLUEPRINT_MESSAGE/1\n${JSON.stringify({
+    kind: "kf-customer-effect-blueprint",
+    version: 1,
+    revision,
+    blueprint: {
+      schema: "kf-design-plan/v2",
+      displayName: "个人求职作品集",
+      overview: {
+        objective: "让招聘经理快速理解候选人的产品与项目成果",
+        audiences: ["招聘经理", "面试官"],
+        scenarios: ["求职应聘"],
+        valueProposition: "用真实感案例证明候选人的能力",
+      },
+      informationArchitecture: {
+        narrative: "从个人定位到产品、项目、履历和联系方式",
+        wireframe: "首屏 → 我的产品 → 项目经历 → 履历 → 联系方式",
+      },
+      modules: [{
+        id: "products",
+        name: "我的产品",
+        purpose: "展示主导或参与的产品",
+        content: ["产品定位", "个人职责", "量化成果"],
+        sampleData: [{ label: "产品名称", value: "KingFusion 工业低代码平台" }],
+        interactions: ["点击产品卡片展开详情"],
+        presentation: "大尺寸产品卡片",
+      }],
+      visualDirection: {
+        tone: "专业可信",
+        colors: ["深蓝", "暖金"],
+        typography: "标题与正文形成清晰层级",
+        spacingAndSurfaces: "大留白与轻边框卡片",
+      },
+      highlights: ["产品与项目形成完整证据链"],
+      revisionNotes: {
+        added: [revision === 1 ? "完整的产品与项目内容" : "新增独立产品展示区"],
+        changed: revision === 1 ? [] : ["项目经历补充背景、职责、方案和成果"],
+        retained: revision === 1 ? [] : ["保留专业深蓝风格"],
+      },
+      acceptanceCriteria: ["至少展示两个包含职责和成果的产品案例"],
+      openQuestions: ["是否使用真实头像"],
+    },
+  })}`;
+}
 
 // ---------------------------------------------------------------------------
 // parseClarifyingQuestion：识别「问题\n①选项\n②选项」格式
@@ -96,6 +145,27 @@ describe("parseDesignPlan", () => {
   });
 });
 
+describe("parseCustomerEffectBlueprint", () => {
+  it("parses every customer-visible section from a versioned blueprint message", () => {
+    const view = parseCustomerEffectBlueprint(blueprintMessage());
+    expect(view?.revision).toBe(1);
+    expect(view?.displayName).toBe("个人求职作品集");
+    expect(view?.overview.objective).toContain("招聘经理");
+    expect(view?.modules[0]?.name).toBe("我的产品");
+    expect(view?.modules[0]?.sampleData[0]).toEqual({
+      label: "产品名称",
+      value: "KingFusion 工业低代码平台",
+    });
+    expect(view?.modules[0]?.interactions).toEqual(["点击产品卡片展开详情"]);
+    expect(view?.acceptanceCriteria).toEqual(["至少展示两个包含职责和成果的产品案例"]);
+  });
+
+  it("returns null for malformed or ordinary messages", () => {
+    expect(parseCustomerEffectBlueprint("普通回复")).toBeNull();
+    expect(parseCustomerEffectBlueprint("KF_BLUEPRINT_MESSAGE/1\n{broken")).toBeNull();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // ConversationPanel 增强渲染：澄清可点选 / 计划卡片 / 纯文本仍转义
 // ---------------------------------------------------------------------------
@@ -142,6 +212,35 @@ describe("ConversationPanel enriched rendering", () => {
     const sends = wrapper.emitted("send");
     expect(sends).toBeTruthy();
     expect(sends?.[0]?.[0]).toBe("确认");
+  });
+
+  it("renders a complete first customer effect blueprint without exposing the internal schema", async () => {
+    const wrapper = mount(ConversationPanel, {
+      props: { messages: [{ role: "assistant", content: blueprintMessage() }] },
+    });
+    const card = wrapper.get('[data-testid="effect-blueprint-card"]');
+    expect(card.find(".plan-badge").text()).toBe("效果蓝图");
+    expect(card.find(".plan-version").text()).toBe("v1");
+    expect(wrapper.text()).toContain("方案目标");
+    expect(wrapper.text()).toContain("我的产品");
+    expect(wrapper.text()).toContain("KingFusion 工业低代码平台");
+    expect(wrapper.text()).toContain("点击产品卡片展开详情");
+    expect(wrapper.text()).toContain("最终验收效果");
+    expect(wrapper.text()).toContain("至少展示两个包含职责和成果的产品案例");
+    expect(wrapper.text()).not.toContain("kf-design-plan/v2");
+
+    await wrapper.get('[data-testid="blueprint-confirm"]').trigger("click");
+    expect(wrapper.emitted("send")?.[0]?.[0]).toBe("确认");
+  });
+
+  it("shows substantive changes before module details on later revisions", () => {
+    const wrapper = mount(ConversationPanel, {
+      props: { messages: [{ role: "assistant", content: blueprintMessage(2) }] },
+    });
+    const text = wrapper.text();
+    expect(wrapper.find(".plan-version").text()).toBe("v2");
+    expect(text).toContain("本次更新");
+    expect(text.indexOf("新增独立产品展示区")).toBeLessThan(text.indexOf("我的产品"));
   });
 
   it("keeps plain-text assistant messages escaped (no v-html)", async () => {

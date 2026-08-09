@@ -2,8 +2,17 @@
 import { computed, ref, watch } from "vue";
 import { escapeModelText } from "../security";
 import { useGsap } from "../composables/useGsap";
-import { parseClarifyingQuestion, parseDesignPlan } from "../types";
-import type { ChatMessage, ClarifyingQuestionView, DesignPlanView } from "../types";
+import {
+  parseClarifyingQuestion,
+  parseCustomerEffectBlueprint,
+  parseDesignPlan,
+} from "../types";
+import type {
+  ChatMessage,
+  ClarifyingQuestionView,
+  CustomerEffectBlueprintView,
+  DesignPlanView,
+} from "../types";
 
 /**
  * 连续对话面板（brief Step 1/3）。模型输出绝不用 v-html：所有内容以
@@ -39,6 +48,7 @@ interface RenderedMessage {
   role: "user" | "assistant";
   content: string;
   clarify: ClarifyingQuestionView | null;
+  blueprint: CustomerEffectBlueprintView | null;
   plan: DesignPlanView | null;
 }
 
@@ -52,6 +62,10 @@ const renderedMessages = computed<RenderedMessage[]>(() =>
     clarify:
       message.role === "assistant" && props.streaming !== true
         ? parseClarifyingQuestion(message.content)
+        : null,
+    blueprint:
+      message.role === "assistant" && props.streaming !== true
+        ? parseCustomerEffectBlueprint(message.content)
         : null,
     plan:
       message.role === "assistant" && props.streaming !== true
@@ -104,6 +118,9 @@ watch(
 );
 
 function displayContent(message: RenderedMessage): string {
+  if (message.content.startsWith("KF_BLUEPRINT_MESSAGE/1\n")) {
+    return "这份效果蓝图暂时无法显示，请重新生成。";
+  }
   return message.role === "assistant" ? escapeModelText(message.content) : message.content;
 }
 
@@ -165,6 +182,102 @@ function submit(): void {
               </button>
             </div>
           </div>
+        </template>
+        <template v-else-if="message.blueprint !== null">
+          <article class="content effect-blueprint" data-testid="effect-blueprint-card">
+            <header class="blueprint-header">
+              <div>
+                <span class="plan-badge">效果蓝图</span>
+                <span class="plan-version">v{{ message.blueprint.revision }}</span>
+              </div>
+              <h3 class="plan-name">{{ message.blueprint.displayName }}</h3>
+            </header>
+
+            <section class="blueprint-section revision-summary">
+              <h4>{{ message.blueprint.revision === 1 ? "方案要点" : "本次更新" }}</h4>
+              <ul v-if="message.blueprint.revisionNotes.added.length > 0">
+                <li v-for="item in message.blueprint.revisionNotes.added" :key="`added-${item}`">
+                  <strong>新增</strong>{{ item }}
+                </li>
+              </ul>
+              <ul v-if="message.blueprint.revisionNotes.changed.length > 0">
+                <li v-for="item in message.blueprint.revisionNotes.changed" :key="`changed-${item}`">
+                  <strong>调整</strong>{{ item }}
+                </li>
+              </ul>
+              <ul v-if="message.blueprint.revisionNotes.retained.length > 0">
+                <li v-for="item in message.blueprint.revisionNotes.retained" :key="`retained-${item}`">
+                  <strong>保留</strong>{{ item }}
+                </li>
+              </ul>
+            </section>
+
+            <section class="blueprint-section">
+              <h4>方案目标</h4>
+              <p>{{ message.blueprint.overview.objective }}</p>
+              <dl class="blueprint-facts">
+                <div><dt>目标受众</dt><dd>{{ message.blueprint.overview.audiences.join("、") }}</dd></div>
+                <div><dt>使用场景</dt><dd>{{ message.blueprint.overview.scenarios.join("、") }}</dd></div>
+                <div><dt>核心价值</dt><dd>{{ message.blueprint.overview.valueProposition }}</dd></div>
+              </dl>
+            </section>
+
+            <section class="blueprint-section">
+              <h4>整体结构</h4>
+              <p>{{ message.blueprint.informationArchitecture.narrative }}</p>
+              <pre class="blueprint-wireframe">{{ message.blueprint.informationArchitecture.wireframe }}</pre>
+            </section>
+
+            <section class="blueprint-section">
+              <h4>页面模块</h4>
+              <div class="blueprint-modules">
+                <article v-for="module in message.blueprint.modules" :key="module.id" class="blueprint-module">
+                  <h5>{{ module.name }}</h5>
+                  <p>{{ module.purpose }}</p>
+                  <div class="module-detail"><strong>展示内容</strong>{{ module.content.join("、") }}</div>
+                  <dl v-if="module.sampleData.length > 0" class="sample-data">
+                    <div v-for="sample in module.sampleData" :key="`${module.id}-${sample.label}`">
+                      <dt>{{ sample.label }}</dt><dd>{{ sample.value }}</dd>
+                    </div>
+                  </dl>
+                  <div v-if="module.interactions.length > 0" class="module-detail">
+                    <strong>关键交互</strong>{{ module.interactions.join("；") }}
+                  </div>
+                  <div class="module-detail"><strong>表现方式</strong>{{ module.presentation }}</div>
+                </article>
+              </div>
+            </section>
+
+            <section class="blueprint-section">
+              <h4>视觉方向</h4>
+              <dl class="blueprint-facts">
+                <div><dt>整体基调</dt><dd>{{ message.blueprint.visualDirection.tone }}</dd></div>
+                <div><dt>配色</dt><dd>{{ message.blueprint.visualDirection.colors.join("、") }}</dd></div>
+                <div><dt>文字层级</dt><dd>{{ message.blueprint.visualDirection.typography }}</dd></div>
+                <div><dt>留白与表面</dt><dd>{{ message.blueprint.visualDirection.spacingAndSurfaces }}</dd></div>
+              </dl>
+            </section>
+
+            <section class="blueprint-section">
+              <h4>方案亮点</h4>
+              <ul><li v-for="item in message.blueprint.highlights" :key="item">{{ item }}</li></ul>
+            </section>
+
+            <section class="blueprint-section acceptance">
+              <h4>最终验收效果</h4>
+              <ul><li v-for="item in message.blueprint.acceptanceCriteria" :key="item">{{ item }}</li></ul>
+            </section>
+
+            <section v-if="message.blueprint.openQuestions.length > 0" class="blueprint-section">
+              <h4>待您确认</h4>
+              <ul><li v-for="item in message.blueprint.openQuestions" :key="item">{{ item }}</li></ul>
+            </section>
+
+            <p class="blueprint-guidance">可以继续告诉我需要修改的细节；确认这份效果蓝图后，我再生成工程实施计划。</p>
+            <button type="button" class="plan-confirm" data-testid="blueprint-confirm" @click="sendOption('确认')">
+              确认效果蓝图
+            </button>
+          </article>
         </template>
         <template v-else-if="message.plan !== null">
           <div class="content plan-card" data-testid="design-plan-card">
@@ -305,6 +418,35 @@ function submit(): void {
 }
 .plan-confirm:hover { filter: brightness(1.06); }
 .plan-confirm:active { transform: scale(0.97); }
+.effect-blueprint { display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; }
+.blueprint-header { display: flex; flex-direction: column; gap: 0.4rem; }
+.blueprint-header > div { display: flex; align-items: center; gap: 0.45rem; }
+.blueprint-section { border-top: 1px solid var(--color-border); padding-top: 0.65rem; }
+.blueprint-section h4 { margin: 0 0 0.35rem; font-size: 0.88rem; color: var(--color-text); }
+.blueprint-section p { margin: 0; font-size: 0.84rem; color: var(--color-text-secondary); }
+.blueprint-section ul { margin: 0; padding-left: 1.15rem; font-size: 0.82rem; }
+.revision-summary { border-top: none; padding: 0.6rem 0.7rem; border-radius: 10px; background: rgba(59, 130, 246, 0.07); }
+.revision-summary strong { display: inline-block; min-width: 2.4rem; margin-right: 0.35rem; color: var(--color-accent); }
+.blueprint-facts { margin: 0.35rem 0 0; display: grid; gap: 0.25rem; font-size: 0.82rem; }
+.blueprint-facts > div { display: grid; grid-template-columns: 4.5rem 1fr; gap: 0.45rem; }
+.blueprint-facts dt { color: var(--color-text-secondary); }
+.blueprint-facts dd { margin: 0; }
+.blueprint-wireframe { margin: 0.4rem 0 0; padding: 0.55rem; overflow-x: auto; border-radius: 8px; background: rgba(15, 23, 42, 0.05); font: 0.78rem/1.5 ui-monospace, monospace; white-space: pre-wrap; }
+.blueprint-modules { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
+.blueprint-module { padding: 0.6rem; border: 1px solid var(--color-border); border-radius: 10px; min-width: 0; }
+.blueprint-module h5 { margin: 0 0 0.2rem; color: var(--color-accent); font-size: 0.86rem; }
+.module-detail { margin-top: 0.35rem; font-size: 0.8rem; }
+.module-detail strong { display: block; color: var(--color-text-secondary); font-size: 0.74rem; }
+.sample-data { margin: 0.4rem 0 0; padding: 0.4rem; border-radius: 7px; background: rgba(15, 23, 42, 0.04); font-size: 0.78rem; }
+.sample-data > div { display: grid; grid-template-columns: minmax(4rem, auto) 1fr; gap: 0.4rem; }
+.sample-data dt { color: var(--color-text-secondary); }
+.sample-data dd { margin: 0; }
+.acceptance { border-left: 3px solid var(--color-accent); padding-left: 0.65rem; }
+.blueprint-guidance { margin: 0; font-size: 0.82rem; color: var(--color-text-secondary); }
+@media (max-width: 720px) {
+  .blueprint-modules { grid-template-columns: 1fr; }
+  .blueprint-facts > div { grid-template-columns: 1fr; gap: 0; }
+}
 .composer {
   display: flex; gap: 0.5rem; margin-top: 0.7rem;
   background: rgba(255, 255, 255, 0.6); backdrop-filter: var(--blur-glass);
