@@ -16,7 +16,11 @@ import type { DomainRegistry } from "@kf/domain-registry";
 import { Prisma, type BuildJob, type PrismaClient } from "@prisma/client";
 import { Readable } from "node:stream";
 import { BuildJobService } from "./build-job.service.js";
-import { resolveRevisionProjectIr } from "./revision-state.js";
+import {
+  resolveRevisionProjectIr,
+  RevisionStateError,
+  validateRevisionProjectBinding,
+} from "./revision-state.js";
 
 /**
  * Thrown by the crash-injection hook to simulate a worker terminating after
@@ -85,6 +89,11 @@ export class BuildExecutor {
           error: new Error(`base revision not found: ${job.baseRevisionId}`),
         });
       }
+      validateRevisionProjectBinding(
+        baseRevision.state,
+        job.projectKey,
+        job.domainKind,
+      );
       const plan = await this.#deps.prisma.changePlan.findUnique({
         where: { id: job.changePlanId },
       });
@@ -156,9 +165,14 @@ export class BuildExecutor {
         solutionRevisionId: baseRevision.id,
         tenantId: job.tenantId,
         projectKey: job.projectKey,
-        domainKind: job.domainKind,
       },
     });
+    if (domainProject !== null && domainProject.domainKind !== job.domainKind) {
+      throw new RevisionStateError(
+        `projectKey ${job.projectKey} belongs to domain ${domainProject.domainKind}, ` +
+          `not ${job.domainKind}`,
+      );
+    }
     if (domainProject === null) {
       // No package exists for this exact project yet: compile only its IR.
       // The legacy single-project seed remains the workspace id; explicit

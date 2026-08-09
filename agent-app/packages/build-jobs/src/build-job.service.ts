@@ -1,10 +1,14 @@
 import { Prisma, type BuildJob, type JobStatus, type PrismaClient } from "@prisma/client";
+import { projectKeySchema } from "@kf/contracts";
 
 import type {
   CompleteBuildInput,
   EnqueueBuildInput,
 } from "./types.js";
-import { replaceRevisionProjectBuildState } from "./revision-state.js";
+import {
+  replaceRevisionProjectBuildState,
+  RevisionStateError,
+} from "./revision-state.js";
 
 /**
  * Durable build-job lease and commit logic, shared by the API (enqueue) and
@@ -220,22 +224,47 @@ export class BuildJobService {
           const message =
             `stale base revision ${job.baseRevisionId}; workspace currently points to ` +
             `${workspace.currentRevisionId ?? "no revision"}`;
-          await tx.validationReport.create({
-            data: {
-              tenantId: job.tenantId,
-              buildJobId: job.id,
-              changePlanId: job.changePlanId,
-              outcome: "fail",
-              summary: `build failed: ${message}`,
-              details: toInputJsonValue({
-                error: { name: "BuildJobConflictError", message },
-              }),
-            },
-          });
-          return tx.buildJob.update({
-            where: { id: job.id },
-            data: { status: "FAILED", leaseOwner: null, leaseExpiresAt: null },
-          });
+          return recordBuildConflict(tx, job, message);
+        }
+        const baseProjects = await tx.domainProjectRevision.findMany({
+          where: {
+            tenantId: job.tenantId,
+            solutionRevisionId: job.baseRevisionId,
+          },
+        });
+        const boundProject = baseProjects.find(
+          (project) => project.projectKey === job.projectKey,
+        );
+        if (boundProject !== undefined && boundProject.domainKind !== job.domainKind) {
+          return recordBuildConflict(
+            tx,
+            job,
+            `projectKey ${job.projectKey} belongs to domain ${boundProject.domainKind}, ` +
+              `not ${job.domainKind}`,
+          );
+        }
+        if (result.domainKind !== job.domainKind) {
+          return recordBuildConflict(
+            tx,
+            job,
+            `build result domain ${result.domainKind} does not match job domain ${job.domainKind}`,
+          );
+        }
+        let nextState: Prisma.InputJsonValue;
+        try {
+          nextState = toInputJsonValue(
+            replaceRevisionProjectBuildState(
+              baseRevision.state,
+              job.projectKey,
+              job.domainKind,
+              result.state,
+            ),
+          );
+        } catch (error) {
+          if (error instanceof RevisionStateError) {
+            return recordBuildConflict(tx, job, error.message);
+          }
+          throw error;
         }
         const latest = await tx.solutionRevision.findFirst({
           where: { workspaceId: job.workspaceId, tenantId: job.tenantId },
@@ -249,20 +278,7 @@ export class BuildJobService {
             revisionNumber: (latest?.revisionNumber ?? 0) + 1,
             kind: result.kind,
             parentRevisionId: job.baseRevisionId,
-            state: toInputJsonValue(
-              replaceRevisionProjectBuildState(
-                baseRevision.state,
-                job.projectKey,
-                job.domainKind,
-                result.state,
-              ),
-            ),
-          },
-        });
-        const baseProjects = await tx.domainProjectRevision.findMany({
-          where: {
-            tenantId: job.tenantId,
-            solutionRevisionId: job.baseRevisionId,
+            state: nextState,
           },
         });
         const preservedProjects = baseProjects.filter(
@@ -376,11 +392,13 @@ interface BuildJobRow {
 }
 
 function normalizeProjectKey(projectKey: string | undefined, domainKind: string): string {
-  const normalized = projectKey?.trim() ?? domainKind.trim();
-  if (normalized.length === 0 || normalized.length > 128) {
-    throw new BuildJobConflictError("projectKey must contain 1 to 128 characters");
+  const parsed = projectKeySchema.safeParse(projectKey ?? domainKind);
+  if (!parsed.success) {
+    throw new BuildJobConflictError(
+      parsed.error.issues.map((issue) => issue.message).join("; "),
+    );
   }
-  return normalized;
+  return parsed.data;
 }
 
 function assertIdempotencyBinding(
@@ -429,6 +447,29 @@ function toInputJsonValue(value: unknown): Prisma.InputJsonValue {
     return output;
   }
   throw new BuildJobConflictError("revision state must be JSON serializable");
+}
+
+async function recordBuildConflict(
+  tx: Prisma.TransactionClient,
+  job: BuildJob,
+  message: string,
+): Promise<BuildJob> {
+  await tx.validationReport.create({
+    data: {
+      tenantId: job.tenantId,
+      buildJobId: job.id,
+      changePlanId: job.changePlanId,
+      outcome: "fail",
+      summary: `build failed: ${message}`,
+      details: toInputJsonValue({
+        error: { name: "BuildJobConflictError", message },
+      }),
+    },
+  });
+  return tx.buildJob.update({
+    where: { id: job.id },
+    data: { status: "FAILED", leaseOwner: null, leaseExpiresAt: null },
+  });
 }
 
 function isUniqueViolation(error: unknown): boolean {

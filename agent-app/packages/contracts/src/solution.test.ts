@@ -40,6 +40,63 @@ describe("solutionIRSchema", () => {
     expect(ir.projects.map((project) => project.projectKey)).toEqual(["primary", "secondary"]);
   });
 
+  it("normalizes explicit and legacy-derived project keys identically", () => {
+    const ir = solutionIRSchema.parse({
+      ...validIRInput,
+      projects: [
+        { id: " derived-key ", name: "派生", domain: "kingclient" },
+        {
+          id: "explicit-id",
+          projectKey: " explicit-key ",
+          name: "显式",
+          domain: "kingcalculation",
+        },
+      ],
+    });
+
+    expect(ir.projects.map((project) => project.projectKey)).toEqual([
+      "derived-key",
+      "explicit-key",
+    ]);
+  });
+
+  it.each([
+    ["an explicit unsafe key", { id: "p1", projectKey: "bad/key" }],
+    ["a derived unsafe key", { id: "bad/key" }],
+    ["an explicit overlong key", { id: "p1", projectKey: "a".repeat(129) }],
+    ["a derived overlong key", { id: "a".repeat(129) }],
+  ])("rejects %s", (_label, project) => {
+    expect(() => solutionIRSchema.parse({
+      ...validIRInput,
+      projects: [{ ...project, name: "非法", domain: "kingclient" }],
+    })).toThrow(/projectKey/);
+  });
+
+  it("rejects duplicate explicit project keys across domains", () => {
+    expect(() => solutionIRSchema.parse({
+      ...validIRInput,
+      projects: [
+        { id: "client", projectKey: "shared", name: "客户端", domain: "kingclient" },
+        {
+          id: "calculation",
+          projectKey: "shared",
+          name: "计算",
+          domain: "kingcalculation",
+        },
+      ],
+    })).toThrow(/duplicate projectKey/);
+  });
+
+  it("rejects duplicate derived project keys after normalization", () => {
+    expect(() => solutionIRSchema.parse({
+      ...validIRInput,
+      projects: [
+        { id: " shared ", name: "客户端", domain: "kingclient" },
+        { id: "shared", name: "计算", domain: "kingcalculation" },
+      ],
+    })).toThrow(/duplicate projectKey/);
+  });
+
   it("rejects an empty solution id", () => {
     expect(() => solutionIRSchema.parse({ ...validIRInput, solutionId: "" })).toThrow(
       "solution id is required"

@@ -527,6 +527,22 @@ describe("build job idempotency and leases", () => {
       .rejects.toThrow("idempotency key already used by another build");
   });
 
+  it("applies the canonical projectKey format before enqueue", async () => {
+    const { tenant, workspace } = await seedWorkspace("new");
+    const { plan, hash } = await seedPlan(tenant.id, workspace.id);
+    const input = seedInput({
+      tenantId: tenant.id,
+      workspaceId: workspace.id,
+      baseRevisionId: workspace.currentRevisionId,
+      changePlanId: plan.id,
+      planHashValue: hash,
+    });
+
+    await expect(jobs.enqueue({ ...input, projectKey: "unsafe/project" }))
+      .rejects.toThrow(/projectKey/);
+    expect(await prisma.buildJob.count({ where: { workspaceId: workspace.id } })).toBe(0);
+  });
+
   it("allows recovery only after a lease expires", async () => {
     const { tenant, workspace } = await seedWorkspace("new");
     const { plan, hash } = await seedPlan(tenant.id, workspace.id);
@@ -726,6 +742,221 @@ describe("domain pack delegation", () => {
     expect(report).toMatchObject({
       outcome: "fail",
       summary: expect.stringContaining("stale base revision"),
+    });
+  });
+
+  it("fails a create build instead of treating a malformed tagged envelope as legacy IR", async () => {
+    const calls = [];
+    const localRegistry = new DomainRegistry();
+    localRegistry.register(trackingDomainPack("kingclient", calls));
+    const { tenant, workspace } = await seedWorkspace("new");
+    await prisma.solutionRevision.update({
+      where: { id: workspace.currentRevisionId },
+      data: {
+        state: {
+          schema: "kf-solution-revision-state/v1",
+          projects: { projectKey: "client-main" },
+        },
+      },
+    });
+    const { plan, hash } = await seedPlan(tenant.id, workspace.id);
+    const queued = await jobs.enqueue({
+      ...seedInput({
+        tenantId: tenant.id,
+        workspaceId: workspace.id,
+        baseRevisionId: workspace.currentRevisionId,
+        changePlanId: plan.id,
+        planHashValue: hash,
+      }),
+      projectKey: "client-main",
+    });
+    const leased = await jobs.leaseNext("malformed-create", new Date());
+    const executor = new BuildExecutor({ prisma, storage, registry: localRegistry });
+
+    expect((await executor.execute(leased)).status).toBe("FAILED");
+    expect(await prisma.solutionRevision.count({
+      where: { workspaceId: workspace.id },
+    })).toBe(1);
+    expect(await prisma.validationReport.findFirst({
+      where: { buildJobId: queued.id },
+    })).toMatchObject({
+      outcome: "fail",
+      summary: expect.stringContaining("invalid solution revision state"),
+    });
+  });
+
+  it("fails a modify build when a tagged envelope project has an invalid shape", async () => {
+    const calls = [];
+    const localRegistry = new DomainRegistry();
+    localRegistry.register(trackingDomainPack("kingclient", calls));
+    const { tenant, workspace } = await seedWorkspace("new");
+    await prisma.solutionRevision.update({
+      where: { id: workspace.currentRevisionId },
+      data: {
+        state: {
+          schema: "kf-solution-revision-state/v1",
+          projects: [
+            {
+              projectKey: "client-main",
+              domainKind: "kingclient",
+              projectIr: { marker: "client-main" },
+            },
+          ],
+        },
+      },
+    });
+    const builtRevisionId = await runProjectBuild({
+      tenantId: tenant.id,
+      workspaceId: workspace.id,
+      baseRevisionId: workspace.currentRevisionId,
+      domainKind: "kingclient",
+      projectKey: "client-main",
+      localRegistry,
+    });
+    await prisma.solutionRevision.update({
+      where: { id: builtRevisionId },
+      data: {
+        state: {
+          schema: "kf-solution-revision-state/v1",
+          projects: [{ projectKey: "client-main", projectIr: { marker: "client-main" } }],
+        },
+      },
+    });
+    const revisionCountBefore = await prisma.solutionRevision.count({
+      where: { workspaceId: workspace.id },
+    });
+    const { plan, hash } = await seedPlan(tenant.id, workspace.id);
+    const queued = await jobs.enqueue({
+      ...seedInput({
+        tenantId: tenant.id,
+        workspaceId: workspace.id,
+        baseRevisionId: builtRevisionId,
+        changePlanId: plan.id,
+        planHashValue: hash,
+      }),
+      projectKey: "client-main",
+    });
+    const leased = await jobs.leaseNext("malformed-modify", new Date());
+    const executor = new BuildExecutor({ prisma, storage, registry: localRegistry });
+
+    expect((await executor.execute(leased)).status).toBe("FAILED");
+    expect(await prisma.solutionRevision.count({
+      where: { workspaceId: workspace.id },
+    })).toBe(revisionCountBefore);
+    expect(await prisma.validationReport.findFirst({
+      where: { buildJobId: queued.id },
+    })).toMatchObject({
+      outcome: "fail",
+      summary: expect.stringContaining("invalid solution revision state"),
+    });
+  });
+
+  it("rejects a successful commit when its projectKey belongs to another domain", async () => {
+    const { tenant, workspace } = await seedWorkspace("new");
+    const baseRevisionId = workspace.currentRevisionId;
+    await prisma.domainProjectRevision.create({
+      data: {
+        tenantId: tenant.id,
+        solutionRevisionId: baseRevisionId,
+        projectKey: "shared",
+        domainKind: "kingclient",
+        kind: "client-package",
+        packageHash: "client-hash",
+        packageUrl: "client-package",
+      },
+    });
+    const { plan, hash } = await seedPlan(tenant.id, workspace.id);
+    const queued = await jobs.enqueue({
+      ...seedInput({
+        tenantId: tenant.id,
+        workspaceId: workspace.id,
+        baseRevisionId,
+        changePlanId: plan.id,
+        planHashValue: hash,
+      }),
+      projectKey: "shared",
+      domainKind: "kingcalculation",
+    });
+    const leased = await jobs.leaseNext("domain-conflict", new Date());
+    const done = await jobs.completeBuild({
+      jobId: queued.id,
+      tenantId: tenant.id,
+      leaseOwner: leased.leaseOwner,
+      status: "SUCCEEDED",
+      validationReport: { outcome: "pass", summary: "pass", details: {} },
+      result: {
+        kind: "built",
+        state: { mode: "compile" },
+        domainKind: "kingcalculation",
+        domainProjectKind: "calculation-package",
+        mediaType: "application/zip",
+        fileExtension: ".zip",
+        packageHash: "calculation-hash",
+        packageUrl: "calculation-package",
+        artifact: {
+          kind: "calculation-package",
+          mediaType: "application/zip",
+          fileExtension: ".zip",
+          storageKey: "calculation-package",
+          sizeBytes: 4,
+          sha256: "calculation-hash",
+        },
+      },
+    });
+
+    expect(done.status).toBe("FAILED");
+    expect(await prisma.solutionRevision.count({
+      where: { workspaceId: workspace.id },
+    })).toBe(1);
+    expect(await prisma.domainProjectRevision.findFirst({
+      where: { solutionRevisionId: baseRevisionId, projectKey: "shared" },
+    })).toMatchObject({ domainKind: "kingclient", packageUrl: "client-package" });
+    expect(await prisma.validationReport.findFirst({
+      where: { buildJobId: queued.id },
+    })).toMatchObject({
+      outcome: "fail",
+      summary: expect.stringContaining("projectKey shared belongs to domain kingclient"),
+    });
+  });
+
+  it("rejects a stored project/domain conflict before invoking the target DomainPack", async () => {
+    const calls = [];
+    const localRegistry = new DomainRegistry();
+    localRegistry.register(trackingDomainPack("kingcalculation", calls));
+    const { tenant, workspace } = await seedWorkspace("new");
+    await prisma.domainProjectRevision.create({
+      data: {
+        tenantId: tenant.id,
+        solutionRevisionId: workspace.currentRevisionId,
+        projectKey: "shared",
+        domainKind: "kingclient",
+        kind: "client-package",
+        packageHash: "client-hash",
+        packageUrl: "client-package",
+      },
+    });
+    const { plan, hash } = await seedPlan(tenant.id, workspace.id);
+    const queued = await jobs.enqueue({
+      ...seedInput({
+        tenantId: tenant.id,
+        workspaceId: workspace.id,
+        baseRevisionId: workspace.currentRevisionId,
+        changePlanId: plan.id,
+        planHashValue: hash,
+      }),
+      projectKey: "shared",
+      domainKind: "kingcalculation",
+    });
+    const leased = await jobs.leaseNext("executor-domain-conflict", new Date());
+    const executor = new BuildExecutor({ prisma, storage, registry: localRegistry });
+
+    expect((await executor.execute(leased)).status).toBe("FAILED");
+    expect(calls).toEqual([]);
+    expect(await prisma.validationReport.findFirst({
+      where: { buildJobId: queued.id },
+    })).toMatchObject({
+      outcome: "fail",
+      summary: expect.stringContaining("projectKey shared belongs to domain kingclient"),
     });
   });
 
