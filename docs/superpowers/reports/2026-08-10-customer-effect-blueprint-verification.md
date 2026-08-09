@@ -14,6 +14,8 @@
 - `pnpm lint`：11 个工作区项目全部通过。
 - `git diff --check`：通过。
 
+最终额外运行根级 `pnpm test`：46 个测试文件中 45 个通过，489 个测试通过、3 个跳过、1 个失败。唯一失败为既有的 `apps/api/src/artifacts/preview.service.test.ts:107` 固定 tenant/admin 测试数据唯一键冲突（`Tenant name or admin username already exists`）。同一代码树按包隔离运行 `pnpm --filter @kf/api test` 为 106/106 通过，包含 preview integration 6/6；本次效果蓝图相关测试均通过。该根级共享数据库夹具冲突未纳入本功能修改范围。
+
 本次新增回归测试均先在旧实现上观察到预期失败，再进行最小实现：
 
 - 详细效果蓝图契约不存在。
