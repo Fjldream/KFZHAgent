@@ -373,4 +373,48 @@ describe("SolutionGraph Postgres checkpoint recovery", () => {
     // 两遍流程：设计计划展示 + 确认后的构建提示（enqueue-build）。
     expect(replyCount).toBe(3);
   });
+
+  it("reuses a legacy default-project idempotency key when approval is replayed", async () => {
+    const seeded = await seedWorkspace();
+    const deps = makeDeps();
+    const saver1 = new PostgresSaver(pool);
+    await saver1.setup();
+    const graph1: CompiledGraph = compileSolutionGraph(deps, { checkpointer: saver1 });
+    const config = graphConfig(seeded.conversationId);
+
+    await graph1.invoke(graphInput(seeded), config);
+    await graph1.invoke(graphInput(seeded), config);
+    const snapshot = await graph1.getState(config);
+    const payload = snapshot.tasks[0]?.interrupts[0]?.value as ApprovalInterrupt | undefined;
+    if (payload === undefined) throw new Error("expected a plan approval interrupt");
+    const changePlanId = `plan:${seeded.workspaceId}:${payload.planHash}`;
+    const legacyKey = `${seeded.conversationId}:${changePlanId}:${payload.planHash}`;
+    const legacyJob = await prisma.buildJob.create({
+      data: {
+        tenantId: seeded.tenantId,
+        workspaceId: seeded.workspaceId,
+        baseRevisionId: seeded.revisionId,
+        changePlanId,
+        planHash: payload.planHash,
+        projectKey: "kingclient",
+        domainKind: "kingclient",
+        idempotencyKey: legacyKey,
+        status: "QUEUED",
+      },
+    });
+
+    const saver2 = new PostgresSaver(pool);
+    await saver2.setup();
+    const graph2: CompiledGraph = compileSolutionGraph(deps, { checkpointer: saver2 });
+    const result = await graph2.invoke(
+      new Command({ resume: { action: "approve", planHash: payload.planHash } }),
+      config,
+    );
+
+    expect(result.buildJobId).toBe(legacyJob.id);
+    expect(await prisma.buildJob.count({ where: { workspaceId: seeded.workspaceId } })).toBe(1);
+    expect(await prisma.solutionRevision.count({
+      where: { workspaceId: seeded.workspaceId },
+    })).toBe(1);
+  });
 });

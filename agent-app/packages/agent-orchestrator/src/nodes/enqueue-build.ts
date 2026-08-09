@@ -36,8 +36,10 @@ export function createEnqueueBuildNode(deps: SolutionGraphDeps) {
 
     const domainKind = deps.defaultDomainKind ?? "kingclient";
     const projectKey = deps.defaultProjectKey ?? domainKind;
-    const idempotencyKey =
-      `${state.conversationId}:${projectKey}:${state.changePlanId}:${state.planHash}`;
+    const legacyDefaultProject = domainKind === "kingclient" && projectKey === "kingclient";
+    const idempotencyKey = legacyDefaultProject
+      ? `${state.conversationId}:${state.changePlanId}:${state.planHash}`
+      : `${state.conversationId}:${projectKey}:${state.changePlanId}:${state.planHash}`;
     try {
       const job = await deps.buildJobPort.enqueue({
         tenantId: state.tenantId,

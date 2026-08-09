@@ -478,10 +478,26 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
       planHash: payload.planHash,
       projectKey: "kingclient",
       domainKind: "kingclient",
+      idempotencyKey:
+        `${CONVERSATION_ID}:plan:${WORKSPACE_ID}:${payload.planHash}:${payload.planHash}`,
     });
     expect(result.buildJobId).toBe("job-1");
     expect(result.stage).toBe("preview-review");
     expect(bed.repo.statusOf(payload.changeRequestId)).toBe("APPROVED");
+  });
+
+  it("scopes the idempotency key for a non-default project", async () => {
+    const bed = createBed();
+    bed.deps.defaultDomainKind = "kingcalculation";
+    bed.deps.defaultProjectKey = "calculation-primary";
+    const ctx = seed(bed);
+    const payload = await planNewRequirement(bed, ctx, "新增一个计算项目");
+
+    await approve(bed, ctx, payload);
+
+    expect(bed.builds.enqueues[0]?.idempotencyKey).toBe(
+      `${CONVERSATION_ID}:calculation-primary:plan:${WORKSPACE_ID}:${payload.planHash}:${payload.planHash}`,
+    );
   });
 
   it("build success enters preview-review with a hint message; CONFIRM_BUILD lands (stage=done)", async () => {
