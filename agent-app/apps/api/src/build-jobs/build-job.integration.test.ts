@@ -6,11 +6,12 @@ process.env.DATABASE_URL =
   process.env.TEST_DATABASE_URL ??
   "postgresql://postgres@127.0.0.1:5432/kf_agent_test";
 
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
-import type { INestApplication } from "@nestjs/common";
+import { ConflictException, type INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { LocalArtifactStorage, type ArtifactStorage } from "@kf/artifact-storage";
 import { BuildExecutor } from "@kf/build-jobs";
@@ -305,6 +306,78 @@ function seedInput({ tenantId, workspaceId, baseRevisionId, changePlanId, planHa
   };
 }
 
+function successfulCompletionInput(job, storageKey) {
+  return {
+    jobId: job.id,
+    tenantId: job.tenantId,
+    leaseOwner: job.leaseOwner,
+    leaseAttempt: job.attemptCount,
+    status: "SUCCEEDED",
+    validationReport: { outcome: "pass", summary: "pass", details: {} },
+    result: {
+      kind: "built",
+      state: { mode: "compile" },
+      domainKind: job.domainKind,
+      domainProjectKind: "client-package",
+      mediaType: "application/zip",
+      fileExtension: ".gz",
+      packageHash: `${storageKey}-hash`,
+      packageUrl: storageKey,
+      artifact: {
+        kind: "client-package",
+        mediaType: "application/zip",
+        fileExtension: ".gz",
+        storageKey,
+        sizeBytes: 4,
+        sha256: `${storageKey}-hash`,
+      },
+    },
+  };
+}
+
+async function holdRowLock(table, id) {
+  let signalLocked;
+  let releaseLock;
+  const locked = new Promise((resolve) => {
+    signalLocked = resolve;
+  });
+  const released = new Promise((resolve) => {
+    releaseLock = resolve;
+  });
+  const transaction = prisma.$transaction(
+    async (tx) => {
+      await tx.$queryRawUnsafe(`SELECT "id" FROM "${table}" WHERE "id" = $1 FOR UPDATE`, id);
+      signalLocked();
+      await released;
+    },
+    { timeout: 10_000 },
+  );
+  await locked;
+  return async () => {
+    releaseLock();
+    await transaction;
+  };
+}
+
+async function waitForBlockedQueries(expectations) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const rows = await prisma.$queryRaw`
+      SELECT "query"
+      FROM "pg_stat_activity"
+      WHERE "datname" = current_database()
+        AND "pid" <> pg_backend_pid()
+        AND "wait_event_type" = 'Lock'
+    `;
+    const allBlocked = expectations.every(({ marker, count }) =>
+      rows.filter((row) => row.query.includes(marker)).length >= count,
+    );
+    if (allBlocked) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`timed out waiting for blocked queries: ${JSON.stringify(expectations)}`);
+}
+
 async function runToSuccess({ tenantId, workspaceId, baseRevisionId, changePlanId, planHashValue, hooks }) {
   const input = seedInput({ tenantId, workspaceId, baseRevisionId, changePlanId, planHashValue });
   const queued = await jobs.enqueue(input);
@@ -565,6 +638,109 @@ describe("build job idempotency and leases", () => {
     expect((await jobs.leaseNext("worker-b", afterLease)).id).toBe(leased.id);
   });
 
+  it("fences an older attempt even when a reclaimed lease has the same owner", async () => {
+    const { tenant, workspace } = await seedWorkspace("new");
+    const { plan, hash } = await seedPlan(tenant.id, workspace.id);
+    const queued = await jobs.enqueue(seedInput({
+      tenantId: tenant.id,
+      workspaceId: workspace.id,
+      baseRevisionId: workspace.currentRevisionId,
+      changePlanId: plan.id,
+      planHashValue: hash,
+    }));
+    const firstLeaseAt = new Date();
+    const first = await jobs.leaseNext("worker-collision", firstLeaseAt, 1_000);
+    const reclaimed = await jobs.leaseNext(
+      "worker-collision",
+      new Date(firstLeaseAt.getTime() + 1_001),
+      30_000,
+    );
+
+    expect(first.id).toBe(queued.id);
+    expect(reclaimed.id).toBe(queued.id);
+    expect(reclaimed.attemptCount).toBe(first.attemptCount + 1);
+    await expect(jobs.completeBuild(successfulCompletionInput(first, "old-attempt")))
+      .rejects.toThrow("lease was lost or expired before completion");
+    expect(await prisma.solutionRevision.count({ where: { workspaceId: workspace.id } })).toBe(1);
+    expect(await prisma.artifact.count({ where: { buildJobId: queued.id } })).toBe(0);
+
+    expect((await jobs.completeBuild(successfulCompletionInput(reclaimed, "new-attempt"))).status)
+      .toBe("SUCCEEDED");
+  });
+
+  it("rejects a completion after its lease has expired in database time", async () => {
+    const { tenant, workspace } = await seedWorkspace("new");
+    const { plan, hash } = await seedPlan(tenant.id, workspace.id);
+    const queued = await jobs.enqueue(seedInput({
+      tenantId: tenant.id,
+      workspaceId: workspace.id,
+      baseRevisionId: workspace.currentRevisionId,
+      changePlanId: plan.id,
+      planHashValue: hash,
+    }));
+    const expired = await jobs.leaseNext(
+      "expired-worker",
+      new Date(Date.now() - 60_000),
+      1_000,
+    );
+
+    await expect(jobs.completeBuild(successfulCompletionInput(expired, "expired-attempt")))
+      .rejects.toThrow("lease was lost or expired before completion");
+    expect(await prisma.buildJob.findUnique({ where: { id: queued.id } })).toMatchObject({
+      status: "RUNNING",
+      attemptCount: 1,
+    });
+    expect(await prisma.solutionRevision.count({ where: { workspaceId: workspace.id } })).toBe(1);
+  });
+
+  it("rejects a lease that expires while completion waits to acquire its job lock", async () => {
+    const { tenant, workspace } = await seedWorkspace("new");
+    const { plan, hash } = await seedPlan(tenant.id, workspace.id);
+    const queued = await jobs.enqueue(seedInput({
+      tenantId: tenant.id,
+      workspaceId: workspace.id,
+      baseRevisionId: workspace.currentRevisionId,
+      changePlanId: plan.id,
+      planHashValue: hash,
+    }));
+    const leased = await jobs.leaseNext("lock-wait-expiry", new Date(), 100);
+    const release = await holdRowLock("BuildJob", queued.id);
+
+    const completion = jobs.completeBuild(successfulCompletionInput(leased, "lock-wait-expired"));
+    await waitForBlockedQueries([{ marker: "kf_complete_build_job_lock", count: 1 }]);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await release();
+
+    await expect(completion).rejects.toThrow("lease was lost or expired before completion");
+    expect(await prisma.solutionRevision.count({ where: { workspaceId: workspace.id } })).toBe(1);
+    expect(await prisma.artifact.count({ where: { buildJobId: queued.id } })).toBe(0);
+  });
+
+  it("commits at most one revision and artifact when the same job completes concurrently", async () => {
+    const { tenant, workspace } = await seedWorkspace("new");
+    const { plan, hash } = await seedPlan(tenant.id, workspace.id);
+    const queued = await jobs.enqueue(seedInput({
+      tenantId: tenant.id,
+      workspaceId: workspace.id,
+      baseRevisionId: workspace.currentRevisionId,
+      changePlanId: plan.id,
+      planHashValue: hash,
+    }));
+    const leased = await jobs.leaseNext("double-completion", new Date());
+    const release = await holdRowLock("BuildJob", queued.id);
+
+    const first = jobs.completeBuild(successfulCompletionInput(leased, "double-a"));
+    const second = jobs.completeBuild(successfulCompletionInput(leased, "double-b"));
+    await waitForBlockedQueries([{ marker: "kf_complete_build_job_lock", count: 2 }]);
+    await release();
+    const results = await Promise.allSettled([first, second]);
+
+    expect(results.every((result) => result.status === "fulfilled")).toBe(true);
+    expect(await prisma.solutionRevision.count({ where: { workspaceId: workspace.id } })).toBe(2);
+    expect(await prisma.artifact.count({ where: { buildJobId: queued.id } })).toBe(1);
+    expect(await prisma.validationReport.count({ where: { buildJobId: queued.id } })).toBe(1);
+  });
+
   it("records diagnostic metadata on failure and never advances the revision", async () => {
     const { tenant, workspace } = await seedWorkspace("new");
     const { plan, hash } = await seedPlan(tenant.id, workspace.id);
@@ -618,6 +794,11 @@ describe("full build chain", () => {
     });
     expect(sourceRevision.revision.revisionNumber).toBe(1);
     expect(sourceRevision.revision.kind).toBe("source");
+    expect(sourceRevision.domainProject).toMatchObject({
+      kind: "source-package",
+      mediaType: "application/zip",
+      fileExtension: ".zip",
+    });
     expect(sourceRevision.summary).toMatchObject({ project: { name: "UnknownFieldFixture" } });
 
     const workspaceAfterImport = await prisma.solutionWorkspace.findUnique({
@@ -655,6 +836,115 @@ describe("full build chain", () => {
     });
     expect(latest.kind).toBe("built");
     expect(latest.parentRevisionId).toBe(sourceRevision.revision.id);
+  });
+
+  it("commits only one source revision when two imports race on an empty workspace", async () => {
+    const { tenant, workspace } = await seedWorkspace("upload");
+    const source = await packageNativeClientProject(unknownFieldClientDir);
+    const release = await holdRowLock("SolutionWorkspace", workspace.id);
+
+    const first = workspaces.createSourceRevision({
+      tenantId: tenant.id,
+      workspaceId: workspace.id,
+      source,
+    });
+    const second = workspaces.createSourceRevision({
+      tenantId: tenant.id,
+      workspaceId: workspace.id,
+      source,
+    });
+    await waitForBlockedQueries([{ marker: "kf_source_workspace_lock", count: 2 }]);
+    await release();
+    const results = await Promise.allSettled([first, second]);
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(await prisma.solutionRevision.count({ where: { workspaceId: workspace.id } })).toBe(1);
+    const winner = results.find((result) => result.status === "fulfilled");
+    expect((await prisma.solutionWorkspace.findUnique({ where: { id: workspace.id } }))
+      ?.currentRevisionId).toBe(winner.value.revision.id);
+    expect(await readdir(path.join(storageRoot, tenant.id))).toHaveLength(1);
+  });
+
+  it("keeps streaming source-upload race losers as 409 and removes their blobs", async () => {
+    const { tenant, workspace } = await seedWorkspace("upload");
+    const source = await packageNativeClientProject(unknownFieldClientDir);
+    const release = await holdRowLock("SolutionWorkspace", workspace.id);
+
+    const first = workspaces.uploadSourceRevision({
+      tenantId: tenant.id,
+      workspaceId: workspace.id,
+      stream: Readable.from([source]),
+    });
+    const second = workspaces.uploadSourceRevision({
+      tenantId: tenant.id,
+      workspaceId: workspace.id,
+      stream: Readable.from([source]),
+    });
+    await waitForBlockedQueries([{ marker: "kf_source_workspace_lock", count: 2 }]);
+    await release();
+    const results = await Promise.allSettled([first, second]);
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const loser = results.find((result) => result.status === "rejected");
+    expect(loser.reason).toBeInstanceOf(ConflictException);
+    expect(loser.reason.getStatus()).toBe(409);
+    expect(await prisma.solutionRevision.count({ where: { workspaceId: workspace.id } })).toBe(1);
+    expect(await readdir(path.join(storageRoot, tenant.id))).toHaveLength(1);
+  });
+});
+
+describe("concurrent revision writers", () => {
+  it("serializes completion and rollback without duplicate revisions or pointer overwrite", async () => {
+    const { tenant, workspace } = await seedWorkspace("new");
+    const firstPlan = await seedPlan(tenant.id, workspace.id);
+    await runToSuccess({
+      tenantId: tenant.id,
+      workspaceId: workspace.id,
+      baseRevisionId: workspace.currentRevisionId,
+      changePlanId: firstPlan.plan.id,
+      planHashValue: firstPlan.hash,
+    });
+    const builtBase = await prisma.solutionRevision.findFirstOrThrow({
+      where: { workspaceId: workspace.id, kind: "built" },
+    });
+    const secondPlan = await seedPlan(tenant.id, workspace.id);
+    const queued = await jobs.enqueue(seedInput({
+      tenantId: tenant.id,
+      workspaceId: workspace.id,
+      baseRevisionId: builtBase.id,
+      changePlanId: secondPlan.plan.id,
+      planHashValue: secondPlan.hash,
+    }));
+    const leased = await jobs.leaseNext("completion-vs-rollback", new Date());
+    const release = await holdRowLock("SolutionWorkspace", workspace.id);
+
+    const completion = jobs.completeBuild(successfulCompletionInput(leased, "race-completion"));
+    const rollback = revisions.rollback({
+      tenantId: tenant.id,
+      workspaceId: workspace.id,
+      targetRevisionId: builtBase.id,
+    });
+    await waitForBlockedQueries([
+      { marker: "kf_complete_workspace_lock", count: 1 },
+      { marker: "kf_rollback_workspace_lock", count: 1 },
+    ]);
+    await release();
+    const [completionResult, rollbackResult] = await Promise.allSettled([completion, rollback]);
+
+    expect(completionResult.status).toBe("fulfilled");
+    expect(rollbackResult.status).toBe("fulfilled");
+    if (completionResult.status !== "fulfilled" || rollbackResult.status !== "fulfilled") return;
+    const history = await prisma.solutionRevision.findMany({
+      where: { workspaceId: workspace.id },
+      orderBy: { revisionNumber: "asc" },
+    });
+    expect(history.map((revision) => revision.revisionNumber))
+      .toEqual(history.map((_, index) => index + 1));
+    expect((await prisma.solutionWorkspace.findUnique({ where: { id: workspace.id } }))
+      ?.currentRevisionId).toBe(rollbackResult.value.id);
+    expect(await prisma.artifact.count({ where: { buildJobId: queued.id } })).toBe(
+      completionResult.value.status === "SUCCEEDED" ? 1 : 0,
+    );
   });
 });
 
@@ -882,6 +1172,7 @@ describe("domain pack delegation", () => {
       jobId: queued.id,
       tenantId: tenant.id,
       leaseOwner: leased.leaseOwner,
+      leaseAttempt: leased.attemptCount,
       status: "SUCCEEDED",
       validationReport: { outcome: "pass", summary: "pass", details: {} },
       result: {

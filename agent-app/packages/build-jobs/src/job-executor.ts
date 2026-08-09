@@ -72,6 +72,8 @@ export class BuildExecutor {
   async execute(job: BuildJob): Promise<BuildJob> {
     if (job.status === "SUCCEEDED" || job.status === "FAILED") return job;
 
+    const heartbeat = this.startLeaseHeartbeat(job);
+    let storedArtifact: StoredArtifact | undefined;
     try {
       // Resolve the domain capabilities (throws for unknown/unsupported kinds).
       const pack = this.#deps.registry.require(job.domainKind);
@@ -84,6 +86,7 @@ export class BuildExecutor {
         baseRevision.tenantId !== job.tenantId ||
         baseRevision.workspaceId !== job.workspaceId
       ) {
+        await heartbeat.stop();
         return this.complete(job, {
           status: "FAILED",
           error: new Error(`base revision not found: ${job.baseRevisionId}`),
@@ -98,6 +101,7 @@ export class BuildExecutor {
         where: { id: job.changePlanId },
       });
       if (plan === null || plan.workspaceId !== job.workspaceId) {
+        await heartbeat.stop();
         return this.complete(job, {
           status: "FAILED",
           error: new Error(`change plan not found: ${job.changePlanId}`),
@@ -113,6 +117,7 @@ export class BuildExecutor {
         changePlan: candidate.planInput,
       });
       if (report.status === "fail") {
+        await heartbeat.stop();
         return this.complete(job, { status: "FAILED", report });
       }
 
@@ -128,11 +133,13 @@ export class BuildExecutor {
         stream: Readable.from([packaged.bytes]),
         maxBytes: this.#deps.maxArtifactBytes ?? DEFAULT_MAX_ARTIFACT_BYTES,
       });
+      storedArtifact = stored;
 
       // Crash injection point: after the artifact write, before the DB commit.
       await this.#deps.hooks?.beforeCommit?.(stored);
 
-      return this.complete(job, {
+      await heartbeat.stop();
+      const completed = await this.complete(job, {
         status: "SUCCEEDED",
         report,
         stored,
@@ -140,10 +147,93 @@ export class BuildExecutor {
         mode: candidate.mode,
         packaged,
       });
+      await this.cleanupUnadoptedArtifact(job, stored);
+      return completed;
     } catch (error) {
+      await heartbeat.stop();
       if (error instanceof BuildWorkerCrash) throw error;
-      return this.complete(job, { status: "FAILED", error });
+      if (storedArtifact !== undefined) {
+        await this.cleanupUnadoptedArtifact(job, storedArtifact);
+      }
+      try {
+        return await this.complete(job, { status: "FAILED", error });
+      } catch {
+        // The cleanup/failure-recording path is compensating work. If it also
+        // fails (for example because this attempt lost its lease), preserve
+        // the original execution/completion error for diagnostics.
+        throw error;
+      }
     }
+  }
+
+  private startLeaseHeartbeat(job: BuildJob): { stop: () => Promise<void> } {
+    if (job.leaseOwner === null) {
+      return { stop: async () => {} };
+    }
+    const leaseMs = this.#deps.leaseMs ?? DEFAULT_LEASE_MS;
+    const intervalMs = Math.max(10, Math.floor(leaseMs / 3));
+    let stopped = false;
+    let timer: NodeJS.Timeout | undefined;
+    let inFlight: Promise<void> = Promise.resolve();
+
+    const schedule = (): void => {
+      if (stopped) return;
+      timer = setTimeout(() => {
+        timer = undefined;
+        inFlight = this.#buildJobs
+          .renewLease({
+            jobId: job.id,
+            tenantId: job.tenantId,
+            leaseOwner: job.leaseOwner ?? "",
+            leaseAttempt: job.attemptCount,
+          }, leaseMs)
+          .then((renewed) => {
+            if (!renewed) stopped = true;
+            else schedule();
+          })
+          .catch(() => {
+            // Completion performs the authoritative fence check. A failed
+            // heartbeat stops renewal but never masks the eventual outcome.
+            stopped = true;
+          });
+      }, intervalMs);
+      timer.unref();
+    };
+    schedule();
+
+    return {
+      stop: async () => {
+        stopped = true;
+        if (timer !== undefined) clearTimeout(timer);
+        await inFlight;
+      },
+    };
+  }
+
+  /**
+   * Deletes a blob only when the database proves this exact job did not adopt
+   * it. A lookup failure is ambiguous, so the conservative choice is to keep
+   * the blob; delete itself is best-effort and never replaces the job result.
+   */
+  private async cleanupUnadoptedArtifact(
+    job: BuildJob,
+    stored: StoredArtifact,
+  ): Promise<void> {
+    let adopted: { id: string } | null;
+    try {
+      adopted = await this.#deps.prisma.artifact.findFirst({
+        where: {
+          tenantId: job.tenantId,
+          buildJobId: job.id,
+          storageKey: stored.artifactId,
+        },
+        select: { id: true },
+      });
+    } catch {
+      return;
+    }
+    if (adopted !== null) return;
+    await this.#deps.storage.delete(job.tenantId, stored.artifactId).catch(() => {});
   }
 
   private async buildCandidate(
@@ -252,11 +342,20 @@ export class BuildExecutor {
   }
 
   private async markValidating(job: BuildJob): Promise<void> {
-    await this.#deps.prisma.buildJob
-      .update({
-        where: { id: job.id },
-        data: { status: "VALIDATING" },
-      })
+    if (job.leaseOwner === null) return;
+    await this.#deps.prisma
+      .$executeRaw`
+        UPDATE "BuildJob"
+        SET "status" = 'VALIDATING',
+            "updatedAt" = (clock_timestamp() AT TIME ZONE 'UTC')
+        WHERE "id" = ${job.id}
+          AND "tenantId" = ${job.tenantId}
+          AND "leaseOwner" = ${job.leaseOwner}
+          AND "attemptCount" = ${job.attemptCount}
+          AND "status" IN ('RUNNING', 'VALIDATING')
+          AND "leaseExpiresAt" IS NOT NULL
+          AND "leaseExpiresAt" > (clock_timestamp() AT TIME ZONE 'UTC')
+      `
       .catch(() => {
         // Lease may already be lost; the eventual commit still validates it.
       });
@@ -290,6 +389,7 @@ export class BuildExecutor {
         jobId: job.id,
         tenantId: job.tenantId,
         leaseOwner: job.leaseOwner ?? "",
+        leaseAttempt: job.attemptCount,
         status: "SUCCEEDED",
         validationReport: {
           outcome: "pass",
@@ -328,6 +428,7 @@ export class BuildExecutor {
       jobId: job.id,
       tenantId: job.tenantId,
       leaseOwner: job.leaseOwner ?? "",
+      leaseAttempt: job.attemptCount,
       status: "FAILED",
       validationReport: { outcome: "fail", summary, details },
     });
@@ -335,6 +436,7 @@ export class BuildExecutor {
 }
 
 const DEFAULT_MAX_ARTIFACT_BYTES = 256 * 1024 * 1024;
+const DEFAULT_LEASE_MS = 30_000;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

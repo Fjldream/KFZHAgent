@@ -1,3 +1,4 @@
+import { projectKeySchema } from "@kf/contracts";
 import type { AgentGraphStateValue, AgentGraphUpdate } from "../state.js";
 import type { SolutionGraphDeps } from "../ports.js";
 
@@ -34,13 +35,16 @@ export function createEnqueueBuildNode(deps: SolutionGraphDeps) {
       return { lastErrorCode: "INCOMPLETE_PLAN", stage: "idle" };
     }
 
-    const domainKind = deps.defaultDomainKind ?? "kingclient";
-    const projectKey = deps.defaultProjectKey ?? domainKind;
-    const legacyDefaultProject = domainKind === "kingclient" && projectKey === "kingclient";
-    const idempotencyKey = legacyDefaultProject
-      ? `${state.conversationId}:${state.changePlanId}:${state.planHash}`
-      : `${state.conversationId}:${projectKey}:${state.changePlanId}:${state.planHash}`;
     try {
+      const domainKind = (deps.defaultDomainKind ?? "kingclient").trim();
+      // One canonical value drives legacy detection, durable identity, the
+      // idempotency key, and the enqueue payload. This keeps spaced replays
+      // bound to the exact same job as their already-normalized form.
+      const projectKey = projectKeySchema.parse(deps.defaultProjectKey ?? domainKind);
+      const legacyDefaultProject = domainKind === "kingclient" && projectKey === "kingclient";
+      const idempotencyKey = legacyDefaultProject
+        ? `${state.conversationId}:${state.changePlanId}:${state.planHash}`
+        : `${state.conversationId}:${projectKey}:${state.changePlanId}:${state.planHash}`;
       const job = await deps.buildJobPort.enqueue({
         tenantId: state.tenantId,
         workspaceId: state.workspaceId,

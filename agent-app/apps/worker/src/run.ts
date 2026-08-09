@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { LocalArtifactStorage } from "@kf/artifact-storage";
 import { createWorkerDomainRegistry } from "./domain-packs.js";
 import { JobRunner } from "./job-runner.js";
+import { createWorkerInstanceId } from "./worker-instance-id.js";
 
 /**
  * 独立构建 Worker 入口（Task 9/12）：轮询耐用构建队列执行编译/修补 →
@@ -46,8 +47,9 @@ async function main(): Promise<never> {
     pollIntervalMs: 1_000,
     leaseMs: 30_000,
   });
-  console.log("[worker] KF Solution Agent worker started");
-  await runner.runForever(`worker-${process.pid}`);
+  const workerInstanceId = createWorkerInstanceId();
+  console.log(`[worker] KF Solution Agent worker started (${workerInstanceId})`);
+  await runner.runForever(workerInstanceId);
   throw new Error("unreachable");
 }
 

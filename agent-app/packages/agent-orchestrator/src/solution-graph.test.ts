@@ -500,6 +500,40 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     );
   });
 
+  it("canonicalizes a spaced project key before constructing the scoped idempotency key", async () => {
+    const bed = createBed();
+    bed.deps.defaultDomainKind = "kingcalculation";
+    bed.deps.defaultProjectKey = " calc ";
+    const ctx = seed(bed);
+    const payload = await planNewRequirement(bed, ctx, "新增一个计算项目");
+
+    await approve(bed, ctx, payload);
+
+    expect(bed.builds.enqueues[0]).toMatchObject({
+      domainKind: "kingcalculation",
+      projectKey: "calc",
+      idempotencyKey:
+        `${CONVERSATION_ID}:calc:plan:${WORKSPACE_ID}:${payload.planHash}:${payload.planHash}`,
+    });
+  });
+
+  it("canonicalizes a spaced kingclient key before selecting the legacy idempotency key", async () => {
+    const bed = createBed();
+    bed.deps.defaultDomainKind = " kingclient ";
+    bed.deps.defaultProjectKey = " kingclient ";
+    const ctx = seed(bed);
+    const payload = await planNewRequirement(bed, ctx, "新增一个按钮");
+
+    await approve(bed, ctx, payload);
+
+    expect(bed.builds.enqueues[0]).toMatchObject({
+      domainKind: "kingclient",
+      projectKey: "kingclient",
+      idempotencyKey:
+        `${CONVERSATION_ID}:plan:${WORKSPACE_ID}:${payload.planHash}:${payload.planHash}`,
+    });
+  });
+
   it("build success enters preview-review with a hint message; CONFIRM_BUILD lands (stage=done)", async () => {
     const bed = createBed();
     const ctx = seed(bed);

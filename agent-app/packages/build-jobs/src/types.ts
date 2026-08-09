@@ -42,11 +42,12 @@ export interface SuccessfulBuildResult {
   };
 }
 
-/** Completion input; leaseOwner must match the current lease or the commit is rejected. */
+/** Completion input; owner + attempt must match a live lease or the commit is rejected. */
 export interface CompleteBuildInput {
   jobId: string;
   tenantId: string;
   leaseOwner: string;
+  leaseAttempt: number;
   status: "SUCCEEDED" | "FAILED";
   validationReport: JobValidationReport;
   result?: SuccessfulBuildResult;

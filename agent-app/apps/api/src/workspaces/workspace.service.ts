@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   Inject,
   Injectable,
   NotFoundException,
@@ -206,6 +207,9 @@ export class WorkspaceService {
       });
     } catch (error) {
       await this.storage.delete(input.tenantId, stored.artifactId).catch(() => {});
+      if (error instanceof HttpException) {
+        throw error;
+      }
       if (error instanceof PackageUnpackError) {
         throw new UnprocessableEntityException(apiError("PACKAGE_UNPACK_FAILED", error.message));
       }
@@ -219,7 +223,7 @@ export class WorkspaceService {
 
   /**
    * Upload flow (in-memory convenience variant, kept for worker/tests): stores
-   * the source .gz as a tenant-scoped artifact, imports it into a read-only
+   * the source ZIP as a tenant-scoped artifact, imports it into a read-only
    * workspace directory, inspects it, and creates Source Revision 1.
    */
   async createSourceRevision(input: {
@@ -254,7 +258,7 @@ export class WorkspaceService {
       const sourceDir = await importNativeClientPackage(source, workDir);
       const inspected = await inspectClientProject(sourceDir);
 
-      return this.commitSourceRevision({
+      return await this.commitSourceRevision({
         tenantId: input.tenantId,
         workspaceId: input.workspaceId,
         domainKind,
@@ -262,6 +266,9 @@ export class WorkspaceService {
         stored,
         summary: inspected.summary,
       });
+    } catch (error) {
+      await this.storage.delete(input.tenantId, stored.artifactId).catch(() => {});
+      throw error;
     } finally {
       // I2: always remove the unpack directory tree on this variant too.
       await rm(workDir, { recursive: true, force: true }).catch(() => {});
@@ -385,6 +392,20 @@ export class WorkspaceService {
     summary: ClientProjectSummary;
   }): Promise<SourceRevisionResult> {
     return this.prisma.$transaction(async (tx) => {
+      const workspaces = await tx.$queryRaw<{ id: string; currentRevisionId: string | null }[]>`
+        SELECT "id", "currentRevisionId" /* kf_source_workspace_lock */
+        FROM "SolutionWorkspace"
+        WHERE "id" = ${input.workspaceId}
+          AND "tenantId" = ${input.tenantId}
+        FOR UPDATE
+      `;
+      const workspace = workspaces[0] ?? null;
+      if (workspace === null) {
+        throw new NotFoundException("workspace");
+      }
+      if (workspace.currentRevisionId !== null) {
+        throw new ConflictException("workspace already has a revision");
+      }
       const revision = await tx.solutionRevision.create({
         data: {
           tenantId: input.tenantId,
@@ -402,7 +423,7 @@ export class WorkspaceService {
           domainKind: input.domainKind,
           kind: "source-package",
           mediaType: "application/zip",
-          fileExtension: ".gz",
+          fileExtension: ".zip",
           packageHash: input.stored.sha256,
           packageUrl: input.stored.artifactId,
         },

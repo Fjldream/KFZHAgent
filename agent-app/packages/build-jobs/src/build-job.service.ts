@@ -180,6 +180,30 @@ export class BuildJobService {
     });
   }
 
+  /** Extends only the still-live lease held by this exact owner/attempt fence. */
+  async renewLease(input: {
+    jobId: string;
+    tenantId: string;
+    leaseOwner: string;
+    leaseAttempt: number;
+  }, leaseMs?: number): Promise<boolean> {
+    const ttl = leaseMs ?? this.leaseMs;
+    const renewed = await this.prisma.$executeRaw`
+      UPDATE "BuildJob"
+      SET "leaseExpiresAt" =
+            (clock_timestamp() AT TIME ZONE 'UTC') + (${ttl} * INTERVAL '1 millisecond'),
+          "updatedAt" = (clock_timestamp() AT TIME ZONE 'UTC')
+      WHERE "id" = ${input.jobId}
+        AND "tenantId" = ${input.tenantId}
+        AND "leaseOwner" = ${input.leaseOwner}
+        AND "attemptCount" = ${input.leaseAttempt}
+        AND "status" IN ('RUNNING', 'VALIDATING')
+        AND "leaseExpiresAt" IS NOT NULL
+        AND "leaseExpiresAt" > (clock_timestamp() AT TIME ZONE 'UTC')
+    `;
+    return renewed === 1;
+  }
+
   /**
    * Commits a build outcome in one transaction: creates the new (immutable)
    * revision, its domain package pointer, the artifact row, the validation
@@ -188,14 +212,52 @@ export class BuildJobService {
    */
   async completeBuild(input: CompleteBuildInput): Promise<BuildJob> {
     return this.prisma.$transaction(async (tx) => {
-      const job = await tx.buildJob.findUnique({ where: { id: input.jobId } });
-      if (job === null || job.tenantId !== input.tenantId) {
+      // Lock order is part of the concurrency contract: BuildJob first,
+      // SolutionWorkspace second. Every completion takes both locks before a
+      // terminal, lease, or stale-base decision so the decision and writes
+      // share one atomic authority under PostgreSQL READ COMMITTED.
+      const lockedJobs = await tx.$queryRaw<BuildJobRow[]>`
+        SELECT * /* kf_complete_build_job_lock */
+        FROM "BuildJob"
+        WHERE "id" = ${input.jobId}
+        FOR UPDATE
+      `;
+      const lockedJob = lockedJobs[0] ?? null;
+      if (lockedJob === null || lockedJob.tenantId !== input.tenantId) {
         throw new BuildJobNotFoundError("build job");
+      }
+      const job = lockedJob;
+      const lockedWorkspaces = await tx.$queryRaw<LockedWorkspaceRow[]>`
+        SELECT "id", "tenantId", "currentRevisionId" /* kf_complete_workspace_lock */
+        FROM "SolutionWorkspace"
+        WHERE "id" = ${job.workspaceId}
+          AND "tenantId" = ${job.tenantId}
+        FOR UPDATE
+      `;
+      const workspace = lockedWorkspaces[0] ?? null;
+      if (workspace === null) {
+        throw new BuildJobNotFoundError("workspace");
       }
       if (job.status === "SUCCEEDED" || job.status === "FAILED") {
         return job;
       }
-      if (job.leaseOwner !== input.leaseOwner) {
+      // CURRENT_TIMESTAMP is fixed at transaction start and can therefore be
+      // stale after a row-lock wait. Evaluate wall-clock database time only
+      // after both authoritative locks have been acquired.
+      const leaseChecks = await tx.$queryRaw<{ leaseIsActive: boolean }[]>`
+        SELECT (
+          "leaseExpiresAt" IS NOT NULL
+          AND "leaseExpiresAt" > (clock_timestamp() AT TIME ZONE 'UTC')
+        ) AS "leaseIsActive"
+        FROM "BuildJob"
+        WHERE "id" = ${job.id}
+      `;
+      const leaseIsActive = leaseChecks[0]?.leaseIsActive === true;
+      if (
+        job.leaseOwner !== input.leaseOwner ||
+        job.attemptCount !== input.leaseAttempt ||
+        !leaseIsActive
+      ) {
         throw new BuildJobLeaseError("lease was lost or expired before completion");
       }
 
@@ -213,12 +275,6 @@ export class BuildJobService {
         });
         if (baseRevision === null) {
           throw new BuildJobNotFoundError("base revision");
-        }
-        const workspace = await tx.solutionWorkspace.findFirst({
-          where: { id: job.workspaceId, tenantId: job.tenantId },
-        });
-        if (workspace === null) {
-          throw new BuildJobNotFoundError("workspace");
         }
         if (workspace.currentRevisionId !== job.baseRevisionId) {
           const message =
@@ -389,6 +445,12 @@ interface BuildJobRow {
   attemptCount: number;
   createdAt: Date;
   updatedAt: Date;
+}
+
+interface LockedWorkspaceRow {
+  id: string;
+  tenantId: string;
+  currentRevisionId: string | null;
 }
 
 function normalizeProjectKey(projectKey: string | undefined, domainKind: string): string {

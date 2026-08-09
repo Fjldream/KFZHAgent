@@ -9,7 +9,7 @@ process.env.DATABASE_URL =
 import { mkdtemp, readdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { LocalArtifactStorage } from "@kf/artifact-storage";
+import { LocalArtifactStorage, type ArtifactStorage, type StoredArtifact } from "@kf/artifact-storage";
 import {
   BuildExecutor,
   BuildJobService,
@@ -155,6 +155,49 @@ function enqueueInput({ tenant, workspace, revision, plan, hash }: Seeded) {
   };
 }
 
+class TrackingStorage implements ArtifactStorage {
+  readonly deleted: Array<{ tenantId: string; artifactId: string }> = [];
+  failDelete = false;
+
+  constructor(private readonly inner: LocalArtifactStorage) {}
+
+  put(input: {
+    tenantId: string;
+    kind: string;
+    stream: NodeJS.ReadableStream;
+    maxBytes: number;
+  }): Promise<StoredArtifact> {
+    return this.inner.put(input);
+  }
+
+  open(tenantId: string, artifactId: string): Promise<NodeJS.ReadableStream> {
+    return this.inner.open(tenantId, artifactId);
+  }
+
+  async delete(tenantId: string, artifactId: string): Promise<void> {
+    this.deleted.push({ tenantId, artifactId });
+    if (this.failDelete) throw new Error("tracking delete failed");
+    await this.inner.delete(tenantId, artifactId);
+  }
+}
+
+async function advanceWorkspacePastBase(seeded: Seeded): Promise<void> {
+  const competing = await prisma.solutionRevision.create({
+    data: {
+      tenantId: seeded.tenant.id,
+      workspaceId: seeded.workspace.id,
+      revisionNumber: 2,
+      kind: "built",
+      parentRevisionId: seeded.revision.id,
+      state: INITIAL_IR,
+    },
+  });
+  await prisma.solutionWorkspace.update({
+    where: { id: seeded.workspace.id },
+    data: { currentRevisionId: competing.id },
+  });
+}
+
 describe("job runner", () => {
   it("executes a new-flow build end to end and advances the revision", async () => {
     const { tenant, workspace, revision, plan, hash } = await seedNewWorkspace();
@@ -208,6 +251,35 @@ describe("job runner", () => {
     expect(textControl!["text"]).toBe("由 KF Solution Agent 生成");
   });
 
+  it("renews a fenced lease while a legitimate build runs longer than its TTL", async () => {
+    const seeded = await seedNewWorkspace();
+    const queued = await jobs.enqueue(enqueueInput(seeded));
+    const leaseMs = 120;
+    const leased = await jobs.leaseNext("slow-worker", new Date(), leaseMs);
+    const real = clientPack();
+    const slowRegistry = new DomainRegistry();
+    slowRegistry.register({
+      ...real,
+      package: async (input) => {
+        await new Promise((resolve) => setTimeout(resolve, leaseMs * 2));
+        return real.package(input);
+      },
+    });
+    const executor = new BuildExecutor({
+      prisma,
+      storage,
+      registry: slowRegistry,
+      leaseMs,
+    });
+
+    const done = await executor.execute(leased!);
+
+    expect(done).toMatchObject({ id: queued.id, status: "SUCCEEDED", attemptCount: 1 });
+    expect(await prisma.solutionRevision.count({ where: { workspaceId: seeded.workspace.id } }))
+      .toBe(2);
+    expect(await prisma.artifact.count({ where: { buildJobId: queued.id } })).toBe(1);
+  });
+
   it("does not advance the revision or create an artifact on failure", async () => {
     const { tenant, workspace, revision, plan, hash } = await seedNewWorkspace({
       ...INITIAL_IR,
@@ -233,7 +305,146 @@ describe("job runner", () => {
     expect(report!.outcome).toBe("fail");
     expect(report!.details).toHaveProperty("error");
   });
+
+  it("deletes the stored blob when a stale completion does not adopt it", async () => {
+    const seeded = await seedNewWorkspace();
+    const queued = await jobs.enqueue(enqueueInput(seeded));
+    const leased = await jobs.leaseNext("stale-blob", new Date());
+    let stored: StoredArtifact | undefined;
+    const executor = new BuildExecutor({
+      prisma,
+      storage,
+      registry,
+      hooks: {
+        beforeCommit: async (artifact) => {
+          stored = artifact;
+          await advanceWorkspacePastBase(seeded);
+        },
+      },
+    });
+
+    expect((await executor.execute(leased!)).status).toBe("FAILED");
+    expect(await prisma.artifact.count({ where: { buildJobId: queued.id } })).toBe(0);
+    expect(stored).toBeDefined();
+    await expect(storage.open(seeded.tenant.id, stored!.artifactId)).rejects.toThrow(
+      "ARTIFACT_NOT_FOUND",
+    );
+  });
+
+  it("does not let a cleanup delete error replace the stale completion result", async () => {
+    const seeded = await seedNewWorkspace();
+    await jobs.enqueue(enqueueInput(seeded));
+    const leased = await jobs.leaseNext("delete-failure", new Date());
+    const tracking = new TrackingStorage(storage);
+    tracking.failDelete = true;
+    let stored: StoredArtifact | undefined;
+    const executor = new BuildExecutor({
+      prisma,
+      storage: tracking,
+      registry,
+      hooks: {
+        beforeCommit: async (artifact) => {
+          stored = artifact;
+          await advanceWorkspacePastBase(seeded);
+        },
+      },
+    });
+
+    expect((await executor.execute(leased!)).status).toBe("FAILED");
+    expect(tracking.deleted).toEqual([
+      { tenantId: seeded.tenant.id, artifactId: stored!.artifactId },
+    ]);
+    expect(await collect(await tracking.open(seeded.tenant.id, stored!.artifactId)))
+      .not.toHaveLength(0);
+  });
+
+  it("deletes a losing blob when another completion already made the job terminal", async () => {
+    const seeded = await seedNewWorkspace();
+    const queued = await jobs.enqueue(enqueueInput(seeded));
+    const leased = await jobs.leaseNext("terminal-loser", new Date());
+    await jobs.completeBuild({
+      jobId: queued.id,
+      tenantId: seeded.tenant.id,
+      leaseOwner: leased!.leaseOwner!,
+      leaseAttempt: leased!.attemptCount,
+      status: "SUCCEEDED",
+      validationReport: { outcome: "pass", summary: "winner", details: {} },
+      result: {
+        kind: "built",
+        state: { mode: "compile" },
+        domainKind: "kingclient",
+        domainProjectKind: "client-package",
+        mediaType: "application/zip",
+        fileExtension: ".gz",
+        packageHash: "winner-hash",
+        packageUrl: "winner-storage-key",
+        artifact: {
+          kind: "client-package",
+          mediaType: "application/zip",
+          fileExtension: ".gz",
+          storageKey: "winner-storage-key",
+          sizeBytes: 4,
+          sha256: "winner-hash",
+        },
+      },
+    });
+    let losingArtifact: StoredArtifact | undefined;
+    const executor = new BuildExecutor({
+      prisma,
+      storage,
+      registry,
+      hooks: {
+        beforeCommit: async (artifact) => {
+          losingArtifact = artifact;
+        },
+      },
+    });
+
+    expect((await executor.execute(leased!)).status).toBe("SUCCEEDED");
+    expect(await prisma.artifact.count({ where: { buildJobId: queued.id } })).toBe(1);
+    expect(losingArtifact).toBeDefined();
+    await expect(storage.open(seeded.tenant.id, losingArtifact!.artifactId)).rejects.toThrow(
+      "ARTIFACT_NOT_FOUND",
+    );
+  });
+
+  it("cleans the stored blob when completion throws without masking that error", async () => {
+    const seeded = await seedNewWorkspace();
+    await jobs.enqueue(enqueueInput(seeded));
+    const leased = await jobs.leaseNext("completion-error", new Date());
+    let stored: StoredArtifact | undefined;
+    const executor = new BuildExecutor({
+      prisma,
+      storage,
+      registry,
+      hooks: {
+        beforeCommit: async (artifact) => {
+          stored = artifact;
+          await prisma.buildJob.update({
+            where: { id: leased!.id },
+            data: { leaseExpiresAt: new Date(Date.now() - 1_000) },
+          });
+        },
+      },
+    });
+
+    await expect(executor.execute(leased!)).rejects.toThrow(
+      "lease was lost or expired before completion",
+    );
+    expect(stored).toBeDefined();
+    await expect(storage.open(seeded.tenant.id, stored!.artifactId)).rejects.toThrow(
+      "ARTIFACT_NOT_FOUND",
+    );
+  });
 });
+
+async function collect(stream: NodeJS.ReadableStream): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream as AsyncIterable<Buffer | string>) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
 
 describe("crash recovery (Step 7)", () => {
   it("recovers one revision and one final artifact when a worker dies after the artifact write", async () => {

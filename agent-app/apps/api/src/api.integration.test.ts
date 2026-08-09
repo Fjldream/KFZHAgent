@@ -555,7 +555,15 @@ describe("api contract", () => {
       .post(`/api/artifacts/${packageUrl}/download-token`)
       .set("Cookie", cookie)
       .expect(200);
-    expect(tokenRes.body.token).toBeTruthy();
+    expect(tokenRes.body).toMatchObject({
+      artifactId: packageUrl,
+      mediaType: "application/zip",
+      fileExtension: ".zip",
+      fileName: `${packageUrl}.zip`,
+    });
+    expect((await prisma.domainProjectRevision.findFirst({
+      where: { packageUrl },
+    }))?.fileExtension).toBe(".zip");
     expect(new Date(tokenRes.body.expiresAt).getTime()).toBeGreaterThan(Date.now());
 
     const dl = await request(server)
@@ -565,6 +573,7 @@ describe("api contract", () => {
       .parse(parseBinary)
       .expect(200);
     expect(dl.headers["content-type"]).toContain("application/zip");
+    expect(dl.headers["content-disposition"]).toContain(`${packageUrl}.zip`);
     expect(dl.body.length).toBeGreaterThan(1000);
 
     // Single-use: the second download with the same token fails.
@@ -577,6 +586,37 @@ describe("api contract", () => {
     await request(server)
       .get(`/api/artifacts/download/${tokenRes.body.token}`)
       .expect(401);
+  });
+
+  it("corrects legacy source ZIP .gz metadata in tokens and download responses", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createUploadWorkspace(cookie, "Legacy Source Download WS");
+    const uploaded = await uploadPackage(cookie, ws.body.id, await makePackage()).expect(201);
+    const packageUrl = uploaded.body.packageUrl as string;
+    await prisma.domainProjectRevision.updateMany({
+      where: { packageUrl, kind: "source-package", mediaType: "application/zip" },
+      data: { fileExtension: ".gz" },
+    });
+
+    const issued = await request(server)
+      .post(`/api/artifacts/${packageUrl}/download-token`)
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(issued.body).toMatchObject({
+      artifactId: packageUrl,
+      mediaType: "application/zip",
+      fileExtension: ".zip",
+      fileName: `${packageUrl}.zip`,
+    });
+
+    const downloaded = await request(server)
+      .get(`/api/artifacts/download/${issued.body.token}`)
+      .set("Cookie", cookie)
+      .buffer(true)
+      .parse(parseBinary)
+      .expect(200);
+    expect(downloaded.headers["content-type"]).toContain("application/zip");
+    expect(downloaded.headers["content-disposition"]).toContain(`${packageUrl}.zip`);
   });
 
   it("downloads a calculation ZIP with its persisted response metadata", async () => {

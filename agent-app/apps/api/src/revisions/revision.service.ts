@@ -80,33 +80,38 @@ export class RevisionService {
     targetRevisionId: string;
     reason?: string;
   }): Promise<SolutionRevision> {
-    const workspace = await this.prisma.solutionWorkspace.findFirst({
-      where: { id: input.workspaceId, tenantId: input.tenantId },
-    });
-    if (workspace === null) {
-      throw new NotFoundException("workspace");
-    }
-    const target = await this.prisma.solutionRevision.findFirst({
-      where: {
-        id: input.targetRevisionId,
-        workspaceId: input.workspaceId,
-        tenantId: input.tenantId,
-      },
-    });
-    if (target === null) {
-      throw new NotFoundException("target revision");
-    }
-    if (target.kind === "initial") {
-      throw new BadRequestException("cannot roll back to an empty initial revision");
-    }
-    const targetDomains = await this.prisma.domainProjectRevision.findMany({
-      where: { tenantId: input.tenantId, solutionRevisionId: target.id },
-    });
-    if (targetDomains.length === 0 || targetDomains.some((domain) => domain.packageUrl === null)) {
-      throw new BadRequestException("target revision has no package");
-    }
-
     return this.prisma.$transaction(async (tx) => {
+      // Workspace-only writers take the same workspace authority used by
+      // build completion, but never take a BuildJob lock (no inverse order).
+      const workspaces = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" /* kf_rollback_workspace_lock */
+        FROM "SolutionWorkspace"
+        WHERE "id" = ${input.workspaceId}
+          AND "tenantId" = ${input.tenantId}
+        FOR UPDATE
+      `;
+      if (workspaces.length === 0) {
+        throw new NotFoundException("workspace");
+      }
+      const target = await tx.solutionRevision.findFirst({
+        where: {
+          id: input.targetRevisionId,
+          workspaceId: input.workspaceId,
+          tenantId: input.tenantId,
+        },
+      });
+      if (target === null) {
+        throw new NotFoundException("target revision");
+      }
+      if (target.kind === "initial") {
+        throw new BadRequestException("cannot roll back to an empty initial revision");
+      }
+      const targetDomains = await tx.domainProjectRevision.findMany({
+        where: { tenantId: input.tenantId, solutionRevisionId: target.id },
+      });
+      if (targetDomains.length === 0 || targetDomains.some((domain) => domain.packageUrl === null)) {
+        throw new BadRequestException("target revision has no package");
+      }
       const latest = await tx.solutionRevision.findFirst({
         where: { workspaceId: input.workspaceId },
         orderBy: { revisionNumber: "desc" },

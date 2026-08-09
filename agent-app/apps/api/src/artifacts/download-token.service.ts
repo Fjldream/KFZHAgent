@@ -121,13 +121,25 @@ export class DownloadTokenService {
     if (artifact === null && domainProject === null) {
       throw new NotFoundException("artifact");
     }
+    const kind = artifact?.kind ?? domainProject?.kind;
+    const mediaType = normalizeArtifactMediaType(
+      artifact?.mediaType ?? domainProject?.mediaType,
+    );
+    const storedExtension = normalizeArtifactFileExtension(
+      artifact?.fileExtension ?? domainProject?.fileExtension,
+    );
+    // Source packages have always been ZIP containers. Older rows inherited
+    // the pre-metadata `.gz` default, so correct only that tagged combination;
+    // client-package ZIPs retain their historical extension contract.
+    const fileExtension =
+      kind === "source-package" && mediaType === "application/zip" && storedExtension === ".gz"
+        ? ".zip"
+        : storedExtension;
     return {
       storageKey: artifact?.storageKey ?? artifactId,
       sizeBytes: artifact?.sizeBytes ?? null,
-      mediaType: normalizeArtifactMediaType(artifact?.mediaType ?? domainProject?.mediaType),
-      fileExtension: normalizeArtifactFileExtension(
-        artifact?.fileExtension ?? domainProject?.fileExtension,
-      ),
+      mediaType,
+      fileExtension,
     };
   }
 }
