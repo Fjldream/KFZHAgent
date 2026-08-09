@@ -32,6 +32,12 @@ describe("KF_DESIGN_PRINCIPLES", () => {
     expect(KF_DESIGN_PRINCIPLES).toContain("记忆点");
   });
 
+  it("defines the first pass as a complete customer effect blueprint", () => {
+    expect(KF_DESIGN_PRINCIPLES).toContain("客户效果蓝图");
+    expect(KF_DESIGN_PRINCIPLES).toContain("示例数据");
+    expect(KF_DESIGN_PRINCIPLES).toContain("验收标准");
+  });
+
   it("mentions the KF control vocabulary instead of CSS", () => {
     expect(KF_DESIGN_PRINCIPLES).not.toContain("flexbox");
     expect(KF_DESIGN_PRINCIPLES).toContain("分区");
@@ -59,13 +65,34 @@ describe("KF_DESIGN_PRINCIPLES_FULL", () => {
 describe("DeepSeekModelPort integration", () => {
   it("injects KF_DESIGN_PRINCIPLES_FULL into the shared system prompt", async () => {
     const plan = {
-      schema: "kf-design-plan/v1",
-      displayName: "监控大屏",
-      summary: "深色工业风",
-      layoutConcept: "顶部标题 + 中部趋势区",
-      styleDirection: "深色工业风",
-      sections: [{ id: "kpi", label: "KPI 区", controls: [{ type: "text", text: "产量" }] }],
-      signature: "趋势联动 KPI",
+      schema: "kf-design-plan/v2",
+      displayName: "监控大屏客户效果方案",
+      overview: {
+        objective: "帮助值班人员掌握生产状态",
+        audiences: ["值班人员"],
+        scenarios: ["生产监控"],
+        valueProposition: "集中呈现关键状态",
+      },
+      informationArchitecture: { narrative: "总览到趋势", wireframe: "总览 → 趋势" },
+      modules: [{
+        id: "kpi",
+        name: "KPI 区",
+        purpose: "展示关键指标",
+        content: ["产量", "达成率"],
+        sampleData: [{ label: "产量", value: "12,680 件" }],
+        interactions: ["查看指标详情"],
+        presentation: "指标卡片",
+      }],
+      visualDirection: {
+        tone: "深色工业风",
+        colors: ["深蓝", "青绿"],
+        typography: "指标数字突出",
+        spacingAndSurfaces: "深色卡片",
+      },
+      highlights: ["趋势联动 KPI"],
+      revisionNotes: { added: ["完整 KPI 模块"], changed: [], retained: [] },
+      acceptanceCriteria: ["首屏展示产量和达成率"],
+      openQuestions: [],
     };
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,

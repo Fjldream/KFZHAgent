@@ -41,13 +41,34 @@ export class DeterministicFakeModelPort implements ModelPort {
   createDesignPlan(_input: ModelPortContext): Promise<DesignPlan> {
     void _input;
     return Promise.resolve({
-      schema: "kf-design-plan/v1",
-      displayName: "确定性设计",
-      summary: "确定性设计计划",
-      layoutConcept: "单区布局",
-      styleDirection: "默认风格",
-      sections: [{ id: "main", label: "主区", controls: [{ type: "text", text: "主标题" }] }],
-      signature: "确定性记忆点",
+      schema: "kf-design-plan/v2",
+      displayName: "确定性客户效果方案",
+      overview: {
+        objective: "完整说明客户最终可见的工程效果",
+        audiences: ["业务用户"],
+        scenarios: ["方案确认"],
+        valueProposition: "使用具体内容和验收标准降低沟通偏差",
+      },
+      informationArchitecture: { narrative: "从总览到核心内容", wireframe: "总览 → 核心内容" },
+      modules: [{
+        id: "main",
+        name: "核心内容",
+        purpose: "展示工程主要信息",
+        content: ["主标题", "业务说明", "关键指标"],
+        sampleData: [{ label: "主标题", value: "KingFusion 智能方案" }],
+        interactions: ["点击按钮查看详情"],
+        presentation: "重点信息卡片",
+      }],
+      visualDirection: {
+        tone: "专业清晰",
+        colors: ["深蓝", "青绿"],
+        typography: "标题与正文分层",
+        spacingAndSurfaces: "卡片化大留白",
+      },
+      highlights: ["信息层级清晰"],
+      revisionNotes: { added: ["完整核心内容"], changed: [], retained: [] },
+      acceptanceCriteria: ["页面完整显示主标题、业务说明和关键指标"],
+      openQuestions: [],
     });
   }
 

@@ -10,6 +10,7 @@ import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import cookieParser from "cookie-parser";
 import type { ArtifactStorage } from "@kf/artifact-storage";
+import { decodeBlueprintMessage } from "@kf/agent-orchestrator";
 import { packageNativeClientProject } from "@kf/domain-client";
 import request from "supertest";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
@@ -93,13 +94,34 @@ class FakeModelPort {
   async createDesignPlan(input) {
     void input;
     return {
-      schema: "kf-design-plan/v1",
-      displayName: "集成测试设计",
-      summary: "集成测试设计计划",
-      layoutConcept: "单区布局",
-      styleDirection: "默认",
-      sections: [{ id: "main", label: "主区", controls: [{ type: "text", text: "标题" }] }],
-      signature: "集成测试",
+      schema: "kf-design-plan/v2",
+      displayName: "集成测试客户效果方案",
+      overview: {
+        objective: "完整说明最终效果",
+        audiences: ["业务用户"],
+        scenarios: ["方案确认"],
+        valueProposition: "减少交付理解偏差",
+      },
+      informationArchitecture: { narrative: "总览到详情", wireframe: "总览 → 详情" },
+      modules: [{
+        id: "main",
+        name: "核心内容",
+        purpose: "展示主要信息",
+        content: ["标题", "说明", "指标"],
+        sampleData: [{ label: "指标", value: "98%" }],
+        interactions: ["查看详情"],
+        presentation: "重点卡片",
+      }],
+      visualDirection: {
+        tone: "专业",
+        colors: ["深蓝"],
+        typography: "清晰层级",
+        spacingAndSurfaces: "卡片留白",
+      },
+      highlights: ["信息清晰"],
+      revisionNotes: { added: ["完整核心内容"], changed: [], retained: [] },
+      acceptanceCriteria: ["完整展示核心信息"],
+      openQuestions: [],
     };
   }
   async createProjectDesign(input) {
@@ -495,6 +517,13 @@ describe("api contract", () => {
       .expect(200);
     expect(messages.body).toHaveLength(3);
     expect(messages.body[0].content).toBe("新增一个按钮");
+    expect(decodeBlueprintMessage(messages.body[1].content)).toMatchObject({
+      revision: 1,
+      blueprint: {
+        schema: "kf-design-plan/v2",
+        overview: { objective: "完整说明最终效果" },
+      },
+    });
     expect(messages.body[2].content).toBe("确认");
     void uploaded;
   });

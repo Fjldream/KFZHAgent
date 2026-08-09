@@ -1,5 +1,5 @@
 import type { ChangePlan, DesignPlan, ValidationReport } from "@kf/contracts";
-import { changePlanSchema, DesignPlanSchema, solutionId } from "@kf/contracts";
+import { changePlanSchema, CustomerEffectBlueprintSchema, solutionId } from "@kf/contracts";
 import { KF_DESIGN_PRINCIPLES_FULL } from "./kf-design-principles.js";
 import type {
   ClassifyIntentResult,
@@ -138,7 +138,11 @@ export class DeepSeekModelPort implements ModelPort {
     this.fetchImpl = options.fetch ?? globalThis.fetch;
   }
 
-  private async chatJson(system: string, user: string): Promise<unknown> {
+  private async chatJson(
+    system: string,
+    user: string,
+    options: { maxTokens?: number } = {},
+  ): Promise<unknown> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     let response: Response;
@@ -157,7 +161,7 @@ export class DeepSeekModelPort implements ModelPort {
           ],
           response_format: { type: "json_object" },
           temperature: 0.2,
-          max_tokens: 4000,
+          max_tokens: options.maxTokens ?? 4000,
         }),
         signal: controller.signal,
       });
@@ -217,20 +221,32 @@ export class DeepSeekModelPort implements ModelPort {
     return parsed.data;
   }
 
-  async createDesignPlan(input: ModelPortContext, opts?: { revising?: boolean }): Promise<DesignPlan> {
+  async createDesignPlan(
+    input: ModelPortContext,
+    opts?: { revising?: boolean; rejectionReasons?: string[] },
+  ): Promise<DesignPlan> {
     const revising = opts?.revising === true;
     const recentConversation = input.recentMessages
       .slice(-20)
       .map((message) => `${message.role}: ${message.content}`)
       .join("\n");
     const lines = [
-      "设计遵循系统提示中的《KF 设计原则（KF_DESIGN_PRINCIPLES_FULL）》章节：布局有主次、避免模板脸（不要白底等大按钮堆叠）、一个记忆点、控件文案具体可读。",
-      "为一个 KF 客户端工程生成设计计划（不是页面控件，是设计意图）。输出 JSON 对象，所有字段必须齐全：",
-      "schema：固定字面量 \"kf-design-plan/v1\"（必须原样，不得改写）；displayName：工程显示名；summary：一句话摘要（≤80 字）；",
-      "layoutConcept：布局概念（≤400 字符，含一行 ASCII 线框即可，简短）；styleDirection：风格方向（配色/基调）；",
-      "sections：页面分区数组（1-8 区；每区必须是对象，含 id、label（区名，如 \"中部趋势区\"）、controls 数组（≤12 个占位，每个必须含 type，type 用枚举：text/button/inputnumber/switch/checkbox/radio/select/image/tabs/table/richtext/spacer））；",
-      "signature：本方案最特别的 1 个设计决策。所有字段值必须是字符串或数组，禁止省略字段，禁止用 null 占位。",
-      "signature：本方案最特别的 1 个设计决策。",
+      "你正在为客户编写可确认的《客户效果蓝图》，不是内部控件清单，也不是工程实施 JSON。使用专业、耐心、信息完整的顾问语言。",
+      "第一次生成给客户的方案就必须完整详细；后续修订也必须保持完整，不能只列控件类型或增加占位数量。",
+      "客户看不到内部 schema、KF GUID、坐标、变量 ID、原始工程 JSON 或工具调用细节；这些内容不得写入客户字段。",
+      "设计遵循系统提示中的《KF 设计原则（KF_DESIGN_PRINCIPLES_FULL）》：布局有主次、避免模板脸、具有明确记忆点，模块文案具体可读。",
+      "输出严格 JSON，schema 固定为 \"kf-design-plan/v2\"，所有字段必须齐全且不得为 null：",
+      "displayName：客户可读的工程名称。",
+      "overview：objective（方案目标）、audiences（目标受众数组）、scenarios（使用场景数组）、valueProposition（客户价值）。",
+      "informationArchitecture：narrative（完整阅读/使用顺序）、wireframe（简洁 ASCII 或箭头线框）。",
+      "modules：1-12 个页面模块；每项必须含 id、name、purpose、content（具体内容数组）、sampleData（示例数据数组，每项 label/value）、interactions（关键交互数组）、presentation（表现方式）。",
+      "示例数据必须具体、可阅读且明显为模拟内容；客户要求内容充实时，相关模块 sampleData 不得为空。",
+      "visualDirection：tone、colors 数组、typography、spacingAndSurfaces。",
+      "highlights：客户可感知的方案亮点数组。",
+      "revisionNotes：added、changed、retained 三个数组；首次方案在 added 中写主要方案要点，修订版逐条写真实新增、调整和保留内容。",
+      "acceptanceCriteria：客户可观察的验收标准数组，例如模块数量、必须展示的信息和交互结果，不能写内部开发任务。",
+      "openQuestions：仍值得客户确认但不妨碍当前方案成形的问题数组，没有则输出空数组。",
+      "客户的每一条要求都必须落到具体模块、示例数据、交互、视觉决策或验收标准中，禁止遗漏。",
       "最近会话上下文：",
       recentConversation.length > 0 ? recentConversation : "（无）",
     ];
@@ -238,13 +254,21 @@ export class DeepSeekModelPort implements ModelPort {
       lines.push(
         "客户修改意见：" + (input.requirementText ?? ""),
         "上一版设计计划：" + JSON.stringify(input.designPlan ?? "（无）"),
-        "在上一版基础上修订，不要重来；把改动体现在设计计划中。",
+        "在上一版基础上修订，不要重来；保留未被客户要求修改的有效内容，并把每项改动同时体现在蓝图主体与 revisionNotes 中。",
       );
+      const rejectionReasons = opts?.rejectionReasons ?? [];
+      if (rejectionReasons.length > 0) {
+        lines.push(
+          "上一候选蓝图未通过质量门禁，必须修正以下问题：",
+          ...rejectionReasons.map((reason) => `- ${reason}`),
+          "请重新生成完整蓝图，不要只改 revisionNotes。",
+        );
+      }
     } else {
       lines.push("需求：" + (input.requirementText ?? ""));
     }
-    const raw = await this.chatJson(SYSTEM_PROMPT, lines.join("\n"));
-    const parsed = DesignPlanSchema.safeParse(raw);
+    const raw = await this.chatJson(SYSTEM_PROMPT, lines.join("\n"), { maxTokens: 8000 });
+    const parsed = CustomerEffectBlueprintSchema.safeParse(raw);
     if (!parsed.success) {
       throw new DeepSeekModelOutputError(
         `design plan failed zod gate: ${parsed.error.issues

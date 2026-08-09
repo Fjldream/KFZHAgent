@@ -15,6 +15,54 @@ function makePort(reply: unknown, status = 200) {
   return new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
 }
 
+function detailedBlueprint(overrides: Record<string, unknown> = {}) {
+  return {
+    schema: "kf-design-plan/v2",
+    displayName: "个人求职作品集",
+    overview: {
+      objective: "让招聘经理快速理解候选人的产品与项目成果",
+      audiences: ["招聘经理", "面试官"],
+      scenarios: ["求职应聘"],
+      valueProposition: "用真实感案例证明候选人的能力",
+    },
+    informationArchitecture: {
+      narrative: "从个人定位到产品、项目、履历和联系方式",
+      wireframe: "首屏 → 我的产品 → 项目经历 → 履历 → 联系方式",
+    },
+    modules: [
+      {
+        id: "products",
+        name: "我的产品",
+        purpose: "展示主导或参与的产品",
+        content: ["产品定位", "个人职责", "量化成果"],
+        sampleData: [{ label: "产品名称", value: "KingFusion 工业低代码平台" }],
+        interactions: ["点击产品卡片展开详情"],
+        presentation: "大尺寸产品卡片",
+      },
+      {
+        id: "projects",
+        name: "项目经历",
+        purpose: "展示项目背景、职责、方案和成果",
+        content: ["项目背景", "个人职责", "解决方案", "量化成果"],
+        sampleData: [{ label: "项目名称", value: "汽车工厂能源管理平台" }],
+        interactions: ["展开项目详情"],
+        presentation: "纵向时间线",
+      },
+    ],
+    visualDirection: {
+      tone: "专业可信",
+      colors: ["深蓝", "暖金"],
+      typography: "标题与正文形成清晰层级",
+      spacingAndSurfaces: "大留白与轻边框卡片",
+    },
+    highlights: ["产品与项目形成完整证据链"],
+    revisionNotes: { added: ["完整客户效果蓝图"], changed: [], retained: [] },
+    acceptanceCriteria: ["至少展示两个产品案例和三个完整项目案例"],
+    openQuestions: ["是否使用真实头像"],
+    ...overrides,
+  };
+}
+
 describe("extractJson", () => {
   it("parses plain JSON", () => {
     expect(extractJson('{"a":1}')).toEqual({ a: 1 });
@@ -233,16 +281,8 @@ describe("DeepSeekModelPort", () => {
     expect(Array.isArray(design.projects)).toBe(true);
   });
 
-  it("createDesignPlan returns a valid DesignPlan", async () => {
-    const plan = {
-      schema: "kf-design-plan/v1",
-      displayName: "监控大屏",
-      summary: "深色工业风",
-      layoutConcept: "顶部标题 + 中部趋势区",
-      styleDirection: "深色工业风",
-      sections: [{ id: "kpi", label: "KPI 区", controls: [{ type: "text", text: "产量" }] }],
-      signature: "趋势联动 KPI",
-    };
+  it("createDesignPlan returns a complete customer effect blueprint from the first revision", async () => {
+    const plan = detailedBlueprint();
     const port = makePort(plan);
     const result = await port.createDesignPlan({
       tenantId: "t",
@@ -252,21 +292,15 @@ describe("DeepSeekModelPort", () => {
       recentMessages: [],
       requirementText: "做一个监控大屏",
     });
-    expect(result.displayName).toBe("监控大屏");
-    expect(result.sections).toHaveLength(1);
-    expect(result.sections[0].controls[0].type).toBe("text");
+    expect(result.schema).toBe("kf-design-plan/v2");
+    expect(result.displayName).toBe("个人求职作品集");
+    expect(result.modules.map((module) => module.name)).toEqual(["我的产品", "项目经历"]);
+    expect(result.modules[0].sampleData[0].value).toBe("KingFusion 工业低代码平台");
+    expect(result.acceptanceCriteria).toEqual(["至少展示两个产品案例和三个完整项目案例"]);
   });
 
   it("createDesignPlan prompt preserves the initial requirement and clarification answer", async () => {
-    const plan = {
-      schema: "kf-design-plan/v1",
-      displayName: "个人简历网站",
-      summary: "求职简历展示",
-      layoutConcept: "单页简历布局",
-      styleDirection: "专业简洁",
-      sections: [{ id: "profile", label: "个人信息", controls: [{ type: "text" }] }],
-      signature: "项目时间轴",
-    };
+    const plan = detailedBlueprint();
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -296,6 +330,11 @@ describe("DeepSeekModelPort", () => {
     const userPrompt = body.messages[1].content;
     expect(userPrompt).toContain("个人简历网站");
     expect(userPrompt).toContain("① 求职应聘");
+    expect(userPrompt).toContain("第一次生成");
+    expect(userPrompt).toContain("示例数据");
+    expect(userPrompt).toContain("验收标准");
+    expect(userPrompt).toContain("客户看不到内部");
+    expect(body.max_tokens).toBe(8000);
   });
 
   it("createDesignPlan rejects output that fails the zod gate", async () => {
@@ -323,18 +362,20 @@ describe("DeepSeekModelPort", () => {
       sections: [{ id: "kpi", label: "KPI 区", controls: [{ type: "text", text: "产量" }] }],
       signature: "趋势联动 KPI",
     };
+    const revised = detailedBlueprint({
+      revisionNotes: {
+        added: ["新增我的产品模块"],
+        changed: ["项目经历补充背景、职责、方案和成果"],
+        retained: ["保留个人介绍"],
+      },
+    });
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
         choices: [
           {
             message: {
-              content: JSON.stringify({
-                ...previousPlan,
-                displayName: "监控大屏v2",
-                summary: "修订版",
-                signature: "大标题吸色",
-              }),
+              content: JSON.stringify(revised),
             },
           },
         ],
@@ -355,9 +396,12 @@ describe("DeepSeekModelPort", () => {
         requirementText: "把大标题改成红色",
         designPlan: previousPlan,
       },
-      { revising: true },
+      {
+        revising: true,
+        rejectionReasons: ["蓝图主体没有实质变化", "修订没有声明新增或调整内容"],
+      },
     );
-    expect(result.displayName).toBe("监控大屏v2");
+    expect(result.schema).toBe("kf-design-plan/v2");
     // 修订上下文必须出现在 user prompt：上一版计划 + 客户修改意见 + 修订指令。
     const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
     const userPrompt = body.messages[1].content;
@@ -365,6 +409,8 @@ describe("DeepSeekModelPort", () => {
     expect(userPrompt).toContain(JSON.stringify(previousPlan));
     expect(userPrompt).toContain("把大标题改成红色");
     expect(userPrompt).toContain("在上一版基础上修订");
+    expect(userPrompt).toContain("蓝图主体没有实质变化");
+    expect(userPrompt).toContain("不要只改 revisionNotes");
   });
 
   it("createChangePlan keeps only operations referencing known entity GUIDs", async () => {
