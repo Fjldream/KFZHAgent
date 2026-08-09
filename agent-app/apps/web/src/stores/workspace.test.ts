@@ -84,6 +84,35 @@ describe("workspace store load() 会话绑定", () => {
     expect(api.listMessages).toHaveBeenLastCalledWith("conv-2");
   });
 
+  it("切换到尚未构建的工程时不残留上一个工程的预览产物", async () => {
+    api.getBuildJob.mockResolvedValue({ id: "job-old", status: "SUCCEEDED" });
+    api.listBuildArtifacts.mockResolvedValue([
+      { id: "art-old", kind: "client-package" },
+    ]);
+    api.getBuildJobReport.mockResolvedValue({ outcome: "pass" });
+    api.listConversations.mockResolvedValue([convA]);
+    api.listMessages.mockResolvedValue([]);
+
+    const store = useWorkspace();
+    await store.load("ws-1");
+    await store.pollBuildJob("job-old");
+    expect(store.state.previewArtifactId).toBe("art-old");
+
+    api.getWorkspace.mockResolvedValue({
+      id: "ws-2",
+      name: "尚未构建的工程",
+      mode: "new",
+      currentRevisionId: null,
+    });
+    api.listConversations.mockResolvedValue([{ id: "conv-2", title: "B对话" }]);
+    await store.load("ws-2");
+
+    expect(store.state.previewArtifactId).toBeUndefined();
+    expect(store.state.artifacts).toEqual([]);
+    expect(store.state.buildJobId).toBeNull();
+    expect(store.state.buildJobStatus).toBeNull();
+  });
+
   it("exposes the built client-package artifact as previewArtifactId after a successful build", async () => {
     api.getBuildJob.mockResolvedValue({ id: "job-1", status: "SUCCEEDED" });
     api.listBuildArtifacts.mockResolvedValue([

@@ -138,6 +138,15 @@ async function pollBuildJob(jobId: string): Promise<BuildJobStatus> {
 async function load(workspaceId: string): Promise<void> {
   state.loading = true;
   state.error = null;
+  if (state.workspaceId !== null && state.workspaceId !== workspaceId) {
+    state.pendingApproval = null;
+    state.lastDone = null;
+    state.buildJobId = null;
+    state.buildJobStatus = null;
+    state.artifacts = [];
+    state.previewArtifactId = undefined;
+    state.validationReport = null;
+  }
   state.workspaceId = workspaceId;
   try {
     state.workspace = await api.getWorkspace(workspaceId);
