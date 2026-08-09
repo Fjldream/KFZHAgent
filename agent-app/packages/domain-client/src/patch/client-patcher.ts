@@ -213,6 +213,8 @@ const CREATE_PASS_THROUGH: Readonly<Record<string, readonly string[]>> = {
 export interface ApplyPatchOptions {
   /** When given, the plan is re-hashed and must match, else PATCH_CONFLICT. */
   planHash?: string;
+  /** Parent directory for the patcher's fresh worker-local candidate. */
+  workRoot?: string;
 }
 
 function filePath(rootDir: string, versionDir: string, file: string): string {
@@ -519,7 +521,9 @@ export async function applyClientPatch(
 
   const versionDir = await resolveVersionDirName(base);
   const inspection = await inspectClientProject(base);
-  const candidate = await mkdtemp(path.join(tmpdir(), "kf-client-candidate-"));
+  const candidate = await mkdtemp(
+    path.join(options?.workRoot ?? tmpdir(), "kf-client-candidate-"),
+  );
   await cp(base, candidate, { recursive: true });
 
   for (const op of plan.operations) {

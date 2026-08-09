@@ -73,6 +73,11 @@ export interface ClientWorkspace {
   path: string;
 }
 
+export interface CompileClientProjectOptions {
+  /** Parent directory for the compiler's fresh worker-local workspace. */
+  workRoot?: string;
+}
+
 interface ValidatedIr {
   id: string;
   name: string;
@@ -88,6 +93,7 @@ const VERSION_RE = /^\d+\.\d+\.\d+\.\d+$/;
 export async function compileClientProject(
   input: ClientProjectIR,
   build: BuildSeed,
+  options?: CompileClientProjectOptions,
 ): Promise<ClientWorkspace> {
   const ir = validateIr(input);
   const variableGroupGuid = deriveGuid(build, "variables");
@@ -169,7 +175,7 @@ export async function compileClientProject(
   // ---------------------------------------------------------------------
   // Write the workspace
   // ---------------------------------------------------------------------
-  const rootDir = await mkdtemp(path.join(tmpdir(), "kf-client-build-"));
+  const rootDir = await mkdtemp(path.join(options?.workRoot ?? tmpdir(), "kf-client-build-"));
   const versionDir = path.join(rootDir, ir.version);
   const projectDir = path.join(versionDir, "project");
   const pageDir = path.join(projectDir, "page");

@@ -1,4 +1,7 @@
 // @ts-nocheck -- adapter behavior is exercised through the public DomainPack boundary.
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { createKingClientDomainPack } from "../index.js";
 import { planHash } from "../patch/client-patcher.js";
@@ -24,6 +27,36 @@ const ir = {
 };
 
 describe("KingClient domain pack", () => {
+  it("creates compiled and patched workspaces inside the requested workRoot", async () => {
+    const pack = createKingClientDomainPack({ nativeAccepted: true });
+    const workRoot = await mkdtemp(path.join(tmpdir(), "kf-domain-pack-root-"));
+    const base = await pack.compile({
+      projectIr: ir,
+      buildSeed: "workspace-root-test",
+      workRoot,
+    });
+    const inspection = await pack.inspect({ workspace: base });
+    const [titleGuid] = Object.keys(inspection.index.controls);
+    const changePlan = {
+      schema: "kf-change-plan/v1",
+      workspaceId: "workspace-root-test",
+      operations: [{
+        op: "update",
+        entityId: titleGuid,
+        changes: [{ path: "/text", value: "Inside Root" }],
+      }],
+    };
+    const candidate = await pack.patch({
+      baseWorkspace: base,
+      changePlan,
+      expectedPlanHash: planHash(changePlan),
+      workRoot,
+    });
+
+    expect(path.relative(workRoot, base.rootDir)).not.toMatch(/^\.\.(?:\/|$)/);
+    expect(path.relative(workRoot, candidate.rootDir)).not.toMatch(/^\.\.(?:\/|$)/);
+  });
+
   it("compiles, patches, validates, and packages through DomainPack", async () => {
     const pack = createKingClientDomainPack({ nativeAccepted: false });
     const base = await pack.compile({

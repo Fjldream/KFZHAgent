@@ -39,15 +39,20 @@ export function createKingClientDomainPack(options: {
       return inspectClientProject(workspace.rootDir);
     },
 
-    async compile({ projectIr, buildSeed }) {
+    async compile({ projectIr, buildSeed, workRoot }) {
       const parsed = ClientProjectIRSchema.parse(projectIr);
-      const workspace = await compileClientProject(parsed, { seed: buildSeed });
+      const workspace = await compileClientProject(
+        parsed,
+        { seed: buildSeed },
+        workRoot === undefined ? undefined : { workRoot },
+      );
       return { id: workspace.id, rootDir: workspace.rootDir, mode: "candidate" };
     },
 
-    async patch({ baseWorkspace, changePlan, expectedPlanHash }) {
+    async patch({ baseWorkspace, changePlan, expectedPlanHash, workRoot }) {
       const workspace = await applyClientPatch(baseWorkspace.rootDir, changePlan, {
         planHash: expectedPlanHash,
+        ...(workRoot === undefined ? {} : { workRoot }),
       });
       return { id: workspace.id, rootDir: workspace.rootDir, mode: "candidate" };
     },
