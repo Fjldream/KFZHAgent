@@ -233,6 +233,22 @@ describe("ConversationPanel enriched rendering", () => {
     expect(wrapper.emitted("send")?.[0]?.[0]).toBe("确认");
   });
 
+  it("does not let a confirmed historical blueprint submit another confirmation", () => {
+    const wrapper = mount(ConversationPanel, {
+      props: {
+        messages: [
+          { id: "blueprint-1", role: "assistant", content: blueprintMessage() },
+          { id: "confirm-1", role: "user", content: "确认" },
+          { id: "preview-1", role: "assistant", content: "预览已生成，您可以查看实际效果。" },
+        ],
+      },
+    });
+
+    expect(wrapper.find('[data-testid="blueprint-confirm"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="blueprint-status"]').text()).toBe("已确认");
+    expect(wrapper.emitted("send")).toBeUndefined();
+  });
+
   it("shows substantive changes before module details on later revisions", () => {
     const wrapper = mount(ConversationPanel, {
       props: { messages: [{ role: "assistant", content: blueprintMessage(2) }] },

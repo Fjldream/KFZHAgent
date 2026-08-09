@@ -3,8 +3,13 @@ import type { ChangePlanRepository } from "@kf/agent-orchestrator";
 import type { EditableEntity } from "@kf/agent-orchestrator";
 import type { GraphMessage } from "@kf/agent-orchestrator";
 import { deriveGuid } from "@kf/domain-client";
+import { importNativeClientPackage, inspectClientProject } from "@kf/domain-client";
+import type { ArtifactStorage } from "@kf/artifact-storage";
 import type { ChangePlan } from "@kf/contracts";
 import type { Prisma } from "@prisma/client";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { BuildJobService } from "../build-jobs/build-job.service.js";
 
@@ -23,7 +28,10 @@ export interface GraphPorts {
   buildJobPort: BuildJobPort;
 }
 
-export function createGraphPorts(prisma: PrismaService): GraphPorts {
+export function createGraphPorts(
+  prisma: PrismaService,
+  storage: ArtifactStorage,
+): GraphPorts {
   const buildJobs = new BuildJobService(prisma);
 
   const workspaceQuery: WorkspaceQueryPort = {
@@ -78,7 +86,18 @@ export function createGraphPorts(prisma: PrismaService): GraphPorts {
       // compile-mode revisions store the ClientProjectIR in state; its control
       // GUIDs are deterministic per workspace: deriveGuid({ seed: workspaceId }, id).
       const record = revision.state as Record<string, unknown>;
-      if (!Array.isArray(record["pages"])) return [];
+      if (!Array.isArray(record["pages"])) {
+        const projectRevision = await prisma.domainProjectRevision.findFirst({
+          where: {
+            tenantId,
+            solutionRevisionId: revisionId,
+            domainKind: "kingclient",
+          },
+          select: { packageUrl: true },
+        });
+        if (projectRevision === null || projectRevision.packageUrl === null) return [];
+        return inspectBuiltClientEntities(tenantId, projectRevision.packageUrl, storage);
+      }
       const entities: EditableEntity[] = [];
       for (const page of record["pages"] as Record<string, unknown>[]) {
         const pageName = typeof page["name"] === "string" ? page["name"] : "";
@@ -160,6 +179,46 @@ export function createGraphPorts(prisma: PrismaService): GraphPorts {
   };
 
   return { workspaceQuery, changePlanRepository, buildJobPort };
+}
+
+async function inspectBuiltClientEntities(
+  tenantId: string,
+  storageKey: string,
+  storage: ArtifactStorage,
+): Promise<EditableEntity[]> {
+  const stream = await storage.open(tenantId, storageKey);
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream as AsyncIterable<Buffer | string>) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  const destination = await mkdtemp(path.join(tmpdir(), "kf-graph-context-"));
+  try {
+    const rootDir = await importNativeClientPackage(Buffer.concat(chunks), destination);
+    const inspection = await inspectClientProject(rootDir);
+    const entities: EditableEntity[] = [];
+    for (const page of inspection.summary.pages) {
+      entities.push({
+        kind: "page",
+        name: page.name,
+        type: "page",
+        guid: page.guid,
+      });
+      const pageIndex = inspection.index.pages[page.guid];
+      for (const controlGuid of pageIndex?.controlGuids ?? []) {
+        const control = inspection.index.controls[controlGuid];
+        if (control === undefined) continue;
+        entities.push({
+          kind: "control",
+          name: control.name ?? control.id,
+          type: control.type,
+          guid: control.guid,
+        });
+      }
+    }
+    return entities;
+  } finally {
+    await rm(destination, { recursive: true, force: true });
+  }
 }
 
 /**

@@ -74,6 +74,28 @@ const renderedMessages = computed<RenderedMessage[]>(() =>
   })),
 );
 
+const BLUEPRINT_CONFIRMATIONS = new Set(["确认", "确认蓝图", "确认效果蓝图"]);
+
+const latestBlueprintIndex = computed(() => {
+  for (let index = renderedMessages.value.length - 1; index >= 0; index -= 1) {
+    if (renderedMessages.value[index]?.blueprint !== null) return index;
+  }
+  return -1;
+});
+
+function isBlueprintConfirmed(index: number): boolean {
+  return renderedMessages.value
+    .slice(index + 1)
+    .some(
+      (message) =>
+        message.role === "user" && BLUEPRINT_CONFIRMATIONS.has(message.content.trim()),
+    );
+}
+
+function isBlueprintActionable(index: number): boolean {
+  return index === latestBlueprintIndex.value && !isBlueprintConfirmed(index);
+}
+
 const draft = ref("");
 const inputEl = ref<HTMLInputElement | null>(null);
 const messagesEl = ref<HTMLElement | null>(null);
@@ -274,9 +296,12 @@ function submit(): void {
             </section>
 
             <p class="blueprint-guidance">可以继续告诉我需要修改的细节；确认这份效果蓝图后，我再生成工程实施计划。</p>
-            <button type="button" class="plan-confirm" data-testid="blueprint-confirm" @click="sendOption('确认')">
+            <button v-if="isBlueprintActionable(index)" type="button" class="plan-confirm" data-testid="blueprint-confirm" @click="sendOption('确认')">
               确认效果蓝图
             </button>
+            <span v-else class="blueprint-status" data-testid="blueprint-status">
+              {{ isBlueprintConfirmed(index) ? "已确认" : "历史版本" }}
+            </span>
           </article>
         </template>
         <template v-else-if="message.plan !== null">

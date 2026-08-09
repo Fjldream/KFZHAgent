@@ -13,9 +13,11 @@ import {
 } from "@kf/agent-orchestrator";
 import { Command } from "@langchain/langgraph";
 import type { Conversation, Message } from "@prisma/client";
+import type { ArtifactStorage } from "@kf/artifact-storage";
 import pg from "pg";
 import { AUDIT_ACTIONS, AuditService } from "../audit/audit.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { ARTIFACT_STORAGE } from "../artifacts/artifact-storage.js";
 import { PG_POOL, createCheckpointSaver } from "./checkpointer.js";
 import { createGraphPorts } from "./graph-ports.js";
 import { MODEL_PORT } from "./model-port.js";
@@ -70,6 +72,7 @@ export class ConversationService {
     private readonly audit: AuditService,
     @Inject(MODEL_PORT) private readonly modelPort: SolutionGraphDeps["modelPort"],
     @Inject(PG_POOL) private readonly pool: pg.Pool,
+    @Inject(ARTIFACT_STORAGE) private readonly artifactStorage: ArtifactStorage,
   ) {}
 
   async create(tenantId: string, workspaceId: string, title?: string): Promise<Conversation> {
@@ -360,7 +363,7 @@ export class ConversationService {
 
   private async getGraph(): Promise<CompiledGraph> {
     if (this.#graph === undefined) {
-      const ports = createGraphPorts(this.prisma);
+      const ports = createGraphPorts(this.prisma, this.artifactStorage);
       const deps: SolutionGraphDeps = {
         modelPort: this.modelPort,
         workspaceQuery: ports.workspaceQuery,

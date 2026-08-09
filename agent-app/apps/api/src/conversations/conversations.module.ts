@@ -6,8 +6,10 @@ import { PG_POOL, createPgPool } from "./checkpointer.js";
 import { DEFAULT_MODEL_PORT, MODEL_PORT } from "./model-port.js";
 import { DeterministicFakeModelPort } from "./fake-model.js";
 import { DeepSeekModelPort } from "./deepseek-model.js";
+import { ArtifactsModule } from "../artifacts/artifacts.module.js";
 
 @Module({
+  imports: [ArtifactsModule],
   controllers: [ConversationController, ChangePlanController],
   providers: [
     ConversationService,
