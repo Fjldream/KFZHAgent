@@ -97,7 +97,10 @@ function clientPack() {
   return createKingClientDomainPack({ nativeAccepted: true });
 }
 
-function tracingPack(calls: string[]) {
+function tracingPack(
+  calls: string[],
+  packagedMetadata?: { artifactKind: string; domainProjectKind: string },
+) {
   const real = createKingClientDomainPack({ nativeAccepted: true });
   return {
     ...real,
@@ -119,7 +122,7 @@ function tracingPack(calls: string[]) {
     }),
     package: vi.fn(async (input) => {
       calls.push("package");
-      return real.package(input);
+      return { ...(await real.package(input)), ...packagedMetadata };
     }),
   };
 }
@@ -468,7 +471,10 @@ describe("full build chain", () => {
 describe("domain pack delegation", () => {
   it("delegates a new build to compile, patch, validate, and package", async () => {
     const calls: string[] = [];
-    const pack = tracingPack(calls);
+    const pack = tracingPack(calls, {
+      artifactKind: "source-package",
+      domainProjectKind: "sentinel-domain-project",
+    });
     const localRegistry = new DomainRegistry();
     localRegistry.register(pack);
     const { tenant, workspace } = await seedWorkspace("new");
@@ -483,8 +489,10 @@ describe("domain pack delegation", () => {
     await jobs.enqueue(input);
     const leased = await jobs.leaseNext("domain-delegation", new Date());
     const executor = new BuildExecutor({ prisma, storage, registry: localRegistry });
+    const put = vi.spyOn(storage, "put");
 
-    expect((await executor.execute(leased)).status).toBe("SUCCEEDED");
+    const done = await executor.execute(leased);
+    expect(done.status).toBe("SUCCEEDED");
     expect(calls).toEqual(["compile", "patch", "validate", "package"]);
     expect(pack.compile).toHaveBeenCalledWith(expect.objectContaining({
       buildSeed: workspace.id,
@@ -492,6 +500,19 @@ describe("domain pack delegation", () => {
     expect(pack.patch).toHaveBeenCalledWith(expect.objectContaining({
       expectedPlanHash: hash,
     }));
+    expect(put).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "source-package",
+    }));
+
+    const artifact = await prisma.artifact.findFirst({ where: { buildJobId: done.id } });
+    expect(artifact?.kind).toBe("source-package");
+    const builtRevision = await prisma.solutionRevision.findFirst({
+      where: { workspaceId: workspace.id, kind: "built" },
+    });
+    const domainProject = await prisma.domainProjectRevision.findFirst({
+      where: { solutionRevisionId: builtRevision?.id },
+    });
+    expect(domainProject?.kind).toBe("sentinel-domain-project");
   });
 
   it("delegates an upload build to importPackage, patch, validate, and package", async () => {
