@@ -643,6 +643,92 @@ describe("full build chain", () => {
 });
 
 describe("domain pack delegation", () => {
+  it("invalidates the second of two project jobs queued against the same base", async () => {
+    const clientCalls = [];
+    const calculationCalls = [];
+    const localRegistry = new DomainRegistry();
+    localRegistry.register(trackingDomainPack("kingclient", clientCalls));
+    localRegistry.register(trackingDomainPack("kingcalculation", calculationCalls));
+    const { tenant, workspace } = await seedWorkspace("new");
+    const baseRevisionId = workspace.currentRevisionId;
+    await prisma.solutionRevision.update({
+      where: { id: baseRevisionId },
+      data: {
+        state: {
+          schema: "kf-solution-revision-state/v1",
+          projects: [
+            {
+              projectKey: "client-main",
+              domainKind: "kingclient",
+              projectIr: { marker: "client-main" },
+            },
+            {
+              projectKey: "calculation-main",
+              domainKind: "kingcalculation",
+              projectIr: { marker: "calculation-main" },
+            },
+          ],
+        },
+      },
+    });
+    const clientPlan = await seedPlan(tenant.id, workspace.id);
+    const calculationPlan = await seedPlan(tenant.id, workspace.id);
+    const clientJob = await jobs.enqueue({
+      ...seedInput({
+        tenantId: tenant.id,
+        workspaceId: workspace.id,
+        baseRevisionId,
+        changePlanId: clientPlan.plan.id,
+        planHashValue: clientPlan.hash,
+      }),
+      domainKind: "kingclient",
+      projectKey: "client-main",
+    });
+    const calculationJob = await jobs.enqueue({
+      ...seedInput({
+        tenantId: tenant.id,
+        workspaceId: workspace.id,
+        baseRevisionId,
+        changePlanId: calculationPlan.plan.id,
+        planHashValue: calculationPlan.hash,
+      }),
+      domainKind: "kingcalculation",
+      projectKey: "calculation-main",
+    });
+    const executor = new BuildExecutor({ prisma, storage, registry: localRegistry });
+
+    const firstLease = await jobs.leaseNext("stale-worker-a", new Date());
+    expect(firstLease?.id).toBe(clientJob.id);
+    expect((await executor.execute(firstLease)).status).toBe("SUCCEEDED");
+    const afterFirst = await prisma.solutionWorkspace.findUnique({
+      where: { id: workspace.id },
+    });
+
+    const secondLease = await jobs.leaseNext("stale-worker-b", new Date());
+    expect(secondLease?.id).toBe(calculationJob.id);
+    const secondDone = await executor.execute(secondLease);
+
+    expect(secondDone.status).toBe("FAILED");
+    expect((await prisma.solutionWorkspace.findUnique({
+      where: { id: workspace.id },
+    }))?.currentRevisionId).toBe(afterFirst?.currentRevisionId);
+    expect(await prisma.solutionRevision.count({
+      where: { workspaceId: workspace.id },
+    })).toBe(2);
+    expect(await prisma.domainProjectRevision.findMany({
+      where: { solutionRevisionId: afterFirst?.currentRevisionId },
+      select: { projectKey: true },
+    })).toEqual([{ projectKey: "client-main" }]);
+    expect(await prisma.artifact.count({ where: { buildJobId: calculationJob.id } })).toBe(0);
+    const report = await prisma.validationReport.findFirst({
+      where: { buildJobId: calculationJob.id },
+    });
+    expect(report).toMatchObject({
+      outcome: "fail",
+      summary: expect.stringContaining("stale base revision"),
+    });
+  });
+
   it("builds and modifies two domain projects without losing or cross-loading either base", async () => {
     const clientCalls = [];
     const calculationCalls = [];

@@ -210,6 +210,33 @@ export class BuildJobService {
         if (baseRevision === null) {
           throw new BuildJobNotFoundError("base revision");
         }
+        const workspace = await tx.solutionWorkspace.findFirst({
+          where: { id: job.workspaceId, tenantId: job.tenantId },
+        });
+        if (workspace === null) {
+          throw new BuildJobNotFoundError("workspace");
+        }
+        if (workspace.currentRevisionId !== job.baseRevisionId) {
+          const message =
+            `stale base revision ${job.baseRevisionId}; workspace currently points to ` +
+            `${workspace.currentRevisionId ?? "no revision"}`;
+          await tx.validationReport.create({
+            data: {
+              tenantId: job.tenantId,
+              buildJobId: job.id,
+              changePlanId: job.changePlanId,
+              outcome: "fail",
+              summary: `build failed: ${message}`,
+              details: toInputJsonValue({
+                error: { name: "BuildJobConflictError", message },
+              }),
+            },
+          });
+          return tx.buildJob.update({
+            where: { id: job.id },
+            data: { status: "FAILED", leaseOwner: null, leaseExpiresAt: null },
+          });
+        }
         const latest = await tx.solutionRevision.findFirst({
           where: { workspaceId: job.workspaceId, tenantId: job.tenantId },
           orderBy: { revisionNumber: "desc" },
