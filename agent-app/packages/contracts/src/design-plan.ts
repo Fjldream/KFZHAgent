@@ -17,7 +17,7 @@ export type DesignPlanControlType = z.infer<typeof DesignPlanControlType>;
  * ClientProjectIR/ControlIR 时由实现层补齐。.strict() 保证 LLM 输出里
  * 多余字段不会静默通过。
  */
-export const DesignPlanSchema = z
+export const LegacyDesignPlanSchema = z
   .object({
     schema: z.literal("kf-design-plan/v1"),
     displayName: z.string().min(1),
@@ -46,4 +46,78 @@ export const DesignPlanSchema = z
   })
   .strict();
 
+const blueprintText = z.string().trim().min(1).max(600);
+const blueprintTextList = z.array(blueprintText).max(12);
+
+export const CustomerEffectBlueprintSchema = z
+  .object({
+    schema: z.literal("kf-design-plan/v2"),
+    displayName: blueprintText,
+    overview: z
+      .object({
+        objective: blueprintText,
+        audiences: blueprintTextList.min(1),
+        scenarios: blueprintTextList.min(1),
+        valueProposition: blueprintText,
+      })
+      .strict(),
+    informationArchitecture: z
+      .object({
+        narrative: blueprintText,
+        wireframe: z.string().trim().min(1).max(1200),
+      })
+      .strict(),
+    modules: z
+      .array(
+        z
+          .object({
+            id: z.string().trim().min(1).max(100),
+            name: blueprintText,
+            purpose: blueprintText,
+            content: blueprintTextList.min(1),
+            sampleData: z
+              .array(
+                z
+                  .object({
+                    label: blueprintText,
+                    value: blueprintText,
+                  })
+                  .strict(),
+              )
+              .max(10),
+            interactions: blueprintTextList,
+            presentation: blueprintText,
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(12),
+    visualDirection: z
+      .object({
+        tone: blueprintText,
+        colors: blueprintTextList.min(1),
+        typography: blueprintText,
+        spacingAndSurfaces: blueprintText,
+      })
+      .strict(),
+    highlights: blueprintTextList.min(1),
+    revisionNotes: z
+      .object({
+        added: blueprintTextList,
+        changed: blueprintTextList,
+        retained: blueprintTextList,
+      })
+      .strict(),
+    acceptanceCriteria: blueprintTextList.min(1),
+    openQuestions: blueprintTextList,
+  })
+  .strict();
+
+export const DesignPlanSchema = z.discriminatedUnion("schema", [
+  LegacyDesignPlanSchema,
+  CustomerEffectBlueprintSchema,
+]);
+
+export type LegacyDesignPlan = z.infer<typeof LegacyDesignPlanSchema>;
+export type CustomerEffectBlueprint = z.infer<typeof CustomerEffectBlueprintSchema>;
 export type DesignPlan = z.infer<typeof DesignPlanSchema>;
