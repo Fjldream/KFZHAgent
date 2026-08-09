@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   ConflictException,
   Controller,
@@ -8,6 +9,7 @@ import {
   NotFoundException,
   Param,
   Post,
+  Query,
   Req,
   Res,
   UseGuards,
@@ -40,6 +42,17 @@ export class ConversationController {
       typeof body.workspaceId === "string" ? body.workspaceId : "",
       body.title,
     );
+  }
+
+  @Get()
+  async list(
+    @Req() req: AuthenticatedRequest,
+    @Query("workspaceId") workspaceId?: string,
+  ): Promise<Record<string, unknown>[]> {
+    if (typeof workspaceId !== "string" || workspaceId.length === 0) {
+      throw new BadRequestException("workspaceId query parameter is required");
+    }
+    return this.conversations.listByWorkspace(req.principal.tenantId, workspaceId);
   }
 
   @Get(":id")

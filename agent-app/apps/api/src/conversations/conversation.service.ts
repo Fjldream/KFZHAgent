@@ -98,6 +98,20 @@ export class ConversationService {
     return conversation;
   }
 
+  async listByWorkspace(tenantId: string, workspaceId: string): Promise<Conversation[]> {
+    const workspace = await this.prisma.solutionWorkspace.findFirst({
+      where: { id: workspaceId, tenantId },
+      select: { id: true },
+    });
+    if (workspace === null) {
+      throw new NotFoundException("workspace");
+    }
+    return this.prisma.conversation.findMany({
+      where: { tenantId, workspaceId },
+      orderBy: { updatedAt: "desc" },
+    });
+  }
+
   async listMessages(tenantId: string, conversationId: string): Promise<Message[]> {
     await this.get(tenantId, conversationId);
     return this.prisma.message.findMany({
