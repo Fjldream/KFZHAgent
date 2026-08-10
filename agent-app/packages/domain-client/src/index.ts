@@ -16,6 +16,7 @@ export {
 } from "./style/runtime-profile.js";
 export * from "./style/style-adapter.js";
 export * from "./style/style-engine.js";
+export * from "./implementation/ui-implementation-compiler.js";
 export {
   renderClientPreview,
   escapeHtml,
