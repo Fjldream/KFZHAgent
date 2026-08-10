@@ -83,20 +83,25 @@ export function createGraphPorts(
       if (revision === null || revision.state === null || typeof revision.state !== "object") {
         return [];
       }
+      // 上传工程（source-package）优先从 artifact 读取真实 GUID——上传包里的
+      // 控件 GUID 是 KF 原始 GUID，不是 compile 模式的 deriveGuid 推导值；
+      // 用推导 GUID 会导致 update/delete 引用找不到实体（PATCH_CONFLICT）。
+      const projectRevision = await prisma.domainProjectRevision.findFirst({
+        where: {
+          tenantId,
+          solutionRevisionId: revisionId,
+          domainKind: "kingclient",
+        },
+        select: { packageUrl: true },
+      });
+      if (projectRevision !== null && projectRevision.packageUrl !== null) {
+        return inspectBuiltClientEntities(tenantId, projectRevision.packageUrl, storage);
+      }
       // compile-mode revisions store the ClientProjectIR in state; its control
       // GUIDs are deterministic per workspace: deriveGuid({ seed: workspaceId }, id).
       const record = revision.state as Record<string, unknown>;
       if (!Array.isArray(record["pages"])) {
-        const projectRevision = await prisma.domainProjectRevision.findFirst({
-          where: {
-            tenantId,
-            solutionRevisionId: revisionId,
-            domainKind: "kingclient",
-          },
-          select: { packageUrl: true },
-        });
-        if (projectRevision === null || projectRevision.packageUrl === null) return [];
-        return inspectBuiltClientEntities(tenantId, projectRevision.packageUrl, storage);
+        return [];
       }
       const entities: EditableEntity[] = [];
       for (const page of record["pages"] as Record<string, unknown>[]) {
