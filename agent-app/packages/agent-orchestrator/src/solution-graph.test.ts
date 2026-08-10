@@ -902,6 +902,34 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     expect(planShown).toBe(true);
   });
 
+  it("clears a stale INVALID_MODEL_OUTPUT when a later plan-change succeeds", async () => {
+    // 回归：plan-change 失败（INVALID_MODEL_OUTPUT）后残留错误码会阻断
+    // 下一次成功的 plan-change 进入 approval（approval 节点检查 lastErrorCode）。
+    // 修复：plan-change 成功返回必须清除 lastErrorCode。
+    const bed = createBed();
+    const ctx = seed(bed);
+    bed.model.queueIntent("NEW_REQUIREMENT");
+    await sendUser(bed, ctx, "新增一个按钮");
+    await bed.graph.invoke(input(ctx), config(ctx));
+
+    // 第一次 plan-change 失败（残留 INVALID_MODEL_OUTPUT）
+    bed.model.queueIntent("CONFIRM_DESIGN");
+    bed.model.invalidPlan = true;
+    await sendUser(bed, ctx, "确认");
+    const failed = await bed.graph.invoke(input(ctx), config(ctx));
+    expect(failed.lastErrorCode).toBe("INVALID_MODEL_OUTPUT");
+
+    // 第二次 plan-change 成功：必须清除错误码并进入 approval 中断
+    bed.model.invalidPlan = false;
+    bed.model.queueIntent("CONFIRM_DESIGN");
+    await sendUser(bed, ctx, "确认");
+    const ok = await bed.graph.invoke(input(ctx), config(ctx));
+    expect(ok.lastErrorCode).toBeUndefined();
+    expect(ok.stage).toBe("approval");
+    const interrupt = await interruptPayload(bed, ctx);
+    expect(interrupt?.type).toBe("plan-approval");
+  });
+
   it("rejects an invalid model intent with INVALID_MODEL_OUTPUT and no side effects (I1)", async () => {
     const bed = createBed();
     const ctx = seed(bed);

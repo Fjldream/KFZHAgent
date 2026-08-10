@@ -142,6 +142,9 @@ export function createPlanChangeNode(deps: SolutionGraphDeps) {
       previewArtifactId,
       stage: "approval",
       resumeAction: undefined,
+      // 计划成功生成后必须清除历史错误码（如之前失败的 INVALID_MODEL_OUTPUT），
+      // 否则 approval 节点会因残留错误码拒绝进入审批中断。
+      lastErrorCode: undefined,
     };
   };
 }

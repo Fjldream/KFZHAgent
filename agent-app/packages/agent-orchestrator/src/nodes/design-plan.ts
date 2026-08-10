@@ -117,6 +117,9 @@ export function createDesignPlanNode(deps: SolutionGraphDeps) {
       designRevision: revision,
       stage: "design-review",
       revising: undefined,
+      // 设计计划成功生成后清除历史错误码，避免残留 INVALID_MODEL_OUTPUT
+      // 阻断后续进入审批/构建流程。
+      lastErrorCode: undefined,
     };
   };
 }
