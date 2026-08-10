@@ -429,6 +429,39 @@ function normalizeDockPanels(
 }
 
 /**
+ * 给布局子对象递归补 guid：KF 布局 insiderObjects 的每个子对象必须有 guid
+ * （参考工程 easyui 子控件在顶层、嵌套布局在 baseProperty.guid），否则 inspect
+ * 无法索引、LLM 无法引用修改。easyui 子控件 name 在顶层；布局子对象 name 在
+ * baseProperty.name；已有 guid 的不动。用 `parentId:name` 派生防止不同布局
+ * 内同名子控件（如两个 Datagrid1）guid 冲突。
+ */
+export function ensureChildGuids(build: BuildSeed, children: unknown[], parentId: string): unknown[] {
+  return children.map((child) => {
+    if (child === null || typeof child !== "object" || Array.isArray(child)) return child;
+    const node = child as Record<string, unknown>;
+    if (typeof node["uiExtendType"] === "number") {
+      if (node["guid"] === undefined) {
+        const name = typeof node["name"] === "string" ? node["name"] : "";
+        if (name !== "") node["guid"] = deriveGuid(build, `child:${parentId}:${name}`);
+      }
+    } else if (typeof node["layoutType"] === "number") {
+      const bp = node["baseProperty"];
+      if (bp !== null && typeof bp === "object") {
+        const base = bp as Record<string, unknown>;
+        if (base["guid"] === undefined) {
+          const name = typeof base["name"] === "string" ? base["name"] : "";
+          if (name !== "") base["guid"] = deriveGuid(build, `child:${parentId}:${name}`);
+        }
+        if (Array.isArray(node["insiderObjects"])) {
+          node["insiderObjects"] = ensureChildGuids(build, node["insiderObjects"] as unknown[], parentId);
+        }
+      }
+    }
+    return child;
+  });
+}
+
+/**
  * Compiles a layout container (objectType=2). Geometry + name/guid live inside
  * `baseProperty`; nested children are carried into `insiderObjects` verbatim
  * (raw KF JSON, recursive layout/control objects), panels into `dPanelsOption`.
@@ -449,8 +482,10 @@ function compileLayoutControl(build: BuildSeed, control: ControlIR): TemplateJso
     },
   };
   if (layout.children !== undefined) {
-    overrides["insiderObjects"] = stripKfContainerKeys(
-      layout.children.map((child) => structuredClone(child)),
+    overrides["insiderObjects"] = ensureChildGuids(
+      build,
+      stripKfContainerKeys(layout.children.map((child) => structuredClone(child))) as unknown[],
+      String(layout.id),
     );
   }
   if (layout.panels !== undefined) {

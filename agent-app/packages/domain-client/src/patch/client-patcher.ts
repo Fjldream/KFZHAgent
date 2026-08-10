@@ -6,6 +6,7 @@ import type { FieldPatch } from "@kf/contracts";
 import { inspectClientProject, type EntityIndex, type InspectResult } from "../inspect/client-inspector.js";
 import { stableStringify, type ClientWorkspace } from "../compile/client-compiler.js";
 import { deriveGuid } from "../compile/guid-factory.js";
+import { ensureChildGuids } from "../compile/control-compiler.js";
 import { mergeControlTemplate, type TemplateJson } from "../templates/merge-template.js";
 import baseFieldsJson from "../templates/base-fields.json" with { type: "json" };
 import buttonTemplate from "../templates/control-templates/button.json" with { type: "json" };
@@ -893,7 +894,18 @@ async function applyCreate(
             height: asNumber(op.properties["height"]) || 200,
           },
         };
-        if (op.properties["children"] !== undefined) overrides["insiderObjects"] = op.properties["children"];
+        if (op.properties["children"] !== undefined) {
+          // 布局子对象补 guid（KF 要求 insiderObjects 子对象有 guid，否则 inspect
+          // 无法索引、后续 LLM 无法引用修改）；与 compileLayoutControl 一致。
+          const children = op.properties["children"];
+          if (Array.isArray(children)) {
+            overrides["insiderObjects"] = ensureChildGuids(
+              { seed: workspaceId },
+              children as unknown[],
+              op.entityId,
+            );
+          }
+        }
         if (op.properties["panels"] !== undefined) overrides["dPanelsOption"] = op.properties["panels"];
         const control = mergeControlTemplate(layoutTemplate, overrides);
         objects.push(control);

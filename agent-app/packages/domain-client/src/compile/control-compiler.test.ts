@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ControlIR } from "../ir/client-project-ir.js";
+import { deriveGuid } from "./guid-factory.js";
 import { compileControl, ModelOutputInvalidError, type CompileContext } from "./control-compiler.js";
 
 const build = { seed: "test-seed" };
@@ -170,7 +171,12 @@ describe("control compiler — layout containers (objectType=2)", () => {
       panels: [panel],
     } as unknown as ControlIR;
     const out = compileControl(build, layout, ctx);
-    expect(out["insiderObjects"]).toEqual([child]);
+    // 子对象补 guid（KF 要求 insiderObjects 子对象有 guid），其余字段原样保留
+    const expectedChild = {
+      ...child,
+      baseProperty: { ...child.baseProperty, guid: deriveGuid(build, "child:HorizontalLayout1:DockingLayout1") },
+    };
+    expect(out["insiderObjects"]).toEqual([expectedChild]);
     expect(out["dPanelsOption"]).toEqual([panel]);
   });
 
@@ -224,7 +230,9 @@ describe("control compiler — layout containers (objectType=2)", () => {
       children: [child],
     } as unknown as ControlIR;
     const out = compileControl(build, layout, ctx);
-    expect(out["insiderObjects"]).toEqual([child]);
+    expect(out["insiderObjects"]).toEqual([
+      { ...child, baseProperty: { name: "C", guid: deriveGuid(build, "child:L1:C") } },
+    ]);
   });
 });
 
@@ -485,5 +493,61 @@ describe.skipIf(!existsSync(REF_DIR))("golden alignment with the reference proje
     expect(out["insiderObjects"]).toEqual(ref.insiderObjects);
     expect(out["dPanelsOption"]).toEqual(ref.dPanelsOption);
     expect(out["version"]).toBe(ref.version);
+  });
+
+  it("auto-assigns guids to layout children missing them (KF requires indexed children)", () => {
+    // LLM 生成的布局 children（KF JSON 透传）可能不带 guid——inspect 无法索引、
+    // LLM 无法引用修改。compileLayoutControl 必须给 easyui 子控件补顶层 guid、
+    // 给嵌套布局补 baseProperty.guid（参考工程均有 guid）。
+    const out = compileControl(
+      build,
+      {
+        id: "DockingLayout1",
+        type: "layout",
+        x: 12, y: 90, width: 1100, height: 560,
+        layoutType: 5,
+        children: [
+          { objectType: 3, uiExtendType: 26, name: "SideMenu1", region: "west", width: 180, height: 540 },
+          { objectType: 3, uiExtendType: 1, name: "Datagrid1", region: "center", width: 900, height: 540 },
+          {
+            objectType: 2, layoutType: 4,
+            baseProperty: { name: "VerticalLayout1", leftTopPt: { x: 0, y: 0 }, width: 300, height: 200 },
+            insiderObjects: [
+              { objectType: 3, uiExtendType: 2, name: "Btn1", leftTopPt: { x: 0, y: 0 }, width: 80, height: 30 },
+            ],
+          },
+        ],
+        panels: [
+          { region: "west", size: 180, split: true },
+          { region: "center", size: 900 },
+        ],
+      } as unknown as ControlIR,
+      ctx,
+    );
+    const children = out["insiderObjects"] as Array<Record<string, unknown>>;
+    expect(children).toHaveLength(3);
+    // easyui 子控件补顶层 guid
+    expect(children[0]!["guid"]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(children[1]!["guid"]).toMatch(/^[0-9a-f-]{36}$/);
+    // 嵌套布局补 baseProperty.guid 且递归补内部子控件 guid
+    const nested = children[2] as Record<string, unknown>;
+    const nestedBp = nested["baseProperty"] as Record<string, unknown>;
+    expect(nestedBp["guid"]).toMatch(/^[0-9a-f-]{36}$/);
+    const nestedInner = nested["insiderObjects"] as Array<Record<string, unknown>>;
+    expect(nestedInner[0]!["guid"]).toMatch(/^[0-9a-f-]{36}$/);
+    // 同名子控件在不同父布局下 guid 不同（parentId 参与派生）
+    const out2 = compileControl(
+      build,
+      {
+        id: "HorizontalLayout1",
+        type: "layout",
+        x: 12, y: 670, width: 1100, height: 200,
+        layoutType: 2,
+        children: [{ objectType: 3, uiExtendType: 1, name: "Datagrid1", internalVertex: { left: 0, top: 0 }, width: 540, height: 190 }],
+      } as unknown as ControlIR,
+      ctx,
+    );
+    const c2 = (out2["insiderObjects"] as Array<Record<string, unknown>>)[0]!;
+    expect(c2["guid"]).not.toBe(children[1]!["guid"]);
   });
 });

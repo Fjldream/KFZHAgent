@@ -184,7 +184,12 @@ describe("client patcher — KF 容器对象（easyui / 布局）", () => {
       width: 600,
       height: 400,
     });
-    expect(node["insiderObjects"]).toEqual([{ layoutType: 4, objectType: 2, baseProperty: { name: "VerticalLayout1" } }]);
+    // 布局子对象自动补 guid（KF 要求 insiderObjects 子对象有 guid，否则 inspect
+    // 无法索引、LLM 无法引用修改）——嵌套布局补 baseProperty.guid。
+    const expectedChildGuid = deriveGuid({ seed: "w-test" }, "child:NewDocking:VerticalLayout1");
+    expect(node["insiderObjects"]).toEqual([
+      { layoutType: 4, objectType: 2, baseProperty: { name: "VerticalLayout1", guid: expectedChildGuid } },
+    ]);
     expect(node["dPanelsOption"]).toEqual([{ region: "center", width: 600, height: 400, split: false }]);
     const result = await inspectClientProject(await rootDirOf(candidate));
     expect(result.index.controls[expectedGuid]?.type).toBe("layout");

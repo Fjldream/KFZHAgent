@@ -141,7 +141,16 @@ describe("client compiler validation — layout containers", () => {
       width: 300,
       height: 127.8,
     });
-    expect(layout!["insiderObjects"]).toEqual(validLayout.children);
+    // 布局子对象自动补 guid（KF 要求 insiderObjects 子对象有 guid）
+    expect(layout!["insiderObjects"]).toEqual([
+      {
+        ...validLayout.children[0],
+        baseProperty: {
+          ...(validLayout.children[0]!.baseProperty as Record<string, unknown>),
+          guid: expect.any(String),
+        },
+      },
+    ]);
     expect(layout!["dPanelsOption"]).toEqual(validLayout.panels);
   });
 
