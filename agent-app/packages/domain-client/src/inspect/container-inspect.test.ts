@@ -166,6 +166,39 @@ describe("KF 容器对象识别（easyui / 布局）", () => {
     const { control } = kfObjectToControl(kf);
     expect(control).toBeNull(); // 静态控件由 index 层 uiModelType 分支识别
   });
+
+  it("识别 DateBox：无 objectType（仅 uiExtendType=11）仍判为 easyui", () => {
+    // 参考工程 8 个 DateBox 均由 KMUIExtendBase 序列化，**没有 objectType 键**，
+    // 只有 uiExtendType=11；KF 前端 gUIObjectFactory.create(11) 原生渲染。
+    const kf = {
+      value: "2023-11-07",
+      disabled: false,
+      width: 278,
+      height: 30,
+      panelWidth: 250,
+      panelHeight: "auto",
+      sharedCalendar: "",
+      currentText: "Today",
+      closeText: "Close",
+      okText: "Ok",
+      uiExtendType: 11,
+      name: "DateBox1",
+      leftTopPt: { x: 74.5, y: 186.5 },
+      linkMng: { linkList: [] },
+    };
+    const { control, unknownFields } = kfObjectToControl(kf);
+    expect(control).not.toBeNull();
+    expect(control.type).toBe("easyui");
+    expect(control.proto).toBe(11);
+    expect(control.id).toBe("DateBox1");
+    expect(control).toMatchObject({ x: 74.5, y: 186.5, width: 278, height: 30 });
+    expect(control.value).toBe("2023-11-07");
+    expect(control.panelWidth).toBe(250);
+    expect(control.panelHeight).toBe("auto");
+    expect(control.sharedCalendar).toBe("");
+    expect(EasyuiControlIR.safeParse(control).success).toBe(true);
+    expect(unknownFields).toEqual([]);
+  });
 });
 
 describe("真实页面 golden round-trip（KF JSON → IR）", () => {

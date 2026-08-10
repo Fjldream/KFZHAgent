@@ -11,6 +11,9 @@ describe("EASYUI_PROTO_TYPES", () => {
     expect(EASYUI_PROTO_TYPES[2]).toBe("linkbutton");
     expect(EASYUI_PROTO_TYPES[5]).toBe("propertygrid");
     expect(EASYUI_PROTO_TYPES[9]).toBe("textbox");
+    expect(EASYUI_PROTO_TYPES[10]).toBe("timespinner");
+    // proto 11 = DateBox：KF 序列化不带 objectType（KMUIExtendBase 系），参考工程 8 例
+    expect(EASYUI_PROTO_TYPES[11]).toBe("datebox");
     expect(EASYUI_PROTO_TYPES[17]).toBe("tree");
     expect(EASYUI_PROTO_TYPES[18]).toBe("treegrid");
     expect(EASYUI_PROTO_TYPES[26]).toBe("sidemenu");
@@ -18,7 +21,7 @@ describe("EASYUI_PROTO_TYPES", () => {
 
   it("covers every proto observed in the reference project", () => {
     const observed = [
-      0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19,
+      0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
       20, 21, 22, 24, 25, 26, 27, 28, 29,
     ];
     for (const proto of observed) {

@@ -1,0 +1,17 @@
+{
+  "uiExtendType": 11,
+  "width": 180,
+  "height": 30,
+  "fixedSize": [
+    180,
+    30
+  ],
+  "value": "",
+  "disabled": false,
+  "panelWidth": 250,
+  "panelHeight": "auto",
+  "sharedCalendar": "",
+  "currentText": "Today",
+  "closeText": "Close",
+  "okText": "Ok"
+}

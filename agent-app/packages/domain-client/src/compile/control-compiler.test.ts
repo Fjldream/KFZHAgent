@@ -85,7 +85,7 @@ describe("control compiler — easyui controls (objectType=3)", () => {
   });
 
   it("serializes every proto with a template registered (coverage)", () => {
-    const protos = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25, 26, 27, 28, 29];
+    const protos = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25, 26, 27, 28, 29];
     for (const proto of protos) {
       const out = compileControl(
         build,
@@ -93,9 +93,31 @@ describe("control compiler — easyui controls (objectType=3)", () => {
         ctx,
       );
       expect(out["uiExtendType"]).toBe(proto);
-      expect(out["objectType"]).toBe(3);
+      // DateBox（proto 11）KF 序列化不带 objectType，其余 proto 均为 objectType=3
+      expect(out["objectType"]).toBe(proto === 11 ? undefined : 3);
       expect(out["uiModelType"]).toBeUndefined();
     }
+  });
+
+  it("serializes a DateBox (proto 11) without objectType and with datebox fields", () => {
+    const out = compileControl(
+      build,
+      easyui({ id: "DateBox1", proto: 11, width: 278, height: 30, value: "2023-11-07", panelWidth: 250 }),
+      ctx,
+    );
+    // 与参考工程 DateBox 原生形态一致：无 objectType、有 uiExtendType=11
+    expect(out["objectType"]).toBeUndefined();
+    expect(out["uiExtendType"]).toBe(11);
+    expect(out["uiModelType"]).toBeUndefined();
+    expect(out["leftTopPt"]).toEqual({ x: 10, y: 20 });
+    expect(out["value"]).toBe("2023-11-07");
+    expect(out["panelWidth"]).toBe(250);
+    // 模板默认值
+    expect(out["panelHeight"]).toBe("auto");
+    expect(out["sharedCalendar"]).toBe("");
+    expect(out["currentText"]).toBe("Today");
+    expect(out["closeText"]).toBe("Close");
+    expect(out["okText"]).toBe("Ok");
   });
 });
 

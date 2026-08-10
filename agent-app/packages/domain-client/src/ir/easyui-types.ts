@@ -29,6 +29,9 @@ export const EASYUI_PROTO_TYPES: Readonly<Record<number, string>> = {
   8: "spinner", // Spinner 微调
   9: "textbox", // Textbox 文本框（可带按钮）
   10: "timespinner", // TimeSpinner 时间微调
+  // 11 = DateBox 日期框：KF 序列化时**不带 objectType**（KMUIExtendBase 系），
+  // 只带 uiExtendType=11；KF 前端 gUIObjectFactory.create(11) 原生创建，可正常渲染。
+  11: "datebox", // DateBox 日期框（无 objectType 键）
   12: "dialog", // Dialog 对话框
   13: "filebox", // FileBox 文件框
   14: "menubutton", // MenuButton 菜单按钮
@@ -142,6 +145,16 @@ export const EASYUI_PROTO_FIELDS: Readonly<Record<number, readonly string[]>> = 
     "icons",
   ],
   10: ["value", "separator", "highlight", "showSeconds", "disabled"],
+  11: [
+    "value",
+    "disabled",
+    "panelWidth",
+    "panelHeight",
+    "sharedCalendar",
+    "currentText",
+    "closeText",
+    "okText",
+  ],
   12: [
     "title",
     "collapsible",

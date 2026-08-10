@@ -59,7 +59,7 @@ const SYSTEM_PROMPT = `你以礼貌、专业的客服顾问口吻与客户沟通
   - 选择类：checkbox/checkboxlegacy（复选）、radio/radiolegacy（单选，options 数组）、select（下拉选择，options/multiple/placeholder）、cascader（级联选择，options 树）、transfer（穿梭框，options/titles）
   - 展示类：image（图片，src/fit/alt）、tabs（页签，tabs 数组）、table（表格）、tag（标签，effect/closable）、timeline（时间线，items 数组）、steps（步骤条，active/direction）、scale（刻度，min/max/value/step）、factorycalendar（日历）、webcontainer（网页容器，url）、gantt（甘特图）、spacer（占位，axis 水平/垂直）
   - 容器类（承载静态控件，可嵌套）：
-    - easyui 容器：datagrid（数据表格，可内嵌列）、linkbutton（按钮组，text/toggle/group）、tree/treegrid（树/树表）、sidemenu（侧边菜单）、combobox（下拉）、propertygrid（属性列表）、textbox（文本框）等主要 proto
+    - easyui 容器：datagrid（数据表格，可内嵌列）、linkbutton（按钮组，text/toggle/group）、tree/treegrid（树/树表）、sidemenu（侧边菜单）、combobox（下拉）、propertygrid（属性列表）、textbox（文本框）、datebox（日期框）等主要 proto（datebox proto 11 序列化不带 objectType）
     - 布局容器 layout：layoutType 2=水平、4=垂直、3=选项卡、5=Docking 区域、0=折叠、6=导航；children 递归嵌套子控件（布局可嵌布局，如 datagrid 内嵌列、布局内嵌子控件）
   - 容器硬约束（违反会导致 KF 页面崩溃或区域空白，详见设计原则"容器序列化硬约束"）：
     - children 里不得写 type/uiModelType 字段；easyui 子控件几何在顶层 leftTopPt/width/height，无 baseProperty
@@ -326,7 +326,8 @@ export class DeepSeekModelPort implements ModelPort {
         : "请根据需求输出变更计划 JSON。",
       "变更计划 JSON 格式（严格）：",
       '{"operations":[{"op":"update","entityId":"<清单中的 GUID>","entityType":"control","changes":[{"path":"/text","value":"..."}]}]}',
-      "create（新增控件）格式：{\"op\":\"create\",\"entityType\":\"control\",\"entityId\":\"新语义id如NewTitle\",\"properties\":{\"pageId\":\"<清单中的页面GUID>\",\"type\":\"text|button|inputnumber|switch|checkbox|radio|select|image|tabs|table|richtext|spacer|radiolegacy|checkboxlegacy|combobox|scale|list|treeview|webcontainer|gantt|factorycalendar|input|cascader|datetimepicker|dropdown|navmenu|tree|upload|transfer|tag|timeline|steps|datagrid|linkbutton|treegrid|sidemenu|propertygrid|textbox|layout|prototype\",\"text\":\"控件文本\",\"x\":60,\"y\":50,\"width\":300,\"height\":40}}",
+      "create（新增控件）格式：{\"op\":\"create\",\"entityType\":\"control\",\"entityId\":\"新语义id如NewTitle\",\"properties\":{\"pageId\":\"<清单中的页面GUID>\",\"type\":\"text|button|inputnumber|switch|checkbox|radio|select|image|tabs|table|richtext|spacer|radiolegacy|checkboxlegacy|combobox|scale|list|treeview|webcontainer|gantt|factorycalendar|input|cascader|datetimepicker|dropdown|navmenu|tree|upload|transfer|tag|timeline|steps|easyui|layout|prototype\",\"text\":\"控件文本\",\"x\":60,\"y\":50,\"width\":300,\"height\":40}}",
+      "create 控件类型说明：静态控件用 type=上述枚举（text/button/input/...）；easyui 控件用 type=\"easyui\" + properties.proto（KF uiExtendType 数字，如 1=datagrid、2=linkbutton、11=datebox、17=tree、18=treegrid、26=sidemenu、5=propertygrid、9=textbox、0=combobox、28=validatebox）；布局用 type=\"layout\" + properties.layoutType；特殊节点用 type=\"prototype\" + properties.prototypeName（CustomCharts/AlarmWindow/TrendChart/BarChart/PieChart/XYChart/EventWindow）。",
       "delete 格式：{\"op\":\"delete\",\"entityId\":\"<清单中的 GUID>\",\"entityType\":\"control\",\"destructiveConfirmed\":true}",
       "规则：update/delete 的 entityId 必须来自下方实体清单的 GUID；create 的 entityId 是新的语义 id，entityType 固定为 control，控件类型放在 properties.type，properties.pageId 必须是清单中页面的 GUID。",
       "update 的 changes[].path 只能使用受控字段：text、value、visible、disabled、backgroundColor、width、height、x、y、fontInfo（字体大小写在 fontInfo.fontSize，不要单独用 /fontSize 路径）、borderColor、layoutStyle、options/radioData/selectData 等控件自身字段；禁止使用未列出的路径（如 /fontSize、/custom）。",

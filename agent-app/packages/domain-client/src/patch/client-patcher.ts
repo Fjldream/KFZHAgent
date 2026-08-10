@@ -875,6 +875,10 @@ async function applyCreate(
           mergeControlTemplate(mergeControlTemplate(BASE_FIELDS, easyuiBaseTemplate), protoTemplate),
           overrides,
         );
+        // DateBox（proto 11）KF 序列化不带 objectType（同 compileEasyuiControl）
+        if (proto === 11) {
+          delete control["objectType"];
+        }
         objects.push(control);
       } else if (type === "layout") {
         // 布局容器：objectType=2 + layoutType 顶层；几何进 baseProperty；

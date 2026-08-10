@@ -37,6 +37,7 @@ import easyuiComboboxTemplate from "../templates/control-templates/easyui-combob
 import easyuiCombotreeTemplate from "../templates/control-templates/easyui-combotree.json" with { type: "json" };
 import easyuiDatagridTemplate from "../templates/control-templates/easyui-datagrid.json" with { type: "json" };
 import easyuiDatetimeboxTemplate from "../templates/control-templates/easyui-datetimebox.json" with { type: "json" };
+import easyuiDateboxTemplate from "../templates/control-templates/easyui-datebox.json" with { type: "json" };
 import easyuiDialogTemplate from "../templates/control-templates/easyui-dialog.json" with { type: "json" };
 import easyuiFileboxTemplate from "../templates/control-templates/easyui-filebox.json" with { type: "json" };
 import easyuiImagecarouselTemplate from "../templates/control-templates/easyui-imagecarousel.json" with { type: "json" };
@@ -182,6 +183,7 @@ const EASYUI_TEMPLATES: Readonly<Record<number, TemplateJson>> = {
   8: easyuiSpinnerTemplate,
   9: easyuiTextboxTemplate,
   10: easyuiTimespinnerTemplate,
+  11: easyuiDateboxTemplate,
   12: easyuiDialogTemplate,
   13: easyuiFileboxTemplate,
   14: easyuiMenubuttonTemplate,
@@ -344,7 +346,16 @@ function compileEasyuiControl(build: BuildSeed, control: ControlIR): TemplateJso
     uiExtendType: proto,
     ...pass,
   };
-  return mergeControlTemplate(merged, overrides);
+  const mergedOut = mergeControlTemplate(merged, overrides);
+  // DateBox（proto 11）在 KF 序列化中**不带 objectType**（KMUIExtendBase 系
+  // objectToJson 不输出 objectType，参考工程 8 个 DateBox 均无该键）；easyui-base
+  // 模板会给 objectType:3。KF 加载按 objectType→uiExtendType 顺序分派、后者覆盖
+  // 前者，带上 objectType:3 也能渲染，但为与 KF 原生形态一致、避免任何意外
+  // （gModelObjectFactory.create(3) 无 case），产物剥离 objectType。
+  if (proto === 11) {
+    delete mergedOut["objectType"];
+  }
+  return mergedOut;
 }
 
 /**

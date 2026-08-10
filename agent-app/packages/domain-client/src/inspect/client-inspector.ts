@@ -7,7 +7,7 @@ import {
   SpecialNodeIR,
   type ControlIR,
 } from "../ir/client-project-ir.js";
-import { EASYUI_PROTO_FIELDS } from "../ir/easyui-types.js";
+import { EASYUI_PROTO_FIELDS, EASYUI_PROTO_TYPES } from "../ir/easyui-types.js";
 
 /**
  * KF 特殊节点集合：这些节点没有 uiModelType/uiExtendType/layoutType，
@@ -477,6 +477,29 @@ function collectControls(node: unknown, rawPath: string, out: RawControl[]): voi
       rawPath,
       unknownFields: [],
     });
+  } else if (
+    typeof record["uiExtendType"] === "number" &&
+    EASYUI_PROTO_TYPES[record["uiExtendType"]] !== undefined
+  ) {
+    // DateBox（proto 11）等 KMUIExtendBase 系控件：KF 序列化不带 objectType，
+    // 只带 uiExtendType（参考工程 8 个 DateBox 均无 objectType 键）。
+    const proto = record["uiExtendType"] as number;
+    const guid = typeof record["guid"] === "string" ? (record["guid"]) : "";
+    const name = typeof record["name"] === "string" ? (record["name"]) : "";
+    const semanticId = name !== "" ? name : guid !== "" ? guid : `easyui-${out.length}`;
+    out.push({
+      guid,
+      type: "easyui",
+      id: semanticId,
+      ...(name !== "" ? { name } : {}),
+      x: asNumber((asRecord(record["leftTopPt"])["x"]) ?? 0),
+      y: asNumber((asRecord(record["leftTopPt"])["y"]) ?? 0),
+      width: asNumber(record["width"]),
+      height: asNumber(record["height"]),
+      kfType: proto,
+      rawPath,
+      unknownFields: [],
+    });
   } else {
     // 布局容器：objectType=2 或无 objectType + layoutType；几何在 baseProperty。
     const layoutType = record["layoutType"];
@@ -563,9 +586,10 @@ export interface KfObjectToIRResult {
  *
  * 判型顺序（优先级不变）：
  * 1. `uiModelType` 为数字 → 静态控件，由 index 层识别（此处返回 null）；
- * 2. `objectType === 3`（且无 uiModelType）→ easyui 控件
- *    （`type: "easyui"`，proto = `uiExtendType`，几何在顶层 leftTopPt/width/height，
- *     `EASYUI_PROTO_FIELDS[proto]` 中存在的字段透传进宽松 IR 字段）；
+ * 2. `objectType === 3`，或 `uiExtendType` 为已知 easyui proto（含 DateBox 等
+ *    **无 objectType** 的 KMUIExtendBase 系控件，见 EASYUI_PROTO_TYPES[11]）
+ *    → easyui 控件（`type: "easyui"`，proto = `uiExtendType`，几何在顶层
+ *    leftTopPt/width/height，`EASYUI_PROTO_FIELDS[proto]` 中存在的字段透传）；
  * 3. `objectType === 2`（或无 objectType）且含 `layoutType` → 布局容器
  *    （`type: "layout"`，children = `insiderObjects` 原样保留，panels = `dPanelsOption`，
  *     几何从 `baseProperty.leftTopPt/width/height`）；
@@ -583,6 +607,11 @@ export function kfObjectToControl(node: unknown): KfObjectToIRResult {
     return { control: null, unknownFields: [] };
   }
   if (record["objectType"] === 3) {
+    return easyuiToIR(record);
+  }
+  // DateBox（proto 11）等 KMUIExtendBase 系控件在 KF 序列化中不带 objectType，
+  // 只带 uiExtendType——只要 uiExtendType 是已知 easyui proto 即可判为 easyui。
+  if (typeof record["uiExtendType"] === "number" && EASYUI_PROTO_TYPES[record["uiExtendType"]] !== undefined) {
     return easyuiToIR(record);
   }
   if (typeof record["layoutType"] === "number" && (record["objectType"] === 2 || record["objectType"] == null)) {

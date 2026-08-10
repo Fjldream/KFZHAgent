@@ -290,6 +290,7 @@ function renderEasyuiControl(control: EasyuiControlIR, base: string): string {
     case "timespinner":
     case "validatebox":
     case "datetimebox":
+    case "datebox":
     case "filebox":
       return `${base}${inner}${renderEasyuiInput(control)}</div></div>`;
     case "switchbutton":

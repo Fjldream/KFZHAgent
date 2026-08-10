@@ -35,7 +35,7 @@ export const KF_DESIGN_PRINCIPLES_FULL = `${KF_DESIGN_PRINCIPLES}
 ### 控件能力边界
 静态控件（31 种）：text/richtext/input/inputnumber/combobox/list/treeview/button/dropdown/navmenu/upload/checkbox/checkboxlegacy/radio/radiolegacy/select/cascader/transfer/image/tabs/table/tag/timeline/steps/scale/factorycalendar/webcontainer/gantt/spacer/switch/datetimepicker。
 容器控件（用于承载静态控件，可嵌套）：
-- easyui 容器：datagrid（数据表格，可内嵌列）、linkbutton（按钮组，text/toggle/group）、tree/treegrid（树/树表）、sidemenu（侧边菜单）、combobox（下拉）、propertygrid（属性列表）、textbox（文本框）等主要 proto。
+- easyui 容器：datagrid（数据表格，可内嵌列）、linkbutton（按钮组，text/toggle/group）、tree/treegrid（树/树表）、sidemenu（侧边菜单）、combobox（下拉）、propertygrid（属性列表）、textbox（文本框）、datebox（日期框）等主要 proto。**datebox（proto 11）KF 序列化不带 objectType 键**，只有 uiExtendType=11；其余 proto 都是 objectType=3。
 - 布局容器 layout：layoutType 2=水平、4=垂直、3=选项卡、5=Docking 区域、0=折叠、6=导航；children 递归嵌套子控件（布局可嵌布局，如 datagrid 内嵌列、布局内嵌子控件）。
 特殊节点（type=prototype，复杂配置节点，KF 渲染时才出真图）：
 - CustomCharts 自定义图表（objectType=1，ECharts option 在 objects[0] JSON 字符串）、AlarmWindow 告警窗口（告警列/数据源）、EventWindow 事件窗口、TrendChart 趋势图、BarChart 柱状图、PieChart 饼图、XYChart XY曲线。
