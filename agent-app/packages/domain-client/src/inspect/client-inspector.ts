@@ -1,6 +1,12 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { CONTROL_TYPE_BY_UIMODEL_TYPE } from "../ir/client-project-ir.js";
+import {
+  CONTROL_TYPE_BY_UIMODEL_TYPE,
+  EasyuiControlIR,
+  LayoutContainerIR,
+  type ControlIR,
+} from "../ir/client-project-ir.js";
+import { EASYUI_PROTO_FIELDS } from "../ir/easyui-types.js";
 
 /**
  * Lossless client project inspector.
@@ -391,8 +397,15 @@ interface RawControl {
 
 /**
  * Recursively collects controls from a page JSON. KF layout containers nest
- * controls under `objects`/`children`/`layoutItems`; any object carrying a
- * numeric `uiModelType` is treated as a control.
+ * controls under `objects`/`children`/`layoutItems`/`insiderObjects`; any
+ * object carrying a numeric `uiModelType` is treated as a static control
+ * (priority dispatch). Container objects are recognized as well:
+ * - easyui controls (`objectType === 3`, no `uiModelType`) — identified by
+ *   `uiExtendType` (proto), geometry on the top level;
+ * - layout containers (`objectType === 2` or absent, with `layoutType`) —
+ *   geometry under `baseProperty`, children under `insiderObjects`.
+ * Container fields are never reported as unknown (they are preserved in
+ * `raw`); static controls keep the existing unknown-field tracking.
  */
 function collectControls(node: unknown, rawPath: string, out: RawControl[]): void {
   if (Array.isArray(node)) {
@@ -424,10 +437,211 @@ function collectControls(node: unknown, rawPath: string, out: RawControl[]): voi
       rawPath,
       unknownFields: unknownKeys(record, knownSet),
     });
+  } else if (record["objectType"] === 3) {
+    // easyui 控件：objectType=3，无 uiModelType；proto = uiExtendType。
+    // 字段不丢（raw 完整保留），不报 unknownFields。
+    const proto = asNumber(record["uiExtendType"]);
+    const guid = typeof record["guid"] === "string" ? (record["guid"]) : "";
+    const name = typeof record["name"] === "string" ? (record["name"]) : "";
+    const semanticId = name !== "" ? name : guid !== "" ? guid : `easyui-${out.length}`;
+    out.push({
+      guid,
+      type: "easyui",
+      id: semanticId,
+      ...(name !== "" ? { name } : {}),
+      x: asNumber((asRecord(record["leftTopPt"])["x"]) ?? 0),
+      y: asNumber((asRecord(record["leftTopPt"])["y"]) ?? 0),
+      width: asNumber(record["width"]),
+      height: asNumber(record["height"]),
+      kfType: proto,
+      rawPath,
+      unknownFields: [],
+    });
+  } else {
+    // 布局容器：objectType=2 或无 objectType + layoutType；几何在 baseProperty。
+    const layoutType = record["layoutType"];
+    const objectType = record["objectType"];
+    if (typeof layoutType === "number" && (objectType === 2 || objectType == null)) {
+      const baseProperty = asRecord(record["baseProperty"]);
+      const guid =
+        typeof record["guid"] === "string"
+          ? (record["guid"])
+          : typeof baseProperty["guid"] === "string"
+            ? (baseProperty["guid"])
+            : "";
+      const name =
+        typeof record["name"] === "string"
+          ? (record["name"])
+          : typeof baseProperty["name"] === "string"
+            ? (baseProperty["name"])
+            : "";
+      const semanticId = name !== "" ? name : guid !== "" ? guid : `layout-${out.length}`;
+      out.push({
+        guid,
+        type: "layout",
+        id: semanticId,
+        ...(name !== "" ? { name } : {}),
+        x: asNumber((asRecord(baseProperty["leftTopPt"])["x"]) ?? 0),
+        y: asNumber((asRecord(baseProperty["leftTopPt"])["y"]) ?? 0),
+        width: asNumber(baseProperty["width"]),
+        height: asNumber(baseProperty["height"]),
+        kfType: layoutType,
+        rawPath,
+        unknownFields: [],
+      });
+    }
   }
   for (const [key, value] of Object.entries(record)) {
     if (key === "objects" || key === "children" || key === "layoutItems" || key === "insiderObjects") {
       collectControls(value, `${rawPath}/${key}`, out);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// KF → IR 反序列化（容器识别）
+// ---------------------------------------------------------------------------
+
+export interface KfObjectToIRResult {
+  /**
+   * 识别出的 IR 控件；对象既非 easyui/布局（且非静态控件分支）时为 null。
+   * 静态控件（uiModelType 为数字）由 index 层 uiModelType 分支识别，
+   * 本函数返回 null —— uiModelType 判型始终优先于 objectType 判型。
+   */
+  control: ControlIR | null;
+  /** 转换中未进入 IR 但必须保留的字段名（容器已受控，通常为空）。 */
+  unknownFields: string[];
+}
+
+/**
+ * 把单个 KF 控件对象反序列化为 IR（KF JSON → IR）。
+ *
+ * 判型顺序（优先级不变）：
+ * 1. `uiModelType` 为数字 → 静态控件，由 index 层识别（此处返回 null）；
+ * 2. `objectType === 3`（且无 uiModelType）→ easyui 控件
+ *    （`type: "easyui"`，proto = `uiExtendType`，几何在顶层 leftTopPt/width/height，
+ *     `EASYUI_PROTO_FIELDS[proto]` 中存在的字段透传进宽松 IR 字段）；
+ * 3. `objectType === 2`（或无 objectType）且含 `layoutType` → 布局容器
+ *    （`type: "layout"`，children = `insiderObjects` 原样保留，panels = `dPanelsOption`，
+ *     几何从 `baseProperty.leftTopPt/width/height`）。
+ *
+ * 未知字段不丢（KF 原始树由 raw 完整保留），容器对象不累积 unknownFields。
+ */
+export function kfObjectToControl(node: unknown): KfObjectToIRResult {
+  const record = asRecord(node);
+  // 静态控件优先：uiModelType 判型优先，绝不落入容器分支。
+  if (typeof record["uiModelType"] === "number") {
+    return { control: null, unknownFields: [] };
+  }
+  if (record["objectType"] === 3) {
+    return easyuiToIR(record);
+  }
+  if (typeof record["layoutType"] === "number" && (record["objectType"] === 2 || record["objectType"] == null)) {
+    return layoutToIR(record);
+  }
+  return { control: null, unknownFields: [] };
+}
+
+function easyuiToIR(node: Record<string, unknown>): KfObjectToIRResult {
+  const proto = asNumber(node["uiExtendType"]);
+  const name = typeof node["name"] === "string" ? (node["name"] as string) : "";
+  const guid = typeof node["guid"] === "string" ? (node["guid"] as string) : "";
+  const id = name !== "" ? name : guid !== "" ? guid : `easyui-${proto}`;
+  const ir: Record<string, unknown> = {
+    id,
+    type: "easyui",
+    x: asNumber(asRecord(node["leftTopPt"])["x"]),
+    y: asNumber(asRecord(node["leftTopPt"])["y"]),
+    width: asNumber(node["width"]),
+    height: asNumber(node["height"]),
+    proto,
+    uiExtendType: proto,
+  };
+  // EASYUI_PROTO_FIELDS 白名单字段透传（schema 中均为宽松 optional 字段）。
+  for (const field of EASYUI_PROTO_FIELDS[proto] ?? []) {
+    if (node[field] !== undefined) ir[field] = node[field];
+  }
+  const parsed = EasyuiControlIR.safeParse(ir);
+  if (!parsed.success) {
+    return { control: null, unknownFields: [] };
+  }
+  return { control: parsed.data, unknownFields: [] };
+}
+
+function layoutToIR(node: Record<string, unknown>): KfObjectToIRResult {
+  const layoutType = asNumber(node["layoutType"]);
+  const baseProperty = asRecord(node["baseProperty"]);
+  const name =
+    typeof node["name"] === "string"
+      ? (node["name"] as string)
+      : typeof baseProperty["name"] === "string"
+        ? (baseProperty["name"] as string)
+        : "";
+  const guid =
+    typeof node["guid"] === "string"
+      ? (node["guid"] as string)
+      : typeof baseProperty["guid"] === "string"
+        ? (baseProperty["guid"] as string)
+        : "";
+  const id = name !== "" ? name : guid !== "" ? guid : `layout-${layoutType}`;
+  const ir: Record<string, unknown> = {
+    id,
+    type: "layout",
+    x: asNumber(asRecord(baseProperty["leftTopPt"])["x"]),
+    y: asNumber(asRecord(baseProperty["leftTopPt"])["y"]),
+    width: asNumber(baseProperty["width"]),
+    height: asNumber(baseProperty["height"]),
+    layoutType,
+  };
+  if (Array.isArray(node["insiderObjects"])) {
+    ir["children"] = node["insiderObjects"]; // 子对象原样保留（宽容 record）
+  }
+  if (Array.isArray(node["dPanelsOption"])) {
+    ir["panels"] = node["dPanelsOption"];
+  }
+  const parsed = LayoutContainerIR.safeParse(ir);
+  if (!parsed.success) {
+    return { control: null, unknownFields: [] };
+  }
+  return { control: parsed.data, unknownFields: [] };
+}
+
+export interface KfControlsToIRResult {
+  /** 页面上所有识别出的容器控件（easyui/布局），递归展平（含布局 insiderObjects 内的嵌套子对象）。 */
+  controls: ControlIR[];
+  /** 转换中累计的 unknownFields（容器已受控，正常为空）。 */
+  unknownFields: string[];
+}
+
+/**
+ * 把 KF 页面 `objects` 数组反序列化为 IR 控件列表（KF JSON → IR）。
+ *
+ * 递归识别布局容器 `insiderObjects`（以及 `objects`/`children`/`layoutItems`）
+ * 内的嵌套子对象：子 easyui 控件与子布局容器都会作为独立 IR 控件出现在
+ * `controls` 中；布局 IR 的 `children` 字段同时原样保留 insiderObjects。
+ */
+export function kfControlToIR(objects: unknown): KfControlsToIRResult {
+  const controls: ControlIR[] = [];
+  const unknownFields: string[] = [];
+  collectIRControls(objects, controls, unknownFields);
+  return { controls, unknownFields };
+}
+
+function collectIRControls(node: unknown, out: ControlIR[], unknownFields: string[]): void {
+  if (Array.isArray(node)) {
+    node.forEach((item) => collectIRControls(item, out, unknownFields));
+    return;
+  }
+  if (typeof node !== "object" || node === null) return;
+  const record = node as Record<string, unknown>;
+  const result = kfObjectToControl(record);
+  if (result.control !== null) {
+    out.push(result.control);
+    unknownFields.push(...result.unknownFields);
+  }
+  for (const key of ["objects", "children", "layoutItems", "insiderObjects"]) {
+    if (record[key] !== undefined) {
+      collectIRControls(record[key], out, unknownFields);
     }
   }
 }
