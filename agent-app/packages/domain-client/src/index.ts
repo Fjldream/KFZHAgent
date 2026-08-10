@@ -5,6 +5,11 @@ export * from "./inspect/client-inspector.js";
 export { mergeControlTemplate, type TemplateJson } from "./templates/merge-template.js";
 export * from "./compile/client-compiler.js";
 export {
+  supportedEasyuiProtos,
+  supportedPrototypeNames,
+} from "./compile/control-compiler.js";
+export * from "./style/control-capability-registry.js";
+export {
   renderClientPreview,
   escapeHtml,
   PREVIEW_CSP,

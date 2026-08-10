@@ -203,6 +203,11 @@ const EASYUI_TEMPLATES: Readonly<Record<number, TemplateJson>> = {
   29: easyuiImagecarouselTemplate,
 };
 
+/** Returns the reviewed EasyUI proto inventory without exposing templates. */
+export function supportedEasyuiProtos(): readonly number[] {
+  return Object.freeze(Object.keys(EASYUI_TEMPLATES).map(Number).sort((a, b) => a - b));
+}
+
 /** IR fields every control variant carries (everything the schema defines). */
 const COMMON_IR_FIELDS = new Set(["id", "type", "x", "y", "width", "height"]);
 const TYPE_IR_FIELDS: Readonly<Record<string, ReadonlySet<string>>> = {
@@ -248,7 +253,7 @@ const TYPE_IR_FIELDS: Readonly<Record<string, ReadonlySet<string>>> = {
  * not fabricate a KF field layout for it.
  */
 export function supportedControlTypes(): readonly string[] {
-  return Object.keys(CONTROL_TEMPLATES);
+  return Object.freeze(Object.keys(CONTROL_TEMPLATES).sort());
 }
 
 export function hasReviewedTemplate(controlType: string): boolean {
@@ -499,7 +504,7 @@ function compileLayoutControl(build: BuildSeed, control: ControlIR): TemplateJso
  * CustomCharts（objectType=1）、图表型（TrendChart/BarChart/PieChart/XYChart）、
  * AlarmWindow/EventWindow。IR 用判别值 `type:"prototype"` + `prototypeName` 细分。
  */
-export const SPECIAL_PROTOTYPE_NAMES: readonly string[] = [
+export const SPECIAL_PROTOTYPE_NAMES: readonly string[] = Object.freeze([
   "CustomCharts",
   "AlarmWindow",
   "EventWindow",
@@ -507,7 +512,12 @@ export const SPECIAL_PROTOTYPE_NAMES: readonly string[] = [
   "BarChart",
   "PieChart",
   "XYChart",
-];
+]);
+
+/** Returns the reviewed special-node inventory without exposing templates. */
+export function supportedPrototypeNames(): readonly string[] {
+  return Object.freeze([...SPECIAL_PROTOTYPE_NAMES].sort());
+}
 
 const SPECIAL_PROTOTYPE_SET: ReadonlySet<string> = new Set(SPECIAL_PROTOTYPE_NAMES);
 
