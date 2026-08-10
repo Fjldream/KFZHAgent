@@ -1,0 +1,15 @@
+{
+  "uiExtendType": 4,
+  "width": 173,
+  "height": 22,
+  "fixedSize": [
+    173,
+    22
+  ],
+  "editable": false,
+  "multiline": false,
+  "interval": 200,
+  "min": 10,
+  "max": 100,
+  "precision": 0
+}

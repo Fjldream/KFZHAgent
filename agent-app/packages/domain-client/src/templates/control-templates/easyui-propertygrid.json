@@ -1,0 +1,12 @@
+{
+  "uiExtendType": 5,
+  "width": 300,
+  "height": 300,
+  "fixedSize": [
+    300,
+    300
+  ],
+  "showGroup": true,
+  "groupField": "group",
+  "alpha": false
+}

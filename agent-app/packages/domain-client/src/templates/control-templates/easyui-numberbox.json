@@ -1,0 +1,18 @@
+{
+  "uiExtendType": 3,
+  "width": 80,
+  "height": 20,
+  "fixedSize": [
+    80,
+    20
+  ],
+  "disabled": false,
+  "value": "",
+  "min": 0,
+  "max": 100,
+  "precision": 2,
+  "decimalSeparator": ".",
+  "groupSeparator": "",
+  "prefix": "",
+  "suffix": ""
+}

@@ -1,0 +1,12 @@
+{
+  "uiExtendType": 14,
+  "width": 90,
+  "height": 30,
+  "fixedSize": [
+    90,
+    30
+  ],
+  "menu": "",
+  "iconCls": "icon-edit",
+  "duration": 100
+}

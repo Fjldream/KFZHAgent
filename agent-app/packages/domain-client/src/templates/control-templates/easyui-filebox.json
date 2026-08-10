@@ -1,0 +1,16 @@
+{
+  "uiExtendType": 13,
+  "width": 500,
+  "height": 30,
+  "fixedSize": [
+    500,
+    30
+  ],
+  "buttonText": "Choose File",
+  "buttonIcon": "",
+  "buttonAlign": "left",
+  "accept": "",
+  "multiple": false,
+  "separator": ",",
+  "picName": ""
+}

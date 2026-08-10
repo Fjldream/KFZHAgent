@@ -1,0 +1,21 @@
+{
+  "uiExtendType": 19,
+  "width": 300,
+  "height": 200,
+  "fixedSize": [
+    300,
+    200
+  ],
+  "title": "New Window",
+  "collapsible": false,
+  "minimizable": true,
+  "maximizable": true,
+  "closable": true,
+  "closed": false,
+  "zIndex": 1521,
+  "draggable": false,
+  "resizable": false,
+  "shadow": true,
+  "modal": false,
+  "inline": true
+}

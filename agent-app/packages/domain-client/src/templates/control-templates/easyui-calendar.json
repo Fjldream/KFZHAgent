@@ -1,0 +1,39 @@
+{
+  "uiExtendType": 20,
+  "width": 180,
+  "height": 180,
+  "fixedSize": [
+    180,
+    180
+  ],
+  "fit": false,
+  "border": true,
+  "showWeek": false,
+  "firstDay": 0,
+  "weeks": [
+    "S",
+    "M",
+    "T",
+    "W",
+    "T",
+    "F",
+    "S"
+  ],
+  "months": [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December"
+  ],
+  "year": 2026,
+  "month": 7,
+  "weekNumberHeader": ""
+}

@@ -1,0 +1,13 @@
+{
+  "uiExtendType": 10,
+  "width": 173,
+  "height": 22,
+  "fixedSize": [
+    173,
+    22
+  ],
+  "value": "",
+  "separator": ":",
+  "showSeconds": true,
+  "highlight": 0
+}

@@ -1,0 +1,18 @@
+{
+  "uiExtendType": 27,
+  "width": 80,
+  "height": 20,
+  "fixedSize": [
+    80,
+    20
+  ],
+  "handleWidth": "auto",
+  "checked": true,
+  "disabled": false,
+  "readonly": false,
+  "reversed": false,
+  "onText": "yes",
+  "offText": "no",
+  "handleText": "",
+  "value": "on"
+}

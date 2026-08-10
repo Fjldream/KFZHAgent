@@ -1,0 +1,17 @@
+{
+  "uiExtendType": 7,
+  "width": 130,
+  "height": 40,
+  "fixedSize": [
+    130,
+    40
+  ],
+  "mode": "h",
+  "reversed": false,
+  "showTip": false,
+  "disabled": false,
+  "value": 0,
+  "min": 0,
+  "max": 100,
+  "step": 1
+}

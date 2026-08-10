@@ -1,0 +1,26 @@
+{
+  "uiExtendType": 22,
+  "width": 500,
+  "height": 30,
+  "fixedSize": [
+    500,
+    30
+  ],
+  "total": 0,
+  "pageSize": 10,
+  "pageNumber": 1,
+  "pageList": [
+    10,
+    20,
+    30,
+    50,
+    100
+  ],
+  "loading": false,
+  "showPageList": true,
+  "showRefresh": true,
+  "links": 10,
+  "beforePageText": "第",
+  "afterPageText": "页 共{pages}页",
+  "displayMsg": "显示 {from} 到 {to}, 共 {total} 记录"
+}

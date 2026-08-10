@@ -31,7 +31,42 @@ import treeTemplate from "../templates/control-templates/tree.json" with { type:
 import treeviewTemplate from "../templates/control-templates/treeview.json" with { type: "json" };
 import uploadTemplate from "../templates/control-templates/upload.json" with { type: "json" };
 import webContainerTemplate from "../templates/control-templates/webcontainer.json" with { type: "json" };
-import type { ControlIR, RestrictedAction } from "../ir/client-project-ir.js";
+import easyuiBaseTemplate from "../templates/control-templates/easyui-base.json" with { type: "json" };
+import easyuiCalendarTemplate from "../templates/control-templates/easyui-calendar.json" with { type: "json" };
+import easyuiComboboxTemplate from "../templates/control-templates/easyui-combobox.json" with { type: "json" };
+import easyuiCombotreeTemplate from "../templates/control-templates/easyui-combotree.json" with { type: "json" };
+import easyuiDatagridTemplate from "../templates/control-templates/easyui-datagrid.json" with { type: "json" };
+import easyuiDatetimeboxTemplate from "../templates/control-templates/easyui-datetimebox.json" with { type: "json" };
+import easyuiDialogTemplate from "../templates/control-templates/easyui-dialog.json" with { type: "json" };
+import easyuiFileboxTemplate from "../templates/control-templates/easyui-filebox.json" with { type: "json" };
+import easyuiImagecarouselTemplate from "../templates/control-templates/easyui-imagecarousel.json" with { type: "json" };
+import easyuiLinkbuttonTemplate from "../templates/control-templates/easyui-linkbutton.json" with { type: "json" };
+import easyuiMenubuttonTemplate from "../templates/control-templates/easyui-menubutton.json" with { type: "json" };
+import easyuiNumberboxTemplate from "../templates/control-templates/easyui-numberbox.json" with { type: "json" };
+import easyuiNumberspinnerTemplate from "../templates/control-templates/easyui-numberspinner.json" with { type: "json" };
+import easyuiPaginationTemplate from "../templates/control-templates/easyui-pagination.json" with { type: "json" };
+import easyuiProgressbarTemplate from "../templates/control-templates/easyui-progressbar.json" with { type: "json" };
+import easyuiPropertygridTemplate from "../templates/control-templates/easyui-propertygrid.json" with { type: "json" };
+import easyuiSearchboxTemplate from "../templates/control-templates/easyui-searchbox.json" with { type: "json" };
+import easyuiSidemenuTemplate from "../templates/control-templates/easyui-sidemenu.json" with { type: "json" };
+import easyuiSliderTemplate from "../templates/control-templates/easyui-slider.json" with { type: "json" };
+import easyuiSpinnerTemplate from "../templates/control-templates/easyui-spinner.json" with { type: "json" };
+import easyuiSwitchbuttonTemplate from "../templates/control-templates/easyui-switchbutton.json" with { type: "json" };
+import easyuiTagboxTemplate from "../templates/control-templates/easyui-tagbox.json" with { type: "json" };
+import easyuiTextboxTemplate from "../templates/control-templates/easyui-textbox.json" with { type: "json" };
+import easyuiTimespinnerTemplate from "../templates/control-templates/easyui-timespinner.json" with { type: "json" };
+import easyuiTooltipTemplate from "../templates/control-templates/easyui-tooltip.json" with { type: "json" };
+import easyuiTreeTemplate from "../templates/control-templates/easyui-tree.json" with { type: "json" };
+import easyuiTreegridTemplate from "../templates/control-templates/easyui-treegrid.json" with { type: "json" };
+import easyuiValidateboxTemplate from "../templates/control-templates/easyui-validatebox.json" with { type: "json" };
+import easyuiWindowTemplate from "../templates/control-templates/easyui-window.json" with { type: "json" };
+import layoutTemplate from "../templates/control-templates/layout.json" with { type: "json" };
+import type { ControlIR, RestrictedAction, EasyuiControlIR, LayoutContainerIR } from "../ir/client-project-ir.js";
+import {
+  EASYUI_ALL_FIELDS,
+  EASYUI_PROTO_FIELDS,
+  easyuiTypeName,
+} from "../ir/easyui-types.js";
 import { mergeControlTemplate, type TemplateJson } from "../templates/merge-template.js";
 import { deriveGuid, type BuildSeed } from "./guid-factory.js";
 
@@ -122,6 +157,46 @@ const CONTROL_TEMPLATES: Readonly<Record<string, TemplateJson>> = {
   tag: tagTemplate,
   timeline: timelineTemplate,
   steps: stepsTemplate,
+  easyui: easyuiBaseTemplate,
+  layout: layoutTemplate,
+};
+
+/**
+ * easyui 控件模板按 proto（KF uiExtendType）注册：`easyui-base` 提供所有
+ * easyui 控件共享的静态字段（type/uiModelType/objectType/version/linkMng/...），
+ * 每个 proto 模板只含该控件特有的默认 options（geometry 默认值、白名单字段
+ * 的 easyui 默认值）。模板只含静态默认值，data/columns 等复杂内容不建模
+ * （走 configureData 脚本）。
+ */
+const EASYUI_TEMPLATES: Readonly<Record<number, TemplateJson>> = {
+  0: easyuiComboboxTemplate,
+  1: easyuiDatagridTemplate,
+  2: easyuiLinkbuttonTemplate,
+  3: easyuiNumberboxTemplate,
+  4: easyuiNumberspinnerTemplate,
+  5: easyuiPropertygridTemplate,
+  6: easyuiSearchboxTemplate,
+  7: easyuiSliderTemplate,
+  8: easyuiSpinnerTemplate,
+  9: easyuiTextboxTemplate,
+  10: easyuiTimespinnerTemplate,
+  12: easyuiDialogTemplate,
+  13: easyuiFileboxTemplate,
+  14: easyuiMenubuttonTemplate,
+  15: easyuiProgressbarTemplate,
+  16: easyuiTooltipTemplate,
+  17: easyuiTreeTemplate,
+  18: easyuiTreegridTemplate,
+  19: easyuiWindowTemplate,
+  20: easyuiCalendarTemplate,
+  21: easyuiDatetimeboxTemplate,
+  22: easyuiPaginationTemplate,
+  24: easyuiCombotreeTemplate,
+  25: easyuiTagboxTemplate,
+  26: easyuiSidemenuTemplate,
+  27: easyuiSwitchbuttonTemplate,
+  28: easyuiValidateboxTemplate,
+  29: easyuiImagecarouselTemplate,
 };
 
 /** IR fields every control variant carries (everything the schema defines). */
@@ -159,6 +234,8 @@ const TYPE_IR_FIELDS: Readonly<Record<string, ReadonlySet<string>>> = {
   tag: new Set(["effect", "closable", "hit"]),
   timeline: new Set(["items"]),
   steps: new Set(["active", "direction", "processStatus"]),
+  easyui: new Set([...EASYUI_ALL_FIELDS, "proto", "uiExtendType"]),
+  layout: new Set(["layoutType", "children", "panels"]),
 };
 
 /**
@@ -203,6 +280,12 @@ export function compileControl(
   control: ControlIR,
   ctx: CompileContext,
 ): TemplateJson {
+  if (control.type === "easyui") {
+    return compileEasyuiControl(build, control);
+  }
+  if (control.type === "layout") {
+    return compileLayoutControl(build, control);
+  }
   const template = CONTROL_TEMPLATES[control.type];
   if (template === undefined) {
     throw new ModelOutputInvalidError(
@@ -212,6 +295,74 @@ export function compileControl(
   }
   const merged = mergeControlTemplate(BASE_FIELDS, template);
   return mergeControlTemplate(merged, applySchemaOverrides(build, control, ctx));
+}
+
+/**
+ * Compiles an easyui control (objectType=3). The KF object carries the
+ * easyui-base static fields plus the proto-specific template defaults; only
+ * fields on the proto's whitelist (EASYUI_PROTO_FIELDS) are taken from the IR
+ * — data/columns/toolbar content goes to configureData scripts and is never
+ * serialized as object fields.
+ */
+function compileEasyuiControl(build: BuildSeed, control: ControlIR): TemplateJson {
+  const easyui = control as unknown as EasyuiControlIR;
+  const proto = easyui.proto;
+  const protoTemplate = EASYUI_TEMPLATES[proto];
+  if (protoTemplate === undefined) {
+    throw new ModelOutputInvalidError(
+      `easyui proto ${proto} (${easyuiTypeName(proto)}) has no compiled template`,
+    );
+  }
+  const merged = mergeControlTemplate(
+    mergeControlTemplate(BASE_FIELDS, easyuiBaseTemplate),
+    protoTemplate,
+  );
+  const pass: Record<string, unknown> = {};
+  for (const field of EASYUI_PROTO_FIELDS[proto] ?? []) {
+    const value = (easyui as unknown as Record<string, unknown>)[field];
+    if (value !== undefined) pass[field] = value;
+  }
+  const overrides: TemplateJson = {
+    name: easyui.id,
+    guid: deriveGuid(build, easyui.id),
+    leftTopPt: { x: easyui.x, y: easyui.y },
+    width: easyui.width,
+    height: easyui.height,
+    uiExtendType: proto,
+    ...pass,
+  };
+  return mergeControlTemplate(merged, overrides);
+}
+
+/**
+ * Compiles a layout container (objectType=2). Geometry + name/guid live inside
+ * `baseProperty`; nested children are carried into `insiderObjects` verbatim
+ * (raw KF JSON, recursive layout/control objects), panels into `dPanelsOption`.
+ * Layouts do NOT merge base-fields.json (its comment/lock/enable/visible top
+ * level keys are control-scoped; real layouts keep those inside baseProperty).
+ */
+function compileLayoutControl(build: BuildSeed, control: ControlIR): TemplateJson {
+  const layout = control as unknown as LayoutContainerIR;
+  const overrides: TemplateJson = {
+    type: 1,
+    uiModelType: null,
+    objectType: 2,
+    layoutType: layout.layoutType,
+    baseProperty: {
+      name: layout.id,
+      guid: deriveGuid(build, layout.id),
+      leftTopPt: { x: layout.x, y: layout.y },
+      width: layout.width,
+      height: layout.height,
+    },
+  };
+  if (layout.children !== undefined) {
+    overrides["insiderObjects"] = layout.children.map((child) => structuredClone(child));
+  }
+  if (layout.panels !== undefined) {
+    overrides["dPanelsOption"] = structuredClone(layout.panels);
+  }
+  return mergeControlTemplate(layoutTemplate, overrides);
 }
 
 function applySchemaOverrides(

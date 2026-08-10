@@ -1,0 +1,15 @@
+{
+  "uiExtendType": 12,
+  "width": 400,
+  "height": 200,
+  "fixedSize": [
+    400,
+    200
+  ],
+  "title": "",
+  "collapsible": false,
+  "minimizable": false,
+  "maximizable": false,
+  "resizable": false,
+  "inline": true
+}

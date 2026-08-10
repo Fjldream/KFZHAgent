@@ -1,0 +1,19 @@
+{
+  "uiExtendType": 16,
+  "width": 120,
+  "height": 30,
+  "fixedSize": [
+    120,
+    30
+  ],
+  "position": "right",
+  "valign": "middle",
+  "content": "",
+  "trackMouse": false,
+  "deltaX": 0,
+  "deltaY": 0,
+  "showEvent": "mouseenter",
+  "hideEvent": "mouseleave",
+  "showDelay": 200,
+  "hideDelay": 100
+}

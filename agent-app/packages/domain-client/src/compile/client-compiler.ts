@@ -8,6 +8,7 @@ import type {
   RestrictedAction,
   VariableIR,
 } from "../ir/client-project-ir.js";
+import { EASYUI_ALL_FIELDS, EASYUI_PROTO_TYPES, EASYUI_PROTOS } from "../ir/easyui-types.js";
 import {
   ModelOutputInvalidError,
   assertNoStringForeignFields,
@@ -322,8 +323,15 @@ function validateControl(value: unknown, index: number): ControlIR {
     );
   }
   const id = requireString(rec["id"], "control.id");
-  const x = requireNonNegativeNumber(rec["x"], "control.x");
-  const y = requireNonNegativeNumber(rec["y"], "control.y");
+  // KF Docking 布局 leftTopPt.x 可为 -1（贴边），LayoutContainerIR 允许负坐标；
+  // 其它控件仍要求非负。
+  const isLayout = type === "layout";
+  const x = isLayout
+    ? requireNumber(rec["x"], "control.x")
+    : requireNonNegativeNumber(rec["x"], "control.x");
+  const y = isLayout
+    ? requireNumber(rec["y"], "control.y")
+    : requireNonNegativeNumber(rec["y"], "control.y");
   const width = requirePositiveNumber(rec["width"], "control.width");
   const height = requirePositiveNumber(rec["height"], "control.height");
   const base = { id, x, y, width, height };
@@ -579,6 +587,64 @@ function validateControl(value: unknown, index: number): ControlIR {
         ...optionalString(rec["direction"], "direction"),
         ...optionalString(rec["processStatus"], "processStatus"),
       };
+    case "easyui": {
+      const proto = requireNumber(rec["proto"], "control.proto");
+      if (!Number.isInteger(proto)) {
+        throw new ModelOutputInvalidError(
+          `control "${id}" easyui proto must be an integer, got ${String(rec["proto"])}`,
+        );
+      }
+      if (EASYUI_PROTO_TYPES[proto] === undefined) {
+        throw new ModelOutputInvalidError(
+          `control "${id}" easyui proto ${proto} is not a supported uiExtendType ` +
+            `(supported: ${EASYUI_PROTOS.join(", ")})`,
+        );
+      }
+      const result: Record<string, unknown> = { ...base, type: "easyui", proto };
+      if (rec["uiExtendType"] !== undefined) {
+        const uiExtendType = requireNumber(rec["uiExtendType"], "easyui.uiExtendType");
+        if (!Number.isInteger(uiExtendType) || uiExtendType !== proto) {
+          throw new ModelOutputInvalidError(
+            `control "${id}" easyui.uiExtendType (${String(rec["uiExtendType"])}) ` +
+              `must be an integer equal to proto (${proto})`,
+          );
+        }
+        result["uiExtendType"] = uiExtendType;
+      }
+      // easyui 核心可选字段：宽容透传（值类型宽松 unknown），只放行白名单字段，
+      // data/columns 等复杂内容不在此列（走 configureData 脚本）。
+      for (const field of EASYUI_ALL_FIELDS) {
+        if (rec[field] !== undefined) result[field] = rec[field];
+      }
+      return result as unknown as ControlIR;
+    }
+    case "layout": {
+      const layoutType = requireNumber(rec["layoutType"], "control.layoutType");
+      if (!Number.isInteger(layoutType)) {
+        throw new ModelOutputInvalidError(
+          `control "${id}" layoutType must be an integer, got ${String(rec["layoutType"])}`,
+        );
+      }
+      const children =
+        rec["children"] === undefined
+          ? undefined
+          : requireArray(rec["children"], "control.children").map((child, ci) =>
+              requireRecord(child, `control.children[${ci}]`),
+            );
+      const panels =
+        rec["panels"] === undefined
+          ? undefined
+          : requireArray(rec["panels"], "control.panels").map((panel, pi) =>
+              requireRecord(panel, `control.panels[${pi}]`),
+            );
+      return {
+        ...base,
+        type: "layout",
+        layoutType,
+        ...(children !== undefined ? { children } : {}),
+        ...(panels !== undefined ? { panels } : {}),
+      };
+    }
     default:
       throw new ModelOutputInvalidError(
         `control type "${type}" has no reviewed template`,

@@ -1,0 +1,35 @@
+{
+  "type": 1,
+  "uiModelType": null,
+  "objectType": 3,
+  "version": "2.0.0.1",
+  "modleStyle": "",
+  "lock": false,
+  "visible": true,
+  "runVisible": true,
+  "comment": "",
+  "memberAccess": true,
+  "enable": true,
+  "linkMng": {
+    "linkList": []
+  },
+  "configureData": "",
+  "styleData": "",
+  "styleDataNew": "",
+  "sizePolicy": [
+    3,
+    3,
+    0,
+    0
+  ],
+  "fixedSize": [
+    0,
+    0
+  ],
+  "changeProperty": {},
+  "securityPriority": 1,
+  "securitySection": [],
+  "resourceGroup": [],
+  "isControl": false,
+  "resDescription": {}
+}

@@ -1,0 +1,22 @@
+{
+  "uiExtendType": 9,
+  "width": 200,
+  "height": 25,
+  "fixedSize": [
+    200,
+    25
+  ],
+  "required": false,
+  "editable": true,
+  "disabled": false,
+  "readonly": true,
+  "prompt": "",
+  "value": "",
+  "type": "text",
+  "multiline": false,
+  "icons": [],
+  "iconAlign": "right",
+  "iconWidth": 26,
+  "buttonText": "",
+  "buttonAlign": "right"
+}

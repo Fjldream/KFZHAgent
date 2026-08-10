@@ -1,0 +1,15 @@
+{
+  "uiExtendType": 26,
+  "width": 180,
+  "height": 180,
+  "fixedSize": [
+    180,
+    180
+  ],
+  "border": true,
+  "animate": true,
+  "multiple": true,
+  "collapsed": false,
+  "floatMenuWidth": 200,
+  "floatMenuPosition": "right"
+}

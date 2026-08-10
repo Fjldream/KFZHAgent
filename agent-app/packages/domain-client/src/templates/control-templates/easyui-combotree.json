@@ -1,0 +1,14 @@
+{
+  "uiExtendType": 24,
+  "width": 200,
+  "height": 40,
+  "fixedSize": [
+    200,
+    40
+  ],
+  "editable": false,
+  "value": "",
+  "method": "post",
+  "textField": "value",
+  "valueField": "label"
+}

@@ -1,0 +1,26 @@
+{
+  "uiExtendType": 28,
+  "width": 180,
+  "height": 24,
+  "fixedSize": [
+    180,
+    24
+  ],
+  "required": true,
+  "validType": "url",
+  "delay": 200,
+  "interval": 200,
+  "missingMessage": "This field is required",
+  "invalidMessage": "Please enter a valid URL",
+  "tipPosition": "right",
+  "deltaX": 0,
+  "deltaY": 0,
+  "novalidate": false,
+  "editable": true,
+  "disabled": false,
+  "readonly": false,
+  "validateOnCreate": true,
+  "validateOnBlur": false,
+  "lengthMin": "0",
+  "lengthMax": "100"
+}

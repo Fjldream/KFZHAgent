@@ -1,0 +1,19 @@
+{
+  "type": 1,
+  "uiModelType": null,
+  "objectType": 2,
+  "version": "2.0.0.1",
+  "sizePolicy": [
+    3,
+    3,
+    0,
+    0
+  ],
+  "fixedSize": [
+    150,
+    100
+  ],
+  "memberAccess": true,
+  "isShowBorder": false,
+  "resDescription": {}
+}

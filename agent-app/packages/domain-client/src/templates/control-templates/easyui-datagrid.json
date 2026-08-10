@@ -1,0 +1,38 @@
+{
+  "uiExtendType": 1,
+  "width": 300,
+  "height": 300,
+  "fixedSize": [
+    300,
+    300
+  ],
+  "method": "post",
+  "fitColumns": false,
+  "resizeHandle": "right",
+  "autoRowHeight": true,
+  "striped": false,
+  "nowrap": true,
+  "loadMsg": "Processing, please wait ...",
+  "rownumbers": false,
+  "singleSelect": false,
+  "selectOnCheck": true,
+  "checkOnSelect": true,
+  "pagination": false,
+  "pagePosition": "bottom",
+  "pageNumber": 1,
+  "pageSize": 5,
+  "pageList": [
+    10,
+    20,
+    30,
+    40,
+    50
+  ],
+  "sortOrder": "asc",
+  "multiSort": false,
+  "remoteSort": false,
+  "showHeader": true,
+  "showFooter": false,
+  "scrollbarSize": 18,
+  "alpha": false
+}

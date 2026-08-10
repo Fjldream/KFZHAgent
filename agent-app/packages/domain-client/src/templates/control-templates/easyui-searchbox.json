@@ -1,0 +1,12 @@
+{
+  "uiExtendType": 6,
+  "width": 280,
+  "height": 22,
+  "fixedSize": [
+    280,
+    22
+  ],
+  "prompt": "Please Input Value",
+  "value": "",
+  "menu": "#mmmm"
+}

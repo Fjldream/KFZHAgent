@@ -1,0 +1,13 @@
+{
+  "uiExtendType": 18,
+  "width": 340,
+  "height": 240,
+  "fixedSize": [
+    340,
+    240
+  ],
+  "idField": "id",
+  "treeField": "name",
+  "animate": false,
+  "alpha": false
+}

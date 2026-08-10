@@ -1,0 +1,17 @@
+{
+  "uiExtendType": 17,
+  "width": 120,
+  "height": 130,
+  "fixedSize": [
+    120,
+    130
+  ],
+  "method": "post",
+  "animate": false,
+  "checkbox": false,
+  "cascadeCheck": true,
+  "onlyLeafCheck": false,
+  "lines": false,
+  "dnd": false,
+  "alpha": false
+}
