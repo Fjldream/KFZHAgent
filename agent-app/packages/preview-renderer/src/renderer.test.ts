@@ -115,6 +115,45 @@ describe("preview renderer", () => {
     expect(html).toContain("<th>列1</th>"); // table header
     expect(html).toContain('class="kf-spacer"'); // spacer
   });
+  it("renders the new control types", () => {
+    const page = {
+      id: "p1",
+      name: "新控件页",
+      width: 1440,
+      height: 900,
+      controls: [
+        { id: "c1", type: "input", x: 10, y: 10, width: 200, height: 40, value: "abc", placeholder: "请输入", inputType: "text" },
+        { id: "c2", type: "tag", x: 10, y: 60, width: 120, height: 30, effect: "light", closable: true },
+        { id: "c3", type: "steps", x: 10, y: 100, width: 400, height: 60, active: 1, direction: "horizontal" },
+        { id: "c4", type: "tree", x: 10, y: 170, width: 200, height: 200, showCheckbox: true, indent: 16 },
+        { id: "c5", type: "cascader", x: 10, y: 380, width: 200, height: 40, placeholder: "请选择" },
+        { id: "c6", type: "datetimepicker", x: 10, y: 430, width: 200, height: 40, value: "2025-01-01" },
+        { id: "c7", type: "dropdown", x: 10, y: 480, width: 150, height: 40, text: "操作", options: [{ label: "A", value: "a" }] },
+        { id: "c8", type: "upload", x: 10, y: 530, width: 150, height: 40, multiple: true },
+        { id: "c9", type: "scale", x: 10, y: 580, width: 300, height: 40, min: 0, max: 100, value: 42 },
+        { id: "c10", type: "timeline", x: 10, y: 630, width: 300, height: 120, items: [{ title: "事件1" }, { title: "事件2" }] },
+        { id: "c11", type: "webcontainer", x: 10, y: 760, width: 400, height: 120, url: "https://example.com" },
+        { id: "c12", type: "radiolegacy", x: 420, y: 10, width: 200, height: 40, options: [{ label: "高", value: "high" }], value: "high" },
+      ],
+    };
+    const html = renderPagePreview(page as never);
+    expect(html).toContain('data-type="input"');
+    expect(html).toContain('value="abc"');
+    expect(html).toContain("请输入");
+    expect(html).toContain('class="kf-tag kf-tag-light"');
+    expect(html).toContain("× 标签");
+    expect(html).toContain('class="kf-step is-active"');
+    expect(html).toContain("步骤2");
+    expect(html).toContain("kf-tree-check"); // tree checkbox icon
+    expect(html).toContain("请选择"); // cascader placeholder
+    expect(html).toContain("2025-01-01"); // datetimepicker value
+    expect(html).toContain("操作"); // dropdown text
+    expect(html).toContain("多文件"); // upload multiple
+    expect(html).toContain("kf-scale-fill"); // scale
+    expect(html).toContain("事件1"); // timeline item
+    expect(html).toContain("example.com"); // webcontainer iframe
+    expect(html).toContain("● 高"); // radiolegacy selected
+  });
   it("renders multi-page tabs with CSS :target and no scripts", () => {
     const html = renderClientProjectPreview(ir);
     expect(html).toContain("首页");

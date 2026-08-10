@@ -77,6 +77,85 @@ function renderControl(control: ControlIR): string {
       return `${base}<div class="kf-richtext">${control.text}</div></div>`;
     case "spacer":
       return `${base}<div class="kf-spacer" title="spacer"></div></div>`;
+    case "radiolegacy": {
+      const options = control.options
+        .map((option) => {
+          const selected = option.value === control.value;
+          const marker = selected ? "●" : "○";
+          return `<span${selected ? ' class="is-selected"' : ""}>${marker} ${escapeHtml(option.label)}</span>`;
+        })
+        .join("");
+      return `${base}<label class="kf-radio-option">${options}</label></div>`;
+    }
+    case "checkboxlegacy":
+      return `${base}<label><input type="checkbox"${control.checked ? " checked" : ""} disabled>${escapeHtml(control.label ?? "")}</label></div>`;
+    case "combobox": {
+      const current = control.options.find((o) => o.value === control.value)?.label ?? control.options[0]?.label ?? "";
+      const options = control.options
+        .map((o) => `<span class="kf-select-option">${escapeHtml(o.label)}</span>`)
+        .join("");
+      return `${base}<span class="kf-select"><span class="kf-select-current">${escapeHtml(current)}</span><span class="kf-select-options">${options}</span></span></div>`;
+    }
+    case "scale": {
+      const min = control.min ?? 0;
+      const max = control.max ?? 100;
+      const value = control.value ?? min;
+      const pct = max > min ? Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100)) : 0;
+      return `${base}<div class="kf-scale"><div class="kf-scale-track"><div class="kf-scale-fill" style="width:${pct}%"></div></div><span class="kf-scale-value">${escapeHtml(String(value))}</span></div></div>`;
+    }
+    case "list": {
+      const items = control.options
+        .map((o) => `<li class="kf-list-item">${escapeHtml(o.label)}</li>`)
+        .join("");
+      return `${base}<ul class="kf-list">${items}</ul></div>`;
+    }
+    case "treeview":
+      return `${base}<div class="kf-tree">${control.showCheckbox ? '<span class="kf-tree-check">☐</span>' : ""}树节点…</div></div>`;
+    case "webcontainer":
+      return `${base}<div class="kf-webcontainer"><iframe class="kf-iframe" src="${escapeHtml(control.url ?? "")}" title="web"></iframe></div></div>`;
+    case "gantt":
+      return `${base}<div class="kf-gantt">甘特图</div></div>`;
+    case "factorycalendar":
+      return `${base}<div class="kf-factorycalendar"><span>日历 ${escapeHtml(control.value ?? "")}</span></div></div>`;
+    case "input": {
+      const inputType = control.inputType ?? "text";
+      return `${base}<input class="kf-input" type="${escapeHtml(inputType)}" value="${escapeHtml(control.value ?? "")}" placeholder="${escapeHtml(control.placeholder ?? "")}" disabled></div>`;
+    }
+    case "cascader":
+      return `${base}<span class="kf-cascader">${escapeHtml(control.placeholder ?? "请选择")} ▾</span></div>`;
+    case "datetimepicker":
+      return `${base}<span class="kf-datetimepicker">${escapeHtml(control.value ?? control.placeholder ?? "")} ▾</span></div>`;
+    case "dropdown": {
+      const options = (control.options ?? [])
+        .map((o) => `<span class="kf-select-option">${escapeHtml(o.label)}</span>`)
+        .join("");
+      return `${base}<span class="kf-dropdown"><button class="kf-btn">${escapeHtml(control.text ?? "下拉")}</button><span class="kf-select-options">${options}</span></span></div>`;
+    }
+    case "navmenu":
+      return `${base}<div class="kf-navmenu">导航菜单</div></div>`;
+    case "tree":
+      return `${base}<div class="kf-tree">${control.showCheckbox ? '<span class="kf-tree-check">☐</span>' : ""}树节点…</div></div>`;
+    case "upload":
+      return `${base}<button class="kf-btn">上传${control.multiple ? "（多文件）" : ""}</button></div>`;
+    case "transfer":
+      return `${base}<div class="kf-transfer">穿梭框</div></div>`;
+    case "tag": {
+      const effect = control.effect ?? "light";
+      return `${base}<span class="kf-tag kf-tag-${escapeHtml(effect)}">${control.closable ? "× " : ""}标签</span></div>`;
+    }
+    case "timeline": {
+      const items = control.items
+        .map((item) => `<li class="kf-timeline-item"><span class="kf-timeline-dot"></span><span>${escapeHtml(item.title)}</span></li>`)
+        .join("");
+      return `${base}<ul class="kf-timeline">${items}</ul></div>`;
+    }
+    case "steps": {
+      const steps = [{ title: "步骤1" }, { title: "步骤2" }, { title: "步骤3" }];
+      const html = steps
+        .map((s, i) => `<span class="kf-step${i <= (control.active ?? 0) ? " is-active" : ""}">${escapeHtml(s.title)}</span>`)
+        .join(" → ");
+      return `${base}<div class="kf-steps">${html}</div></div>`;
+    }
   }
 }
 
@@ -137,7 +216,30 @@ body:has(section.kf-page:target) section.kf-page:first-of-type{display:none}
 .kf-table{width:100%;height:100%;border-collapse:collapse;font-size:13px}
 .kf-table th{background:#161b26;border:1px solid #2a3342;padding:6px 10px;text-align:left;font-weight:600;color:#e8ecf4}
 .kf-richtext{overflow:auto;font-size:14px;line-height:1.5;color:#e8ecf4}
-.kf-spacer{background:transparent;border-top:1px dashed #2a3342}`;
+.kf-spacer{background:transparent;border-top:1px dashed #2a3342}
+.kf-scale{display:flex;flex-direction:column;justify-content:center;gap:4px;height:100%;padding:0 6px}
+.kf-scale-track{height:8px;border-radius:4px;background:#2a3342;overflow:hidden}
+.kf-scale-fill{height:100%;background:${THEME_COLOR}}
+.kf-scale-value{font-size:13px;color:#e8ecf4;text-align:center}
+.kf-list{list-style:none;display:flex;flex-direction:column;gap:4px;height:100%;overflow:auto;padding:4px 6px}
+.kf-list-item{font-size:13px;color:#e8ecf4;padding:2px 4px}
+.kf-tree{font-size:13px;color:#e8ecf4;height:100%;padding:4px 6px;overflow:auto}
+.kf-tree-check{margin-right:4px;color:#9fb0c9}
+.kf-webcontainer{width:100%;height:100%;border:1px solid #2a3342;border-radius:4px;overflow:hidden;background:#12161f}
+.kf-iframe{width:100%;height:100%;border:0;background:#ffffff}
+.kf-gantt,.kf-factorycalendar,.kf-navmenu,.kf-transfer{display:flex;align-items:center;justify-content:center;width:100%;height:100%;font-size:13px;color:#9fb0c9;border:1px dashed #2a3342;border-radius:4px}
+.kf-cascader,.kf-datetimepicker{display:flex;align-items:center;height:100%;font-size:14px;color:#e8ecf4;border:1px solid #2a3342;border-radius:4px;background:#12161f;padding:0 8px}
+.kf-dropdown{display:inline-flex;flex-direction:column;justify-content:center;gap:2px;height:100%;min-width:0}
+.kf-tag{display:inline-flex;align-items:center;gap:4px;height:100%;padding:0 10px;border-radius:4px;font-size:13px}
+.kf-tag-light{background:#2a3342;color:#e8ecf4}
+.kf-tag-dark{background:#0f1522;color:#ffffff}
+.kf-tag-plain{background:transparent;color:#e8ecf4;border:1px solid #2a3342}
+.kf-timeline{list-style:none;display:flex;flex-direction:column;gap:6px;height:100%;overflow:auto;padding:4px 8px}
+.kf-timeline-item{display:flex;align-items:center;gap:8px;font-size:13px;color:#e8ecf4}
+.kf-timeline-dot{width:8px;height:8px;border-radius:50%;background:${THEME_COLOR};flex-shrink:0}
+.kf-steps{display:flex;align-items:center;gap:6px;height:100%;padding:0 8px;font-size:13px;overflow:hidden}
+.kf-step{color:#9fb0c9;white-space:nowrap}
+.kf-step.is-active{color:${THEME_COLOR};font-weight:600}`;
 
 /**
  * Render a full static HTML document: doctype, inline `<style>`, page-tab
@@ -202,6 +304,18 @@ function kfControlToIR(rec: Record<string, unknown>): Record<string, unknown> {
   pickAll(["options", "selectData", "radioData"]);
   pickAll(["src", "fit", "alt"]);
   pickAll(["tabs", "activeId"]);
+  // 新增控件字段（KF 字段名 → IR 字段名：input.type→inputType、datetimepicker.type→pickerType）
+  pickAll(["placeholder", "maxlength", "disabled", "clearable"]);
+  if (rec["uiModelType"] === 38) base["inputType"] = rec["type"]; // INPUT
+  if (rec["uiModelType"] === 40) base["pickerType"] = rec["type"]; // DATETIMEPICKER
+  pickAll(["url", "scrolling"]);
+  pickAll(["effect", "closable", "hit"]);
+  pickAll(["active", "direction", "processStatus"]);
+  pickAll(["showCheckbox", "indent", "expandOnClickNode", "accordion", "defaultExpandAll"]);
+  pickAll(["mode", "backgroundColor", "textColor"]);
+  pickAll(["splitButton", "trigger", "placement"]);
+  pickAll(["min", "max", "step"]);
+  pickAll(["action", "accept", "multiple"]);
   if (rec["precision"] !== undefined) base["decimals"] = rec["precision"];
   return base;
 }
