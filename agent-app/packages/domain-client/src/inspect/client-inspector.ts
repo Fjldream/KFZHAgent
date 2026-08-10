@@ -4,9 +4,26 @@ import {
   CONTROL_TYPE_BY_UIMODEL_TYPE,
   EasyuiControlIR,
   LayoutContainerIR,
+  SpecialNodeIR,
   type ControlIR,
 } from "../ir/client-project-ir.js";
 import { EASYUI_PROTO_FIELDS } from "../ir/easyui-types.js";
+
+/**
+ * KF 特殊节点集合：这些节点没有 uiModelType/uiExtendType/layoutType，
+ * KF 前端按顶层 `prototypeName` 特判创建实例（km_layer/kmui_layout
+ * jsonToObject）。识别分支必须只匹配这 7 个名称——普通控件（如 Label）
+ * 也可能携带 prototypeName="Label"（其本身有 uiModelType/objectType）。
+ */
+const SPECIAL_PROTOTYPE_NAMES = new Set([
+  "CustomCharts",
+  "AlarmWindow",
+  "EventWindow",
+  "TrendChart",
+  "BarChart",
+  "PieChart",
+  "XYChart",
+]);
 
 /**
  * Lossless client project inspector.
@@ -403,9 +420,12 @@ interface RawControl {
  * - easyui controls (`objectType === 3`, no `uiModelType`) — identified by
  *   `uiExtendType` (proto), geometry on the top level;
  * - layout containers (`objectType === 2` or absent, with `layoutType`) —
- *   geometry under `baseProperty`, children under `insiderObjects`.
- * Container fields are never reported as unknown (they are preserved in
- * `raw`); static controls keep the existing unknown-field tracking.
+ *   geometry under `baseProperty`, children under `insiderObjects`;
+ * - KF special nodes (prototypeName in {CustomCharts,AlarmWindow,EventWindow,
+ *   TrendChart,BarChart,PieChart,XYChart}) — priority after containers,
+ *   CustomCharts geometry from `pageProperty.pagePos/pageSize`.
+ * Container/special-node fields are never reported as unknown (they are
+ * preserved in `raw`); static controls keep the existing unknown-field tracking.
  */
 function collectControls(node: unknown, rawPath: string, out: RawControl[]): void {
   if (Array.isArray(node)) {
@@ -489,6 +509,31 @@ function collectControls(node: unknown, rawPath: string, out: RawControl[]): voi
         rawPath,
         unknownFields: [],
       });
+    } else if (typeof record["prototypeName"] === "string" && SPECIAL_PROTOTYPE_NAMES.has(record["prototypeName"])) {
+      // KF 特殊节点（优先级在容器之后）：prototypeName 特判，无数字类型码。
+      const prototypeName = record["prototypeName"] as string;
+      const geometry = specialNodeGeometry(record, prototypeName);
+      const guid = typeof record["guid"] === "string" ? (record["guid"]) : "";
+      const name =
+        typeof record["name"] === "string" && record["name"] !== ""
+          ? (record["name"])
+          : prototypeName === "CustomCharts" && typeof asRecord(record["pageProperty"])["name"] === "string"
+            ? (asRecord(record["pageProperty"])["name"] as string)
+            : "";
+      const semanticId = name !== "" ? name : guid !== "" ? guid : `prototype-${prototypeName}`;
+      out.push({
+        guid,
+        type: "prototype",
+        id: semanticId,
+        ...(name !== "" ? { name } : {}),
+        x: geometry.x,
+        y: geometry.y,
+        width: geometry.width,
+        height: geometry.height,
+        kfType: 0,
+        rawPath,
+        unknownFields: [],
+      });
     }
   }
   for (const [key, value] of Object.entries(record)) {
@@ -523,9 +568,13 @@ export interface KfObjectToIRResult {
  *     `EASYUI_PROTO_FIELDS[proto]` 中存在的字段透传进宽松 IR 字段）；
  * 3. `objectType === 2`（或无 objectType）且含 `layoutType` → 布局容器
  *    （`type: "layout"`，children = `insiderObjects` 原样保留，panels = `dPanelsOption`，
- *     几何从 `baseProperty.leftTopPt/width/height`）。
+ *     几何从 `baseProperty.leftTopPt/width/height`）；
+ * 4. `prototypeName` ∈ {CustomCharts,AlarmWindow,EventWindow,TrendChart,BarChart,
+ *    PieChart,XYChart}（且无 uiModelType/objectType=3/layoutType）→ KF 特殊节点
+ *    （`type: "prototype"`，几何 CustomCharts 从 pageProperty.pagePos/pageSize 提取、
+ *    其余从顶层 leftTopPt/width/height，其余字段 passthrough 宽容保留）。
  *
- * 未知字段不丢（KF 原始树由 raw 完整保留），容器对象不累积 unknownFields。
+ * 未知字段不丢（KF 原始树由 raw 完整保留），容器/特殊节点不累积 unknownFields。
  */
 export function kfObjectToControl(node: unknown): KfObjectToIRResult {
   const record = asRecord(node);
@@ -538,6 +587,11 @@ export function kfObjectToControl(node: unknown): KfObjectToIRResult {
   }
   if (typeof record["layoutType"] === "number" && (record["objectType"] === 2 || record["objectType"] == null)) {
     return layoutToIR(record);
+  }
+  // KF 特殊节点（优先级在容器之后）：顶层 prototypeName 特判。
+  const prototypeName = record["prototypeName"];
+  if (typeof prototypeName === "string" && SPECIAL_PROTOTYPE_NAMES.has(prototypeName)) {
+    return prototypeToIR(record);
   }
   return { control: null, unknownFields: [] };
 }
@@ -558,7 +612,14 @@ function easyuiToIR(node: Record<string, unknown>): KfObjectToIRResult {
     uiExtendType: proto,
   };
   // EASYUI_PROTO_FIELDS 白名单字段透传（schema 中均为宽松 optional 字段）。
+  // 排除 IR 保留字段：textbox 白名单含 `type`（KF 的 textbox 输入类型），
+  // 若透传会覆盖 ir.type="easyui" 判别值导致 safeParse 失败（与编译层 RESERVED_IR_FIELDS 一致）。
+  const RESERVED_IR_FIELDS = new Set([
+    "type", "proto", "uiExtendType", "id", "name", "guid",
+    "x", "y", "width", "height", "uiModelType",
+  ]);
   for (const field of EASYUI_PROTO_FIELDS[proto] ?? []) {
+    if (RESERVED_IR_FIELDS.has(field)) continue;
     if (node[field] !== undefined) ir[field] = node[field];
   }
   const parsed = EasyuiControlIR.safeParse(ir);
@@ -600,6 +661,65 @@ function layoutToIR(node: Record<string, unknown>): KfObjectToIRResult {
     ir["panels"] = node["dPanelsOption"];
   }
   const parsed = LayoutContainerIR.safeParse(ir);
+  if (!parsed.success) {
+    return { control: null, unknownFields: [] };
+  }
+  return { control: parsed.data, unknownFields: [] };
+}
+
+/**
+ * 提取 KF 特殊节点的几何：
+ * - **CustomCharts**（窗口型容器）：name/几何都在 pageProperty
+ *   {name, pagePos{x,y}, pageSize{width,height}}，IR 层 x/y/width/height 从
+ *   pageProperty 提取（顶层无 leftTopPt/width/height）；
+ * - **其余**（图表型 / 告警窗 / 事件窗）：几何在顶层 leftTopPt/width/height。
+ */
+function specialNodeGeometry(
+  node: Record<string, unknown>,
+  prototypeName: string,
+): { x: number; y: number; width: number; height: number } {
+  if (prototypeName === "CustomCharts") {
+    const pageProperty = asRecord(node["pageProperty"]);
+    return {
+      x: asNumber(asRecord(pageProperty["pagePos"])["x"]),
+      y: asNumber(asRecord(pageProperty["pagePos"])["y"]),
+      width: asNumber(asRecord(pageProperty["pageSize"])["width"]),
+      height: asNumber(asRecord(pageProperty["pageSize"])["height"]),
+    };
+  }
+  return {
+    x: asNumber(asRecord(node["leftTopPt"])["x"]),
+    y: asNumber(asRecord(node["leftTopPt"])["y"]),
+    width: asNumber(node["width"]),
+    height: asNumber(node["height"]),
+  };
+}
+
+function prototypeToIR(node: Record<string, unknown>): KfObjectToIRResult {
+  const prototypeName = node["prototypeName"] as string;
+  const geometry = specialNodeGeometry(node, prototypeName);
+  // 稳定语义 id：KF 控件 `name` 优先（CustomCharts 的 name 在 pageProperty.name），
+  // 其次 KF GUID，最后按 prototypeName 兜底。
+  const name =
+    typeof node["name"] === "string" && node["name"] !== ""
+      ? (node["name"] as string)
+      : typeof asRecord(node["pageProperty"])["name"] === "string"
+        ? (asRecord(node["pageProperty"])["name"] as string)
+        : "";
+  const guid = typeof node["guid"] === "string" ? (node["guid"] as string) : "";
+  const id = name !== "" ? name : guid !== "" ? guid : `prototype-${prototypeName}`;
+  const ir: Record<string, unknown> = {
+    ...node, // 其余字段（pageProperty / objects JSON 字符串 / areas / title /
+    // linkMng / modlePrototype 等）passthrough 宽容保留，不丢不报
+    id,
+    type: "prototype",
+    prototypeName,
+    x: geometry.x,
+    y: geometry.y,
+    width: geometry.width,
+    height: geometry.height,
+  };
+  const parsed = SpecialNodeIR.safeParse(ir);
   if (!parsed.success) {
     return { control: null, unknownFields: [] };
   }
