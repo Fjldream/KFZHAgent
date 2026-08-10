@@ -106,7 +106,8 @@ function isNumericProperty(key: keyof StyleDeclaration): key is NumericStyleProp
   return NUMERIC_PROPERTIES.has(key as NumericStyleProperty);
 }
 
-function serializeColor(value: unknown): string {
+/** Validates and serializes the only color format allowed in KF style output. */
+export function serializeStyleColor(value: unknown): string {
   if (typeof value !== "string") {
     return throwInvalidValue();
   }
@@ -135,7 +136,7 @@ function serializeNumeric(key: NumericStyleProperty, value: unknown): string {
 
 function serializeValue(key: keyof StyleDeclaration, value: unknown): string {
   if (COLOR_PROPERTIES.has(key)) {
-    return serializeColor(value);
+    return serializeStyleColor(value);
   }
 
   if (isNumericProperty(key)) {

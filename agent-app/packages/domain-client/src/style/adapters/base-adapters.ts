@@ -1,5 +1,6 @@
 import type { ComponentStyleSpec, StyleDeclaration } from "@kf/contracts";
 import { getControlCapability, listControlCapabilities } from "../control-capability-registry.js";
+import { serializeStyleColor } from "../css-compiler.js";
 import type {
   StyleAdapter,
   StyleAdapterResult,
@@ -63,7 +64,7 @@ function splitDeclarations(declarations: StyleDeclaration): Pick<StyleAdapterRes
 
   return {
     // backgroundColor is a reviewed common-control field in the KF patch allowlist.
-    nativeFields: backgroundColor === undefined ? {} : { backgroundColor },
+    nativeFields: backgroundColor === undefined ? {} : { backgroundColor: serializeStyleColor(backgroundColor) },
     cssDeclarations: Object.keys(cssDeclarations).length === 0 ? {} : { normal: cssDeclarations },
   };
 }

@@ -44,6 +44,32 @@ describe("compileControlStyle", () => {
     });
   });
 
+  it.each([
+    "url(javascript:alert(1))",
+    "#ffffff;background-image:url(https://evil.invalid/x)",
+  ])("rejects unsafe native background color %s before emission", (backgroundColor) => {
+    expect(() => compileControlStyle({
+      capabilityId: "button",
+      theme: themeFixture,
+      instanceStyle: style({ declarations: { backgroundColor } }),
+      runtimeProfile: KF36_RUNTIME_PROFILE,
+    })).toThrow(/UNSAFE_STYLE_VALUE/);
+  });
+
+  it("emits a valid native background color", () => {
+    expect(compileControlStyle({
+      capabilityId: "button",
+      theme: themeFixture,
+      instanceStyle: style({ declarations: { backgroundColor: "#ffffff" } }),
+      runtimeProfile: KF36_RUNTIME_PROFILE,
+    })).toEqual({
+      nativeFields: { backgroundColor: "#ffffff" },
+      styleDataNew: "",
+      unsupported: [],
+      warnings: [],
+    });
+  });
+
   it("resolves role, type, and instance layers before adapting them", () => {
     expect(compileControlStyle({
       capabilityId: "button",

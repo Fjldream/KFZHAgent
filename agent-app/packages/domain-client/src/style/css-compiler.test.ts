@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compileScopedCss } from "./css-compiler.js";
+import { compileScopedCss, serializeStyleColor } from "./css-compiler.js";
 import { KF36_RUNTIME_PROFILE } from "./runtime-profile.js";
 
 describe("compileScopedCss", () => {
@@ -13,6 +13,14 @@ describe("compileScopedCss", () => {
       "#domId{border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.18)}" +
       "#domId:hover{background-color:#1d4ed8}",
     );
+  });
+
+  it("exports the strict color serializer used by native style adapters", () => {
+    expect(serializeStyleColor("#ffffff")).toBe("#ffffff");
+    expect(() => serializeStyleColor("url(javascript:alert(1))"))
+      .toThrow(/UNSAFE_STYLE_VALUE/);
+    expect(() => serializeStyleColor("#ffffff;color:red"))
+      .toThrow(/UNSAFE_STYLE_VALUE/);
   });
 
   it.each(["url(https://evil.invalid/x)", "expression(alert(1))", "javascript:alert(1)", "@import x"])(
