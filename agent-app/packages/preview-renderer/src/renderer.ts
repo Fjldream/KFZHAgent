@@ -10,6 +10,7 @@ import type {
   EasyuiControlIR,
   LayoutContainerIR,
   PageIR,
+  SpecialNodeIR,
 } from "@kf/domain-client";
 
 const DEFAULT_PAGE_WIDTH = 1024;
@@ -183,8 +184,88 @@ function renderControl(control: ControlIR, options?: RenderOptions): string {
       return renderEasyuiControl(control, base);
     case "layout":
       return renderLayoutContainer(control as LayoutContainerIR, options);
+    case "prototype":
+      return renderSpecialNode(control as SpecialNodeIR, base);
   }
   return base;
+}
+
+// ---------------------------------------------------------------------------
+// KF 特殊节点渲染（type="prototype"，按 prototypeName 分派）
+// ---------------------------------------------------------------------------
+
+/** 图表型 prototypeName → 中文类型标签（参考工程 KF 源码语义）。 */
+const SPECIAL_CHART_LABELS: Readonly<Record<string, string>> = {
+  TrendChart: "趋势图",
+  BarChart: "柱状图",
+  PieChart: "饼图",
+  XYChart: "XY曲线",
+};
+
+/** 告警/事件窗 prototypeName → 中文类型标签。 */
+const SPECIAL_WINDOW_LABELS: Readonly<Record<string, string>> = {
+  AlarmWindow: "告警窗口",
+  EventWindow: "事件窗口",
+};
+
+/** 宽容读取未知对象字段（特殊节点复杂配置不建模，全部走 passthrough）。 */
+function unknownField(obj: unknown, key: string): unknown {
+  if (obj && typeof obj === "object") return (obj as Record<string, unknown>)[key];
+  return undefined;
+}
+
+/** 提取非空字符串字段；缺失/非字符串返回空串。 */
+function unknownString(value: unknown): string {
+  return typeof value === "string" && value !== "" ? value : "";
+}
+
+/** 图表型标题：title.text 优先，回退 prototypeName。 */
+function specialChartTitle(control: SpecialNodeIR): string {
+  const text = unknownString(unknownField(control.title, "text"));
+  return text !== "" ? text : control.prototypeName;
+}
+
+/** CustomCharts 标题：pageProperty.name 优先，回退 prototypeName。 */
+function specialCustomTitle(control: SpecialNodeIR): string {
+  const name = unknownString(unknownField(control.pageProperty, "name"));
+  return name !== "" ? name : control.prototypeName;
+}
+
+/** 告警/事件窗标题：titleName 优先，其次 name，最后 prototypeName。 */
+function specialWindowTitle(control: SpecialNodeIR): string {
+  const titleName = unknownString(control.titleName);
+  if (titleName !== "") return titleName;
+  const name = unknownString(control.name);
+  if (name !== "") return name;
+  return control.prototypeName;
+}
+
+function renderSpecialNode(control: SpecialNodeIR, base: string): string {
+  const { prototypeName } = control;
+  if (prototypeName in SPECIAL_CHART_LABELS) return renderSpecialChart(control, base);
+  if (prototypeName === "CustomCharts") return renderSpecialCustom(control, base);
+  if (prototypeName in SPECIAL_WINDOW_LABELS) return renderSpecialWindow(control, base);
+  return base; // 未知 prototypeName：仅保留几何占位框
+}
+
+/** 图表型占位：标题 + 类型标签（如 趋势图/柱状图/饼图/XY曲线）。 */
+function renderSpecialChart(control: SpecialNodeIR, base: string): string {
+  const title = escapeHtml(specialChartTitle(control));
+  const label = escapeHtml(SPECIAL_CHART_LABELS[control.prototypeName] ?? control.prototypeName);
+  return `${base}<div class="kf-special-chart"><span class="kf-special-icon">📈</span><span class="kf-special-title">${title}</span><span class="kf-special-tag">${label}</span></div></div>`;
+}
+
+/** CustomCharts 占位：标题 + ECharts 自定义图表标注。 */
+function renderSpecialCustom(control: SpecialNodeIR, base: string): string {
+  const title = escapeHtml(specialCustomTitle(control));
+  return `${base}<div class="kf-special-custom"><span class="kf-special-icon">📊</span><span class="kf-special-title">${title}</span><span class="kf-special-tag">ECharts 自定义图表</span></div></div>`;
+}
+
+/** AlarmWindow/EventWindow 占位：标题 + 告警/事件窗口标签。 */
+function renderSpecialWindow(control: SpecialNodeIR, base: string): string {
+  const title = escapeHtml(specialWindowTitle(control));
+  const label = escapeHtml(SPECIAL_WINDOW_LABELS[control.prototypeName] ?? control.prototypeName);
+  return `${base}<div class="kf-special-alarm"><span class="kf-special-icon">🔔</span><span class="kf-special-title">${title}</span><span class="kf-special-tag">${label}</span></div></div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -668,7 +749,12 @@ body:has(section.kf-page:target) section.kf-page:first-of-type{display:none}
 .kf-accordion-header{padding:6px 10px;font-size:13px;background:#161b26;color:#e8ecf4;cursor:pointer}
 .kf-accordion-header.is-active{color:#fff;border-bottom:1px solid #2a3342}
 .kf-accordion-body{display:none;padding:4px}
-.kf-accordion-body.is-open{display:block}`;
+.kf-accordion-body.is-open{display:block}
+/* ---- KF 特殊节点占位（type="prototype"：CustomCharts / 图表型 / 告警窗） ---- */
+.kf-special-chart,.kf-special-custom,.kf-special-alarm{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;width:100%;height:100%;border:1px dashed #3d4d66;border-radius:6px;background:#161b26;color:#9fb0c9;text-align:center;overflow:hidden;padding:8px}
+.kf-special-icon{font-size:28px;line-height:1;flex-shrink:0}
+.kf-special-title{max-width:90%;font-size:15px;font-weight:600;color:#e8ecf4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kf-special-tag{background:#1c2333;border:1px solid #2a3342;border-radius:4px;padding:2px 8px;font-size:12px;color:#8fb4ff}`;
 
 /**
  * Render a full static HTML document: doctype, inline `<style>`, page-tab
@@ -710,12 +796,64 @@ function kfNum(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+/** KF 特殊节点 prototypeName 集合（与 domain-client inspect 的 SPECIAL_PROTOTYPE_NAMES 一致）。 */
+const SPECIAL_PROTOTYPE_NAMES: ReadonlySet<string> = new Set([
+  "CustomCharts",
+  "AlarmWindow",
+  "EventWindow",
+  "TrendChart",
+  "BarChart",
+  "PieChart",
+  "XYChart",
+]);
+
+/**
+ * KF 特殊节点 JSON → SpecialNodeIR 形状：type="prototype" + prototypeName 特判，
+ * 几何宽容提取（CustomCharts 在 pageProperty{pagePos,pageSize}，其余在顶层
+ * leftTopPt/width/height），其余复杂配置（title/areas/objects/pageProperty/
+ * columns 等）passthrough 原样保留，由 renderSpecialNode 消费。
+ */
+function kfSpecialToIR(rec: Record<string, unknown>): Record<string, unknown> {
+  const prototypeName = rec["prototypeName"] as string;
+  let geometry: { x: number; y: number; width: number; height: number };
+  if (prototypeName === "CustomCharts") {
+    const pageProperty = (rec["pageProperty"] ?? {}) as Record<string, unknown>;
+    const pagePos = (pageProperty["pagePos"] ?? {}) as Record<string, unknown>;
+    const pageSize = (pageProperty["pageSize"] ?? {}) as Record<string, unknown>;
+    geometry = {
+      x: kfNum(pagePos["x"]),
+      y: kfNum(pagePos["y"]),
+      width: kfNum(pageSize["width"]),
+      height: kfNum(pageSize["height"]),
+    };
+  } else {
+    const lp = (rec["leftTopPt"] ?? {}) as Record<string, unknown>;
+    geometry = {
+      x: kfNum(lp["x"]),
+      y: kfNum(lp["y"]),
+      width: kfNum(rec["width"]),
+      height: kfNum(rec["height"]),
+    };
+  }
+  return {
+    ...rec,
+    id: typeof rec["name"] === "string" ? rec["name"] : `prototype-${prototypeName}`,
+    type: "prototype",
+    prototypeName,
+    ...geometry,
+  };
+}
+
 /** KF 控件对象 → ControlIR 形状（宽容提取渲染所需字段）。 */
 function kfControlToIR(rec: Record<string, unknown>): Record<string, unknown> {
-  // 容器对象：easyui（objectType=3）/ 布局（layoutType）优先于静态兜底。
+  // 容器对象：easyui（objectType=3）/ 布局（layoutType）优先于静态兜底；
+  // 特殊节点（prototypeName）在容器之后特判（与 inspect 判型优先级一致）。
   if (rec["objectType"] === 3) return kfEasyuiToIR(rec);
   if (typeof rec["layoutType"] === "number" && (rec["objectType"] === 2 || rec["objectType"] == null)) {
     return kfLayoutToIR(rec);
+  }
+  if (typeof rec["prototypeName"] === "string" && SPECIAL_PROTOTYPE_NAMES.has(rec["prototypeName"])) {
+    return kfSpecialToIR(rec);
   }
   const lp = (rec["leftTopPt"] ?? {}) as Record<string, unknown>;
   const base: Record<string, unknown> = {
