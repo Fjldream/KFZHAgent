@@ -180,6 +180,10 @@ const ctxBase: ModelPortContext = {
   editableEntities: entities,
 };
 
+// 打包最终候选工程（含 LLM 全部改动），供 sdb 安装原生验证
+let lastCandidatePath: string | undefined;
+// (scenes 循环内赋值)
+
 const scenes: Array<"create" | "modify"> = scene === "both" ? ["create", "modify"] : [scene];
 
 for (const s of scenes) {
@@ -206,6 +210,7 @@ for (const s of scenes) {
   // -------------------------------------------------------------------------
   console.log("\n④ 应用 plan 到工程…");
   const candidate = await applyClientPatch(ws.path, planObj);
+  lastCandidatePath = candidate.path;
   const candInspection = await inspectClientProject(candidate.path);
   console.log(`   候选工程控件数: ${Object.keys(candInspection.index.controls).length}`);
 
@@ -284,11 +289,16 @@ for (const s of scenes) {
   }
 }
 
-// 打包产物（供 sdb 安装原生验证）
-const pkg = await packageNativeClientProject(ws.path);
+// 打包最终候选工程（含 LLM 全部改动），供 sdb 安装原生验证
+if (lastCandidatePath === undefined) {
+  console.error("❌ 没有可打包的候选工程（走查未执行任何场景）");
+  process.exit(1);
+}
+const pkg = await packageNativeClientProject(lastCandidatePath);
 const outDir = "/tmp/container-llm-walkthrough";
 await mkdir(outDir, { recursive: true });
-const out = path.join(outDir, "built-container-llm.gz");
+const out = path.join(outDir, "built-container-llm-candidate.gz");
 await (await import("node:fs/promises")).writeFile(out, pkg);
-console.log(`\n⑤ 基础工程打包: ${out} (${pkg.length} bytes)`);
-console.log("   原生验证：将候选工程（candidate.path）按 sdb 流程安装后由 KF 前端打开确认。");
+console.log(`\n⑤ 候选工程打包: ${out} (${pkg.length} bytes)`);
+console.log(`   来源: ${lastCandidatePath}`);
+console.log("   原生验证：将候选工程按 sdb 流程安装后由 KF 前端打开确认。");
