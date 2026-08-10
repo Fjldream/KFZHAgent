@@ -37,4 +37,12 @@ export const KF_DESIGN_PRINCIPLES_FULL = `${KF_DESIGN_PRINCIPLES}
 容器控件（用于承载静态控件，可嵌套）：
 - easyui 容器：datagrid（数据表格，可内嵌列）、linkbutton（按钮组，text/toggle/group）、tree/treegrid（树/树表）、sidemenu（侧边菜单）、combobox（下拉）、propertygrid（属性列表）、textbox（文本框）等主要 proto。
 - 布局容器 layout：layoutType 2=水平、4=垂直、3=选项卡、5=Docking 区域、0=折叠、6=导航；children 递归嵌套子控件（布局可嵌布局，如 datagrid 内嵌列、布局内嵌子控件）。
-趋势曲线/图表（Chart 节点）尚未支持：需要图表时用 text 控件标注区名（如 text=中部趋势区）作为占位，不得用按钮冒充。`;
+趋势曲线/图表（Chart 节点）尚未支持：需要图表时用 text 控件标注区名（如 text=中部趋势区）作为占位，不得用按钮冒充。
+
+### 容器序列化硬约束（KF 原生要求，违反会导致页面崩溃或区域空白）
+1. **容器 children（布局内的子对象）必须用 KF 原生 JSON 结构**，且**不得写「type」「uiModelType」字段**（KF 加载按 objectType→uiExtendType→uiModelType→layoutType 顺序分派、后者覆盖前者；uiModelType:null 会把控件覆盖成 null 导致不渲染）。只写：objectType + uiExtendType（easyui 控件）或 objectType + layoutType（嵌套布局）+ 几何 + 属性。
+2. **easyui 子控件无 baseProperty**：几何在顶层「leftTopPt:{x,y}」+「width/height」；Docking 布局的子对象用顶层「region」（west/north/south/east/center）定位；水平/垂直布局的子对象用顶层「internalVertex:{left,top}」定位（不用 region）。
+3. **嵌套布局子对象有 baseProperty**（name/guid/leftTopPt/width/height）+ 顶层 layoutType + insiderObjects。
+4. **Docking 布局必须提供 panels（dPanelsOption）**，每个 panel 至少含「region」+ 尺寸（west/east 用 width、north/south 用 height，或统一用「size」字段由编译器转换）；region 必须与 children 里子对象的 region 对应。
+5. **树/菜单类控件必须给非空 data 数组**：tree 用「[{id,text,state,children}]」，sidemenu 用「[{text,iconCls,state,children}]」；空 data 渲染空白，缺 data 会让 sidemenu 崩溃。datagrid 的 data/columns 复杂内容不建模（走 configureData 脚本），模板自动提供空 data。
+6. **easyui 控件不要用「type」字段表达业务属性**（type 是 IR 判别保留字，白名单透传时会被过滤）：textbox 输入类型用「inputType」表达。`;

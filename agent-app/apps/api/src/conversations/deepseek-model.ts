@@ -61,6 +61,11 @@ const SYSTEM_PROMPT = `你以礼貌、专业的客服顾问口吻与客户沟通
   - 容器类（承载静态控件，可嵌套）：
     - easyui 容器：datagrid（数据表格，可内嵌列）、linkbutton（按钮组，text/toggle/group）、tree/treegrid（树/树表）、sidemenu（侧边菜单）、combobox（下拉）、propertygrid（属性列表）、textbox（文本框）等主要 proto
     - 布局容器 layout：layoutType 2=水平、4=垂直、3=选项卡、5=Docking 区域、0=折叠、6=导航；children 递归嵌套子控件（布局可嵌布局，如 datagrid 内嵌列、布局内嵌子控件）
+  - 容器硬约束（违反会导致 KF 页面崩溃或区域空白，详见设计原则"容器序列化硬约束"）：
+    - children 里不得写 type/uiModelType 字段；easyui 子控件几何在顶层 leftTopPt/width/height，无 baseProperty
+    - Docking 子对象用顶层 region 定位，水平/垂直子对象用 internalVertex:{left,top}
+    - Docking 必须给 panels（每项含 region + size 或 width/height），region 与 children 对应
+    - tree/sidemenu 必须给非空 data 数组（tree: [{id,text,state,children}]；sidemenu: [{text,iconCls,state,children}]），空 data 渲染空白
 - 控件动作只允许受限 DSL：{"kind":"setVariable","variableId":"$变量名","value":数字} 或 {"kind":"navigatePage","pageId":"页面名"}。
 - 禁止输出任意 JavaScript、脚本字符串、自由文本代码。
 
