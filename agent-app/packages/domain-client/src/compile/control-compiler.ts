@@ -11,6 +11,26 @@ import switchTemplate from "../templates/control-templates/switch.json" with { t
 import tableTemplate from "../templates/control-templates/table.json" with { type: "json" };
 import tabsTemplate from "../templates/control-templates/tabs.json" with { type: "json" };
 import textTemplate from "../templates/control-templates/text.json" with { type: "json" };
+import cascaderTemplate from "../templates/control-templates/cascader.json" with { type: "json" };
+import checkboxLegacyTemplate from "../templates/control-templates/checkboxlegacy.json" with { type: "json" };
+import comboboxTemplate from "../templates/control-templates/combobox.json" with { type: "json" };
+import datetimePickerTemplate from "../templates/control-templates/datetimepicker.json" with { type: "json" };
+import dropdownTemplate from "../templates/control-templates/dropdown.json" with { type: "json" };
+import factoryCalendarTemplate from "../templates/control-templates/factorycalendar.json" with { type: "json" };
+import ganttTemplate from "../templates/control-templates/gantt.json" with { type: "json" };
+import inputTemplate from "../templates/control-templates/input.json" with { type: "json" };
+import listTemplate from "../templates/control-templates/list.json" with { type: "json" };
+import navmenuTemplate from "../templates/control-templates/navmenu.json" with { type: "json" };
+import radioLegacyTemplate from "../templates/control-templates/radiolegacy.json" with { type: "json" };
+import scaleTemplate from "../templates/control-templates/scale.json" with { type: "json" };
+import stepsTemplate from "../templates/control-templates/steps.json" with { type: "json" };
+import tagTemplate from "../templates/control-templates/tag.json" with { type: "json" };
+import timelineTemplate from "../templates/control-templates/timeline.json" with { type: "json" };
+import transferTemplate from "../templates/control-templates/transfer.json" with { type: "json" };
+import treeTemplate from "../templates/control-templates/tree.json" with { type: "json" };
+import treeviewTemplate from "../templates/control-templates/treeview.json" with { type: "json" };
+import uploadTemplate from "../templates/control-templates/upload.json" with { type: "json" };
+import webContainerTemplate from "../templates/control-templates/webcontainer.json" with { type: "json" };
 import type { ControlIR, RestrictedAction } from "../ir/client-project-ir.js";
 import { mergeControlTemplate, type TemplateJson } from "../templates/merge-template.js";
 import { deriveGuid, type BuildSeed } from "./guid-factory.js";
@@ -82,6 +102,26 @@ const CONTROL_TEMPLATES: Readonly<Record<string, TemplateJson>> = {
   table: tableTemplate,
   richtext: richtextTemplate,
   spacer: spacerTemplate,
+  radiolegacy: radioLegacyTemplate,
+  checkboxlegacy: checkboxLegacyTemplate,
+  combobox: comboboxTemplate,
+  scale: scaleTemplate,
+  list: listTemplate,
+  treeview: treeviewTemplate,
+  webcontainer: webContainerTemplate,
+  gantt: ganttTemplate,
+  factorycalendar: factoryCalendarTemplate,
+  input: inputTemplate,
+  cascader: cascaderTemplate,
+  datetimepicker: datetimePickerTemplate,
+  dropdown: dropdownTemplate,
+  navmenu: navmenuTemplate,
+  tree: treeTemplate,
+  upload: uploadTemplate,
+  transfer: transferTemplate,
+  tag: tagTemplate,
+  timeline: timelineTemplate,
+  steps: stepsTemplate,
 };
 
 /** IR fields every control variant carries (everything the schema defines). */
@@ -99,6 +139,26 @@ const TYPE_IR_FIELDS: Readonly<Record<string, ReadonlySet<string>>> = {
   table: new Set([]),
   richtext: new Set(["text"]),
   spacer: new Set(["axis"]),
+  radiolegacy: new Set(["options", "value"]),
+  checkboxlegacy: new Set(["label", "checked"]),
+  combobox: new Set(["options", "value", "editable"]),
+  scale: new Set(["min", "max", "value", "step"]),
+  list: new Set(["options"]),
+  treeview: new Set(["showCheckbox"]),
+  webcontainer: new Set(["url", "scrollbar"]),
+  gantt: new Set([]),
+  factorycalendar: new Set(["value", "dateFormat"]),
+  input: new Set(["value", "placeholder", "type", "disabled", "clearable", "maxlength"]),
+  cascader: new Set(["options", "placeholder", "filterable", "clearable"]),
+  datetimepicker: new Set(["value", "type", "placeholder", "format"]),
+  dropdown: new Set(["options", "text", "splitButton"]),
+  navmenu: new Set(["mode", "options"]),
+  tree: new Set(["showCheckbox", "indent", "expandOnClickNode"]),
+  upload: new Set(["action", "accept", "multiple"]),
+  transfer: new Set(["options", "titles"]),
+  tag: new Set(["effect", "closable", "hit"]),
+  timeline: new Set(["items"]),
+  steps: new Set(["active", "direction", "processStatus"]),
 };
 
 /**
@@ -216,6 +276,77 @@ function applySchemaOverrides(
         name: control.id,
         uiModelType: control.axis === "horizontal" ? 13 : 14,
       };
+    case "radiolegacy": {
+      const radioData = control.options.map((o) => ({
+        text: o.label,
+        disabled: false,
+        visible: true,
+      }));
+      return { ...common, radioData };
+    }
+    case "checkboxlegacy":
+    case "combobox":
+    case "scale":
+    case "list":
+    case "treeview":
+    case "webcontainer":
+    case "gantt":
+    case "factorycalendar":
+    case "cascader":
+    case "navmenu":
+    case "tree":
+    case "upload":
+    case "tag":
+    case "timeline":
+    case "steps": {
+      // 多数新控件：IR 语义字段名与 KF 字段名一致（模板已由源码生成），
+      // 直接透传非 undefined 字段；复杂数据（gantt data 等）走 configureData。
+      const type = (control as unknown as Record<string, unknown>)["type"] as string;
+      const pass = {} as Record<string, unknown>;
+      for (const key of TYPE_IR_FIELDS[type] ?? []) {
+        const value = (control as unknown as Record<string, unknown>)[key];
+        if (value !== undefined) pass[key] = value;
+      }
+      return { ...common, ...pass };
+    }
+    case "input": {
+      const pass = {} as Record<string, unknown>;
+      for (const key of ["value", "placeholder", "disabled", "clearable", "maxlength"]) {
+        const value = (control as unknown as Record<string, unknown>)[key];
+        if (value !== undefined) pass[key] = value;
+      }
+      const inputType = (control as unknown as Record<string, unknown>)["inputType"];
+      if (inputType !== undefined) pass["type"] = inputType;
+      return { ...common, ...pass };
+    }
+    case "datetimepicker": {
+      const pass = {} as Record<string, unknown>;
+      for (const key of ["value", "placeholder", "format"]) {
+        const value = (control as unknown as Record<string, unknown>)[key];
+        if (value !== undefined) pass[key] = value;
+      }
+      const pickerType = (control as unknown as Record<string, unknown>)["pickerType"];
+      if (pickerType !== undefined) pass["type"] = pickerType;
+      return { ...common, ...pass };
+    }
+    case "dropdown": {
+      const pass = {} as Record<string, unknown>;
+      for (const key of ["options", "splitButton"]) {
+        const value = (control as unknown as Record<string, unknown>)[key];
+        if (value !== undefined) pass[key] = value;
+      }
+      const text = (control as unknown as Record<string, unknown>)["text"];
+      if (text !== undefined) pass["text"] = text;
+      return { ...common, ...pass };
+    }
+    case "transfer": {
+      const pass = {} as Record<string, unknown>;
+      for (const key of ["titles"]) {
+        const value = (control as unknown as Record<string, unknown>)[key];
+        if (value !== undefined) pass[key] = value;
+      }
+      return { ...common, ...pass };
+    }
     default:
       throw new ModelOutputInvalidError(
         `control type "${String((control as { type?: string }).type)}" has no reviewed template`,

@@ -20,6 +20,26 @@ import switchTemplate from "../templates/control-templates/switch.json" with { t
 import tableTemplate from "../templates/control-templates/table.json" with { type: "json" };
 import tabsTemplate from "../templates/control-templates/tabs.json" with { type: "json" };
 import textTemplate from "../templates/control-templates/text.json" with { type: "json" };
+import cascaderTemplate from "../templates/control-templates/cascader.json" with { type: "json" };
+import checkboxLegacyTemplate from "../templates/control-templates/checkboxlegacy.json" with { type: "json" };
+import comboboxTemplate from "../templates/control-templates/combobox.json" with { type: "json" };
+import datetimePickerTemplate from "../templates/control-templates/datetimepicker.json" with { type: "json" };
+import dropdownTemplate from "../templates/control-templates/dropdown.json" with { type: "json" };
+import factoryCalendarTemplate from "../templates/control-templates/factorycalendar.json" with { type: "json" };
+import ganttTemplate from "../templates/control-templates/gantt.json" with { type: "json" };
+import inputTemplate from "../templates/control-templates/input.json" with { type: "json" };
+import listTemplate from "../templates/control-templates/list.json" with { type: "json" };
+import navmenuTemplate from "../templates/control-templates/navmenu.json" with { type: "json" };
+import radioLegacyTemplate from "../templates/control-templates/radiolegacy.json" with { type: "json" };
+import scaleTemplate from "../templates/control-templates/scale.json" with { type: "json" };
+import stepsTemplate from "../templates/control-templates/steps.json" with { type: "json" };
+import tagTemplate from "../templates/control-templates/tag.json" with { type: "json" };
+import timelineTemplate from "../templates/control-templates/timeline.json" with { type: "json" };
+import transferTemplate from "../templates/control-templates/transfer.json" with { type: "json" };
+import treeTemplate from "../templates/control-templates/tree.json" with { type: "json" };
+import treeviewTemplate from "../templates/control-templates/treeview.json" with { type: "json" };
+import uploadTemplate from "../templates/control-templates/upload.json" with { type: "json" };
+import webContainerTemplate from "../templates/control-templates/webcontainer.json" with { type: "json" };
 import pageSkeleton from "../templates/page-skeleton.json" with { type: "json" };
 import { allowedFieldsFor, resolveControlPath } from "./allowlist.js";
 import {
@@ -191,6 +211,26 @@ const CONTROL_TEMPLATES: Readonly<Record<string, TemplateJson>> = {
   table: tableTemplate,
   richtext: richtextTemplate,
   spacer: spacerTemplate,
+  radiolegacy: radioLegacyTemplate,
+  checkboxlegacy: checkboxLegacyTemplate,
+  combobox: comboboxTemplate,
+  scale: scaleTemplate,
+  list: listTemplate,
+  treeview: treeviewTemplate,
+  webcontainer: webContainerTemplate,
+  gantt: ganttTemplate,
+  factorycalendar: factoryCalendarTemplate,
+  input: inputTemplate,
+  cascader: cascaderTemplate,
+  datetimepicker: datetimePickerTemplate,
+  dropdown: dropdownTemplate,
+  navmenu: navmenuTemplate,
+  tree: treeTemplate,
+  upload: uploadTemplate,
+  transfer: transferTemplate,
+  tag: tagTemplate,
+  timeline: timelineTemplate,
+  steps: stepsTemplate,
 };
 
 /** create 时允许从 IR properties 透传覆盖的控件属性（与 client-project-ir schema 同名）。 */
@@ -204,6 +244,26 @@ const CREATE_PASS_THROUGH: Readonly<Record<string, readonly string[]>> = {
   table: [],
   richtext: ["text"],
   spacer: ["axis"],
+  radiolegacy: ["options", "value"],
+  checkboxlegacy: ["label", "checked"],
+  combobox: ["options", "value", "editable"],
+  scale: ["min", "max", "value", "step"],
+  list: ["options"],
+  treeview: ["showCheckbox"],
+  webcontainer: ["url", "scrollbar"],
+  gantt: [],
+  factorycalendar: ["value", "dateFormat"],
+  input: ["value", "placeholder", "type", "disabled", "clearable", "maxlength"],
+  cascader: ["options", "placeholder", "filterable", "clearable"],
+  datetimepicker: ["value", "type", "placeholder", "format"],
+  dropdown: ["options", "text", "splitButton"],
+  navmenu: ["mode", "options"],
+  tree: ["showCheckbox", "indent", "expandOnClickNode"],
+  upload: ["action", "accept", "multiple"],
+  transfer: ["options", "titles"],
+  tag: ["effect", "closable", "hit"],
+  timeline: ["items"],
+  steps: ["active", "direction", "processStatus"],
 };
 
 // ---------------------------------------------------------------------------

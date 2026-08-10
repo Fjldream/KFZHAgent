@@ -128,6 +128,141 @@ export const SpacerControlIR = BaseControlIR.extend({
 // implied by the KF uiModelType (13 = HORIZONTALSPACER, 14 = VERTICALSPACER);
 // the Task 6 compiler emits the uiModelType from `axis`.
 
+// ── 新增控件（参考工程 test_最新_2 实际使用；字段 = LLM 可生成的语义属性，
+//    复杂数据如 gantt data/tag tags 走 configureData 脚本，IR 不建模）──
+
+export const LegacyRadioControlIR = BaseControlIR.extend({
+  type: z.literal("radiolegacy"),
+  options: z.array(z.object({ label: z.string(), value: z.string() })).min(1),
+  value: z.string().optional(),
+}).strict();
+
+export const LegacyCheckboxControlIR = BaseControlIR.extend({
+  type: z.literal("checkboxlegacy"),
+  label: z.string().optional(),
+  checked: z.boolean(),
+}).strict();
+
+export const ComboboxControlIR = BaseControlIR.extend({
+  type: z.literal("combobox"),
+  options: z.array(z.object({ label: z.string(), value: z.string() })).min(1),
+  value: z.string().optional(),
+  editable: z.boolean().optional(),
+}).strict();
+
+export const ScaleControlIR = BaseControlIR.extend({
+  type: z.literal("scale"),
+  min: z.number().optional(),
+  max: z.number().optional(),
+  value: z.number().optional(),
+  step: z.number().optional(),
+}).strict();
+
+export const ListControlIR = BaseControlIR.extend({
+  type: z.literal("list"),
+  options: z.array(z.object({ label: z.string(), value: z.string() })).min(1),
+}).strict();
+
+export const TreeviewControlIR = BaseControlIR.extend({
+  type: z.literal("treeview"),
+  showCheckbox: z.boolean().optional(),
+}).strict();
+
+export const WebContainerControlIR = BaseControlIR.extend({
+  type: z.literal("webcontainer"),
+  url: z.string().optional(),
+  scrollbar: z.boolean().optional(),
+}).strict();
+
+export const GanttControlIR = BaseControlIR.extend({
+  type: z.literal("gantt"),
+}).strict();
+// gantt 的 data（项目/任务树）走 configureData 脚本，IR 只占几何。
+
+export const FactoryCalendarControlIR = BaseControlIR.extend({
+  type: z.literal("factorycalendar"),
+  value: z.string().optional(),
+  dateFormat: z.string().optional(),
+}).strict();
+
+export const InputControlIR = BaseControlIR.extend({
+  type: z.literal("input"),
+  value: z.string().optional(),
+  placeholder: z.string().optional(),
+  inputType: z.enum(["text", "password", "textarea"]).optional(),
+  disabled: z.boolean().optional(),
+  clearable: z.boolean().optional(),
+  maxlength: z.number().int().nonnegative().optional(),
+}).strict();
+
+export const CascaderControlIR = BaseControlIR.extend({
+  type: z.literal("cascader"),
+  options: z.array(z.record(z.string(), z.unknown())).optional(),
+  placeholder: z.string().optional(),
+  filterable: z.boolean().optional(),
+  clearable: z.boolean().optional(),
+}).strict();
+
+export const DatetimePickerControlIR = BaseControlIR.extend({
+  type: z.literal("datetimepicker"),
+  value: z.string().optional(),
+  pickerType: z.enum(["date", "datetime", "daterange", "month", "time"]).optional(),
+  placeholder: z.string().optional(),
+  format: z.string().optional(),
+}).strict();
+
+export const DropdownControlIR = BaseControlIR.extend({
+  type: z.literal("dropdown"),
+  options: z.array(z.object({ label: z.string(), value: z.string() })).min(1),
+  text: z.string().optional(),
+  splitButton: z.boolean().optional(),
+}).strict();
+
+export const NavmenuControlIR = BaseControlIR.extend({
+  type: z.literal("navmenu"),
+  mode: z.enum(["horizontal", "vertical"]).optional(),
+  options: z.array(z.record(z.string(), z.unknown())).optional(),
+}).strict();
+
+export const TreeControlIR = BaseControlIR.extend({
+  type: z.literal("tree"),
+  showCheckbox: z.boolean().optional(),
+  indent: z.number().nonnegative().optional(),
+  expandOnClickNode: z.boolean().optional(),
+}).strict();
+
+export const UploadControlIR = BaseControlIR.extend({
+  type: z.literal("upload"),
+  action: z.string().optional(),
+  accept: z.string().optional(),
+  multiple: z.boolean().optional(),
+}).strict();
+
+export const TransferControlIR = BaseControlIR.extend({
+  type: z.literal("transfer"),
+  options: z.array(z.object({ label: z.string(), value: z.string() })).min(1),
+  titles: z.tuple([z.string(), z.string()]).optional(),
+}).strict();
+
+export const TagControlIR = BaseControlIR.extend({
+  type: z.literal("tag"),
+  effect: z.enum(["light", "dark", "plain"]).optional(),
+  closable: z.boolean().optional(),
+  hit: z.boolean().optional(),
+}).strict();
+
+export const TimelineControlIR = BaseControlIR.extend({
+  type: z.literal("timeline"),
+  items: z.array(z.object({ title: z.string(), description: z.string().optional() })).min(1),
+}).strict();
+
+export const StepsControlIR = BaseControlIR.extend({
+  type: z.literal("steps"),
+  active: z.number().int().nonnegative().optional(),
+  direction: z.enum(["horizontal", "vertical"]).optional(),
+  processStatus: z.enum(["wait", "process", "finish", "error", "success"]).optional(),
+}).strict();
+
 export const ControlIR = z.discriminatedUnion("type", [
   TextControlIR,
   ButtonControlIR,
@@ -141,24 +276,64 @@ export const ControlIR = z.discriminatedUnion("type", [
   TableControlIR,
   RichTextControlIR,
   SpacerControlIR,
+  LegacyRadioControlIR,
+  LegacyCheckboxControlIR,
+  ComboboxControlIR,
+  ScaleControlIR,
+  ListControlIR,
+  TreeviewControlIR,
+  WebContainerControlIR,
+  GanttControlIR,
+  FactoryCalendarControlIR,
+  InputControlIR,
+  CascaderControlIR,
+  DatetimePickerControlIR,
+  DropdownControlIR,
+  NavmenuControlIR,
+  TreeControlIR,
+  UploadControlIR,
+  TransferControlIR,
+  TagControlIR,
+  TimelineControlIR,
+  StepsControlIR,
 ]);
 export type ControlIR = z.infer<typeof ControlIR>;
 
 /** KF `uiModelType` -> IR control type (from `kmui_glabolvar.js` + SDB pages). */
 export const CONTROL_TYPE_BY_UIMODEL_TYPE: Readonly<Record<number, string>> = {
+  0: "radiolegacy", // RADIO（旧）
+  1: "checkboxlegacy", // CHECKBOX（旧）
+  3: "combobox", // COMBOBOX
   6: "text", // TEXTBOX
   7: "richtext", // RICHTEXT
+  8: "scale", // SCALE
+  9: "list", // LIST
+  11: "treeview", // TREEVIEW
+  12: "webcontainer", // WEBCONTAINER
   13: "spacer", // HORIZONTALSPACER
   14: "spacer", // VERTICALSPACER
+  30: "gantt", // GANTT
   31: "table", // TABLE
+  32: "tree", // TREE
+  33: "dropdown", // DROPDOWN
+  34: "navmenu", // NAVMENU
   35: "button", // BUTTON (element-style, page JSON verified)
   36: "radio", // ELEMENTRADIO
   37: "checkbox", // ELEMENTCHECHECKBOX
+  38: "input", // INPUT
+  39: "cascader", // CASCADER
+  40: "datetimepicker", // DATETIMEPICKER
   41: "image", // IMAGE
+  43: "factorycalendar", // FACTORYCALENDAR
   44: "select", // SELECT
+  45: "upload", // UPLOAD
+  46: "transfer", // TRANSFER
   47: "tabs", // TABS
   48: "switch", // SWITCH
   49: "inputnumber", // INPUTNUMBER
+  50: "tag", // TAG
+  51: "timeline", // TIMELINE
+  52: "steps", // STEPS
 };
 
 export const VariableIR = z.object({

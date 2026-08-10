@@ -79,6 +79,27 @@ export const CONTROL_TYPE_ALLOWED_FIELDS: Readonly<Record<string, readonly strin
   tabs: ["activeName", "type", "tabData", "closable", "addable", "tabPosition", "stretch"],
   switch: ["value", "activeColor", "inactiveColor", "activeText", "inactiveText", "activeIconClass", "inactiveIconClass", "disabled"],
   inputnumber: ["value", "min", "max", "step", "stepStrictly", "precision", "disabled", "controls", "controlsPosition", "placeholder"],
+  // ── 新增 20 种（update 允许修改的核心字段，与模板序列化字段一致）──
+  radiolegacy: ["radioData", "selectIndex", "layoutStyle", "bkColor", "fontInfo", "rightToLeft"],
+  checkboxlegacy: ["check", "checkbox", "bkColor", "fontInfo", "span"],
+  combobox: ["selectIndex", "bkColor", "isChangeFixedSize", "isChangeFont"],
+  scale: ["minValue", "maxValue", "numerical", "priGraduation", "auxGraduation", "decPart", "graColor", "textColor", "bkColor", "fontInfo"],
+  list: ["list", "selectIndex", "borderStyle", "hScrollBar", "bkColor", "fontInfo"],
+  treeview: ["bkColor", "fontInfo", "isChangeFixedSize", "isChangeFont"],
+  webcontainer: ["url", "scrolling", "transcrolling", "webcon"],
+  gantt: ["currentTimeLevel", "timeFormatter", "rowHeight", "taskHeight", "rowFontSize", "timeLineFontSize", "dateEnable", "disableResizing", "isShowTool", "isShowDel", "isShowLock"],
+  factorycalendar: ["defaultData", "connectObj"],
+  input: ["value", "maxlength", "showWordLimit", "placeholder", "showPassword", "disabled", "clearable", "prefixIcon", "suffixIcon", "readonly", "max", "min", "step", "type", "prepend", "append"],
+  cascader: ["placeholder", "disabled", "clearable", "showAllLevels", "collapseTags", "filterable", "separator", "debounce", "refresh"],
+  datetimepicker: ["value", "type", "placeholder", "startPlaceholder", "endPlaceholder", "rangeSeparator", "format", "align", "clearable", "editable", "readonly", "unlinkPanels", "disabled"],
+  dropdown: ["showDropdown", "showMenu", "property", "text"],
+  navmenu: ["show", "mode"],
+  tree: ["show", "showCheckbox", "indent", "expandOnClickNode", "draggable", "highlightCurrent", "defaultExpandAll", "accordion"],
+  upload: ["dialogVisible", "action", "accept", "multiple"],
+  transfer: ["filterable", "filterPlaceholder", "targetOrder"],
+  tag: ["closable", "disableTransitions", "hit", "effect", "addable"],
+  timeline: ["reverse"],
+  steps: ["active", "direction", "space", "processStatus", "finishStatus", "alignCenter", "simple"],
 };
 
 /** Fields on a KF page JSON file that may be patched. */

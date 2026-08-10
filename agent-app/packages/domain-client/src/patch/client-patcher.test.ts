@@ -236,6 +236,48 @@ describe("client patcher (Task 7 brief Step 1)", () => {
     expect(cb).toMatchObject({ name: "NewCheckbox", label: "启用", checked: true });
   });
 
+  it("creates controls of the new ElementUI types with pass-through props", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const candidate = await applyClientPatch(base, plan([
+      {
+        op: "create", entityType: "control", entityId: "NewInput",
+        properties: { pageId: "page-guid-1", type: "input", placeholder: "请输入", value: "hello", clearable: true, x: 0, y: 0 },
+      },
+      {
+        op: "create", entityType: "control", entityId: "NewTag",
+        properties: { pageId: "page-guid-1", type: "tag", effect: "light", closable: true },
+      },
+      {
+        op: "create", entityType: "control", entityId: "NewSteps",
+        properties: { pageId: "page-guid-1", type: "steps", active: 1, direction: "horizontal" },
+      },
+      {
+        op: "create", entityType: "control", entityId: "NewTree",
+        properties: { pageId: "page-guid-1", type: "tree", showCheckbox: true, indent: 16 },
+      },
+      {
+        op: "create", entityType: "control", entityId: "NewCascader",
+        properties: { pageId: "page-guid-1", type: "cascader", placeholder: "请选择" },
+      },
+      {
+        op: "create", entityType: "control", entityId: "NewRadioLegacy",
+        properties: { pageId: "page-guid-1", type: "radiolegacy", options: [{ label: "A", value: "a" }] },
+      },
+    ]));
+    const inp = await wholeControl(candidate, deriveGuid({ seed: "w-test" }, "NewInput"));
+    expect(inp).toMatchObject({ name: "NewInput", uiModelType: 38, placeholder: "请输入", value: "hello", clearable: true });
+    const tag = await wholeControl(candidate, deriveGuid({ seed: "w-test" }, "NewTag"));
+    expect(tag).toMatchObject({ name: "NewTag", uiModelType: 50, effect: "light", closable: true });
+    const stp = await wholeControl(candidate, deriveGuid({ seed: "w-test" }, "NewSteps"));
+    expect(stp).toMatchObject({ name: "NewSteps", uiModelType: 52, active: 1, direction: "horizontal" });
+    const tree = await wholeControl(candidate, deriveGuid({ seed: "w-test" }, "NewTree"));
+    expect(tree).toMatchObject({ name: "NewTree", uiModelType: 32, showCheckbox: true, indent: 16 });
+    const cas = await wholeControl(candidate, deriveGuid({ seed: "w-test" }, "NewCascader"));
+    expect(cas).toMatchObject({ name: "NewCascader", uiModelType: 39, placeholder: "请选择" });
+    const rl = await wholeControl(candidate, deriveGuid({ seed: "w-test" }, "NewRadioLegacy"));
+    expect(rl).toMatchObject({ name: "NewRadioLegacy", uiModelType: 0 });
+  });
+
   it("updates a variable field by name", async () => {
     const base = await copyFixture("client-unknown-field");
     const candidate = await applyClientPatch(base, plan([

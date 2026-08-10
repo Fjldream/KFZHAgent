@@ -33,6 +33,10 @@ export function escapeHtml(value: string): string {
 
 function renderControl(control: ControlIR): string {
   const style = `left:${control.x}px;top:${control.y}px;width:${control.width}px;height:${control.height}px`;
+  const textOf = (c: ControlIR): string => {
+    if (c.type === "text" || c.type === "button" || c.type === "richtext") return c.text;
+    return c.type;
+  };
   switch (control.type) {
     case "text":
       return `<div class="control text" style="${style}">${escapeHtml(control.text)}</div>`;
@@ -46,7 +50,7 @@ function renderControl(control: ControlIR): string {
     case "inputnumber":
       return `<div class="control inputnumber" style="${style}"><input type="number" value="0" step="0.1" disabled><span class="bind">→ ${escapeHtml(control.variableId)}</span></div>`;
     default:
-      return `<div class="control ${escapeHtml(control.type)}" style="${style}"><span class="placeholder">${escapeHtml(control.type)}</span></div>`;
+      return `<div class="control ${escapeHtml(control.type)}" style="${style}"><span class="placeholder">${escapeHtml(textOf(control))}</span></div>`;
   }
 }
 

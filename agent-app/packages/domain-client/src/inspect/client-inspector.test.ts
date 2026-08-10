@@ -145,7 +145,7 @@ describe("client inspector", () => {
     expect(CONTROL_TYPE_BY_UIMODEL_TYPE[49]).toBe("inputnumber");
     expect(CONTROL_TYPE_BY_UIMODEL_TYPE[48]).toBe("switch");
     expect(CONTROL_TYPE_BY_UIMODEL_TYPE[44]).toBe("select");
-    expect(Object.keys(CONTROL_TYPE_BY_UIMODEL_TYPE).length).toBe(13);
+    expect(Object.keys(CONTROL_TYPE_BY_UIMODEL_TYPE).length).toBe(33);
   });
 });
 
