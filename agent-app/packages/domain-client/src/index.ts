@@ -10,6 +10,13 @@ export {
 } from "./compile/control-compiler.js";
 export * from "./style/control-capability-registry.js";
 export {
+  KF36_RUNTIME_PROFILE,
+  type KFRuntimeProfile,
+  type SelectorRoles,
+} from "./style/runtime-profile.js";
+export * from "./style/style-adapter.js";
+export * from "./style/style-engine.js";
+export {
   renderClientPreview,
   escapeHtml,
   PREVIEW_CSP,
