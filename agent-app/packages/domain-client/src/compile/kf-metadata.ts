@@ -167,6 +167,9 @@ export const KF_METADATA_EMPTY_DIRS: ReadonlyArray<string> = [
   "htDataModel/storage/temp",
   "report",
   "dataSet",
+  "userSource",
+  "uploads",
+  "video",
 ];
 
 export interface KfMetadataInput {
@@ -213,5 +216,11 @@ export function buildKfMetadataFiles(input: KfMetadataInput): Record<string, unk
     },
     "dataSet/dataSet.json": { dataSet: {}, dataItem: {} },
     "htDataModel/storage/scenes/default.json": KF_HT_DEFAULT_SCENE,
+    // 运行态语言配置：KMLanguageMng.jsonToObject 读 languageArray/translateArray，
+    // 缺文件时 ajax 404 → error 回调传 undefined → `n.length` 崩溃（运行态登录后报错）。
+    "userSource/customelangguage.json": { languageArray: [], translateArray: [] },
+    // 用户资源（默认资源字符串库）。运行态 KMUserResourceMng 初始化读取；
+    // 完整默认资源集由 KF 内部维护，编译器产物给空数组（确定性）。
+    "userSource/userSource.json": [],
   };
 }

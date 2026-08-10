@@ -233,6 +233,9 @@ export async function compileClientProject(
       ir.scripts.join("\n"),
       "utf8",
     );
+  } else {
+    // KF 运行态启动会请求 km_global_script.js；缺文件 404 同样走 error 回调。
+    await writeFile(path.join(projectDir, "km_global_script.js"), "", "utf8");
   }
 
   return { id: projectGuid, rootDir, mode: "candidate", path: rootDir };
