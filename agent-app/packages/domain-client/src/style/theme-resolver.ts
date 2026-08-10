@@ -3,6 +3,7 @@ import type { ComponentStyleSpec, StyleDeclaration, ThemeSpec } from "@kf/contra
 type StyleState = keyof ComponentStyleSpec["states"];
 
 const THEME_TOKEN = /^\{theme\.([^{}]+)\}$/;
+const STATE_ORDER: readonly StyleState[] = ["hover", "active", "focus", "disabled", "selected", "error"];
 
 function resolveValue(theme: ThemeSpec, value: string | number): string | number {
   if (typeof value !== "string") {
@@ -53,14 +54,10 @@ export function resolveComponentStyle(
   typeStyle: ComponentStyleSpec,
   instanceStyle: ComponentStyleSpec,
 ): ComponentStyleSpec {
-  const stateNames = new Set<StyleState>([
-    ...Object.keys(roleStyle.states),
-    ...Object.keys(typeStyle.states),
-    ...Object.keys(instanceStyle.states),
-  ] as StyleState[]);
-
   const states = Object.fromEntries(
-    [...stateNames].map((state) => [state, mergeDeclarations(
+    STATE_ORDER
+      .filter((state) => roleStyle.states[state] || typeStyle.states[state] || instanceStyle.states[state])
+      .map((state) => [state, mergeDeclarations(
       theme,
       roleStyle,
       typeStyle,

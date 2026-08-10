@@ -38,6 +38,13 @@ const SELECTOR_ROLES = Object.freeze({
   "layout.6": rootSelector(),
 });
 
+const TRUSTED_SELECTOR_ROLES = new WeakSet<SelectorRoles>(Object.values(SELECTOR_ROLES));
+
+/** True only for selector-role objects owned by the immutable KF 3.6 profile. */
+export function isTrustedKF36SelectorRoles(selectorRoles: SelectorRoles): boolean {
+  return TRUSTED_SELECTOR_ROLES.has(selectorRoles);
+}
+
 export const KF36_RUNTIME_PROFILE = Object.freeze({
   runtimeFamily: "kingfusion-client",
   runtimeVersion: "3.6",

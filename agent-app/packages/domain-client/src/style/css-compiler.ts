@@ -1,5 +1,8 @@
 import type { StyleDeclaration } from "@kf/contracts";
-import type { SelectorRoles } from "./runtime-profile.js";
+import {
+  isTrustedKF36SelectorRoles,
+  type SelectorRoles,
+} from "./runtime-profile.js";
 
 export type StyleState = "normal" | "hover" | "active" | "focus" | "disabled" | "selected" | "error";
 export type DeclarationsByState = Partial<Record<StyleState, StyleDeclaration>>;
@@ -23,12 +26,39 @@ const STATE_SUFFIX: Readonly<Record<Exclude<StyleState, "normal">, string>> = {
   error: ".is-error",
 };
 
-const PIXEL_PROPERTIES = new Set<keyof StyleDeclaration>([
+type NumericStyleProperty = "borderRadius" | "fontSize" | "fontWeight" | "lineHeight" | "padding" | "margin" | "gap" | "opacity";
+
+const NUMERIC_CONSTRAINTS: Readonly<Record<NumericStyleProperty, {
+  readonly min: number;
+  readonly max: number;
+  readonly integer?: boolean;
+  readonly pixels?: boolean;
+}>> = {
+  borderRadius: { min: 0, max: 100, pixels: true },
+  fontSize: { min: 8, max: 200, pixels: true },
+  fontWeight: { min: 100, max: 900, integer: true },
+  lineHeight: { min: 0.5, max: 4 },
+  padding: { min: 0, max: 200, pixels: true },
+  margin: { min: 0, max: 200, pixels: true },
+  gap: { min: 0, max: 200, pixels: true },
+  opacity: { min: 0, max: 1 },
+};
+
+const NUMERIC_PROPERTIES = new Set<NumericStyleProperty>([
   "borderRadius",
   "fontSize",
+  "fontWeight",
+  "lineHeight",
   "padding",
   "margin",
   "gap",
+  "opacity",
+]);
+
+const COLOR_PROPERTIES = new Set<keyof StyleDeclaration>([
+  "backgroundColor",
+  "textColor",
+  "borderColor",
 ]);
 
 const PROPERTY_NAMES: Readonly<Record<keyof StyleDeclaration, string>> = {
@@ -54,37 +84,93 @@ const BOX_SHADOWS: Readonly<Record<NonNullable<StyleDeclaration["boxShadow"]>, s
   large: "0 16px 40px rgba(0,0,0,.24)",
 };
 
-const UNSAFE_STYLE_VALUE = /url\(|@import|javascript:|expression\(|behavior:|[<>{}]/i;
+const UNSAFE_STYLE_VALUE = /url\(|@import|javascript:|expression\(|behavior:|[<>{};]|\/\*|\*\/|!important/i;
+const HEX_COLOR = /^#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i;
+const KEYWORD_COLORS = new Set(["transparent", "currentcolor"]);
 
-function assertSafeValue(value: string): void {
+function throwInvalidValue(): never {
+  throw new Error("INVALID_STYLE_VALUE: invalid style value");
+}
+
+function assertSafeString(value: string): void {
   if (UNSAFE_STYLE_VALUE.test(value)) {
     throw new Error("UNSAFE_STYLE_VALUE: unsafe style value");
   }
 }
 
-function serializeValue(key: keyof StyleDeclaration, value: NonNullable<StyleDeclaration[keyof StyleDeclaration]>): string {
-  if (typeof value === "string") {
-    assertSafeValue(value);
+function isStyleProperty(key: string): key is keyof StyleDeclaration {
+  return Object.prototype.hasOwnProperty.call(PROPERTY_NAMES, key);
+}
+
+function isNumericProperty(key: keyof StyleDeclaration): key is NumericStyleProperty {
+  return NUMERIC_PROPERTIES.has(key as NumericStyleProperty);
+}
+
+function serializeColor(value: unknown): string {
+  if (typeof value !== "string") {
+    return throwInvalidValue();
+  }
+
+  assertSafeString(value);
+  if (!HEX_COLOR.test(value) && !KEYWORD_COLORS.has(value.toLowerCase())) {
+    return throwInvalidValue();
+  }
+  return value;
+}
+
+function serializeNumeric(key: NumericStyleProperty, value: unknown): string {
+  const constraint = NUMERIC_CONSTRAINTS[key];
+  if (
+    typeof value !== "number"
+    || !Number.isFinite(value)
+    || value < constraint.min
+    || value > constraint.max
+    || (constraint.integer === true && !Number.isInteger(value))
+  ) {
+    return throwInvalidValue();
+  }
+
+  return constraint.pixels === true ? `${value}px` : String(value);
+}
+
+function serializeValue(key: keyof StyleDeclaration, value: unknown): string {
+  if (COLOR_PROPERTIES.has(key)) {
+    return serializeColor(value);
+  }
+
+  if (isNumericProperty(key)) {
+    return serializeNumeric(key, value);
   }
 
   if (key === "boxShadow") {
-    return BOX_SHADOWS[value as NonNullable<StyleDeclaration["boxShadow"]>];
+    if (typeof value !== "string" || !Object.prototype.hasOwnProperty.call(BOX_SHADOWS, value)) {
+      return throwInvalidValue();
+    }
+    return BOX_SHADOWS[value as keyof typeof BOX_SHADOWS];
   }
 
-  if (typeof value === "number" && PIXEL_PROPERTIES.has(key)) {
-    return `${value}px`;
+  if (key === "textAlign") {
+    if (value !== "left" && value !== "center" && value !== "right") {
+      return throwInvalidValue();
+    }
+    return value;
   }
 
-  return String(value);
+  return throwInvalidValue();
 }
 
 function serializeDeclarations(declarations: StyleDeclaration): string {
-  return (Object.keys(declarations) as (keyof StyleDeclaration)[])
-    .filter((key) => declarations[key] !== undefined)
-    .map((key) => ({
-      property: PROPERTY_NAMES[key],
-      value: serializeValue(key, declarations[key]!),
-    }))
+  return Object.entries(declarations)
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => {
+      if (!isStyleProperty(key)) {
+        return throwInvalidValue();
+      }
+      return {
+        property: PROPERTY_NAMES[key],
+        value: serializeValue(key, value),
+      };
+    })
     .sort((left, right) => left.property.localeCompare(right.property))
     .map(({ property, value }) => `${property}:${value}`)
     .join(";");
@@ -95,6 +181,10 @@ export function compileScopedCss(
   selectorRoles: SelectorRoles,
   declarationsByState: DeclarationsByState,
 ): string {
+  if (!isTrustedKF36SelectorRoles(selectorRoles)) {
+    throw new Error("UNTRUSTED_SELECTOR_ROLES: untrusted selector roles");
+  }
+
   return STATE_ORDER.flatMap((state) => {
     const declarations = declarationsByState[state];
     if (!declarations) {

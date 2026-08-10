@@ -62,4 +62,25 @@ describe("resolveComponentStyle", () => {
       style({}),
     ).declarations.backgroundColor).toBe("linear-gradient({theme.primary}, #fff)");
   });
+
+  it("emits equivalent state layers in fixed supported-state order", () => {
+    const selectedThenHover = style({
+      states: {
+        selected: { borderColor: "#1d4ed8" },
+        hover: { backgroundColor: "#2f81f7" },
+      },
+    });
+    const hoverThenSelected = style({
+      states: {
+        hover: { backgroundColor: "#2f81f7" },
+        selected: { borderColor: "#1d4ed8" },
+      },
+    });
+
+    const first = resolveComponentStyle(theme, selectedThenHover, style({}), style({}));
+    const second = resolveComponentStyle(theme, hoverThenSelected, style({}), style({}));
+
+    expect(first.states).toEqual(second.states);
+    expect(Object.keys(first.states)).toEqual(["hover", "selected"]);
+  });
 });
