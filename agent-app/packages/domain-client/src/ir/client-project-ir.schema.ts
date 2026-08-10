@@ -263,6 +263,192 @@ export const StepsControlIR = BaseControlIR.extend({
   processStatus: z.enum(["wait", "process", "finish", "error", "success"]).optional(),
 }).strict();
 
+// ── KF 容器对象（参考工程 test_最新_2；详见 docs/superpowers/plans/2026-08-10-kf-container-controls.md）──
+// 容器对象没有 `uiModelType`：easyui 控件用 objectType=3 + uiExtendType(proto) 标识，
+// 布局容器用 objectType=2（或无 objectType）+ layoutType 标识。
+
+/** 布局容器内嵌套子对象的宽容保留（真实 `insiderObjects` 原始结构）。 */
+export const ContainerChildIR = z.record(z.string(), z.unknown());
+export type ContainerChildIR = z.infer<typeof ContainerChildIR>;
+
+/**
+ * easyui 控件（objectType=3）。几何在顶层 leftTopPt/width/height；
+ * 数据/列走 `configureData` 脚本（easyui 模式），IR 只建模几何 + 核心字段。
+ * `type` 固定为字面量 "easyui"（保证 discriminatedUnion 可用），proto 细分控件种类。
+ */
+export const EasyuiControlIR = BaseControlIR.extend({
+  type: z.literal("easyui"),
+  /** KF `uiExtendType`：easyui 控件种类标识（见 EASYUI_PROTO_TYPES）。 */
+  proto: z.number().int(),
+  /** 冗余保留原始 proto 值（与 proto 相同，便于回写 KF 时对账）。 */
+  uiExtendType: z.number().int().optional(),
+  // ── easyui 核心可选字段（EASYUI_PROTO_FIELDS 并集，排除 IR 保留名 type/proto/uiExtendType/几何；值类型宽松 unknown）──
+  _validateOnCreate: z.unknown().optional(),
+  accept: z.unknown().optional(),
+  afterPageText: z.unknown().optional(),
+  animate: z.unknown().optional(),
+  autoRowHeight: z.unknown().optional(),
+  backPicName: z.unknown().optional(),
+  beforePageText: z.unknown().optional(),
+  border: z.unknown().optional(),
+  buttonAlign: z.unknown().optional(),
+  buttonIcon: z.unknown().optional(),
+  buttonText: z.unknown().optional(),
+  buttons: z.unknown().optional(),
+  cascadeCheck: z.unknown().optional(),
+  checkOnSelect: z.unknown().optional(),
+  checkbox: z.unknown().optional(),
+  checked: z.unknown().optional(),
+  closable: z.unknown().optional(),
+  closed: z.unknown().optional(),
+  collapsed: z.unknown().optional(),
+  collapsible: z.unknown().optional(),
+  columns: z.unknown().optional(),
+  content: z.unknown().optional(),
+  current: z.unknown().optional(),
+  decimalSeparator: z.unknown().optional(),
+  delay: z.unknown().optional(),
+  deltaX: z.unknown().optional(),
+  deltaY: z.unknown().optional(),
+  disabled: z.unknown().optional(),
+  displayMsg: z.unknown().optional(),
+  dnd: z.unknown().optional(),
+  draggable: z.unknown().optional(),
+  duration: z.unknown().optional(),
+  editable: z.unknown().optional(),
+  events: z.unknown().optional(),
+  firstDay: z.unknown().optional(),
+  fit: z.unknown().optional(),
+  fitColumns: z.unknown().optional(),
+  floatMenuPosition: z.unknown().optional(),
+  floatMenuWidth: z.unknown().optional(),
+  group: z.unknown().optional(),
+  groupField: z.unknown().optional(),
+  groupSeparator: z.unknown().optional(),
+  handleText: z.unknown().optional(),
+  handleWidth: z.unknown().optional(),
+  hasDownArrow: z.unknown().optional(),
+  hideDelay: z.unknown().optional(),
+  hideEvent: z.unknown().optional(),
+  highlight: z.unknown().optional(),
+  iconAlign: z.unknown().optional(),
+  iconCls: z.unknown().optional(),
+  iconWidth: z.unknown().optional(),
+  icons: z.unknown().optional(),
+  idField: z.unknown().optional(),
+  images: z.unknown().optional(),
+  increment: z.unknown().optional(),
+  inline: z.unknown().optional(),
+  interval: z.unknown().optional(),
+  invalidMessage: z.unknown().optional(),
+  lines: z.unknown().optional(),
+  links: z.unknown().optional(),
+  loadMsg: z.unknown().optional(),
+  loading: z.unknown().optional(),
+  max: z.unknown().optional(),
+  maximizable: z.unknown().optional(),
+  menu: z.unknown().optional(),
+  min: z.unknown().optional(),
+  minimizable: z.unknown().optional(),
+  missingMessage: z.unknown().optional(),
+  modal: z.unknown().optional(),
+  mode: z.unknown().optional(),
+  month: z.unknown().optional(),
+  months: z.unknown().optional(),
+  multiSort: z.unknown().optional(),
+  multiline: z.unknown().optional(),
+  multiple: z.unknown().optional(),
+  novalidate: z.unknown().optional(),
+  nowrap: z.unknown().optional(),
+  offText: z.unknown().optional(),
+  onText: z.unknown().optional(),
+  onlyLeafCheck: z.unknown().optional(),
+  outline: z.unknown().optional(),
+  pageList: z.unknown().optional(),
+  pageNumber: z.unknown().optional(),
+  pagePosition: z.unknown().optional(),
+  pageSize: z.unknown().optional(),
+  pagination: z.unknown().optional(),
+  picName: z.unknown().optional(),
+  plain: z.unknown().optional(),
+  playtime: z.unknown().optional(),
+  position: z.unknown().optional(),
+  precision: z.unknown().optional(),
+  prefix: z.unknown().optional(),
+  prompt: z.unknown().optional(),
+  readonly: z.unknown().optional(),
+  remoteSort: z.unknown().optional(),
+  required: z.unknown().optional(),
+  resizable: z.unknown().optional(),
+  resizeHandle: z.unknown().optional(),
+  reversed: z.unknown().optional(),
+  rownumbers: z.unknown().optional(),
+  rule: z.unknown().optional(),
+  rules: z.unknown().optional(),
+  scrollbarSize: z.unknown().optional(),
+  selectOnCheck: z.unknown().optional(),
+  selected: z.unknown().optional(),
+  selectedItemId: z.unknown().optional(),
+  separator: z.unknown().optional(),
+  shadow: z.unknown().optional(),
+  showDelay: z.unknown().optional(),
+  showEvent: z.unknown().optional(),
+  showFooter: z.unknown().optional(),
+  showGroup: z.unknown().optional(),
+  showHeader: z.unknown().optional(),
+  showPageList: z.unknown().optional(),
+  showRefresh: z.unknown().optional(),
+  showSeconds: z.unknown().optional(),
+  showTip: z.unknown().optional(),
+  showWeek: z.unknown().optional(),
+  singleSelect: z.unknown().optional(),
+  size: z.unknown().optional(),
+  sortOrder: z.unknown().optional(),
+  step: z.unknown().optional(),
+  striped: z.unknown().optional(),
+  suffix: z.unknown().optional(),
+  text: z.unknown().optional(),
+  textField: z.unknown().optional(),
+  timeSeparator: z.unknown().optional(),
+  tipOptions: z.unknown().optional(),
+  tipPosition: z.unknown().optional(),
+  title: z.unknown().optional(),
+  toggle: z.unknown().optional(),
+  toolbar: z.unknown().optional(),
+  total: z.unknown().optional(),
+  trackMouse: z.unknown().optional(),
+  treeField: z.unknown().optional(),
+  validType: z.unknown().optional(),
+  validateOnBlur: z.unknown().optional(),
+  validateOnCreate: z.unknown().optional(),
+  valign: z.unknown().optional(),
+  value: z.unknown().optional(),
+  valueField: z.unknown().optional(),
+  weekNumberHeader: z.unknown().optional(),
+  weeks: z.unknown().optional(),
+  year: z.unknown().optional(),
+  zIndex: z.unknown().optional(),
+}).strict();
+export type EasyuiControlIR = z.infer<typeof EasyuiControlIR>;
+
+/**
+ * 布局容器（objectType=2 或无 objectType + layoutType）。几何在 `baseProperty`
+ * （inspect 层映射为 IR 的 x/y/width/height，KF 贴边坐标可为 -1）；
+ * 子对象在 `insiderObjects`（映射为 children），面板在 `dPanelsOption`（映射为 panels）。
+ */
+export const LayoutContainerIR = BaseControlIR.extend({
+  x: z.number(), // KF Docking 布局 leftTopPt.x=-1 表示贴边，允许负坐标
+  y: z.number(),
+  type: z.literal("layout"),
+  /** KF `layoutType`：2=HorizontalLayout、3=Tab、4=VerticalLayout、5=DockingLayout、0=Accordion、6=ProjectFlowChart 等。 */
+  layoutType: z.number().int(),
+  /** 嵌套子对象（宽容保留原始 JSON，含子布局/子控件的 baseProperty/insiderObjects）。 */
+  children: z.array(ContainerChildIR).optional(),
+  /** `dPanelsOption` 面板配置（宽容保留）。 */
+  panels: z.array(z.record(z.string(), z.unknown())).optional(),
+}).strict();
+export type LayoutContainerIR = z.infer<typeof LayoutContainerIR>;
+
 export const ControlIR = z.discriminatedUnion("type", [
   TextControlIR,
   ButtonControlIR,
@@ -296,6 +482,8 @@ export const ControlIR = z.discriminatedUnion("type", [
   TagControlIR,
   TimelineControlIR,
   StepsControlIR,
+  EasyuiControlIR,
+  LayoutContainerIR,
 ]);
 export type ControlIR = z.infer<typeof ControlIR>;
 

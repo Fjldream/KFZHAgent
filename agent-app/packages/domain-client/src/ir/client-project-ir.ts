@@ -1,4 +1,5 @@
 export * from "./client-project-ir.schema.js";
+export * from "./easyui-types.js";
 
 import {
   ClientProjectIR,
@@ -39,6 +40,8 @@ export const CONTROL_TYPES = [
   "tag",
   "timeline",
   "steps",
+  "easyui",
+  "layout",
 ] as const;
 
 export function isClientProjectIR(value: unknown): value is ClientProjectIRValue {
