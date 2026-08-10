@@ -537,6 +537,23 @@ export function compileSpecialNode(build: BuildSeed, control: ControlIR): Templa
         result["areas"] = [];
       }
     }
+    // 图表型（KMCC*Chart）jsonToObject 用 `default: this[e[i]]=t[e[i]]` 逐个赋值，
+    // 缺省字段会被覆盖成 undefined——updateCenterPoint 读 this.relativePt.x /
+    // this.leftTopPt.x 崩溃（真实 BarChart 必有这三个派生几何）。
+    if (result["relativePt"] === undefined) {
+      result["relativePt"] = { x: 0, y: 0 };
+    }
+    if (result["boundRect"] === undefined) {
+      result["boundRect"] = {
+        x: raw["x"], y: raw["y"], width: raw["width"], height: raw["height"],
+      };
+    }
+    if (result["absolutePt"] === undefined) {
+      result["absolutePt"] = {
+        x: Number(raw["x"]) + Number(raw["width"]) / 2,
+        y: Number(raw["y"]) + Number(raw["height"]) / 2,
+      };
+    }
   }
 
   return result;
