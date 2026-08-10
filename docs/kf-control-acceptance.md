@@ -123,3 +123,48 @@
 ## 待办（后续）
 - CustomCharts/AlarmWindow/TrendChart（objectType=1 特殊节点）
 - 容器控件 LLM 生成端到端（上传含容器工程 → 对话修改 → 构建）尚未完整走查
+
+---
+
+# 容器 LLM 端到端走查（2026-08-10，通过 ✅）
+
+## 走查方式
+真实 DeepSeek 对话生成容器 plan → applyClientPatch 构建 → 产物硬约束校验 → sdb 安装原生验证。
+走查脚本：`agent-app/scripts/walkthrough-container-llm.mts`（`DRY_RUN=1` 无需 key 验证链路；`DEEPSEEK_API_KEY=...` 跑真实 LLM，场景 create/modify）。
+
+## 两个场景（真实 DeepSeek，全部通过）
+- **create**：「新增数据表格 + 垂直布局（内嵌两个按钮）」→ LLM 输出 `type=easyui proto=1` datagrid + `type=layout layoutType=4` 布局 + 2 个按钮（`properties.parentId` 表达嵌套）→ 产物硬约束通过，按钮验证在父布局 insiderObjects 内
+- **modify**：「改 Docking 里 Datagrid1 行号、水平布局里两个表格分页/条纹」→ LLM 引用布局子控件**真实 GUID** + 受控 path → 3 项修改全部生效
+
+## 走查发现的链路缺陷（已修复 + 单测 + 607 全绿）
+1. **布局子控件 guid 缺失**（commit 4afdb03）：LLM 生成的 children 无 guid → inspect 无法索引、LLM 无法引用修改布局内子控件。`ensureChildGuids` 在编译/patcher create layout 时递归补 guid（`child:parentId:name` 派生防不同布局同名子控件冲突），已有 guid 不动
+2. **`properties.parentId` 嵌套不生效**（commit d6d90ac）：LLM 用 create + parentId（非 children 数组）表达「布局里放按钮」，原 patcher 把控件建到顶层、parentId 被白名单过滤丢弃。applyCreate 的 easyui/静态分支支持 parentId——控件插入目标布局 insiderObjects（按 name/guid 匹配），自动补内部定位（Docking 缺省 region=center、水平/垂直/导航缺省 internalVertex={0,0}），找不到回退顶层
+
+## 服务器部署
+工程「容器LLM走查」（GUID `a1b2c3d4-0002-4b02-9b02-000000000002`），页面「容器验收页」含 LLM 生成的 NewDatagrid4 + NewVerticalLayout1（内 2 按钮）。
+安装脚本 `/tmp/kf_install_llm_container.sh`：仅解压产物 + 改元数据 + ProjectManager 注册 + 重启；**不覆盖 km_global_script.js**（编译器产物含 $Function）、需 cp pagerecord。
+**用户确认：KF 打开正常 ✅**
+
+---
+
+# 控件覆盖核对（2026-08-10，参考工程 100% 覆盖）
+
+对照参考工程（test_最新_2，275 页 1726 控件）+ KF 前端工厂（km_factory.js）全量核对：
+
+## 已支持（参考工程 100%）
+- 静态控件：uiModelType 29 种实际值全映射（1337 实例）
+- easyui：uiExtendType 0–29 全覆盖（30 种 proto，663 实例；含 DateBox=11 无 objectType，本轮补齐）
+- 布局：layoutType 0–14 通用模板 + Docking/Tab/Accordion 专门处理（416 实例）
+- 特殊节点：CustomCharts/AlarmWindow/EventWindow/TrendChart/BarChart/PieChart/XYChart（42 实例）
+
+## 已知未覆盖（KF 工厂有 case、参考工程 0 实例、用户决策不实现 → 文档记录）
+- **CUSTOMMODEL（uiModelType 42）**：KMUICustomeModel 自定义模型
+- **REPORT（uiModelType 53）**：KmReportModel 报表模型（依赖 Univer 报表引擎 + reportId 服务）
+- **ComponentGroup（objectType=5）**：组合图形模型容器（GIS demo 专用）
+- **HT3DLayout（layoutType 11）**：KF 3D 布局（走布局通用模板可编译、无专门序列化处理）
+
+## 无需支持（KF 工厂无 case / 枚举被覆盖）
+- 老式 CLAENDAR(4)/DATATIME(5)/MENU(10)：gUIModelObjectFactory **无 case**（老版本遗留类，现代编辑器创建不了）
+- BUTTON(2)：KF 枚举重复 key 被 `BUTTON:35` 覆盖（JS 对象字面量后者胜），实际就是已支持的 ElementUI Button
+- VALIDATEBOX(23)：被 `VALIDATEBOX:28` 覆盖（gUIObjectFactory 的 `VALLIDDATEBOX` 拼写错误永不命中）→ validatebox 实际在 proto 28
+- 布局 GRID(1)/WINDIALOG(7)/FORMLAYOUT(8)/GRIDLAYOUT(9)/HTLAYOUT(12)/WORKFLOW(13)：参考工程 0 实例，走布局通用模板可编译
