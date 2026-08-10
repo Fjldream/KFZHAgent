@@ -17,7 +17,13 @@
  * - `layout`（objectType=2 + layoutType）白名单 = layoutType/children/panels
  *   + 公共几何字段，但 IR 路径与 KF 原始路径不同（几何在 baseProperty、
  *   子对象在 insiderObjects、面板在 dPanelsOption），由
- *   `CONTROL_LAYOUT_PATH_ALIASES` 在解析阶段映射。
+ *   `CONTROL_LAYOUT_PATH_ALIASES` 在解析阶段映射；
+ * - `prototype`（prototypeName 判别的 KF 特殊节点：CustomCharts/AlarmWindow/
+ *   EventWindow/TrendChart/BarChart/PieChart/XYChart）白名单 = 几何 + title +
+ *   显示属性 + 复杂配置字段，其中复杂配置（pageProperty/objects/areas/columns）
+ *   作为**整体替换**（patch 整段 JSON，不细粒度 patch）；CustomCharts 的几何
+ *   在 pageProperty.pagePos/pageSize（非顶层 leftTopPt），由
+ *   `PROTOTYPE_GEOMETRY_ALIASES_BY_NAME` 在解析阶段映射。
  */
 
 import { EASYUI_ALL_FIELDS } from "../ir/easyui-types.js";
@@ -75,6 +81,80 @@ export const CONTROL_GEOMETRY_ALIASES: Readonly<Record<string, string>> = {
   "/height": "/height",
 };
 
+/**
+ * KF 特殊节点（prototypeName 判别）可 patch 字段。复杂配置字段
+ * （pageProperty/objects/areas/columns/list/...）只作为**整体替换**：
+ * patch 整段 JSON，绝不细粒度 patch 内部深层结构（objects[0] 是 JSON 字符串、
+ * areas/columns 结构随原型而变）。来源：docs/kf-special-node-field-map.md §4。
+ */
+export const PROTOTYPE_ALLOWED_FIELDS: readonly string[] = [
+  // CustomCharts（objectType=1，窗口型容器）：复杂配置整体替换
+  "pageProperty",
+  "objects",
+  "modlePrototype",
+  "region",
+  "bordershow",
+  // 图表型（TrendChart/BarChart/PieChart/XYChart）顶层显示字段
+  "title",
+  "areas",
+  "chartComponentType",
+  "trendMode",
+  "refreshMode",
+  "refreshFrequance",
+  "boundRect",
+  "relativePt",
+  "absolutePt",
+  "isEditLocked",
+  "isEditVisible",
+  // AlarmWindow / EventWindow
+  "alarmWindowType",
+  "columns",
+  "dateSource",
+  "dateType",
+  "timeType",
+  "historyNumber",
+  "list",
+  "toolBar",
+  "statusBar",
+  // 文字 / 配色 / 背景 / 显示开关
+  "titleName",
+  "titleFontSize",
+  "titleFontColor",
+  "titleTextAlign",
+  "titleTextVertAlign",
+  "backGroundColor",
+  "alarmMsgColor",
+  "alarmMsgBackColor",
+  "alarmMsgFontSize",
+  "ackAlarmColor",
+  "ackAlarmBackColor",
+  "ackAlarmFontSize",
+  "resumeAlarmColor",
+  "resumeAlarmBackColor",
+  "resumeAlarmFontSize",
+  "operationEventColor",
+  "operationEventBckColor",
+  "operationEventFontSize",
+  "securityEventColor",
+  "securityEventBckColor",
+  "securityEventFontSize",
+  "customEventColor",
+  "customEventBckColor",
+  "customEventFontSize",
+  "showAlarmTitle",
+  "showToolBar",
+  "showStatusBar",
+  "showTree",
+  "treeBackGround",
+  "treeFontSize",
+  "treeFontColor",
+  "treeShowLine",
+  "brushArray",
+  "brushName",
+  "picName",
+  "picPath",
+];
+
 /** Control-specific fields per IR control type (mirrors the serialized layouts). */
 export const CONTROL_TYPE_ALLOWED_FIELDS: Readonly<Record<string, readonly string[]>> = {
   text: ["text", "readOnly", "maxLen", "fontInfo", "bkColor", "type", "borderStyle", "borderColor", "layoutStyle", "isShowBorder", "toolTipEnable", "toolTipText"],
@@ -118,6 +198,12 @@ export const CONTROL_TYPE_ALLOWED_FIELDS: Readonly<Record<string, readonly strin
   // IR 语义字段（patch 时经 CONTROL_LAYOUT_PATH_ALIASES 映射到 insiderObjects/
   // dPanelsOption），几何经映射进入 baseProperty。
   layout: ["layoutType", "children", "panels"],
+  // ── KF 特殊节点（objectType=1 / prototypeName 判别）──
+  // 几何/可见性/tooltip 等走公共字段（COMMON_CONTROL_ALLOWED_FIELDS）；
+  // 复杂配置（pageProperty/objects JSON 字符串/areas/columns）作为整体替换
+  // （patch 整段 JSON，不细粒度 patch）；guid/areasNumStr 等身份/结构字段
+  // 不在此列（保持只读）。
+  prototype: PROTOTYPE_ALLOWED_FIELDS,
 };
 
 /**
@@ -133,6 +219,24 @@ export const CONTROL_LAYOUT_PATH_ALIASES: Readonly<Record<string, string>> = {
   "/height": "/baseProperty/height",
   "/children": "/insiderObjects",
   "/panels": "/dPanelsOption",
+};
+
+/**
+ * KF 特殊节点几何路径（按 prototypeName）：**CustomCharts** 的几何在
+ * `pageProperty.pagePos/pageSize`（顶层无 leftTopPt/width/height），IR 几何
+ * 别名需映射进 pageProperty；图表型 / 告警窗 / 事件窗几何在顶层，走默认
+ * `CONTROL_GEOMETRY_ALIASES`，无需在此登记。
+ */
+export const PROTOTYPE_GEOMETRY_ALIASES_BY_NAME: Readonly<
+  Record<string, Readonly<Record<string, string>>>
+> = {
+  CustomCharts: {
+    "/x": "/pageProperty/pagePos/x",
+    "/y": "/pageProperty/pagePos/y",
+    "/leftTopPt": "/pageProperty/pagePos",
+    "/width": "/pageProperty/pageSize/width",
+    "/height": "/pageProperty/pageSize/height",
+  },
 };
 
 /** Fields on a KF page JSON file that may be patched. */
@@ -209,14 +313,23 @@ export function resolveControlPath(relativePath: string): string {
  * Resolves a control change path for a specific IR control type. easyui
  * controls keep the top-level geometry aliases (`x`/`y` → `/leftTopPt/x`...);
  * layout containers additionally map `children`/`panels`/geometry onto their
- * KF nesting (`insiderObjects`/`dPanelsOption`/`baseProperty`).
+ * KF nesting (`insiderObjects`/`dPanelsOption`/`baseProperty`); KF special
+ * nodes (`prototype`) map CustomCharts geometry onto `pageProperty.pagePos/
+ * pageSize` (other prototypeNames keep the top-level geometry aliases).
  */
 export function resolveControlPathFor(
   controlType: string | undefined,
   relativePath: string,
+  prototypeName?: string,
 ): string {
   if (controlType === "layout") {
     return CONTROL_LAYOUT_PATH_ALIASES[relativePath] ?? relativePath;
+  }
+  if (controlType === "prototype" && prototypeName !== undefined) {
+    const aliases = PROTOTYPE_GEOMETRY_ALIASES_BY_NAME[prototypeName];
+    if (aliases !== undefined) {
+      return aliases[relativePath] ?? relativePath;
+    }
   }
   return resolveControlPath(relativePath);
 }

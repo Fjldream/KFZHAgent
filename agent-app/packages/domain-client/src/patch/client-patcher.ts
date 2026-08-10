@@ -301,6 +301,228 @@ const EASYUI_TEMPLATES: Readonly<Record<number, TemplateJson>> = {
   29: easyuiImagecarouselTemplate,
 };
 
+/** CustomCharts 的 pageProperty 默认结构（docs/kf-special-node-field-map.md §2.1）。 */
+const CUSTOMCHARTS_BASE_PAGE_PROPERTY: TemplateJson = {
+  name: "",
+  pagePos: { x: 0, y: 0 },
+  pageSize: { width: 400, height: 300 },
+  windowSize: { width: 1440, height: 900 },
+  comment: "",
+  title: "",
+  titleBar: true,
+  closeBox: false,
+  sizeable: true,
+  fontsizeable: false,
+  autoUserScrollbar: false,
+  windowType: 0,
+  borderType: 0,
+  openAlways: false,
+  minLockWidth: 1200,
+  minLockHeight: 500,
+  lockHeightWidthScale: false,
+  lockHeightWidthNum: false,
+  lockAspectRatioType: 0,
+  hideInOptenDialog: true,
+  scaleControl: "图形模型实例",
+  appOrientation: 0,
+  brushArray: [],
+  brushName: "纯色",
+  picSrc: "",
+  picPath: "",
+  picName: "",
+  priority: "",
+  createtime: "",
+  security: "",
+  securitySection: "",
+  resourceGroup: "",
+  resourceGroupMsg: "",
+  resDescriptionMap: [],
+};
+
+/** CustomCharts 模板：objectType=1，几何/name 在 pageProperty，objects[0] 是 JSON 字符串。 */
+const CUSTOMCHARTS_TEMPLATE: TemplateJson = {
+  prototypeName: "CustomCharts",
+  objectType: 1,
+  pageProperty: CUSTOMCHARTS_BASE_PAGE_PROPERTY,
+  objects: [],
+  modlePrototype: { name: "", guid: "", version: "2.0.0.1.1", type: 1 },
+  linkMng: { linkList: [] },
+  variableMng: [],
+  depender: { dependObjects: [] },
+  bordershow: true,
+  toolTipEnable: true,
+  toolTipText: "",
+  fixedSize: [400, 300],
+  sizePolicy: [3, 3, 0, 0],
+  visible: true,
+  lock: false,
+  memberAccess: true,
+  isControl: false,
+  resDescription: {},
+  version: "2.0.0.1.1",
+  securityPriority: 0,
+  securitySection: [],
+  resourceGroup: [],
+  region: "center",
+  internalVertex: null,
+};
+
+/** 图表型共享模板（TrendChart/BarChart/PieChart/XYChart 公共字段，几何在顶层）。 */
+function chartTemplate(
+  prototypeName: string,
+  chartComponentType: number,
+  extra?: TemplateJson,
+): TemplateJson {
+  return {
+    prototypeName,
+    chartComponentType,
+    leftTopPt: { x: 0, y: 0 },
+    width: 400,
+    height: 300,
+    boundRect: { x: 0, y: 0, width: 400, height: 300 },
+    relativePt: { x: 0, y: 0 },
+    absolutePt: { x: 200, y: 150 },
+    isEditLocked: false,
+    isEditVisible: true,
+    visible: true,
+    enable: true,
+    runVisible: true,
+    toolTipEnable: false,
+    toolTipText: "",
+    securityPriority: 0,
+    securitySection: [],
+    resourceGroup: [],
+    title: {
+      show: true,
+      textStyle: {
+        color: "rgba(110,110,110,1)",
+        fontStyle: "normal",
+        fontWeight: "bolder",
+        fontFamily: "sans-serif",
+        fontSize: 20,
+      },
+      position: 1,
+      text: "",
+      left: 0,
+      right: 0,
+      top: 0,
+      bottom: 0,
+      backgroundColor: "rgba(0,0,0,0)",
+    },
+    areas: [],
+    areasNumStr: "1,0,0,0",
+    sizePolicy: [3, 3, 0, 0],
+    fixedSize: [400, 300],
+    comment: "",
+    memberAccess: true,
+    lock: false,
+    isControl: false,
+    resDescription: {},
+    version: "2.0.0.1.1",
+    ...extra,
+  };
+}
+
+/** AlarmWindow / EventWindow 共享模板（几何/字段在顶层，columns/dateSource 等数据字段保留）。 */
+const ALARM_WINDOW_TEMPLATE: TemplateJson = {
+  prototypeName: "AlarmWindow",
+  name: "",
+  leftTopPt: { x: 0, y: 0 },
+  width: 500,
+  height: 300,
+  realAWModel: 0,
+  alarmWindowType: "实时报警窗",
+  columns: [],
+  list: {},
+  toolBar: {},
+  statusBar: {},
+  dateSource: "",
+  dateType: "YYYY/MM/DD",
+  timeType: ["小时", "分钟", "秒"],
+  filterMsg: "",
+  filterDataSource: "all",
+  pageSizeNum: 7,
+  historyNumber: 100,
+  evalconfig: "",
+  alarmMsgColor: "rgba(255,0,0,1)",
+  alarmMsgBackColor: "",
+  alarmMsgFontSize: 14,
+  ackAlarmColor: "",
+  ackAlarmBackColor: "",
+  ackAlarmFontSize: 14,
+  resumeAlarmColor: "",
+  resumeAlarmBackColor: "",
+  resumeAlarmFontSize: 14,
+  confirmRemark: false,
+  confirmCertification: false,
+  backGroundColor: "rgba(255,255,255,1)",
+  showAlarmTitle: true,
+  showToolBar: true,
+  showStatusBar: true,
+  showTree: false,
+  titleName: "报警",
+  titleFontSize: 14,
+  titleTextAlign: 0,
+  titleTextVertAlign: 0,
+  titleFontColor: "",
+  treeBackGround: "",
+  treeFontSize: 12,
+  treeFontColor: "",
+  treeShowLine: false,
+  brushArray: [],
+  brushName: "",
+  picName: "",
+  picPath: "",
+  enable: true,
+  runVisible: true,
+  visible: true,
+  lock: false,
+  memberAccess: true,
+  toolTipEnable: true,
+  toolTipText: "",
+  securityPriority: 0,
+  securitySection: [],
+  resourceGroup: [],
+  fixedSize: [500, 300],
+  sizePolicy: [3, 3, 0, 0],
+  internalVertex: null,
+  linkMng: { linkList: [] },
+  comment: "",
+  isControl: false,
+  resDescription: {},
+  version: "2.0.0.1.1",
+};
+
+const EVENT_WINDOW_TEMPLATE: TemplateJson = {
+  ...ALARM_WINDOW_TEMPLATE,
+  prototypeName: "EventWindow",
+  alarmWindowType: "实时事件窗",
+  operationEventColor: "",
+  operationEventBckColor: "",
+  operationEventFontSize: 14,
+  securityEventColor: "",
+  securityEventBckColor: "",
+  securityEventFontSize: 14,
+  customEventColor: "",
+  customEventBckColor: "",
+  customEventFontSize: 14,
+};
+
+/** prototypeName -> 特殊节点基础模板（与 control-compiler 同一套 reviewed 结构）。 */
+const PROTOTYPE_TEMPLATES: Readonly<Record<string, TemplateJson>> = {
+  CustomCharts: CUSTOMCHARTS_TEMPLATE,
+  TrendChart: chartTemplate("TrendChart", 2, {
+    trendMode: true,
+    refreshMode: true,
+    refreshFrequance: 1000,
+  }),
+  BarChart: chartTemplate("BarChart", 3),
+  PieChart: chartTemplate("PieChart", 4),
+  XYChart: chartTemplate("XYChart", 5),
+  AlarmWindow: ALARM_WINDOW_TEMPLATE,
+  EventWindow: EVENT_WINDOW_TEMPLATE,
+};
+
 /** create 时允许从 IR properties 透传覆盖的控件属性（与 client-project-ir schema 同名）。 */
 const CREATE_PASS_THROUGH: Readonly<Record<string, readonly string[]>> = {
   switch: ["value", "activeText", "inactiveText"],
@@ -529,6 +751,14 @@ async function applyUpdate(
       ? { controlType: loc.controlType }
       : {}),
   });
+  // KF 特殊节点：prototypeName 从候选节点读取（决定几何路径映射，
+  // 例如 CustomCharts 几何在 pageProperty.pagePos/pageSize）。
+  const prototypeName =
+    isControlLocation(loc) && loc.controlType === "prototype"
+      ? typeof root["prototypeName"] === "string"
+        ? (root["prototypeName"] as string)
+        : undefined
+      : undefined;
   for (const change of op.changes) {
     if (change.path === "") {
       throw new PatchConflictError("update patch path must address a field, not the entity root");
@@ -543,7 +773,7 @@ async function applyUpdate(
       );
     }
     const resolvedPath = isControlLocation(loc)
-      ? resolveControlPathFor(loc.controlType, change.path)
+      ? resolveControlPathFor(loc.controlType, change.path, prototypeName)
       : change.path;
     setByTokens(root, parseJsonPointer(resolvedPath), change.value);
   }
@@ -662,6 +892,60 @@ async function applyCreate(
         if (op.properties["children"] !== undefined) overrides["insiderObjects"] = op.properties["children"];
         if (op.properties["panels"] !== undefined) overrides["dPanelsOption"] = op.properties["panels"];
         const control = mergeControlTemplate(layoutTemplate, overrides);
+        objects.push(control);
+      } else if (type === "prototype") {
+        // KF 特殊节点（prototypeName 判别）：模板 = 该原型的基础字段 + 宽容
+        // 透传（prototype IR 是 passthrough）。判别/身份/几何字段不透传；
+        // 复杂配置（pageProperty/objects/areas/columns）作为整体覆盖。
+        const prototypeName = requireString(
+          op.properties["prototypeName"],
+          "create prototype control requires properties.prototypeName",
+        );
+        const protoTemplate = PROTOTYPE_TEMPLATES[prototypeName];
+        if (protoTemplate === undefined) {
+          throw new PatchConflictError(
+            `create prototype control: no reviewed template for prototypeName "${prototypeName}" (supported: ${Object.keys(PROTOTYPE_TEMPLATES).join(", ")})`,
+          );
+        }
+        const RESERVED_PROTOTYPE_FIELDS = new Set([
+          "type", "prototypeName", "id", "name", "guid",
+          "x", "y", "width", "height", "pageId", "uiModelType",
+        ]);
+        const pass: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(op.properties)) {
+          if (RESERVED_PROTOTYPE_FIELDS.has(key) || value === undefined) continue;
+          pass[key] = value;
+        }
+        const overrides: TemplateJson = { ...pass, guid };
+        if (prototypeName === "CustomCharts") {
+          // CustomCharts 几何/name 在 pageProperty（窗口型容器）：pagePos/pageSize
+          // 由 create 几何决定，用户提供的 pageProperty 其余字段浅合并。
+          const pageProperty: TemplateJson = {
+            ...CUSTOMCHARTS_BASE_PAGE_PROPERTY,
+            ...(isObject(pass["pageProperty"])
+              ? (pass["pageProperty"] as Record<string, unknown>)
+              : {}),
+            name: op.entityId,
+            pagePos: { x: asNumber(op.properties["x"]), y: asNumber(op.properties["y"]) },
+            pageSize: {
+              width: asNumber(op.properties["width"]) || 400,
+              height: asNumber(op.properties["height"]) || 300,
+            },
+          };
+          overrides["pageProperty"] = pageProperty;
+          overrides["fixedSize"] = [
+            (pageProperty["pageSize"] as Record<string, unknown>)["width"],
+            (pageProperty["pageSize"] as Record<string, unknown>)["height"],
+          ];
+        } else {
+          // 图表型 / 告警窗 / 事件窗：几何在顶层 leftTopPt/width/height。
+          overrides["name"] = op.entityId;
+          overrides["leftTopPt"] = { x: asNumber(op.properties["x"]), y: asNumber(op.properties["y"]) };
+          overrides["width"] = asNumber(op.properties["width"]) || 400;
+          overrides["height"] = asNumber(op.properties["height"]) || 300;
+          overrides["fixedSize"] = [overrides["width"], overrides["height"]];
+        }
+        const control = mergeControlTemplate(protoTemplate, overrides);
         objects.push(control);
       } else {
         const template = CONTROL_TEMPLATES[type];
