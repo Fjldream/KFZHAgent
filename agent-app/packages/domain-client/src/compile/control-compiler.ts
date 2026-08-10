@@ -381,6 +381,38 @@ function stripKfContainerKeys(node: unknown): unknown {
 }
 
 /**
+ * 规范化 Docking 布局的 dPanelsOption：easyui layout 的 panel 尺寸由
+ * `width`（west/east）与 `height`（north/south）控制，**不认 `size` 字段**——
+ * 只传 {region,size,split} 会让面板尺寸落到默认 "auto"，区域内部空白。
+ * 将 IR 里的 `size` 按 region 语义转换为 width/height（center 自适应填满）。
+ * 已有 width/height 的 panel 原样保留。
+ */
+function normalizeDockPanels(
+  panels: unknown[] | undefined,
+  layoutWidth: number,
+  layoutHeight: number,
+): unknown[] | undefined {
+  if (panels === undefined) return undefined;
+  return panels.map((panel) => {
+    if (panel === null || typeof panel !== "object") return panel;
+    const p = structuredClone(panel) as Record<string, unknown>;
+    const region = String(p["region"] ?? "center");
+    const hasSize = typeof p["size"] === "number" && p["width"] === undefined && p["height"] === undefined;
+    if (hasSize) {
+      const size = p["size"] as number;
+      if (region === "north" || region === "south") p["height"] = size;
+      else if (region === "west" || region === "east") p["width"] = size;
+      else {
+        p["width"] = layoutWidth;
+        p["height"] = layoutHeight;
+      }
+      delete p["size"];
+    }
+    return p;
+  });
+}
+
+/**
  * Compiles a layout container (objectType=2). Geometry + name/guid live inside
  * `baseProperty`; nested children are carried into `insiderObjects` verbatim
  * (raw KF JSON, recursive layout/control objects), panels into `dPanelsOption`.
@@ -406,7 +438,7 @@ function compileLayoutControl(build: BuildSeed, control: ControlIR): TemplateJso
     );
   }
   if (layout.panels !== undefined) {
-    overrides["dPanelsOption"] = structuredClone(layout.panels);
+    overrides["dPanelsOption"] = normalizeDockPanels(layout.panels, layout.width, layout.height);
   }
   return mergeControlTemplate(layoutTemplate, overrides);
 }

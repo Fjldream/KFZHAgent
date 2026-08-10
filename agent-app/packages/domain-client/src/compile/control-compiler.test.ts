@@ -152,6 +152,29 @@ describe("control compiler — layout containers (objectType=2)", () => {
     expect(out["dPanelsOption"]).toEqual([panel]);
   });
 
+  it("normalizes Docking dPanelsOption: size -> width/height per region (easyui ignores 'size')", () => {
+    const layout = {
+      id: "DockingLayout1",
+      type: "layout",
+      x: 12,
+      y: 90,
+      width: 1100,
+      height: 560,
+      layoutType: 5,
+      panels: [
+        { region: "north", size: 60, split: true },
+        { region: "west", size: 180, split: true },
+        { region: "center", size: 900 },
+      ],
+    } as unknown as ControlIR;
+    const out = compileControl(build, layout, ctx);
+    expect(out["dPanelsOption"]).toEqual([
+      { region: "north", height: 60, split: true },
+      { region: "west", width: 180, split: true },
+      { region: "center", width: 1100, height: 560 },
+    ]);
+  });
+
   it("supports negative coordinates (KF Docking edge docking, x=-1)", () => {
     const layout = {
       id: "DockingLayout1",
