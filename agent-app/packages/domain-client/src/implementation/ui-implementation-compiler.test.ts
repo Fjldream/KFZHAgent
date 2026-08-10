@@ -1,6 +1,33 @@
 import { describe, expect, it } from "vitest";
+import { cp, mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { UIImplementationSpec } from "@kf/contracts";
+import { inspectClientProject } from "../inspect/client-inspector.js";
+import { applyClientPatch } from "../patch/client-patcher.js";
 import { compileUiImplementation } from "./ui-implementation-compiler.js";
+
+const pkgDir = fileURLToPath(new URL(".", import.meta.url));
+const fixturesRoot = join(pkgDir, "../../../../tests/fixtures");
+
+async function copyFixture(name: string): Promise<string> {
+  const destination = await mkdtemp(join(tmpdir(), "kf-ui-implementation-"));
+  await cp(join(fixturesRoot, name), destination, { recursive: true });
+  return destination;
+}
+
+async function controlField(root: string, guid: string, field: string): Promise<unknown> {
+  const inspection = await inspectClientProject(root);
+  const entry = inspection.index.controls[guid];
+  if (entry === undefined) throw new Error(`fixture does not contain control ${guid}`);
+  const page = JSON.parse(await readFile(join(root, "1.0.0.1", "project", "page", "Page1.json"), "utf8")) as Record<string, unknown>;
+  let node: unknown = page;
+  for (const segment of entry.rawPath.split("#")[1]!.split("/").filter(Boolean)) {
+    node = (node as Record<string, unknown>)[Number.isNaN(Number(segment)) ? segment : Number(segment)];
+  }
+  return (node as Record<string, unknown>)[field];
+}
 
 const theme = {
   background: "#0b1220",
@@ -66,7 +93,7 @@ describe("compileUiImplementation", () => {
           op: "applyStyle",
           entityId: "title-guid-1",
           entityType: "control",
-          style: specFixture.pages[0]!.components[0]!.style,
+          style: { declarations: { fontSize: 28 }, states: {} },
         },
         {
           op: "create",
@@ -80,7 +107,10 @@ describe("compileUiImplementation", () => {
             width: 120,
             height: 40,
             text: "提交",
-            style: specFixture.pages[0]!.components[1]!.style,
+            style: {
+              declarations: { backgroundColor: "#2563eb", borderRadius: 8 },
+              states: { hover: { backgroundColor: "#1d4ed8" } },
+            },
           },
         },
       ],
@@ -116,12 +146,44 @@ describe("compileUiImplementation", () => {
           ...specFixture.pages[0]!.components[1]!,
           id: "UnsupportedWebContainer",
           capabilityId: "webcontainer",
+          content: undefined,
+          properties: {},
+          style: { declarations: {}, states: {} },
         }],
       }],
     };
 
     expect(() => compileUiImplementation(unsupportedCriticalSpec, context))
       .toThrow(/UNSUPPORTED_CRITICAL_CAPABILITY/);
+  });
+
+  it("uses an explicit reviewed fallback for an empty-style non-critical capability gap", () => {
+    const result = compileUiImplementation({
+      ...specFixture,
+      pages: [{
+        ...specFixture.pages[0]!,
+        components: [{
+          ...specFixture.pages[0]!.components[1]!,
+          id: "FallbackWebContainer",
+          capabilityId: "webcontainer",
+          critical: false,
+          fallbackCapabilityId: "text",
+          content: undefined,
+          properties: {},
+          style: { declarations: {}, states: {} },
+        }],
+      }],
+    }, context);
+
+    expect(result.plan.operations).toContainEqual(expect.objectContaining({
+      op: "create",
+      entityId: "FallbackWebContainer",
+      properties: expect.objectContaining({ type: "text" }),
+    }));
+    expect(result.capabilityReport.deliveryGaps).toContainEqual(expect.objectContaining({
+      componentId: "FallbackWebContainer",
+      fallback: "text",
+    }));
   });
 
   it("records every unsupported token against a verified non-critical fallback", () => {
@@ -156,6 +218,107 @@ describe("compileUiImplementation", () => {
     expect(result.capabilityReport.unsupported).toEqual([
       "LegacyTable:table:declarations.backgroundColor",
       "LegacyTable:table:declarations.fontSize",
+      "LegacyTable:table:style",
     ]);
+  });
+
+  it("resolves theme tokens in emitted styles before the plan reaches the patcher", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const result = compileUiImplementation({
+      ...specFixture,
+      theme: { ...theme, primary: "#e11d48", accent: "#14b8a6" },
+      pages: [{
+        ...specFixture.pages[0]!,
+        components: [{
+          ...specFixture.pages[0]!.components[0]!,
+          capabilityId: "button",
+          style: {
+            declarations: { backgroundColor: "{theme.primary}", borderRadius: 8 },
+            states: { hover: { backgroundColor: "{theme.accent}" } },
+          },
+        }],
+      }],
+    }, {
+      workspaceId: "w-theme",
+      pageGuidById: { overview: "page-guid-1" },
+      existingControlGuidByComponentId: { ExistingTitle: "button-guid-1" },
+    });
+
+    expect(result.plan.operations[0]).toMatchObject({
+      style: {
+        declarations: { backgroundColor: "#e11d48", borderRadius: 8 },
+        states: { hover: { backgroundColor: "#14b8a6" } },
+      },
+    });
+    const candidate = await applyClientPatch(base, result.plan);
+    expect(await controlField(candidate.rootDir, "button-guid-1", "backgroundColor")).toBe("#e11d48");
+    expect(await controlField(candidate.rootDir, "button-guid-1", "styleDataNew")).toContain("background-color:#14b8a6");
+  });
+
+  it("rejects raw nested layout children instead of forwarding native style fields", () => {
+    expect(() => compileUiImplementation({
+      ...specFixture,
+      pages: [{
+        ...specFixture.pages[0]!,
+        components: [{
+          ...specFixture.pages[0]!.components[1]!,
+          id: "UnsafeLayoutChildren",
+          capabilityId: "layout.2",
+          content: undefined,
+          properties: { children: [{ styleDataNew: "#domId{display:none}" }] },
+          style: { declarations: {}, states: {} },
+        }],
+      }],
+    }, context)).toThrow(/UNSUPPORTED_COMPONENT_PROPERTY/);
+  });
+
+  it("rejects raw nested layout panels instead of forwarding CSS-shaped values", () => {
+    expect(() => compileUiImplementation({
+      ...specFixture,
+      pages: [{
+        ...specFixture.pages[0]!,
+        components: [{
+          ...specFixture.pages[0]!.components[1]!,
+          id: "UnsafeLayoutPanels",
+          capabilityId: "layout.2",
+          content: undefined,
+          properties: { panels: [{ css: "body{display:none}" }] },
+          style: { declarations: {}, states: {} },
+        }],
+      }],
+    }, context)).toThrow(/UNSUPPORTED_COMPONENT_PROPERTY/);
+  });
+
+  it("accepts geometry exactly at the page boundary and rejects overflow", () => {
+    const atBoundary = {
+      ...specFixture,
+      pages: [{
+        ...specFixture.pages[0]!,
+        components: [{
+          ...specFixture.pages[0]!.components[1]!,
+          geometry: { x: 1320, y: 860, width: 120, height: 40 },
+        }],
+      }],
+    };
+    expect(() => compileUiImplementation(atBoundary, context)).not.toThrow();
+
+    const overflowing = {
+      ...atBoundary,
+      pages: [{
+        ...atBoundary.pages[0]!,
+        components: [{ ...atBoundary.pages[0]!.components[0]!, geometry: { x: 1321, y: 860, width: 120, height: 40 } }],
+      }],
+    };
+    expect(() => compileUiImplementation(overflowing, context)).toThrow(/COMPONENT_OUT_OF_PAGE_BOUNDS/);
+  });
+
+  it("rejects duplicate page ids before emitting operations", () => {
+    expect(() => compileUiImplementation({
+      ...specFixture,
+      pages: [
+        { ...specFixture.pages[0]!, components: [{ ...specFixture.pages[0]!.components[0]!, id: "FirstTitle" }] },
+        { ...specFixture.pages[0]!, components: [{ ...specFixture.pages[0]!.components[0]!, id: "SecondTitle" }] },
+      ],
+    }, context)).toThrow(/DUPLICATE_PAGE_ID/);
   });
 });

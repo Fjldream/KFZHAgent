@@ -3,6 +3,7 @@ import {
   type CapabilityReport,
   type ChangeOperation,
   type ChangePlan,
+  type ComponentStyleSpec,
   type ControlCapability,
   type UIComponentSpec,
   type UIImplementationSpec,
@@ -10,6 +11,7 @@ import {
 import { getControlCapability } from "../style/control-capability-registry.js";
 import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
 import { compileControlStyle } from "../style/style-engine.js";
+import { resolveComponentStyle } from "../style/theme-resolver.js";
 
 export interface ImplementationCompileContext {
   workspaceId: string;
@@ -66,10 +68,10 @@ const PROPERTY_KEYS: Readonly<Record<string, readonly string[]>> = Object.freeze
   treeview: ["showCheckbox"],
   upload: ["action", "accept", "multiple"],
   webcontainer: ["url", "scrollbar"],
-  layout: ["children", "panels"],
 });
 
 const CONTENT_CAPABILITIES = new Set(["button", "text", "richtext"]);
+const EMPTY_STYLE: ComponentStyleSpec = Object.freeze({ declarations: {}, states: {} });
 
 /**
  * Compiles a validated UI implementation spec into a deterministic, structured
@@ -88,6 +90,14 @@ export function compileUiImplementation(
   const operations: ChangeOperation[] = [];
   const report = createReportAccumulator();
   const seenComponentIds = new Set<string>();
+  const pageIds = new Set<string>();
+
+  for (const page of spec.pages) {
+    if (pageIds.has(page.id)) {
+      throw new Error(`DUPLICATE_PAGE_ID: ${page.id}`);
+    }
+    pageIds.add(page.id);
+  }
 
   for (const page of spec.pages) {
     const pageGuid = context.pageGuidById[page.id];
@@ -99,6 +109,7 @@ export function compileUiImplementation(
         throw new Error(`DUPLICATE_COMPONENT_ID: ${component.id}`);
       }
       seenComponentIds.add(component.id);
+      assertGeometryInPage(component, page);
       operations.push(...compileComponent(component, spec, pageGuid, context, report));
     }
   }
@@ -116,7 +127,8 @@ function compileComponent(
   context: ImplementationCompileContext,
   report: ReportAccumulator,
 ): ChangeOperation[] {
-  const primary = selectCapability(component.capabilityId, component, spec);
+  const style = resolveComponentStyle(spec.theme, EMPTY_STYLE, EMPTY_STYLE, component.style);
+  const primary = selectCapability(component.capabilityId, style, spec);
   const primaryIssues = primary.issues;
   let selected = primary.selected;
 
@@ -131,7 +143,7 @@ function compileComponent(
     if (context.existingControlGuidByComponentId[component.id] !== undefined) {
       throw unsupportedCapabilityError("UNSUPPORTED_EXISTING_CONTROL_FALLBACK", component, primaryIssues);
     }
-    const fallback = selectCapability(component.fallbackCapabilityId, component, spec);
+    const fallback = selectCapability(component.fallbackCapabilityId, style, spec);
     if (fallback.selected === undefined || fallback.issues.length > 0) {
       throw unsupportedCapabilityError("UNVERIFIED_FALLBACK_CAPABILITY", component, fallback.issues);
     }
@@ -163,7 +175,7 @@ function compileComponent(
       op: "applyStyle",
       entityId: existingGuid,
       entityType: "control",
-      style: component.style,
+      style,
     }];
     if (component.content !== undefined) {
       existingOperations.push({
@@ -180,13 +192,13 @@ function compileComponent(
     op: "create",
     entityId: component.id,
     entityType: "control",
-    properties: createProperties(component, selected.id, pageGuid),
+    properties: createProperties(component, selected.id, pageGuid, style),
   }];
 }
 
 function selectCapability(
   capabilityId: string,
-  component: UIComponentSpec,
+  style: ComponentStyleSpec,
   spec: UIImplementationSpec,
 ): { selected?: SelectedCapability; issues: CapabilityIssue[] } {
   const capability = getControlCapability(capabilityId);
@@ -200,24 +212,45 @@ function selectCapability(
       issues: [{ token: "capability", reason: `Capability ${capability.id} has no reviewed creation variant` }],
     };
   }
+  const issues: CapabilityIssue[] = [];
+  if (capability.generation.status === "unsupported" || capability.generation.status === "preserve-only") {
+    issues.push({
+      token: "generation",
+      reason: `Capability ${capability.id} generation is ${capability.generation.status}`,
+    });
+  }
+  if (capability.style.status === "unsupported" || capability.style.status === "preserve-only") {
+    issues.push({
+      token: "style",
+      reason: `Capability ${capability.id} style is ${capability.style.status}`,
+    });
+  }
   let compiled;
   try {
     compiled = compileControlStyle({
       capabilityId: capability.id,
       theme: spec.theme,
-      instanceStyle: component.style,
+      instanceStyle: style,
       runtimeProfile: KF36_RUNTIME_PROFILE,
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     return { issues: [{ token: "style", reason: detail }] };
   }
-  return {
-    selected: { id: capability.id, capability },
-    issues: compiled.unsupported.map((unsupported) => ({
+  for (const unsupported of compiled.unsupported) {
+    issues.push({
       token: unsupported.token,
       reason: unsupported.reason,
-    })),
+    });
+  }
+  for (const warning of compiled.warnings) {
+    if (warning.code === "STYLE_ADAPTER_UNAVAILABLE" || warning.code === "STYLE_SELECTOR_UNAVAILABLE") {
+      issues.push({ token: "style", reason: warning.message });
+    }
+  }
+  return {
+    selected: { id: capability.id, capability },
+    issues: deduplicateIssues(issues),
   };
 }
 
@@ -225,12 +258,16 @@ function createProperties(
   component: UIComponentSpec,
   capabilityId: string,
   pageId: string,
+  style: ComponentStyleSpec,
 ): Record<string, unknown> {
   const variant = capabilityVariant(capabilityId);
   if (variant === undefined) {
     throw new Error(`UNSUPPORTED_CAPABILITY_VARIANT: ${capabilityId}`);
   }
-  const allowed = new Set([...(PROPERTY_KEYS[variant.type] ?? []), "parentId"]);
+  const allowed = new Set([
+    ...(PROPERTY_KEYS[variant.type] ?? []),
+    ...(variant.type === "layout" || variant.type === "prototype" ? [] : ["parentId"]),
+  ]);
   const properties: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(component.properties)) {
     if (!allowed.has(key)) {
@@ -252,8 +289,21 @@ function createProperties(
     width: component.geometry.width,
     height: component.geometry.height,
     ...properties,
-    style: component.style,
+    style,
   };
+}
+
+function assertGeometryInPage(
+  component: UIComponentSpec,
+  page: UIImplementationSpec["pages"][number],
+): void {
+  const { x, y, width, height } = component.geometry;
+  if (x + width > page.width || y + height > page.height) {
+    throw new Error(
+      `COMPONENT_OUT_OF_PAGE_BOUNDS: ${component.id} exceeds page ${page.id} ` +
+        `(${x}+${width} <= ${page.width}; ${y}+${height} <= ${page.height})`,
+    );
+  }
 }
 
 function capabilityVariant(capabilityId: string): ControlVariant | undefined {
@@ -281,6 +331,12 @@ function unsupportedCapabilityError(
 
 function compareIssues(left: CapabilityIssue, right: CapabilityIssue): number {
   return left.token.localeCompare(right.token) || left.reason.localeCompare(right.reason);
+}
+
+function deduplicateIssues(issues: readonly CapabilityIssue[]): CapabilityIssue[] {
+  const unique = new Map<string, CapabilityIssue>();
+  for (const issue of issues) unique.set(`${issue.token}\u0000${issue.reason}`, issue);
+  return [...unique.values()].sort(compareIssues);
 }
 
 interface ReportAccumulator {
