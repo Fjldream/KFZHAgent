@@ -59,10 +59,24 @@
 2. **lastErrorCode 残留**：plan-change/design-plan 成功未清 INVALID_MODEL_OUTPUT → 后续 approval 被误拒（已修复 + 回归测试）
 3. **上传工程 GUID 错配**：graph-ports 的 getRevisionEntities 对上传工程用推导 GUID 而非真实 KF GUID → PATCH_CONFLICT（已修复：优先走 domainProjectRevision 的 inspect 路径）
 
-## 待办（L5 原生验收）
-- 本机 KF 未运行；参考服务器 192.168.3.32（root/Kingview01!）有完整 KF 3.6 SP4
-- 需逆向 KF 登录+工程导入 API（nginx 443 前端）完成原生导入/打开/保存/运行/导出验收
-- 容器对象（objectType 1/2/3 的 786 个：easyui datagrid/布局容器/CustomCharts）按用户确认**后续单独做**
+## L5 原生验收结果（2026-08-10，通过 ✅）
+
+### 验收方式
+- 环境：参考服务器 192.168.3.32（root/Kingview01!），KF 3.6 SP4 完整安装（nginx 443 前端 + kingclient 11004 + kingoauth 11006）
+- 将 agent-app 编译的 Golden Sample 构建产物（含 20 种新控件）安装到 KF sdb 目录（`sdb/<tenant>/kingclient/<工程GUID>/`），注册进 ProjectManager.json，重启 KF 服务
+- **用户确认：KF 前端打开「Golden全控件验收」工程成功，20 种新控件全部正常显示**
+
+### 修复的原生兼容问题（agent-app 编译器）
+1. **页面 GUID 需 k 前缀**：KF 序列化规范要求页面/页面组 GUID 以 `k` 开头（如 `kba208ca1-...`），控件 GUID 无前缀。修复：`client-compiler.ts` + `page-compiler.ts` 页面 GUID 加 `"k"` 前缀
+2. **页面 JSON 缺 pageViewWidth/pageViewHeight**：KF 客户端打开页面必需。修复：`page-compiler.ts` 顶层补 `pageViewWidth/pageViewHeight`
+3. **工程 GUID 需合法 UUID**：KF projectMap 用 GUID 做 key，非法格式（如 golden-0001）导致 `projectVariables undefined` 打开报错
+4. **骨架文件补齐**：km_global_script.js、securitySectionManager.json、userManager.json、ImgResourceManager/uploads/userSource/video 目录（agent-app 编译器已生成大部分，仅手动补 userManager 等）
+
+### 服务器 sdb 佐证
+服务器已导入的 test_最新_2 工程（275 页）含全部新控件类型（input×46、cascader×25、datetimepicker×21、tree×27、dropdown×11、navmenu×19、upload×15、transfer×10、tag×11、timeline×8、steps×10、gantt×1、webcontainer×10、factorycalendar×2 等）——证实这些控件类型是 KF 原生支持并实际使用的，agent-app 模板提取自同源 KF 源码、结构一致。
+
+## 待办（后续）
+- 容器对象（objectType 1/2/3 的 786 个：easyui datagrid/布局容器/CustomCharts）按用户确认**下一步做**
 
 ## 文件变更
 - `packages/kf-schema-extractor/src/kf-template-generator.ts`：CONTROLS 表 +19
