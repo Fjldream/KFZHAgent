@@ -8,8 +8,10 @@ import { inspectClientProject, type EntityIndex, type InspectResult } from "../i
 import { stableStringify, type ClientWorkspace } from "../compile/client-compiler.js";
 import { deriveGuid } from "../compile/guid-factory.js";
 import { ensureChildGuids } from "../compile/control-compiler.js";
-import { compileControlStyle } from "../style/style-engine.js";
+import { assertStyleCompilationAccepted, compileControlStyle } from "../style/style-engine.js";
 import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
+import { mergeManagedStyleData } from "../style/style-data-merge.js";
+import { validateComponentProperties } from "../implementation/component-properties.js";
 import { mergeControlTemplate, type TemplateJson } from "../templates/merge-template.js";
 import baseFieldsJson from "../templates/base-fields.json" with { type: "json" };
 import buttonTemplate from "../templates/control-templates/button.json" with { type: "json" };
@@ -827,12 +829,52 @@ function capabilityIdForImportedControl(
   return controlType ?? "";
 }
 
+const CREATE_SYSTEM_PROPERTY_KEYS = new Set([
+  "pageId",
+  "type",
+  "proto",
+  "uiExtendType",
+  "layoutType",
+  "prototypeName",
+  "id",
+  "name",
+  "guid",
+  "x",
+  "y",
+  "width",
+  "height",
+  "uiModelType",
+  "style",
+]);
+
+function capabilityIdForCreateProperties(properties: Record<string, unknown>): string {
+  const type = typeof properties["type"] === "string" ? properties["type"] : "button";
+  if (type === "easyui") return `easyui.${asNumber(properties["proto"])}`;
+  if (type === "layout") return `layout.${asNumber(properties["layoutType"])}`;
+  if (type === "prototype") {
+    return `prototype.${typeof properties["prototypeName"] === "string" ? properties["prototypeName"] : ""}`;
+  }
+  return type;
+}
+
+function validateCreateControlProperties(properties: Record<string, unknown>): void {
+  const semanticProperties = Object.fromEntries(
+    Object.entries(properties).filter(([key]) => !CREATE_SYSTEM_PROPERTY_KEYS.has(key)),
+  );
+  try {
+    validateComponentProperties(capabilityIdForCreateProperties(properties), semanticProperties);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new PatchConflictError(detail, { cause: error });
+  }
+}
+
 /** Applies only reviewed, allowlisted native style fields to a raw KF control. */
 function applyStyleToControl(
   control: Record<string, unknown>,
   controlType: string | undefined,
   style: ComponentStyleSpec,
-): void {
+): boolean {
   let compiled;
   try {
     compiled = compileControlStyle({
@@ -841,26 +883,38 @@ function applyStyleToControl(
       instanceStyle: style,
       runtimeProfile: KF36_RUNTIME_PROFILE,
     });
+    assertStyleCompilationAccepted(capabilityIdForImportedControl(controlType, control), compiled);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new PatchConflictError(detail, { cause: error });
   }
-  if (compiled.unsupported.length > 0) {
-    throw new PatchConflictError(
-      `UNSUPPORTED_STYLE_TOKEN: ${compiled.unsupported.map((item) => item.token).join(", ")}`,
-    );
-  }
   const allowed = allowedFieldsFor({ kind: "control", ...(controlType ? { controlType } : {}) });
+  let changed = false;
   for (const [field, value] of Object.entries(compiled.nativeFields)) {
     if (!allowed.has(field)) {
       throw new PatchConflictError(`style native field "${field}" is not allowlisted for control/${controlType ?? "unknown"}`);
     }
-    control[field] = value;
+    if (control[field] !== value) {
+      control[field] = value;
+      changed = true;
+    }
   }
-  if (!allowed.has("styleDataNew")) {
-    throw new PatchConflictError(`styleDataNew is not allowlisted for control/${controlType ?? "unknown"}`);
+  if (compiled.styleDataNew !== "") {
+    if (!allowed.has("styleDataNew")) {
+      throw new PatchConflictError(`styleDataNew is not allowlisted for control/${controlType ?? "unknown"}`);
+    }
+    try {
+      const merged = mergeManagedStyleData(control["styleDataNew"], compiled.styleDataNew);
+      if (merged !== control["styleDataNew"]) {
+        control["styleDataNew"] = merged;
+        changed = true;
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new PatchConflictError(detail, { cause: error });
+    }
   }
-  control["styleDataNew"] = compiled.styleDataNew;
+  return changed;
 }
 
 async function applyStyle(
@@ -878,7 +932,7 @@ async function applyStyle(
     throw new PatchConflictError(`applyStyle target "${op.entityId}" is not a control`);
   }
   const { doc, root } = await entityRootOf(candidate, versionDir, loc);
-  applyStyleToControl(root, loc.controlType, op.style);
+  if (!applyStyleToControl(root, loc.controlType, op.style)) return;
   await writeJsonFile(candidate, versionDir, loc.file, doc);
 }
 
@@ -972,6 +1026,7 @@ async function applyCreate(
   const build = { seed: workspaceId };
   switch (op.entityType) {
     case "control": {
+      validateCreateControlProperties(op.properties);
       const pageId = op.properties["pageId"];
       if (typeof pageId !== "string") {
         throw new PatchConflictError("create control requires properties.pageId (page GUID)");

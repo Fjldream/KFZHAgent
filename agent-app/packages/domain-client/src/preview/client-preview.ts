@@ -7,7 +7,7 @@ import type {
 import type { ComponentStyleSpec, StyleDeclaration, ThemeSpec } from "@kf/contracts";
 import { serializeStyleColor } from "../style/css-compiler.js";
 import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
-import { compileControlStyle } from "../style/style-engine.js";
+import { assertStyleCompilationAccepted, compileControlStyle } from "../style/style-engine.js";
 import { resolveComponentStyle } from "../style/theme-resolver.js";
 
 /**
@@ -106,9 +106,7 @@ function previewStyle(control: ControlIR): string {
       instanceStyle: control.style,
       runtimeProfile: KF36_RUNTIME_PROFILE,
     });
-    if (compiled.unsupported.some(({ token }) => token.startsWith("declarations."))) {
-      return "";
-    }
+    assertStyleCompilationAccepted(capabilityIdForControl(control), compiled);
     return serializePreviewDeclarations(resolveComponentStyle(
       PREVIEW_STYLE_THEME,
       EMPTY_STYLE,

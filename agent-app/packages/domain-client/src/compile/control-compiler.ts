@@ -72,8 +72,9 @@ import {
 } from "../ir/easyui-types.js";
 import { mergeControlTemplate, type TemplateJson } from "../templates/merge-template.js";
 import { deriveGuid, type BuildSeed } from "./guid-factory.js";
-import { compileControlStyle } from "../style/style-engine.js";
+import { assertStyleCompilationAccepted, compileControlStyle } from "../style/style-engine.js";
 import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
+import { mergeManagedStyleData } from "../style/style-data-merge.js";
 
 /**
  * Per-control compilation (brief Step 5 + Step 6).
@@ -352,12 +353,16 @@ function applyControlStyle(compiled: TemplateJson, control: ControlIR): Template
   } catch (error) {
     throw new ModelOutputInvalidError(styleEngineErrorMessage(error), { cause: error });
   }
-  if (result.unsupported.length > 0) {
-    throw new ModelOutputInvalidError(
-      `UNSUPPORTED_STYLE_TOKEN: ${result.unsupported.map((item) => item.token).join(", ")}`,
-    );
+  try {
+    assertStyleCompilationAccepted(capabilityIdForControl(control), result);
+  } catch (error) {
+    throw new ModelOutputInvalidError(styleEngineErrorMessage(error), { cause: error });
   }
-  return { ...compiled, ...result.nativeFields, styleDataNew: result.styleDataNew };
+  return {
+    ...compiled,
+    ...result.nativeFields,
+    styleDataNew: mergeManagedStyleData(compiled["styleDataNew"], result.styleDataNew),
+  };
 }
 
 function styleEngineErrorMessage(error: unknown): string {

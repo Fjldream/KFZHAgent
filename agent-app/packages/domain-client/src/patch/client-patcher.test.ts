@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cp, mkdtemp, readFile, readdir } from "node:fs/promises";
+import { cp, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -80,6 +80,17 @@ async function wholeControl(root: Root, guid: string): Promise<Record<string, un
   return nodeAt(entry, await pageFile(root));
 }
 
+async function setControlField(root: string, guid: string, field: string, value: unknown): Promise<void> {
+  const result = await inspectClientProject(root);
+  const entry = result.index.controls[guid];
+  if (!entry) throw new Error(`no control ${guid} in index`);
+  const page = await pageFile(root);
+  const control = await nodeAt(entry, page);
+  control[field] = value;
+  const projectRoot = await resolveVersionDir(root);
+  await writeFile(join(projectRoot, "project", "page", "Page1.json"), JSON.stringify(page, null, 2));
+}
+
 describe("client patcher (Task 7 brief Step 1)", () => {
   it("applies structured style to an imported control without changing unknown fields", async () => {
     const base = await copyFixture("client-unknown-field");
@@ -93,6 +104,77 @@ describe("client patcher (Task 7 brief Step 1)", () => {
     expect(await controlField(candidate, "button-guid-1", "backgroundColor")).toBe("#2563eb");
     expect(await controlField(candidate, "button-guid-1", "styleDataNew")).toContain("border-radius:8px");
     expect(await controlField(candidate, "button-guid-1", "customFutureField")).toEqual({ keep: true });
+  });
+
+  it("preserves customer CSS and merges successive compiler-managed declaration and state deltas", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const customerCss = "#domId .customer-owned{color:#123456}";
+    await setControlField(base, "button-guid-1", "styleDataNew", customerCss);
+
+    const candidate = await applyClientPatch(base, plan([
+      {
+        op: "applyStyle",
+        entityId: "button-guid-1",
+        entityType: "control",
+        style: {
+          declarations: { backgroundColor: "#2563eb", fontSize: 14 },
+          states: { hover: { textColor: "#ffffff" } },
+        },
+      },
+      {
+        op: "applyStyle",
+        entityId: "button-guid-1",
+        entityType: "control",
+        style: {
+          declarations: { borderRadius: 8, fontSize: 16 },
+          states: { active: { opacity: 0.8 } },
+        },
+      },
+    ]));
+
+    const merged = await controlField(candidate, "button-guid-1", "styleDataNew");
+    expect(merged).toContain(customerCss);
+    expect(merged).toContain("font-size:16px");
+    expect(merged).not.toContain("font-size:14px");
+    expect(merged).toContain("border-radius:8px");
+    expect(merged).toContain("#domId:hover{color:#ffffff}");
+    expect(merged).toContain("#domId:active{opacity:0.8}");
+    expect((merged as string).match(/KF_AGENT_MANAGED_STYLE_V1_START/g)).toHaveLength(1);
+    expect(await controlField(candidate, "button-guid-1", "backgroundColor")).toBe("#2563eb");
+  });
+
+  it("leaves imported native fields and styleDataNew byte-for-byte unchanged for an empty style delta", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const customerCss = "#domId{color:#123456}\n";
+    await setControlField(base, "button-guid-1", "styleDataNew", customerCss);
+    await setControlField(base, "button-guid-1", "backgroundColor", "#abcdef");
+    const baseProjectRoot = await resolveVersionDir(base);
+    const beforePage = await readFile(join(baseProjectRoot, "project", "page", "Page1.json"), "utf8");
+
+    const candidate = await applyClientPatch(base, plan([{
+      op: "applyStyle",
+      entityId: "button-guid-1",
+      entityType: "control",
+      style: { declarations: {}, states: {} },
+    }]));
+
+    expect(await controlField(candidate, "button-guid-1", "styleDataNew")).toBe(customerCss);
+    expect(await controlField(candidate, "button-guid-1", "backgroundColor")).toBe("#abcdef");
+    const candidateProjectRoot = await resolveVersionDir(candidate.rootDir);
+    expect(await readFile(join(candidateProjectRoot, "project", "page", "Page1.json"), "utf8"))
+      .toBe(beforePage);
+  });
+
+  it("rejects empty style application to an imported preserve-only capability", async () => {
+    const base = await copyFixture("client-unknown-field");
+    await setControlField(base, "button-guid-1", "uiModelType", 31);
+
+    await expect(applyClientPatch(base, plan([{
+      op: "applyStyle",
+      entityId: "button-guid-1",
+      entityType: "control",
+      style: { declarations: {}, states: {} },
+    }]))).rejects.toThrow(/PATCH_CONFLICT: UNSUPPORTED_STYLE_CAPABILITY|STYLE_ADAPTER_UNAVAILABLE/);
   });
 
   it("wraps schema-valid invalid style values as patch conflicts without changing the base", async () => {
@@ -133,6 +215,28 @@ describe("client patcher (Task 7 brief Step 1)", () => {
 
     expect(await controlField(candidate, createdGuid, "backgroundColor")).toBe("#2563eb");
     expect(await controlField(candidate, createdGuid, "styleDataNew")).toContain("border-radius:8px");
+  });
+
+  it("rejects nested reserved native/style payloads at the create persistence boundary", async () => {
+    const base = await copyFixture("client-unknown-field");
+
+    await expect(applyClientPatch(base, plan([{
+      op: "create",
+      entityType: "control",
+      entityId: "UnsafeSelect",
+      properties: {
+        pageId: "page-guid-1",
+        type: "select",
+        options: [{
+          label: "Ready",
+          value: "ready",
+          raw: { native: { styleDataNew: "#domId{display:none}" } },
+        }],
+      },
+    }]))).rejects.toThrow(/PATCH_CONFLICT: UNSAFE_COMPONENT_PROPERTY/);
+
+    const inspection = await inspectClientProject(base);
+    expect(inspection.index.controls[deriveGuid({ seed: "w-test" }, "UnsafeSelect")]).toBeUndefined();
   });
 
   it("changes only the confirmed field and preserves unknown content", async () => {

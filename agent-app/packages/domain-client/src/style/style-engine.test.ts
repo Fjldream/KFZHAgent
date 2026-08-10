@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ComponentStyleSpec, ThemeSpec } from "@kf/contracts";
 import { KF36_RUNTIME_PROFILE } from "./runtime-profile.js";
-import { compileControlStyle } from "./style-engine.js";
+import {
+  assertStyleCompilationAccepted,
+  compileControlStyle,
+  listStyleCompilationIssues,
+} from "./style-engine.js";
 
 const themeFixture: ThemeSpec = {
   background: "#0b1220",
@@ -159,5 +163,37 @@ describe("compileControlStyle", () => {
       ],
       warnings: [{ code: "STYLE_SELECTOR_UNAVAILABLE" }],
     });
+  });
+
+  it("reports unsupported registry status and adapter warnings even for empty style intent", () => {
+    const compiled = compileControlStyle({
+      capabilityId: "table",
+      theme: themeFixture,
+      instanceStyle: style({}),
+      runtimeProfile: KF36_RUNTIME_PROFILE,
+    });
+
+    expect(listStyleCompilationIssues("table", compiled)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "UNSUPPORTED_STYLE_CAPABILITY" }),
+      expect.objectContaining({ code: "STYLE_ADAPTER_UNAVAILABLE" }),
+    ]));
+    expect(() => assertStyleCompilationAccepted("table", compiled))
+      .toThrow(/UNSUPPORTED_STYLE_CAPABILITY|STYLE_ADAPTER_UNAVAILABLE/);
+  });
+
+  it("rejects unexpected or invalid native fields at the style assignment boundary", () => {
+    expect(() => assertStyleCompilationAccepted("button", {
+      nativeFields: { styleDataNew: "#domId{display:none}" },
+      styleDataNew: "",
+      unsupported: [],
+      warnings: [],
+    })).toThrow(/UNEXPECTED_NATIVE_STYLE_FIELD/);
+
+    expect(() => assertStyleCompilationAccepted("button", {
+      nativeFields: { backgroundColor: "red" },
+      styleDataNew: "",
+      unsupported: [],
+      warnings: [],
+    })).toThrow(/INVALID_NATIVE_STYLE_FIELD/);
   });
 });

@@ -49,6 +49,28 @@ describe("client preview", () => {
     expect(html).toContain("default-src 'none'");
   });
 
+  it("suppresses the entire style when any requested state is unsupported", () => {
+    const html = renderClientPreview({
+      ...irWithStyledButton,
+      pages: [{
+        ...irWithStyledButton.pages[0],
+        controls: irWithStyledButton.pages[0].controls.map((control) => control.type === "button"
+          ? {
+              ...control,
+              style: {
+                declarations: { backgroundColor: "#2563eb", fontSize: 14 },
+                states: { error: { textColor: "#dc2626" } },
+              },
+            }
+          : control),
+      }],
+    });
+
+    expect(html).not.toContain("background-color:#2563eb");
+    expect(html).not.toContain("font-size:14px");
+    expect(html).not.toContain("#dc2626");
+  });
+
   it("escapes all control text and never emits a script tag", () => {
     const irWithXss = {
       ...ir,

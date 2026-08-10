@@ -63,6 +63,18 @@ describe("control compiler — structured styles", () => {
       style: { declarations: { backgroundColor: "red" }, states: {} },
     }, ctx)).toThrow("MODEL_OUTPUT_INVALID: INVALID_STYLE_VALUE");
   });
+
+  it("rejects an empty direct style for a preserve-only capability", () => {
+    expect(() => compileControl(build, {
+      id: "LegacyTable",
+      type: "table",
+      x: 10,
+      y: 20,
+      width: 300,
+      height: 200,
+      style: { declarations: {}, states: {} },
+    }, ctx)).toThrow(/MODEL_OUTPUT_INVALID: UNSUPPORTED_STYLE_CAPABILITY|STYLE_ADAPTER_UNAVAILABLE/);
+  });
 });
 
 function easyui(overrides: Record<string, unknown> = {}): ControlIR {

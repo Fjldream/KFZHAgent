@@ -10,13 +10,15 @@ import {
 } from "@kf/contracts";
 import { getControlCapability } from "../style/control-capability-registry.js";
 import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
-import { compileControlStyle } from "../style/style-engine.js";
+import { compileControlStyle, listStyleCompilationIssues } from "../style/style-engine.js";
 import { resolveComponentStyle } from "../style/theme-resolver.js";
+import { validateComponentProperties } from "./component-properties.js";
 
 export interface ImplementationCompileContext {
   workspaceId: string;
   pageGuidById: Readonly<Record<string, string>>;
   existingControlGuidByComponentId: Readonly<Record<string, string>>;
+  existingControlCapabilityIdByComponentId: Readonly<Record<string, string>>;
 }
 
 export interface UiImplementationCompileResult {
@@ -100,10 +102,12 @@ export function compileUiImplementation(
   }
 
   for (const page of spec.pages) {
-    const pageGuid = context.pageGuidById[page.id];
-    if (pageGuid === undefined) {
-      throw new Error(`UNKNOWN_PAGE_ID: ${page.id}`);
-    }
+    const pageGuid = contextStringValue(
+      context.pageGuidById,
+      page.id,
+      "UNKNOWN_PAGE_ID",
+      "INVALID_PAGE_GUID",
+    );
     for (const component of page.components) {
       if (seenComponentIds.has(component.id)) {
         throw new Error(`DUPLICATE_COMPONENT_ID: ${component.id}`);
@@ -128,7 +132,31 @@ function compileComponent(
   report: ReportAccumulator,
 ): ChangeOperation[] {
   const style = resolveComponentStyle(spec.theme, EMPTY_STYLE, EMPTY_STYLE, component.style);
-  const primary = selectCapability(component.capabilityId, style, spec);
+  const existingGuid = optionalContextStringValue(
+    context.existingControlGuidByComponentId,
+    component.id,
+    "INVALID_EXISTING_CONTROL_GUID",
+  );
+  let actualCapabilityId: string | undefined;
+  if (existingGuid !== undefined) {
+    actualCapabilityId = optionalContextStringValue(
+      context.existingControlCapabilityIdByComponentId,
+      component.id,
+      "INVALID_EXISTING_CONTROL_CAPABILITY",
+    );
+    if (actualCapabilityId === undefined) {
+      throw new Error(`MISSING_EXISTING_CONTROL_CAPABILITY: ${component.id}`);
+    }
+    if (actualCapabilityId !== component.capabilityId) {
+      throw new Error(
+        `EXISTING_CAPABILITY_MISMATCH: ${component.id} requested ${component.capabilityId} `
+        + `but actual existing capability is ${actualCapabilityId}`,
+      );
+    }
+  }
+
+  const primaryCapabilityId = actualCapabilityId ?? component.capabilityId;
+  const primary = selectCapability(primaryCapabilityId, style, spec);
   const primaryIssues = primary.issues;
   let selected = primary.selected;
 
@@ -140,7 +168,7 @@ function compileComponent(
     if (component.fallbackCapabilityId === undefined) {
       throw unsupportedCapabilityError("UNSUPPORTED_NON_CRITICAL_CAPABILITY", component, primaryIssues);
     }
-    if (context.existingControlGuidByComponentId[component.id] !== undefined) {
+    if (existingGuid !== undefined) {
       throw unsupportedCapabilityError("UNSUPPORTED_EXISTING_CONTROL_FALLBACK", component, primaryIssues);
     }
     const fallback = selectCapability(component.fallbackCapabilityId, style, spec);
@@ -169,15 +197,20 @@ function compileComponent(
   }
   recordCapabilityStatus(report, selected);
 
-  const existingGuid = context.existingControlGuidByComponentId[component.id];
   if (existingGuid !== undefined) {
-    const existingOperations: ChangeOperation[] = [{
-      op: "applyStyle",
-      entityId: existingGuid,
-      entityType: "control",
-      style,
-    }];
+    const existingOperations: ChangeOperation[] = [];
+    if (hasStyleDelta(style)) {
+      existingOperations.push({
+        op: "applyStyle",
+        entityId: existingGuid,
+        entityType: "control",
+        style,
+      });
+    }
     if (component.content !== undefined) {
+      if (!CONTENT_CAPABILITIES.has(selected.id)) {
+        throw new Error(`UNSUPPORTED_COMPONENT_CONTENT: ${component.id} for ${selected.id}`);
+      }
       existingOperations.push({
         op: "update",
         entityId: existingGuid,
@@ -219,12 +252,6 @@ function selectCapability(
       reason: `Capability ${capability.id} generation is ${capability.generation.status}`,
     });
   }
-  if (capability.style.status === "unsupported" || capability.style.status === "preserve-only") {
-    issues.push({
-      token: "style",
-      reason: `Capability ${capability.id} style is ${capability.style.status}`,
-    });
-  }
   let compiled;
   try {
     compiled = compileControlStyle({
@@ -237,16 +264,8 @@ function selectCapability(
     const detail = error instanceof Error ? error.message : String(error);
     return { issues: [{ token: "style", reason: detail }] };
   }
-  for (const unsupported of compiled.unsupported) {
-    issues.push({
-      token: unsupported.token,
-      reason: unsupported.reason,
-    });
-  }
-  for (const warning of compiled.warnings) {
-    if (warning.code === "STYLE_ADAPTER_UNAVAILABLE" || warning.code === "STYLE_SELECTOR_UNAVAILABLE") {
-      issues.push({ token: "style", reason: warning.message });
-    }
+  for (const issue of listStyleCompilationIssues(capability.id, compiled)) {
+    issues.push({ token: issue.token, reason: `${issue.code}: ${issue.message}` });
   }
   return {
     selected: { id: capability.id, capability },
@@ -281,6 +300,7 @@ function createProperties(
     }
     properties.text = component.content;
   }
+  const validatedProperties = validateComponentProperties(capabilityId, properties);
   return {
     pageId,
     ...variant,
@@ -288,9 +308,38 @@ function createProperties(
     y: component.geometry.y,
     width: component.geometry.width,
     height: component.geometry.height,
-    ...properties,
+    ...validatedProperties,
     style,
   };
+}
+
+function hasStyleDelta(style: ComponentStyleSpec): boolean {
+  return Object.keys(style.declarations).length > 0
+    || Object.values(style.states).some((declarations) => Object.keys(declarations ?? {}).length > 0);
+}
+
+function optionalContextStringValue(
+  mapping: Readonly<Record<string, string>>,
+  key: string,
+  invalidCode: string,
+): string | undefined {
+  if (!Object.hasOwn(mapping, key)) return undefined;
+  const value: unknown = mapping[key];
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`${invalidCode}: ${key}`);
+  }
+  return value;
+}
+
+function contextStringValue(
+  mapping: Readonly<Record<string, string>>,
+  key: string,
+  missingCode: string,
+  invalidCode: string,
+): string {
+  const value = optionalContextStringValue(mapping, key, invalidCode);
+  if (value === undefined) throw new Error(`${missingCode}: ${key}`);
+  return value;
 }
 
 function assertGeometryInPage(

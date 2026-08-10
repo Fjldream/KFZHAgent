@@ -45,6 +45,7 @@ const context = {
   workspaceId: "w-1",
   pageGuidById: { overview: "page-guid-1" },
   existingControlGuidByComponentId: { ExistingTitle: "title-guid-1" },
+  existingControlCapabilityIdByComponentId: { ExistingTitle: "text" },
 } as const;
 
 const specFixture: UIImplementationSpec = {
@@ -242,6 +243,7 @@ describe("compileUiImplementation", () => {
       workspaceId: "w-theme",
       pageGuidById: { overview: "page-guid-1" },
       existingControlGuidByComponentId: { ExistingTitle: "button-guid-1" },
+      existingControlCapabilityIdByComponentId: { ExistingTitle: "button" },
     });
 
     expect(result.plan.operations[0]).toMatchObject({
@@ -320,5 +322,151 @@ describe("compileUiImplementation", () => {
         { ...specFixture.pages[0]!, components: [{ ...specFixture.pages[0]!.components[0]!, id: "SecondTitle" }] },
       ],
     }, context)).toThrow(/DUPLICATE_PAGE_ID/);
+  });
+
+  it("validates capability-specific property values and preserves valid semantic properties", () => {
+    const result = compileUiImplementation({
+      ...specFixture,
+      pages: [{
+        ...specFixture.pages[0]!,
+        components: [{
+          ...specFixture.pages[0]!.components[1]!,
+          id: "StatusSelect",
+          capabilityId: "select",
+          content: undefined,
+          properties: {
+            options: [{ label: "Ready", value: "ready" }],
+            value: "ready",
+            multiple: false,
+          },
+          style: { declarations: {}, states: {} },
+        }],
+      }],
+    }, context);
+
+    expect(result.plan.operations).toContainEqual(expect.objectContaining({
+      op: "create",
+      entityId: "StatusSelect",
+      properties: expect.objectContaining({
+        type: "select",
+        options: [{ label: "Ready", value: "ready" }],
+        value: "ready",
+        multiple: false,
+      }),
+    }));
+  });
+
+  it.each([
+    {
+      name: "nested styleDataNew",
+      properties: { options: [{ label: "Ready", value: "ready", styleDataNew: "#domId{display:none}" }] },
+    },
+    {
+      name: "nested raw native payload",
+      properties: { options: [{ label: "Ready", value: "ready", raw: { native: { backgroundColor: "#000000" } } }] },
+    },
+    {
+      name: "wrong semantic value type",
+      properties: { options: [{ label: "Ready", value: { nativeFields: { backgroundColor: "#000000" } } }] },
+    },
+  ])("rejects $name in capability-specific properties", ({ properties }) => {
+    expect(() => compileUiImplementation({
+      ...specFixture,
+      pages: [{
+        ...specFixture.pages[0]!,
+        components: [{
+          ...specFixture.pages[0]!.components[1]!,
+          id: "UnsafeSelect",
+          capabilityId: "select",
+          content: undefined,
+          properties,
+          style: { declarations: {}, states: {} },
+        }],
+      }],
+    }, context)).toThrow(/UNSAFE_COMPONENT_PROPERTY|INVALID_COMPONENT_PROPERTY/);
+  });
+
+  it("compiles existing controls against their actual capability and reports that capability", () => {
+    const result = compileUiImplementation({
+      ...specFixture,
+      pages: [{
+        ...specFixture.pages[0]!,
+        components: [{
+          ...specFixture.pages[0]!.components[0]!,
+          capabilityId: "button",
+          style: { declarations: { borderRadius: 8 }, states: {} },
+        }],
+      }],
+    }, {
+      workspaceId: "w-existing",
+      pageGuidById: { overview: "page-guid-1" },
+      existingControlGuidByComponentId: { ExistingTitle: "button-guid-1" },
+      existingControlCapabilityIdByComponentId: { ExistingTitle: "button" },
+    });
+
+    expect(result.plan.operations[0]).toMatchObject({ op: "applyStyle", entityId: "button-guid-1" });
+    expect(result.capabilityReport.partial).toEqual(["button"]);
+  });
+
+  it("rejects a requested capability that does not match the actual existing control", () => {
+    expect(() => compileUiImplementation(specFixture, {
+      ...context,
+      existingControlCapabilityIdByComponentId: { ExistingTitle: "button" },
+    })).toThrow(/EXISTING_CAPABILITY_MISMATCH/);
+  });
+
+  it("requires an own, non-empty actual capability id for every existing control", () => {
+    expect(() => compileUiImplementation(specFixture, {
+      ...context,
+      existingControlCapabilityIdByComponentId: {},
+    })).toThrow(/MISSING_EXISTING_CONTROL_CAPABILITY/);
+
+    expect(() => compileUiImplementation(specFixture, {
+      ...context,
+      existingControlCapabilityIdByComponentId: { ExistingTitle: "" },
+    })).toThrow(/INVALID_EXISTING_CONTROL_CAPABILITY/);
+  });
+
+  it("does not resolve page or existing-control ids through object prototypes", () => {
+    const inheritedPageMap = Object.create({ overview: "prototype-page-guid" }) as Record<string, string>;
+    expect(() => compileUiImplementation(specFixture, {
+      ...context,
+      pageGuidById: inheritedPageMap,
+    })).toThrow(/UNKNOWN_PAGE_ID/);
+
+    const inheritedExistingMap = Object.create({ ExistingTitle: "prototype-control-guid" }) as Record<string, string>;
+    const result = compileUiImplementation(specFixture, {
+      ...context,
+      existingControlGuidByComponentId: inheritedExistingMap,
+      existingControlCapabilityIdByComponentId: {},
+    });
+    expect(result.plan.operations[0]).toMatchObject({ op: "create", entityId: "ExistingTitle" });
+  });
+
+  it("rejects empty or non-string ids in context maps", () => {
+    expect(() => compileUiImplementation(specFixture, {
+      ...context,
+      pageGuidById: { overview: "" },
+    })).toThrow(/INVALID_PAGE_GUID/);
+
+    expect(() => compileUiImplementation(specFixture, {
+      ...context,
+      existingControlGuidByComponentId: { ExistingTitle: 42 } as unknown as Record<string, string>,
+    })).toThrow(/INVALID_EXISTING_CONTROL_GUID/);
+  });
+
+  it("skips an empty style delta for an existing supported control", () => {
+    const result = compileUiImplementation({
+      ...specFixture,
+      pages: [{
+        ...specFixture.pages[0]!,
+        components: [{
+          ...specFixture.pages[0]!.components[0]!,
+          style: { declarations: {}, states: {} },
+        }],
+      }],
+    }, context);
+
+    expect(result.plan.operations).toEqual([]);
   });
 });
