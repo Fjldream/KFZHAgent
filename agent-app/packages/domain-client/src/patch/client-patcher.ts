@@ -833,12 +833,18 @@ function applyStyleToControl(
   controlType: string | undefined,
   style: ComponentStyleSpec,
 ): void {
-  const compiled = compileControlStyle({
-    capabilityId: capabilityIdForImportedControl(controlType, control),
-    theme: PATCH_STYLE_THEME,
-    instanceStyle: style,
-    runtimeProfile: KF36_RUNTIME_PROFILE,
-  });
+  let compiled;
+  try {
+    compiled = compileControlStyle({
+      capabilityId: capabilityIdForImportedControl(controlType, control),
+      theme: PATCH_STYLE_THEME,
+      instanceStyle: style,
+      runtimeProfile: KF36_RUNTIME_PROFILE,
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new PatchConflictError(detail, { cause: error });
+  }
   if (compiled.unsupported.length > 0) {
     throw new PatchConflictError(
       `UNSUPPORTED_STYLE_TOKEN: ${compiled.unsupported.map((item) => item.token).join(", ")}`,

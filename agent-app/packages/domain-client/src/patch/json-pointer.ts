@@ -11,8 +11,8 @@
 
 /** Error used for every rejected patch (invalid path or path not allowlisted). */
 export class PatchConflictError extends Error {
-  constructor(detail: string) {
-    super(`PATCH_CONFLICT: ${detail}`);
+  constructor(detail: string, options?: ErrorOptions) {
+    super(`PATCH_CONFLICT: ${detail}`, options);
     this.name = "PatchConflictError";
   }
 }

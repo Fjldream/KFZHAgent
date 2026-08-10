@@ -50,6 +50,19 @@ describe("control compiler — structured styles", () => {
       },
     }, ctx)).toThrow("MODEL_OUTPUT_INVALID: UNSUPPORTED_STYLE_TOKEN");
   });
+
+  it("wraps schema-valid invalid style values as model output errors", () => {
+    expect(() => compileControl(build, {
+      id: "StyledButton",
+      type: "button",
+      x: 10,
+      y: 20,
+      width: 120,
+      height: 40,
+      text: "Save",
+      style: { declarations: { backgroundColor: "red" }, states: {} },
+    }, ctx)).toThrow("MODEL_OUTPUT_INVALID: INVALID_STYLE_VALUE");
+  });
 });
 
 function easyui(overrides: Record<string, unknown> = {}): ControlIR {

@@ -90,6 +90,65 @@ describe("client compiler", () => {
     expect(await findJsonValue(result.path, "arbitraryRawField")).toBeUndefined();
   });
 
+  it("carries validated IR button styles through client compilation", async () => {
+    const styled = {
+      ...ir,
+      pages: ir.pages.map((page) => ({
+        ...page,
+        controls: page.controls.map((control) => control.id === "Button1"
+          ? {
+              ...control,
+              style: {
+                declarations: { backgroundColor: "#2563eb", borderRadius: 8 },
+                states: {},
+              },
+            }
+          : control,
+        ),
+      })),
+    };
+
+    const result = await compileClientProject(styled, { seed: "styled-build" });
+    const page = JSON.parse(
+      await readFile(path.join(result.path, "1.0.0.1", "project", "page", "Page1.json"), "utf8"),
+    );
+    const button = page.objects.find((control) => control.name === "Button1");
+    expect(button.backgroundColor).toBe("#2563eb");
+    expect(button.styleDataNew).toContain("border-radius:8px");
+  });
+
+  it("rejects raw CSS in an IR control style", async () => {
+    const invalidStyle = {
+      ...ir,
+      pages: ir.pages.map((page) => ({
+        ...page,
+        controls: page.controls.map((control) => control.id === "Button1"
+          ? { ...control, style: { css: "body { display: none }" } }
+          : control,
+        ),
+      })),
+    };
+
+    await expect(compileClientProject(invalidStyle, { seed: "invalid-style" }))
+      .rejects.toThrow("MODEL_OUTPUT_INVALID");
+  });
+
+  it("wraps schema-valid invalid style values as model output errors", async () => {
+    const invalidColor = {
+      ...ir,
+      pages: ir.pages.map((page) => ({
+        ...page,
+        controls: page.controls.map((control) => control.id === "Button1"
+          ? { ...control, style: { declarations: { backgroundColor: "red" }, states: {} } }
+          : control,
+        ),
+      })),
+    };
+
+    await expect(compileClientProject(invalidColor, { seed: "invalid-color" }))
+      .rejects.toThrow("MODEL_OUTPUT_INVALID: INVALID_STYLE_VALUE");
+  });
+
   it("derives RFC 4122 v5 GUIDs from seed plus semantic id", () => {
     const g1 = deriveGuid({ seed: "build-1" }, "page-1");
     expect(g1).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);

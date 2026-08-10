@@ -95,6 +95,20 @@ describe("client patcher (Task 7 brief Step 1)", () => {
     expect(await controlField(candidate, "button-guid-1", "customFutureField")).toEqual({ keep: true });
   });
 
+  it("wraps schema-valid invalid style values as patch conflicts without changing the base", async () => {
+    const base = await copyFixture("client-unknown-field");
+
+    await expect(applyClientPatch(base, plan([{
+      op: "applyStyle",
+      entityId: "button-guid-1",
+      entityType: "control",
+      style: { declarations: { backgroundColor: "red" }, states: {} },
+    }]))).rejects.toThrow("PATCH_CONFLICT: INVALID_STYLE_VALUE");
+
+    expect(await controlField(base, "button-guid-1", "backgroundColor")).not.toBe("red");
+    expect(await controlField(base, "button-guid-1", "customFutureField")).toEqual({ keep: true });
+  });
+
   it("validates and compiles create-control styles after template merging", async () => {
     const base = await copyFixture("client-unknown-field");
     const inspected = await inspectClientProject(base);

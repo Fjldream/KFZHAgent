@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { ComponentStyleSpecSchema, type ComponentStyleSpec } from "@kf/contracts";
 import type {
   ClientProjectIR,
   ControlIR,
@@ -371,7 +372,8 @@ function validateControl(value: unknown, index: number): ControlIR {
     : requireNonNegativeNumber(rec["y"], "control.y");
   const width = requirePositiveNumber(rec["width"], "control.width");
   const height = requirePositiveNumber(rec["height"], "control.height");
-  const base = { id, x, y, width, height };
+  const style = validateControlStyle(rec["style"], id);
+  const base = { id, x, y, width, height, ...(style !== undefined ? { style } : {}) };
   switch (type) {
     case "text":
       return { ...base, type: "text", text: requireString(rec["text"], "control.text") };
@@ -697,7 +699,7 @@ function validateControl(value: unknown, index: number): ControlIR {
       for (const key of Object.keys(rec)) {
         if (
           key === "type" || key === "id" || key === "x" || key === "y" ||
-          key === "width" || key === "height" || key === "prototypeName"
+          key === "width" || key === "height" || key === "prototypeName" || key === "style"
         ) {
           continue;
         }
@@ -710,6 +712,15 @@ function validateControl(value: unknown, index: number): ControlIR {
         `control type "${type}" has no reviewed template`,
       );
   }
+}
+
+function validateControlStyle(value: unknown, id: string): ComponentStyleSpec | undefined {
+  if (value === undefined) return undefined;
+  const parsed = ComponentStyleSpecSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new ModelOutputInvalidError(`control "${id}" style must be a valid ComponentStyleSpec`);
+  }
+  return parsed.data;
 }
 
 function validateAction(value: unknown): RestrictedAction {

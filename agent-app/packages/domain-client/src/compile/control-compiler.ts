@@ -64,7 +64,7 @@ import easyuiWindowTemplate from "../templates/control-templates/easyui-window.j
 import layoutTemplate from "../templates/control-templates/layout.json" with { type: "json" };
 import prototypeBaseTemplate from "../templates/control-templates/prototype-base.json" with { type: "json" };
 import type { ControlIR, RestrictedAction, EasyuiControlIR, LayoutContainerIR } from "../ir/client-project-ir.js";
-import type { ComponentStyleSpec, ThemeSpec } from "@kf/contracts";
+import type { ThemeSpec } from "@kf/contracts";
 import {
   EASYUI_ALL_FIELDS,
   EASYUI_PROTO_FIELDS,
@@ -97,8 +97,8 @@ import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
 export const MODEL_OUTPUT_INVALID = "MODEL_OUTPUT_INVALID";
 
 export class ModelOutputInvalidError extends Error {
-  constructor(detail: string) {
-    super(`${MODEL_OUTPUT_INVALID}: ${detail}`);
+  constructor(detail: string, options?: ErrorOptions) {
+    super(`${MODEL_OUTPUT_INVALID}: ${detail}`, options);
     this.name = "ModelOutputInvalidError";
   }
 }
@@ -341,18 +341,27 @@ function capabilityIdForControl(control: ControlIR): string {
 /** Applies compiled style only after semantic/template overrides have been resolved. */
 function applyControlStyle(compiled: TemplateJson, control: ControlIR): TemplateJson {
   if (control.style === undefined) return compiled;
-  const result = compileControlStyle({
-    capabilityId: capabilityIdForControl(control),
-    theme: DIRECT_IR_STYLE_THEME,
-    instanceStyle: control.style as ComponentStyleSpec,
-    runtimeProfile: KF36_RUNTIME_PROFILE,
-  });
+  let result;
+  try {
+    result = compileControlStyle({
+      capabilityId: capabilityIdForControl(control),
+      theme: DIRECT_IR_STYLE_THEME,
+      instanceStyle: control.style,
+      runtimeProfile: KF36_RUNTIME_PROFILE,
+    });
+  } catch (error) {
+    throw new ModelOutputInvalidError(styleEngineErrorMessage(error), { cause: error });
+  }
   if (result.unsupported.length > 0) {
     throw new ModelOutputInvalidError(
       `UNSUPPORTED_STYLE_TOKEN: ${result.unsupported.map((item) => item.token).join(", ")}`,
     );
   }
   return { ...compiled, ...result.nativeFields, styleDataNew: result.styleDataNew };
+}
+
+function styleEngineErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /**
