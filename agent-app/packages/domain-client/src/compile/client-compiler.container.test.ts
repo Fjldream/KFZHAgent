@@ -96,7 +96,8 @@ describe("client compiler validation — easyui controls", () => {
     expect(datagrid!["pagination"]).toBe(true);
     // datagrid 白名单不含 value：用户字符串被宽容接收但不序列化
     expect("value" in datagrid!).toBe(false);
-    expect("data" in datagrid!).toBe(false);
+    // 模板默认空 data（KF 加载必需），用户传入的 data 内容不序列化
+    expect(datagrid!["data"]).toEqual([]);
     // textbox 白名单含 value/readonly：字符串字段正常透传
     const textbox = objects.find((o) => o["name"] === "Textbox1");
     expect(textbox).toBeDefined();

@@ -34,5 +34,7 @@
   "showHeader": true,
   "showFooter": false,
   "scrollbarSize": 18,
-  "alpha": false
+  "alpha": false,
+  "data": [],
+  "queryParams": {}
 }

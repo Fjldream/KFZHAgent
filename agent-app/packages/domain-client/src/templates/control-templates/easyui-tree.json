@@ -13,5 +13,6 @@
   "onlyLeafCheck": false,
   "lines": false,
   "dnd": false,
-  "alpha": false
+  "alpha": false,
+  "data": []
 }

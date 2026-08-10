@@ -11,5 +11,6 @@
   "valueField": "label",
   "textField": "value",
   "mode": "local",
-  "method": "post"
+  "method": "post",
+  "data": []
 }

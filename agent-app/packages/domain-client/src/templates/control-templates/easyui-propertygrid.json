@@ -8,5 +8,6 @@
   ],
   "showGroup": true,
   "groupField": "group",
-  "alpha": false
+  "alpha": false,
+  "data": []
 }

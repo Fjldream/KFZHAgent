@@ -9,5 +9,6 @@
   "idField": "id",
   "treeField": "name",
   "animate": false,
-  "alpha": false
+  "alpha": false,
+  "data": []
 }

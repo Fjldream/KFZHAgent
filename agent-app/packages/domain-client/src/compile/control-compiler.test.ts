@@ -60,9 +60,12 @@ describe("control compiler — easyui controls (objectType=3)", () => {
       easyui({ data: [{ id: 1, name: "x" }], columns: [[{ title: "A" }]] }),
       ctx,
     );
-    expect("data" in out).toBe(false);
+    // 模板默认空 data/queryParams（KF 加载必需，sidemenu/accordion 对 undefined data 崩溃），
+    // 但用户传入的复杂内容（data 行/columns 定义）绝不序列化——走 configureData 脚本。
+    expect(out["data"]).toEqual([]);
+    expect(out["queryParams"]).toEqual({});
     expect("columns" in out).toBe(false);
-    expect("queryParams" in out).toBe(false);
+    expect(out["data"]).not.toEqual([{ id: 1, name: "x" }]);
   });
 
   it("rejects unknown protos without a compiled template", () => {
