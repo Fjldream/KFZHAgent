@@ -16,9 +16,9 @@ import {
   NavmenuControlIR,
   RadioControlIR,
   RichTextControlIR,
-  ScaleControlIR,
   SelectControlIR,
   SpacerControlIR,
+  StepsControlIR,
   SwitchControlIR,
   TabsControlIR,
   TagControlIR,
@@ -30,8 +30,97 @@ import {
   UploadControlIR,
   WebContainerControlIR,
 } from "../ir/client-project-ir.schema.js";
+import { EASYUI_PROTO_TYPES } from "../ir/easyui-types.js";
 
-const parentId = z.string().min(1).optional();
+const parentId = z.string().min(1).max(100).optional();
+const boundedNumber = z.number().finite().min(-1_000_000_000).max(1_000_000_000).optional();
+const positiveBoundedNumber = z.number().finite().positive().max(1_000_000_000).optional();
+const dateFormat = z.string().min(1).max(64).regex(/^[a-zA-Z0-9:/ ._-]+$/).optional();
+const uploadAccept = z.string().min(1).max(256).regex(/^[a-zA-Z0-9.,/+*-]+$/).optional();
+
+const layoutBaseProperty = z.object({
+  name: z.string().min(1).max(100),
+  guid: z.string().min(1).max(100).optional(),
+}).strict();
+const layoutChild = z.object({
+  layoutType: z.number().int().min(0).max(6),
+  objectType: z.literal(2).optional(),
+  baseProperty: layoutBaseProperty,
+}).strict();
+const layoutPanel = z.object({
+  region: z.enum(["center", "north", "south", "east", "west"]),
+  width: z.number().positive().max(1_000_000_000),
+  height: z.number().positive().max(1_000_000_000),
+  split: z.boolean(),
+}).strict();
+const layoutProperties = z.object({
+  children: z.array(layoutChild).max(1_000).optional(),
+  panels: z.array(layoutPanel).max(1_000).optional(),
+}).strict();
+
+const chartTitle = z.object({
+  show: z.boolean(),
+  text: z.string(),
+  position: z.number().int().min(0).max(8),
+}).strict();
+const chartArea = z.object({
+  top: z.number().finite(),
+  left: z.number().finite(),
+  width: z.number().finite().positive(),
+  height: z.number().finite().positive(),
+}).strict();
+const chartProperties = z.object({
+  title: chartTitle.optional(),
+  areas: z.array(chartArea).max(100).optional(),
+  comment: z.string().optional(),
+}).strict();
+
+const FORBIDDEN_EMBEDDED_JSON_KEYS = new Set([
+  "configuredata",
+  "css",
+  "linkmng",
+  "native",
+  "nativefields",
+  "objecttype",
+  "raw",
+  "script",
+  "style",
+  "styledata",
+  "styledatanew",
+]);
+
+function embeddedJsonIsReviewed(value: string): boolean {
+  if (value.length > 100_000) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return false;
+  }
+  const seen = new WeakSet<object>();
+  const visit = (current: unknown): boolean => {
+    if (current === null || typeof current !== "object") return true;
+    if (seen.has(current)) return false;
+    seen.add(current);
+    if (Array.isArray(current)) return current.every(visit);
+    return Object.entries(current as Record<string, unknown>).every(([key, nested]) =>
+      !FORBIDDEN_EMBEDDED_JSON_KEYS.has(key.toLowerCase()) && visit(nested));
+  };
+  return visit(parsed);
+}
+
+const customChartProperties = z.object({
+  objects: z.array(z.string().refine(embeddedJsonIsReviewed, "contains unreviewed embedded JSON")).max(100).optional(),
+  region: z.enum(["center", "north", "south", "east", "west"]).optional(),
+}).strict();
+
+const emptyProperties = z.object({ parentId }).strict();
+const easyuiDatagridProperties = z.object({
+  striped: z.boolean().optional(),
+  pagination: z.boolean().optional(),
+  pageSize: z.number().int().min(1).max(10_000).optional(),
+  parentId,
+}).strict();
 
 const COMPONENT_PROPERTY_SCHEMAS: Readonly<Record<string, z.ZodType<Record<string, unknown>>>> = Object.freeze({
   button: z.object({ text: ButtonControlIR.shape.text.optional(), parentId }).strict(),
@@ -54,7 +143,7 @@ const COMPONENT_PROPERTY_SCHEMAS: Readonly<Record<string, z.ZodType<Record<strin
     placeholder: InputControlIR.shape.placeholder,
     disabled: InputControlIR.shape.disabled,
     clearable: InputControlIR.shape.clearable,
-    maxlength: InputControlIR.shape.maxlength,
+    maxlength: z.number().int().min(0).max(1_000_000).optional(),
     parentId,
   }).strict(),
   inputnumber: z.object({
@@ -82,7 +171,7 @@ const COMPONENT_PROPERTY_SCHEMAS: Readonly<Record<string, z.ZodType<Record<strin
   }).strict(),
   factorycalendar: z.object({
     value: FactoryCalendarControlIR.shape.value,
-    dateFormat: FactoryCalendarControlIR.shape.dateFormat,
+    dateFormat,
     parentId,
   }).strict(),
   list: z.object({ options: ListControlIR.shape.options.optional(), parentId }).strict(),
@@ -119,10 +208,10 @@ const COMPONENT_PROPERTY_SCHEMAS: Readonly<Record<string, z.ZodType<Record<strin
     parentId,
   }).strict(),
   scale: z.object({
-    min: ScaleControlIR.shape.min,
-    max: ScaleControlIR.shape.max,
-    value: ScaleControlIR.shape.value,
-    step: ScaleControlIR.shape.step,
+    min: boundedNumber,
+    max: boundedNumber,
+    value: boundedNumber,
+    step: positiveBoundedNumber,
     parentId,
   }).strict(),
   switch: z.object({
@@ -134,7 +223,7 @@ const COMPONENT_PROPERTY_SCHEMAS: Readonly<Record<string, z.ZodType<Record<strin
   datetimepicker: z.object({
     value: DatetimePickerControlIR.shape.value,
     placeholder: DatetimePickerControlIR.shape.placeholder,
-    format: DatetimePickerControlIR.shape.format,
+    format: dateFormat,
     parentId,
   }).strict(),
   tabs: z.object({
@@ -151,14 +240,14 @@ const COMPONENT_PROPERTY_SCHEMAS: Readonly<Record<string, z.ZodType<Record<strin
   }).strict(),
   tree: z.object({
     showCheckbox: TreeControlIR.shape.showCheckbox,
-    indent: TreeControlIR.shape.indent,
+    indent: z.number().int().min(0).max(1_000).optional(),
     expandOnClickNode: TreeControlIR.shape.expandOnClickNode,
     parentId,
   }).strict(),
   treeview: z.object({ showCheckbox: TreeviewControlIR.shape.showCheckbox, parentId }).strict(),
   upload: z.object({
     action: UploadControlIR.shape.action,
-    accept: UploadControlIR.shape.accept,
+    accept: uploadAccept,
     multiple: UploadControlIR.shape.multiple,
     parentId,
   }).strict(),
@@ -167,7 +256,29 @@ const COMPONENT_PROPERTY_SCHEMAS: Readonly<Record<string, z.ZodType<Record<strin
     scrollbar: WebContainerControlIR.shape.scrollbar,
     parentId,
   }).strict(),
+  table: emptyProperties,
+  gantt: emptyProperties,
+  steps: z.object({
+    active: StepsControlIR.shape.active,
+    direction: StepsControlIR.shape.direction,
+    processStatus: StepsControlIR.shape.processStatus,
+    parentId,
+  }).strict(),
+  "easyui.1": easyuiDatagridProperties,
   "easyui.2": z.object({ text: z.string().optional(), parentId }).strict(),
+  "layout.0": layoutProperties,
+  "layout.2": layoutProperties,
+  "layout.3": layoutProperties,
+  "layout.4": layoutProperties,
+  "layout.5": layoutProperties,
+  "layout.6": layoutProperties,
+  "prototype.CustomCharts": customChartProperties,
+  "prototype.TrendChart": chartProperties,
+  "prototype.BarChart": chartProperties,
+  "prototype.PieChart": chartProperties,
+  "prototype.XYChart": chartProperties,
+  "prototype.AlarmWindow": z.object({}).strict(),
+  "prototype.EventWindow": z.object({}).strict(),
 });
 
 const RESERVED_PROPERTY_KEYS = new Set([
@@ -223,8 +334,18 @@ export function validateComponentProperties(
   properties: Record<string, unknown>,
 ): Record<string, unknown> {
   assertNoReservedPropertyKeys(properties, "properties", new WeakSet());
-  const schema = COMPONENT_PROPERTY_SCHEMAS[capabilityId];
-  if (schema === undefined) return properties;
+  let schema = Object.hasOwn(COMPONENT_PROPERTY_SCHEMAS, capabilityId)
+    ? COMPONENT_PROPERTY_SCHEMAS[capabilityId]
+    : undefined;
+  if (schema === undefined) {
+    const easyui = /^easyui\.(\d+)$/.exec(capabilityId);
+    if (easyui !== null && Object.hasOwn(EASYUI_PROTO_TYPES, Number(easyui[1]))) {
+      schema = emptyProperties;
+    }
+  }
+  if (schema === undefined) {
+    throw new Error(`INVALID_COMPONENT_PROPERTY: ${capabilityId} — no reviewed property schema`);
+  }
   const parsed = schema.safeParse(properties);
   if (!parsed.success) {
     const detail = parsed.error.issues

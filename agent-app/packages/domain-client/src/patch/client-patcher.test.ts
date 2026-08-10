@@ -239,6 +239,46 @@ describe("client patcher (Task 7 brief Step 1)", () => {
     expect(inspection.index.controls[deriveGuid({ seed: "w-test" }, "UnsafeSelect")]).toBeUndefined();
   });
 
+  it("rejects unknown nested native/script fields in direct ChangePlan control properties", async () => {
+    const base = await copyFixture("client-unknown-field");
+
+    await expect(applyClientPatch(base, plan([{
+      op: "create",
+      entityType: "control",
+      entityId: "UnsafeDirectSelect",
+      properties: {
+        pageId: "page-guid-1",
+        type: "select",
+        options: [{
+          label: "Ready",
+          value: "ready",
+          objectType: 3,
+          linkMng: { linkList: [] },
+          script: "evil()",
+        }],
+      },
+    }]))).rejects.toThrow(/PATCH_CONFLICT: INVALID_COMPONENT_PROPERTY/);
+
+    const inspection = await inspectClientProject(base);
+    expect(inspection.index.controls[deriveGuid({ seed: "w-test" }, "UnsafeDirectSelect")]).toBeUndefined();
+  });
+
+  it("rejects unsafe image fit and URL values in a direct ChangePlan", async () => {
+    const base = await copyFixture("client-unknown-field");
+
+    await expect(applyClientPatch(base, plan([{
+      op: "create",
+      entityType: "control",
+      entityId: "UnsafeDirectImage",
+      properties: {
+        pageId: "page-guid-1",
+        type: "image",
+        src: "javascript:alert(1)",
+        fit: "fill;background:url(javascript:evil)",
+      },
+    }]))).rejects.toThrow(/PATCH_CONFLICT: INVALID_COMPONENT_PROPERTY/);
+  });
+
   it("changes only the confirmed field and preserves unknown content", async () => {
     const base = await copyFixture("client-unknown-field");
     const candidate = await applyClientPatch(base, {

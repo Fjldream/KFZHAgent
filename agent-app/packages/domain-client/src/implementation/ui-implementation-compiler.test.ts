@@ -369,6 +369,10 @@ describe("compileUiImplementation", () => {
       name: "wrong semantic value type",
       properties: { options: [{ label: "Ready", value: { nativeFields: { backgroundColor: "#000000" } } }] },
     },
+    {
+      name: "unknown nested native fields",
+      properties: { options: [{ label: "Ready", value: "ready", objectType: 3, linkMng: {}, script: "evil()" }] },
+    },
   ])("rejects $name in capability-specific properties", ({ properties }) => {
     expect(() => compileUiImplementation({
       ...specFixture,
@@ -384,6 +388,55 @@ describe("compileUiImplementation", () => {
         }],
       }],
     }, context)).toThrow(/UNSAFE_COMPONENT_PROPERTY|INVALID_COMPONENT_PROPERTY/);
+  });
+
+  it.each([
+    "fill",
+    "contain",
+    "cover",
+    "none",
+    "scale-down",
+  ])("accepts reviewed image fit %s", (fit) => {
+    const result = compileUiImplementation({
+      ...specFixture,
+      pages: [{
+        ...specFixture.pages[0]!,
+        components: [{
+          ...specFixture.pages[0]!.components[1]!,
+          id: "SafeImage",
+          capabilityId: "image",
+          content: undefined,
+          properties: { src: "static/images/example.png", fit, alt: "Example" },
+          style: { declarations: {}, states: {} },
+        }],
+      }],
+    }, context);
+
+    expect(result.plan.operations[0]).toMatchObject({
+      op: "create",
+      properties: { src: "static/images/example.png", fit, alt: "Example" },
+    });
+  });
+
+  it.each([
+    { name: "CSS declaration fit", properties: { src: "static/images/example.png", fit: "fill;background:url(javascript:evil)" } },
+    { name: "javascript image URL", properties: { src: "javascript:alert(1)", fit: "fill" } },
+    { name: "CSS url() image payload", properties: { src: "url(https://attacker.invalid/a.png)", fit: "fill" } },
+  ])("rejects $name", ({ properties }) => {
+    expect(() => compileUiImplementation({
+      ...specFixture,
+      pages: [{
+        ...specFixture.pages[0]!,
+        components: [{
+          ...specFixture.pages[0]!.components[1]!,
+          id: "UnsafeImage",
+          capabilityId: "image",
+          content: undefined,
+          properties,
+          style: { declarations: {}, states: {} },
+        }],
+      }],
+    }, context)).toThrow(/INVALID_COMPONENT_PROPERTY/);
   });
 
   it("compiles existing controls against their actual capability and reports that capability", () => {

@@ -857,12 +857,16 @@ function capabilityIdForCreateProperties(properties: Record<string, unknown>): s
   return type;
 }
 
-function validateCreateControlProperties(properties: Record<string, unknown>): void {
+function validateCreateControlProperties(properties: Record<string, unknown>): Record<string, unknown> {
+  const systemProperties = Object.fromEntries(
+    Object.entries(properties).filter(([key]) => CREATE_SYSTEM_PROPERTY_KEYS.has(key)),
+  );
   const semanticProperties = Object.fromEntries(
     Object.entries(properties).filter(([key]) => !CREATE_SYSTEM_PROPERTY_KEYS.has(key)),
   );
   try {
-    validateComponentProperties(capabilityIdForCreateProperties(properties), semanticProperties);
+    const validated = validateComponentProperties(capabilityIdForCreateProperties(properties), semanticProperties);
+    return { ...systemProperties, ...validated };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new PatchConflictError(detail, { cause: error });
@@ -1026,17 +1030,17 @@ async function applyCreate(
   const build = { seed: workspaceId };
   switch (op.entityType) {
     case "control": {
-      validateCreateControlProperties(op.properties);
-      const pageId = op.properties["pageId"];
+      const properties = validateCreateControlProperties(op.properties);
+      const pageId = properties["pageId"];
       if (typeof pageId !== "string") {
         throw new PatchConflictError("create control requires properties.pageId (page GUID)");
       }
       const page = inspection.index.pages[pageId];
       if (page === undefined) throw new PatchConflictError(`create control: page "${pageId}" not found`);
-      const type = typeof op.properties["type"] === "string" ? (op.properties["type"]) : "button";
-      const parsedStyle = op.properties["style"] === undefined
+      const type = typeof properties["type"] === "string" ? (properties["type"]) : "button";
+      const parsedStyle = properties["style"] === undefined
         ? undefined
-        : ComponentStyleSpecSchema.safeParse(op.properties["style"]);
+        : ComponentStyleSpecSchema.safeParse(properties["style"]);
       if (parsedStyle !== undefined && !parsedStyle.success) {
         throw new PatchConflictError("create control properties.style is not a valid ComponentStyleSpec");
       }
@@ -1048,7 +1052,7 @@ async function applyCreate(
       if (type === "easyui") {
         // easyui 控件：objectType=3 + uiExtendType(proto)。模板 = base + easyui-base
         // + proto 专用模板，透传仅限该 proto 白名单字段（EASYUI_PROTO_FIELDS[proto]）。
-        const proto = asNumber(op.properties["proto"]);
+        const proto = asNumber(properties["proto"]);
         const protoTemplate = EASYUI_TEMPLATES[proto];
         if (protoTemplate === undefined) {
           throw new PatchConflictError(
@@ -1064,18 +1068,18 @@ async function applyCreate(
         ]);
         for (const field of EASYUI_PROTO_FIELDS[proto] ?? []) {
           if (RESERVED_IR_FIELDS.has(field)) continue;
-          const value = op.properties[field];
+          const value = properties[field];
           if (value !== undefined) pass[field] = value;
         }
         const overrides: TemplateJson = {
           name: op.entityId,
           guid,
-          leftTopPt: { x: asNumber(op.properties["x"]), y: asNumber(op.properties["y"]) },
+          leftTopPt: { x: asNumber(properties["x"]), y: asNumber(properties["y"]) },
           uiExtendType: proto,
           ...pass,
         };
-        if (op.properties["width"] !== undefined) overrides["width"] = asNumber(op.properties["width"]);
-        if (op.properties["height"] !== undefined) overrides["height"] = asNumber(op.properties["height"]);
+        if (properties["width"] !== undefined) overrides["width"] = asNumber(properties["width"]);
+        if (properties["height"] !== undefined) overrides["height"] = asNumber(properties["height"]);
         const control = mergeControlTemplate(
           mergeControlTemplate(mergeControlTemplate(BASE_FIELDS, easyuiBaseTemplate), protoTemplate),
           overrides,
@@ -1087,7 +1091,7 @@ async function applyCreate(
         if (style !== undefined) applyStyleToControl(control, type, style);
         // LLM 可用 properties.parentId 表达容器嵌套（布局内子控件）；找不到目标
         // 布局时回退页面顶层 objects。
-        const parentId = op.properties["parentId"];
+        const parentId = properties["parentId"];
         if (parentId === undefined || !pushControlIntoParent(objects, control, parentId)) {
           objects.push(control);
         }
@@ -1095,19 +1099,19 @@ async function applyCreate(
         // 布局容器：objectType=2 + layoutType 顶层；几何进 baseProperty；
         // children/panels 作为整体写入 insiderObjects/dPanelsOption（嵌套 JSON patch 复杂，整体 set 最稳）。
         const overrides: TemplateJson = {
-          layoutType: asNumber(op.properties["layoutType"]),
+          layoutType: asNumber(properties["layoutType"]),
           baseProperty: {
             name: op.entityId,
             guid,
-            leftTopPt: { x: asNumber(op.properties["x"]), y: asNumber(op.properties["y"]) },
-            width: asNumber(op.properties["width"]) || 200,
-            height: asNumber(op.properties["height"]) || 200,
+            leftTopPt: { x: asNumber(properties["x"]), y: asNumber(properties["y"]) },
+            width: asNumber(properties["width"]) || 200,
+            height: asNumber(properties["height"]) || 200,
           },
         };
-        if (op.properties["children"] !== undefined) {
+        if (properties["children"] !== undefined) {
           // 布局子对象补 guid（KF 要求 insiderObjects 子对象有 guid，否则 inspect
           // 无法索引、后续 LLM 无法引用修改）；与 compileLayoutControl 一致。
-          const children = op.properties["children"];
+          const children = properties["children"];
           if (Array.isArray(children)) {
             overrides["insiderObjects"] = ensureChildGuids(
               { seed: workspaceId },
@@ -1116,7 +1120,7 @@ async function applyCreate(
             );
           }
         }
-        if (op.properties["panels"] !== undefined) overrides["dPanelsOption"] = op.properties["panels"];
+        if (properties["panels"] !== undefined) overrides["dPanelsOption"] = properties["panels"];
         const control = mergeControlTemplate(layoutTemplate, overrides);
         if (style !== undefined) applyStyleToControl(control, type, style);
         objects.push(control);
@@ -1125,7 +1129,7 @@ async function applyCreate(
         // 透传（prototype IR 是 passthrough）。判别/身份/几何字段不透传；
         // 复杂配置（pageProperty/objects/areas/columns）作为整体覆盖。
         const prototypeName = requireString(
-          op.properties["prototypeName"],
+          properties["prototypeName"],
           "create prototype control requires properties.prototypeName",
         );
         const protoTemplate = PROTOTYPE_TEMPLATES[prototypeName];
@@ -1139,7 +1143,7 @@ async function applyCreate(
           "x", "y", "width", "height", "pageId", "uiModelType", "style",
         ]);
         const pass: Record<string, unknown> = {};
-        for (const [key, value] of Object.entries(op.properties)) {
+        for (const [key, value] of Object.entries(properties)) {
           if (RESERVED_PROTOTYPE_FIELDS.has(key) || value === undefined) continue;
           pass[key] = value;
         }
@@ -1153,10 +1157,10 @@ async function applyCreate(
               ? (pass["pageProperty"] as Record<string, unknown>)
               : {}),
             name: op.entityId,
-            pagePos: { x: asNumber(op.properties["x"]), y: asNumber(op.properties["y"]) },
+            pagePos: { x: asNumber(properties["x"]), y: asNumber(properties["y"]) },
             pageSize: {
-              width: asNumber(op.properties["width"]) || 400,
-              height: asNumber(op.properties["height"]) || 300,
+              width: asNumber(properties["width"]) || 400,
+              height: asNumber(properties["height"]) || 300,
             },
           };
           overrides["pageProperty"] = pageProperty;
@@ -1167,9 +1171,9 @@ async function applyCreate(
         } else {
           // 图表型 / 告警窗 / 事件窗：几何在顶层 leftTopPt/width/height。
           overrides["name"] = op.entityId;
-          overrides["leftTopPt"] = { x: asNumber(op.properties["x"]), y: asNumber(op.properties["y"]) };
-          overrides["width"] = asNumber(op.properties["width"]) || 400;
-          overrides["height"] = asNumber(op.properties["height"]) || 300;
+          overrides["leftTopPt"] = { x: asNumber(properties["x"]), y: asNumber(properties["y"]) };
+          overrides["width"] = asNumber(properties["width"]) || 400;
+          overrides["height"] = asNumber(properties["height"]) || 300;
           overrides["fixedSize"] = [overrides["width"], overrides["height"]];
         }
         const control = mergeControlTemplate(protoTemplate, overrides);
@@ -1185,24 +1189,24 @@ async function applyCreate(
         const overrides: TemplateJson = {
           name: op.entityId,
           guid,
-          leftTopPt: { x: asNumber(op.properties["x"]), y: asNumber(op.properties["y"]) },
-          width: asNumber(op.properties["width"]) || 90,
-          height: asNumber(op.properties["height"]) || 60,
+          leftTopPt: { x: asNumber(properties["x"]), y: asNumber(properties["y"]) },
+          width: asNumber(properties["width"]) || 90,
+          height: asNumber(properties["height"]) || 60,
         };
         if (type === "button" || type === "text") {
-          if (typeof op.properties["text"] === "string") overrides["text"] = op.properties["text"];
+          if (typeof properties["text"] === "string") overrides["text"] = properties["text"];
         }
         if (type === "inputnumber") {
-          if (typeof op.properties["precision"] === "number") overrides["precision"] = op.properties["precision"];
+          if (typeof properties["precision"] === "number") overrides["precision"] = properties["precision"];
         }
         for (const key of CREATE_PASS_THROUGH[type] ?? []) {
-          const value = op.properties[key];
+          const value = properties[key];
           if (value !== undefined) (overrides as Record<string, unknown>)[key] = value;
         }
         const control = mergeControlTemplate(mergeControlTemplate(BASE_FIELDS, template), overrides);
         if (style !== undefined) applyStyleToControl(control, type, style);
         // 静态控件也可用 parentId 放进布局（同 easyui 分支）
-        const parentId = op.properties["parentId"];
+        const parentId = properties["parentId"];
         if (parentId === undefined || !pushControlIntoParent(objects, control, parentId)) {
           objects.push(control);
         }

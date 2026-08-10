@@ -9,6 +9,7 @@ import type {
   RestrictedAction,
   VariableIR,
 } from "../ir/client-project-ir.js";
+import { ImageFitSchema, SafeResourceUrlSchema } from "../ir/client-project-ir.schema.js";
 import { EASYUI_ALL_FIELDS, EASYUI_PROTO_TYPES, EASYUI_PROTOS } from "../ir/easyui-types.js";
 import {
   ModelOutputInvalidError,
@@ -430,8 +431,8 @@ function validateControl(value: unknown, index: number): ControlIR {
       return {
         ...base,
         type: "image",
-        src: requireString(rec["src"], "control.src"),
-        ...optionalString(rec["fit"], "fit"),
+        src: requireSafeResourceUrl(rec["src"], "control.src"),
+        ...(rec["fit"] === undefined ? {} : { fit: requireImageFit(rec["fit"], "control.fit") }),
         ...optionalString(rec["alt"], "alt"),
       };
     case "tabs":
@@ -505,7 +506,7 @@ function validateControl(value: unknown, index: number): ControlIR {
       return {
         ...base,
         type: "webcontainer",
-        ...optionalString(rec["url"], "url"),
+        ...(rec["url"] === undefined ? {} : { url: requireSafeResourceUrl(rec["url"], "control.url") }),
         ...(rec["scrollbar"] === undefined ? {} : { scrollbar: requireBoolean(rec["scrollbar"], "control.scrollbar") }),
       };
     case "gantt":
@@ -535,9 +536,7 @@ function validateControl(value: unknown, index: number): ControlIR {
         ...(rec["options"] === undefined
           ? {}
           : {
-              options: requireArray(rec["options"], "control.options").map((o, oi) =>
-                requireRecord(o, `control.options[${oi}]`),
-              ),
+              options: requireNestedOptions(rec["options"], "control.options"),
             }),
         ...optionalString(rec["placeholder"], "placeholder"),
         ...(rec["filterable"] === undefined ? {} : { filterable: requireBoolean(rec["filterable"], "control.filterable") }),
@@ -568,9 +567,7 @@ function validateControl(value: unknown, index: number): ControlIR {
         ...(rec["options"] === undefined
           ? {}
           : {
-              options: requireArray(rec["options"], "control.options").map((o, oi) =>
-                requireRecord(o, `control.options[${oi}]`),
-              ),
+              options: requireNestedOptions(rec["options"], "control.options"),
             }),
       };
     case "tree":
@@ -585,7 +582,7 @@ function validateControl(value: unknown, index: number): ControlIR {
       return {
         ...base,
         type: "upload",
-        ...optionalString(rec["action"], "action"),
+        ...(rec["action"] === undefined ? {} : { action: requireSafeResourceUrl(rec["action"], "control.action") }),
         ...optionalString(rec["accept"], "accept"),
         ...(rec["multiple"] === undefined ? {} : { multiple: requireBoolean(rec["multiple"], "control.multiple") }),
       };
@@ -824,11 +821,48 @@ function requireOptions(value: unknown, what: string): { label: string; value: s
   });
 }
 
+function requireNestedOptions(
+  value: unknown,
+  what: string,
+): Array<{ label: string; value: string; disabled?: boolean; children?: ReturnType<typeof requireNestedOptions> }> {
+  return requireArray(value, what).map((option, index) => {
+    const optionPath = `${what}[${index}]`;
+    const rec = requireRecord(option, optionPath);
+    const allowed = new Set(["label", "value", "disabled", "children"]);
+    const unknown = Object.keys(rec).find((key) => !allowed.has(key));
+    if (unknown !== undefined) {
+      throw new ModelOutputInvalidError(`${optionPath}.${unknown} is not a reviewed option field`);
+    }
+    return {
+      label: requireString(rec["label"], `${optionPath}.label`),
+      value: requireString(rec["value"], `${optionPath}.value`),
+      ...(rec["disabled"] === undefined
+        ? {}
+        : { disabled: requireBoolean(rec["disabled"], `${optionPath}.disabled`) }),
+      ...(rec["children"] === undefined
+        ? {}
+        : { children: requireNestedOptions(rec["children"], `${optionPath}.children`) }),
+    };
+  });
+}
+
 function requireNumber(value: unknown, what: string): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new ModelOutputInvalidError(`${what} must be a finite number`);
   }
   return value;
+}
+
+function requireSafeResourceUrl(value: unknown, what: string): string {
+  const parsed = SafeResourceUrlSchema.safeParse(value);
+  if (!parsed.success) throw new ModelOutputInvalidError(`${what} must be a safe HTTP(S) or relative URL`);
+  return parsed.data;
+}
+
+function requireImageFit(value: unknown, what: string): "fill" | "contain" | "cover" | "none" | "scale-down" {
+  const parsed = ImageFitSchema.safeParse(value);
+  if (!parsed.success) throw new ModelOutputInvalidError(`${what} must be a reviewed image fit`);
+  return parsed.data;
 }
 
 function requireNonNegativeNumber(value: unknown, what: string): number {

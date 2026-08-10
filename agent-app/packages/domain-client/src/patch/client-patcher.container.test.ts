@@ -195,6 +195,28 @@ describe("client patcher — KF 容器对象（easyui / 布局）", () => {
     expect(result.index.controls[expectedGuid]?.type).toBe("layout");
   });
 
+  it("rejects unreviewed nested layout child fields in a direct ChangePlan", async () => {
+    const base = await copyFixture("client-unknown-field");
+
+    await expect(applyClientPatch(base, plan([
+      {
+        op: "create",
+        entityType: "control",
+        entityId: "UnsafeLayout",
+        properties: {
+          pageId: "page-guid-1",
+          type: "layout",
+          layoutType: 5,
+          children: [{
+            layoutType: 4,
+            objectType: 2,
+            baseProperty: { name: "Nested", script: "evil()" },
+          }],
+        },
+      },
+    ]))).rejects.toThrow(/PATCH_CONFLICT: INVALID_COMPONENT_PROPERTY/);
+  });
+
   it("updates easyui fields through the allowlist and rejects non-allowlisted ones", async () => {
     const base = await makeContainerFixture();
     const candidate = await applyClientPatch(base, plan([

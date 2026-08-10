@@ -13,6 +13,63 @@ const SELECTOR_ORDER = [
 
 type Rules = Map<string, Map<string, string>>;
 
+interface ManagedEnvelope {
+  bodyStart: number;
+  end: number;
+}
+
+/** Finds exact ownership comments only at CSS top level, outside strings/comments/rules. */
+function findManagedEnvelope(css: string): ManagedEnvelope | undefined {
+  const markers: Array<{ kind: "start" | "end"; index: number }> = [];
+  let depth = 0;
+  let quote: "\"" | "'" | undefined;
+  for (let index = 0; index < css.length;) {
+    const char = css[index]!;
+    if (quote !== undefined) {
+      if (char === "\\") {
+        index += 2;
+      } else {
+        if (char === quote) quote = undefined;
+        index += 1;
+      }
+      continue;
+    }
+    if (char === "\"" || char === "'") {
+      quote = char;
+      index += 1;
+      continue;
+    }
+    if (char === "/" && css[index + 1] === "*") {
+      if (depth === 0 && css.startsWith(MANAGED_STYLE_START, index)) {
+        markers.push({ kind: "start", index });
+        index += MANAGED_STYLE_START.length;
+        continue;
+      }
+      if (depth === 0 && css.startsWith(MANAGED_STYLE_END, index)) {
+        markers.push({ kind: "end", index });
+        index += MANAGED_STYLE_END.length;
+        continue;
+      }
+      const commentEnd = css.indexOf("*/", index + 2);
+      if (commentEnd === -1) break;
+      index = commentEnd + 2;
+      continue;
+    }
+    if (char === "{") depth += 1;
+    if (char === "}" && depth > 0) depth -= 1;
+    index += 1;
+  }
+
+  if (markers.length === 0) return undefined;
+  if (markers.length !== 2 || markers[0]!.kind !== "start" || markers[1]!.kind !== "end") {
+    throw new Error("MANAGED_STYLE_DATA_INVALID: ambiguous or corrupt compiler-owned envelope");
+  }
+  return {
+    bodyStart: markers[0]!.index + MANAGED_STYLE_START.length,
+    end: markers[1]!.index,
+  };
+}
+
 function parseManagedRules(css: string): Rules {
   const rules: Rules = new Map();
   const pattern = /([^{}]+)\{([^{}]*)\}/g;
@@ -66,26 +123,14 @@ export function mergeManagedStyleData(existingValue: unknown, compiledDelta: str
   const existing = typeof existingValue === "string" ? existingValue : "";
   if (compiledDelta === "") return existing;
 
-  const start = existing.indexOf(MANAGED_STYLE_START);
-  const end = existing.indexOf(MANAGED_STYLE_END);
-  if ((start === -1) !== (end === -1) || (start !== -1 && end < start)) {
-    throw new Error("MANAGED_STYLE_DATA_INVALID: incomplete compiler-owned block");
-  }
-  if (start !== -1 && (
-    existing.indexOf(MANAGED_STYLE_START, start + MANAGED_STYLE_START.length) !== -1
-    || existing.indexOf(MANAGED_STYLE_END, end + MANAGED_STYLE_END.length) !== -1
-  )) {
-    throw new Error("MANAGED_STYLE_DATA_INVALID: multiple compiler-owned blocks");
-  }
-
+  const envelope = findManagedEnvelope(existing);
   const deltaRules = parseManagedRules(compiledDelta);
-  if (start === -1) {
+  if (envelope === undefined) {
     const separator = existing !== "" && !existing.endsWith("\n") ? "\n" : "";
     return `${existing}${separator}${MANAGED_STYLE_START}${serializeRules(deltaRules)}${MANAGED_STYLE_END}`;
   }
 
-  const bodyStart = start + MANAGED_STYLE_START.length;
-  const managedBody = existing.slice(bodyStart, end);
+  const managedBody = existing.slice(envelope.bodyStart, envelope.end);
   const merged = serializeRules(mergeRules(parseManagedRules(managedBody), deltaRules));
-  return `${existing.slice(0, bodyStart)}${merged}${existing.slice(end)}`;
+  return `${existing.slice(0, envelope.bodyStart)}${merged}${existing.slice(envelope.end)}`;
 }

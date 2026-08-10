@@ -25,6 +25,39 @@ export const BaseControlIR = z.object({
 });
 export type BaseControlIR = z.infer<typeof BaseControlIR>;
 
+export const ImageFitSchema = z.enum(["fill", "contain", "cover", "none", "scale-down"]);
+
+/** URL values emitted into KF fields: HTTP(S) or a local relative resource only. */
+export const SafeResourceUrlSchema = z.string().min(1).max(2_048).refine((value) => {
+  const hasControlCharacter = [...value].some((char) => {
+    const code = char.charCodeAt(0);
+    return code <= 31 || code === 127;
+  });
+  if (value !== value.trim() || hasControlCharacter || /url\s*\(/i.test(value)) return false;
+  if (value.startsWith("//")) return false;
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(value)?.[1]?.toLowerCase();
+  return scheme === undefined || scheme === "http" || scheme === "https";
+}, "must be an HTTP(S) URL or a local relative resource without CSS url() syntax");
+
+const LabelValueOptionSchema = z.object({
+  label: z.string(),
+  value: z.string(),
+}).strict();
+
+interface NestedOption {
+  label: string;
+  value: string;
+  disabled?: boolean | undefined;
+  children?: NestedOption[] | undefined;
+}
+
+const NestedOptionSchema: z.ZodType<NestedOption> = z.lazy(() => z.object({
+  label: z.string(),
+  value: z.string(),
+  disabled: z.boolean().optional(),
+  children: z.array(NestedOptionSchema).optional(),
+}).strict());
+
 /**
  * Restricted action DSL (design doc §11: "动作 DSL/模板" as a limited first
  * capability). Only whitelisted, declarative actions are expressible; free
@@ -82,13 +115,13 @@ export const CheckboxControlIR = BaseControlIR.extend({
 
 export const RadioControlIR = BaseControlIR.extend({
   type: z.literal("radio"),
-  options: z.array(z.object({ label: z.string(), value: z.string() })).min(1),
+  options: z.array(LabelValueOptionSchema).min(1),
   value: z.string().optional(),
 }).strict();
 
 export const SelectControlIR = BaseControlIR.extend({
   type: z.literal("select"),
-  options: z.array(z.object({ label: z.string(), value: z.string() })).min(1),
+  options: z.array(LabelValueOptionSchema).min(1),
   value: z.string().optional(),
   multiple: z.boolean().optional(),
   placeholder: z.string().optional(),
@@ -96,14 +129,14 @@ export const SelectControlIR = BaseControlIR.extend({
 
 export const ImageControlIR = BaseControlIR.extend({
   type: z.literal("image"),
-  src: z.string().min(1),
-  fit: z.string().optional(),
+  src: SafeResourceUrlSchema,
+  fit: ImageFitSchema.optional(),
   alt: z.string().optional(),
 }).strict();
 
 export const TabsControlIR = BaseControlIR.extend({
   type: z.literal("tabs"),
-  tabs: z.array(z.object({ id: z.string().min(1), label: z.string() })).min(1),
+  tabs: z.array(z.object({ id: z.string().min(1), label: z.string() }).strict()).min(1),
   activeId: z.string().optional(),
 }).strict();
 
@@ -136,7 +169,7 @@ export const SpacerControlIR = BaseControlIR.extend({
 
 export const LegacyRadioControlIR = BaseControlIR.extend({
   type: z.literal("radiolegacy"),
-  options: z.array(z.object({ label: z.string(), value: z.string() })).min(1),
+  options: z.array(LabelValueOptionSchema).min(1),
   value: z.string().optional(),
 }).strict();
 
@@ -148,7 +181,7 @@ export const LegacyCheckboxControlIR = BaseControlIR.extend({
 
 export const ComboboxControlIR = BaseControlIR.extend({
   type: z.literal("combobox"),
-  options: z.array(z.object({ label: z.string(), value: z.string() })).min(1),
+  options: z.array(LabelValueOptionSchema).min(1),
   value: z.string().optional(),
   editable: z.boolean().optional(),
 }).strict();
@@ -163,7 +196,7 @@ export const ScaleControlIR = BaseControlIR.extend({
 
 export const ListControlIR = BaseControlIR.extend({
   type: z.literal("list"),
-  options: z.array(z.object({ label: z.string(), value: z.string() })).min(1),
+  options: z.array(LabelValueOptionSchema).min(1),
 }).strict();
 
 export const TreeviewControlIR = BaseControlIR.extend({
@@ -173,7 +206,7 @@ export const TreeviewControlIR = BaseControlIR.extend({
 
 export const WebContainerControlIR = BaseControlIR.extend({
   type: z.literal("webcontainer"),
-  url: z.string().optional(),
+  url: SafeResourceUrlSchema.optional(),
   scrollbar: z.boolean().optional(),
 }).strict();
 
@@ -200,7 +233,7 @@ export const InputControlIR = BaseControlIR.extend({
 
 export const CascaderControlIR = BaseControlIR.extend({
   type: z.literal("cascader"),
-  options: z.array(z.record(z.string(), z.unknown())).optional(),
+  options: z.array(NestedOptionSchema).optional(),
   placeholder: z.string().optional(),
   filterable: z.boolean().optional(),
   clearable: z.boolean().optional(),
@@ -216,7 +249,7 @@ export const DatetimePickerControlIR = BaseControlIR.extend({
 
 export const DropdownControlIR = BaseControlIR.extend({
   type: z.literal("dropdown"),
-  options: z.array(z.object({ label: z.string(), value: z.string() })).min(1),
+  options: z.array(LabelValueOptionSchema).min(1),
   text: z.string().optional(),
   splitButton: z.boolean().optional(),
 }).strict();
@@ -224,7 +257,7 @@ export const DropdownControlIR = BaseControlIR.extend({
 export const NavmenuControlIR = BaseControlIR.extend({
   type: z.literal("navmenu"),
   mode: z.enum(["horizontal", "vertical"]).optional(),
-  options: z.array(z.record(z.string(), z.unknown())).optional(),
+  options: z.array(NestedOptionSchema).optional(),
 }).strict();
 
 export const TreeControlIR = BaseControlIR.extend({
@@ -236,14 +269,14 @@ export const TreeControlIR = BaseControlIR.extend({
 
 export const UploadControlIR = BaseControlIR.extend({
   type: z.literal("upload"),
-  action: z.string().optional(),
+  action: SafeResourceUrlSchema.optional(),
   accept: z.string().optional(),
   multiple: z.boolean().optional(),
 }).strict();
 
 export const TransferControlIR = BaseControlIR.extend({
   type: z.literal("transfer"),
-  options: z.array(z.object({ label: z.string(), value: z.string() })).min(1),
+  options: z.array(LabelValueOptionSchema).min(1),
   titles: z.tuple([z.string(), z.string()]).optional(),
 }).strict();
 
@@ -256,7 +289,7 @@ export const TagControlIR = BaseControlIR.extend({
 
 export const TimelineControlIR = BaseControlIR.extend({
   type: z.literal("timeline"),
-  items: z.array(z.object({ title: z.string(), description: z.string().optional() })).min(1),
+  items: z.array(z.object({ title: z.string(), description: z.string().optional() }).strict()).min(1),
 }).strict();
 
 export const StepsControlIR = BaseControlIR.extend({

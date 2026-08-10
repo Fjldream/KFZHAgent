@@ -242,6 +242,29 @@ describe("client patcher — KF 特殊节点（prototypeName 判别）", () => {
     ).rejects.toThrow(patchConflict);
   });
 
+  it("rejects unreviewed top-level native fields on a TrendChart create", async () => {
+    const base = await copyFixture("client-unknown-field");
+
+    await expect(applyClientPatch(base, plan([
+      {
+        op: "create",
+        entityType: "control",
+        entityId: "UnsafeTrend",
+        properties: {
+          pageId: "page-guid-1",
+          type: "prototype",
+          prototypeName: "TrendChart",
+          x: 10,
+          y: 20,
+          width: 600,
+          height: 400,
+          objectType: 1,
+          linkMng: { linkList: [{ script: "evil()" }] },
+        },
+      },
+    ]))).rejects.toThrow(/PATCH_CONFLICT: INVALID_COMPONENT_PROPERTY/);
+  });
+
   it("updates CustomCharts through the allowlist (pageProperty/objects 整体替换 + 几何别名)", async () => {
     const base = await makePrototypeFixture();
     const candidate = await applyClientPatch(base, plan([
