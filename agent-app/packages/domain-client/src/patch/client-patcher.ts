@@ -40,8 +40,40 @@ import treeTemplate from "../templates/control-templates/tree.json" with { type:
 import treeviewTemplate from "../templates/control-templates/treeview.json" with { type: "json" };
 import uploadTemplate from "../templates/control-templates/upload.json" with { type: "json" };
 import webContainerTemplate from "../templates/control-templates/webcontainer.json" with { type: "json" };
+// ── KF 容器对象模板（与 control-compiler 同一套 reviewed 模板）──
+import easyuiBaseTemplate from "../templates/control-templates/easyui-base.json" with { type: "json" };
+import easyuiCalendarTemplate from "../templates/control-templates/easyui-calendar.json" with { type: "json" };
+import easyuiComboboxTemplate from "../templates/control-templates/easyui-combobox.json" with { type: "json" };
+import easyuiCombotreeTemplate from "../templates/control-templates/easyui-combotree.json" with { type: "json" };
+import easyuiDatagridTemplate from "../templates/control-templates/easyui-datagrid.json" with { type: "json" };
+import easyuiDatetimeboxTemplate from "../templates/control-templates/easyui-datetimebox.json" with { type: "json" };
+import easyuiDialogTemplate from "../templates/control-templates/easyui-dialog.json" with { type: "json" };
+import easyuiFileboxTemplate from "../templates/control-templates/easyui-filebox.json" with { type: "json" };
+import easyuiImagecarouselTemplate from "../templates/control-templates/easyui-imagecarousel.json" with { type: "json" };
+import easyuiLinkbuttonTemplate from "../templates/control-templates/easyui-linkbutton.json" with { type: "json" };
+import easyuiMenubuttonTemplate from "../templates/control-templates/easyui-menubutton.json" with { type: "json" };
+import easyuiNumberboxTemplate from "../templates/control-templates/easyui-numberbox.json" with { type: "json" };
+import easyuiNumberspinnerTemplate from "../templates/control-templates/easyui-numberspinner.json" with { type: "json" };
+import easyuiPaginationTemplate from "../templates/control-templates/easyui-pagination.json" with { type: "json" };
+import easyuiProgressbarTemplate from "../templates/control-templates/easyui-progressbar.json" with { type: "json" };
+import easyuiPropertygridTemplate from "../templates/control-templates/easyui-propertygrid.json" with { type: "json" };
+import easyuiSearchboxTemplate from "../templates/control-templates/easyui-searchbox.json" with { type: "json" };
+import easyuiSidemenuTemplate from "../templates/control-templates/easyui-sidemenu.json" with { type: "json" };
+import easyuiSliderTemplate from "../templates/control-templates/easyui-slider.json" with { type: "json" };
+import easyuiSpinnerTemplate from "../templates/control-templates/easyui-spinner.json" with { type: "json" };
+import easyuiSwitchbuttonTemplate from "../templates/control-templates/easyui-switchbutton.json" with { type: "json" };
+import easyuiTagboxTemplate from "../templates/control-templates/easyui-tagbox.json" with { type: "json" };
+import easyuiTextboxTemplate from "../templates/control-templates/easyui-textbox.json" with { type: "json" };
+import easyuiTimespinnerTemplate from "../templates/control-templates/easyui-timespinner.json" with { type: "json" };
+import easyuiTooltipTemplate from "../templates/control-templates/easyui-tooltip.json" with { type: "json" };
+import easyuiTreeTemplate from "../templates/control-templates/easyui-tree.json" with { type: "json" };
+import easyuiTreegridTemplate from "../templates/control-templates/easyui-treegrid.json" with { type: "json" };
+import easyuiValidateboxTemplate from "../templates/control-templates/easyui-validatebox.json" with { type: "json" };
+import easyuiWindowTemplate from "../templates/control-templates/easyui-window.json" with { type: "json" };
+import layoutTemplate from "../templates/control-templates/layout.json" with { type: "json" };
 import pageSkeleton from "../templates/page-skeleton.json" with { type: "json" };
-import { allowedFieldsFor, resolveControlPath } from "./allowlist.js";
+import { EASYUI_PROTO_FIELDS } from "../ir/easyui-types.js";
+import { allowedFieldsFor, resolveControlPathFor } from "./allowlist.js";
 import {
   PatchConflictError,
   isObject,
@@ -231,6 +263,42 @@ const CONTROL_TEMPLATES: Readonly<Record<string, TemplateJson>> = {
   tag: tagTemplate,
   timeline: timelineTemplate,
   steps: stepsTemplate,
+};
+
+/**
+ * easyui 控件模板按 proto（KF uiExtendType）注册：`easyui-base` 提供所有
+ * easyui 控件共享的静态字段（type/uiModelType/objectType/version/linkMng/...），
+ * 每个 proto 模板只含该控件特有的默认 options（与 control-compiler 同一套）。
+ */
+const EASYUI_TEMPLATES: Readonly<Record<number, TemplateJson>> = {
+  0: easyuiComboboxTemplate,
+  1: easyuiDatagridTemplate,
+  2: easyuiLinkbuttonTemplate,
+  3: easyuiNumberboxTemplate,
+  4: easyuiNumberspinnerTemplate,
+  5: easyuiPropertygridTemplate,
+  6: easyuiSearchboxTemplate,
+  7: easyuiSliderTemplate,
+  8: easyuiSpinnerTemplate,
+  9: easyuiTextboxTemplate,
+  10: easyuiTimespinnerTemplate,
+  12: easyuiDialogTemplate,
+  13: easyuiFileboxTemplate,
+  14: easyuiMenubuttonTemplate,
+  15: easyuiProgressbarTemplate,
+  16: easyuiTooltipTemplate,
+  17: easyuiTreeTemplate,
+  18: easyuiTreegridTemplate,
+  19: easyuiWindowTemplate,
+  20: easyuiCalendarTemplate,
+  21: easyuiDatetimeboxTemplate,
+  22: easyuiPaginationTemplate,
+  24: easyuiCombotreeTemplate,
+  25: easyuiTagboxTemplate,
+  26: easyuiSidemenuTemplate,
+  27: easyuiSwitchbuttonTemplate,
+  28: easyuiValidateboxTemplate,
+  29: easyuiImagecarouselTemplate,
 };
 
 /** create 时允许从 IR properties 透传覆盖的控件属性（与 client-project-ir schema 同名）。 */
@@ -474,7 +542,9 @@ async function applyUpdate(
         }`,
       );
     }
-    const resolvedPath = isControlLocation(loc) ? resolveControlPath(change.path) : change.path;
+    const resolvedPath = isControlLocation(loc)
+      ? resolveControlPathFor(loc.controlType, change.path)
+      : change.path;
     setByTokens(root, parseJsonPointer(resolvedPath), change.value);
   }
   await writeJsonFile(candidate, versionDir, loc.file, doc);
@@ -536,34 +606,83 @@ async function applyCreate(
       const page = inspection.index.pages[pageId];
       if (page === undefined) throw new PatchConflictError(`create control: page "${pageId}" not found`);
       const type = typeof op.properties["type"] === "string" ? (op.properties["type"]) : "button";
-      const template = CONTROL_TEMPLATES[type];
-      if (template === undefined) {
-        throw new PatchConflictError(
-          `create control: no reviewed template for type "${type}" (supported: ${Object.keys(CONTROL_TEMPLATES).join(", ")})`,
-        );
-      }
       const guid = deriveGuid(build, op.entityId);
       const doc = await readJsonFile(candidate, versionDir, page.file);
       const objects = Array.isArray(doc["objects"]) ? (doc["objects"] as unknown[]) : [];
-      const overrides: TemplateJson = {
-        name: op.entityId,
-        guid,
-        leftTopPt: { x: asNumber(op.properties["x"]), y: asNumber(op.properties["y"]) },
-        width: asNumber(op.properties["width"]) || 90,
-        height: asNumber(op.properties["height"]) || 60,
-      };
-      if (type === "button" || type === "text") {
-        if (typeof op.properties["text"] === "string") overrides["text"] = op.properties["text"];
+
+      if (type === "easyui") {
+        // easyui 控件：objectType=3 + uiExtendType(proto)。模板 = base + easyui-base
+        // + proto 专用模板，透传仅限该 proto 白名单字段（EASYUI_PROTO_FIELDS[proto]）。
+        const proto = asNumber(op.properties["proto"]);
+        const protoTemplate = EASYUI_TEMPLATES[proto];
+        if (protoTemplate === undefined) {
+          throw new PatchConflictError(
+            `create easyui control: no reviewed template for proto ${proto} (uiExtendType; supported: ${Object.keys(EASYUI_TEMPLATES).join(", ")})`,
+          );
+        }
+        const pass: Record<string, unknown> = {};
+        for (const field of EASYUI_PROTO_FIELDS[proto] ?? []) {
+          const value = op.properties[field];
+          if (value !== undefined) pass[field] = value;
+        }
+        const overrides: TemplateJson = {
+          name: op.entityId,
+          guid,
+          leftTopPt: { x: asNumber(op.properties["x"]), y: asNumber(op.properties["y"]) },
+          uiExtendType: proto,
+          ...pass,
+        };
+        if (op.properties["width"] !== undefined) overrides["width"] = asNumber(op.properties["width"]);
+        if (op.properties["height"] !== undefined) overrides["height"] = asNumber(op.properties["height"]);
+        const control = mergeControlTemplate(
+          mergeControlTemplate(mergeControlTemplate(BASE_FIELDS, easyuiBaseTemplate), protoTemplate),
+          overrides,
+        );
+        objects.push(control);
+      } else if (type === "layout") {
+        // 布局容器：objectType=2 + layoutType 顶层；几何进 baseProperty；
+        // children/panels 作为整体写入 insiderObjects/dPanelsOption（嵌套 JSON patch 复杂，整体 set 最稳）。
+        const overrides: TemplateJson = {
+          layoutType: asNumber(op.properties["layoutType"]),
+          baseProperty: {
+            name: op.entityId,
+            guid,
+            leftTopPt: { x: asNumber(op.properties["x"]), y: asNumber(op.properties["y"]) },
+            width: asNumber(op.properties["width"]) || 200,
+            height: asNumber(op.properties["height"]) || 200,
+          },
+        };
+        if (op.properties["children"] !== undefined) overrides["insiderObjects"] = op.properties["children"];
+        if (op.properties["panels"] !== undefined) overrides["dPanelsOption"] = op.properties["panels"];
+        const control = mergeControlTemplate(layoutTemplate, overrides);
+        objects.push(control);
+      } else {
+        const template = CONTROL_TEMPLATES[type];
+        if (template === undefined) {
+          throw new PatchConflictError(
+            `create control: no reviewed template for type "${type}" (supported: ${Object.keys(CONTROL_TEMPLATES).join(", ")})`,
+          );
+        }
+        const overrides: TemplateJson = {
+          name: op.entityId,
+          guid,
+          leftTopPt: { x: asNumber(op.properties["x"]), y: asNumber(op.properties["y"]) },
+          width: asNumber(op.properties["width"]) || 90,
+          height: asNumber(op.properties["height"]) || 60,
+        };
+        if (type === "button" || type === "text") {
+          if (typeof op.properties["text"] === "string") overrides["text"] = op.properties["text"];
+        }
+        if (type === "inputnumber") {
+          if (typeof op.properties["precision"] === "number") overrides["precision"] = op.properties["precision"];
+        }
+        for (const key of CREATE_PASS_THROUGH[type] ?? []) {
+          const value = op.properties[key];
+          if (value !== undefined) (overrides as Record<string, unknown>)[key] = value;
+        }
+        const control = mergeControlTemplate(mergeControlTemplate(BASE_FIELDS, template), overrides);
+        objects.push(control);
       }
-      if (type === "inputnumber") {
-        if (typeof op.properties["precision"] === "number") overrides["precision"] = op.properties["precision"];
-      }
-      for (const key of CREATE_PASS_THROUGH[type] ?? []) {
-        const value = op.properties[key];
-        if (value !== undefined) (overrides as Record<string, unknown>)[key] = value;
-      }
-      const control = mergeControlTemplate(mergeControlTemplate(BASE_FIELDS, template), overrides);
-      objects.push(control);
       await writeJsonFile(candidate, versionDir, page.file, doc);
       break;
     }

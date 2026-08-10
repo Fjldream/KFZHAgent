@@ -10,7 +10,17 @@
  * which is what the inspector resolves a KF `uiModelType` to. `x`/`y` are
  * geometry aliases for the raw KF `leftTopPt.x`/`leftTopPt.y` fields; `width`
  * and `height` map 1:1 to the raw KF fields.
+ *
+ * KF 容器对象（easyui / 布局）也走同一张表：
+ * - `easyui`（objectType=3 + uiExtendType）白名单 = `EASYUI_ALL_FIELDS` 并集
+ *   （约 145 个宽松字段）+ 公共几何字段，字段名与 KF 顶层字段一一对应；
+ * - `layout`（objectType=2 + layoutType）白名单 = layoutType/children/panels
+ *   + 公共几何字段，但 IR 路径与 KF 原始路径不同（几何在 baseProperty、
+ *   子对象在 insiderObjects、面板在 dPanelsOption），由
+ *   `CONTROL_LAYOUT_PATH_ALIASES` 在解析阶段映射。
  */
+
+import { EASYUI_ALL_FIELDS } from "../ir/easyui-types.js";
 
 /** Fields every KF control may be patched on, regardless of type.
  * Note: `guid` is deliberately NOT here — a KF GUID identifies the entity
@@ -100,6 +110,29 @@ export const CONTROL_TYPE_ALLOWED_FIELDS: Readonly<Record<string, readonly strin
   tag: ["closable", "disableTransitions", "hit", "effect", "addable"],
   timeline: ["reverse"],
   steps: ["active", "direction", "space", "processStatus", "finishStatus", "alignCenter", "simple"],
+  // ── KF 容器对象（参考工程 test_最新_2）──
+  // easyui（objectType=3 + uiExtendType/proto）：白名单 = 全 proto 可修改字段并集
+  // （EASYUI_ALL_FIELDS，约 145 个宽松字段）；几何走公共 leftTopPt/width/height。
+  easyui: EASYUI_ALL_FIELDS,
+  // layout（objectType=2 + layoutType）：layoutType 顶层直写，children/panels 为
+  // IR 语义字段（patch 时经 CONTROL_LAYOUT_PATH_ALIASES 映射到 insiderObjects/
+  // dPanelsOption），几何经映射进入 baseProperty。
+  layout: ["layoutType", "children", "panels"],
+};
+
+/**
+ * KF 布局容器的 IR 路径 → 原始 KF 路径映射：几何在 `baseProperty`（非顶层
+ * leftTopPt），子对象在 `insiderObjects`，面板在 `dPanelsOption`。easyui 的
+ * IR 字段名与 KF 顶层字段一一对应，无需映射。
+ */
+export const CONTROL_LAYOUT_PATH_ALIASES: Readonly<Record<string, string>> = {
+  "/x": "/baseProperty/leftTopPt/x",
+  "/y": "/baseProperty/leftTopPt/y",
+  "/leftTopPt": "/baseProperty/leftTopPt",
+  "/width": "/baseProperty/width",
+  "/height": "/baseProperty/height",
+  "/children": "/insiderObjects",
+  "/panels": "/dPanelsOption",
 };
 
 /** Fields on a KF page JSON file that may be patched. */
@@ -170,4 +203,20 @@ export function allowedFieldsFor(
 /** Resolves a relative change path to the effective raw-KF path (alias expansion). */
 export function resolveControlPath(relativePath: string): string {
   return CONTROL_GEOMETRY_ALIASES[relativePath] ?? relativePath;
+}
+
+/**
+ * Resolves a control change path for a specific IR control type. easyui
+ * controls keep the top-level geometry aliases (`x`/`y` → `/leftTopPt/x`...);
+ * layout containers additionally map `children`/`panels`/geometry onto their
+ * KF nesting (`insiderObjects`/`dPanelsOption`/`baseProperty`).
+ */
+export function resolveControlPathFor(
+  controlType: string | undefined,
+  relativePath: string,
+): string {
+  if (controlType === "layout") {
+    return CONTROL_LAYOUT_PATH_ALIASES[relativePath] ?? relativePath;
+  }
+  return resolveControlPath(relativePath);
 }
