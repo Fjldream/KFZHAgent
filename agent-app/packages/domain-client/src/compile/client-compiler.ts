@@ -11,6 +11,7 @@ import type {
 import { EASYUI_ALL_FIELDS, EASYUI_PROTO_TYPES, EASYUI_PROTOS } from "../ir/easyui-types.js";
 import {
   ModelOutputInvalidError,
+  SPECIAL_PROTOTYPE_NAMES,
   assertNoStringForeignFields,
   hasReviewedTemplate,
   supportedControlTypes,
@@ -31,6 +32,8 @@ export {
   ModelOutputInvalidError,
   compileControl,
   compileAction,
+  compileSpecialNode,
+  SPECIAL_PROTOTYPE_NAMES,
   supportedControlTypes,
   hasReviewedTemplate,
   assertNoStringForeignFields,
@@ -316,11 +319,17 @@ function validatePage(value: unknown, index: number): PageIR {
 function validateControl(value: unknown, index: number): ControlIR {
   const rec = requireRecord(value, `page.controls[${index}]`);
   const type = requireString(rec["type"], "control.type");
-  assertNoStringForeignFields(rec, type);
-  if (!hasReviewedTemplate(type)) {
-    throw new ModelOutputInvalidError(
-      `control type "${type}" has no reviewed template (supported: ${supportedControlTypes().join(", ")})`,
-    );
+  const isSpecial = type === "prototype";
+  // 特殊节点（prototypeName 判别）不套用普通控件的字符串注入拒绝/模板白名单：
+  // SpecialNodeIR 用 .passthrough() 宽容保留任意字段（JSON 字符串 objects、
+  // comment、pageProperty 等），由 compileSpecialNode 原样透传。
+  if (!isSpecial) {
+    assertNoStringForeignFields(rec, type);
+    if (!hasReviewedTemplate(type)) {
+      throw new ModelOutputInvalidError(
+        `control type "${type}" has no reviewed template (supported: ${supportedControlTypes().join(", ")})`,
+      );
+    }
   }
   const id = requireString(rec["id"], "control.id");
   // KF Docking 布局 leftTopPt.x 可为 -1（贴边），LayoutContainerIR 允许负坐标；
@@ -644,6 +653,29 @@ function validateControl(value: unknown, index: number): ControlIR {
         ...(children !== undefined ? { children } : {}),
         ...(panels !== undefined ? { panels } : {}),
       };
+    }
+    case "prototype": {
+      const prototypeName = requireString(rec["prototypeName"], "control.prototypeName");
+      if (!SPECIAL_PROTOTYPE_NAMES.includes(prototypeName)) {
+        throw new ModelOutputInvalidError(
+          `control "${id}" prototypeName "${prototypeName}" is not a supported KF special node ` +
+            `(supported: ${SPECIAL_PROTOTYPE_NAMES.join(", ")})`,
+        );
+      }
+      // 宽容透传：type/prototypeName/几何（x/y/width/height）由编译层接管，
+      // 其余字段（pageProperty/objects/title/areas/chartComponentType/comment/
+      // columns/dateSource/evalconfig 等）原样保留给 compileSpecialNode。
+      const result: Record<string, unknown> = { ...base, type: "prototype", prototypeName };
+      for (const key of Object.keys(rec)) {
+        if (
+          key === "type" || key === "id" || key === "x" || key === "y" ||
+          key === "width" || key === "height" || key === "prototypeName"
+        ) {
+          continue;
+        }
+        result[key] = rec[key];
+      }
+      return result as unknown as ControlIR;
     }
     default:
       throw new ModelOutputInvalidError(

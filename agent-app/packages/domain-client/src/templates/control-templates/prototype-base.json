@@ -1,0 +1,28 @@
+{
+  "version": "2.0.0.1.1",
+  "modleStyle": "",
+  "lock": false,
+  "visible": true,
+  "runVisible": true,
+  "comment": "",
+  "memberAccess": true,
+  "enable": true,
+  "linkMng": {
+    "linkList": []
+  },
+  "resDescription": {},
+  "securityPriority": 1,
+  "securitySection": [],
+  "resourceGroup": [],
+  "isControl": false,
+  "fixedSize": [
+    300,
+    300
+  ],
+  "sizePolicy": [
+    3,
+    3,
+    0,
+    0
+  ]
+}

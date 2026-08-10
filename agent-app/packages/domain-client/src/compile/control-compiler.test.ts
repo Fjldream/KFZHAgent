@@ -206,6 +206,183 @@ describe("control compiler — layout containers (objectType=2)", () => {
   });
 });
 
+describe("control compiler — KF special nodes (prototypeName dispatch)", () => {
+  function special(overrides: Record<string, unknown> = {}): ControlIR {
+    return {
+      id: "Special1",
+      type: "prototype",
+      prototypeName: "TrendChart",
+      x: 10,
+      y: 20,
+      width: 300,
+      height: 200,
+      ...overrides,
+    } as unknown as ControlIR;
+  }
+
+  it("serializes a CustomCharts envelope keeping pageProperty and JSON-string objects verbatim", () => {
+    const objectsJson = '{"name":"echart","customChartsType":1,"option":{"title":{"text":"供气占比统计"}}}';
+    const out = compileControl(
+      build,
+      special({
+        id: "CustomCharts1",
+        prototypeName: "CustomCharts",
+        x: 5.13,
+        y: 35.92,
+        width: 396,
+        height: 344,
+        pageProperty: {
+          name: "CustomCharts1",
+          pagePos: { x: 5.13, y: 35.92 },
+          pageSize: { width: 396, height: 344 },
+          windowSize: { width: 1440, height: 900 },
+        },
+        objects: [objectsJson],
+        modlePrototype: { name: "", guid: "k6842b85b", version: "1.0.0.1.1", type: 1 },
+        region: "center",
+        variableMng: [],
+        bordershow: false,
+      }),
+      ctx,
+    );
+    // 绝不输出 type/uiModelType；objectType 由 prototypeName 特判
+    expect(out["type"]).toBeUndefined();
+    expect(out["uiModelType"]).toBeUndefined();
+    expect(out["objectType"]).toBe(1);
+    expect(out["prototypeName"]).toBe("CustomCharts");
+    // pageProperty 保留 + 几何回写
+    expect(out["pageProperty"]).toEqual({
+      name: "CustomCharts1",
+      pagePos: { x: 5.13, y: 35.92 },
+      pageSize: { width: 396, height: 344 },
+      windowSize: { width: 1440, height: 900 },
+    });
+    // objects 是 JSON 字符串，原样保留
+    expect(out["objects"]).toEqual([objectsJson]);
+    expect(typeof (out["objects"] as string[])[0]).toBe("string");
+    expect(out["region"]).toBe("center");
+    expect(out["variableMng"]).toEqual([]);
+    expect(out["bordershow"]).toBe(false);
+    expect(out["guid"]).toMatch(/^[0-9a-f-]+$/);
+    // 模板公共静态字段
+    expect(out["version"]).toBe("2.0.0.1.1");
+    expect(out["securityPriority"]).toBe(1);
+    expect(out["sizePolicy"]).toEqual([3, 3, 0, 0]);
+    expect(out["linkMng"]).toEqual({ linkList: [] });
+  });
+
+  it("builds pageProperty from IR geometry when the IR has none", () => {
+    const out = compileControl(
+      build,
+      special({
+        id: "CustomCharts1",
+        prototypeName: "CustomCharts",
+        x: 5,
+        y: 35,
+        width: 396,
+        height: 344,
+      }),
+      ctx,
+    );
+    expect(out["pageProperty"]).toEqual({
+      name: "CustomCharts1",
+      pagePos: { x: 5, y: 35 },
+      pageSize: { width: 396, height: 344 },
+    });
+    expect(out["objectType"]).toBe(1);
+  });
+
+  it("serializes chart nodes with top-level geometry and passthrough title/areas", () => {
+    const out = compileControl(
+      build,
+      special({
+        id: "XYChart1",
+        prototypeName: "XYChart",
+        x: 89,
+        y: 34,
+        width: 749,
+        height: 271,
+        title: { show: true, text: "XYChart", position: 1 },
+        areas: [{ top: 0, left: 0, width: 749, height: 253 }],
+        chartComponentType: 5,
+        boundRect: { x: 89, y: 34, width: 749, height: 271 },
+        comment: "曲线",
+      }),
+      ctx,
+    );
+    expect(out["type"]).toBeUndefined();
+    expect(out["uiModelType"]).toBeUndefined();
+    expect("objectType" in out).toBe(false);
+    expect(out["prototypeName"]).toBe("XYChart");
+    expect(out["leftTopPt"]).toEqual({ x: 89, y: 34 });
+    expect(out["width"]).toBe(749);
+    expect(out["height"]).toBe(271);
+    expect(out["title"]).toEqual({ show: true, text: "XYChart", position: 1 });
+    expect(out["areas"]).toEqual([{ top: 0, left: 0, width: 749, height: 253 }]);
+    expect(out["chartComponentType"]).toBe(5);
+    expect(out["boundRect"]).toEqual({ x: 89, y: 34, width: 749, height: 271 });
+    expect(out["comment"]).toBe("曲线");
+    // name 兜底为 IR id
+    expect(out["name"]).toBe("XYChart1");
+  });
+
+  it("backs up default title/areas for BarChart/PieChart (no jsonToObject guard)", () => {
+    const out = compileControl(
+      build,
+      special({ id: "BarChart1", prototypeName: "BarChart", chartComponentType: 3 }),
+      ctx,
+    );
+    expect(out["title"]).toEqual({ text: "BarChart", show: true });
+    expect(out["areas"]).toEqual([]);
+    // TrendChart/XYChart 有守卫：缺省不补
+    const trend = compileControl(
+      build,
+      special({ id: "Trend1", prototypeName: "TrendChart" }),
+      ctx,
+    );
+    expect(trend["title"]).toBeUndefined();
+    expect(trend["areas"]).toBeUndefined();
+  });
+
+  it("serializes an AlarmWindow with top-level geometry and alarm fields", () => {
+    const out = compileControl(
+      build,
+      special({
+        id: "AlarmWindow1",
+        prototypeName: "AlarmWindow",
+        name: "AlarmWindow1",
+        alarmWindowType: "实时报警窗",
+        columns: [{ field: "alarmTime", title: "时间", width: 100, align: "center" }],
+        dateSource: "KS",
+        evalconfig: "",
+        list: { rowHeight: 24 },
+        titleName: "报警",
+      }),
+      ctx,
+    );
+    expect(out["type"]).toBeUndefined();
+    expect(out["uiModelType"]).toBeUndefined();
+    expect("objectType" in out).toBe(false);
+    expect(out["prototypeName"]).toBe("AlarmWindow");
+    expect(out["leftTopPt"]).toEqual({ x: 10, y: 20 });
+    expect(out["width"]).toBe(300);
+    expect(out["height"]).toBe(200);
+    expect(out["alarmWindowType"]).toBe("实时报警窗");
+    expect(out["columns"]).toEqual([{ field: "alarmTime", title: "时间", width: 100, align: "center" }]);
+    expect(out["dateSource"]).toBe("KS");
+    expect(out["evalconfig"]).toBe("");
+    expect(out["list"]).toEqual({ rowHeight: 24 });
+    expect(out["titleName"]).toBe("报警");
+    expect(out["name"]).toBe("AlarmWindow1");
+  });
+
+  it("rejects unknown prototypeName values", () => {
+    expect(() =>
+      compileControl(build, special({ prototypeName: "FooChart" }), ctx),
+    ).toThrow(ModelOutputInvalidError);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Golden alignment: compile IR derived from REAL reference-project objects and
 // assert the serialized KF structure matches the reference layout.

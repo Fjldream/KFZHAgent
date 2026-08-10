@@ -61,6 +61,7 @@ import easyuiTreegridTemplate from "../templates/control-templates/easyui-treegr
 import easyuiValidateboxTemplate from "../templates/control-templates/easyui-validatebox.json" with { type: "json" };
 import easyuiWindowTemplate from "../templates/control-templates/easyui-window.json" with { type: "json" };
 import layoutTemplate from "../templates/control-templates/layout.json" with { type: "json" };
+import prototypeBaseTemplate from "../templates/control-templates/prototype-base.json" with { type: "json" };
 import type { ControlIR, RestrictedAction, EasyuiControlIR, LayoutContainerIR } from "../ir/client-project-ir.js";
 import {
   EASYUI_ALL_FIELDS,
@@ -159,6 +160,7 @@ const CONTROL_TEMPLATES: Readonly<Record<string, TemplateJson>> = {
   steps: stepsTemplate,
   easyui: easyuiBaseTemplate,
   layout: layoutTemplate,
+  prototype: prototypeBaseTemplate,
 };
 
 /**
@@ -285,6 +287,9 @@ export function compileControl(
   }
   if (control.type === "layout") {
     return compileLayoutControl(build, control);
+  }
+  if (control.type === "prototype") {
+    return compileSpecialNode(build, control);
   }
   const template = CONTROL_TEMPLATES[control.type];
   if (template === undefined) {
@@ -441,6 +446,100 @@ function compileLayoutControl(build: BuildSeed, control: ControlIR): TemplateJso
     overrides["dPanelsOption"] = normalizeDockPanels(layout.panels, layout.width, layout.height);
   }
   return mergeControlTemplate(layoutTemplate, overrides);
+}
+
+/**
+ * KF 特殊节点（`prototypeName` 判别，无 uiModelType/uiExtendType/layoutType）：
+ * CustomCharts（objectType=1）、图表型（TrendChart/BarChart/PieChart/XYChart）、
+ * AlarmWindow/EventWindow。IR 用判别值 `type:"prototype"` + `prototypeName` 细分。
+ */
+export const SPECIAL_PROTOTYPE_NAMES: readonly string[] = [
+  "CustomCharts",
+  "AlarmWindow",
+  "EventWindow",
+  "TrendChart",
+  "BarChart",
+  "PieChart",
+  "XYChart",
+];
+
+const SPECIAL_PROTOTYPE_SET: ReadonlySet<string> = new Set(SPECIAL_PROTOTYPE_NAMES);
+
+/**
+ * Compiles a KF special node (objectType=1 or prototypeName-dispatched chart /
+ * alarm / event window). Geometry + name/guid + prototypeName are managed by
+ * the compiler; every other IR field is passed through verbatim (the IR schema
+ * keeps complex content — CustomCharts `objects` JSON strings, chart
+ * `title`/`areas`, AlarmWindow `columns`/`evalconfig` — as opaque passthrough).
+ *
+ * - CustomCharts: geometry lives in `pageProperty.pagePos/pageSize` (built from
+ *   the IR geometry when the IR has no pageProperty); objectType=1.
+ * - Other nodes: top-level `leftTopPt`/`width`/`height`; no objectType.
+ * - BarChart/PieChart have no jsonToObject guard on title/areas (missing keys
+ *   crash KF), so a default `title:{text,show:true}` + `areas:[]` is applied.
+ * - `type`/`uiModelType` are NEVER emitted.
+ */
+export function compileSpecialNode(build: BuildSeed, control: ControlIR): TemplateJson {
+  const raw = control as unknown as Record<string, unknown>;
+  const prototypeName = String(raw["prototypeName"] ?? "");
+  if (!SPECIAL_PROTOTYPE_SET.has(prototypeName)) {
+    throw new ModelOutputInvalidError(
+      `prototypeName "${prototypeName}" is not a supported KF special node ` +
+        `(supported: ${SPECIAL_PROTOTYPE_NAMES.join(", ")})`,
+    );
+  }
+
+  // IR 判别/几何/id 字段绝不能透传进 KF 对象；objectType/prototypeName 由本
+  // 函数显式管理。`uiModelType` 更不能出现（KF 加载用它覆盖实例）。
+  const RESERVED_IR_FIELDS = new Set([
+    "type", "id", "x", "y", "width", "height", "uiModelType",
+    "objectType", "prototypeName",
+  ]);
+  const passthrough: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (RESERVED_IR_FIELDS.has(key)) continue;
+    if (value === undefined) continue;
+    passthrough[key] = value;
+  }
+
+  const result = mergeControlTemplate(prototypeBaseTemplate, passthrough);
+  result["prototypeName"] = prototypeName;
+  result["guid"] = deriveGuid(build, String(raw["id"]));
+
+  if (prototypeName === "CustomCharts") {
+    // 几何写入 pageProperty（KF KMCustomCharts 无条件读 pageProperty.pagePos/
+    // pageSize）；IR 已给 pageProperty 时保留其余字段、回写几何。
+    const pageProperty =
+      passthrough["pageProperty"] !== null && typeof passthrough["pageProperty"] === "object"
+        ? (structuredClone(passthrough["pageProperty"]) as Record<string, unknown>)
+        : {};
+    if (typeof pageProperty["name"] !== "string") {
+      pageProperty["name"] = String(raw["id"]);
+    }
+    pageProperty["pagePos"] = { x: raw["x"], y: raw["y"] };
+    pageProperty["pageSize"] = { width: raw["width"], height: raw["height"] };
+    result["pageProperty"] = pageProperty;
+    result["objectType"] = 1;
+  } else {
+    result["leftTopPt"] = { x: raw["x"], y: raw["y"] };
+    result["width"] = raw["width"];
+    result["height"] = raw["height"];
+    if (result["name"] === undefined) {
+      result["name"] = String(raw["id"]);
+    }
+    // BarChart/PieChart 的 jsonToObject 无 hasOwnProperty 守卫：title/areas
+    // 缺失会 `undefined.jsonToObject` / `undefined.map` TypeError。
+    if (prototypeName === "BarChart" || prototypeName === "PieChart") {
+      if (result["title"] === undefined) {
+        result["title"] = { text: prototypeName, show: true };
+      }
+      if (result["areas"] === undefined) {
+        result["areas"] = [];
+      }
+    }
+  }
+
+  return result;
 }
 
 function applySchemaOverrides(

@@ -121,6 +121,90 @@ describe("client compiler", () => {
     await expect(compileClientProject(dup, { seed: "s" })).rejects.toThrow(/MODEL_OUTPUT_INVALID/);
   });
 
+  it("compiles pages containing KF special nodes (prototypeName dispatch)", async () => {
+    const irWithSpecial = {
+      ...ir,
+      pages: [
+        {
+          ...ir.pages[0],
+          controls: [
+            ...ir.pages[0].controls,
+            {
+              id: "CustomCharts1",
+              type: "prototype",
+              prototypeName: "CustomCharts",
+              x: 5.13,
+              y: 35.92,
+              width: 396,
+              height: 344,
+              pageProperty: {
+                name: "CustomCharts1",
+                pagePos: { x: 5.13, y: 35.92 },
+                pageSize: { width: 396, height: 344 },
+              },
+              objects: ['{"name":"echart","customChartsType":1}'],
+              region: "center",
+            },
+            {
+              id: "BarChart1",
+              type: "prototype",
+              prototypeName: "BarChart",
+              x: 0,
+              y: 0,
+              width: 400,
+              height: 200,
+              chartComponentType: 3,
+            },
+          ],
+        },
+      ],
+    };
+    const result = await compileClientProject(irWithSpecial, { seed: "special-build" });
+    const page = JSON.parse(
+      await readFile(path.join(result.path, "1.0.0.1", "project", "page", "Page1.json"), "utf8"),
+    );
+    const customCharts = page.objects.find((o) => o.prototypeName === "CustomCharts");
+    expect(customCharts).toBeDefined();
+    expect(customCharts.type).toBeUndefined();
+    expect(customCharts.uiModelType).toBeUndefined();
+    expect(customCharts.objectType).toBe(1);
+    expect(customCharts.pageProperty).toMatchObject({
+      pagePos: { x: 5.13, y: 35.92 },
+      pageSize: { width: 396, height: 344 },
+    });
+    expect(customCharts.objects[0]).toContain('"customChartsType":1');
+    const barChart = page.objects.find((o) => o.prototypeName === "BarChart");
+    expect(barChart).toBeDefined();
+    expect(barChart.title).toEqual({ text: "BarChart", show: true });
+    expect(barChart.areas).toEqual([]);
+    expect(barChart.leftTopPt).toEqual({ x: 0, y: 0 });
+  });
+
+  it("rejects special nodes with an unknown prototypeName", async () => {
+    const irWithBadPrototype = {
+      ...ir,
+      pages: [
+        {
+          ...ir.pages[0],
+          controls: [
+            ...ir.pages[0].controls,
+            {
+              id: "Foo1",
+              type: "prototype",
+              prototypeName: "FooChart",
+              x: 0,
+              y: 0,
+              width: 100,
+              height: 50,
+            },
+          ],
+        },
+      ],
+    };
+    await expect(compileClientProject(irWithBadPrototype, { seed: "s" }))
+      .rejects.toThrow(/prototypeName "FooChart"/);
+  });
+
   it("rejects duplicate semantic control ids within a page", async () => {
     const dup = {
       ...ir,
