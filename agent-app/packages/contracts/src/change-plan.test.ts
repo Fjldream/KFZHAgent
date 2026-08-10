@@ -89,4 +89,29 @@ describe("change plan schema", () => {
       properties: { pageId: "page-guid-1", type: "button", x: 10 },
     });
   });
+
+  it("keeps a structured applyStyle operation after parsing", () => {
+    const parsed = changePlanSchema.parse({
+      schema: "kf-change-plan/v1",
+      workspaceId: "w-1",
+      operations: [{
+        op: "applyStyle",
+        entityId: "button-guid-1",
+        entityType: "control",
+        style: {
+          declarations: { backgroundColor: "#2563eb", borderRadius: 8 },
+          states: { hover: { backgroundColor: "#1d4ed8" } },
+        },
+      }],
+    });
+    expect(parsed.operations[0]).toMatchObject({ op: "applyStyle", entityId: "button-guid-1" });
+  });
+
+  it("rejects applyStyle raw CSS", () => {
+    expect(changePlanSchema.safeParse({
+      schema: "kf-change-plan/v1",
+      workspaceId: "w-1",
+      operations: [{ op: "applyStyle", entityId: "x", entityType: "control", style: { css: "*{}" } }],
+    }).success).toBe(false);
+  });
 });

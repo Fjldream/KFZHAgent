@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ComponentStyleSpecSchema } from "./ui-style.js";
 
 /**
  * A JSON-pointer style field patch applied to a target entity.
@@ -53,10 +54,22 @@ export const deleteOperationSchema = z.object({
 });
 export type DeleteOperation = z.infer<typeof deleteOperationSchema>;
 
+/**
+ * Apply a structured style specification to a control.
+ */
+export const applyStyleOperationSchema = z.object({
+  op: z.literal("applyStyle"),
+  entityId: z.string().min(1),
+  entityType: z.literal("control"),
+  style: ComponentStyleSpecSchema,
+}).strict();
+export type ApplyStyleOperation = z.infer<typeof applyStyleOperationSchema>;
+
 export const changeOperationSchema = z.discriminatedUnion("op", [
   createOperationSchema,
   updateOperationSchema,
-  deleteOperationSchema
+  deleteOperationSchema,
+  applyStyleOperationSchema
 ]);
 export type ChangeOperation = z.infer<typeof changeOperationSchema>;
 
