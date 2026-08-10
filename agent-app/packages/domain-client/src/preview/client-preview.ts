@@ -4,6 +4,11 @@ import type {
   PageIR,
   RestrictedAction,
 } from "../ir/client-project-ir.js";
+import type { ComponentStyleSpec, StyleDeclaration, ThemeSpec } from "@kf/contracts";
+import { serializeStyleColor } from "../style/css-compiler.js";
+import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
+import { compileControlStyle } from "../style/style-engine.js";
+import { resolveComponentStyle } from "../style/theme-resolver.js";
 
 /**
  * Sanitized, self-contained HTML preview (brief Step 7).
@@ -19,6 +24,30 @@ import type {
 const DEFAULT_PAGE_WIDTH = 1280;
 const DEFAULT_PAGE_HEIGHT = 720;
 
+const PREVIEW_STYLE_THEME: ThemeSpec = Object.freeze({
+  background: "#ffffff",
+  surface: "#ffffff",
+  primary: "#2563eb",
+  accent: "#2563eb",
+  textPrimary: "#111827",
+  textSecondary: "#6b7280",
+  fontFamily: "sans-serif",
+  spacingUnit: 4,
+  radiusScale: { small: 4, medium: 8, large: 12 },
+});
+
+const EMPTY_STYLE: ComponentStyleSpec = Object.freeze({
+  declarations: Object.freeze({}),
+  states: Object.freeze({}),
+});
+
+const PREVIEW_BOX_SHADOWS: Readonly<Record<NonNullable<StyleDeclaration["boxShadow"]>, string>> = {
+  none: "none",
+  small: "0 2px 8px rgba(0,0,0,.12)",
+  medium: "0 8px 24px rgba(0,0,0,.18)",
+  large: "0 16px 40px rgba(0,0,0,.24)",
+};
+
 export const PREVIEW_CSP =
   "default-src 'none'; img-src data:; style-src 'unsafe-inline'";
 
@@ -31,26 +60,93 @@ export function escapeHtml(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
+function capabilityIdForControl(control: ControlIR): string {
+  switch (control.type) {
+    case "easyui":
+      return `easyui.${control.proto}`;
+    case "layout":
+      return `layout.${control.layoutType}`;
+    case "prototype":
+      return `prototype.${control.prototypeName}`;
+    default:
+      return control.type;
+  }
+}
+
+/**
+ * Serializes resolved, contract-limited declarations for the inert preview.
+ * This deliberately has no selector handling: KF runtime selectors and
+ * `styleDataNew` remain compilation details and never enter preview markup.
+ */
+function serializePreviewDeclarations(declarations: StyleDeclaration): string {
+  const values: Array<[string, string]> = [];
+  if (declarations.backgroundColor !== undefined) values.push(["background-color", serializeStyleColor(declarations.backgroundColor)]);
+  if (declarations.textColor !== undefined) values.push(["color", serializeStyleColor(declarations.textColor)]);
+  if (declarations.borderColor !== undefined) values.push(["border-color", serializeStyleColor(declarations.borderColor)]);
+  if (declarations.borderRadius !== undefined) values.push(["border-radius", `${declarations.borderRadius}px`]);
+  if (declarations.fontSize !== undefined) values.push(["font-size", `${declarations.fontSize}px`]);
+  if (declarations.fontWeight !== undefined) values.push(["font-weight", String(declarations.fontWeight)]);
+  if (declarations.lineHeight !== undefined) values.push(["line-height", String(declarations.lineHeight)]);
+  if (declarations.padding !== undefined) values.push(["padding", `${declarations.padding}px`]);
+  if (declarations.margin !== undefined) values.push(["margin", `${declarations.margin}px`]);
+  if (declarations.gap !== undefined) values.push(["gap", `${declarations.gap}px`]);
+  if (declarations.boxShadow !== undefined) values.push(["box-shadow", PREVIEW_BOX_SHADOWS[declarations.boxShadow]]);
+  if (declarations.opacity !== undefined) values.push(["opacity", String(declarations.opacity)]);
+  if (declarations.textAlign !== undefined) values.push(["text-align", declarations.textAlign]);
+  return values.map(([property, value]) => `${property}:${value}`).join(";");
+}
+
+function previewStyle(control: ControlIR): string {
+  if (control.style === undefined) return "";
+
+  try {
+    const compiled = compileControlStyle({
+      capabilityId: capabilityIdForControl(control),
+      theme: PREVIEW_STYLE_THEME,
+      instanceStyle: control.style,
+      runtimeProfile: KF36_RUNTIME_PROFILE,
+    });
+    if (compiled.unsupported.some(({ token }) => token.startsWith("declarations."))) {
+      return "";
+    }
+    return serializePreviewDeclarations(resolveComponentStyle(
+      PREVIEW_STYLE_THEME,
+      EMPTY_STYLE,
+      EMPTY_STYLE,
+      control.style,
+    ).declarations);
+  } catch {
+    // A preview must remain renderable and inert even if an unvalidated IR is
+    // supplied directly by a caller. The compiler reports style errors instead.
+    return "";
+  }
+}
+
+function inlineStyle(value: string): string {
+  return value === "" ? "" : ` style="${escapeHtml(value)}"`;
+}
+
 function renderControl(control: ControlIR): string {
-  const style = `left:${control.x}px;top:${control.y}px;width:${control.width}px;height:${control.height}px`;
+  const layoutStyle = `left:${control.x}px;top:${control.y}px;width:${control.width}px;height:${control.height}px`;
+  const resolvedStyle = previewStyle(control);
   const textOf = (c: ControlIR): string => {
     if (c.type === "text" || c.type === "button" || c.type === "richtext") return c.text;
     return c.type;
   };
   switch (control.type) {
     case "text":
-      return `<div class="control text" style="${style}">${escapeHtml(control.text)}</div>`;
+      return `<div class="control text" style="${layoutStyle};${resolvedStyle}">${escapeHtml(control.text)}</div>`;
     case "button": {
       const actionNote =
         control.action === undefined || control.action.kind === "noop"
           ? ""
           : `<span class="action">${escapeHtml(describeAction(control.action))}</span>`;
-      return `<div class="control button" style="${style}"><button type="button" disabled>${escapeHtml(control.text)}</button>${actionNote}</div>`;
+      return `<div class="control button" style="${layoutStyle}"><button type="button" disabled${inlineStyle(resolvedStyle)}>${escapeHtml(control.text)}</button>${actionNote}</div>`;
     }
     case "inputnumber":
-      return `<div class="control inputnumber" style="${style}"><input type="number" value="0" step="0.1" disabled><span class="bind">→ ${escapeHtml(control.variableId)}</span></div>`;
+      return `<div class="control inputnumber" style="${layoutStyle}"><input type="number" value="0" step="0.1" disabled${inlineStyle(resolvedStyle)}><span class="bind">→ ${escapeHtml(control.variableId)}</span></div>`;
     default:
-      return `<div class="control ${escapeHtml(control.type)}" style="${style}"><span class="placeholder">${escapeHtml(textOf(control))}</span></div>`;
+      return `<div class="control ${escapeHtml(control.type)}" style="${layoutStyle}"><span class="placeholder"${inlineStyle(resolvedStyle)}>${escapeHtml(textOf(control))}</span></div>`;
   }
 }
 

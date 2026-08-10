@@ -9,7 +9,46 @@ const minimalIrPath = fileURLToPath(
 );
 const ir = JSON.parse(await readFile(minimalIrPath, "utf8"));
 
+const irWithStyledButton = {
+  ...ir,
+  pages: [
+    {
+      ...ir.pages[0],
+      controls: ir.pages[0].controls.map((control: { type: string }) => (
+        control.type === "button"
+          ? {
+              ...control,
+              style: {
+                declarations: {
+                  backgroundColor: "{theme.primary}",
+                  borderRadius: 8,
+                },
+                states: {},
+              },
+            }
+          : control
+      )),
+    },
+  ],
+};
+
 describe("client preview", () => {
+  it("renders approved style intent without exposing raw KF CSS", () => {
+    const html = renderClientPreview(irWithStyledButton);
+
+    expect(html).toContain("background-color:#2563eb");
+    expect(html).toContain("border-radius:8px");
+    expect(html).not.toContain("styleDataNew");
+  });
+
+  it("keeps the preview inert when rendering approved style intent", () => {
+    const html = renderClientPreview(irWithStyledButton);
+
+    expect(html).not.toContain("<script");
+    expect(html).not.toMatch(/https?:\/\//i);
+    expect(html).toContain("default-src 'none'");
+  });
+
   it("escapes all control text and never emits a script tag", () => {
     const irWithXss = {
       ...ir,
