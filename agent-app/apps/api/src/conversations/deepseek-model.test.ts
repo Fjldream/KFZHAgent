@@ -484,6 +484,86 @@ describe("DeepSeekModelPort", () => {
     expect(system).toContain("承载");
   });
 
+  it("system prompt exposes KF special nodes (prototype) as complex-config passthrough", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({ intent: "NEW_REQUIREMENT", requestedDomains: ["kingclient"] }),
+            },
+          },
+        ],
+      }),
+    });
+    const port = new DeepSeekModelPort({
+      apiKey: "test-key",
+      fetch: fetchImpl,
+      baseUrl: "https://mock.local",
+    });
+    await port.classifyIntent({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [{ role: "user", content: "做一个带趋势图和报警窗口的大屏" }],
+      requirementText: "做一个带趋势图和报警窗口的大屏",
+    });
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    const system = body.messages[0].content;
+    // 特殊节点段必须出现：prototype 判别 + 全部 7 种 prototypeName。
+    expect(system).toContain("prototype");
+    for (const node of [
+      "CustomCharts",
+      "AlarmWindow",
+      "EventWindow",
+      "TrendChart",
+      "BarChart",
+      "PieChart",
+      "XYChart",
+    ]) {
+      expect(system).toContain(node);
+    }
+    // 复杂配置不对话生成、原样保留；图表占位（KF 渲染才出真图）。
+    expect(system).toContain("复杂配置");
+    expect(system).toContain("原样保留");
+    expect(system).toContain("type=prototype");
+    expect(system).toContain("prototypeName");
+    expect(system).toContain("KF 渲染");
+    expect(system).toContain("占位");
+  });
+
+  it("createChangePlan prompt whitelists prototype in create type union", async () => {
+    const pageGuid = "22222222-2222-4222-8222-222222222222";
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify({ operations: [] }) } }] }),
+    });
+    const port = new DeepSeekModelPort({
+      apiKey: "test-key",
+      fetch: fetchImpl,
+      baseUrl: "https://mock.local",
+    });
+    await port.createChangePlan({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [],
+      requirementText: "加一个趋势图",
+      revisionSummary: "页面 Page1；共 1 页",
+      editableEntities: [
+        { kind: "page", name: "Page1", type: "page", guid: pageGuid },
+        { kind: "control", name: "Text1", type: "text", guid: "11111111-1111-4111-8111-111111111111" },
+      ],
+    });
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    const userPrompt = body.messages[1].content;
+    // create 类型白名单（| 分隔的联合）必须包含 prototype。
+    expect(userPrompt).toContain("|prototype");
+  });
+
   it("createChangePlan keeps create ops whose pageId hits a known page GUID", async () => {
     const pageGuid = "22222222-2222-4222-8222-222222222222";
     const port = makePort({

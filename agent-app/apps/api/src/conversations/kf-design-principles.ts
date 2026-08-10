@@ -37,7 +37,11 @@ export const KF_DESIGN_PRINCIPLES_FULL = `${KF_DESIGN_PRINCIPLES}
 容器控件（用于承载静态控件，可嵌套）：
 - easyui 容器：datagrid（数据表格，可内嵌列）、linkbutton（按钮组，text/toggle/group）、tree/treegrid（树/树表）、sidemenu（侧边菜单）、combobox（下拉）、propertygrid（属性列表）、textbox（文本框）等主要 proto。
 - 布局容器 layout：layoutType 2=水平、4=垂直、3=选项卡、5=Docking 区域、0=折叠、6=导航；children 递归嵌套子控件（布局可嵌布局，如 datagrid 内嵌列、布局内嵌子控件）。
-趋势曲线/图表（Chart 节点）尚未支持：需要图表时用 text 控件标注区名（如 text=中部趋势区）作为占位，不得用按钮冒充。
+特殊节点（type=prototype，复杂配置节点，KF 渲染时才出真图）：
+- CustomCharts 自定义图表（objectType=1，ECharts option 在 objects[0] JSON 字符串）、AlarmWindow 告警窗口（告警列/数据源）、EventWindow 事件窗口、TrendChart 趋势图、BarChart 柱状图、PieChart 饼图、XYChart XY曲线。
+- 对话生成时只需给出 type=prototype + prototypeName + 几何（x/y/width/height）+ title；内部复杂配置（ECharts option/告警列/数据源/areas 等）不对话生成，由工具原样保留，不得凭空编造或重写。
+- 与容器一致的硬约束：prototype 节点内不得输出 type/uiModelType 字段（type 是 IR 判别保留字、uiModelType:null 会覆盖节点导致不渲染）。
+- 图表占位：特殊节点是占位节点，KF 渲染时才出真图，需要图表时用特殊节点承载，不得用按钮冒充。
 
 ### 容器序列化硬约束（KF 原生要求，违反会导致页面崩溃或区域空白）
 1. **容器 children（布局内的子对象）必须用 KF 原生 JSON 结构**，且**不得写「type」「uiModelType」字段**（KF 加载按 objectType→uiExtendType→uiModelType→layoutType 顺序分派、后者覆盖前者；uiModelType:null 会把控件覆盖成 null 导致不渲染）。只写：objectType + uiExtendType（easyui 控件）或 objectType + layoutType（嵌套布局）+ 几何 + 属性。

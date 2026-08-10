@@ -66,6 +66,11 @@ const SYSTEM_PROMPT = `你以礼貌、专业的客服顾问口吻与客户沟通
     - Docking 子对象用顶层 region 定位，水平/垂直子对象用 internalVertex:{left,top}
     - Docking 必须给 panels（每项含 region + size 或 width/height），region 与 children 对应
     - tree/sidemenu 必须给非空 data 数组（tree: [{id,text,state,children}]；sidemenu: [{text,iconCls,state,children}]），空 data 渲染空白
+  - 特殊节点（type=prototype，复杂配置节点，KF 渲染时才出真图）：
+    - CustomCharts 自定义图表、AlarmWindow 告警窗口、EventWindow 事件窗口、TrendChart 趋势图、BarChart 柱状图、PieChart 饼图、XYChart XY曲线
+    - 对话生成时只需给 type=prototype + prototypeName + 几何（x/y/width/height）+ title；内部复杂配置（ECharts option/告警列/数据源/areas 等）不对话生成、由工具原样保留，不得凭空编造或重写
+    - 与容器一致的硬约束：prototype 节点内不得输出 type/uiModelType 字段（type 是 IR 判别保留字、uiModelType:null 会覆盖节点导致不渲染）
+    - 图表占位：这些是占位节点，KF 渲染时才出真图，需要图表时用特殊节点承载，不得用按钮冒充
 - 控件动作只允许受限 DSL：{"kind":"setVariable","variableId":"$变量名","value":数字} 或 {"kind":"navigatePage","pageId":"页面名"}。
 - 禁止输出任意 JavaScript、脚本字符串、自由文本代码。
 
@@ -321,7 +326,7 @@ export class DeepSeekModelPort implements ModelPort {
         : "请根据需求输出变更计划 JSON。",
       "变更计划 JSON 格式（严格）：",
       '{"operations":[{"op":"update","entityId":"<清单中的 GUID>","entityType":"control","changes":[{"path":"/text","value":"..."}]}]}',
-      "create（新增控件）格式：{\"op\":\"create\",\"entityType\":\"control\",\"entityId\":\"新语义id如NewTitle\",\"properties\":{\"pageId\":\"<清单中的页面GUID>\",\"type\":\"text|button|inputnumber|switch|checkbox|radio|select|image|tabs|table|richtext|spacer|radiolegacy|checkboxlegacy|combobox|scale|list|treeview|webcontainer|gantt|factorycalendar|input|cascader|datetimepicker|dropdown|navmenu|tree|upload|transfer|tag|timeline|steps|datagrid|linkbutton|treegrid|sidemenu|propertygrid|textbox|layout\",\"text\":\"控件文本\",\"x\":60,\"y\":50,\"width\":300,\"height\":40}}",
+      "create（新增控件）格式：{\"op\":\"create\",\"entityType\":\"control\",\"entityId\":\"新语义id如NewTitle\",\"properties\":{\"pageId\":\"<清单中的页面GUID>\",\"type\":\"text|button|inputnumber|switch|checkbox|radio|select|image|tabs|table|richtext|spacer|radiolegacy|checkboxlegacy|combobox|scale|list|treeview|webcontainer|gantt|factorycalendar|input|cascader|datetimepicker|dropdown|navmenu|tree|upload|transfer|tag|timeline|steps|datagrid|linkbutton|treegrid|sidemenu|propertygrid|textbox|layout|prototype\",\"text\":\"控件文本\",\"x\":60,\"y\":50,\"width\":300,\"height\":40}}",
       "delete 格式：{\"op\":\"delete\",\"entityId\":\"<清单中的 GUID>\",\"entityType\":\"control\",\"destructiveConfirmed\":true}",
       "规则：update/delete 的 entityId 必须来自下方实体清单的 GUID；create 的 entityId 是新的语义 id，entityType 固定为 control，控件类型放在 properties.type，properties.pageId 必须是清单中页面的 GUID。",
       "update 的 changes[].path 只能使用受控字段：text、value、visible、disabled、backgroundColor、width、height、x、y、fontInfo（字体大小写在 fontInfo.fontSize，不要单独用 /fontSize 路径）、borderColor、layoutStyle、options/radioData/selectData 等控件自身字段；禁止使用未列出的路径（如 /fontSize、/custom）。",

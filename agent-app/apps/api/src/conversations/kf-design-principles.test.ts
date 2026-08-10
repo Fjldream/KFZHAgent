@@ -113,6 +113,37 @@ describe("KF_DESIGN_PRINCIPLES_FULL", () => {
     expect(KF_DESIGN_PRINCIPLES_FULL).toContain("数据表格");
     expect(KF_DESIGN_PRINCIPLES_FULL).toContain("内嵌列");
   });
+
+  it("lists all KF special nodes (prototype) in the capability boundary", () => {
+    for (const node of [
+      "CustomCharts",
+      "AlarmWindow",
+      "EventWindow",
+      "TrendChart",
+      "BarChart",
+      "PieChart",
+      "XYChart",
+    ]) {
+      expect(KF_DESIGN_PRINCIPLES_FULL).toContain(node);
+    }
+    expect(KF_DESIGN_PRINCIPLES_FULL).toContain("prototype");
+    expect(KF_DESIGN_PRINCIPLES_FULL).toContain("prototypeName");
+  });
+
+  it("marks special nodes as complex-config nodes with passthrough preservation", () => {
+    expect(KF_DESIGN_PRINCIPLES_FULL).toContain("复杂配置");
+    expect(KF_DESIGN_PRINCIPLES_FULL).toContain("原样保留");
+    expect(KF_DESIGN_PRINCIPLES_FULL).toContain("type=prototype");
+  });
+
+  it("applies the container-style hard constraint (no type/uiModelType) to special nodes", () => {
+    expect(KF_DESIGN_PRINCIPLES_FULL).toContain("不得输出 type/uiModelType");
+  });
+
+  it("marks chart special nodes as placeholders that only render at KF runtime", () => {
+    expect(KF_DESIGN_PRINCIPLES_FULL).toContain("KF 渲染");
+    expect(KF_DESIGN_PRINCIPLES_FULL).toContain("占位");
+  });
 });
 
 describe("DeepSeekModelPort integration", () => {
