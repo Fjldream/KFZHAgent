@@ -59,6 +59,23 @@ function deferredCapability(
   };
 }
 
+function freezeDimension<T extends { supported: string[]; unsupported: string[] }>(dimension: T): T {
+  Object.freeze(dimension.supported);
+  Object.freeze(dimension.unsupported);
+  return Object.freeze(dimension);
+}
+
+function freezeCapability(capability: ControlCapability): ControlCapability {
+  freezeDimension(capability.generation);
+  freezeDimension(capability.style);
+  freezeDimension(capability.preview);
+  freezeDimension(capability.dataBinding);
+  freezeDimension(capability.interaction);
+  Object.freeze(capability.runtimeVerification);
+  Object.freeze(capability.limitations);
+  return Object.freeze(capability);
+}
+
 /**
  * Explicit capability records for every compiler inventory entry. New compiler
  * inventory must be added here deliberately; assertCapabilityCoverage() makes
@@ -142,7 +159,7 @@ const CONTROL_CAPABILITIES: readonly ControlCapability[] = Object.freeze([
   deferredCapability("prototype.BarChart", "prototype", "Bar chart", "preserve-only", "Bar chart styling and data rendering require a dedicated adapter."),
   deferredCapability("prototype.PieChart", "prototype", "Pie chart", "preserve-only", "Pie chart styling and data rendering require a dedicated adapter."),
   deferredCapability("prototype.XYChart", "prototype", "XY chart", "preserve-only", "XY chart styling and data rendering require a dedicated adapter."),
-].sort((left, right) => left.id.localeCompare(right.id)));
+].sort((left, right) => left.id.localeCompare(right.id)).map(freezeCapability));
 
 export function listControlCapabilities(): readonly ControlCapability[] {
   return CONTROL_CAPABILITIES;

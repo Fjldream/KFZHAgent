@@ -24,4 +24,24 @@ describe("control capability registry", () => {
     expect(getControlCapability("webcontainer")?.style.status)
       .toBe("unsupported");
   });
+
+  it("does not allow callers to mutate canonical capability records", () => {
+    const fromLookup = getControlCapability("button");
+    const fromList = listControlCapabilities().find((capability) => capability.id === "text");
+
+    expect(fromLookup).toBeDefined();
+    expect(fromList).toBeDefined();
+
+    try {
+      fromLookup!.style.status = "full";
+      fromLookup!.limitations.push("forged limitation");
+      fromList!.style.supported.push("forged token");
+    } catch {
+      // Frozen records reject mutation in strict-mode ESM; snapshots may instead absorb it.
+    }
+
+    expect(getControlCapability("button")?.style.status).toBe("pending-verification");
+    expect(getControlCapability("button")?.limitations).not.toContain("forged limitation");
+    expect(getControlCapability("text")?.style.supported).not.toContain("forged token");
+  });
 });
