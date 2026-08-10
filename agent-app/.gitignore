@@ -19,3 +19,6 @@ sanitized-golden/
 test-results/
 playwright-report/
 tests/e2e/.e2e-pids.json
+
+# Task: demo runtime artifacts (never committed)
+.kf-demo-artifacts/
