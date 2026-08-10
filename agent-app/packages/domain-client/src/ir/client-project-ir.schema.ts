@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ComponentStyleSpecSchema } from "@kf/contracts";
 
 /**
  * ClientProjectIR: a schema-constrained, lossless view of a KingFusion client
@@ -19,6 +20,8 @@ export const BaseControlIR = z.object({
   y: z.number().nonnegative(),
   width: z.number().positive(),
   height: z.number().positive(),
+  /** Structured style intent only; arbitrary CSS is intentionally not representable. */
+  style: ComponentStyleSpecSchema.optional(),
 });
 export type BaseControlIR = z.infer<typeof BaseControlIR>;
 

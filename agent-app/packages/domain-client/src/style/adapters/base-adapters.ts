@@ -137,8 +137,6 @@ export function assertStyleAdapterRegistry(): void {
   }
 }
 
-assertStyleAdapterRegistry();
-
 export function listStyleAdapters(): readonly StyleAdapter[] {
   return STYLE_ADAPTERS;
 }

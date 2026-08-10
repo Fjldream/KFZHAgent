@@ -3,10 +3,13 @@ import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { FieldPatch } from "@kf/contracts";
+import { ComponentStyleSpecSchema, type ComponentStyleSpec, type ThemeSpec } from "@kf/contracts";
 import { inspectClientProject, type EntityIndex, type InspectResult } from "../inspect/client-inspector.js";
 import { stableStringify, type ClientWorkspace } from "../compile/client-compiler.js";
 import { deriveGuid } from "../compile/guid-factory.js";
 import { ensureChildGuids } from "../compile/control-compiler.js";
+import { compileControlStyle } from "../style/style-engine.js";
+import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
 import { mergeControlTemplate, type TemplateJson } from "../templates/merge-template.js";
 import baseFieldsJson from "../templates/base-fields.json" with { type: "json" };
 import buttonTemplate from "../templates/control-templates/button.json" with { type: "json" };
@@ -112,13 +115,14 @@ import {
 // ---------------------------------------------------------------------------
 
 export interface NormalizedOperation {
-  op: "create" | "update" | "delete";
+  op: "create" | "update" | "delete" | "applyStyle";
   entityType?: string;
   entityId: string;
   changes: FieldPatch[];
   properties: Record<string, unknown>;
   destructiveConfirmed: boolean;
   digest?: string;
+  style?: ComponentStyleSpec;
 }
 
 export interface NormalizedPlan {
@@ -203,9 +207,27 @@ export function normalizeChangePlan(input: unknown): NormalizedPlan {
           destructiveConfirmed: rec["destructiveConfirmed"] === true,
           ...(typeof rec["digest"] === "string" ? { digest: rec["digest"] } : {}),
         };
+      case "applyStyle": {
+        if (entityType !== "control") {
+          throw new PatchConflictError(`operations[${index}].applyStyle requires entityType "control"`);
+        }
+        const parsedStyle = ComponentStyleSpecSchema.safeParse(rec["style"]);
+        if (!parsedStyle.success) {
+          throw new PatchConflictError(`operations[${index}].style is not a valid ComponentStyleSpec`);
+        }
+        return {
+          op: "applyStyle",
+          entityId,
+          entityType: "control",
+          changes: [],
+          properties: {},
+          destructiveConfirmed: false,
+          style: parsedStyle.data,
+        };
+      }
       default:
         throw new PatchConflictError(
-          `operations[${index}] has unknown action "${op}" (expected create/update/delete)`,
+          `operations[${index}] has unknown action "${op}" (expected create/update/delete/applyStyle)`,
         );
     }
   });
@@ -224,6 +246,18 @@ export function deleteOperationDigest(entityId: string): string {
 }
 
 export const patchConflict = "PATCH_CONFLICT";
+
+const PATCH_STYLE_THEME: ThemeSpec = Object.freeze({
+  background: "#ffffff",
+  surface: "#ffffff",
+  primary: "#2563eb",
+  accent: "#2563eb",
+  textPrimary: "#111827",
+  textSecondary: "#6b7280",
+  fontFamily: "sans-serif",
+  spacingUnit: 4,
+  radiusScale: { small: 4, medium: 8, large: 12 },
+});
 
 // ---------------------------------------------------------------------------
 // Templates (same reviewed set as the deterministic compiler)
@@ -781,6 +815,67 @@ async function applyUpdate(
   await writeJsonFile(candidate, versionDir, loc.file, doc);
 }
 
+function capabilityIdForImportedControl(
+  controlType: string | undefined,
+  control: Record<string, unknown>,
+): string {
+  if (controlType === "easyui") return `easyui.${asNumber(control["uiExtendType"])}`;
+  if (controlType === "layout") return `layout.${asNumber(control["layoutType"])}`;
+  if (controlType === "prototype") {
+    return `prototype.${typeof control["prototypeName"] === "string" ? control["prototypeName"] : ""}`;
+  }
+  return controlType ?? "";
+}
+
+/** Applies only reviewed, allowlisted native style fields to a raw KF control. */
+function applyStyleToControl(
+  control: Record<string, unknown>,
+  controlType: string | undefined,
+  style: ComponentStyleSpec,
+): void {
+  const compiled = compileControlStyle({
+    capabilityId: capabilityIdForImportedControl(controlType, control),
+    theme: PATCH_STYLE_THEME,
+    instanceStyle: style,
+    runtimeProfile: KF36_RUNTIME_PROFILE,
+  });
+  if (compiled.unsupported.length > 0) {
+    throw new PatchConflictError(
+      `UNSUPPORTED_STYLE_TOKEN: ${compiled.unsupported.map((item) => item.token).join(", ")}`,
+    );
+  }
+  const allowed = allowedFieldsFor({ kind: "control", ...(controlType ? { controlType } : {}) });
+  for (const [field, value] of Object.entries(compiled.nativeFields)) {
+    if (!allowed.has(field)) {
+      throw new PatchConflictError(`style native field "${field}" is not allowlisted for control/${controlType ?? "unknown"}`);
+    }
+    control[field] = value;
+  }
+  if (!allowed.has("styleDataNew")) {
+    throw new PatchConflictError(`styleDataNew is not allowlisted for control/${controlType ?? "unknown"}`);
+  }
+  control["styleDataNew"] = compiled.styleDataNew;
+}
+
+async function applyStyle(
+  candidate: string,
+  versionDir: string,
+  inspection: InspectResult,
+  baseRoot: string,
+  op: NormalizedOperation,
+): Promise<void> {
+  if (op.style === undefined) {
+    throw new PatchConflictError("applyStyle operation is missing its validated style");
+  }
+  const loc = await locateEntity(baseRoot, inspection.index, versionDir, op.entityId, op.entityType);
+  if (!isControlLocation(loc)) {
+    throw new PatchConflictError(`applyStyle target "${op.entityId}" is not a control`);
+  }
+  const { doc, root } = await entityRootOf(candidate, versionDir, loc);
+  applyStyleToControl(root, loc.controlType, op.style);
+  await writeJsonFile(candidate, versionDir, loc.file, doc);
+}
+
 async function applyDelete(
   candidate: string,
   versionDir: string,
@@ -878,6 +973,13 @@ async function applyCreate(
       const page = inspection.index.pages[pageId];
       if (page === undefined) throw new PatchConflictError(`create control: page "${pageId}" not found`);
       const type = typeof op.properties["type"] === "string" ? (op.properties["type"]) : "button";
+      const parsedStyle = op.properties["style"] === undefined
+        ? undefined
+        : ComponentStyleSpecSchema.safeParse(op.properties["style"]);
+      if (parsedStyle !== undefined && !parsedStyle.success) {
+        throw new PatchConflictError("create control properties.style is not a valid ComponentStyleSpec");
+      }
+      const style = parsedStyle?.data;
       const guid = deriveGuid(build, op.entityId);
       const doc = await readJsonFile(candidate, versionDir, page.file);
       const objects = Array.isArray(doc["objects"]) ? (doc["objects"] as unknown[]) : [];
@@ -921,6 +1023,7 @@ async function applyCreate(
         if (proto === 11) {
           delete control["objectType"];
         }
+        if (style !== undefined) applyStyleToControl(control, type, style);
         // LLM 可用 properties.parentId 表达容器嵌套（布局内子控件）；找不到目标
         // 布局时回退页面顶层 objects。
         const parentId = op.properties["parentId"];
@@ -954,6 +1057,7 @@ async function applyCreate(
         }
         if (op.properties["panels"] !== undefined) overrides["dPanelsOption"] = op.properties["panels"];
         const control = mergeControlTemplate(layoutTemplate, overrides);
+        if (style !== undefined) applyStyleToControl(control, type, style);
         objects.push(control);
       } else if (type === "prototype") {
         // KF 特殊节点（prototypeName 判别）：模板 = 该原型的基础字段 + 宽容
@@ -971,7 +1075,7 @@ async function applyCreate(
         }
         const RESERVED_PROTOTYPE_FIELDS = new Set([
           "type", "prototypeName", "id", "name", "guid",
-          "x", "y", "width", "height", "pageId", "uiModelType",
+          "x", "y", "width", "height", "pageId", "uiModelType", "style",
         ]);
         const pass: Record<string, unknown> = {};
         for (const [key, value] of Object.entries(op.properties)) {
@@ -1008,6 +1112,7 @@ async function applyCreate(
           overrides["fixedSize"] = [overrides["width"], overrides["height"]];
         }
         const control = mergeControlTemplate(protoTemplate, overrides);
+        if (style !== undefined) applyStyleToControl(control, type, style);
         objects.push(control);
       } else {
         const template = CONTROL_TEMPLATES[type];
@@ -1034,6 +1139,7 @@ async function applyCreate(
           if (value !== undefined) (overrides as Record<string, unknown>)[key] = value;
         }
         const control = mergeControlTemplate(mergeControlTemplate(BASE_FIELDS, template), overrides);
+        if (style !== undefined) applyStyleToControl(control, type, style);
         // 静态控件也可用 parentId 放进布局（同 easyui 分支）
         const parentId = op.properties["parentId"];
         if (parentId === undefined || !pushControlIntoParent(objects, control, parentId)) {
@@ -1142,6 +1248,8 @@ export async function applyClientPatch(
       await applyCreate(candidate, versionDir, inspection, base, op, plan.workspaceId);
     } else if (op.op === "update") {
       await applyUpdate(candidate, versionDir, inspection, base, op);
+    } else if (op.op === "applyStyle") {
+      await applyStyle(candidate, versionDir, inspection, base, op);
     } else {
       await applyDelete(candidate, versionDir, inspection, base, op);
     }

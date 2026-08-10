@@ -98,6 +98,26 @@ describe("LayoutContainerIR", () => {
 });
 
 describe("ControlIR discriminated union", () => {
+  it("accepts structured style intent but rejects raw CSS and undeclared tokens", () => {
+    const valid = {
+      id: "Button1",
+      x: 0,
+      y: 0,
+      width: 100,
+      height: 40,
+      type: "button",
+      text: "Save",
+      style: {
+        declarations: { backgroundColor: "#2563eb", borderRadius: 8 },
+        states: {},
+      },
+    };
+
+    expect(ControlIR.parse(valid)).toMatchObject({ style: valid.style });
+    expect(ControlIR.safeParse({ ...valid, style: { css: "body { display: none }" } }).success).toBe(false);
+    expect(ControlIR.safeParse({ ...valid, style: { declarations: { position: "fixed" }, states: {} } }).success).toBe(false);
+  });
+
   it("dispatches the easyui and layout variants on `type`", () => {
     const easyui = ControlIR.parse({
       id: "g1",

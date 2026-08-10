@@ -64,6 +64,7 @@ import easyuiWindowTemplate from "../templates/control-templates/easyui-window.j
 import layoutTemplate from "../templates/control-templates/layout.json" with { type: "json" };
 import prototypeBaseTemplate from "../templates/control-templates/prototype-base.json" with { type: "json" };
 import type { ControlIR, RestrictedAction, EasyuiControlIR, LayoutContainerIR } from "../ir/client-project-ir.js";
+import type { ComponentStyleSpec, ThemeSpec } from "@kf/contracts";
 import {
   EASYUI_ALL_FIELDS,
   EASYUI_PROTO_FIELDS,
@@ -71,6 +72,8 @@ import {
 } from "../ir/easyui-types.js";
 import { mergeControlTemplate, type TemplateJson } from "../templates/merge-template.js";
 import { deriveGuid, type BuildSeed } from "./guid-factory.js";
+import { compileControlStyle } from "../style/style-engine.js";
+import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
 
 /**
  * Per-control compilation (brief Step 5 + Step 6).
@@ -209,7 +212,7 @@ export function supportedEasyuiProtos(): readonly number[] {
 }
 
 /** IR fields every control variant carries (everything the schema defines). */
-const COMMON_IR_FIELDS = new Set(["id", "type", "x", "y", "width", "height"]);
+const COMMON_IR_FIELDS = new Set(["id", "type", "x", "y", "width", "height", "style"]);
 const TYPE_IR_FIELDS: Readonly<Record<string, ReadonlySet<string>>> = {
   text: new Set(["text"]),
   button: new Set(["text", "action"]),
@@ -289,24 +292,67 @@ export function compileControl(
   control: ControlIR,
   ctx: CompileContext,
 ): TemplateJson {
+  let compiled: TemplateJson;
   if (control.type === "easyui") {
-    return compileEasyuiControl(build, control);
+    compiled = compileEasyuiControl(build, control);
+  } else if (control.type === "layout") {
+    compiled = compileLayoutControl(build, control);
+  } else if (control.type === "prototype") {
+    compiled = compileSpecialNode(build, control);
+  } else {
+    const template = CONTROL_TEMPLATES[control.type];
+    if (template === undefined) {
+      throw new ModelOutputInvalidError(
+        `control type "${control.type}" has no reviewed template ` +
+          `(supported: ${supportedControlTypes().join(", ")})`,
+      );
+    }
+    const merged = mergeControlTemplate(BASE_FIELDS, template);
+    compiled = mergeControlTemplate(merged, applySchemaOverrides(build, control, ctx));
   }
-  if (control.type === "layout") {
-    return compileLayoutControl(build, control);
+  return applyControlStyle(compiled, control);
+}
+
+const DIRECT_IR_STYLE_THEME: ThemeSpec = Object.freeze({
+  background: "#ffffff",
+  surface: "#ffffff",
+  primary: "#2563eb",
+  accent: "#2563eb",
+  textPrimary: "#111827",
+  textSecondary: "#6b7280",
+  fontFamily: "sans-serif",
+  spacingUnit: 4,
+  radiusScale: { small: 4, medium: 8, large: 12 },
+});
+
+function capabilityIdForControl(control: ControlIR): string {
+  switch (control.type) {
+    case "easyui":
+      return `easyui.${control.proto}`;
+    case "layout":
+      return `layout.${control.layoutType}`;
+    case "prototype":
+      return `prototype.${control.prototypeName}`;
+    default:
+      return control.type;
   }
-  if (control.type === "prototype") {
-    return compileSpecialNode(build, control);
-  }
-  const template = CONTROL_TEMPLATES[control.type];
-  if (template === undefined) {
+}
+
+/** Applies compiled style only after semantic/template overrides have been resolved. */
+function applyControlStyle(compiled: TemplateJson, control: ControlIR): TemplateJson {
+  if (control.style === undefined) return compiled;
+  const result = compileControlStyle({
+    capabilityId: capabilityIdForControl(control),
+    theme: DIRECT_IR_STYLE_THEME,
+    instanceStyle: control.style as ComponentStyleSpec,
+    runtimeProfile: KF36_RUNTIME_PROFILE,
+  });
+  if (result.unsupported.length > 0) {
     throw new ModelOutputInvalidError(
-      `control type "${control.type}" has no reviewed template ` +
-        `(supported: ${supportedControlTypes().join(", ")})`,
+      `UNSUPPORTED_STYLE_TOKEN: ${result.unsupported.map((item) => item.token).join(", ")}`,
     );
   }
-  const merged = mergeControlTemplate(BASE_FIELDS, template);
-  return mergeControlTemplate(merged, applySchemaOverrides(build, control, ctx));
+  return { ...compiled, ...result.nativeFields, styleDataNew: result.styleDataNew };
 }
 
 /**

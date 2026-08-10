@@ -81,6 +81,46 @@ async function wholeControl(root: Root, guid: string): Promise<Record<string, un
 }
 
 describe("client patcher (Task 7 brief Step 1)", () => {
+  it("applies structured style to an imported control without changing unknown fields", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const candidate = await applyClientPatch(base, plan([{
+      op: "applyStyle",
+      entityId: "button-guid-1",
+      entityType: "control",
+      style: { declarations: { backgroundColor: "#2563eb", borderRadius: 8 }, states: {} },
+    }]));
+
+    expect(await controlField(candidate, "button-guid-1", "backgroundColor")).toBe("#2563eb");
+    expect(await controlField(candidate, "button-guid-1", "styleDataNew")).toContain("border-radius:8px");
+    expect(await controlField(candidate, "button-guid-1", "customFutureField")).toEqual({ keep: true });
+  });
+
+  it("validates and compiles create-control styles after template merging", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const inspected = await inspectClientProject(base);
+    const pageId = Object.keys(inspected.index.pages)[0];
+    if (!pageId) throw new Error("fixture must contain a page");
+    const candidate = await applyClientPatch(base, plan([{
+      op: "create",
+      entityType: "control",
+      entityId: "StyledButton",
+      properties: {
+        pageId,
+        type: "button",
+        x: 100,
+        y: 100,
+        width: 120,
+        height: 40,
+        text: "Save",
+        style: { declarations: { backgroundColor: "#2563eb", borderRadius: 8 }, states: {} },
+      },
+    }]));
+    const createdGuid = deriveGuid({ seed: "w-test" }, "StyledButton");
+
+    expect(await controlField(candidate, createdGuid, "backgroundColor")).toBe("#2563eb");
+    expect(await controlField(candidate, createdGuid, "styleDataNew")).toContain("border-radius:8px");
+  });
+
   it("changes only the confirmed field and preserves unknown content", async () => {
     const base = await copyFixture("client-unknown-field");
     const candidate = await applyClientPatch(base, {

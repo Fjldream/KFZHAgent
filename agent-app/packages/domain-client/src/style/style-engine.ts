@@ -1,5 +1,5 @@
 import type { ComponentStyleSpec, ThemeSpec } from "@kf/contracts";
-import { getStyleAdapter } from "./adapters/base-adapters.js";
+import { assertStyleAdapterRegistry, getStyleAdapter } from "./adapters/base-adapters.js";
 import { compileScopedCss, type DeclarationsByState } from "./css-compiler.js";
 import type { KFRuntimeProfile } from "./runtime-profile.js";
 import type { CompiledControlStyle, StyleWarning, UnsupportedStyle } from "./style-adapter.js";
@@ -56,6 +56,9 @@ function unavailableAdapterWarning(capabilityId: string): StyleWarning {
  * remains the sole trusted-selector boundary.
  */
 export function compileControlStyle(input: CompileControlStyleInput): CompiledControlStyle {
+  // Delayed until first compilation to avoid the compiler → style engine →
+  // registry initialization cycle while retaining the adapter/registry gate.
+  assertStyleAdapterRegistry();
   const resolvedStyle = resolveComponentStyle(
     input.theme,
     input.roleStyle ?? EMPTY_STYLE,

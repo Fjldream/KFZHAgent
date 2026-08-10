@@ -15,6 +15,43 @@ const ctx: CompileContext = {
   resolveVariableName: (id) => id,
 };
 
+describe("control compiler — structured styles", () => {
+  it("compiles the same StyleSpec for a new IR button", () => {
+    const out = compileControl(build, {
+      id: "StyledButton",
+      type: "button",
+      x: 10,
+      y: 20,
+      width: 120,
+      height: 40,
+      text: "Save",
+      style: {
+        declarations: { backgroundColor: "#2563eb", borderRadius: 8 },
+        states: {},
+      },
+    }, ctx);
+
+    expect(out["backgroundColor"]).toBe("#2563eb");
+    expect(out["styleDataNew"]).toContain("border-radius:8px");
+  });
+
+  it("rejects direct IR styles that contain unsupported declarations", () => {
+    expect(() => compileControl(build, {
+      id: "StyledButton",
+      type: "button",
+      x: 10,
+      y: 20,
+      width: 120,
+      height: 40,
+      text: "Save",
+      style: {
+        declarations: {},
+        states: { error: { textColor: "#dc2626" } },
+      },
+    }, ctx)).toThrow("MODEL_OUTPUT_INVALID: UNSUPPORTED_STYLE_TOKEN");
+  });
+});
+
 function easyui(overrides: Record<string, unknown> = {}): ControlIR {
   return {
     id: "Datagrid1",
