@@ -6,7 +6,7 @@ import {
 } from "./kf-design-principles.js";
 import { DeepSeekModelPort } from "./deepseek-model.js";
 
-/** 设计计划层支持的 12 种控件类型（与 DesignPlanControlType 对齐）。 */
+/** 支持的全部 31 种 KF 控件类型（与 CONTROL_TYPE_BY_UIMODEL_TYPE 对齐）。 */
 const CONTROLS = [
   "text",
   "button",
@@ -20,6 +20,26 @@ const CONTROLS = [
   "table",
   "richtext",
   "spacer",
+  "radiolegacy",
+  "checkboxlegacy",
+  "combobox",
+  "scale",
+  "list",
+  "treeview",
+  "webcontainer",
+  "gantt",
+  "factorycalendar",
+  "input",
+  "cascader",
+  "datetimepicker",
+  "dropdown",
+  "navmenu",
+  "tree",
+  "upload",
+  "transfer",
+  "tag",
+  "timeline",
+  "steps",
 ];
 
 describe("KF_DESIGN_PRINCIPLES", () => {
@@ -51,7 +71,7 @@ describe("KF_DESIGN_PRINCIPLES_FULL", () => {
     expect(KF_DESIGN_PRINCIPLES_FULL).toContain("占位");
   });
 
-  it("lists all 12 supported KF control types", () => {
+  it("lists all supported KF control types", () => {
     for (const control of CONTROLS) {
       expect(KF_DESIGN_PRINCIPLES_FULL).toContain(control);
     }
