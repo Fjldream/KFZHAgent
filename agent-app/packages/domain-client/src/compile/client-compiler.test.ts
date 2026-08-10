@@ -109,7 +109,8 @@ describe("client compiler", () => {
       return page.guid;
     };
     expect(await readPageGuid(a)).not.toBe(await readPageGuid(b));
-    expect(await readPageGuid(a)).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    // KF 页面 GUID 带 k 前缀（KF 序列化规范），其余保持 UUID 格式
+    expect(await readPageGuid(a)).toMatch(/^k[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   });
 
   it("rejects duplicate semantic page ids", async () => {
@@ -253,7 +254,8 @@ describe("client compiler", () => {
     const inspected = await inspectClientProject(unpacked);
     expect(inspected.summary.pageCount).toBe(1);
     expect(inspected.summary.pages[0].name).toBe("Page1");
-    expect(inspected.summary.pages[0].guid).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    // KF 页面 GUID 带 k 前缀
+    expect(inspected.summary.pages[0].guid).toMatch(/^k[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(inspected.summary.pages[0].controls).toHaveLength(3);
     expect(inspected.summary.pages[0].controls.map((c) => c.type).sort()).toEqual([
       "button",

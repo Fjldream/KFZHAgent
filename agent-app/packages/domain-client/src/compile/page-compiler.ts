@@ -38,12 +38,15 @@ export function compilePage(
       `unsafe page name ${JSON.stringify(page.name)} (must be non-empty and contain no path separators)`,
     );
   }
-  const pageGuid = deriveGuid(build, page.name);
+  const pageGuid = "k" + deriveGuid(build, page.name);
   const width = page.width ?? SKELETON_DEFAULT_WIDTH;
   const height = page.height ?? SKELETON_DEFAULT_HEIGHT;
 
   const json: TemplateJson = structuredClone(pageSkeleton);
   json["guid"] = pageGuid;
+  // KF 页面 JSON 顶层需要 pageViewWidth/pageViewHeight（KF 客户端打开页面时读取）。
+  json["pageViewWidth"] = width;
+  json["pageViewHeight"] = height;
   const pageProperty = json["pageProperty"] as Record<string, unknown>;
   pageProperty["name"] = page.name;
   pageProperty["pageSize"] = { width, height };

@@ -97,7 +97,9 @@ export async function compileClientProject(
 ): Promise<ClientWorkspace> {
   const ir = validateIr(input);
   const variableGroupGuid = deriveGuid(build, "variables");
-  const pageGroupGuid = deriveGuid(build, "page-group");
+  // KF 页面组 GUID 带 k 前缀（KF 序列化规范：页面组/页面 GUID 以 "k" 开头，
+  // 如 k9b6a50cb-4b72-406f-b894-fc5a3b3e3797；控件 GUID 无前缀）。
+  const pageGroupGuid = "k" + deriveGuid(build, "page-group");
 
   // ---------------------------------------------------------------------
   // Semantic-id uniqueness + reference indexes (brief Step 4)
@@ -114,7 +116,7 @@ export async function compileClientProject(
     }
     pageNames.add(page.name);
     pageIds.add(page.id);
-    pageNameToGuid.set(page.name, deriveGuid(build, page.name));
+    pageNameToGuid.set(page.name, "k" + deriveGuid(build, page.name));
 
     const controlIds = new Set<string>();
     for (const control of page.controls) {
@@ -409,6 +411,174 @@ function validateControl(value: unknown, index: number): ControlIR {
       }
       return { ...base, type: "spacer", axis };
     }
+    case "radiolegacy":
+      return {
+        ...base,
+        type: "radiolegacy",
+        options: requireOptions(rec["options"], "control.options"),
+        ...optionalString(rec["value"], "value"),
+      };
+    case "checkboxlegacy":
+      return {
+        ...base,
+        type: "checkboxlegacy",
+        ...optionalString(rec["label"], "label"),
+        checked: requireBoolean(rec["checked"], "control.checked"),
+      };
+    case "combobox":
+      return {
+        ...base,
+        type: "combobox",
+        options: requireOptions(rec["options"], "control.options"),
+        ...optionalString(rec["value"], "value"),
+        ...(rec["editable"] === undefined ? {} : { editable: requireBoolean(rec["editable"], "control.editable") }),
+      };
+    case "scale":
+      return {
+        ...base,
+        type: "scale",
+        ...optionalNumber(rec["min"], "min"),
+        ...optionalNumber(rec["max"], "max"),
+        ...optionalNumber(rec["value"], "value"),
+        ...optionalNumber(rec["step"], "step"),
+      };
+    case "list":
+      return {
+        ...base,
+        type: "list",
+        options: requireOptions(rec["options"], "control.options"),
+      };
+    case "treeview":
+      return {
+        ...base,
+        type: "treeview",
+        ...(rec["showCheckbox"] === undefined ? {} : { showCheckbox: requireBoolean(rec["showCheckbox"], "control.showCheckbox") }),
+      };
+    case "webcontainer":
+      return {
+        ...base,
+        type: "webcontainer",
+        ...optionalString(rec["url"], "url"),
+        ...(rec["scrollbar"] === undefined ? {} : { scrollbar: requireBoolean(rec["scrollbar"], "control.scrollbar") }),
+      };
+    case "gantt":
+      return { ...base, type: "gantt" };
+    case "factorycalendar":
+      return {
+        ...base,
+        type: "factorycalendar",
+        ...optionalString(rec["value"], "value"),
+        ...optionalString(rec["dateFormat"], "dateFormat"),
+      };
+    case "input":
+      return {
+        ...base,
+        type: "input",
+        ...optionalString(rec["value"], "value"),
+        ...optionalString(rec["placeholder"], "placeholder"),
+        ...optionalString(rec["inputType"], "inputType"),
+        ...(rec["disabled"] === undefined ? {} : { disabled: requireBoolean(rec["disabled"], "control.disabled") }),
+        ...(rec["clearable"] === undefined ? {} : { clearable: requireBoolean(rec["clearable"], "control.clearable") }),
+        ...(rec["maxlength"] === undefined ? {} : { maxlength: requireNumber(rec["maxlength"], "control.maxlength") }),
+      };
+    case "cascader":
+      return {
+        ...base,
+        type: "cascader",
+        ...(rec["options"] === undefined
+          ? {}
+          : {
+              options: requireArray(rec["options"], "control.options").map((o, oi) =>
+                requireRecord(o, `control.options[${oi}]`),
+              ),
+            }),
+        ...optionalString(rec["placeholder"], "placeholder"),
+        ...(rec["filterable"] === undefined ? {} : { filterable: requireBoolean(rec["filterable"], "control.filterable") }),
+        ...(rec["clearable"] === undefined ? {} : { clearable: requireBoolean(rec["clearable"], "control.clearable") }),
+      };
+    case "datetimepicker":
+      return {
+        ...base,
+        type: "datetimepicker",
+        ...optionalString(rec["value"], "value"),
+        ...optionalString(rec["pickerType"], "pickerType"),
+        ...optionalString(rec["placeholder"], "placeholder"),
+        ...optionalString(rec["format"], "format"),
+      };
+    case "dropdown":
+      return {
+        ...base,
+        type: "dropdown",
+        options: requireOptions(rec["options"], "control.options"),
+        ...optionalString(rec["text"], "text"),
+        ...(rec["splitButton"] === undefined ? {} : { splitButton: requireBoolean(rec["splitButton"], "control.splitButton") }),
+      };
+    case "navmenu":
+      return {
+        ...base,
+        type: "navmenu",
+        ...optionalString(rec["mode"], "mode"),
+        ...(rec["options"] === undefined
+          ? {}
+          : {
+              options: requireArray(rec["options"], "control.options").map((o, oi) =>
+                requireRecord(o, `control.options[${oi}]`),
+              ),
+            }),
+      };
+    case "tree":
+      return {
+        ...base,
+        type: "tree",
+        ...(rec["showCheckbox"] === undefined ? {} : { showCheckbox: requireBoolean(rec["showCheckbox"], "control.showCheckbox") }),
+        ...(rec["indent"] === undefined ? {} : { indent: requireNumber(rec["indent"], "control.indent") }),
+        ...(rec["expandOnClickNode"] === undefined ? {} : { expandOnClickNode: requireBoolean(rec["expandOnClickNode"], "control.expandOnClickNode") }),
+      };
+    case "upload":
+      return {
+        ...base,
+        type: "upload",
+        ...optionalString(rec["action"], "action"),
+        ...optionalString(rec["accept"], "accept"),
+        ...(rec["multiple"] === undefined ? {} : { multiple: requireBoolean(rec["multiple"], "control.multiple") }),
+      };
+    case "transfer":
+      return {
+        ...base,
+        type: "transfer",
+        options: requireOptions(rec["options"], "control.options"),
+        ...(rec["titles"] === undefined
+          ? {}
+          : { titles: requireArray(rec["titles"], "control.titles").map((t, ti) => requireString(t, `control.titles[${ti}]`)) as [string, string] }),
+      };
+    case "tag":
+      return {
+        ...base,
+        type: "tag",
+        ...optionalString(rec["effect"], "effect"),
+        ...(rec["closable"] === undefined ? {} : { closable: requireBoolean(rec["closable"], "control.closable") }),
+        ...(rec["hit"] === undefined ? {} : { hit: requireBoolean(rec["hit"], "control.hit") }),
+      };
+    case "timeline":
+      return {
+        ...base,
+        type: "timeline",
+        items: requireArray(rec["items"], "control.items").map((t, ti) => {
+          const tr = requireRecord(t, `control.items[${ti}]`);
+          return {
+            title: requireString(tr["title"], "items.title"),
+            ...optionalString(tr["description"], "description"),
+          };
+        }),
+      };
+    case "steps":
+      return {
+        ...base,
+        type: "steps",
+        ...(rec["active"] === undefined ? {} : { active: requireNumber(rec["active"], "control.active") }),
+        ...optionalString(rec["direction"], "direction"),
+        ...optionalString(rec["processStatus"], "processStatus"),
+      };
     default:
       throw new ModelOutputInvalidError(
         `control type "${type}" has no reviewed template`,
@@ -494,6 +664,12 @@ function requireBoolean(value: unknown, what: string): boolean {
 function optionalString(value: unknown, field: string): Record<string, string> {
   if (value === undefined) return {};
   return { [field]: requireString(value, `control.${field}`) };
+}
+
+/** 可选数字：undefined 返回空展开，否则必须为有限数字。 */
+function optionalNumber(value: unknown, field: string): Record<string, number> {
+  if (value === undefined) return {};
+  return { [field]: requireNumber(value, `control.${field}`) };
 }
 
 /** radio/select 选项：非空 [{label,value}] 数组。 */
