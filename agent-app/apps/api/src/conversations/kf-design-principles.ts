@@ -33,5 +33,8 @@ boldness 用在一处：一个签名元素（如中部大趋势区 + 联动 KPI 
 export const KF_DESIGN_PRINCIPLES_FULL = `${KF_DESIGN_PRINCIPLES}
 
 ### 控件能力边界
-当前可生成控件（31 种）：text/richtext/input/inputnumber/combobox/list/treeview/button/dropdown/navmenu/upload/checkbox/checkboxlegacy/radio/radiolegacy/select/cascader/transfer/image/tabs/table/tag/timeline/steps/scale/factorycalendar/webcontainer/gantt/spacer/switch/datetimepicker。
+静态控件（31 种）：text/richtext/input/inputnumber/combobox/list/treeview/button/dropdown/navmenu/upload/checkbox/checkboxlegacy/radio/radiolegacy/select/cascader/transfer/image/tabs/table/tag/timeline/steps/scale/factorycalendar/webcontainer/gantt/spacer/switch/datetimepicker。
+容器控件（用于承载静态控件，可嵌套）：
+- easyui 容器：datagrid（数据表格，可内嵌列）、linkbutton（按钮组，text/toggle/group）、tree/treegrid（树/树表）、sidemenu（侧边菜单）、combobox（下拉）、propertygrid（属性列表）、textbox（文本框）等主要 proto。
+- 布局容器 layout：layoutType 2=水平、4=垂直、3=选项卡、5=Docking 区域、0=折叠、6=导航；children 递归嵌套子控件（布局可嵌布局，如 datagrid 内嵌列、布局内嵌子控件）。
 趋势曲线/图表（Chart 节点）尚未支持：需要图表时用 text 控件标注区名（如 text=中部趋势区）作为占位，不得用按钮冒充。`;

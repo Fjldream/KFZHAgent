@@ -435,6 +435,55 @@ describe("DeepSeekModelPort", () => {
     expect(plan.operations[0].entityId).toBe(knownGuid);
   });
 
+  it("system prompt exposes easyui and layout container generation capability", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({ intent: "NEW_REQUIREMENT", requestedDomains: ["kingclient"] }),
+            },
+          },
+        ],
+      }),
+    });
+    const port = new DeepSeekModelPort({
+      apiKey: "test-key",
+      fetch: fetchImpl,
+      baseUrl: "https://mock.local",
+    });
+    await port.classifyIntent({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [{ role: "user", content: "做一个大屏" }],
+      requirementText: "做一个大屏",
+    });
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    const system = body.messages[0].content;
+    // 静态控件清单之后必须跟随容器能力（easyui 容器 + 布局容器）。
+    expect(system).toContain("容器类");
+    expect(system).toContain("datagrid");
+    expect(system).toContain("linkbutton");
+    expect(system).toContain("treegrid");
+    expect(system).toContain("sidemenu");
+    expect(system).toContain("propertygrid");
+    // 布局容器 layout 语义（layoutType + children 递归嵌套）。
+    expect(system).toContain("布局容器 layout");
+    expect(system).toContain("layoutType");
+    expect(system).toContain("2=水平");
+    expect(system).toContain("4=垂直");
+    expect(system).toContain("3=选项卡");
+    expect(system).toContain("5=Docking");
+    expect(system).toContain("0=折叠");
+    expect(system).toContain("6=导航");
+    expect(system).toContain("children");
+    expect(system).toContain("递归");
+    expect(system).toContain("承载");
+  });
+
   it("createChangePlan keeps create ops whose pageId hits a known page GUID", async () => {
     const pageGuid = "22222222-2222-4222-8222-222222222222";
     const port = makePort({

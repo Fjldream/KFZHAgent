@@ -80,6 +80,39 @@ describe("KF_DESIGN_PRINCIPLES_FULL", () => {
   it("forbids faking a chart with a button", () => {
     expect(KF_DESIGN_PRINCIPLES_FULL).toContain("不得用按钮冒充");
   });
+
+  it("lists easyui container controls in the capability boundary", () => {
+    for (const container of [
+      "datagrid",
+      "linkbutton",
+      "treegrid",
+      "sidemenu",
+      "combobox",
+      "propertygrid",
+      "textbox",
+    ]) {
+      expect(KF_DESIGN_PRINCIPLES_FULL).toContain(container);
+    }
+  });
+
+  it("explains the layout container with layoutType semantics and recursive nesting", () => {
+    expect(KF_DESIGN_PRINCIPLES_FULL).toContain("layout");
+    expect(KF_DESIGN_PRINCIPLES_FULL).toContain("layoutType");
+    expect(KF_DESIGN_PRINCIPLES_FULL).toContain("children");
+    expect(KF_DESIGN_PRINCIPLES_FULL).toContain("2=水平");
+    expect(KF_DESIGN_PRINCIPLES_FULL).toContain("4=垂直");
+    expect(KF_DESIGN_PRINCIPLES_FULL).toContain("3=选项卡");
+    expect(KF_DESIGN_PRINCIPLES_FULL).toContain("5=Docking");
+    expect(KF_DESIGN_PRINCIPLES_FULL).toContain("0=折叠");
+    expect(KF_DESIGN_PRINCIPLES_FULL).toContain("6=导航");
+    expect(KF_DESIGN_PRINCIPLES_FULL).toContain("嵌套");
+  });
+
+  it("explains that containers carry static controls (datagrid columns, layout children)", () => {
+    expect(KF_DESIGN_PRINCIPLES_FULL).toContain("承载静态控件");
+    expect(KF_DESIGN_PRINCIPLES_FULL).toContain("数据表格");
+    expect(KF_DESIGN_PRINCIPLES_FULL).toContain("内嵌列");
+  });
 });
 
 describe("DeepSeekModelPort integration", () => {
@@ -137,5 +170,8 @@ describe("DeepSeekModelPort integration", () => {
     expect(body.messages[0].role).toBe("system");
     expect(body.messages[0].content).toContain("控件能力边界");
     expect(body.messages[0].content).toContain("两遍");
+    expect(body.messages[0].content).toContain("datagrid");
+    expect(body.messages[0].content).toContain("layoutType");
+    expect(body.messages[0].content).toContain("2=水平");
   });
 });

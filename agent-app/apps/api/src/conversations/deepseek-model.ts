@@ -53,11 +53,14 @@ const SYSTEM_PROMPT = `你以礼貌、专业的客服顾问口吻与客户沟通
 
 领域知识：
 - KF 客户端工程由页面（默认 1440x900）和控件组成。
-- 支持生成/修改的控件类型（31 种）：
+- 支持生成/修改的控件类型（静态控件 31 种 + 容器控件）：
   - 文本类：text（静态文本）、richtext（富文本）、input（输入框，value/placeholder/clearable）、inputnumber（数值输入，variableId 绑定变量、decimals 小数位）、combobox（可编辑下拉）、list（列表）、treeview（树视图）
   - 按钮动作类：button（按钮，text 为按钮文字）、dropdown（下拉菜单，text+options）、navmenu（导航菜单）、upload（文件上传，action/accept/multiple）
   - 选择类：checkbox/checkboxlegacy（复选）、radio/radiolegacy（单选，options 数组）、select（下拉选择，options/multiple/placeholder）、cascader（级联选择，options 树）、transfer（穿梭框，options/titles）
   - 展示类：image（图片，src/fit/alt）、tabs（页签，tabs 数组）、table（表格）、tag（标签，effect/closable）、timeline（时间线，items 数组）、steps（步骤条，active/direction）、scale（刻度，min/max/value/step）、factorycalendar（日历）、webcontainer（网页容器，url）、gantt（甘特图）、spacer（占位，axis 水平/垂直）
+  - 容器类（承载静态控件，可嵌套）：
+    - easyui 容器：datagrid（数据表格，可内嵌列）、linkbutton（按钮组，text/toggle/group）、tree/treegrid（树/树表）、sidemenu（侧边菜单）、combobox（下拉）、propertygrid（属性列表）、textbox（文本框）等主要 proto
+    - 布局容器 layout：layoutType 2=水平、4=垂直、3=选项卡、5=Docking 区域、0=折叠、6=导航；children 递归嵌套子控件（布局可嵌布局，如 datagrid 内嵌列、布局内嵌子控件）
 - 控件动作只允许受限 DSL：{"kind":"setVariable","variableId":"$变量名","value":数字} 或 {"kind":"navigatePage","pageId":"页面名"}。
 - 禁止输出任意 JavaScript、脚本字符串、自由文本代码。
 
@@ -313,7 +316,7 @@ export class DeepSeekModelPort implements ModelPort {
         : "请根据需求输出变更计划 JSON。",
       "变更计划 JSON 格式（严格）：",
       '{"operations":[{"op":"update","entityId":"<清单中的 GUID>","entityType":"control","changes":[{"path":"/text","value":"..."}]}]}',
-      "create（新增控件）格式：{\"op\":\"create\",\"entityType\":\"control\",\"entityId\":\"新语义id如NewTitle\",\"properties\":{\"pageId\":\"<清单中的页面GUID>\",\"type\":\"text|button|inputnumber|switch|checkbox|radio|select|image|tabs|table|richtext|spacer|radiolegacy|checkboxlegacy|combobox|scale|list|treeview|webcontainer|gantt|factorycalendar|input|cascader|datetimepicker|dropdown|navmenu|tree|upload|transfer|tag|timeline|steps\",\"text\":\"控件文本\",\"x\":60,\"y\":50,\"width\":300,\"height\":40}}",
+      "create（新增控件）格式：{\"op\":\"create\",\"entityType\":\"control\",\"entityId\":\"新语义id如NewTitle\",\"properties\":{\"pageId\":\"<清单中的页面GUID>\",\"type\":\"text|button|inputnumber|switch|checkbox|radio|select|image|tabs|table|richtext|spacer|radiolegacy|checkboxlegacy|combobox|scale|list|treeview|webcontainer|gantt|factorycalendar|input|cascader|datetimepicker|dropdown|navmenu|tree|upload|transfer|tag|timeline|steps|datagrid|linkbutton|treegrid|sidemenu|propertygrid|textbox|layout\",\"text\":\"控件文本\",\"x\":60,\"y\":50,\"width\":300,\"height\":40}}",
       "delete 格式：{\"op\":\"delete\",\"entityId\":\"<清单中的 GUID>\",\"entityType\":\"control\",\"destructiveConfirmed\":true}",
       "规则：update/delete 的 entityId 必须来自下方实体清单的 GUID；create 的 entityId 是新的语义 id，entityType 固定为 control，控件类型放在 properties.type，properties.pageId 必须是清单中页面的 GUID。",
       "update 的 changes[].path 只能使用受控字段：text、value、visible、disabled、backgroundColor、width、height、x、y、fontInfo（字体大小写在 fontInfo.fontSize，不要单独用 /fontSize 路径）、borderColor、layoutStyle、options/radioData/selectData 等控件自身字段；禁止使用未列出的路径（如 /fontSize、/custom）。",
