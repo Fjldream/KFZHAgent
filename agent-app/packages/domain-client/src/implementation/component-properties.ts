@@ -41,6 +41,9 @@ const uploadAccept = z.string().min(1).max(256).regex(/^[a-zA-Z0-9.,/+*-]+$/).op
 const layoutBaseProperty = z.object({
   name: z.string().min(1).max(100),
   guid: z.string().min(1).max(100).optional(),
+  leftTopPt: z.object({ x: z.number().finite(), y: z.number().finite() }).strict().optional(),
+  width: z.number().finite().positive().max(1_000_000_000).optional(),
+  height: z.number().finite().positive().max(1_000_000_000).optional(),
 }).strict();
 const layoutChild = z.object({
   layoutType: z.number().int().min(0).max(6),
@@ -49,9 +52,10 @@ const layoutChild = z.object({
 }).strict();
 const layoutPanel = z.object({
   region: z.enum(["center", "north", "south", "east", "west"]),
-  width: z.number().positive().max(1_000_000_000),
-  height: z.number().positive().max(1_000_000_000),
-  split: z.boolean(),
+  width: z.number().positive().max(1_000_000_000).optional(),
+  height: z.number().positive().max(1_000_000_000).optional(),
+  size: z.number().positive().max(1_000_000_000).optional(),
+  split: z.boolean().optional(),
 }).strict();
 const layoutProperties = z.object({
   children: z.array(layoutChild).max(1_000).optional(),
@@ -75,42 +79,7 @@ const chartProperties = z.object({
   comment: z.string().optional(),
 }).strict();
 
-const FORBIDDEN_EMBEDDED_JSON_KEYS = new Set([
-  "configuredata",
-  "css",
-  "linkmng",
-  "native",
-  "nativefields",
-  "objecttype",
-  "raw",
-  "script",
-  "style",
-  "styledata",
-  "styledatanew",
-]);
-
-function embeddedJsonIsReviewed(value: string): boolean {
-  if (value.length > 100_000) return false;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch {
-    return false;
-  }
-  const seen = new WeakSet<object>();
-  const visit = (current: unknown): boolean => {
-    if (current === null || typeof current !== "object") return true;
-    if (seen.has(current)) return false;
-    seen.add(current);
-    if (Array.isArray(current)) return current.every(visit);
-    return Object.entries(current as Record<string, unknown>).every(([key, nested]) =>
-      !FORBIDDEN_EMBEDDED_JSON_KEYS.has(key.toLowerCase()) && visit(nested));
-  };
-  return visit(parsed);
-}
-
 const customChartProperties = z.object({
-  objects: z.array(z.string().refine(embeddedJsonIsReviewed, "contains unreviewed embedded JSON")).max(100).optional(),
   region: z.enum(["center", "north", "south", "east", "west"]).optional(),
 }).strict();
 
@@ -121,9 +90,18 @@ const easyuiDatagridProperties = z.object({
   pageSize: z.number().int().min(1).max(10_000).optional(),
   parentId,
 }).strict();
+const easyuiTextboxProperties = z.object({
+  value: z.string().optional(),
+  readonly: z.boolean().optional(),
+  parentId,
+}).strict();
 
 const COMPONENT_PROPERTY_SCHEMAS: Readonly<Record<string, z.ZodType<Record<string, unknown>>>> = Object.freeze({
-  button: z.object({ text: ButtonControlIR.shape.text.optional(), parentId }).strict(),
+  button: z.object({
+    text: ButtonControlIR.shape.text.optional(),
+    action: ButtonControlIR.shape.action,
+    parentId,
+  }).strict(),
   text: z.object({ text: TextControlIR.shape.text.optional(), parentId }).strict(),
   richtext: z.object({ text: RichTextControlIR.shape.text.optional(), parentId }).strict(),
   image: z.object({
@@ -141,6 +119,7 @@ const COMPONENT_PROPERTY_SCHEMAS: Readonly<Record<string, z.ZodType<Record<strin
   input: z.object({
     value: InputControlIR.shape.value,
     placeholder: InputControlIR.shape.placeholder,
+    inputType: InputControlIR.shape.inputType,
     disabled: InputControlIR.shape.disabled,
     clearable: InputControlIR.shape.clearable,
     maxlength: z.number().int().min(0).max(1_000_000).optional(),
@@ -148,6 +127,8 @@ const COMPONENT_PROPERTY_SCHEMAS: Readonly<Record<string, z.ZodType<Record<strin
   }).strict(),
   inputnumber: z.object({
     precision: InputNumberControlIR.shape.decimals.optional(),
+    variableId: InputNumberControlIR.shape.variableId.optional(),
+    decimals: InputNumberControlIR.shape.decimals.optional(),
     parentId,
   }).strict(),
   cascader: z.object({
@@ -223,6 +204,7 @@ const COMPONENT_PROPERTY_SCHEMAS: Readonly<Record<string, z.ZodType<Record<strin
   datetimepicker: z.object({
     value: DatetimePickerControlIR.shape.value,
     placeholder: DatetimePickerControlIR.shape.placeholder,
+    pickerType: DatetimePickerControlIR.shape.pickerType,
     format: dateFormat,
     parentId,
   }).strict(),
@@ -266,6 +248,7 @@ const COMPONENT_PROPERTY_SCHEMAS: Readonly<Record<string, z.ZodType<Record<strin
   }).strict(),
   "easyui.1": easyuiDatagridProperties,
   "easyui.2": z.object({ text: z.string().optional(), parentId }).strict(),
+  "easyui.9": easyuiTextboxProperties,
   "layout.0": layoutProperties,
   "layout.2": layoutProperties,
   "layout.3": layoutProperties,

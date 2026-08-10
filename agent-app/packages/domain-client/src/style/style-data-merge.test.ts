@@ -39,4 +39,23 @@ describe("mergeManagedStyleData", () => {
     expect(mergeManagedStyleData(existing, "#domId:hover{color:#ffffff}"))
       .toBe(`${before}${START}#domId{font-size:14px}#domId:hover{color:#ffffff}${END}${after}`);
   });
+
+  it("does not treat an escaped selector brace as an open rule when replacing the managed envelope", () => {
+    const customerCss = ".\\{safe{color:red}\n";
+    const existing = `${customerCss}${START}#domId{font-size:14px}${END}`;
+
+    expect(mergeManagedStyleData(existing, "#domId{font-size:16px}"))
+      .toBe(`${customerCss}${START}#domId{font-size:16px}${END}`);
+  });
+
+  it.each([
+    "#domId{color:red",
+    "#domId{content:'unterminated}",
+    "/* unterminated customer comment",
+    "#domId{color:red}\\",
+    "}",
+  ])("fails closed for lexically incomplete customer CSS", (existing) => {
+    expect(() => mergeManagedStyleData(existing, "#domId{font-size:16px}"))
+      .toThrow(/MANAGED_STYLE_DATA_INVALID/);
+  });
 });

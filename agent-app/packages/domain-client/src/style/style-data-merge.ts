@@ -23,15 +23,32 @@ function findManagedEnvelope(css: string): ManagedEnvelope | undefined {
   const markers: Array<{ kind: "start" | "end"; index: number }> = [];
   let depth = 0;
   let quote: "\"" | "'" | undefined;
+  let inComment = false;
+  let escaped = false;
   for (let index = 0; index < css.length;) {
     const char = css[index]!;
-    if (quote !== undefined) {
-      if (char === "\\") {
+    if (escaped) {
+      escaped = false;
+      index += 1;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      index += 1;
+      continue;
+    }
+    if (inComment) {
+      if (char === "*" && css[index + 1] === "/") {
+        inComment = false;
         index += 2;
       } else {
-        if (char === quote) quote = undefined;
         index += 1;
       }
+      continue;
+    }
+    if (quote !== undefined) {
+      if (char === quote) quote = undefined;
+      index += 1;
       continue;
     }
     if (char === "\"" || char === "'") {
@@ -50,14 +67,22 @@ function findManagedEnvelope(css: string): ManagedEnvelope | undefined {
         index += MANAGED_STYLE_END.length;
         continue;
       }
-      const commentEnd = css.indexOf("*/", index + 2);
-      if (commentEnd === -1) break;
-      index = commentEnd + 2;
+      inComment = true;
+      index += 2;
       continue;
     }
     if (char === "{") depth += 1;
-    if (char === "}" && depth > 0) depth -= 1;
+    if (char === "}") {
+      if (depth === 0) {
+        throw new Error("MANAGED_STYLE_DATA_INVALID: unmatched closing brace");
+      }
+      depth -= 1;
+    }
     index += 1;
+  }
+
+  if (escaped || quote !== undefined || inComment || depth !== 0) {
+    throw new Error("MANAGED_STYLE_DATA_INVALID: incomplete CSS lexical state");
   }
 
   if (markers.length === 0) return undefined;

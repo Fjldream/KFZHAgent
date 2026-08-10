@@ -279,6 +279,32 @@ describe("client patcher (Task 7 brief Step 1)", () => {
     }]))).rejects.toThrow(/PATCH_CONFLICT: INVALID_COMPONENT_PROPERTY/);
   });
 
+  it.each([
+    { name: "string x", extra: { x: "10" } },
+    { name: "object y", extra: { y: { value: 10 } } },
+    { name: "negative width", extra: { width: -1 } },
+    { name: "zero height", extra: { height: 0 } },
+    { name: "inconsistent proto discriminator", extra: { proto: 1 } },
+  ])("rejects $name in the direct create envelope", async ({ extra }) => {
+    const base = await copyFixture("client-unknown-field");
+
+    await expect(applyClientPatch(base, plan([{
+      op: "create",
+      entityType: "control",
+      entityId: "UnsafeEnvelope",
+      properties: {
+        pageId: "page-guid-1",
+        type: "button",
+        x: 10,
+        y: 20,
+        width: 100,
+        height: 40,
+        text: "Safe text",
+        ...extra,
+      },
+    }]))).rejects.toThrow(/PATCH_CONFLICT: INVALID_CREATE_CONTROL_ENVELOPE/);
+  });
+
   it("changes only the confirmed field and preserves unknown content", async () => {
     const base = await copyFixture("client-unknown-field");
     const candidate = await applyClientPatch(base, {

@@ -217,6 +217,27 @@ describe("client patcher — KF 容器对象（easyui / 布局）", () => {
     ]))).rejects.toThrow(/PATCH_CONFLICT: INVALID_COMPONENT_PROPERTY/);
   });
 
+  it("preserves reviewed negative docking coordinates through strict create validation", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const candidate = await applyClientPatch(base, plan([{
+      op: "create",
+      entityType: "control",
+      entityId: "EdgeDocking",
+      properties: {
+        pageId: "page-guid-1",
+        type: "layout",
+        layoutType: 5,
+        x: -1,
+        y: -1,
+        width: 600,
+        height: 400,
+      },
+    }]));
+
+    const node = await rawContainer(candidate, deriveGuid({ seed: "w-test" }, "EdgeDocking"));
+    expect((node["baseProperty"] as Record<string, unknown>)["leftTopPt"]).toEqual({ x: -1, y: -1 });
+  });
+
   it("updates easyui fields through the allowlist and rejects non-allowlisted ones", async () => {
     const base = await makeContainerFixture();
     const candidate = await applyClientPatch(base, plan([

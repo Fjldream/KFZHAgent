@@ -15,6 +15,13 @@ const minimalIrPath = fileURLToPath(
 );
 const ir = JSON.parse(await readFile(minimalIrPath, "utf8"));
 
+function irWithOnlyControl(control) {
+  return {
+    ...ir,
+    pages: [{ ...ir.pages[0], controls: [control] }],
+  };
+}
+
 async function hashDirectory(dir) {
   const files = [];
   async function walk(p, rel) {
@@ -31,41 +38,6 @@ async function hashDirectory(dir) {
   const h = createHash("sha256");
   for (const [rel, digest] of files) h.update(rel).update("\0").update(digest).update("\0");
   return h.digest("hex");
-}
-
-async function findJsonValue(dir, key) {
-  let found;
-  function search(node) {
-    if (found !== undefined) return;
-    if (Array.isArray(node)) {
-      node.forEach(search);
-      return;
-    }
-    if (node !== null && typeof node === "object") {
-      for (const [k, v] of Object.entries(node)) {
-        if (k === key) {
-          found = v;
-          return;
-        }
-        search(v);
-        if (found !== undefined) return;
-      }
-    }
-  }
-  async function walk(p) {
-    const entries = await readdir(p, { withFileTypes: true });
-    for (const e of entries) {
-      if (found !== undefined) return;
-      const full = path.join(p, e.name);
-      if (e.isDirectory()) await walk(full);
-      else if (e.name.toLowerCase().endsWith(".json")) {
-        search(JSON.parse(await readFile(full, "utf8")));
-        if (found !== undefined) return;
-      }
-    }
-  }
-  await walk(dir);
-  return found;
 }
 
 const irWithInjectedRawField = {
@@ -85,9 +57,64 @@ describe("client compiler", () => {
     expect(await hashDirectory(first.path)).toBe(await hashDirectory(second.path));
   });
 
-  it("uses reviewed templates rather than model-provided raw fields", async () => {
-    const result = await compileClientProject(irWithInjectedRawField, { seed: "build-2" });
-    expect(await findJsonValue(result.path, "arbitraryRawField")).toBeUndefined();
+  it("rejects model-provided raw object fields instead of silently dropping them", async () => {
+    await expect(compileClientProject(irWithInjectedRawField, { seed: "build-2" }))
+      .rejects.toThrow(/MODEL_OUTPUT_INVALID: INVALID_COMPONENT_PROPERTY/);
+  });
+
+  it.each([
+    {
+      name: "tag effect declaration payload",
+      control: { id: "UnsafeTag", type: "tag", x: 0, y: 0, width: 90, height: 30, effect: "dark;display:none" },
+    },
+    {
+      name: "negative scale step",
+      control: { id: "UnsafeScale", type: "scale", x: 0, y: 0, width: 200, height: 30, step: -1 },
+    },
+    {
+      name: "invalid steps enums and range",
+      control: {
+        id: "UnsafeSteps",
+        type: "steps",
+        x: 0,
+        y: 0,
+        width: 300,
+        height: 80,
+        active: -1,
+        direction: "horizontal;display:none",
+        processStatus: "script",
+      },
+    },
+    {
+      name: "prototype native passthrough",
+      control: {
+        id: "UnsafeChart",
+        type: "prototype",
+        prototypeName: "BarChart",
+        x: 0,
+        y: 0,
+        width: 400,
+        height: 200,
+        styleDataNew: "#domId{display:none}",
+        linkMng: { linkList: [{ script: "evil()" }] },
+      },
+    },
+  ])("rejects $name in direct generative IR", async ({ control }) => {
+    await expect(compileClientProject(irWithOnlyControl(control), { seed: "strict-generated" }))
+      .rejects.toThrow(/MODEL_OUTPUT_INVALID/);
+  });
+
+  it("rejects configured CustomCharts objects in direct generative IR", async () => {
+    await expect(compileClientProject(irWithOnlyControl({
+      id: "ConfiguredCustomChart",
+      type: "prototype",
+      prototypeName: "CustomCharts",
+      x: 0,
+      y: 0,
+      width: 400,
+      height: 300,
+      objects: ['{"name":"echart","option":{"series":[]}}'],
+    }), { seed: "custom-chart-config" })).rejects.toThrow(/MODEL_OUTPUT_INVALID/);
   });
 
   it("carries validated IR button styles through client compilation", async () => {
@@ -196,12 +223,6 @@ describe("client compiler", () => {
               y: 35.92,
               width: 396,
               height: 344,
-              pageProperty: {
-                name: "CustomCharts1",
-                pagePos: { x: 5.13, y: 35.92 },
-                pageSize: { width: 396, height: 344 },
-              },
-              objects: ['{"name":"echart","customChartsType":1}'],
               region: "center",
             },
             {
@@ -212,7 +233,6 @@ describe("client compiler", () => {
               y: 0,
               width: 400,
               height: 200,
-              chartComponentType: 3,
             },
           ],
         },
@@ -231,7 +251,6 @@ describe("client compiler", () => {
       pagePos: { x: 5.13, y: 35.92 },
       pageSize: { width: 396, height: 344 },
     });
-    expect(customCharts.objects[0]).toContain('"customChartsType":1');
     const barChart = page.objects.find((o) => o.prototypeName === "BarChart");
     expect(barChart).toBeDefined();
     expect(barChart.title).toEqual({ text: "BarChart", show: true });

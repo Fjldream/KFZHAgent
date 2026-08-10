@@ -144,7 +144,7 @@ async function makePrototypeFixture(): Promise<string> {
 }
 
 describe("client patcher — KF 特殊节点（prototypeName 判别）", () => {
-  it("creates a CustomCharts prototype (objectType=1, pageProperty 几何, 无 type/uiModelType)", async () => {
+  it("creates an unconfigured CustomCharts shell (objectType=1, pageProperty geometry)", async () => {
     const base = await copyFixture("client-unknown-field");
     const candidate = await applyClientPatch(base, plan([
       {
@@ -159,7 +159,6 @@ describe("client patcher — KF 特殊节点（prototypeName 判别）", () => {
           y: 40,
           width: 400,
           height: 300,
-          objects: ['{"name":"echart","customChartsType":1,"option":{"title":{"text":"My Chart"}}}'],
           region: "center",
         },
       },
@@ -167,7 +166,7 @@ describe("client patcher — KF 特殊节点（prototypeName 判别）", () => {
     const expectedGuid = deriveGuid({ seed: "w-test" }, "NewCustomChart");
     const node = await rawPrototype(candidate, expectedGuid);
     // 合法 KF 特殊节点：prototypeName + objectType=1，几何在 pageProperty，
-    // 复杂配置整体透传，且不含 type/uiModelType（KF 前端按 prototypeName 特判）。
+    // Foundation generation emits only the reviewed shell and geometry.
     expect(node["prototypeName"]).toBe("CustomCharts");
     expect(node["objectType"]).toBe(1);
     expect(node["type"]).toBeUndefined();
@@ -178,7 +177,6 @@ describe("client patcher — KF 特殊节点（prototypeName 判别）", () => {
       pagePos: { x: 30, y: 40 },
       pageSize: { width: 400, height: 300 },
     });
-    expect(node["objects"]).toEqual(['{"name":"echart","customChartsType":1,"option":{"title":{"text":"My Chart"}}}']);
     expect(node["region"]).toBe("center");
     expect((node["modlePrototype"] as Record<string, unknown>)["type"]).toBe(1);
     // 模板默认字段必须存在，构成合法对象（fixedSize 与 pageSize 同步）。
@@ -187,6 +185,26 @@ describe("client patcher — KF 特殊节点（prototypeName 判别）", () => {
     // inspect 能识别为 prototype 控件。
     const result = await inspectClientProject(await rootDirOf(candidate));
     expect(result.index.controls[expectedGuid]?.type).toBe("prototype");
+  });
+
+  it("rejects configured CustomCharts objects in a direct ChangePlan", async () => {
+    const base = await copyFixture("client-unknown-field");
+
+    await expect(applyClientPatch(base, plan([{
+      op: "create",
+      entityType: "control",
+      entityId: "ConfiguredCustomChart",
+      properties: {
+        pageId: "page-guid-1",
+        type: "prototype",
+        prototypeName: "CustomCharts",
+        x: 30,
+        y: 40,
+        width: 400,
+        height: 300,
+        objects: ['{"name":"echart","option":{"series":[]}}'],
+      },
+    }]))).rejects.toThrow(/PATCH_CONFLICT: INVALID_COMPONENT_PROPERTY/);
   });
 
   it("creates a chart prototype (顶层几何 + chartComponentType, 无 type/uiModelType)", async () => {

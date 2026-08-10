@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { FieldPatch } from "@kf/contracts";
 import { ComponentStyleSpecSchema, type ComponentStyleSpec, type ThemeSpec } from "@kf/contracts";
+import { z } from "zod";
 import { inspectClientProject, type EntityIndex, type InspectResult } from "../inspect/client-inspector.js";
 import { stableStringify, type ClientWorkspace } from "../compile/client-compiler.js";
 import { deriveGuid } from "../compile/guid-factory.js";
@@ -833,24 +834,80 @@ const CREATE_SYSTEM_PROPERTY_KEYS = new Set([
   "pageId",
   "type",
   "proto",
-  "uiExtendType",
   "layoutType",
   "prototypeName",
-  "id",
-  "name",
-  "guid",
   "x",
   "y",
   "width",
   "height",
-  "uiModelType",
   "style",
+  "parentId",
 ]);
 
+const createCoordinate = z.number().finite().min(-1).max(1_000_000_000).optional();
+const createSize = z.number().finite().positive().max(1_000_000_000).optional();
+const CREATE_CONTROL_ENVELOPE_SCHEMA = z.object({
+  pageId: z.string().min(1).max(100),
+  type: z.string().min(1).max(100),
+  proto: z.number().int().optional(),
+  layoutType: z.number().int().optional(),
+  prototypeName: z.string().min(1).max(100).optional(),
+  x: createCoordinate,
+  y: createCoordinate,
+  width: createSize,
+  height: createSize,
+  style: ComponentStyleSpecSchema.optional(),
+  parentId: z.string().min(1).max(100).optional(),
+}).strict().superRefine((value, ctx) => {
+  const discriminatorKeys = ["proto", "layoutType", "prototypeName"] as const;
+  const rejectUnexpectedDiscriminators = (expected?: (typeof discriminatorKeys)[number]) => {
+    for (const key of discriminatorKeys) {
+      if (key !== expected && value[key] !== undefined) {
+        ctx.addIssue({ code: "custom", path: [key], message: `${key} is inconsistent with type ${value.type}` });
+      }
+    }
+  };
+  if (Object.hasOwn(CONTROL_TEMPLATES, value.type)) {
+    rejectUnexpectedDiscriminators();
+    if ((value.x ?? 0) < 0 || (value.y ?? 0) < 0) {
+      ctx.addIssue({ code: "custom", path: ["x"], message: "negative coordinates are reviewed only for layouts" });
+    }
+    return;
+  }
+  if (value.type === "easyui") {
+    rejectUnexpectedDiscriminators("proto");
+    if (value.proto === undefined || !Object.hasOwn(EASYUI_TEMPLATES, value.proto)) {
+      ctx.addIssue({ code: "custom", path: ["proto"], message: "proto must identify a reviewed EasyUI template" });
+    }
+    if ((value.x ?? 0) < 0 || (value.y ?? 0) < 0) {
+      ctx.addIssue({ code: "custom", path: ["x"], message: "negative coordinates are reviewed only for layouts" });
+    }
+    return;
+  }
+  if (value.type === "layout") {
+    rejectUnexpectedDiscriminators("layoutType");
+    if (value.layoutType === undefined || ![0, 2, 3, 4, 5, 6].includes(value.layoutType)) {
+      ctx.addIssue({ code: "custom", path: ["layoutType"], message: "layoutType must identify a reviewed layout" });
+    }
+    return;
+  }
+  if (value.type === "prototype") {
+    rejectUnexpectedDiscriminators("prototypeName");
+    if (value.prototypeName === undefined || !Object.hasOwn(PROTOTYPE_TEMPLATES, value.prototypeName)) {
+      ctx.addIssue({ code: "custom", path: ["prototypeName"], message: "prototypeName must identify a reviewed prototype" });
+    }
+    if ((value.x ?? 0) < 0 || (value.y ?? 0) < 0) {
+      ctx.addIssue({ code: "custom", path: ["x"], message: "negative coordinates are reviewed only for layouts" });
+    }
+    return;
+  }
+  ctx.addIssue({ code: "custom", path: ["type"], message: `type ${value.type} has no reviewed template` });
+});
+
 function capabilityIdForCreateProperties(properties: Record<string, unknown>): string {
-  const type = typeof properties["type"] === "string" ? properties["type"] : "button";
-  if (type === "easyui") return `easyui.${asNumber(properties["proto"])}`;
-  if (type === "layout") return `layout.${asNumber(properties["layoutType"])}`;
+  const type = properties["type"] as string;
+  if (type === "easyui") return `easyui.${properties["proto"] as number}`;
+  if (type === "layout") return `layout.${properties["layoutType"] as number}`;
   if (type === "prototype") {
     return `prototype.${typeof properties["prototypeName"] === "string" ? properties["prototypeName"] : ""}`;
   }
@@ -858,15 +915,23 @@ function capabilityIdForCreateProperties(properties: Record<string, unknown>): s
 }
 
 function validateCreateControlProperties(properties: Record<string, unknown>): Record<string, unknown> {
-  const systemProperties = Object.fromEntries(
+  const systemInput = Object.fromEntries(
     Object.entries(properties).filter(([key]) => CREATE_SYSTEM_PROPERTY_KEYS.has(key)),
   );
+  if (!Object.hasOwn(systemInput, "type")) systemInput["type"] = "button";
+  const envelope = CREATE_CONTROL_ENVELOPE_SCHEMA.safeParse(systemInput);
+  if (!envelope.success) {
+    const detail = envelope.error.issues
+      .map((issue) => `${issue.path.join(".") || "properties"}: ${issue.message}`)
+      .join("; ");
+    throw new PatchConflictError(`INVALID_CREATE_CONTROL_ENVELOPE: ${detail}`);
+  }
   const semanticProperties = Object.fromEntries(
     Object.entries(properties).filter(([key]) => !CREATE_SYSTEM_PROPERTY_KEYS.has(key)),
   );
   try {
-    const validated = validateComponentProperties(capabilityIdForCreateProperties(properties), semanticProperties);
-    return { ...systemProperties, ...validated };
+    const validated = validateComponentProperties(capabilityIdForCreateProperties(envelope.data), semanticProperties);
+    return { ...envelope.data, ...validated };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new PatchConflictError(detail, { cause: error });

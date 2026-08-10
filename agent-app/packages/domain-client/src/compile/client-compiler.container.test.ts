@@ -38,7 +38,6 @@ const validEasyui = {
   striped: false,
   pagination: true,
   pageSize: 5,
-  value: "abc", // 白名单字符串字段不应触发注入拒绝（datagrid 白名单不含 value，编译时不输出）
 };
 
 const validEasyuiTextbox = {
@@ -94,7 +93,6 @@ describe("client compiler validation — easyui controls", () => {
     expect(datagrid!["height"]).toBe(227);
     expect(datagrid!["striped"]).toBe(false);
     expect(datagrid!["pagination"]).toBe(true);
-    // datagrid 白名单不含 value：用户字符串被宽容接收但不序列化
     expect("value" in datagrid!).toBe(false);
     // 模板默认空 data（KF 加载必需），用户传入的 data 内容不序列化
     expect(datagrid!["data"]).toEqual([]);
@@ -110,6 +108,12 @@ describe("client compiler validation — easyui controls", () => {
     await expect(
       compileClientProject(projectWith([{ ...validEasyui, proto: 99 }]), build),
     ).rejects.toThrow(/proto 99/);
+  });
+
+  it("rejects an unreviewed property instead of silently dropping it", async () => {
+    await expect(
+      compileClientProject(projectWith([{ ...validEasyui, value: "must-not-be-silently-dropped" }]), build),
+    ).rejects.toThrow(/INVALID_COMPONENT_PROPERTY/);
   });
 
   it("rejects a non-integer easyui proto", async () => {

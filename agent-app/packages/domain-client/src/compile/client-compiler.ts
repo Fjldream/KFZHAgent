@@ -11,6 +11,7 @@ import type {
 } from "../ir/client-project-ir.js";
 import { ImageFitSchema, SafeResourceUrlSchema } from "../ir/client-project-ir.schema.js";
 import { EASYUI_ALL_FIELDS, EASYUI_PROTO_TYPES, EASYUI_PROTOS } from "../ir/easyui-types.js";
+import { validateComponentProperties } from "../implementation/component-properties.js";
 import {
   ModelOutputInvalidError,
   SPECIAL_PROTOTYPE_NAMES,
@@ -347,6 +348,11 @@ function validatePage(value: unknown, index: number): PageIR {
 }
 
 function validateControl(value: unknown, index: number): ControlIR {
+  const source = requireRecord(value, `page.controls[${index}]`);
+  return canonicalizeGeneratedControl(validateControlShape(value, index), source);
+}
+
+function validateControlShape(value: unknown, index: number): ControlIR {
   const rec = requireRecord(value, `page.controls[${index}]`);
   const type = requireString(rec["type"], "control.type");
   const isSpecial = type === "prototype";
@@ -708,6 +714,49 @@ function validateControl(value: unknown, index: number): ControlIR {
       throw new ModelOutputInvalidError(
         `control type "${type}" has no reviewed template`,
       );
+  }
+}
+
+const GENERATED_CONTROL_SYSTEM_KEYS = new Set([
+  "id",
+  "type",
+  "x",
+  "y",
+  "width",
+  "height",
+  "style",
+  "proto",
+  "uiExtendType",
+  "layoutType",
+  "prototypeName",
+]);
+
+function generatedCapabilityId(control: ControlIR): string {
+  if (control.type === "easyui") return `easyui.${control.proto}`;
+  if (control.type === "layout") return `layout.${control.layoutType}`;
+  if (control.type === "prototype") return `prototype.${control.prototypeName}`;
+  return control.type;
+}
+
+function canonicalizeGeneratedControl(
+  control: ControlIR,
+  source: Record<string, unknown>,
+): ControlIR {
+  const raw = control as unknown as Record<string, unknown>;
+  const system = Object.fromEntries(
+    Object.entries(raw).filter(([key]) => GENERATED_CONTROL_SYSTEM_KEYS.has(key)),
+  );
+  const semantic = Object.fromEntries(
+    Object.entries(source).filter(([key]) => !GENERATED_CONTROL_SYSTEM_KEYS.has(key)),
+  );
+  try {
+    return {
+      ...system,
+      ...validateComponentProperties(generatedCapabilityId(control), semantic),
+    } as unknown as ControlIR;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new ModelOutputInvalidError(detail, { cause: error });
   }
 }
 

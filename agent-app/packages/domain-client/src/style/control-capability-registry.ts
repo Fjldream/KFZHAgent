@@ -152,7 +152,7 @@ const CONTROL_CAPABILITIES: readonly ControlCapability[] = Object.freeze([
   pendingCapability("layout.5", "layout", "Docking layout"),
   pendingCapability("layout.6", "layout", "Project flow chart layout"),
 
-  deferredCapability("prototype.CustomCharts", "prototype", "Custom charts", "preserve-only", "Custom chart styling and data rendering require a dedicated adapter."),
+  deferredCapability("prototype.CustomCharts", "prototype", "Custom charts", "preserve-only", "Generation is limited to an unconfigured shell; objects/options and styling require a positive dedicated schema."),
   deferredCapability("prototype.AlarmWindow", "prototype", "Alarm window", "preserve-only", "Alarm window styling is deferred to a dedicated adapter."),
   deferredCapability("prototype.EventWindow", "prototype", "Event window", "preserve-only", "Event window styling is deferred to a dedicated adapter."),
   deferredCapability("prototype.TrendChart", "prototype", "Trend chart", "preserve-only", "Trend chart styling and data rendering require a dedicated adapter."),
