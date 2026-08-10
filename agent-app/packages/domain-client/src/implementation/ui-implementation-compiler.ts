@@ -12,7 +12,7 @@ import { getControlCapability } from "../style/control-capability-registry.js";
 import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
 import { compileControlStyle, listStyleCompilationIssues } from "../style/style-engine.js";
 import { resolveComponentStyle } from "../style/theme-resolver.js";
-import { validateComponentProperties } from "./component-properties.js";
+import { validateCreateComponentProperties } from "./component-properties.js";
 
 export interface ImplementationCompileContext {
   workspaceId: string;
@@ -300,7 +300,7 @@ function createProperties(
     }
     properties.text = component.content;
   }
-  const validatedProperties = validateComponentProperties(capabilityId, properties);
+  const validatedProperties = validateCreateComponentProperties(capabilityId, properties);
   return {
     pageId,
     ...variant,

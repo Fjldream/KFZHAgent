@@ -10,13 +10,16 @@ export const fieldPatchSchema = z.object({
 });
 export type FieldPatch = z.infer<typeof fieldPatchSchema>;
 
+/** Canonical bounded identifier shared by every change operation. */
+export const ChangeEntityIdSchema = z.string().trim().min(1).max(100);
+
 /**
  * Create an entity in the target workspace.
  */
 export const createOperationSchema = z.object({
   op: z.literal("create"),
   entityType: z.string(),
-  entityId: z.string(),
+  entityId: ChangeEntityIdSchema,
   properties: z.record(z.string(), z.unknown()).default({})
 });
 export type CreateOperation = z.infer<typeof createOperationSchema>;
@@ -31,7 +34,7 @@ export type CreateOperation = z.infer<typeof createOperationSchema>;
  */
 export const updateOperationSchema = z.object({
   op: z.literal("update"),
-  entityId: z.string(),
+  entityId: ChangeEntityIdSchema,
   entityType: z.string().optional(),
   changes: z.array(fieldPatchSchema)
 });
@@ -48,7 +51,7 @@ export type UpdateOperation = z.infer<typeof updateOperationSchema>;
  */
 export const deleteOperationSchema = z.object({
   op: z.literal("delete"),
-  entityId: z.string(),
+  entityId: ChangeEntityIdSchema,
   destructiveConfirmed: z.boolean(),
   digest: z.string()
 });
@@ -59,7 +62,7 @@ export type DeleteOperation = z.infer<typeof deleteOperationSchema>;
  */
 export const applyStyleOperationSchema = z.object({
   op: z.literal("applyStyle"),
-  entityId: z.string().min(1),
+  entityId: ChangeEntityIdSchema,
   entityType: z.literal("control"),
   style: ComponentStyleSpecSchema,
 }).strict();

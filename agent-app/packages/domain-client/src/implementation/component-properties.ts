@@ -40,13 +40,12 @@ const uploadAccept = z.string().min(1).max(256).regex(/^[a-zA-Z0-9.,/+*-]+$/).op
 
 const layoutBaseProperty = z.object({
   name: z.string().min(1).max(100),
-  guid: z.string().min(1).max(100).optional(),
   leftTopPt: z.object({ x: z.number().finite(), y: z.number().finite() }).strict().optional(),
   width: z.number().finite().positive().max(1_000_000_000).optional(),
   height: z.number().finite().positive().max(1_000_000_000).optional(),
 }).strict();
 const layoutChild = z.object({
-  layoutType: z.number().int().min(0).max(6),
+  layoutType: z.union([z.literal(0), z.literal(2), z.literal(3), z.literal(4), z.literal(5), z.literal(6)]),
   objectType: z.literal(2).optional(),
   baseProperty: layoutBaseProperty,
 }).strict();
@@ -60,7 +59,20 @@ const layoutPanel = z.object({
 const layoutProperties = z.object({
   children: z.array(layoutChild).max(1_000).optional(),
   panels: z.array(layoutPanel).max(1_000).optional(),
-}).strict();
+}).strict().superRefine((value, ctx) => {
+  const names = new Set<string>();
+  for (const [index, child] of (value.children ?? []).entries()) {
+    const name = child.baseProperty.name;
+    if (names.has(name)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["children", index, "baseProperty", "name"],
+        message: `DUPLICATE_LAYOUT_CHILD_ID: ${name}`,
+      });
+    }
+    names.add(name);
+  }
+});
 
 const chartTitle = z.object({
   show: z.boolean(),
@@ -96,7 +108,7 @@ const easyuiTextboxProperties = z.object({
   parentId,
 }).strict();
 
-const COMPONENT_PROPERTY_SCHEMAS: Readonly<Record<string, z.ZodType<Record<string, unknown>>>> = Object.freeze({
+const GENERATED_COMPONENT_PROPERTY_SCHEMAS: Readonly<Record<string, z.ZodType<Record<string, unknown>>>> = Object.freeze({
   button: z.object({
     text: ButtonControlIR.shape.text.optional(),
     action: ButtonControlIR.shape.action,
@@ -264,6 +276,26 @@ const COMPONENT_PROPERTY_SCHEMAS: Readonly<Record<string, z.ZodType<Record<strin
   "prototype.EventWindow": z.object({}).strict(),
 });
 
+const CREATE_COMPONENT_PROPERTY_SCHEMAS: Readonly<Record<string, z.ZodType<Record<string, unknown>>>> = Object.freeze({
+  ...GENERATED_COMPONENT_PROPERTY_SCHEMAS,
+  button: z.object({ text: ButtonControlIR.shape.text.optional(), parentId }).strict(),
+  input: z.object({
+    value: InputControlIR.shape.value,
+    placeholder: InputControlIR.shape.placeholder,
+    disabled: InputControlIR.shape.disabled,
+    clearable: InputControlIR.shape.clearable,
+    maxlength: z.number().int().min(0).max(1_000_000).optional(),
+    parentId,
+  }).strict(),
+  inputnumber: z.object({ precision: InputNumberControlIR.shape.decimals.optional(), parentId }).strict(),
+  datetimepicker: z.object({
+    value: DatetimePickerControlIR.shape.value,
+    placeholder: DatetimePickerControlIR.shape.placeholder,
+    format: dateFormat,
+    parentId,
+  }).strict(),
+});
+
 const RESERVED_PROPERTY_KEYS = new Set([
   "__proto__",
   "prototype",
@@ -312,13 +344,14 @@ function assertNoReservedPropertyKeys(
  * schemas; raw-preservation paths still reject recursively nested native/style
  * payloads.
  */
-export function validateComponentProperties(
+function validateProperties(
   capabilityId: string,
   properties: Record<string, unknown>,
+  schemas: Readonly<Record<string, z.ZodType<Record<string, unknown>>>>,
 ): Record<string, unknown> {
   assertNoReservedPropertyKeys(properties, "properties", new WeakSet());
-  let schema = Object.hasOwn(COMPONENT_PROPERTY_SCHEMAS, capabilityId)
-    ? COMPONENT_PROPERTY_SCHEMAS[capabilityId]
+  let schema = Object.hasOwn(schemas, capabilityId)
+    ? schemas[capabilityId]
     : undefined;
   if (schema === undefined) {
     const easyui = /^easyui\.(\d+)$/.exec(capabilityId);
@@ -337,4 +370,18 @@ export function validateComponentProperties(
     throw new Error(`INVALID_COMPONENT_PROPERTY: ${capabilityId} — ${detail}`);
   }
   return parsed.data;
+}
+
+export function validateGeneratedComponentProperties(
+  capabilityId: string,
+  properties: Record<string, unknown>,
+): Record<string, unknown> {
+  return validateProperties(capabilityId, properties, GENERATED_COMPONENT_PROPERTY_SCHEMAS);
+}
+
+export function validateCreateComponentProperties(
+  capabilityId: string,
+  properties: Record<string, unknown>,
+): Record<string, unknown> {
+  return validateProperties(capabilityId, properties, CREATE_COMPONENT_PROPERTY_SCHEMAS);
 }

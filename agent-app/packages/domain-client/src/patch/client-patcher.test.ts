@@ -305,6 +305,32 @@ describe("client patcher (Task 7 brief Step 1)", () => {
     }]))).rejects.toThrow(/PATCH_CONFLICT: INVALID_CREATE_CONTROL_ENVELOPE/);
   });
 
+  it.each([
+    { name: "button action", type: "button", extra: { text: "Go", action: { kind: "noop" } } },
+    { name: "input inputType", type: "input", extra: { inputType: "password" } },
+    { name: "datetime pickerType", type: "datetimepicker", extra: { pickerType: "date" } },
+    { name: "inputnumber variableId", type: "inputnumber", extra: { variableId: "$Temp" } },
+    { name: "inputnumber decimals", type: "inputnumber", extra: { decimals: 2 } },
+  ])("rejects direct-only $name instead of silently dropping it during create", async ({ type, extra }) => {
+    const base = await copyFixture("client-unknown-field");
+    await expect(applyClientPatch(base, plan([{
+      op: "create",
+      entityType: "control",
+      entityId: "UnsupportedPatchSemantic",
+      properties: { pageId: "page-guid-1", type, ...extra },
+    }]))).rejects.toThrow(/PATCH_CONFLICT: INVALID_COMPONENT_PROPERTY/);
+  });
+
+  it.each(["   ", "x".repeat(101)])("rejects invalid runtime-normalized entityId %j", async (entityId) => {
+    const base = await copyFixture("client-unknown-field");
+    await expect(applyClientPatch(base, plan([{
+      op: "create",
+      entityType: "control",
+      entityId,
+      properties: { pageId: "page-guid-1", type: "button", text: "unsafe" },
+    }]))).rejects.toThrow(/PATCH_CONFLICT: operations\[0\]\.entityId/);
+  });
+
   it("changes only the confirmed field and preserves unknown content", async () => {
     const base = await copyFixture("client-unknown-field");
     const candidate = await applyClientPatch(base, {

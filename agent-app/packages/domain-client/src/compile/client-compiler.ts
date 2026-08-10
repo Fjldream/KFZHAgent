@@ -11,7 +11,8 @@ import type {
 } from "../ir/client-project-ir.js";
 import { ImageFitSchema, SafeResourceUrlSchema } from "../ir/client-project-ir.schema.js";
 import { EASYUI_ALL_FIELDS, EASYUI_PROTO_TYPES, EASYUI_PROTOS } from "../ir/easyui-types.js";
-import { validateComponentProperties } from "../implementation/component-properties.js";
+import { validateGeneratedComponentProperties } from "../implementation/component-properties.js";
+import { controlGeometryIssues } from "../implementation/control-geometry.js";
 import {
   ModelOutputInvalidError,
   SPECIAL_PROTOTYPE_NAMES,
@@ -143,6 +144,7 @@ export async function compileClientProject(
     }
     variableNames.add(variable.name);
   }
+  assertGeneratedGuidUniqueness(ir, build, variableGroupGuid, pageGroupGuid);
   for (const page of ir.pages) {
     for (const control of page.controls) {
       if (control.type === "inputnumber" && !variableNames.has(control.variableId)) {
@@ -349,7 +351,14 @@ function validatePage(value: unknown, index: number): PageIR {
 
 function validateControl(value: unknown, index: number): ControlIR {
   const source = requireRecord(value, `page.controls[${index}]`);
-  return canonicalizeGeneratedControl(validateControlShape(value, index), source);
+  const control = canonicalizeGeneratedControl(validateControlShape(value, index), source);
+  const issues = controlGeometryIssues(generatedCapabilityId(control), control);
+  if (issues.length > 0) {
+    throw new ModelOutputInvalidError(
+      `INVALID_CONTROL_GEOMETRY: ${issues.map((issue) => `${issue.field}: ${issue.message}`).join("; ")}`,
+    );
+  }
+  return control;
 }
 
 function validateControlShape(value: unknown, index: number): ControlIR {
@@ -752,11 +761,53 @@ function canonicalizeGeneratedControl(
   try {
     return {
       ...system,
-      ...validateComponentProperties(generatedCapabilityId(control), semantic),
+      ...validateGeneratedComponentProperties(generatedCapabilityId(control), semantic),
     } as unknown as ControlIR;
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new ModelOutputInvalidError(detail, { cause: error });
+  }
+}
+
+function assertGeneratedGuidUniqueness(
+  ir: ValidatedIr,
+  build: BuildSeed,
+  variableGroupGuid: string,
+  pageGroupGuid: string,
+): void {
+  const owners = new Map<string, string>();
+  const register = (guid: string, owner: string): void => {
+    const existing = owners.get(guid);
+    if (existing !== undefined) {
+      throw new ModelOutputInvalidError(`GENERATED_GUID_COLLISION: ${owner} collides with ${existing}`);
+    }
+    owners.set(guid, owner);
+  };
+
+  register(deriveGuid(build, ir.id), `project ${ir.id}`);
+  register(variableGroupGuid, "variable group");
+  register(pageGroupGuid, "page group");
+  for (const variable of ir.variables) register(deriveGuid(build, variable.name), `variable ${variable.name}`);
+  for (const page of ir.pages) {
+    register(`k${deriveGuid(build, page.name)}`, `page ${page.name}`);
+    for (const control of page.controls) {
+      register(deriveGuid(build, control.id), `control ${control.id}`);
+    }
+  }
+  for (const page of ir.pages) {
+    for (const control of page.controls) {
+      if (control.type !== "layout") continue;
+      for (const child of control.children ?? []) {
+        const base = child["baseProperty"];
+        if (base === null || typeof base !== "object" || Array.isArray(base)) continue;
+        const name = (base as Record<string, unknown>)["name"];
+        if (typeof name !== "string") continue;
+        register(
+          deriveGuid(build, `child:${control.id}:${name}`),
+          `layout child ${control.id}/${name}`,
+        );
+      }
+    }
   }
 }
 

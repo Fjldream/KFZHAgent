@@ -551,8 +551,17 @@ describe.skipIf(!existsSync(REF_DIR))("golden alignment with the reference proje
       width: ref.baseProperty.width,
       height: ref.baseProperty.height,
     });
-    // children 原样保留（含嵌套 DockingLayout 的 region/dPanelsOption/字符串样式）
-    expect(out["insiderObjects"]).toEqual(ref.insiderObjects);
+    // Generative compilation owns nested identities and derives the child GUID;
+    // every non-identity byte remains aligned with the reference input.
+    const originalChildGuid = ref.insiderObjects[0].baseProperty.guid;
+    expect(out["insiderObjects"]).toEqual([{
+      ...ref.insiderObjects[0],
+      baseProperty: {
+        ...ref.insiderObjects[0].baseProperty,
+        guid: deriveGuid(build, `child:${ref.baseProperty.name}:${ref.insiderObjects[0].baseProperty.name}`),
+      },
+    }]);
+    expect(ref.insiderObjects[0].baseProperty.guid).toBe(originalChildGuid);
     expect(out["dPanelsOption"]).toEqual(ref.dPanelsOption);
     expect(out["version"]).toBe(ref.version);
   });

@@ -217,7 +217,7 @@ describe("client patcher — KF 容器对象（easyui / 布局）", () => {
     ]))).rejects.toThrow(/PATCH_CONFLICT: INVALID_COMPONENT_PROPERTY/);
   });
 
-  it("preserves reviewed negative docking coordinates through strict create validation", async () => {
+  it("preserves the reviewed docking edge coordinate through strict create validation", async () => {
     const base = await copyFixture("client-unknown-field");
     const candidate = await applyClientPatch(base, plan([{
       op: "create",
@@ -236,6 +236,69 @@ describe("client patcher — KF 容器对象（easyui / 布局）", () => {
 
     const node = await rawContainer(candidate, deriveGuid({ seed: "w-test" }, "EdgeDocking"));
     expect((node["baseProperty"] as Record<string, unknown>)["leftTopPt"]).toEqual({ x: -1, y: -1 });
+  });
+
+  it.each([
+    { name: "horizontal x=-999", layoutType: 2, x: -999 },
+    { name: "horizontal x=-1", layoutType: 2, x: -1 },
+    { name: "docking x=-2", layoutType: 5, x: -2 },
+  ])("rejects $name in the direct create envelope", async ({ layoutType, x }) => {
+    const base = await copyFixture("client-unknown-field");
+    await expect(applyClientPatch(base, plan([{
+      op: "create",
+      entityType: "control",
+      entityId: "InvalidGeometryLayout",
+      properties: { pageId: "page-guid-1", type: "layout", layoutType, x, y: 0, width: 100, height: 100 },
+    }]))).rejects.toThrow(/PATCH_CONFLICT: INVALID_CREATE_CONTROL_ENVELOPE/);
+  });
+
+  it.each([
+    {
+      name: "a model-supplied child GUID",
+      children: [{ layoutType: 4, objectType: 2, baseProperty: { name: "Nested", guid: "model-guid" } }],
+    },
+    {
+      name: "an unreviewed nested layout type",
+      children: [{ layoutType: 1, objectType: 2, baseProperty: { name: "Nested" } }],
+    },
+    {
+      name: "duplicate nested layout names",
+      children: [
+        { layoutType: 4, objectType: 2, baseProperty: { name: "Nested" } },
+        { layoutType: 5, objectType: 2, baseProperty: { name: "Nested" } },
+      ],
+    },
+  ])("rejects $name before layout creation", async ({ children }) => {
+    const base = await copyFixture("client-unknown-field");
+    await expect(applyClientPatch(base, plan([{
+      op: "create",
+      entityType: "control",
+      entityId: "InvalidChildrenLayout",
+      properties: { pageId: "page-guid-1", type: "layout", layoutType: 5, children },
+    }]))).rejects.toThrow(/PATCH_CONFLICT: INVALID_COMPONENT_PROPERTY/);
+  });
+
+  it("rejects generated child GUID collisions with another create operation atomically", async () => {
+    const base = await copyFixture("client-unknown-field");
+    await expect(applyClientPatch(base, plan([
+      {
+        op: "create",
+        entityType: "control",
+        entityId: "child:NewDocking:Nested",
+        properties: { pageId: "page-guid-1", type: "text", text: "collision" },
+      },
+      {
+        op: "create",
+        entityType: "control",
+        entityId: "NewDocking",
+        properties: {
+          pageId: "page-guid-1",
+          type: "layout",
+          layoutType: 5,
+          children: [{ layoutType: 4, objectType: 2, baseProperty: { name: "Nested" } }],
+        },
+      },
+    ]))).rejects.toThrow(/PATCH_CONFLICT: GENERATED_GUID_COLLISION/);
   });
 
   it("updates easyui fields through the allowlist and rejects non-allowlisted ones", async () => {
@@ -311,6 +374,28 @@ describe("client patcher — KF 容器对象（easyui / 布局）", () => {
         updateOperation("layout-guid-1", [{ path: "/arbitraryRawField", value: "x" }]),
       ])),
     ).rejects.toThrow(patchConflict);
+  });
+
+  it("preserves an imported child GUID when patching an unrelated layout field", async () => {
+    const base = await makeContainerFixture();
+    const versionDir = await resolveVersionDir(base);
+    const pagePath = join(versionDir, "project", "page", "Page1.json");
+    const page = JSON.parse(await readFile(pagePath, "utf8")) as Record<string, unknown>;
+    const layout = (page["objects"] as Array<Record<string, unknown>>)
+      .find((object) => object["layoutType"] === 5)!;
+    layout["insiderObjects"] = [{
+      layoutType: 4,
+      objectType: 2,
+      baseProperty: { name: "ImportedChild", guid: "imported-child-guid" },
+    }];
+    await writeFile(pagePath, JSON.stringify(page, null, 2), "utf8");
+
+    const candidate = await applyClientPatch(base, plan([
+      updateOperation("layout-guid-1", [{ path: "/panels", value: [{ region: "center", split: false }] }]),
+    ]));
+    const node = await rawContainer(candidate, "layout-guid-1");
+    const child = (node["insiderObjects"] as Array<Record<string, unknown>>)[0]!;
+    expect((child["baseProperty"] as Record<string, unknown>)["guid"]).toBe("imported-child-guid");
   });
 
   it("creates a control with properties.parentId into the target layout's insiderObjects (LLM nested-container expression)", async () => {

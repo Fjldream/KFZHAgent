@@ -497,8 +497,8 @@ function normalizeDockPanels(
  * 给布局子对象递归补 guid：KF 布局 insiderObjects 的每个子对象必须有 guid
  * （参考工程 easyui 子控件在顶层、嵌套布局在 baseProperty.guid），否则 inspect
  * 无法索引、LLM 无法引用修改。easyui 子控件 name 在顶层；布局子对象 name 在
- * baseProperty.name；已有 guid 的不动。用 `parentId:name` 派生防止不同布局
- * 内同名子控件（如两个 Datagrid1）guid 冲突。
+ * baseProperty.name。生成路径始终覆盖模型提供的子 GUID，并用 `parentId:name`
+ * 派生稳定身份；导入工程的无关 patch 不调用此函数，因此继续原样保留。
  */
 export function ensureChildGuids(build: BuildSeed, children: unknown[], parentId: string): unknown[] {
   return children.map((child) => {
@@ -513,10 +513,8 @@ export function ensureChildGuids(build: BuildSeed, children: unknown[], parentId
       const bp = node["baseProperty"];
       if (bp !== null && typeof bp === "object") {
         const base = bp as Record<string, unknown>;
-        if (base["guid"] === undefined) {
-          const name = typeof base["name"] === "string" ? base["name"] : "";
-          if (name !== "") base["guid"] = deriveGuid(build, `child:${parentId}:${name}`);
-        }
+        const name = typeof base["name"] === "string" ? base["name"] : "";
+        if (name !== "") base["guid"] = deriveGuid(build, `child:${parentId}:${name}`);
         if (Array.isArray(node["insiderObjects"])) {
           node["insiderObjects"] = ensureChildGuids(build, node["insiderObjects"] as unknown[], parentId);
         }

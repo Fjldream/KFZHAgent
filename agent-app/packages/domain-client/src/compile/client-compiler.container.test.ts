@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { compileClientProject } from "./client-compiler.js";
 import type { ClientProjectIR } from "../ir/client-project-ir.js";
+import { inspectClientProject } from "../inspect/client-inspector.js";
 
 const build = { seed: "container-seed" };
 
@@ -158,7 +159,7 @@ describe("client compiler validation — layout containers", () => {
     expect(layout!["dPanelsOption"]).toEqual(validLayout.panels);
   });
 
-  it("accepts negative layout coordinates (KF edge docking x=-1)", async () => {
+  it("accepts only the reviewed docking edge coordinate x=-1", async () => {
     const ws = await compileClientProject(
       projectWith([{ ...validLayout, x: -1, y: 59, layoutType: 5, children: [] }]),
       build,
@@ -166,6 +167,68 @@ describe("client compiler validation — layout containers", () => {
     const objects = await readPageObjects(ws);
     const layout = objects.find((o) => o["layoutType"] === 5);
     expect((layout!["baseProperty"] as { leftTopPt: { x: number } }).leftTopPt.x).toBe(-1);
+  });
+
+  it.each([
+    { name: "horizontal x=-999", control: { ...validLayout, x: -999, layoutType: 2 } },
+    { name: "docking x=-2", control: { ...validLayout, x: -2, layoutType: 5 } },
+  ])("rejects $name", async ({ control }) => {
+    await expect(compileClientProject(projectWith([control]), build))
+      .rejects.toThrow(/MODEL_OUTPUT_INVALID: INVALID_CONTROL_GEOMETRY/);
+  });
+
+  it("rejects model-supplied nested layout GUIDs", async () => {
+    const child = validLayout.children[0]!;
+    await expect(compileClientProject(projectWith([{
+      ...validLayout,
+      children: [{
+        ...child,
+        baseProperty: { ...child.baseProperty, guid: "model-owned-guid" },
+      }],
+    }]), build)).rejects.toThrow(/INVALID_COMPONENT_PROPERTY/);
+  });
+
+  it("rejects unreviewed nested layout types", async () => {
+    await expect(compileClientProject(projectWith([{
+      ...validLayout,
+      children: [{ ...validLayout.children[0]!, layoutType: 1 }],
+    }]), build)).rejects.toThrow(/INVALID_COMPONENT_PROPERTY/);
+  });
+
+  it("rejects duplicate nested layout names before GUID derivation", async () => {
+    await expect(compileClientProject(projectWith([{
+      ...validLayout,
+      children: [validLayout.children[0]!, structuredClone(validLayout.children[0]!)],
+    }]), build)).rejects.toThrow(/DUPLICATE_LAYOUT_CHILD_ID/);
+  });
+
+  it("rejects a nested derived GUID collision with a generated top-level control before inspect round-trip", async () => {
+    const childName = (validLayout.children[0]!.baseProperty as { name: string }).name;
+    await expect(compileClientProject(projectWith([
+      validLayout,
+      {
+        id: `child:${validLayout.id}:${childName}`,
+        type: "text",
+        x: 400,
+        y: 20,
+        width: 100,
+        height: 30,
+        text: "collision",
+      },
+    ]), build)).rejects.toThrow(/GENERATED_GUID_COLLISION/);
+  });
+
+  it("round-trips unique generated layout child GUIDs through inspection", async () => {
+    const ws = await compileClientProject(projectWith([validLayout]), build);
+    const inspected = await inspectClientProject(ws.path);
+    const childGuid = Object.keys(inspected.index.controls)
+      .find((guid) => inspected.index.controls[guid]?.name === "DockingLayout1");
+    const layoutGuid = Object.keys(inspected.index.controls)
+      .find((guid) => inspected.index.controls[guid]?.name === "HorizontalLayout1");
+
+    expect(childGuid).toBeDefined();
+    expect(layoutGuid).toBeDefined();
+    expect(childGuid).not.toBe(layoutGuid);
   });
 
   it("rejects a non-integer layoutType", async () => {

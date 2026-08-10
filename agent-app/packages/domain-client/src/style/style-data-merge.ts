@@ -27,6 +27,17 @@ function findManagedEnvelope(css: string): ManagedEnvelope | undefined {
   let escaped = false;
   for (let index = 0; index < css.length;) {
     const char = css[index]!;
+    // CSS comments do not assign escape semantics to backslashes: the first
+    // literal */ always closes the comment.
+    if (inComment) {
+      if (char === "*" && css[index + 1] === "/") {
+        inComment = false;
+        index += 2;
+      } else {
+        index += 1;
+      }
+      continue;
+    }
     if (escaped) {
       escaped = false;
       index += 1;
@@ -35,15 +46,6 @@ function findManagedEnvelope(css: string): ManagedEnvelope | undefined {
     if (char === "\\") {
       escaped = true;
       index += 1;
-      continue;
-    }
-    if (inComment) {
-      if (char === "*" && css[index + 1] === "/") {
-        inComment = false;
-        index += 2;
-      } else {
-        index += 1;
-      }
       continue;
     }
     if (quote !== undefined) {

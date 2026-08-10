@@ -357,6 +357,29 @@ describe("compileUiImplementation", () => {
   });
 
   it.each([
+    { name: "button action", capabilityId: "button", properties: { action: { kind: "noop" } } },
+    { name: "input inputType", capabilityId: "input", properties: { inputType: "password" } },
+    { name: "datetime pickerType", capabilityId: "datetimepicker", properties: { pickerType: "date" } },
+    { name: "inputnumber variableId", capabilityId: "inputnumber", properties: { variableId: "$Temp" } },
+    { name: "inputnumber decimals", capabilityId: "inputnumber", properties: { decimals: 2 } },
+  ])("rejects direct-only $name from the ChangePlan surface", ({ capabilityId, properties }) => {
+    expect(() => compileUiImplementation({
+      ...specFixture,
+      pages: [{
+        ...specFixture.pages[0]!,
+        components: [{
+          ...specFixture.pages[0]!.components[1]!,
+          id: "UnsupportedPatchSemantic",
+          capabilityId,
+          content: undefined,
+          properties,
+          style: { declarations: {}, states: {} },
+        }],
+      }],
+    }, context)).toThrow(/UNSUPPORTED_COMPONENT_PROPERTY|INVALID_COMPONENT_PROPERTY/);
+  });
+
+  it.each([
     {
       name: "nested styleDataNew",
       properties: { options: [{ label: "Ready", value: "ready", styleDataNew: "#domId{display:none}" }] },

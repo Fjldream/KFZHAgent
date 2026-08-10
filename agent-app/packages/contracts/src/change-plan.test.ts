@@ -114,4 +114,31 @@ describe("change plan schema", () => {
       operations: [{ op: "applyStyle", entityId: "x", entityType: "control", style: { css: "*{}" } }],
     }).success).toBe(false);
   });
+
+  it.each([
+    { name: "create", operation: { op: "create", entityType: "control", entityId: "   ", properties: {} } },
+    { name: "update", operation: { op: "update", entityId: "   ", changes: [] } },
+    { name: "delete", operation: { op: "delete", entityId: "   ", destructiveConfirmed: true, digest: "x" } },
+    { name: "applyStyle", operation: { op: "applyStyle", entityId: "   ", entityType: "control", style: {} } },
+  ])("rejects a blank $name entityId", ({ operation }) => {
+    expect(changePlanSchema.safeParse({
+      schema: "kf-change-plan/v1",
+      workspaceId: "w-1",
+      operations: [operation],
+    }).success).toBe(false);
+  });
+
+  it("trims valid entity IDs and rejects IDs beyond the reviewed bound", () => {
+    const parsed = changePlanSchema.parse({
+      schema: "kf-change-plan/v1",
+      workspaceId: "w-1",
+      operations: [{ op: "create", entityType: "control", entityId: "  FreshButton  ", properties: {} }],
+    });
+    expect(parsed.operations[0]?.entityId).toBe("FreshButton");
+    expect(changePlanSchema.safeParse({
+      schema: "kf-change-plan/v1",
+      workspaceId: "w-1",
+      operations: [{ op: "update", entityId: "x".repeat(101), changes: [] }],
+    }).success).toBe(false);
+  });
 });

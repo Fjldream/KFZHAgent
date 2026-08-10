@@ -5,7 +5,7 @@ Branch: `codex/kf-native-style-engine-foundation`
 
 ## Status
 
-All six initial findings, all three second-review findings, and all four third-review findings are addressed within the foundation scope. No runtime deployment or live KingFusion project mutation was added.
+All six initial findings, all three second-review findings, all four third-review findings, and all five fourth-review findings are addressed within the foundation scope. No runtime deployment or live KingFusion project mutation was added.
 
 ## RED evidence
 
@@ -29,6 +29,14 @@ The third-review focused RED run exposed 17 failing behaviors across 84 tests:
 
 A follow-up RED refinement exposed one additional failure across 27 compiler tests: an original unknown object property was silently removed by the shape parser before capability validation instead of being rejected. The implementation now validates semantic properties from the original generated-control source.
 
+The fourth-review RED cycle exposed 24 expected failures across 157 focused tests:
+
+- 5 contract failures: blank IDs remained valid for every operation variant and valid IDs were not trimmed or bounded.
+- 6 direct layout compiler failures: horizontal/docking negative coordinates, model-supplied child GUIDs, unreviewed nested layout types, duplicate child names, and a child GUID collision with a generated top-level control.
+- 5 direct layout patch failures: non-docking `-1`, child GUID/type/name violations, and a child collision with another generated create operation.
+- 7 patch-boundary failures: button action, input type, picker type, and input-number-only semantics were accepted then dropped, while blank/oversized runtime IDs were accepted.
+- 1 managed-CSS failure: a backslash before `*/` incorrectly prevented the first comment terminator from closing a customer comment.
+
 ## Implementation decisions
 
 1. Component properties are recursively screened for reserved native/style keys and validated with capability-specific Zod fields reused from semantic ControlIR schemas. The same validator runs again at create persistence. Raw-preservation capabilities retain their reviewed structures but cannot carry nested style/native payloads.
@@ -44,10 +52,16 @@ A follow-up RED refinement exposed one additional failure across 27 compiler tes
 11. CustomCharts creation is honest about the foundation's review boundary: an unconfigured shell is generatable, but `objects` and other arbitrary chart configuration are preserve-only until a positive strict chart schema exists. Existing imported CustomCharts remain byte-preserved when untouched.
 12. Patch creation uses a strict canonical envelope for system fields and geometry. Capability discriminators must agree; IDs are own non-empty strings; coordinates are bounded finite numbers; dimensions are bounded, finite, and positive. Reviewed layout docking coordinates of `-1` remain supported, and invalid values are never coerced to zero.
 13. The managed-style scanner is escape-aware in every lexical state and requires fully balanced CSS before append or replacement. Escaped selector braces remain literal, while unmatched braces, strings, comments, and dangling escapes fail closed without mutating customer CSS.
+14. Generated layout children cannot provide GUIDs. Nested layout types use the exact reviewed set (`0`, `2`, `3`, `4`, `5`, `6`), duplicate semantic child names fail before derivation, and compiler/patch preflights reject derived GUID collisions against known project and plan identities. Generative compilation always derives child GUIDs; unrelated imported-project patches preserve existing child GUID bytes.
+15. A shared geometry policy now gates both direct compilation and ChangePlan creation: coordinates are non-negative except docking layout `layout.5`, which alone accepts exactly `-1`; sizes are finite, positive, and bounded.
+16. Component-property validation has explicit generative and ChangePlan-create surfaces. Direct generation retains its reviewed mappings for button actions, input/picker native type aliases, and input-number decimals, while UI planning and patch creation reject those fields instead of silently dropping them. Every create-surface field was audited against patch persistence mappings.
+17. Every ChangeOperation uses one canonical `ChangeEntityIdSchema`: IDs are trimmed, non-blank, and limited to 100 characters. The runtime normalizer applies the same schema before hashing, lookup, or GUID derivation.
+18. CSS comments deliberately ignore backslash escape semantics, so the first literal `*/` closes the comment; escapes remain active in string and ordinary CSS lexical states.
 
 ## Files changed
 
 - `agent-app/packages/domain-client/src/implementation/component-properties.ts`
+- `agent-app/packages/domain-client/src/implementation/control-geometry.ts`
 - `agent-app/packages/domain-client/src/implementation/ui-implementation-compiler.ts`
 - `agent-app/packages/domain-client/src/ir/client-project-ir.schema.ts`
 - `agent-app/packages/domain-client/src/compile/client-compiler.ts`
@@ -57,6 +71,7 @@ A follow-up RED refinement exposed one additional failure across 27 compiler tes
 - `agent-app/packages/domain-client/src/compile/control-compiler.ts`
 - `agent-app/packages/domain-client/src/patch/client-patcher.ts`
 - `agent-app/packages/domain-client/src/preview/client-preview.ts`
+- `agent-app/packages/contracts/src/change-plan.ts`
 - Regression tests beside each affected module.
 
 ## GREEN verification
@@ -64,10 +79,11 @@ A follow-up RED refinement exposed one additional failure across 27 compiler tes
 - Initial focused final-review suite: 5 files, 86/86 tests passed.
 - Second-review focused suite: 5 files, 73/73 tests passed after observing 10 expected RED failures.
 - Third-review focused suite: 6 files, 96/96 tests passed after observing 17 expected RED failures plus the one-test original-source refinement failure.
-- Full `@kf/domain-client` suite: 24 files, 314/314 tests passed.
-- Full `@kf/contracts` suite: 6 files, 37/37 tests passed; the focused contracts subset also passed 11/11 during the RED/GREEN cycle.
+- Fourth-review focused suites: contracts 12/12 and domain-client 146/146 after observing 24 expected RED failures; the final domain focus includes one additional imported-preservation characterization.
+- Full `@kf/domain-client` suite: 24 files, 343/343 tests passed.
+- Full `@kf/contracts` suite: 6 files, 42/42 tests passed.
 - TypeScript: all 11 agent-app project typechecks passed (`api`, `web`, `worker`, `agent-orchestrator`, `artifact-storage`, `build-jobs`, `contracts`, `domain-client`, `domain-registry`, `kf-schema-extractor`, `preview-renderer`).
-- Scoped lint across every third-review changed TypeScript file reports exactly 3 pre-existing baseline errors in legacy lines (`client-compiler.ts` once and `client-patcher.ts` twice); no new finding is present.
+- Scoped lint across every fourth-review changed TypeScript file reports exactly 7 pre-existing baseline errors in legacy lines (`client-compiler.ts` once, `control-compiler.ts` three times, `control-compiler.test.ts` once, and `client-patcher.ts` twice); no new finding is present.
 - Exact `@kf/domain-client` package lint: 18 errors, 0 warnings, matching the recorded pre-existing baseline; no new lint finding was introduced.
 - `git diff --check`: clean.
 

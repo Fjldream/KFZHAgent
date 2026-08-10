@@ -21,6 +21,13 @@ describe("mergeManagedStyleData", () => {
     expect(merged).toBe(`${customerCss}\n${START}#domId{border-radius:8px}${END}`);
   });
 
+  it("closes customer comments at the first terminator even when preceded by a backslash", () => {
+    const customerCss = "/* customer \\*/#customer{color:red}";
+
+    expect(mergeManagedStyleData(customerCss, "#domId{font-size:16px}"))
+      .toBe(`${customerCss}\n${START}#domId{font-size:16px}${END}`);
+  });
+
   it.each([
     `${START}#domId{font-size:14px}`,
     `${END}`,

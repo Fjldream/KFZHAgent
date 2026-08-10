@@ -2,8 +2,13 @@ import { createHash } from "node:crypto";
 import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { FieldPatch } from "@kf/contracts";
-import { ComponentStyleSpecSchema, type ComponentStyleSpec, type ThemeSpec } from "@kf/contracts";
+import {
+  ChangeEntityIdSchema,
+  ComponentStyleSpecSchema,
+  type ComponentStyleSpec,
+  type FieldPatch,
+  type ThemeSpec,
+} from "@kf/contracts";
 import { z } from "zod";
 import { inspectClientProject, type EntityIndex, type InspectResult } from "../inspect/client-inspector.js";
 import { stableStringify, type ClientWorkspace } from "../compile/client-compiler.js";
@@ -12,7 +17,8 @@ import { ensureChildGuids } from "../compile/control-compiler.js";
 import { assertStyleCompilationAccepted, compileControlStyle } from "../style/style-engine.js";
 import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
 import { mergeManagedStyleData } from "../style/style-data-merge.js";
-import { validateComponentProperties } from "../implementation/component-properties.js";
+import { validateCreateComponentProperties } from "../implementation/component-properties.js";
+import { controlGeometryIssues, MAX_CONTROL_GEOMETRY } from "../implementation/control-geometry.js";
 import { mergeControlTemplate, type TemplateJson } from "../templates/merge-template.js";
 import baseFieldsJson from "../templates/base-fields.json" with { type: "json" };
 import buttonTemplate from "../templates/control-templates/button.json" with { type: "json" };
@@ -145,6 +151,12 @@ function requireString(value: unknown, what: string): string {
   return value;
 }
 
+function requireEntityId(value: unknown, what: string): string {
+  const parsed = ChangeEntityIdSchema.safeParse(value);
+  if (!parsed.success) throw new PatchConflictError(`${what} must be a trimmed non-blank string of at most 100 characters`);
+  return parsed.data;
+}
+
 /** Accepts both `op` (contract) and `action` (brief Step 1 example) keys. */
 function operationAction(raw: Record<string, unknown>): string {
   const value = raw["op"] ?? raw["action"];
@@ -174,7 +186,7 @@ export function normalizeChangePlan(input: unknown): NormalizedPlan {
   const operations: NormalizedOperation[] = rawOperations.map((raw, index) => {
     const rec = asRecord(raw);
     const op = operationAction(rec);
-    const entityId = requireString(rec["entityId"], `operations[${index}].entityId`);
+    const entityId = requireEntityId(rec["entityId"], `operations[${index}].entityId`);
     const entityType =
       typeof rec["entityType"] === "string" ? (rec["entityType"]) : undefined;
     switch (op) {
@@ -581,9 +593,9 @@ const CREATE_PASS_THROUGH: Readonly<Record<string, readonly string[]>> = {
   webcontainer: ["url", "scrollbar"],
   gantt: [],
   factorycalendar: ["value", "dateFormat"],
-  input: ["value", "placeholder", "type", "disabled", "clearable", "maxlength"],
+  input: ["value", "placeholder", "disabled", "clearable", "maxlength"],
   cascader: ["options", "placeholder", "filterable", "clearable"],
-  datetimepicker: ["value", "type", "placeholder", "format"],
+  datetimepicker: ["value", "placeholder", "format"],
   dropdown: ["options", "text", "splitButton"],
   navmenu: ["mode", "options"],
   tree: ["showCheckbox", "indent", "expandOnClickNode"],
@@ -844,8 +856,8 @@ const CREATE_SYSTEM_PROPERTY_KEYS = new Set([
   "parentId",
 ]);
 
-const createCoordinate = z.number().finite().min(-1).max(1_000_000_000).optional();
-const createSize = z.number().finite().positive().max(1_000_000_000).optional();
+const createCoordinate = z.number().finite().min(-MAX_CONTROL_GEOMETRY).max(MAX_CONTROL_GEOMETRY).optional();
+const createSize = z.number().finite().positive().max(MAX_CONTROL_GEOMETRY).optional();
 const CREATE_CONTROL_ENVELOPE_SCHEMA = z.object({
   pageId: z.string().min(1).max(100),
   type: z.string().min(1).max(100),
@@ -869,9 +881,7 @@ const CREATE_CONTROL_ENVELOPE_SCHEMA = z.object({
   };
   if (Object.hasOwn(CONTROL_TEMPLATES, value.type)) {
     rejectUnexpectedDiscriminators();
-    if ((value.x ?? 0) < 0 || (value.y ?? 0) < 0) {
-      ctx.addIssue({ code: "custom", path: ["x"], message: "negative coordinates are reviewed only for layouts" });
-    }
+    addGeometryIssues(value.type);
     return;
   }
   if (value.type === "easyui") {
@@ -879,9 +889,7 @@ const CREATE_CONTROL_ENVELOPE_SCHEMA = z.object({
     if (value.proto === undefined || !Object.hasOwn(EASYUI_TEMPLATES, value.proto)) {
       ctx.addIssue({ code: "custom", path: ["proto"], message: "proto must identify a reviewed EasyUI template" });
     }
-    if ((value.x ?? 0) < 0 || (value.y ?? 0) < 0) {
-      ctx.addIssue({ code: "custom", path: ["x"], message: "negative coordinates are reviewed only for layouts" });
-    }
+    addGeometryIssues(`easyui.${String(value.proto)}`);
     return;
   }
   if (value.type === "layout") {
@@ -889,6 +897,7 @@ const CREATE_CONTROL_ENVELOPE_SCHEMA = z.object({
     if (value.layoutType === undefined || ![0, 2, 3, 4, 5, 6].includes(value.layoutType)) {
       ctx.addIssue({ code: "custom", path: ["layoutType"], message: "layoutType must identify a reviewed layout" });
     }
+    addGeometryIssues(`layout.${String(value.layoutType)}`);
     return;
   }
   if (value.type === "prototype") {
@@ -896,12 +905,16 @@ const CREATE_CONTROL_ENVELOPE_SCHEMA = z.object({
     if (value.prototypeName === undefined || !Object.hasOwn(PROTOTYPE_TEMPLATES, value.prototypeName)) {
       ctx.addIssue({ code: "custom", path: ["prototypeName"], message: "prototypeName must identify a reviewed prototype" });
     }
-    if ((value.x ?? 0) < 0 || (value.y ?? 0) < 0) {
-      ctx.addIssue({ code: "custom", path: ["x"], message: "negative coordinates are reviewed only for layouts" });
-    }
+    addGeometryIssues(`prototype.${String(value.prototypeName)}`);
     return;
   }
   ctx.addIssue({ code: "custom", path: ["type"], message: `type ${value.type} has no reviewed template` });
+
+  function addGeometryIssues(capabilityId: string): void {
+    for (const issue of controlGeometryIssues(capabilityId, value)) {
+      ctx.addIssue({ code: "custom", path: [issue.field], message: issue.message });
+    }
+  }
 });
 
 function capabilityIdForCreateProperties(properties: Record<string, unknown>): string {
@@ -930,7 +943,7 @@ function validateCreateControlProperties(properties: Record<string, unknown>): R
     Object.entries(properties).filter(([key]) => !CREATE_SYSTEM_PROPERTY_KEYS.has(key)),
   );
   try {
-    const validated = validateComponentProperties(capabilityIdForCreateProperties(envelope.data), semanticProperties);
+    const validated = validateCreateComponentProperties(capabilityIdForCreateProperties(envelope.data), semanticProperties);
     return { ...envelope.data, ...validated };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -1343,6 +1356,46 @@ async function applyCreate(
   }
 }
 
+function assertPatchGeneratedGuidUniqueness(
+  plan: NormalizedPlan,
+  inspection: InspectResult,
+): void {
+  const owners = new Map<string, string>();
+  for (const guid of Object.keys(inspection.index.controls)) owners.set(guid, `existing control ${guid}`);
+  for (const guid of Object.keys(inspection.index.pages)) owners.set(guid, `existing page ${guid}`);
+  for (const variable of Object.values(inspection.index.variables)) {
+    if (variable.guid !== "") owners.set(variable.guid, `existing variable ${variable.id}`);
+  }
+  const register = (guid: string, owner: string): void => {
+    const existing = owners.get(guid);
+    if (existing !== undefined) {
+      throw new PatchConflictError(`GENERATED_GUID_COLLISION: ${owner} collides with ${existing}`);
+    }
+    owners.set(guid, owner);
+  };
+
+  for (const op of plan.operations) {
+    if (op.op !== "create" || (op.entityType !== "control" && op.entityType !== "page")) continue;
+    register(deriveGuid({ seed: plan.workspaceId }, op.entityId), `create ${op.entityType ?? "entity"} ${op.entityId}`);
+  }
+  for (const op of plan.operations) {
+    if (op.op !== "create" || op.entityType !== "control") continue;
+    const properties = validateCreateControlProperties(op.properties);
+    if (properties["type"] !== "layout" || !Array.isArray(properties["children"])) continue;
+    for (const child of properties["children"] as unknown[]) {
+      if (child === null || typeof child !== "object" || Array.isArray(child)) continue;
+      const base = (child as Record<string, unknown>)["baseProperty"];
+      if (base === null || typeof base !== "object" || Array.isArray(base)) continue;
+      const name = (base as Record<string, unknown>)["name"];
+      if (typeof name !== "string") continue;
+      register(
+        deriveGuid({ seed: plan.workspaceId }, `child:${op.entityId}:${name}`),
+        `layout child ${op.entityId}/${name}`,
+      );
+    }
+  }
+}
+
 /**
  * Applies a confirmed change plan to `base` and returns a fresh candidate
  * workspace. `base` is never modified.
@@ -1362,6 +1415,7 @@ export async function applyClientPatch(
 
   const versionDir = await resolveVersionDirName(base);
   const inspection = await inspectClientProject(base);
+  assertPatchGeneratedGuidUniqueness(plan, inspection);
   const pagesNeedingBoundsCheck = new Set(
     plan.operations
       .filter((op) => op.op === "create" && op.entityType === "control")

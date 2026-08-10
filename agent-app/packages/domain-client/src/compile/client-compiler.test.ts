@@ -117,6 +117,53 @@ describe("client compiler", () => {
     }), { seed: "custom-chart-config" })).rejects.toThrow(/MODEL_OUTPUT_INVALID/);
   });
 
+  it("retains strictly mapped direct-only generative properties", async () => {
+    const direct = {
+      ...ir,
+      pages: [{
+        ...ir.pages[0],
+        controls: [
+          {
+            id: "PasswordInput",
+            type: "input",
+            x: 0,
+            y: 0,
+            width: 160,
+            height: 30,
+            inputType: "password",
+          },
+          {
+            id: "DateOnly",
+            type: "datetimepicker",
+            x: 0,
+            y: 40,
+            width: 180,
+            height: 30,
+            pickerType: "date",
+          },
+          {
+            id: "PreciseNumber",
+            type: "inputnumber",
+            x: 0,
+            y: 80,
+            width: 160,
+            height: 30,
+            variableId: "$Temp",
+            decimals: 3,
+          },
+        ],
+      }],
+    };
+    const result = await compileClientProject(direct, { seed: "direct-only-properties" });
+    const page = JSON.parse(
+      await readFile(path.join(result.path, "1.0.0.1", "project", "page", "Page1.json"), "utf8"),
+    );
+
+    expect(page.objects.find((control) => control.name === "PasswordInput")?.type).toBe("password");
+    expect(page.objects.find((control) => control.name === "DateOnly")?.type).toBe("date");
+    expect(page.objects.find((control) => control.name === "PreciseNumber")?.precision).toBe(3);
+  });
+
   it("carries validated IR button styles through client compilation", async () => {
     const styled = {
       ...ir,
