@@ -182,11 +182,12 @@ describe("client validator (Task 7 brief Step 2)", () => {
   it("fails on a package round-trip mismatch", async () => {
     const base = await copyFixture("client-unknown-field");
     const candidate = await applyClientPatch(base, happyPlan());
-    // The packager excludes pagerecord, so it never shows up in the unpacked
-    // output; a candidate that keeps it cannot round-trip byte-for-byte.
+    // The packager excludes pagerecord record content (recordpages/recyclepages
+    // page snapshots), so it never shows up in the unpacked output; a candidate
+    // that keeps it cannot round-trip byte-for-byte.
     const projectRoot = await resolveVersionDir(candidate);
-    await mkdir(join(projectRoot, "project", "pagerecord"), { recursive: true });
-    await writeFile(join(projectRoot, "project", "pagerecord", "secret.page"), "top-secret");
+    await mkdir(join(projectRoot, "project", "pagerecord", "recordpages"), { recursive: true });
+    await writeFile(join(projectRoot, "project", "pagerecord", "recordpages", "secret.page"), "top-secret");
     const report = await validateClientProject(base, candidate, happyPlan());
     expect(report.checks.roundTrip).toBe("fail");
     expect(report.status).toBe("fail");

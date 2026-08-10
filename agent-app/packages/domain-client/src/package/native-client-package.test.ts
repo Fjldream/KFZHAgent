@@ -197,18 +197,20 @@ describe("native client package IO", () => {
     await expectDirsEqual(unpacked1, unpacked2);
   });
 
-  it("excludes pagerecord and agent-private metadata from packages", async () => {
+  it("excludes agent-private metadata and pagerecord record content from packages", async () => {
     const src = await mkdtemp(path.join(tmpdir(), "kf-client-src-"));
-    await mkdir(path.join(src, "1.0.0.1", "pagerecord"), { recursive: true });
+    await mkdir(path.join(src, "1.0.0.1", "pagerecord", "recordpages"), { recursive: true });
     await writeFile(path.join(src, "1.0.0.1", "project.json"), JSON.stringify({ name: "Minimal" }));
-    await writeFile(path.join(src, "1.0.0.1", "pagerecord", "secret.page"), "top-secret");
+    await writeFile(path.join(src, "1.0.0.1", "pagerecord", "recordpages", "secret.page"), "top-secret");
     await mkdir(path.join(src, ".kf-agent"));
     await writeFile(path.join(src, ".kf-agent", "state.json"), "{}");
 
     const gz = await packageNativeClientProject(src);
     const unpacked = await importNativeClientPackage(gz, tempDir());
 
-    await expect(readFile(path.join(unpacked, "1.0.0.1/pagerecord/secret.page"), "utf8")).rejects.toThrow();
+    // 编译产物里的 pagerecord 骨架（pageRecordManager.json + 空目录）KF 打开必需，
+    // 但用户历史记录内容（secret.page 等）仍被排除。
+    await expect(readFile(path.join(unpacked, "1.0.0.1/pagerecord/recordpages/secret.page"), "utf8")).rejects.toThrow();
     await expect(readFile(path.join(unpacked, ".kf-agent/state.json"), "utf8")).rejects.toThrow();
     await expect(readFile(path.join(unpacked, "1.0.0.1/project.json"), "utf8")).resolves.toBe(
       JSON.stringify({ name: "Minimal" }),

@@ -41,7 +41,9 @@ const ALLOWED_TOP_LEVEL_METADATA = new Set([
 
 /** Path segments excluded from packaged output. */
 const EXCLUDED_PATH_SEGMENTS = new Set([
-  "pagerecord",
+  // pagerecord 骨架（pageRecordManager.json/空 recordpages）由编译器生成、
+  // KF 打开工程必需，必须打进产物；排除它会导致每次部署都要手动补。
+  // （recordpages/recyclepages 在编译产物中为空目录，无历史记录内容。）
   ".kf-agent",
   ".git",
   ".svn",
@@ -228,6 +230,16 @@ async function collectProjectFiles(projectDir: string): Promise<{
         await walk(path.join(currentDir, name), nextRel);
       } else if (entry.isFile()) {
         if (EXCLUDED_BASENAMES.has(name.toLowerCase())) continue;
+        // pagerecord 的用户历史记录内容（recordpages/recyclepages 下的页面
+        // 快照）不打包——骨架文件（pageRecordManager.json/recyclePageManager.json）
+        // 由编译器生成且 KF 必需，必须保留。
+        const recordSegs = nextRel.split("/");
+        if (
+          recordSegs.includes("pagerecord") &&
+          (recordSegs.includes("recordpages") || recordSegs.includes("recyclepages"))
+        ) {
+          continue;
+        }
         files.push({ relPath: nextRel, data: await readFile(path.join(currentDir, name)) });
       }
       // Symbolic links are intentionally not followed during packaging.
@@ -242,7 +254,7 @@ async function collectProjectFiles(projectDir: string): Promise<{
  * Deterministically packages a client project directory into a ZIP container
  * (to be stored with a `.gz` extension). Entries are sorted lexically, all
  * timestamps are normalized to PACKAGE_FIXED_MTIME, permissions are stable,
- * and pagerecord / Agent-private metadata is excluded. Packing the same input
+ * and Agent-private metadata is excluded. Packing the same input
  * twice yields byte-identical output.
  */
 export async function packageNativeClientProject(projectDir: string): Promise<Buffer> {

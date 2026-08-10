@@ -227,6 +227,17 @@ export async function compileClientProject(
     await mkdir(path.join(projectDir, rel), { recursive: true });
   }
 
+  // pagerecord（页面版本记录）：位于工程根（与 project/ 平级，参考工程
+  // 1.0.0.1/pagerecord/）。KF 页面版本管理读写该目录，缺失时打开工程可能报错。
+  const pageRecordDir = path.join(versionDir, "pagerecord");
+  await mkdir(path.join(pageRecordDir, "recordpages"), { recursive: true });
+  await mkdir(path.join(pageRecordDir, "recyclepages"), { recursive: true });
+  await writeJson(path.join(pageRecordDir, "pageRecordManager.json"), {
+    recordCount: 0,
+    pages: [],
+  });
+  await writeJson(path.join(pageRecordDir, "recyclePageManager.json"), {});
+
   if (ir.scripts.length > 0) {
     await writeFile(
       path.join(projectDir, "km_global_script.js"),
