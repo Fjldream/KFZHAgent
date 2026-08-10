@@ -238,6 +238,34 @@ describe("client patcher — KF 容器对象（easyui / 布局）", () => {
     expect((node["baseProperty"] as Record<string, unknown>)["leftTopPt"]).toEqual({ x: -1, y: -1 });
   });
 
+  it("canonicalizes a generated docking child name before persistence and GUID derivation", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const candidate = await applyClientPatch(base, plan([{
+      op: "create",
+      entityType: "control",
+      entityId: "DockingWithChild",
+      properties: {
+        pageId: "page-guid-1",
+        type: "layout",
+        layoutType: 5,
+        children: [{
+          layoutType: 5,
+          objectType: 2,
+          baseProperty: { name: " DockingChild ", leftTopPt: { x: -1, y: 0 }, width: 200, height: 100 },
+        }],
+      },
+    }]));
+    const node = await rawContainer(candidate, deriveGuid({ seed: "w-test" }, "DockingWithChild"));
+    const child = (node["insiderObjects"] as Array<Record<string, unknown>>)[0]!;
+    expect(child["baseProperty"]).toEqual({
+      name: "DockingChild",
+      leftTopPt: { x: -1, y: 0 },
+      width: 200,
+      height: 100,
+      guid: deriveGuid({ seed: "w-test" }, "child:DockingWithChild:DockingChild"),
+    });
+  });
+
   it.each([
     { name: "horizontal x=-999", layoutType: 2, x: -999 },
     { name: "horizontal x=-1", layoutType: 2, x: -1 },

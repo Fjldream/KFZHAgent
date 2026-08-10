@@ -31,6 +31,7 @@ import {
   WebContainerControlIR,
 } from "../ir/client-project-ir.schema.js";
 import { EASYUI_PROTO_TYPES } from "../ir/easyui-types.js";
+import { controlGeometryIssues } from "./control-geometry.js";
 
 const parentId = z.string().min(1).max(100).optional();
 const boundedNumber = z.number().finite().min(-1_000_000_000).max(1_000_000_000).optional();
@@ -39,7 +40,7 @@ const dateFormat = z.string().min(1).max(64).regex(/^[a-zA-Z0-9:/ ._-]+$/).optio
 const uploadAccept = z.string().min(1).max(256).regex(/^[a-zA-Z0-9.,/+*-]+$/).optional();
 
 const layoutBaseProperty = z.object({
-  name: z.string().min(1).max(100),
+  name: z.string().trim().min(1).max(100),
   leftTopPt: z.object({ x: z.number().finite(), y: z.number().finite() }).strict().optional(),
   width: z.number().finite().positive().max(1_000_000_000).optional(),
   height: z.number().finite().positive().max(1_000_000_000).optional(),
@@ -48,7 +49,23 @@ const layoutChild = z.object({
   layoutType: z.union([z.literal(0), z.literal(2), z.literal(3), z.literal(4), z.literal(5), z.literal(6)]),
   objectType: z.literal(2).optional(),
   baseProperty: layoutBaseProperty,
-}).strict();
+}).strict().superRefine((value, ctx) => {
+  const { leftTopPt, width, height } = value.baseProperty;
+  for (const issue of controlGeometryIssues(`layout.${value.layoutType}`, {
+    x: leftTopPt?.x,
+    y: leftTopPt?.y,
+    width,
+    height,
+  })) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["baseProperty", ...(issue.field === "x" || issue.field === "y"
+        ? ["leftTopPt", issue.field]
+        : [issue.field])],
+      message: issue.message,
+    });
+  }
+});
 const layoutPanel = z.object({
   region: z.enum(["center", "north", "south", "east", "west"]),
   width: z.number().positive().max(1_000_000_000).optional(),

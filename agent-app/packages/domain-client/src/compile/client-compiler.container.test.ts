@@ -202,6 +202,75 @@ describe("client compiler validation — layout containers", () => {
     }]), build)).rejects.toThrow(/DUPLICATE_LAYOUT_CHILD_ID/);
   });
 
+  it("rejects a whitespace-only nested layout name", async () => {
+    const child = validLayout.children[0]!;
+    await expect(compileClientProject(projectWith([{
+      ...validLayout,
+      children: [{ ...child, baseProperty: { ...child.baseProperty, name: "   " } }],
+    }]), build)).rejects.toThrow(/INVALID_COMPONENT_PROPERTY/);
+  });
+
+  it("detects duplicate nested layout names after canonical trimming", async () => {
+    const child = validLayout.children[0]!;
+    await expect(compileClientProject(projectWith([{
+      ...validLayout,
+      children: [
+        { ...structuredClone(child), baseProperty: { ...structuredClone(child.baseProperty), name: "A" } },
+        { ...structuredClone(child), baseProperty: { ...structuredClone(child.baseProperty), name: " A " } },
+      ],
+    }]), build)).rejects.toThrow(/DUPLICATE_LAYOUT_CHILD_ID/);
+  });
+
+  it("rejects a negative coordinate on a non-docking nested layout", async () => {
+    const child = validLayout.children[0]!;
+    await expect(compileClientProject(projectWith([{
+      ...validLayout,
+      children: [{
+        ...child,
+        layoutType: 2,
+        baseProperty: { ...child.baseProperty, leftTopPt: { x: -1, y: 0 } },
+      }],
+    }]), build)).rejects.toThrow(/INVALID_COMPONENT_PROPERTY/);
+  });
+
+  it("canonicalizes a valid docking child name and preserves its reviewed -1 edge", async () => {
+    const child = validLayout.children[0]!;
+    const ws = await compileClientProject(projectWith([{
+      ...validLayout,
+      children: [{
+        ...child,
+        layoutType: 5,
+        baseProperty: {
+          ...child.baseProperty,
+          name: " DockingChild ",
+          leftTopPt: { x: -1, y: 0 },
+          width: 200,
+          height: 100,
+        },
+      }],
+    }]), build);
+    const layout = (await readPageObjects(ws)).find((object) => object["layoutType"] === 2)!;
+    const storedChild = (layout["insiderObjects"] as Array<Record<string, unknown>>)[0]!;
+    expect(storedChild["baseProperty"]).toMatchObject({
+      name: "DockingChild",
+      leftTopPt: { x: -1, y: 0 },
+      width: 200,
+      height: 100,
+    });
+  });
+
+  it("accepts bounded normal nested layout geometry", async () => {
+    const child = validLayout.children[0]!;
+    await expect(compileClientProject(projectWith([{
+      ...validLayout,
+      children: [{
+        ...child,
+        layoutType: 4,
+        baseProperty: { ...child.baseProperty, leftTopPt: { x: 0, y: 1 }, width: 200, height: 100 },
+      }],
+    }]), build)).resolves.toMatchObject({ mode: "candidate" });
+  });
+
   it("rejects a nested derived GUID collision with a generated top-level control before inspect round-trip", async () => {
     const childName = (validLayout.children[0]!.baseProperty as { name: string }).name;
     await expect(compileClientProject(projectWith([

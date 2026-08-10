@@ -5,7 +5,7 @@ Branch: `codex/kf-native-style-engine-foundation`
 
 ## Status
 
-All six initial findings, all three second-review findings, all four third-review findings, and all five fourth-review findings are addressed within the foundation scope. No runtime deployment or live KingFusion project mutation was added.
+All six initial findings, all three second-review findings, all four third-review findings, all five fourth-review findings, and the sole fifth-review finding are addressed within the foundation scope. No runtime deployment or live KingFusion project mutation was added.
 
 ## RED evidence
 
@@ -37,6 +37,8 @@ The fourth-review RED cycle exposed 24 expected failures across 157 focused test
 - 7 patch-boundary failures: button action, input type, picker type, and input-number-only semantics were accepted then dropped, while blank/oversized runtime IDs were accepted.
 - 1 managed-CSS failure: a backslash before `*/` incorrectly prevented the first comment terminator from closing a customer comment.
 
+The fifth-review focused RED cycle exposed 5 expected failures across 40 tests: whitespace-only child names were accepted, trim-equivalent names escaped duplicate detection, a non-docking child accepted a negative coordinate, and direct compilation plus ChangePlan creation persisted an untrimmed name before GUID derivation. The valid normal geometry and supplied-GUID rejection characterizations remained green.
+
 ## Implementation decisions
 
 1. Component properties are recursively screened for reserved native/style keys and validated with capability-specific Zod fields reused from semantic ControlIR schemas. The same validator runs again at create persistence. Raw-preservation capabilities retain their reviewed structures but cannot carry nested style/native payloads.
@@ -57,6 +59,7 @@ The fourth-review RED cycle exposed 24 expected failures across 157 focused test
 16. Component-property validation has explicit generative and ChangePlan-create surfaces. Direct generation retains its reviewed mappings for button actions, input/picker native type aliases, and input-number decimals, while UI planning and patch creation reject those fields instead of silently dropping them. Every create-surface field was audited against patch persistence mappings.
 17. Every ChangeOperation uses one canonical `ChangeEntityIdSchema`: IDs are trimmed, non-blank, and limited to 100 characters. The runtime normalizer applies the same schema before hashing, lookup, or GUID derivation.
 18. CSS comments deliberately ignore backslash escape semantics, so the first literal `*/` closes the comment; escapes remain active in string and ordinary CSS lexical states.
+19. Generated layout child names are trimmed, non-blank, and bounded before duplicate detection, storage, or GUID derivation. Each child's geometry is checked by the shared policy against its own layout type, so only docking type `5` accepts exact `-1` edges; dimensions remain finite, positive, and bounded. Imported untouched children retain the separate lossless-preservation path.
 
 ## Files changed
 
@@ -80,10 +83,12 @@ The fourth-review RED cycle exposed 24 expected failures across 157 focused test
 - Second-review focused suite: 5 files, 73/73 tests passed after observing 10 expected RED failures.
 - Third-review focused suite: 6 files, 96/96 tests passed after observing 17 expected RED failures plus the one-test original-source refinement failure.
 - Fourth-review focused suites: contracts 12/12 and domain-client 146/146 after observing 24 expected RED failures; the final domain focus includes one additional imported-preservation characterization.
-- Full `@kf/domain-client` suite: 24 files, 343/343 tests passed.
+- Fifth-review focused suite: 2 files, 40/40 tests passed after observing 5 expected RED failures.
+- Full `@kf/domain-client` suite: 24 files, 349/349 tests passed.
 - Full `@kf/contracts` suite: 6 files, 42/42 tests passed.
 - TypeScript: all 11 agent-app project typechecks passed (`api`, `web`, `worker`, `agent-orchestrator`, `artifact-storage`, `build-jobs`, `contracts`, `domain-client`, `domain-registry`, `kf-schema-extractor`, `preview-renderer`).
-- Scoped lint across every fourth-review changed TypeScript file reports exactly 7 pre-existing baseline errors in legacy lines (`client-compiler.ts` once, `control-compiler.ts` three times, `control-compiler.test.ts` once, and `client-patcher.ts` twice); no new finding is present.
+- Scoped lint across the three fifth-review changed TypeScript files passes with 0 errors and 0 warnings.
+- `@kf/contracts` package lint passes with 0 errors and 0 warnings.
 - Exact `@kf/domain-client` package lint: 18 errors, 0 warnings, matching the recorded pre-existing baseline; no new lint finding was introduced.
 - `git diff --check`: clean.
 
