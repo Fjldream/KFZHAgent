@@ -1,0 +1,68 @@
+{
+  "uiModelType": 33,
+  "adaptFontSize": false,
+  "miniFontSize": 10,
+  "propertys": [
+    "leftTopPt",
+    "comment",
+    "memberAccess",
+    "name",
+    "uiModelType",
+    "configureData",
+    "lock",
+    "sizePolicy",
+    "width",
+    "height",
+    "visible",
+    "runVisible",
+    "guid",
+    "styleData",
+    "isControl",
+    "resDescription",
+    "enable"
+  ],
+  "sizePolicy": {
+    "sizePolicy": [
+      3,
+      3,
+      0,
+      0
+    ],
+    "minSize": [
+      5,
+      5
+    ],
+    "maxSize": [
+      16777215,
+      16777215
+    ],
+    "fixedSize": [
+      150,
+      50
+    ]
+  },
+  "showUiExtendType": "ElementUI_Dropdown",
+  "width": 150,
+  "height": 50,
+  "prototypeName": "Dropdown",
+  "isControl": false,
+  "resDescription": {},
+  "property": {
+    "type": "{\\\"type\\\": \\\"combobox\\\",\\\"options\\\": {\\\"data\\\": [{\\\"value\\\":\\\"primary\\\",\\\"text\\\":\\\"primary\\\"},{\\\"value\\\":\\\"success\\\",\\\"text\\\":\\\"success\\\"},{\\\"value\\\":\\\"warning\\\",\\\"text\\\":\\\"warning\\\"},{\\\"value\\\":\\\"danger\\\",\\\"text\\\":\\\"danger\\\"},{\\\"value\\\":\\\"info\\\",\\\"text\\\":\\\"info\\\"},{\\\"value\\\":\\\"text\\\",\\\"text\\\":\\\"text\\\"}],\\\"panelHeight\\\": \\\"auto\\\"}}",
+    "placement": "{\\\"type\\\": \\\"combobox\\\",\\\"options\\\": {\\\"data\\\": [{\\\"value\\\":\\\"top\\\",\\\"text\\\":\\\"top\\\"},{\\\"value\\\":\\\"top-start\\\",\\\"text\\\":\\\"top-start\\\"},{\\\"value\\\":\\\"top-end\\\",\\\"text\\\":\\\"top-end\\\"},{\\\"value\\\":\\\"bottom\\\",\\\"text\\\":\\\"bottom\\\"},{\\\"value\\\":\\\"bottom-start\\\",\\\"text\\\":\\\"bottom-start\\\"},{\\\"value\\\":\\\"bottom-end\\\",\\\"text\\\":\\\"bottom-end\\\"}],\\\"panelHeight\\\": \\\"auto\\\"}}",
+    "trigger": "{\\\"type\\\": \\\"combobox\\\",\\\"options\\\": {\\\"data\\\": [{\\\"value\\\":\\\"hover\\\",\\\"text\\\":\\\"hover\\\"},{\\\"value\\\":\\\"click\\\",\\\"text\\\":\\\"click\\\"}],\\\"panelHeight\\\": \\\"auto\\\"}}"
+  },
+  "attributes": [
+    "type",
+    "split-button",
+    "text",
+    "placement",
+    "trigger",
+    "hide-on-click",
+    "show-timeout",
+    "hide-timeout",
+    "tabindex"
+  ],
+  "showDropdown": true,
+  "showMenu": true
+}

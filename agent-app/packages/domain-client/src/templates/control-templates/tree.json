@@ -1,0 +1,62 @@
+{
+  "uiModelType": 32,
+  "adaptFontSize": false,
+  "miniFontSize": 10,
+  "propertys": [
+    "leftTopPt",
+    "comment",
+    "memberAccess",
+    "name",
+    "uiModelType",
+    "configureData",
+    "lock",
+    "sizePolicy",
+    "width",
+    "height",
+    "visible",
+    "runVisible",
+    "guid",
+    "styleData",
+    "isControl",
+    "resDescription",
+    "enable"
+  ],
+  "sizePolicy": {
+    "sizePolicy": [
+      3,
+      3,
+      0,
+      0
+    ],
+    "minSize": [
+      5,
+      5
+    ],
+    "maxSize": [
+      16777215,
+      16777215
+    ],
+    "fixedSize": [
+      200,
+      400
+    ]
+  },
+  "showUiExtendType": "ElementUI_Tree",
+  "isControl": false,
+  "resDescription": {},
+  "width": 200,
+  "height": 400,
+  "prototypeName": "Tree",
+  "attributes": [
+    "draggable",
+    "render-after-expand",
+    "highlight-current",
+    "default-expand-all",
+    "expand-on-click-node",
+    "auto-expand-parent",
+    "show-checkbox",
+    "accordion",
+    "indent"
+  ],
+  "show": true
+}

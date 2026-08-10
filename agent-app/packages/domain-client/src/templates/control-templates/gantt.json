@@ -1,0 +1,149 @@
+{
+  "uiModelType": 30,
+  "lock": false,
+  "visible": true,
+  "enable": true,
+  "comment": "",
+  "width": 1200,
+  "height": 500,
+  "isChangeFixedSize": false,
+  "isChangeFont": false,
+  "sizePolicy": {
+    "sizePolicy": [
+      3,
+      3,
+      0,
+      0
+    ],
+    "minSize": [
+      5,
+      5
+    ],
+    "maxSize": [
+      16777215,
+      16777215
+    ],
+    "fixedSize": [
+      900,
+      400
+    ]
+  },
+  "showUiExtendType": "Gantt",
+  "prototypeName": "Gantt",
+  "ganttMainHeight": 600,
+  "ganttMainWidth": 1300,
+  "copylink": [
+    {
+      "id": "1",
+      "source": "task1",
+      "target": "task3",
+      "type": "2"
+    },
+    {
+      "id": "3",
+      "source": "task8",
+      "target": "task14",
+      "type": "2"
+    }
+  ],
+  "copycolumns": [
+    {
+      "prop": "id",
+      "label": "ID",
+      "width": "80",
+      "tree": true
+    },
+    {
+      "prop": "name",
+      "label": "\\u540D\\u79F0",
+      "width": "150"
+    }
+  ],
+  "copyzooming": {
+    "minColumnWidth": 100,
+    "maxColumnWidth": 200,
+    "levels": [
+      [
+        {
+          "unit": "month",
+          "format": "%M %Y",
+          "step": 1
+        },
+        {
+          "unit": "day",
+          "format": "%d %M",
+          "step": 1
+        }
+      ],
+      [
+        {
+          "unit": "day",
+          "format": "%d %M",
+          "step": 1
+        },
+        {
+          "unit": "hour",
+          "step": 12
+        }
+      ],
+      [
+        {
+          "unit": "day",
+          "format": "%d %M",
+          "step": 1
+        },
+        {
+          "unit": "hour",
+          "step": 6
+        }
+      ],
+      [
+        {
+          "unit": "day",
+          "format": "%d %M",
+          "step": 1
+        },
+        {
+          "unit": "hour",
+          "format": "%H:%i",
+          "step": 1
+        }
+      ]
+    ]
+  },
+  "timeLineColor": "red",
+  "copytaskBackgroudColor": [
+    {
+      "id": "1",
+      "color": "black"
+    },
+    {
+      "id": "5",
+      "color": "red"
+    }
+  ],
+  "timeFormatter": "YYYY/MM/DD",
+  "dateEnable": true,
+  "runVisible": true,
+  "sizeAble": true,
+  "timeLineFontColor": "rgba(0,0,0,1)",
+  "timeLineFontSize": "14",
+  "timeLineFont": "Arial",
+  "timeLineBackgroundColor": "rgba(0,0,0,0)",
+  "rowHeight": 61,
+  "taskHeight": 36,
+  "rowWidth": 150,
+  "rowFontColor": "rgba(0,0,0,1)",
+  "rowFont": "Arial",
+  "rowFontSize": "14px",
+  "timeDividedLineEffective": true,
+  "passedCell": "#CCC",
+  "futureCell": "#DDD",
+  "errTaskColor": "red",
+  "currentTimeLevel": "月/天",
+  "disableResizing": false,
+  "isShowTool": true,
+  "toolPlace": "top",
+  "isShowLock": true,
+  "isShowDel": true
+}

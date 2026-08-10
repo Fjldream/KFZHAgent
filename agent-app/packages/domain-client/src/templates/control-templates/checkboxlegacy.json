@@ -1,0 +1,68 @@
+{
+  "uiModelType": 1,
+  "lock": false,
+  "visible": true,
+  "enable": true,
+  "comment": "",
+  "width": 93,
+  "height": 31,
+  "isChangeFixedSize": false,
+  "isChangeFont": false,
+  "checkbox": {
+    "thisElement": {
+      "style": {
+        "position": "absolute",
+        "margin": "auto",
+        "height": "20px",
+        "left": "5px",
+        "top": "0",
+        "bottom": "0"
+      }
+    }
+  },
+  "span": {
+    "thisElement": {
+      "style": {
+        "position": "absolute",
+        "margin": "auto",
+        "height": "20px",
+        "lineHeight": "20px",
+        "left": "20px",
+        "top": "0",
+        "bottom": "0"
+      },
+      "innerText": "CheckBox"
+    }
+  },
+  "isControl": false,
+  "resDescription": {},
+  "showUiExtendType": "UICheckBox",
+  "check": false,
+  "fontInfo": {
+    "fontSize": "12",
+    "fontFamily": "Arial",
+    "textColor": "rgba(0,0,0,1)"
+  },
+  "bkColor": "rgba(255, 255, 255, 1)",
+  "sizePolicy": {
+    "sizePolicy": [
+      3,
+      3,
+      0,
+      0
+    ],
+    "minSize": [
+      5,
+      5
+    ],
+    "maxSize": [
+      16777215,
+      16777215
+    ],
+    "fixedSize": [
+      93,
+      31
+    ]
+  },
+  "prototypeName": "UICheckBox"
+}

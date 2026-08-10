@@ -1,0 +1,44 @@
+{
+  "uiModelType": 12,
+  "lock": false,
+  "visible": true,
+  "enable": true,
+  "comment": "",
+  "width": 200,
+  "height": 200,
+  "isChangeFixedSize": false,
+  "isChangeFont": false,
+  "prototypeName": "WebContainer",
+  "scrolling": true,
+  "url": "http://www..com/",
+  "transcrolling": "no",
+  "webcon": {
+    "thisElement": {
+      "width": "100%",
+      "height": "100%"
+    }
+  },
+  "sizePolicy": {
+    "sizePolicy": [
+      3,
+      3,
+      0,
+      0
+    ],
+    "minSize": [
+      5,
+      5
+    ],
+    "maxSize": [
+      16777215,
+      16777215
+    ],
+    "fixedSize": [
+      200,
+      200
+    ]
+  },
+  "isControl": false,
+  "resDescription": {},
+  "showUiExtendType": "网页容器"
+}

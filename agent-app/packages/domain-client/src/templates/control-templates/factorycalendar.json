@@ -1,0 +1,96 @@
+{
+  "uiModelType": 43,
+  "lock": false,
+  "visible": true,
+  "enable": true,
+  "comment": "",
+  "width": 1,
+  "height": 645,
+  "isChangeFixedSize": false,
+  "isChangeFont": false,
+  "prototypeName": "CustomeCalendar",
+  "sizePolicy": {
+    "sizePolicy": [
+      3,
+      3,
+      0,
+      0
+    ],
+    "minSize": [
+      5,
+      5
+    ],
+    "maxSize": [
+      16777215,
+      16777215
+    ],
+    "fixedSize": [
+      645,
+      1000
+    ]
+  },
+  "showUiExtendType": "CustomeCalendar",
+  "connectArray": [
+    "onSelect",
+    "onAdd",
+    "onEdit",
+    "onDelete",
+    "onBatchAdd"
+  ],
+  "connectObj": {
+    "IDS_BASE": []
+  },
+  "defaultData": {
+    "taskOptionArray": [
+      {
+        "eventTypeName": "\\u5DE5\\u4F5C\\u65E5",
+        "eventTypeFlag": "rgb(95, 184, 120)"
+      },
+      {
+        "eventTypeName": "\\u56FD\\u5E86",
+        "eventTypeFlag": "red"
+      }
+    ],
+    "taskOption": [
+      {
+        "eventType": "\\u5DE5\\u4F5C\\u65E5",
+        "startTime": "1990/01/01",
+        "endTime": "2100/01/01",
+        "weekSelected": [
+          "\\u5468\\u4E00",
+          "\\u5468\\u4E8C",
+          "\\u5468\\u4E09",
+          "\\u5468\\u56DB",
+          "\\u5468\\u4E94"
+        ],
+        "taskOptions": [
+          {
+            "taskName": "\\u4E0A\\u5348\\u73ED",
+            "et": "2020/10/01 09:00",
+            "st": "2020/10/01 12:00"
+          },
+          {
+            "taskName": "\\u4E0B\\u5348\\u73ED",
+            "et": "2020/10/01 13:00",
+            "st": "2020/10/01 18:00"
+          }
+        ]
+      },
+      {
+        "eventType": "\\u56FD\\u5E86",
+        "eventDate": "2020/10/01",
+        "weekSelected": [],
+        "taskOptions": [
+          {
+            "taskName": "\\u4F11\\u606F",
+            "et": "2020/10/01 00:00",
+            "st": "2020/10/02 00:10"
+          }
+        ]
+      },
+      {
+        "deleteTime": "2020/10/16"
+      }
+    ]
+  }
+}

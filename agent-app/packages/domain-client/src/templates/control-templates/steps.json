@@ -1,0 +1,31 @@
+{
+  "uiModelType": 52,
+  "active": 1,
+  "direction": "horizontal",
+  "space": "",
+  "processStatus": "process",
+  "finishStatus": "finish",
+  "alignCenter": false,
+  "simple": false,
+  "sizePolicy": {
+    "sizePolicy": [
+      3,
+      3,
+      0,
+      0
+    ],
+    "minSize": [
+      5,
+      5
+    ],
+    "maxSize": [
+      16777215,
+      16777215
+    ],
+    "fixedSize": [
+      90,
+      500
+    ]
+  },
+  "showUiExtendType": "ElementUI_Steps"
+}

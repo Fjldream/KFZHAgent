@@ -25,8 +25,9 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-/** 12 种 IR 控件 → 源码文件 + 基类 */
+/** IR 控件 → 源码文件 + 基类（12 种既有 + 19 种新增，覆盖参考工程全部 uiModelType） */
 const CONTROLS: Record<string, { file: string; base: string | null; templateName: string }> = {
+  // ── 既有 12 种 ──
   text: { file: "Common/Graphic/UI/kmui_textbox.js", base: "KMUIModelBase", templateName: "text" },
   richtext: { file: "Common/Graphic/UI/kmui_richtext.js", base: "KMUIModelBase", templateName: "richtext" },
   button: { file: "Common/Graphic/ElementUI/kmui_elementui_button.js", base: "KMUIElementBase", templateName: "button" },
@@ -39,6 +40,29 @@ const CONTROLS: Record<string, { file: string; base: string | null; templateName
   tabs: { file: "Common/Graphic/ElementUI/kmui_elementui_tabs.js", base: "KMUIElementBase", templateName: "tabs" },
   table: { file: "Common/Graphic/ElementUI/kmui_elementui_table.js", base: "KMUIElementBase", templateName: "table" },
   spacer: { file: "Common/Graphic/UI/kmui_vertical_spacer.js", base: "KMUIModelBase", templateName: "spacer" },
+  // ── 新增：老式控件（KMUIModelBase）──
+  combobox: { file: "Common/Graphic/UI/kmui_combobox_model.js", base: "KMUIModelBase", templateName: "combobox" },
+  scale: { file: "Common/Graphic/UI/kmui_scale.js", base: "KMUIModelBase", templateName: "scale" },
+  list: { file: "Common/Graphic/UI/kmui_list_model.js", base: "KMUIModelBase", templateName: "list" },
+  treeview: { file: "Common/Graphic/UI/kmui_treeview.js", base: "KMUIModelBase", templateName: "treeview" },
+  webcontainer: { file: "Common/Graphic/UI/kmui_webcontainer.js", base: "KMUIModelBase", templateName: "webcontainer" },
+  gantt: { file: "Common/Graphic/UI/kmui_gantt.js", base: "KMUIModelBase", templateName: "gantt" },
+  factorycalendar: { file: "Common/Graphic/UI/kmui_factorycalendar.js", base: "KMUIModelBase", templateName: "factorycalendar" },
+  // 旧式 radio/checkbox（uiModelType 0/1，参考工程仍在用；语义与 ElementUI 36/37 不同，保留独立模板）
+  radiolegacy: { file: "Common/Graphic/UI/kmui_radio_model.js", base: "KMUIModelBase", templateName: "radiolegacy" },
+  checkboxlegacy: { file: "Common/Graphic/UI/kmui_checkbox_model.js", base: "KMUIModelBase", templateName: "checkboxlegacy" },
+  // ── 新增：ElementUI 新式控件（KMUIElementBase）──
+  input: { file: "Common/Graphic/ElementUI/kmui_elementui_input.js", base: "KMUIElementBase", templateName: "input" },
+  cascader: { file: "Common/Graphic/ElementUI/kmui_elementui_cascader.js", base: "KMUIElementBase", templateName: "cascader" },
+  datetimepicker: { file: "Common/Graphic/ElementUI/kmui_elementui_datetimepicker.js", base: "KMUIElementBase", templateName: "datetimepicker" },
+  dropdown: { file: "Common/Graphic/ElementUI/kmui_elementui_dropdown.js", base: "KMUIElementBase", templateName: "dropdown" },
+  navmenu: { file: "Common/Graphic/ElementUI/kmui_elementui_navmenu.js", base: "KMUIElementBase", templateName: "navmenu" },
+  tree: { file: "Common/Graphic/ElementUI/kmui_elementui_tree.js", base: "KMUIElementBase", templateName: "tree" },
+  upload: { file: "Common/Graphic/ElementUI/kmui_elementui_upload.js", base: "KMUIElementBase", templateName: "upload" },
+  transfer: { file: "Common/Graphic/ElementUI/kmui_elementui_transfer.js", base: "KMUIElementBase", templateName: "transfer" },
+  tag: { file: "Common/Graphic/ElementUI/kmui_elementui_tag.js", base: "KMUIElementBase", templateName: "tag" },
+  timeline: { file: "Common/Graphic/ElementUI/kmui_elementui_timeline.js", base: "KMUIElementBase", templateName: "timeline" },
+  steps: { file: "Common/Graphic/ElementUI/kmui_elementui_steps.js", base: "KMUIElementBase", templateName: "steps" },
 };
 
 /** 基类源码文件 */

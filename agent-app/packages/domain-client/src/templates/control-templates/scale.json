@@ -1,0 +1,55 @@
+{
+  "uiModelType": 8,
+  "lock": false,
+  "visible": true,
+  "enable": true,
+  "comment": "",
+  "width": 0,
+  "height": 0,
+  "isChangeFixedSize": false,
+  "isChangeFont": false,
+  "maxValue": 100,
+  "minValue": 0,
+  "decPart": 0,
+  "priLine": true,
+  "numerical": true,
+  "graLine": true,
+  "priGraduation": 4,
+  "auxGraduation": 4,
+  "bkColor": "#ffffff",
+  "graColor": "rgba(159,165,171,1)",
+  "textColor": "rgba(92,95,98,1)",
+  "fontInfo": "15px Arial",
+  "bkDisplay": true,
+  "prototypeName": "Ruler",
+  "isControl": false,
+  "resDescription": {},
+  "hRulerCanvas": {
+    "thisElement": {
+      "style": {
+        "width": "100%",
+        "height": "100%"
+      }
+    }
+  },
+  "sizePolicy": {
+    "sizePolicy": [
+      3,
+      3,
+      0,
+      0
+    ],
+    "minSize": [
+      5,
+      5
+    ],
+    "maxSize": [
+      16777215,
+      16777215
+    ],
+    "fixedSize": [
+      100,
+      30
+    ]
+  }
+}

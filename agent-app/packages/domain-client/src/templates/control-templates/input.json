@@ -1,0 +1,40 @@
+{
+  "uiModelType": 38,
+  "value": "",
+  "maxlength": 99999999,
+  "showWordLimit": false,
+  "placeholder": "",
+  "showPassword": false,
+  "disabled": false,
+  "clearable": false,
+  "prefixIcon": "",
+  "suffixIcon": "",
+  "readonly": false,
+  "max": 9999999999,
+  "min": -999999999,
+  "step": 1,
+  "type": "text",
+  "prepend": "",
+  "append": "",
+  "sizePolicy": {
+    "sizePolicy": [
+      3,
+      3,
+      0,
+      0
+    ],
+    "minSize": [
+      5,
+      5
+    ],
+    "maxSize": [
+      16777215,
+      16777215
+    ],
+    "fixedSize": [
+      200,
+      45
+    ]
+  },
+  "showUiExtendType": "ElementUI_Input"
+}

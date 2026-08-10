@@ -1,0 +1,34 @@
+{
+  "uiModelType": 11,
+  "lock": false,
+  "visible": true,
+  "enable": true,
+  "comment": "",
+  "width": 0,
+  "height": 0,
+  "isChangeFixedSize": false,
+  "isChangeFont": false,
+  "prototypeName": "TreeView",
+  "bkColor": "rgba(255, 255, 255, 1)",
+  "fontInfo": "",
+  "sizePolicy": {
+    "sizePolicy": [
+      3,
+      3,
+      0,
+      0
+    ],
+    "minSize": [
+      5,
+      5
+    ],
+    "maxSize": [
+      16777215,
+      16777215
+    ],
+    "fixedSize": [
+      100,
+      30
+    ]
+  }
+}

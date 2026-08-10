@@ -1,0 +1,43 @@
+{
+  "uiModelType": 9,
+  "lock": false,
+  "visible": true,
+  "enable": true,
+  "comment": "",
+  "width": 0,
+  "height": 0,
+  "isChangeFixedSize": false,
+  "isChangeFont": false,
+  "list": {
+    "thisElement": {
+      "style": {
+        "width": "100%",
+        "height": "100%"
+      }
+    }
+  },
+  "hScrollBar": false,
+  "selectIndex": "-1",
+  "prototypeName": "UIListBox",
+  "borderStyle": 2,
+  "sizePolicy": {
+    "sizePolicy": [
+      3,
+      3,
+      0,
+      0
+    ],
+    "minSize": [
+      5,
+      5
+    ],
+    "maxSize": [
+      16777215,
+      16777215
+    ],
+    "fixedSize": [
+      100,
+      30
+    ]
+  }
+}
