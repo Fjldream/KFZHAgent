@@ -317,8 +317,16 @@ function compileEasyuiControl(build: BuildSeed, control: ControlIR): TemplateJso
     mergeControlTemplate(BASE_FIELDS, easyuiBaseTemplate),
     protoTemplate,
   );
+  // IR 保留字段名（type/proto/几何/id）绝不能透传进 KF 对象：
+  // IR 的 `type` 是判别值 "easyui"，若白名单含 "type"（如 textbox）会把判别值写进 KF；
+  // `uiModelType` 更不能出现（KF 加载用 uiModelType!==void 0 覆盖 easyui 实例）。
+  const RESERVED_IR_FIELDS = new Set([
+    "type", "proto", "uiExtendType", "id", "name", "guid",
+    "x", "y", "width", "height", "uiModelType",
+  ]);
   const pass: Record<string, unknown> = {};
   for (const field of EASYUI_PROTO_FIELDS[proto] ?? []) {
+    if (RESERVED_IR_FIELDS.has(field)) continue;
     const value = (easyui as unknown as Record<string, unknown>)[field];
     if (value !== undefined) pass[field] = value;
   }
@@ -335,6 +343,29 @@ function compileEasyuiControl(build: BuildSeed, control: ControlIR): TemplateJso
 }
 
 /**
+ * 清洗 KF 容器子对象：递归删除 `type`/`uiModelType` 顶层键。
+ * KF 布局 jsonToObject 对 insiderObjects 的每个子对象做同样的分派
+ * （uiExtendType → uiModelType → layoutType，后者覆盖前者）：
+ * 若子对象带 `uiModelType: null`（null!==undefined 为 true），
+ * gUIModelObjectFactory.create(null) 会把 easyui/布局实例覆盖成 null，控件不渲染。
+ * 真实 KF 序列化的子对象本就不含这两个键；LLM 生成的 children 必须被清洗。
+ */
+function stripKfContainerKeys(node: unknown): unknown {
+  if (Array.isArray(node)) {
+    return node.map(stripKfContainerKeys);
+  }
+  if (node !== null && typeof node === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+      if (key === "type" || key === "uiModelType") continue;
+      out[key] = stripKfContainerKeys(value);
+    }
+    return out;
+  }
+  return node;
+}
+
+/**
  * Compiles a layout container (objectType=2). Geometry + name/guid live inside
  * `baseProperty`; nested children are carried into `insiderObjects` verbatim
  * (raw KF JSON, recursive layout/control objects), panels into `dPanelsOption`.
@@ -344,8 +375,6 @@ function compileEasyuiControl(build: BuildSeed, control: ControlIR): TemplateJso
 function compileLayoutControl(build: BuildSeed, control: ControlIR): TemplateJson {
   const layout = control as unknown as LayoutContainerIR;
   const overrides: TemplateJson = {
-    type: 1,
-    uiModelType: null,
     objectType: 2,
     layoutType: layout.layoutType,
     baseProperty: {
@@ -357,7 +386,9 @@ function compileLayoutControl(build: BuildSeed, control: ControlIR): TemplateJso
     },
   };
   if (layout.children !== undefined) {
-    overrides["insiderObjects"] = layout.children.map((child) => structuredClone(child));
+    overrides["insiderObjects"] = stripKfContainerKeys(
+      layout.children.map((child) => structuredClone(child)),
+    );
   }
   if (layout.panels !== undefined) {
     overrides["dPanelsOption"] = structuredClone(layout.panels);

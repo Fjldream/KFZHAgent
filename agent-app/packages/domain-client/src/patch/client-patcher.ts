@@ -621,7 +621,14 @@ async function applyCreate(
           );
         }
         const pass: Record<string, unknown> = {};
+        // IR 保留字段名绝不能透传（同 compileEasyuiControl）：type 是判别值 "easyui"，
+        // uiModelType 会在 KF 加载时覆盖 easyui 实例。
+        const RESERVED_IR_FIELDS = new Set([
+          "type", "proto", "uiExtendType", "id", "name", "guid",
+          "x", "y", "width", "height", "uiModelType",
+        ]);
         for (const field of EASYUI_PROTO_FIELDS[proto] ?? []) {
+          if (RESERVED_IR_FIELDS.has(field)) continue;
           const value = op.properties[field];
           if (value !== undefined) pass[field] = value;
         }

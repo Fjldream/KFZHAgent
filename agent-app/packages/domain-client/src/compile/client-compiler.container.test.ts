@@ -85,8 +85,8 @@ describe("client compiler validation — easyui controls", () => {
     const objects = await readPageObjects(ws);
     const datagrid = objects.find((o) => o["name"] === "Datagrid1");
     expect(datagrid).toBeDefined();
-    expect(datagrid!["type"]).toBe(1);
-    expect(datagrid!["uiModelType"]).toBeNull();
+    expect(datagrid!["type"]).toBeUndefined();
+    expect(datagrid!["uiModelType"]).toBeUndefined();
     expect(datagrid!["objectType"]).toBe(3);
     expect(datagrid!["uiExtendType"]).toBe(1);
     expect(datagrid!["leftTopPt"]).toEqual({ x: 14, y: 13 });
@@ -130,8 +130,8 @@ describe("client compiler validation — layout containers", () => {
     const objects = await readPageObjects(ws);
     const layout = objects.find((o) => o["layoutType"] === 2);
     expect(layout).toBeDefined();
-    expect(layout!["type"]).toBe(1);
-    expect(layout!["uiModelType"]).toBeNull();
+    expect(layout!["type"]).toBeUndefined();
+    expect(layout!["uiModelType"]).toBeUndefined();
     expect(layout!["objectType"]).toBe(2);
     expect(layout!["baseProperty"]).toEqual({
       name: "HorizontalLayout1",

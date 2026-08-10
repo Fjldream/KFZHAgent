@@ -28,10 +28,10 @@ function easyui(overrides: Record<string, unknown> = {}): ControlIR {
 }
 
 describe("control compiler — easyui controls (objectType=3)", () => {
-  it("serializes the KF datagrid envelope (type/uiModelType/objectType/uiExtendType)", () => {
+  it("serializes the KF datagrid envelope (objectType/uiExtendType)", () => {
     const out = compileControl(build, easyui(), ctx);
-    expect(out["type"]).toBe(1);
-    expect(out["uiModelType"]).toBeNull();
+    expect(out["type"]).toBeUndefined();
+    expect(out["uiModelType"]).toBeUndefined();
     expect(out["objectType"]).toBe(3);
     expect(out["uiExtendType"]).toBe(1);
     expect(out["leftTopPt"]).toEqual({ x: 10, y: 20 });
@@ -91,7 +91,7 @@ describe("control compiler — easyui controls (objectType=3)", () => {
       );
       expect(out["uiExtendType"]).toBe(proto);
       expect(out["objectType"]).toBe(3);
-      expect(out["uiModelType"]).toBeNull();
+      expect(out["uiModelType"]).toBeUndefined();
     }
   });
 });
@@ -108,8 +108,8 @@ describe("control compiler — layout containers (objectType=2)", () => {
       layoutType: 2,
     } as unknown as ControlIR;
     const out = compileControl(build, layout, ctx);
-    expect(out["type"]).toBe(1);
-    expect(out["uiModelType"]).toBeNull();
+    expect(out["type"]).toBeUndefined();
+    expect(out["uiModelType"]).toBeUndefined();
     expect(out["objectType"]).toBe(2);
     expect(out["layoutType"]).toBe(2);
     expect(out["baseProperty"]).toEqual({
