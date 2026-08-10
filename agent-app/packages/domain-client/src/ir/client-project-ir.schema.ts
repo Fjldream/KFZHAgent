@@ -449,6 +449,48 @@ export const LayoutContainerIR = BaseControlIR.extend({
 }).strict();
 export type LayoutContainerIR = z.infer<typeof LayoutContainerIR>;
 
+// ── KF 特殊节点（objectType=1 或 prototypeName 特判的图表/告警/自定义窗口）──
+// 详见 docs/superpowers/plans/2026-08-10-kf-special-nodes.md。这些节点没有
+// uiModelType/uiExtendType/layoutType，KF 前端 km_layer/kmui_layout jsonToObject
+// 按 `prototypeName` 特判创建实例（AlarmWindow/EventWindow/TrendChart/BarChart/
+// PieChart/XYChart/CustomCharts）。
+
+/**
+ * KF 特殊节点 IR（`prototypeName` 判别的图表/告警/自定义窗口）。
+ *
+ * 已知节点结构（参考工程 42 例，/tmp/kf_ref/1.0.0.1）：
+ * - **CustomCharts**（objectType=1，容器型）：name/几何在
+ *   pageProperty{name,pagePos,pageSize}；objects[0] 是 **JSON 字符串**
+ *   （echart 配置 customChartsType/option/title/...）；modlePrototype
+ *   {name,guid,version,type}；region 顶层。IR 的几何由 inspect 从
+ *   pageProperty 提取映射到 BaseControlIR 的 x/y/width/height。
+ * - **图表型**（XYChart/TrendChart/BarChart/PieChart）：几何在顶层
+ *   leftTopPt/width/height；title 是对象（{show,text,textStyle,...}）非字符串；
+ *   areas/chartComponentType 顶层。
+ * - **AlarmWindow**：几何在顶层；alarmWindowType/columns/dateSource/
+ *   dateType/evalconfig/filterDataSource/filterMsg/historyNumber/list/linkMng
+ *   等顶层。
+ *
+ * 复杂配置（CustomCharts.objects JSON 字符串、AlarmWindow.columns/evalconfig、
+ * 图表 areas/option/title）**不建模**：`.passthrough()` 宽容保留全部未知字段
+ * 原样，由编译/patch/inspect/渲染透传。IR 判别 `type` 固定为字面量
+ * "prototype"（保证 discriminatedUnion 可用），`prototypeName` 细分节点种类。
+ */
+export const SpecialNodeIR = BaseControlIR.extend({
+  type: z.literal("prototype"),
+  /** KF `prototypeName`：CustomCharts / AlarmWindow / EventWindow / TrendChart / BarChart / PieChart / XYChart 等。 */
+  prototypeName: z.string(),
+  /** 图表标题（图表型顶层 `title` 配置对象；CustomCharts 在 pageProperty.title）。 */
+  title: z.unknown().optional(),
+  /** 图表区域配置（图表型 `areas`，复杂配置宽容保留）。 */
+  areas: z.unknown().optional(),
+  /** 图表组件类型枚举（图表型 `chartComponentType`，宽容保留）。 */
+  chartComponentType: z.unknown().optional(),
+  /** 注释（顶层 `comment`）。 */
+  comment: z.string().optional(),
+}).passthrough();
+export type SpecialNodeIR = z.infer<typeof SpecialNodeIR>;
+
 export const ControlIR = z.discriminatedUnion("type", [
   TextControlIR,
   ButtonControlIR,
@@ -484,6 +526,7 @@ export const ControlIR = z.discriminatedUnion("type", [
   StepsControlIR,
   EasyuiControlIR,
   LayoutContainerIR,
+  SpecialNodeIR,
 ]);
 export type ControlIR = z.infer<typeof ControlIR>;
 

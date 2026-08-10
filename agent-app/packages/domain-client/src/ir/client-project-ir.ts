@@ -42,6 +42,7 @@ export const CONTROL_TYPES = [
   "steps",
   "easyui",
   "layout",
+  "prototype",
 ] as const;
 
 export function isClientProjectIR(value: unknown): value is ClientProjectIRValue {
