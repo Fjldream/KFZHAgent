@@ -246,13 +246,40 @@ for (const s of scenes) {
     console.log(`✅ 场景 ${s} 产物硬约束全部通过（无 type/uiModelType/baseProperty 违规，Docking 有 panels）`);
   }
 
-  // 校验 create 的控件确实存在
+  // 校验 create 的控件确实存在（含 parentId 嵌套）
   for (const op of plan.operations) {
     if (op.op === "create" && op.entityType === "control") {
       const name = op.entityId;
       const exists = Object.values(candInspection.index.controls).some((c) => c.id === name);
       console.log(`   create 控件 "${name}" 是否进入产物: ${exists ? "✓" : "✗ 未找到"}`);
       if (!exists) process.exitCode = 1;
+      // parentId：验证控件确实在目标布局 insiderObjects 内（不在页面顶层）
+      const parentId = op.properties?.["parentId"];
+      if (typeof parentId === "string" && parentId !== "") {
+        const inParent = (() => {
+          const collect = (o: unknown, layoutName: string): boolean => {
+            if (Array.isArray(o)) return o.some((v) => collect(v, layoutName));
+            if (typeof o !== "object" || o === null) return false;
+            const rec = o as Record<string, unknown>;
+            const bp = rec["baseProperty"];
+            const nm = typeof rec["name"] === "string" ? (rec["name"]) : "";
+            const bpName = bp !== null && typeof bp === "object" ? ((bp as Record<string, unknown>)["name"]) : undefined;
+            if ((nm === layoutName || bpName === layoutName) && Array.isArray(rec["insiderObjects"])) {
+              return (rec["insiderObjects"] as unknown[]).some((c) => {
+                if (typeof c !== "object" || c === null) return false;
+                return (c as Record<string, unknown>)["name"] === name;
+              });
+            }
+            for (const k of ["objects", "insiderObjects", "children", "layoutItems"]) {
+              if (rec[k] !== undefined && collect(rec[k], layoutName)) return true;
+            }
+            return false;
+          };
+          return collect(page.objects, parentId);
+        })();
+        console.log(`   create 控件 "${name}" 是否在父布局 "${parentId}" 内: ${inParent ? "✓" : "✗（在顶层，parentId 未生效）"}`);
+        if (!inParent) process.exitCode = 1;
+      }
     }
   }
 }

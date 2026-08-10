@@ -269,4 +269,67 @@ describe("client patcher — KF 容器对象（easyui / 布局）", () => {
       ])),
     ).rejects.toThrow(patchConflict);
   });
+
+  it("creates a control with properties.parentId into the target layout's insiderObjects (LLM nested-container expression)", async () => {
+    const base = await copyFixture("client-unknown-field");
+    // 先建垂直布局，再用 parentId 把两个按钮放进布局（LLM 的自然表达方式）
+    const candidate = await applyClientPatch(base, plan([
+      {
+        op: "create",
+        entityType: "control",
+        entityId: "NewVerticalLayout",
+        properties: {
+          pageId: "page-guid-1",
+          type: "layout",
+          layoutType: 4,
+          x: 100, y: 200, width: 620, height: 200,
+        },
+      },
+      {
+        op: "create",
+        entityType: "control",
+        entityId: "ConfirmBtn",
+        properties: {
+          pageId: "page-guid-1",
+          type: "easyui",
+          proto: 2,
+          text: "确认",
+          parentId: "NewVerticalLayout",
+        },
+      },
+      {
+        op: "create",
+        entityType: "control",
+        entityId: "CancelBtn",
+        properties: {
+          pageId: "page-guid-1",
+          type: "easyui",
+          proto: 2,
+          text: "取消",
+          parentId: "NewVerticalLayout",
+        },
+      },
+    ]));
+    const layoutGuid = deriveGuid({ seed: "w-test" }, "NewVerticalLayout");
+    const layout = await rawContainer(candidate, layoutGuid);
+    // 按钮在布局 insiderObjects 内（不在页面顶层），且自动补内部定位字段
+    const inner = layout["insiderObjects"] as Array<Record<string, unknown>>;
+    expect(inner.map((c) => c["name"])).toEqual(["ConfirmBtn", "CancelBtn"]);
+    for (const child of inner) {
+      expect(child["objectType"]).toBe(3);
+      expect(child["uiExtendType"]).toBe(2);
+      // 垂直布局（lt=4）子控件缺省 internalVertex:{0,0}，KF 加载不位置错乱
+      expect(child["internalVertex"]).toEqual({ left: 0, top: 0 });
+      expect(child["type"]).toBeUndefined();
+      expect(child["uiModelType"]).toBeUndefined();
+    }
+    // 页面顶层不应有这两个按钮
+    const dir = await rootDirOf(candidate);
+    const projectRoot = await resolveVersionDir(dir);
+    const page = JSON.parse(
+      await readFile(join(projectRoot, "project", "page", "Page1.json"), "utf8"),
+    ) as Record<string, unknown>;
+    const topLevel = page["objects"] as Array<Record<string, unknown>>;
+    expect(topLevel.some((o) => o["name"] === "ConfirmBtn" || o["name"] === "CancelBtn")).toBe(false);
+  });
 });

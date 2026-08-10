@@ -819,6 +819,47 @@ async function applyDelete(
   await writeJsonFile(candidate, versionDir, "project/pageManager.json", manager);
 }
 
+/**
+ * 把新建控件插入指定布局的 insiderObjects（LLM 用 properties.parentId 表达容器
+ * 嵌套，如「在垂直布局里放两个按钮」）。找不到目标布局时返回 false（回退页面
+ * 顶层 objects）。KF 布局子控件需要内部定位字段：Docking 用 region、水平/垂直/
+ * 导航布局用 internalVertex——缺失时按目标布局类型补默认（Docking 缺省 center、
+ * 水平/垂直缺省 {0,0} 左上角），避免 KF 加载时位置错乱。
+ */
+function pushControlIntoParent(
+  objects: unknown[],
+  control: Record<string, unknown>,
+  parentId: unknown,
+): boolean {
+  const target = typeof parentId === "string" ? parentId : "";
+  if (target === "") return false;
+  const container = objects.find((o) => {
+    if (o === null || typeof o !== "object") return false;
+    const rec = o as Record<string, unknown>;
+    const bp = rec["baseProperty"];
+    const name = typeof rec["name"] === "string" ? (rec["name"]) : "";
+    const bpName = bp !== null && typeof bp === "object" ? ((bp as Record<string, unknown>)["name"]) : undefined;
+    const guid = typeof rec["guid"] === "string" ? (rec["guid"]) : "";
+    const bpGuid = bp !== null && typeof bp === "object" ? ((bp as Record<string, unknown>)["guid"]) : undefined;
+    return name === target || bpName === target || guid === target || bpGuid === target;
+  });
+  if (container === undefined) return false;
+  const rec = container as Record<string, unknown>;
+  if (!Array.isArray(rec["insiderObjects"])) rec["insiderObjects"] = [];
+  const lt = rec["layoutType"];
+  if (lt === 5) {
+    // Docking 布局：子对象用 region 定位，缺省 center
+    if (control["region"] === undefined) control["region"] = "center";
+  } else if (lt === 2 || lt === 4 || lt === 6) {
+    // 水平/垂直/导航布局：子对象用 internalVertex 定位，缺省 {0,0}
+    if (control["internalVertex"] === undefined) {
+      control["internalVertex"] = { left: 0, top: 0 };
+    }
+  }
+  (rec["insiderObjects"] as unknown[]).push(control);
+  return true;
+}
+
 async function applyCreate(
   candidate: string,
   versionDir: string,
@@ -880,7 +921,12 @@ async function applyCreate(
         if (proto === 11) {
           delete control["objectType"];
         }
-        objects.push(control);
+        // LLM 可用 properties.parentId 表达容器嵌套（布局内子控件）；找不到目标
+        // 布局时回退页面顶层 objects。
+        const parentId = op.properties["parentId"];
+        if (parentId === undefined || !pushControlIntoParent(objects, control, parentId)) {
+          objects.push(control);
+        }
       } else if (type === "layout") {
         // 布局容器：objectType=2 + layoutType 顶层；几何进 baseProperty；
         // children/panels 作为整体写入 insiderObjects/dPanelsOption（嵌套 JSON patch 复杂，整体 set 最稳）。
@@ -988,7 +1034,11 @@ async function applyCreate(
           if (value !== undefined) (overrides as Record<string, unknown>)[key] = value;
         }
         const control = mergeControlTemplate(mergeControlTemplate(BASE_FIELDS, template), overrides);
-        objects.push(control);
+        // 静态控件也可用 parentId 放进布局（同 easyui 分支）
+        const parentId = op.properties["parentId"];
+        if (parentId === undefined || !pushControlIntoParent(objects, control, parentId)) {
+          objects.push(control);
+        }
       }
       await writeJsonFile(candidate, versionDir, page.file, doc);
       break;
