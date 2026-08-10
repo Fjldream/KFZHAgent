@@ -14,5 +14,28 @@
   "lines": false,
   "dnd": false,
   "alpha": false,
-  "data": []
+  "data": [
+    {
+      "id": "node1",
+      "text": "根节点1",
+      "state": "open",
+      "children": [
+        {
+          "id": "node1-1",
+          "text": "子节点1",
+          "state": "open"
+        },
+        {
+          "id": "node1-2",
+          "text": "子节点2",
+          "state": "open"
+        }
+      ]
+    },
+    {
+      "id": "node2",
+      "text": "根节点2",
+      "state": "open"
+    }
+  ]
 }

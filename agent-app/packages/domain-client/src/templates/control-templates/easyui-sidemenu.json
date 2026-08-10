@@ -6,7 +6,28 @@
     180,
     180
   ],
-  "data": [],
+  "data": [
+    {
+      "text": "菜单1",
+      "iconCls": "icon-sum",
+      "state": "open",
+      "children": [
+        {
+          "text": "子菜单1-1",
+          "iconCls": "sidemenu-default-icon"
+        },
+        {
+          "text": "子菜单1-2",
+          "iconCls": "sidemenu-default-icon"
+        }
+      ]
+    },
+    {
+      "text": "菜单2",
+      "iconCls": "icon-sum",
+      "state": "open"
+    }
+  ],
   "border": true,
   "animate": true,
   "multiple": true,
