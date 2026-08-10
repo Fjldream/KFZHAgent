@@ -343,7 +343,10 @@ function compileEasyuiControl(build: BuildSeed, control: ControlIR): TemplateJso
 }
 
 /**
- * 清洗 KF 容器子对象：递归删除 `type`/`uiModelType` 顶层键。
+ * 清洗 KF 容器子对象：递归删除 `type`/`uiModelType` 顶层键，并给 easyui
+ * 子对象（objectType=3 + uiExtendType）补齐其 proto 模板的缺省字段
+ * （如 data: []/queryParams: {}——KF 插件如 sidemenu 对 undefined data 崩溃）。
+ * 仅补缺失 key，不覆盖子对象已有的字段。
  * KF 布局 jsonToObject 对 insiderObjects 的每个子对象做同样的分派
  * （uiExtendType → uiModelType → layoutType，后者覆盖前者）：
  * 若子对象带 `uiModelType: null`（null!==undefined 为 true），
@@ -355,10 +358,22 @@ function stripKfContainerKeys(node: unknown): unknown {
     return node.map(stripKfContainerKeys);
   }
   if (node !== null && typeof node === "object") {
+    const raw = node as Record<string, unknown>;
     const out: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+    for (const [key, value] of Object.entries(raw)) {
       if (key === "type" || key === "uiModelType") continue;
       out[key] = stripKfContainerKeys(value);
+    }
+    // easyui 子对象：补 proto 模板缺省字段（data/queryParams 等 KF 加载必需）
+    if (raw["objectType"] === 3 && typeof raw["uiExtendType"] === "number") {
+      const proto = raw["uiExtendType"] as number;
+      const protoTemplate = EASYUI_TEMPLATES[proto];
+      if (protoTemplate) {
+        for (const [k, v] of Object.entries(protoTemplate)) {
+          if (k === "uiExtendType") continue;
+          if (out[k] === undefined) out[k] = structuredClone(v);
+        }
+      }
     }
     return out;
   }
