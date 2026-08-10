@@ -234,8 +234,22 @@ export async function compileClientProject(
       "utf8",
     );
   } else {
-    // KF 运行态启动会请求 km_global_script.js；缺文件 404 同样走 error 回调。
-    await writeFile(path.join(projectDir, "km_global_script.js"), "", "utf8");
+    // 运行态 iniRunSystem 会 eval km_global_script.js 并调用全局钩子 $Function
+    // （systemStart/systemOn/systemEnd 等，参考工程 km_global_script.js 开头定义）。
+    // 空文件导致 `$Function is not defined` 运行态报错，必须生成最小骨架。
+    await writeFile(
+      path.join(projectDir, "km_global_script.js"),
+      `var $System = KMRunSystemManager.getInstance().get$System();
+$Function = {
+  systemStart: function() {},
+  systemOn: function() {},
+  systemEnd: function() {},
+  event1: function() {},
+  GetUIId: function() {}
+};
+`,
+      "utf8",
+    );
   }
 
   return { id: projectGuid, rootDir, mode: "candidate", path: rootDir };
