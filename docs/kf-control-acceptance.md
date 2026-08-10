@@ -94,3 +94,32 @@
 - `apps/api/src/conversations/graph-ports.ts`：上传工程真实 GUID 读取
 - `packages/agent-orchestrator/src/nodes/plan-change.ts` + `design-plan.ts`：清 lastErrorCode
 - 测试：`client-patcher.test.ts`/`renderer.test.ts`/`client-inspector.test.ts`/`kf-template-generator.test.ts`/`kf-design-principles.test.ts`/`solution-graph.test.ts`
+
+---
+
+# 容器对象 L5 原生验收（2026-08-10，通过 ✅）
+
+## 验收方式
+- 与静态控件同路径：agent-app 编译容器工程 → 安装到 sdb（`sdb/<tenant>/kingclient/<GUID>/`）→ ProjectManager.json 注册 → 重启 kingservermanager
+- 工程「容器对象验收」（GUID `5ce5a81a-be3b-4d74-9a13-0f5ce382c374`），页面「容器验收页」（1440×900）：
+  - 顶层 easyui：LinkButton×2（按钮组）、Textbox（文本框）
+  - DockingLayout（layoutType 5）：west=sidemenu、north=tree、center=datagrid
+  - HorizontalLayout（layoutType 2）：datagrid×2（internalVertex 定位）
+- **用户确认：全部正常显示**（按钮/文本框/侧边菜单/树/表格/Docking 四边区域/水平双表）
+
+## 修复的原生兼容问题（本轮 8 个提交）
+1. **easyui/layout 对象绝不能输出 `type:1`/`uiModelType:null`**（07da0f6）：KF 加载按 objectType→uiExtendType→uiModelType→layoutType 顺序分派、后者覆盖前者；`uiModelType:null`（null!==undefined）会让 `gUIModelObjectFactory.create(null)` 把 easyui 实例覆盖成 null → 控件不渲染（布局因 layoutType 最后覆盖而幸存）
+2. **IR 保留字段透传污染**（07da0f6）：textbox 白名单含 `type`，会把 IR 判别值 "easyui" 写进 KF；compile/patcher 透传时排除 type/proto/uiExtendType/几何等
+3. **布局 children 的 type/uiModelType 递归清洗**（07da0f6）：stripKfContainerKeys 递归删除 insiderObjects 子对象的这两个键
+4. **sidemenu 缺 data 崩溃**（80fb0a9）：sidemenu jsonToObject 无条件 `sidemenu({data:s.data})`，插件内部 `for(k=m.data;k.length)` 对 undefined 抛 TypeError（报错链 sidemenu→c→accordion→panels→nodeName）→ 页面卡死；给 data 驱动模板补 `data:[]`
+5. **布局内 easyui 子对象继承 proto 模板缺省字段**（7bc6b76）：stripKfContainerKeys 按 proto 合并模板默认（仅补缺失 key）
+6. **Docking dPanelsOption 的 `size` 不生效**（d0d899f）：easyui layout panel 尺寸用 width(west/east)/height(north/south)，不认 size → 面板落 auto → 区域空白；normalizeDockPanels 按 region 语义转换（center 填满）
+7. **tree/sidemenu 空 data 渲染空白**（cd84193）：datagrid 有默认表头空数据可见，树/菜单空数组渲染空内容；模板补非空示例节点
+
+## 服务器现状
+- 已注册 7 个工程：AA、XLZ01、test_最新、test_最新_2、Golden全控件验收、容器对象验收、容器验收-最小、容器验收-单表
+- 隔离工程（容器验收-最小/单表）保留用于后续回归定位
+
+## 待办（后续）
+- CustomCharts/AlarmWindow/TrendChart（objectType=1 特殊节点）
+- 容器控件 LLM 生成端到端（上传含容器工程 → 对话修改 → 构建）尚未完整走查
