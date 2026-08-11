@@ -17,7 +17,7 @@ const readFixture = (rel: string) => readFile(join(fixturesRoot, rel), "utf8");
 
 function runCli(args: readonly string[]): { status: number; stdout: string; stderr: string } {
   try {
-    const stdout = execFileSync("node", [join(pkgDir, "cli.ts"), ...args], {
+    const stdout = execFileSync(process.execPath, ["--import", "tsx", join(pkgDir, "cli.ts"), ...args], {
       cwd: workspaceRoot,
       encoding: "utf8",
     });

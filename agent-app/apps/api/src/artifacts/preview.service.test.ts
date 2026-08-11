@@ -104,16 +104,6 @@ describe("preview endpoint (integration)", () => {
     prisma = moduleRef.get(PrismaService);
     tenants = moduleRef.get(TenantsService);
     storage = moduleRef.get(ARTIFACT_STORAGE);
-    await tenants.createTenantWithAdmin({
-      name: TENANT_A.tenant,
-      username: TENANT_A.username,
-      temporaryPassword: TENANT_A.password,
-    });
-    await tenants.createTenantWithAdmin({
-      name: TENANT_B.tenant,
-      username: TENANT_B.username,
-      temporaryPassword: TENANT_B.password,
-    });
   });
 
   afterAll(async () => {

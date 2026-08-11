@@ -10,6 +10,6 @@
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "cli": "cd ../.. && node packages/kf-schema-extractor/src/cli.ts"
+    "cli": "cd ../.. && node --import tsx packages/kf-schema-extractor/src/cli.ts"
   }
 }
