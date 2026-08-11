@@ -45,6 +45,36 @@ git diff --check
 
 Result: all commands exited successfully with no diagnostics.
 
+## Review fix round 2/5
+
+### RED evidence
+
+```sh
+PATH="/Users/fengjinlong/.nvm/versions/node/v22.14.0/bin:$PATH" pnpm --filter @kf/contracts exec vitest run src/module-plan.test.ts src/asset.test.ts src/module-delivery.test.ts
+```
+
+Result: 2 failing assertions in `module-plan.test.ts`: unknown interaction
+references in `update.changes.interactions` were accepted, and legacy v1
+`submit` was no longer registered.
+
+### GREEN evidence
+
+```sh
+PATH="/Users/fengjinlong/.nvm/versions/node/v22.14.0/bin:$PATH" pnpm --filter @kf/contracts exec vitest run src/module-plan.test.ts src/asset.test.ts src/module-delivery.test.ts
+```
+
+Result: 3 test files passed; 20 tests passed.
+
+### Typecheck, lint, and diff evidence
+
+```sh
+PATH="/Users/fengjinlong/.nvm/versions/node/v22.14.0/bin:$PATH" pnpm --filter @kf/contracts typecheck
+PATH="/Users/fengjinlong/.nvm/versions/node/v22.14.0/bin:$PATH" pnpm --filter @kf/contracts lint
+git diff --check
+```
+
+Result: all commands exited successfully with no diagnostics.
+
 ## Commit
 
 `feat(contracts): add module planning contracts`

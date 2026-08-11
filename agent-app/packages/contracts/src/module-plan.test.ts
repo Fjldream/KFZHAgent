@@ -154,6 +154,45 @@ describe("ModulePlanSchema", () => {
     }).success).toBe(false);
   });
 
+  it("validates interaction references introduced by an update operation", () => {
+    expect(ModulePlanSchema.safeParse({
+      ...validPlan,
+      operations: [{
+        op: "update",
+        pageId: "home",
+        moduleId: "hero",
+        changes: { interactions: [{ type: "navigate", pageId: "missing-page" }] },
+      }],
+    }).success).toBe(false);
+    expect(ModulePlanSchema.safeParse({
+      ...validPlan,
+      operations: [{
+        op: "update",
+        pageId: "home",
+        moduleId: "hero",
+        changes: {
+          interactions: [
+            { type: "navigate", pageId: "home" },
+            { type: "scroll", moduleId: "hero" },
+            { type: "open-modal", moduleId: "hero" },
+          ],
+        },
+      }],
+    }).success).toBe(true);
+  });
+
+  it("keeps legacy v1 submit, filter, and toggle interactions registered and safe", () => {
+    expect(ModuleInteractionSchema.safeParse({ type: "submit", action: "save-profile" }).success).toBe(true);
+    expect(ModuleInteractionSchema.safeParse({ type: "filter", field: "status" }).success).toBe(true);
+    expect(ModuleInteractionSchema.safeParse({ type: "toggle", target: "hero" }).success).toBe(true);
+    expect(ModuleInteractionSchema.safeParse({ type: "submit", action: "a0b1c2d3-e4f5-6789-abcd-ef0123456789" }).success).toBe(false);
+    expect(ModuleInteractionSchema.safeParse({ type: "filter", field: "javascript:alert(1)" }).success).toBe(false);
+    expect(ModulePlanSchema.safeParse({
+      ...validPlan,
+      pages: [{ ...validPlan.pages[0], modules: [{ ...hero, interactions: [{ type: "toggle", target: "missing-module" }] }] }],
+    }).success).toBe(false);
+  });
+
   it("processes remove operations before later module operations", () => {
     for (const operation of [
       { op: "update", pageId: "home", moduleId: "hero", changes: { title: "更新" } },

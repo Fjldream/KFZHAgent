@@ -33,6 +33,9 @@ export const ModuleInteractionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("navigate"), pageId: stableIdSchema }).strict(),
   z.object({ type: z.literal("scroll"), moduleId: stableIdSchema }).strict(),
   z.object({ type: z.literal("open-modal"), moduleId: stableIdSchema }).strict(),
+  z.object({ type: z.literal("submit"), action: stableIdSchema }).strict(),
+  z.object({ type: z.literal("filter"), field: stableIdSchema }).strict(),
+  z.object({ type: z.literal("toggle"), target: stableIdSchema }).strict(),
 ]);
 
 export const ModulePlanModuleSchema = z
@@ -183,8 +186,13 @@ export const ModulePlanSchema = z
         moduleIds.delete(operation.moduleId);
         return;
       }
-      if (operation.op === "update" && operation.changes.assetId !== undefined && !assetIds.has(operation.changes.assetId)) {
-        ctx.addIssue({ code: "custom", path: ["operations", index, "changes", "assetId"], message: `unknown asset id: ${operation.changes.assetId}` });
+      if (operation.op === "update") {
+        if (operation.changes.assetId !== undefined && !assetIds.has(operation.changes.assetId)) {
+          ctx.addIssue({ code: "custom", path: ["operations", index, "changes", "assetId"], message: `unknown asset id: ${operation.changes.assetId}` });
+        }
+        if (operation.changes.interactions !== undefined) {
+          interactionSources.push({ interactions: operation.changes.interactions, path: ["operations", index, "changes", "interactions"] });
+        }
       }
     });
 
@@ -198,6 +206,9 @@ export const ModulePlanSchema = z
           && !moduleIds.has(interaction.moduleId)
         ) {
           ctx.addIssue({ code: "custom", path: [...source.path, index, "moduleId"], message: `unknown module id: ${interaction.moduleId}` });
+        }
+        if (interaction.type === "toggle" && !moduleIds.has(interaction.target)) {
+          ctx.addIssue({ code: "custom", path: [...source.path, index, "target"], message: `unknown module id: ${interaction.target}` });
         }
       });
     });
