@@ -76,6 +76,7 @@ const layoutPanel = z.object({
 const layoutProperties = z.object({
   children: z.array(layoutChild).max(1_000).optional(),
   panels: z.array(layoutPanel).max(1_000).optional(),
+  parentId,
 }).strict().superRefine((value, ctx) => {
   const names = new Set<string>();
   for (const [index, child] of (value.children ?? []).entries()) {
@@ -295,7 +296,7 @@ const GENERATED_COMPONENT_PROPERTY_SCHEMAS: Readonly<Record<string, z.ZodType<Re
 
 const CREATE_COMPONENT_PROPERTY_SCHEMAS: Readonly<Record<string, z.ZodType<Record<string, unknown>>>> = Object.freeze({
   ...GENERATED_COMPONENT_PROPERTY_SCHEMAS,
-  button: z.object({ text: ButtonControlIR.shape.text.optional(), parentId }).strict(),
+  button: z.object({ text: ButtonControlIR.shape.text.optional(), action: ButtonControlIR.shape.action, parentId }).strict(),
   input: z.object({
     value: InputControlIR.shape.value,
     placeholder: InputControlIR.shape.placeholder,

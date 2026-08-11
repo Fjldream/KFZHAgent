@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ModulePlan, ModulePlanModule, ResolvedAsset } from "@kf/contracts";
 import { compileModulePlan } from "../module-compiler.js";
 import { createDefaultModuleRegistry } from "../module-registry.js";
+import { compileUiImplementation } from "../../implementation/ui-implementation-compiler.js";
 import { createPortalPlan } from "./fixtures/portal-plan.js";
 
 const theme = {
@@ -104,21 +105,34 @@ describe("portal module definitions", () => {
     expect(() => compile(plan([cards]))).toThrow("MODULE_CONTENT_INVALID");
   });
 
-  it("emits the registered submit, filter and navigation interaction controls", () => {
-    const form = module("form.record-editor", "contact", {
-      fields: [{ id: "name", label: "Name", placeholder: "Your name" }], submitLabel: "Send",
-    });
-    form.interactions = [{ type: "submit", action: "send" }];
-    const result = compile(plan([form]));
+  it("emits a real native navigate action and rejects unsupported submit/filter interactions", () => {
+    const hero = module("content.hero", "contact", { title: "Lin", primaryAction: "Open" });
+    hero.variant = "no-portrait";
+    hero.interactions = [{ type: "navigate", pageId: "home" }];
+    const result = compile(plan([hero]));
     expect(result.status).toBe("compiled");
     if (result.status !== "compiled") return;
-    expect(result.implementation.pages[0]?.components).toContainEqual(expect.objectContaining({ capabilityId: "button", properties: { text: "Send" } }));
+    expect(result.implementation.pages[0]?.components).toContainEqual(expect.objectContaining({ capabilityId: "button", properties: { parentId: "contact/surface", action: { kind: "navigate", pageId: "home" } } }));
+    const form = module("form.record-editor", "form", { fields: [{ id: "name", label: "Name", placeholder: "Your name" }], submitLabel: "Send" });
+    form.interactions = [{ type: "submit", action: "send" }];
+    expect(() => compile(plan([form]))).toThrow("MODULE_LAYOUT_INVALID");
   });
 
   it("keeps modules beta without matching real KF runtime verification", () => {
     const registry = createDefaultModuleRegistry();
     expect(registry.require("content.hero", "1.0.0").maturity).toBe("beta");
     expect(registry.listForPlanning()).toEqual([]);
+    expect(registry.listForInternalPlanning().map((definition) => definition.kind)).toContain("content.hero");
+  });
+
+  it("requires exact module runtime evidence before removing the beta delivery gap", () => {
+    const hero = module("content.hero", "hero", { title: "Lin" });
+    hero.variant = "no-portrait";
+    const base = { ...plan([hero]), assets: [] };
+    const generic = compileModulePlan({ plan: base, registry: createDefaultModuleRegistry(), assetsById: {}, validationContext: { availableKfCapabilities: ["layout.2", "text", "image", "button"], approvedAuthorizationRefs: [], moduleRuntimeEvidence: [{ kind: "content.hero", version: "2.0.0", runtimeFamily: "KingFusion", runtimeVersion: "3.6", baselineId: "kf36-portal-v1", verifiedCapabilities: ["layout.2", "text", "image", "button"] }] } });
+    expect(generic.gaps).toContainEqual(expect.objectContaining({ moduleId: "hero", severity: "warning" }));
+    const accepted = compileModulePlan({ plan: base, registry: createDefaultModuleRegistry(), assetsById: {}, validationContext: { availableKfCapabilities: ["layout.2", "text", "image", "button"], approvedAuthorizationRefs: [], moduleRuntimeEvidence: [{ kind: "content.hero", version: "1.0.0", runtimeFamily: "KingFusion", runtimeVersion: "3.6", baselineId: "kf36-portal-v1", verifiedCapabilities: ["layout.2", "text", "image", "button"] }] } });
+    expect(accepted.gaps.some((gap) => gap.moduleId === "hero" && gap.requirement.includes("Mature"))).toBe(false);
   });
 
   it("compiles the golden portal as separate hero, kpi, portfolio, timeline and contact control trees", () => {
@@ -132,6 +146,24 @@ describe("portal module definitions", () => {
     expect(components.filter((component) => component.capabilityId === "richtext")).toHaveLength(0);
     expect(components.some((component) => component.capabilityId === "image")).toBe(true);
     expect(components.some((component) => component.capabilityId === "input")).toBe(true);
-    expect(components.some((component) => component.capabilityId === "timeline")).toBe(true);
+    expect(components.filter((component) => component.sourceModuleId === "portal-timeline" && component.capabilityId === "text").length).toBeGreaterThan(1);
+    expect(result.gaps).toContainEqual(expect.objectContaining({ moduleId: "portal-portfolio", reason: "per-item-assets-unsupported" }));
+  });
+
+  it("takes the golden portal through the real UI implementation compiler with contained native controls", () => {
+    const result = compile(createPortalPlan());
+    expect(result.status).toBe("compiled");
+    if (result.status !== "compiled") return;
+    const change = compileUiImplementation(result.implementation, {
+      workspaceId: "workspace", pageGuidById: { home: "page-guid-home" },
+      existingControlGuidByComponentId: {}, existingControlCapabilityIdByComponentId: {},
+    });
+    expect(change.plan.operations.filter((operation) => operation.op === "create")).not.toHaveLength(0);
+    expect(change.plan.operations).toContainEqual(expect.objectContaining({
+      op: "create", entityType: "control", properties: expect.objectContaining({ pageId: "page-guid-home" }),
+    }));
+    expect(change.plan.operations).toContainEqual(expect.objectContaining({
+      op: "create", entityId: "portal-hero/primary-action", properties: expect.objectContaining({ parentId: "portal-hero/surface", action: { kind: "navigate", pageId: "home" } }),
+    }));
   });
 });

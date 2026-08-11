@@ -84,6 +84,7 @@ function freezeDefinition(definition: ModuleDefinition): ModuleDefinition {
 
   return Object.freeze({
     ...definition,
+    ...(definition.runtimeEvidenceTarget === undefined ? {} : { runtimeEvidenceTarget: Object.freeze({ ...definition.runtimeEvidenceTarget }) }),
     fallbackPolicy: freezeFallbackPolicy(fallbackPolicyOf(definition)),
     variants: freezeArray(definition.variants),
     assetSlots: freezeArray(definition.assetSlots.map(freezeSlot)),
@@ -245,6 +246,20 @@ function assertWebContainerAuthorization(
   }
 }
 
+function effectiveMaturity(definition: ModuleDefinition, context: ModuleValidationInput["context"]): ModuleDefinition["maturity"] {
+  if (definition.maturity !== "beta" || definition.runtimeEvidenceTarget === undefined) return definition.maturity;
+  const evidence = context.moduleRuntimeEvidence?.find((candidate) =>
+    candidate.kind === definition.kind
+    && candidate.version === definition.version
+    && candidate.runtimeFamily === definition.runtimeEvidenceTarget!.runtimeFamily
+    && candidate.runtimeVersion === definition.runtimeEvidenceTarget!.runtimeVersion
+    && candidate.baselineId === definition.runtimeEvidenceTarget!.baselineId,
+  );
+  return evidence !== undefined && definition.requiredKfCapabilities.every((capability) => evidence.verifiedCapabilities.includes(capability))
+    ? "stable"
+    : "beta";
+}
+
 /**
  * The authoritative module capability boundary. A caller must always provide
  * an exact version; this registry intentionally has no latest-version lookup.
@@ -276,6 +291,16 @@ export class ModuleRegistry {
     );
   }
 
+  /** Internal repair/planning catalog: includes beta with its maturity, never unsupported. */
+  listForInternalPlanning(): readonly ModulePlanningSummary[] {
+    return Object.freeze(
+      [...this.#definitions.values()]
+        .filter((definition) => definition.maturity !== "unsupported")
+        .sort((left, right) => compareCodePoints(definitionKey(left.kind, left.version), definitionKey(right.kind, right.version)))
+        .map(planningSummary),
+    );
+  }
+
   validateInstance(input: ModuleValidationInput): ModuleValidationResult {
     const definition = this.require(input.instance.kind, input.instance.templateVersion);
     const key = definitionKey(definition.kind, definition.version);
@@ -296,7 +321,7 @@ export class ModuleRegistry {
     const asset = validateAsset(input.instance, definition.assetSlots, input.assets, key);
     assertLayout(input.instance, definition, key);
 
-    const deliveryGaps: readonly ModuleDeliveryGap[] = definition.maturity === "beta"
+    const deliveryGaps: readonly ModuleDeliveryGap[] = effectiveMaturity(definition, input.context) === "beta"
       ? Object.freeze([Object.freeze({
         moduleId: input.instance.id,
         requirement: `Mature ${key} before production delivery`,

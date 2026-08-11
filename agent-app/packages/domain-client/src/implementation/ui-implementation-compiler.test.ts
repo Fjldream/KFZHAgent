@@ -519,7 +519,6 @@ describe("compileUiImplementation", () => {
   });
 
   it.each([
-    { name: "button action", capabilityId: "button", properties: { action: { kind: "noop" } } },
     { name: "input inputType", capabilityId: "input", properties: { inputType: "password" } },
     { name: "datetime pickerType", capabilityId: "datetimepicker", properties: { pickerType: "date" } },
     { name: "inputnumber variableId", capabilityId: "inputnumber", properties: { variableId: "$Temp" } },
@@ -539,6 +538,24 @@ describe("compileUiImplementation", () => {
         }],
       }],
     }, context)).toThrow(/UNSUPPORTED_COMPONENT_PROPERTY|INVALID_COMPONENT_PROPERTY/);
+  });
+
+  it("accepts only the restricted declarative button action DSL", () => {
+    const result = compileUiImplementation({
+      ...specFixture,
+      pages: [{
+        ...specFixture.pages[0]!,
+        components: [{
+          ...specFixture.pages[0]!.components[1]!,
+          id: "NavigateButton",
+          properties: { action: { kind: "navigate", pageId: "overview" } },
+          style: { declarations: {}, states: {} },
+        }],
+      }],
+    }, context);
+    expect(result.plan.operations).toContainEqual(expect.objectContaining({
+      op: "create", entityId: "NavigateButton", properties: expect.objectContaining({ action: { kind: "navigate", pageId: "overview" } }),
+    }));
   });
 
   it.each([

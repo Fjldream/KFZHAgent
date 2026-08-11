@@ -52,6 +52,7 @@ interface ControlVariant {
 }
 
 const PROPERTY_KEYS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  button: ["action"],
   checkbox: ["label", "checked"],
   checkboxlegacy: ["label", "checked"],
   combobox: ["options", "value", "editable"],
@@ -426,7 +427,7 @@ function createProperties(
   }
   const allowed = new Set([
     ...(PROPERTY_KEYS[capabilityId] ?? PROPERTY_KEYS[variant.type] ?? []),
-    ...(variant.type === "layout" || variant.type === "prototype" ? [] : ["parentId"]),
+    ...(variant.type === "prototype" ? [] : ["parentId"]),
   ]);
   const properties: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(component.properties)) {

@@ -129,6 +129,7 @@ export function compileModulePlan(input: CompileModulePlanInput): ModuleCompilat
           content: validation.content,
           asset: resolvedAsset,
           validationContext,
+          bounds,
         }),
       }));
       const translated = translateModuleOutput(instance, bounds, compiled, plan.theme, seenIds);
@@ -244,6 +245,7 @@ function translateModuleOutput(
   seenIds: Set<string>,
 ): UIComponentSpec[] {
   const output: UIComponentSpec[] = [];
+  const localIds = new Set(compiled.components.map((component) => component.id));
   for (const component of compiled.components) {
     assertPlainComponent(component, instance.id);
     const id = stableModuleComponentId(instance.id, component.id);
@@ -253,6 +255,16 @@ function translateModuleOutput(
     assertLocalBounds(component, bounds, id);
     const role = component.style.role as ModuleThemeRole | undefined;
     const style = resolveModuleComponentStyle(theme, role, component.style);
+    const parentId = component.properties.parentId;
+    if (parentId !== undefined) {
+      if (typeof parentId !== "string" || !localIds.has(parentId) || parentId === component.id) {
+        throw new Error(`MODULE_COMPILER_INVALID_PARENT: ${id}`);
+      }
+      const parent = compiled.components.find((candidate) => candidate.id === parentId);
+      if (parent === undefined || !parent.capabilityId.startsWith("layout.")) {
+        throw new Error(`MODULE_COMPILER_INVALID_PARENT: ${id}`);
+      }
+    }
     output.push({
       ...component,
       id,
@@ -262,6 +274,10 @@ function translateModuleOutput(
         y: bounds.y + component.geometry.y,
         width: component.geometry.width,
         height: component.geometry.height,
+      }),
+      properties: Object.freeze({
+        ...component.properties,
+        ...(parentId === undefined ? {} : { parentId: stableModuleComponentId(instance.id, parentId) }),
       }),
       style,
     });

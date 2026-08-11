@@ -8,6 +8,7 @@ import type {
   UIComponentSpec,
 } from "@kf/contracts";
 import type { z } from "zod";
+import type { ModuleBounds } from "./layout/layout-engine.js";
 
 export type ModuleMaturity = "stable" | "beta" | "unsupported";
 
@@ -46,6 +47,8 @@ export interface ModuleCompileContext {
   readonly content: Record<string, unknown>;
   readonly asset: ResolvedAsset | undefined;
   readonly validationContext: ModuleValidationContext;
+  /** Solver-owned local implementation envelope; definitions must never assume a page width. */
+  readonly bounds: ModuleBounds;
 }
 
 export interface ModuleCompileInput {
@@ -62,6 +65,8 @@ export interface ModuleDefinition {
   readonly version: string;
   readonly category: string;
   readonly maturity: ModuleMaturity;
+  /** Exact real-runtime acceptance target required before a beta can be promoted. */
+  readonly runtimeEvidenceTarget?: Readonly<{ runtimeFamily: string; runtimeVersion: string; baselineId: string }>;
   readonly variants: readonly string[];
   /** Omitted policies normalize to native-only when registered. */
   readonly fallbackPolicy?: ModuleFallbackPolicy;
@@ -82,6 +87,17 @@ export interface ModuleValidationInput {
 export interface ModuleValidationContext {
   readonly availableKfCapabilities: readonly string[];
   readonly approvedAuthorizationRefs: readonly string[];
+  readonly moduleRuntimeEvidence?: readonly ModuleRuntimeEvidence[];
+}
+
+/** Trusted Task 13 acceptance evidence, never model-authored plan content. */
+export interface ModuleRuntimeEvidence {
+  readonly kind: string;
+  readonly version: string;
+  readonly runtimeFamily: string;
+  readonly runtimeVersion: string;
+  readonly baselineId: string;
+  readonly verifiedCapabilities: readonly string[];
 }
 
 export interface ModuleValidationResult {

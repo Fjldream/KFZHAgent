@@ -306,7 +306,6 @@ describe("client patcher (Task 7 brief Step 1)", () => {
   });
 
   it.each([
-    { name: "button action", type: "button", extra: { text: "Go", action: { kind: "noop" } } },
     { name: "input inputType", type: "input", extra: { inputType: "password" } },
     { name: "datetime pickerType", type: "datetimepicker", extra: { pickerType: "date" } },
     { name: "inputnumber variableId", type: "inputnumber", extra: { variableId: "$Temp" } },
@@ -319,6 +318,14 @@ describe("client patcher (Task 7 brief Step 1)", () => {
       entityId: "UnsupportedPatchSemantic",
       properties: { pageId: "page-guid-1", type, ...extra },
     }]))).rejects.toThrow(/PATCH_CONFLICT: INVALID_COMPONENT_PROPERTY/);
+  });
+
+  it("accepts the reviewed restricted button action for native compilation", async () => {
+    const base = await copyFixture("client-unknown-field");
+    await expect(applyClientPatch(base, plan([{
+      op: "create", entityType: "control", entityId: "NavigateButton",
+      properties: { pageId: "page-guid-1", type: "button", text: "Go", action: { kind: "navigate", pageId: "Page1" } },
+    }]))).resolves.toBeDefined();
   });
 
   it.each(["   ", "x".repeat(101)])("rejects invalid runtime-normalized entityId %j", async (entityId) => {

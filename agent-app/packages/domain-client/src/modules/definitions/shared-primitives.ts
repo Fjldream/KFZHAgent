@@ -31,33 +31,33 @@ export function surface(id: string, bounds: LocalBounds): UIComponentSpec {
   return component(id, "surface", "layout.2", undefined, bounds, {}, "surface");
 }
 
-export function sectionTitle(id: string, text: string, bounds: LocalBounds): UIComponentSpec {
-  return component(id, "section-title", "text", text, bounds, { text }, "title");
+export function sectionTitle(id: string, text: string, bounds: LocalBounds, parentId?: string): UIComponentSpec {
+  return component(id, "section-title", "text", text, bounds, parentId === undefined ? {} : { parentId }, "title");
 }
 
-export function labeledValue(id: string, label: string, value: string, bounds: LocalBounds): UIComponentSpec {
-  return component(id, "labeled-value", "text", `${label}: ${value}`, bounds, { text: `${label}: ${value}` }, "description");
+export function labeledValue(id: string, label: string, value: string, bounds: LocalBounds, parentId?: string): UIComponentSpec {
+  return component(id, "labeled-value", "text", `${label}: ${value}`, bounds, parentId === undefined ? {} : { parentId }, "description");
 }
 
-export function imageSlot(id: string, alt: string, bounds: LocalBounds): UIComponentSpec {
-  return component(id, "image", "image", undefined, bounds, { src: "asset", fit: "cover", alt }, "accent");
+export function imageSlot(id: string, alt: string, bounds: LocalBounds, parentId?: string): UIComponentSpec {
+  return component(id, "image", "image", undefined, bounds, { src: "asset", fit: "cover", alt, ...(parentId === undefined ? {} : { parentId }) }, "accent");
 }
 
-export function actionButton(id: string, text: string, bounds: LocalBounds): UIComponentSpec {
-  return component(id, "action", "button", text, bounds, { text }, "action");
+export function actionButton(id: string, text: string, bounds: LocalBounds, parentId?: string, action?: { kind: "navigate"; pageId: string }): UIComponentSpec {
+  return component(id, "action", "button", text, bounds, { ...(parentId === undefined ? {} : { parentId }), ...(action === undefined ? {} : { action }) }, "action");
 }
 
-export function repeatedCard(id: string, title: string, summary: string, bounds: LocalBounds): readonly UIComponentSpec[] {
+export function repeatedCard(id: string, title: string, summary: string, bounds: LocalBounds, parentId = "surface"): readonly UIComponentSpec[] {
   return Object.freeze([
-    surface(`${id}-surface`, bounds),
-    sectionTitle(`${id}-title`, title, { x: bounds.x + 16, y: bounds.y + 16, width: bounds.width - 32, height: 28 }),
-    labeledValue(`${id}-summary`, "", summary, { x: bounds.x + 16, y: bounds.y + 52, width: bounds.width - 32, height: 40 }),
+    component(`${id}-surface`, "card-surface", "layout.2", undefined, bounds, { parentId }, "surface"),
+    sectionTitle(`${id}-title`, title, { x: bounds.x + 16, y: bounds.y + 16, width: bounds.width - 32, height: 28 }, `${id}-surface`),
+    labeledValue(`${id}-summary`, "", summary, { x: bounds.x + 16, y: bounds.y + 52, width: bounds.width - 32, height: 40 }, `${id}-surface`),
   ]);
 }
 
-export function formRow(id: string, label: string, placeholder: string, bounds: LocalBounds): readonly UIComponentSpec[] {
+export function formRow(id: string, label: string, placeholder: string, bounds: LocalBounds, parentId = "surface"): readonly UIComponentSpec[] {
   return Object.freeze([
-    sectionTitle(`${id}-label`, label, { x: bounds.x, y: bounds.y, width: Math.min(160, bounds.width), height: 28 }),
-    component(`${id}-input`, "form-input", "input", undefined, { x: bounds.x, y: bounds.y + 32, width: bounds.width, height: bounds.height - 32 }, { placeholder, inputType: "text", disabled: false, clearable: true }, "surface"),
+    sectionTitle(`${id}-label`, label, { x: bounds.x, y: bounds.y, width: Math.min(160, bounds.width), height: 28 }, parentId),
+    component(`${id}-input`, "form-input", "input", undefined, { x: bounds.x, y: bounds.y + 32, width: bounds.width, height: bounds.height - 32 }, { placeholder, disabled: false, clearable: true, parentId }, "surface"),
   ]);
 }
