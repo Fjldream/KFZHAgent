@@ -110,6 +110,33 @@ function compile(input: ModulePlan) {
 }
 
 describe("portal module definitions", () => {
+  it("keeps every portal definition bounds-safe for minimal and maximum content", () => {
+    const max = {
+      "navigation.top": { logo: "KF", items: Array.from({ length: 8 }, (_, i) => `Nav ${i + 1}`) },
+      "content.hero": { title: "Hero", subtitle: "Subtitle", description: "Description", primaryAction: "Primary", secondaryAction: "Secondary" },
+      "metric.kpi-grid": { items: Array.from({ length: 6 }, (_, i) => ({ label: `KPI ${i}`, value: `${i}`, trend: "up" })) },
+      "content.card-grid": { items: Array.from({ length: 12 }, (_, i) => ({ title: `Card ${i}`, summary: "Summary", tag: "Tag", action: "Open" })) },
+      "content.timeline": { items: Array.from({ length: 10 }, (_, i) => ({ title: `Event ${i}`, detail: "Detail", date: "2026" })) },
+      "interaction.tabs-filter": { tabs: Array.from({ length: 8 }, (_, i) => `Tab ${i + 1}`), active: "Tab 1" },
+      "form.record-editor": { fields: Array.from({ length: 8 }, (_, i) => ({ id: `field${i}`, label: `Field ${i}`, placeholder: "Value" })), submitLabel: "Send", resetLabel: "Reset" },
+      "content.contact-footer": { contacts: Array.from({ length: 6 }, (_, i) => ({ label: `Contact ${i}`, value: "value@example.com" })), copyright: "© 2026", action: "Open" },
+    } as const;
+    const minimum = {
+      "navigation.top": { logo: "KF", items: ["Home"] }, "content.hero": { title: "Hero" }, "metric.kpi-grid": { items: [{ label: "KPI", value: "1" }] }, "content.card-grid": { items: [{ title: "Card", summary: "Summary", tag: "Tag" }] }, "content.timeline": { items: [{ title: "Event", detail: "Detail", date: "2026" }] }, "interaction.tabs-filter": { tabs: ["All"] }, "form.record-editor": { fields: [{ id: "name", label: "Name", placeholder: "Name" }], submitLabel: "Send" }, "content.contact-footer": { contacts: [{ label: "Email", value: "a@b.com" }], copyright: "©" },
+    } as const;
+    const registry = createDefaultModuleRegistry();
+    for (const kind of Object.keys(max) as Array<keyof typeof max>) {
+      const definition = registry.require(kind, "1.0.0");
+      for (const content of [minimum[kind], max[kind]]) for (const height of new Set([definition.layout.height.min, ...Object.values(definition.layout.height.preferred), definition.layout.height.max])) for (const width of [Math.max(1, definition.layout.minColumnSpan * 80), 1440]) {
+        const instance = module(kind, "matrix", content); instance.variant = kind === "content.hero" ? "no-portrait" : "default";
+        const result = definition.compile({ context: { definition, instance, content: definition.contentSchema.parse(content), asset: undefined, validationContext: { availableKfCapabilities: [], approvedAuthorizationRefs: [] }, bounds: { x: 0, y: 0, width, height } } });
+        const ids = result.components.map((component) => component.id);
+        if (result.components.length === 0) { expect(result.deliveryGaps).toContainEqual(expect.objectContaining({ severity: "blocking", reason: "module-bounds-insufficient" })); continue; }
+        expect(new Set(ids).size).toBe(ids.length);
+        for (const component of result.components) { const g = component.geometry; expect(Number.isInteger(g.x) && Number.isInteger(g.y) && Number.isInteger(g.width) && Number.isInteger(g.height)).toBe(true); expect(g.width).toBeGreaterThan(0); expect(g.height).toBeGreaterThan(0); expect(g.x).toBeGreaterThanOrEqual(0); expect(g.y).toBeGreaterThanOrEqual(0); expect(g.x + g.width).toBeLessThanOrEqual(width); expect(g.y + g.height).toBeLessThanOrEqual(height); const parent = component.properties["parentId"]; if (typeof parent === "string") expect(result.components.find((candidate) => candidate.id === parent)?.capabilityId).toMatch(/^layout\./); }
+      }
+    }
+  });
   it.each([
     ["navigation.top", "default", "header", { logo: "KF", items: ["Home", "Projects"] }],
     ["content.hero", "no-portrait", "main", { title: "Lin", subtitle: "Designer", description: "Builds useful products", primaryAction: "Contact" }],
