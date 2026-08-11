@@ -64,6 +64,8 @@ export interface CompileModulePlanInput {
   readonly previousImplementation?: UIImplementationSpec;
   /** Existing editable entities are preserved when not module-owned. */
   readonly editableEntityIds?: readonly string[];
+  /** Explicitly identified generated seeds may be removed; customer controls never match by text. */
+  readonly generatedSeedEntityIds?: readonly string[];
   /** Trusted capability and WebContainer authorization facts. Strictly empty by default. */
   readonly validationContext?: ModuleValidationContext;
 }
@@ -78,6 +80,8 @@ const EMPTY_VALIDATION_CONTEXT: ModuleValidationContext = Object.freeze({
  * compiler. A copied/model-authored JSON spec has no entry in this WeakMap.
  */
 const TRUSTED_MODULE_SOURCE_IDS = new WeakMap<UIImplementationSpec, readonly string[]>();
+/** Compiler identities are trusted registry facts retained with compiler-owned output only. */
+const TRUSTED_MODULE_DEFINITION_IDENTITIES = new WeakMap<UIImplementationSpec, Readonly<Record<string, string>>>();
 
 export function trustedModuleSourceIdsFor(implementation: UIImplementationSpec): readonly string[] | undefined {
   return TRUSTED_MODULE_SOURCE_IDS.get(implementation);
@@ -97,6 +101,8 @@ export function compileModulePlan(input: CompileModulePlanInput): ModuleCompilat
   const assetsById = parseResolvedAssets(input.assetsById);
   const previousAssetsById = input.previousAssetsById === undefined ? undefined : parseResolvedAssets(input.previousAssetsById);
   const validationContext = input.validationContext ?? EMPTY_VALIDATION_CONTEXT;
+  const editableEntityIds = parseEntityIds(optionalOwnDataField(input, "editableEntityIds", "INVALID_EDITABLE_ENTITY_IDS"), "INVALID_EDITABLE_ENTITY_IDS");
+  const generatedSeedEntityIds = parseEntityIds(optionalOwnDataField(input, "generatedSeedEntityIds", "INVALID_GENERATED_SEED_ENTITY_IDS"), "INVALID_GENERATED_SEED_ENTITY_IDS");
   const previousModules = previousModuleIndex(previousPlan);
   const previousComponents = previousComponentIndex(previousImplementation);
   const pages: UIImplementationSpec["pages"] = [];
@@ -183,9 +189,11 @@ export function compileModulePlan(input: CompileModulePlanInput): ModuleCompilat
     : undefined;
   const parsedImplementation = implementation === undefined ? undefined : UIImplementationSpecSchema.safeParse(implementation);
   if (parsedImplementation !== undefined && !parsedImplementation.success) throw new Error(`INVALID_COMPILED_UI_IMPLEMENTATION: ${parsedImplementation.error.issues[0]?.message ?? "invalid implementation"}`);
-  const canonicalImplementation = parsedImplementation === undefined ? undefined : validatePreservedImplementation(preserveLegacyComponents(reuseCanonicalPriorComponents(parsedImplementation.data, plan, previousPlan, previousComponents), previousImplementation, input.editableEntityIds));
+  const canonicalImplementation = parsedImplementation === undefined ? undefined : validatePreservedImplementation(preserveLegacyComponents(reuseCanonicalPriorComponents(parsedImplementation.data, plan, previousPlan, previousComponents), previousImplementation, editableEntityIds, generatedSeedEntityIds));
+  const definitionIdentities = definitionIdentityIndex(plan, input.registry);
+  const previousDefinitionIdentities = previousImplementation === undefined ? undefined : TRUSTED_MODULE_DEFINITION_IDENTITIES.get(previousImplementation);
   const diff = canonicalImplementation !== undefined && previousPlan !== undefined && previousImplementation !== undefined
-    ? diffModulePlans({ previousPlan, plan, previousImplementation, implementation: canonicalImplementation, ...(previousAssetsById === undefined ? {} : { previousAssetsById }), assetsById })
+    ? diffModulePlans({ previousPlan, plan, previousImplementation, implementation: canonicalImplementation, ...(previousAssetsById === undefined ? {} : { previousAssetsById }), assetsById, ...(previousDefinitionIdentities === undefined ? {} : { previousDefinitionIdentities }), definitionIdentities, ...(generatedSeedEntityIds === undefined ? {} : { expectedLegacyRemovedIds: generatedSeedEntityIds }) })
     : undefined;
   if (diff !== undefined && diff.unexpectedChanges.length > 0) throw new UnexpectedModuleChangeError(diff);
   const deliveryReport = input.blueprint === undefined ? undefined : evaluateModuleDelivery({
@@ -213,6 +221,7 @@ export function compileModulePlan(input: CompileModulePlanInput): ModuleCompilat
     canonicalImplementation,
     Object.freeze(plan.pages.flatMap((page) => page.modules.map((module) => module.id)).sort(compareCodePoints)),
   );
+  TRUSTED_MODULE_DEFINITION_IDENTITIES.set(canonicalImplementation, definitionIdentities);
   return Object.freeze({
     status: "compiled",
     implementation: canonicalImplementation,
@@ -224,21 +233,49 @@ export function compileModulePlan(input: CompileModulePlanInput): ModuleCompilat
   });
 }
 
+function definitionIdentityIndex(plan: ModulePlan, registry: ModuleRegistry): Readonly<Record<string, string>> {
+  const values: Record<string, string> = {};
+  for (const page of plan.pages) for (const instance of page.modules) {
+    const definition = registry.require(instance.kind, instance.templateVersion);
+    values[`${page.id}\u0000${instance.id}`] = definition.compilerIdentity ?? definition.compile.toString();
+  }
+  return Object.freeze(values);
+}
+
 function hasUnresolvedBlockingGap(gaps: readonly ModuleDeliveryGap[]): boolean {
   return gaps.some((gap) => gap.severity === "blocking" && gap.status === "unresolved");
+}
+
+function optionalOwnDataField(input: object, key: string, code: string): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(input, key);
+  if (descriptor === undefined) return undefined;
+  if (!descriptor.enumerable || !("value" in descriptor)) throw new Error(code);
+  return descriptor.value;
+}
+
+function parseEntityIds(input: unknown, code: string): readonly string[] | undefined {
+  if (input === undefined) return undefined;
+  if (!Array.isArray(input)) throw new Error(code);
+  const values = strictArrayValues(input);
+  if (values === undefined) throw new Error(code);
+  const output: string[] = [];
+  for (const value of values) { if (typeof value !== "string" || value.length < 1 || value.length > 100) throw new Error(code); output.push(value); }
+  return Object.freeze(output);
 }
 
 function preserveLegacyComponents(
   implementation: UIImplementationSpec,
   previous: UIImplementationSpec | undefined,
   editableEntityIds: readonly string[] | undefined,
+  generatedSeedEntityIds: readonly string[] | undefined,
 ): UIImplementationSpec {
   if (previous === undefined) return implementation;
   const allowed = editableEntityIds === undefined ? undefined : new Set(editableEntityIds);
+  const seeds = new Set(generatedSeedEntityIds ?? []);
   const pages = implementation.pages.map((page) => ({ ...page, components: [...page.components] }));
   const byPage = new Map(pages.map((page) => [page.id, page]));
   for (const priorPage of previous.pages) {
-    const legacy = priorPage.components.filter((component) => component.sourceModuleId === undefined && (allowed === undefined || allowed.has(component.id)));
+    const legacy = priorPage.components.filter((component) => component.sourceModuleId === undefined && !seeds.has(component.id) && (allowed === undefined || allowed.has(component.id)));
     if (legacy.length === 0) continue;
     const page = byPage.get(priorPage.id);
     if (page === undefined) { pages.push({ ...priorPage, components: legacy }); continue; }

@@ -3,7 +3,6 @@ import { z } from "zod";
 import type { ModulePlan, ModulePlanModule, ResolvedAsset, UIComponentSpec } from "@kf/contracts";
 import { ModuleRegistry, type ModuleDefinition } from "./module-registry.js";
 import { compileModulePlan } from "./module-compiler.js";
-import { UnexpectedModuleChangeError } from "./module-diff.js";
 import { stableModuleComponentId } from "./stable-ids.js";
 
 const theme = {
@@ -194,6 +193,28 @@ describe("compileModulePlan", () => {
     expect(result.implementation.pages[0]?.components[0]).toBe(previous.pages[0]?.components[0]);
   });
 
+  it("preserves customer legacy controls by explicit entity ID and removes only trusted generated seeds", () => {
+    const input = plan([module("profile")]);
+    const registry = registryFor(definition());
+    const previous = compile(input, registry).implementation;
+    const customerHello: UIComponentSpec = { ...component("Text1", "text"), id: "Text1", sourceModuleId: undefined, content: "Hello Alice" };
+    previous.pages[0]!.components.push(customerHello);
+
+    const preserved = compile(input, registry, { previousPlan: input, previousImplementation: previous, editableEntityIds: ["Text1"] });
+    expect(preserved.implementation.pages[0]!.components.find((item) => item.id === "Text1")).toBe(customerHello);
+
+    const withoutSeed = compile(input, registry, { previousPlan: input, previousImplementation: previous, editableEntityIds: ["Text1"], generatedSeedEntityIds: ["Text1"] });
+    expect(withoutSeed.implementation.pages[0]!.components.some((item) => item.id === "Text1")).toBe(false);
+  });
+
+  it("rejects accessor-backed legacy provenance without executing it", () => {
+    let reads = 0;
+    const unsafe = { plan: plan([module("profile")]), registry: registryFor(definition()), assetsById: resolvedAssets } as Record<string, unknown>;
+    Object.defineProperty(unsafe, "generatedSeedEntityIds", { enumerable: true, get: () => { reads += 1; return ["Text1"]; } });
+    expect(() => compileModulePlan(unsafe as never)).toThrow("INVALID_GENERATED_SEED_ENTITY_IDS");
+    expect(reads).toBe(0);
+  });
+
   it("keeps a prior object only when the newly compiled canonical component is exactly equal", () => {
     const input = plan([module("profile")]);
     const registry = registryFor(definition());
@@ -209,8 +230,9 @@ describe("compileModulePlan", () => {
       .not.toBe(afterPrefix.pages[0]!.components.find((item) => item.sourceModuleId === "profile")?.geometry.y);
 
     const alteredRegistry = registryFor(definition({ compile: () => ({ components: [{ ...component("title", "text"), content: "definition changed" }], deliveryGaps: [] }) }));
-    expect(() => compile(input, alteredRegistry, { previousPlan: input, previousImplementation: first }))
-      .toThrow(UnexpectedModuleChangeError);
+    const definitionRevision = compile(input, alteredRegistry, { previousPlan: input, previousImplementation: first });
+    expect(definitionRevision.diff?.changedModules).toEqual(["profile"]);
+    expect(definitionRevision.implementation.pages[0]!.components[0]!.content).toBe("definition changed");
   });
 
   it("strictly rejects unsafe resolved assets, nested compiler payloads, and unsafe prior implementations", () => {

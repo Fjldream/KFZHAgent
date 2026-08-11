@@ -20,7 +20,7 @@ function layout(regions: readonly ModuleDefinition["layout"]["regions"][number][
 
 function define(input: Omit<ModuleDefinition, "version" | "maturity" | "runtimeEvidenceTarget">): ModuleDefinition {
   const compile = input.compile;
-  return Object.freeze({ ...input, version: VERSION, runtimeEvidenceTarget: { runtimeFamily: "KingFusion", runtimeVersion: "3.6", baselineId: "kf36-portal-v1" }, maturity: "beta", compile: (input: ModuleCompileInput): ModuleCompileOutput => {
+  return Object.freeze({ ...input, compilerIdentity: input.compilerIdentity ?? compile.toString(), quality: input.quality ?? Object.freeze({ minimumComponentCount: 2, minimumCriticalComponentCount: 1, requiredRoles: Object.freeze(["surface"]), requiredCriticalRoles: Object.freeze(["surface"]), requiredCapabilityIds: Object.freeze(["layout.2"]) }), version: VERSION, runtimeEvidenceTarget: { runtimeFamily: "KingFusion", runtimeVersion: "3.6", baselineId: "kf36-portal-v1" }, maturity: "beta", compile: (input: ModuleCompileInput): ModuleCompileOutput => {
     const result = compile(input); const { width, height } = input.context.bounds;
     const invalid = result.components.some((component) => { const g = component.geometry; return !Number.isInteger(g.x) || !Number.isInteger(g.y) || !Number.isInteger(g.width) || !Number.isInteger(g.height) || g.width <= 0 || g.height <= 0 || g.x < 0 || g.y < 0 || g.x + g.width > width || g.y + g.height > height; });
     return invalid ? { components: [], deliveryGaps: [...result.deliveryGaps, { moduleId: input.context.instance.id, requirement: "Module local bounds", severity: "blocking" as const, status: "unresolved" as const, reason: "module-bounds-insufficient", alternatives: ["Increase module span or semantic height."] }] } : result;

@@ -30,6 +30,36 @@ describe("diffModulePlans", () => {
     expect(diff.unexpectedChanges).toContainEqual(expect.objectContaining({ moduleId: "projects", reason: "UNTOUCHED_MODULE_IMPLEMENTATION_CHANGED" }));
   });
 
+  it("accepts compiler-definition identity changes but still rejects same-identity output drift", () => {
+    const before = implementation(["hero"]);
+    const after = implementation(["hero"], new Set(["hero"]));
+    const drift = diffModulePlans({
+      previousPlan: plan(["hero"]), plan: plan(["hero"]), previousImplementation: before, implementation: after,
+      previousDefinitionIdentities: { "home\u0000hero": "content.hero@1.0.0:a" },
+      definitionIdentities: { "home\u0000hero": "content.hero@1.0.0:b" },
+    });
+    expect(drift.changedModules).toEqual(["hero"]);
+    expect(drift.unexpectedChanges).toEqual([]);
+
+    const unchangedIdentity = diffModulePlans({
+      previousPlan: plan(["hero"]), plan: plan(["hero"]), previousImplementation: before, implementation: after,
+      previousDefinitionIdentities: { "home\u0000hero": "content.hero@1.0.0:a" },
+      definitionIdentities: { "home\u0000hero": "content.hero@1.0.0:a" },
+    });
+    expect(unchangedIdentity.unexpectedChanges).toContainEqual(expect.objectContaining({ reason: "UNTOUCHED_MODULE_IMPLEMENTATION_CHANGED" }));
+  });
+
+  it("keeps changed and unchanged module sets mutually exclusive", () => {
+    const before = implementation(["hero"]);
+    const after = structuredClone(before);
+    after.pages[0]!.components[0]!.style.declarations = { textColor: "#fff" };
+    const revised = plan(["hero"]);
+    revised.theme = { ...theme, primary: "#ffffff" };
+    const diff = diffModulePlans({ previousPlan: plan(["hero"]), plan: revised, previousImplementation: before, implementation: after });
+    expect(diff.changedModules).toEqual(["hero"]);
+    expect(diff.unchangedModules).toEqual([]);
+  });
+
   it("preserves unrelated implementation objects for an asset-only revision", () => {
     const previous = plan(["hero", "projects"]);
     previous.assets.push({ id: "portrait", kind: "image", name: "Portrait", mimeType: "image/png", description: "Portrait" });
@@ -42,6 +72,22 @@ describe("diffModulePlans", () => {
     after.pages[0]!.components[0]!.properties = { src: "asset:portraitNew" };
     const diff = diffModulePlans({ previousPlan: previous, plan: revised, previousImplementation: before, implementation: after });
     expect(diff.changedModules).toEqual(["hero"]);
+    expect(diff.unexpectedChanges).toEqual([]);
+  });
+
+  it("treats a resolved-to-pending referenced asset as an affected module, not an unexpected change", () => {
+    const previous = plan(["hero", "projects"]);
+    previous.assets.push({ id: "portrait", kind: "image", name: "Portrait", mimeType: "image/png", description: "Portrait" });
+    previous.pages[0]!.modules[0]!.assetId = "portrait";
+    const after = structuredClone(implementation(["hero", "projects"]));
+    after.pages[0]!.components[0]!.content = "asset pending";
+    const diff = diffModulePlans({
+      previousPlan: previous, plan: structuredClone(previous), previousImplementation: implementation(["hero", "projects"]), implementation: after,
+      previousAssetsById: { portrait: { assetId: "portrait", status: "resolved", resolvedName: "Portrait" } },
+      assetsById: { portrait: { assetId: "portrait", status: "pending" } },
+    });
+    expect(diff.changedModules).toEqual(["hero"]);
+    expect(diff.unchangedModules).toEqual(["projects"]);
     expect(diff.unexpectedChanges).toEqual([]);
   });
 

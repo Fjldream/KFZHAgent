@@ -43,16 +43,16 @@ function component(moduleId = "hero", overrides: Partial<UIComponentSpec> = {}):
   };
 }
 
-function implementation(components: UIComponentSpec[] = [component()]): UIImplementationSpec {
+function implementation(components: UIComponentSpec[] = [component(), component("hero", { id: "hero/title", role: "title", capabilityId: "text", critical: false })]): UIImplementationSpec {
   return { schema: "kf-ui-implementation/v1", theme, pages: [{ id: "home", width: 1440, height: 900, components }] };
 }
-function registry(): ModuleRegistry { const value = new ModuleRegistry(); const common = { version: "1.0.0", category: "content", maturity: "stable" as const, variants: ["no-portrait"], contentSchema: z.object({ title: z.string() }), assetSlots: [], requiredKfCapabilities: ["layout.2"], layout: { regions: ["main"] as const, minColumnSpan: 1, maxColumnSpan: 12, preferredHeights: ["medium"] as const, interactions: ["navigate"] as const, height: { min: 1, preferred: { compact: 1, small: 1, medium: 200, large: 300, full: 400 }, max: 400 } }, quality: { minimumComponentCount: 1, requiredRoles: [], requiredCapabilityIds: [] }, compile: () => ({ components: [], deliveryGaps: [] }) }; value.register({ ...common, kind: "content.hero" }); value.register({ ...common, kind: "content.card-grid" }); return value; }
+function registry(): ModuleRegistry { const value = new ModuleRegistry(); const common = { version: "1.0.0", category: "content", maturity: "stable" as const, variants: ["no-portrait"], contentSchema: z.object({ title: z.string() }), assetSlots: [], requiredKfCapabilities: ["layout.2"], layout: { regions: ["main"] as const, minColumnSpan: 1, maxColumnSpan: 12, preferredHeights: ["medium"] as const, interactions: ["navigate"] as const, height: { min: 1, preferred: { compact: 1, small: 1, medium: 200, large: 300, full: 400 }, max: 400 } }, quality: { minimumComponentCount: 2, minimumCriticalComponentCount: 1, requiredRoles: ["surface"], requiredCriticalRoles: ["surface"], requiredCapabilityIds: ["layout.2"] }, compile: () => ({ components: [], deliveryGaps: [] }) }; value.register({ ...common, kind: "content.hero" }); value.register({ ...common, kind: "content.card-grid" }); return value; }
 
 function evaluate(overrides: Partial<Parameters<typeof evaluateModuleDelivery>[0]> = {}) {
   const ui = implementation();
   return evaluateModuleDelivery({
     blueprint: blueprint(), plan: plan(), implementation: ui,
-    traces: [{ schema: "kf-module-trace/v1", projectKey: "kingclient.portal", entries: [{ pageId: "home", moduleId: "hero", outputId: "hero/surface" }] }],
+    traces: [{ schema: "kf-module-trace/v1", projectKey: "kingclient.portal", entries: ui.pages[0]!.components.map((item) => ({ pageId: "home", moduleId: "hero", outputId: item.id })) }],
     assetBindings: [], gaps: [], registry: registry(), assetsById: {}, trustedBlueprintModuleMapping: { hero: ["hero"] }, ...overrides,
   });
 }
@@ -112,6 +112,21 @@ describe("evaluateModuleDelivery", () => {
   it("keeps documented non-critical differences deliverable with warnings", () => {
     const gap: ModuleDeliveryGap = { moduleId: "hero", requirement: "Minor shadow", severity: "warning", status: "unresolved", reason: "Minor visual difference" };
     expect(evaluate({ gaps: [gap] }).report.status).toBe("ready_with_warnings");
+  });
+
+  it("keeps a blocking repair owner for every module at the 250-gap report cap", () => {
+    const moduleIds = Array.from({ length: 250 }, (_, index) => `module-${String(index).padStart(3, "0")}`);
+    const cappedPlan = plan([moduleIds[0]!]);
+    cappedPlan.pages = Array.from({ length: 5 }, (_, pageIndex) => ({
+      id: `page-${pageIndex}`, title: `Page ${pageIndex}`, mode: "vertical-flow" as const,
+      modules: moduleIds.slice(pageIndex * 50, (pageIndex + 1) * 50).map((id, order) => ({
+        ...plan([id]).pages[0]!.modules[0]!, id, placement: { ...plan([id]).pages[0]!.modules[0]!.placement, order }, sourceBlueprintModuleIds: [id],
+      })),
+    }));
+    const report = evaluate({ blueprint: blueprint(Array.from({ length: 12 }, (_, index) => `blueprint-${index}`)), plan: cappedPlan, implementation: undefined as never, traces: [] }).report;
+    expect(report.status).toBe("blocked");
+    expect(report.gaps).toHaveLength(250);
+    expect(new Set(report.gaps.map((gap) => gap.moduleId))).toEqual(new Set(moduleIds));
   });
 
   it("rejects descriptor surprises without invoking their getters", () => {

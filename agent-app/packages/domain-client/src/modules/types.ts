@@ -63,7 +63,10 @@ export interface ModuleCompileOutput {
 /** Registry-owned structural contract used by delivery gates, never model input. */
 export interface ModuleQualityContract {
   readonly minimumComponentCount: number;
+  /** A surface-only rendering is never considered delivery-ready. */
+  readonly minimumCriticalComponentCount: number;
   readonly requiredRoles: readonly string[];
+  readonly requiredCriticalRoles: readonly string[];
   readonly requiredCapabilityIds: readonly string[];
   readonly interactionActionKinds?: Readonly<Partial<Record<ModuleInteraction["type"], string>>>;
 }
@@ -81,6 +84,8 @@ export interface ModuleDefinition {
   readonly contentSchema: z.ZodType<Record<string, unknown>>;
   readonly assetSlots: readonly AssetSlotDefinition[];
   readonly requiredKfCapabilities: readonly string[];
+  /** Immutable identity of the registered compiler implementation, if it differs from its source. */
+  readonly compilerIdentity?: string;
   readonly quality?: ModuleQualityContract;
   readonly layout: ModuleLayoutContract;
   compile(input: ModuleCompileInput): ModuleCompileOutput;

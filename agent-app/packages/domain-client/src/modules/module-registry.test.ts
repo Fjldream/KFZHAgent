@@ -259,4 +259,20 @@ describe("versioned module registry", () => {
     expect(registry.listForPlanning()[0]!.kind).toBe("hero");
     expect(registry.listForPlanning()[0]!.variants).toEqual(["default", "compact"]);
   });
+
+  it("registers every V1 module with a frozen non-surface quality contract", () => {
+    const registry = createDefaultModuleRegistry();
+    const kinds = ["navigation.top", "navigation.sidebar", "content.hero", "metric.kpi-grid", "content.card-grid", "content.timeline", "data.chart-panel", "data.status-grid", "data.table", "data.detail", "interaction.tabs-filter", "form.record-editor", "action.toolbar", "feedback.alert-list", "content.contact-footer"];
+    for (const kind of kinds) {
+      const quality = registry.require(kind, "1.0.0").quality!;
+      expect(quality.minimumComponentCount).toBeGreaterThanOrEqual(2);
+      expect(quality.minimumCriticalComponentCount).toBeGreaterThanOrEqual(1);
+      expect(quality.requiredRoles.length).toBeGreaterThan(0);
+      expect(quality.requiredCriticalRoles.length).toBeGreaterThan(0);
+      expect(quality.requiredCapabilityIds.length).toBeGreaterThan(0);
+      expect(Object.isFrozen(quality)).toBe(true);
+      expect(Object.isFrozen(quality.requiredRoles)).toBe(true);
+      expect(Object.isFrozen(quality.requiredCriticalRoles)).toBe(true);
+    }
+  });
 });

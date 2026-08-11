@@ -24,6 +24,11 @@ export interface DiffModulePlansInput {
   readonly implementation: UIImplementationSpec;
   readonly previousAssetsById?: Readonly<Record<string, ResolvedAsset>>;
   readonly assetsById?: Readonly<Record<string, ResolvedAsset>>;
+  /** Trusted registry compiler identities keyed by pageId + NUL + moduleId. */
+  readonly previousDefinitionIdentities?: Readonly<Record<string, string>>;
+  readonly definitionIdentities?: Readonly<Record<string, string>>;
+  /** Trusted generated seed entities may be intentionally removed during import normalization. */
+  readonly expectedLegacyRemovedIds?: readonly string[];
 }
 
 /**
@@ -55,6 +60,12 @@ export function diffModulePlans(input: DiffModulePlansInput): ModulePlanDiff {
   }
   for (const [key, module] of previous) if (!current.has(key)) changed.add(module.id);
 
+  for (const [key, module] of current) {
+    const priorIdentity = input.previousDefinitionIdentities?.[key];
+    const identity = input.definitionIdentities?.[key];
+    if (priorIdentity !== undefined && identity !== undefined && priorIdentity !== identity) changed.add(module.id);
+  }
+
   const previousGroups = pageComponentGroups(input.previousImplementation);
   const currentGroups = pageComponentGroups(input.implementation);
   if (!isDeepStrictEqual(input.previousPlan.theme, input.plan.theme)) {
@@ -75,7 +86,7 @@ export function diffModulePlans(input: DiffModulePlansInput): ModulePlanDiff {
   const unexpected = [
     ...unexpectedModuleImplementationChanges(input.previousImplementation, input.implementation, protectedModules),
     ...unexpectedLayoutFieldChanges(input.previousImplementation, input.implementation, new Set(layoutAffected)),
-    ...unexpectedLegacyImplementationChanges(input.previousImplementation, input.implementation),
+    ...unexpectedLegacyImplementationChanges(input.previousImplementation, input.implementation, new Set(input.expectedLegacyRemovedIds ?? [])),
   ].sort(compareUnexpected);
 
   return Object.freeze({
@@ -168,12 +179,13 @@ function unexpectedModuleImplementationChanges(
   return output;
 }
 
-function unexpectedLegacyImplementationChanges(previous: UIImplementationSpec, current: UIImplementationSpec): UnexpectedModuleChange[] {
+function unexpectedLegacyImplementationChanges(previous: UIImplementationSpec, current: UIImplementationSpec, expectedRemovedIds: ReadonlySet<string>): UnexpectedModuleChange[] {
   const output: UnexpectedModuleChange[] = [];
   const previousLegacy = legacyComponentGroups(previous);
   const currentLegacy = legacyComponentGroups(current);
   for (const [pageId, components] of previousLegacy) {
-    if (!byteIdentical(components, currentLegacy.get(pageId) ?? [])) {
+    const retained = components.filter((component) => !expectedRemovedIds.has(component.id));
+    if (!byteIdentical(retained, currentLegacy.get(pageId) ?? [])) {
       output.push(Object.freeze({ pageId, moduleId: "legacy", reason: "PRESERVED_LEGACY_IMPLEMENTATION_CHANGED" }));
     }
   }

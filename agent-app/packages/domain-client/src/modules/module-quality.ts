@@ -115,9 +115,9 @@ function inspectImplementation(
     const components = componentsByModule.get(module.id) ?? [];
     let definition;
     try { definition = registry.require(module.kind, module.templateVersion); } catch { gaps.push(gap(module.id, "Use a registered module definition.", "MODULE_DEFINITION_UNREGISTERED")); continue; }
-    const quality = definition.quality ?? { minimumComponentCount: 1, requiredRoles: [], requiredCapabilityIds: [] };
+    const quality = definition.quality ?? { minimumComponentCount: 1, minimumCriticalComponentCount: 1, requiredRoles: [], requiredCriticalRoles: [], requiredCapabilityIds: [] };
     if (components.length < quality.minimumComponentCount || quality.requiredRoles.some((role) => !components.some((component) => component.role === role)) || quality.requiredCapabilityIds.some((capability) => !components.some((component) => component.capabilityId === capability))) gaps.push(gap(module.id, "Generate the module's required registered structure.", "MODULE_REQUIRED_STRUCTURE_MISSING"));
-    if (!components.some((component) => component.critical)) gaps.push(gap(module.id, "Generate the module's required critical controls.", "CRITICAL_CONTROL_MISSING"));
+    if (components.filter((component) => component.critical).length < quality.minimumCriticalComponentCount || quality.requiredCriticalRoles.some((role) => !components.some((component) => component.critical && component.role === role))) gaps.push(gap(module.id, "Generate the module's required critical controls.", "CRITICAL_CONTROL_MISSING"));
     if (components.some((component) => !traceKeys.has(`${page.id}\u0000${module.id}\u0000${component.id}`))) gaps.push(gap(module.id, "Emit an exact module trace for every generated control.", "MODULE_TRACE_MISSING"));
     if (module.assetId !== undefined && !assetBindings.some((binding) => binding.moduleId === module.id && binding.assetId === module.assetId)) {
       gaps.push(gap(module.id, "Bind the requested module asset into the delivery package.", "ASSET_BINDING_MISSING"));

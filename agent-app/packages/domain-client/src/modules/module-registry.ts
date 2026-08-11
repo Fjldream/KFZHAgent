@@ -33,6 +33,7 @@ export type {
 } from "./types.js";
 
 const MATURITIES = new Set(["stable", "beta", "unsupported"]);
+const V1_EXACT_KINDS = new Set(["navigation.top", "navigation.sidebar", "content.hero", "metric.kpi-grid", "content.card-grid", "content.timeline", "data.chart-panel", "data.status-grid", "data.table", "data.detail", "interaction.tabs-filter", "form.record-editor", "action.toolbar", "feedback.alert-list", "content.contact-footer"]);
 const NATIVE_ONLY_FALLBACK_POLICY: ModuleFallbackPolicy = Object.freeze({ mode: "native-only" });
 
 function definitionKey(kind: string, version: string): string {
@@ -92,6 +93,7 @@ function freezeDefinition(definition: ModuleDefinition): ModuleDefinition {
     variants: freezeArray(definition.variants),
     assetSlots: freezeArray(definition.assetSlots.map(freezeSlot)),
     requiredKfCapabilities: freezeArray(definition.requiredKfCapabilities),
+    ...(definition.quality === undefined ? {} : { quality: Object.freeze({ minimumComponentCount: definition.quality.minimumComponentCount, minimumCriticalComponentCount: definition.quality.minimumCriticalComponentCount, requiredRoles: freezeArray(definition.quality.requiredRoles), requiredCriticalRoles: freezeArray(definition.quality.requiredCriticalRoles), requiredCapabilityIds: freezeArray(definition.quality.requiredCapabilityIds), ...(definition.quality.interactionActionKinds === undefined ? {} : { interactionActionKinds: Object.freeze({ ...definition.quality.interactionActionKinds }) }) }) }),
     layout,
   });
 }
@@ -104,6 +106,7 @@ function assertDefinition(definition: ModuleDefinition): void {
   if (!MATURITIES.has(definition.maturity)) {
     fail("MODULE_DEFINITION_INVALID", `${key} has invalid maturity`);
   }
+  if (V1_EXACT_KINDS.has(definition.kind) && (definition.quality === undefined || definition.quality.minimumComponentCount < 2 || definition.quality.minimumCriticalComponentCount < 1 || definition.quality.requiredRoles.length < 1 || definition.quality.requiredCriticalRoles.length < 1 || definition.quality.requiredRoles.some((role) => !role) || definition.quality.requiredCriticalRoles.some((role) => !role) || definition.quality.requiredCapabilityIds.length < 1 || definition.quality.requiredCapabilityIds.some((capability) => !capability))) fail("MODULE_DEFINITION_INVALID", `${key} requires a complete quality contract`);
   if (definition.variants.length === 0 || definition.variants.some((variant) => !variant)) {
     fail("MODULE_DEFINITION_INVALID", `${key} requires one or more variants`);
   }
