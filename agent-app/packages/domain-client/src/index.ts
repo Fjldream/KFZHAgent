@@ -29,3 +29,4 @@ export * from "./patch/json-pointer.js";
 export * from "./validate/client-validator.js";
 export * from "./validate/report.js";
 export * from "./domain-pack/king-client-domain-pack.js";
+export * from "./modules/module-registry.js";

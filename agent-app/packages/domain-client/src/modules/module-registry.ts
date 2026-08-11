@@ -1,0 +1,235 @@
+import type {
+  AssetRecord,
+  ModuleDeliveryGap,
+  ModulePlanModule,
+} from "@kf/contracts";
+import type {
+  AssetSlotDefinition,
+  ModuleDefinition,
+  ModulePlanningSummary,
+  ModuleValidationInput,
+  ModuleValidationResult,
+} from "./types.js";
+
+export type {
+  AssetSlotDefinition,
+  ModuleCompileContext,
+  ModuleCompileInput,
+  ModuleCompileOutput,
+  ModuleDefinition,
+  ModuleLayoutContract,
+  ModuleMaturity,
+  ModulePlanningSummary,
+  ModuleValidationInput,
+  ModuleValidationResult,
+} from "./types.js";
+
+const MATURITIES = new Set(["stable", "beta", "unsupported"]);
+
+function definitionKey(kind: string, version: string): string {
+  return `${kind}@${version}`;
+}
+
+function fail(code: string, detail: string): never {
+  throw new Error(`${code}: ${detail}`);
+}
+
+function freezeArray<T>(values: readonly T[]): readonly T[] {
+  return Object.freeze([...values]);
+}
+
+function freezeSlot(slot: AssetSlotDefinition): AssetSlotDefinition {
+  return Object.freeze({
+    id: slot.id,
+    required: slot.required,
+    allowedKinds: freezeArray(slot.allowedKinds),
+  });
+}
+
+function freezeDefinition(definition: ModuleDefinition): ModuleDefinition {
+  const layout = Object.freeze({
+    regions: freezeArray(definition.layout.regions),
+    minColumnSpan: definition.layout.minColumnSpan,
+    maxColumnSpan: definition.layout.maxColumnSpan,
+    preferredHeights: freezeArray(definition.layout.preferredHeights),
+    interactions: freezeArray(definition.layout.interactions),
+  });
+
+  return Object.freeze({
+    ...definition,
+    variants: freezeArray(definition.variants),
+    assetSlots: freezeArray(definition.assetSlots.map(freezeSlot)),
+    requiredKfCapabilities: freezeArray(definition.requiredKfCapabilities),
+    layout,
+  });
+}
+
+function assertDefinition(definition: ModuleDefinition): void {
+  const key = definitionKey(definition.kind, definition.version);
+  if (!definition.kind || !definition.version || !definition.category) {
+    fail("MODULE_DEFINITION_INVALID", `${key} requires kind, version, and category`);
+  }
+  if (!MATURITIES.has(definition.maturity)) {
+    fail("MODULE_DEFINITION_INVALID", `${key} has invalid maturity`);
+  }
+  if (definition.variants.length === 0 || definition.variants.some((variant) => !variant)) {
+    fail("MODULE_DEFINITION_INVALID", `${key} requires one or more variants`);
+  }
+  if (new Set(definition.variants).size !== definition.variants.length) {
+    fail("MODULE_DEFINITION_INVALID", `${key} has duplicate variants`);
+  }
+  if (definition.assetSlots.length > 1) {
+    fail("MODULE_DEFINITION_INVALID", `${key} has more asset slots than ModulePlanModule can represent`);
+  }
+  if (definition.assetSlots.some((slot) => !slot.id || slot.allowedKinds.length === 0)) {
+    fail("MODULE_DEFINITION_INVALID", `${key} has an invalid asset slot`);
+  }
+  if (new Set(definition.assetSlots.map((slot) => slot.id)).size !== definition.assetSlots.length) {
+    fail("MODULE_DEFINITION_INVALID", `${key} has duplicate asset slots`);
+  }
+  if (
+    definition.layout.regions.length === 0
+    || definition.layout.preferredHeights.length === 0
+    || definition.layout.minColumnSpan < 1
+    || definition.layout.maxColumnSpan > 12
+    || definition.layout.minColumnSpan > definition.layout.maxColumnSpan
+  ) {
+    fail("MODULE_DEFINITION_INVALID", `${key} has invalid layout bounds`);
+  }
+}
+
+function parseContent(instance: ModulePlanModule, key: string): Record<string, unknown> {
+  if (instance.content === undefined) return {};
+  try {
+    const content: unknown = JSON.parse(instance.content);
+    if (content === null || Array.isArray(content) || typeof content !== "object") {
+      fail("MODULE_CONTENT_INVALID", key);
+    }
+    return content as Record<string, unknown>;
+  } catch (error) {
+    if (error instanceof Error && error.message === `MODULE_CONTENT_INVALID: ${key}`) throw error;
+    fail("MODULE_CONTENT_INVALID", key);
+  }
+}
+
+function validateAsset(
+  instance: ModulePlanModule,
+  slots: readonly AssetSlotDefinition[],
+  assets: readonly AssetRecord[],
+  key: string,
+): AssetRecord | undefined {
+  const slot = slots[0];
+  if (slot === undefined) {
+    if (instance.assetId !== undefined) fail("MODULE_ASSET_SLOT_UNEXPECTED", key);
+    return undefined;
+  }
+  if (instance.assetId === undefined) {
+    if (slot.required) fail("MODULE_ASSET_SLOT_REQUIRED", `${key} [${slot.id}]`);
+    return undefined;
+  }
+  const asset = assets.find((candidate) => candidate.id === instance.assetId);
+  if (asset === undefined) fail("MODULE_ASSET_NOT_FOUND", `${key} [${instance.assetId}]`);
+  if (!slot.allowedKinds.includes(asset.kind)) {
+    fail("MODULE_ASSET_SLOT_INVALID", `${key} [${slot.id}]`);
+  }
+  return asset;
+}
+
+function assertLayout(instance: ModulePlanModule, definition: ModuleDefinition, key: string): void {
+  const { placement, interactions } = instance;
+  const { layout } = definition;
+  if (
+    !layout.regions.includes(placement.region)
+    || placement.columnSpan < layout.minColumnSpan
+    || placement.columnSpan > layout.maxColumnSpan
+    || !layout.preferredHeights.includes(placement.preferredHeight)
+    || interactions.some((interaction) => !layout.interactions.includes(interaction.type))
+  ) {
+    fail("MODULE_LAYOUT_INVALID", key);
+  }
+}
+
+function planningSummary(definition: ModuleDefinition): ModulePlanningSummary {
+  return Object.freeze({
+    kind: definition.kind,
+    version: definition.version,
+    maturity: definition.maturity,
+    variants: freezeArray(definition.variants),
+    slots: freezeArray(definition.assetSlots.map(freezeSlot)),
+    interactions: freezeArray(definition.layout.interactions),
+    layout: Object.freeze({
+      regions: freezeArray(definition.layout.regions),
+      minColumnSpan: definition.layout.minColumnSpan,
+      maxColumnSpan: definition.layout.maxColumnSpan,
+      preferredHeights: freezeArray(definition.layout.preferredHeights),
+    }),
+  });
+}
+
+/**
+ * The authoritative module capability boundary. A caller must always provide
+ * an exact version; this registry intentionally has no latest-version lookup.
+ */
+export class ModuleRegistry {
+  readonly #definitions = new Map<string, ModuleDefinition>();
+
+  register(definition: ModuleDefinition): void {
+    assertDefinition(definition);
+    const key = definitionKey(definition.kind, definition.version);
+    if (this.#definitions.has(key)) fail("MODULE_DEFINITION_DUPLICATE", key);
+    this.#definitions.set(key, freezeDefinition(definition));
+  }
+
+  require(kind: string, version: string): ModuleDefinition {
+    if (!version) fail("MODULE_VERSION_REQUIRED", kind);
+    const key = definitionKey(kind, version);
+    const definition = this.#definitions.get(key);
+    if (definition === undefined) fail("MODULE_DEFINITION_NOT_FOUND", key);
+    return definition;
+  }
+
+  listForPlanning(): readonly ModulePlanningSummary[] {
+    return Object.freeze(
+      [...this.#definitions.values()]
+        .filter((definition) => definition.maturity === "stable")
+        .sort((left, right) => definitionKey(left.kind, left.version).localeCompare(definitionKey(right.kind, right.version)))
+        .map(planningSummary),
+    );
+  }
+
+  validateInstance(input: ModuleValidationInput): ModuleValidationResult {
+    const definition = this.require(input.instance.kind, input.version);
+    const key = definitionKey(definition.kind, definition.version);
+    if (definition.maturity === "unsupported") fail("MODULE_UNSUPPORTED", key);
+    if (!definition.variants.includes(input.variant)) {
+      fail("MODULE_VARIANT_UNSUPPORTED", `${key} [${input.variant}]`);
+    }
+    const missingCapabilities = definition.requiredKfCapabilities.filter(
+      (capability) => !input.availableKfCapabilities.includes(capability),
+    );
+    if (missingCapabilities.length > 0) {
+      fail("MODULE_KF_CAPABILITY_MISSING", `${key} [${missingCapabilities.join(", ")}]`);
+    }
+
+    const content = parseContent(input.instance, key);
+    if (!definition.contentSchema.safeParse(content).success) fail("MODULE_CONTENT_INVALID", key);
+    const asset = validateAsset(input.instance, definition.assetSlots, input.assets, key);
+    assertLayout(input.instance, definition, key);
+
+    const deliveryGaps: readonly ModuleDeliveryGap[] = definition.maturity === "beta"
+      ? Object.freeze([Object.freeze({
+        moduleId: input.instance.id,
+        requirement: `Mature ${key} before production delivery`,
+        severity: "warning" as const,
+        status: "unresolved" as const,
+        reason: `Module ${key} is registered as beta.`,
+      })])
+      : Object.freeze([]);
+    return Object.freeze({ definition, content, asset, deliveryGaps });
+  }
+}
+
+/** Creates an empty registry so every supported module is registered explicitly. */
+export function createDefaultModuleRegistry(): ModuleRegistry {
+  return new ModuleRegistry();
+}
