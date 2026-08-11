@@ -47,10 +47,11 @@ const ASSET_PNG_1X1 = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/mXPo5QAAAABJRU5ErkJggg==",
   "base64",
 );
-const ASSET_JPEG_1X1 = Buffer.from(
-  "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAH/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAEFAqf/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/Aaf/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/Aaf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAY/Aqf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAQEA/6f/2gAMAwEAAgADAAAAEP/EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQMBAT8QH//EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQIBAT8QH//EABQQAQAAAAAAAAAAAAAAAAAAABD/2gAIAQEAAT8QH//Z",
-  "base64",
-);
+const ASSET_JPEG_1X1 = Buffer.from([
+  0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
+  0xff, 0xc0, 0x00, 0x0b, 0x08, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x11, 0x00,
+  0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3f, 0x00, 0x01, 0xff, 0xd9,
+]);
 const ASSET_WEBP_1X1 = Buffer.from(
   "UklGRiIAAABXRUJQVlA4IBYAAABwAQCdASoBAAEAAUAmJaQAA3AA/vuU",
   "base64",
@@ -61,6 +62,8 @@ const ASSET_INCOMPLETE_SOS_JPEG = ASSET_JPEG_1X1.subarray(
   0,
   ASSET_JPEG_SOS_INDEX + 2 + ASSET_JPEG_1X1.readUInt16BE(ASSET_JPEG_SOS_INDEX + 2),
 );
+const ASSET_INVALID_VERTICAL_SAMPLING_JPEG = Buffer.from(ASSET_JPEG_1X1);
+ASSET_INVALID_VERTICAL_SAMPLING_JPEG[31] = 0x10;
 
 let app: INestApplication;
 let server: ReturnType<INestApplication["getHttpServer"]>;
@@ -953,6 +956,7 @@ describe("api contract", () => {
     for (const [name, bytes] of [
       ["header-only.jpg", ASSET_HEADER_ONLY_JPEG],
       ["incomplete-sos.jpg", ASSET_INCOMPLETE_SOS_JPEG],
+      ["vertical-sampling-zero.jpg", ASSET_INVALID_VERTICAL_SAMPLING_JPEG],
     ] as const) {
       const response = await request(server)
         .post(`/api/workspaces/${ws.body.id}/assets`)

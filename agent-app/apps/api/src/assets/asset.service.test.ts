@@ -15,10 +15,19 @@ const PNG_1X1 = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/mXPo5QAAAABJRU5ErkJggg==",
   "base64",
 );
-const JPEG_1X1 = Buffer.from(
-  "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAH/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAEFAqf/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/Aaf/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/Aaf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAY/Aqf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAQEA/6f/2gAMAwEAAgADAAAAEP/EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQMBAT8QH//EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQIBAT8QH//EABQQAQAAAAAAAAAAAAAAAAAAABD/2gAIAQEAAT8QH//Z",
-  "base64",
-);
+// Minimal structurally complete 1×1 sequential/progressive fixtures. The
+// asset service validates container grammar and metadata, not JPEG entropy
+// decoding, so the deliberately tiny entropy payload is sufficient here.
+const JPEG_1X1 = Buffer.from([
+  0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
+  0xff, 0xc0, 0x00, 0x0b, 0x08, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x11, 0x00,
+  0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3f, 0x00, 0x01, 0xff, 0xd9,
+]);
+const PROGRESSIVE_JPEG_1X1 = Buffer.from([
+  0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
+  0xff, 0xc2, 0x00, 0x0b, 0x08, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x11, 0x00,
+  0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0xff, 0xd9,
+]);
 const WEBP_1X1 = Buffer.from(
   "UklGRiIAAABXRUJQVlA4IBYAAABwAQCdASoBAAEAAUAmJaQAA3AA/vuU",
   "base64",
@@ -27,6 +36,12 @@ const HEADER_ONLY_JPEG = Buffer.from("ffd8ffe00002ffc000080001000100ffd9", "hex"
 const STRUCTURALLY_SIZED_HEADER_ONLY_JPEG = Buffer.from("ffd8ffc0000b080001000101011100ffd9", "hex");
 const SOS_INDEX = JPEG_1X1.indexOf(Buffer.from([0xff, 0xda]));
 const INCOMPLETE_SOS_JPEG = JPEG_1X1.subarray(0, SOS_INDEX + 2 + JPEG_1X1.readUInt16BE(SOS_INDEX + 2));
+const INVALID_VERTICAL_SAMPLING_JPEG = Buffer.from(JPEG_1X1);
+INVALID_VERTICAL_SAMPLING_JPEG[31] = 0x10;
+const INVALID_BASELINE_SOS_JPEG = Buffer.from(JPEG_1X1);
+INVALID_BASELINE_SOS_JPEG[42] = 0x01;
+const INVALID_PROGRESSIVE_SOS_JPEG = Buffer.from(PROGRESSIVE_JPEG_1X1);
+INVALID_PROGRESSIVE_SOS_JPEG[41] = 0x01;
 
 class MemoryStorage implements ArtifactStorage {
   readonly bytes = new Map<string, Buffer>();
@@ -162,6 +177,16 @@ describe("AssetService", () => {
     expect(result).not.toHaveProperty("storageKey");
   });
 
+  it("accepts a valid progressive JPEG scan", async () => {
+    const { service: assets } = service();
+    await expect(assets.upload({
+      tenantId: T_A,
+      workspaceId: W_A,
+      name: "progressive.jpg",
+      stream: Readable.from([PROGRESSIVE_JPEG_1X1]),
+    })).resolves.toMatchObject({ mediaType: "image/jpeg", width: 1, height: 1 });
+  });
+
   it.each([
     ["PNG", PNG_1X1],
     ["JPEG", JPEG_1X1],
@@ -200,6 +225,22 @@ describe("AssetService", () => {
       tenantId: T_A,
       workspaceId: W_A,
       name: "invalid.jpg",
+      stream: Readable.from([bytes]),
+    })).rejects.toThrow("ASSET_INVALID_CONTAINER");
+    expect(prisma.rows).toHaveLength(0);
+    expect(storage.bytes.size).toBe(0);
+  });
+
+  it.each([
+    ["a vertical sampling factor of zero", INVALID_VERTICAL_SAMPLING_JPEG],
+    ["baseline SOS successive approximation", INVALID_BASELINE_SOS_JPEG],
+    ["progressive DC spectral range", INVALID_PROGRESSIVE_SOS_JPEG],
+  ])("rejects %s before database adoption", async (_label, bytes) => {
+    const { service: assets, prisma, storage } = service();
+    await expect(assets.upload({
+      tenantId: T_A,
+      workspaceId: W_A,
+      name: "invalid-structure.jpg",
       stream: Readable.from([bytes]),
     })).rejects.toThrow("ASSET_INVALID_CONTAINER");
     expect(prisma.rows).toHaveLength(0);
