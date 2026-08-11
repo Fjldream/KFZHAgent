@@ -1,5 +1,8 @@
 import {
+  ModuleDeliveryGapSchema,
   ModulePlanSchema,
+  ModuleTraceSchema,
+  ResolvedAssetSchema,
   UIImplementationSpecSchema,
   type ModuleDeliveryGap,
   type ModulePlan,
@@ -9,7 +12,9 @@ import {
   type UIComponentSpec,
   type UIImplementationSpec,
 } from "@kf/contracts";
+import { isDeepStrictEqual } from "node:util";
 import { solvePageLayout, type ModuleBounds } from "./layout/layout-engine.js";
+import type { PageLayoutIssue } from "./layout/layout-errors.js";
 import { ModuleRegistry } from "./module-registry.js";
 import { stableModuleComponentId } from "./stable-ids.js";
 import { resolveModuleComponentStyle, type ModuleThemeRole } from "./theme/module-theme.js";
@@ -44,18 +49,18 @@ const EMPTY_VALIDATION_CONTEXT: ModuleValidationContext = Object.freeze({
   approvedAuthorizationRefs: Object.freeze([]),
 });
 
-const FORBIDDEN_PROPERTY_KEY = /^(?:css|native|guid|path|storagekey|styledata|script)/i;
+const FORBIDDEN_PROPERTY_KEY = /(?:css|native|guid|path|storagekey|styledata|script)$/i;
 const FORBIDDEN_TEXT = /<\/?script\b|javascript\s*:|data\s*:\s*text\s*\/\s*html|<style\b/i;
-const GUID_VALUE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const GUID_VALUE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+const ABSOLUTE_PATH = /(?:^|\s)(?:[A-Za-z]:[\\/]|\\\\|\/)/;
 
 export function compileModulePlan(input: CompileModulePlanInput): ModuleCompilationResult {
   const parsedPlan = ModulePlanSchema.safeParse(input.plan);
   if (!parsedPlan.success) throw new Error(`INVALID_MODULE_PLAN: ${parsedPlan.error.issues[0]?.message ?? "invalid plan"}`);
   const plan = parsedPlan.data;
   const previousPlan = input.previousPlan === undefined ? undefined : ModulePlanSchema.parse(input.previousPlan);
-  const previousImplementation = input.previousImplementation === undefined
-    ? undefined
-    : UIImplementationSpecSchema.parse(input.previousImplementation);
+  const previousImplementation = parsePreviousImplementation(input.previousImplementation);
+  const assetsById = parseResolvedAssets(input.assetsById);
   const validationContext = input.validationContext ?? EMPTY_VALIDATION_CONTEXT;
   const previousModules = previousModuleIndex(previousPlan);
   const previousComponents = previousComponentIndex(previousImplementation);
@@ -66,22 +71,37 @@ export function compileModulePlan(input: CompileModulePlanInput): ModuleCompilat
   const seenIds = new Set<string>();
 
   for (const page of plan.pages) {
-    const layout = solvePageLayout(page, input.registry);
-    const pageComponents: UIComponentSpec[] = [];
-    const traceEntries: ModuleTrace["entries"] = [];
-    const modules = [...page.modules].sort(compareModules);
-
+    const modules = [...page.modules].sort(compareModulePlacement);
+    const validations = new Map<string, ReturnType<ModuleRegistry["validateInstance"]>>();
     for (const instance of modules) {
-      const bounds = layout.boundsByModuleId[instance.id];
-      if (bounds === undefined) {
-        gaps.push(layoutGap(instance.id, "Module cannot be placed within the page layout."));
+      const definition = input.registry.require(instance.kind, instance.templateVersion);
+      if (requiredAsset(definition.assetSlots) && instance.assetId === undefined) {
+        gaps.push(assetGap(instance.id, "blocking", "A required registered asset was not bound to this module."));
         continue;
       }
       const validation = validateModuleInstance(input.registry, instance, plan, validationContext, gaps);
+      if (validation !== undefined) validations.set(instance.id, validation);
+    }
+    const layout = solvePageLayout(page, input.registry);
+    const layoutIssues = new Map(layout.issues.map((entry) => [entry.moduleId, entry]));
+    const pageComponents: UIComponentSpec[] = [];
+
+    for (const instance of modules) {
+      const layoutIssue = layoutIssues.get(instance.id);
+      if (layoutIssue !== undefined) {
+        gaps.push(layoutIssueGap(layoutIssue));
+        continue;
+      }
+      const bounds = layout.boundsByModuleId[instance.id];
+      if (bounds === undefined) {
+        gaps.push(layoutGap(instance.id, "LAYOUT_UNASSIGNED", "Module cannot be placed within the page layout."));
+        continue;
+      }
+      const validation = validations.get(instance.id);
       if (validation === undefined) continue;
       gaps.push(...validation.deliveryGaps);
-      const resolvedAsset = resolveAsset(instance, input.assetsById, validation.asset, gaps);
-      if (instance.assetId !== undefined && resolvedAsset === undefined && validation.asset !== undefined && requiredAsset(validation.definition.assetSlots)) {
+      const resolvedAsset = resolveAsset(instance, assetsById, validation.definition.assetSlots, gaps);
+      if (requiredAsset(validation.definition.assetSlots) && resolvedAsset === undefined) {
         continue;
       }
       if (resolvedAsset?.status === "resolved" && instance.assetId !== undefined) {
@@ -102,31 +122,43 @@ export function compileModulePlan(input: CompileModulePlanInput): ModuleCompilat
         }),
       });
       const translated = translateModuleOutput(instance, bounds, compiled, plan.theme, seenIds);
-      const prior = reusablePreviousComponents(instance, page.id, bounds, previousModules, previousComponents, translated);
-      pageComponents.push(...(prior ?? translated));
-      gaps.push(...compiled.deliveryGaps);
-      traceEntries.push({ pageId: page.id, moduleId: instance.id, outputId: instance.id });
+      const parsedGaps = parseCompilerGaps(instance, compiled.deliveryGaps);
+      gaps.push(...parsedGaps);
+      if (translated.length === 0) {
+        gaps.push(Object.freeze({ moduleId: instance.id, requirement: "Generate required module controls.", severity: "blocking", status: "unresolved", reason: "MODULE_COMPILER_EMPTY_OUTPUT", alternatives: ["Select a supported module variant."] }));
+        continue;
+      }
+      const prior = reusablePreviousComponents(instance, page.id, bounds, plan.theme, previousPlan?.theme, previousModules, previousComponents, translated);
+      const finalComponents = prior ?? translated;
+      pageComponents.push(...finalComponents);
+      for (const component of finalComponents) {
+        const trace = ModuleTraceSchema.parse({ schema: "kf-module-trace/v1", projectKey: plan.projectKey, entries: [{ pageId: page.id, moduleId: instance.id, outputId: component.id }] });
+        traces.push(trace);
+      }
     }
 
     if (pageComponents.length === 0) {
       throw new Error(`MODULE_COMPILATION_BLOCKED: ${page.id} has no compilable components`);
     }
     pages.push({ id: page.id, width: layout.width, height: layout.height, components: pageComponents });
-    traces.push({ schema: "kf-module-trace/v1", projectKey: plan.projectKey, entries: traceEntries });
   }
 
-  const implementation = UIImplementationSpecSchema.safeParse({ schema: "kf-ui-implementation/v1", theme: plan.theme, pages });
-  if (!implementation.success) throw new Error(`INVALID_COMPILED_UI_IMPLEMENTATION: ${implementation.error.issues[0]?.message ?? "invalid implementation"}`);
+  const implementation: UIImplementationSpec = { schema: "kf-ui-implementation/v1", theme: plan.theme, pages };
+  const parsedImplementation = UIImplementationSpecSchema.safeParse(implementation);
+  if (!parsedImplementation.success) throw new Error(`INVALID_COMPILED_UI_IMPLEMENTATION: ${parsedImplementation.error.issues[0]?.message ?? "invalid implementation"}`);
   return Object.freeze({
-    implementation: implementation.data,
+    implementation,
     traces: Object.freeze(traces),
     assetBindings: Object.freeze(assetBindings),
     gaps: Object.freeze(gaps),
   });
 }
 
-function compareModules(left: ModulePlanModule, right: ModulePlanModule): number {
-  return left.placement.order - right.placement.order || compareCodePoints(left.id, right.id);
+/** Shared deterministic order used for prevalidation, layout-aligned compilation and traces. */
+export function compareModulePlacement(left: ModulePlanModule, right: ModulePlanModule): number {
+  return compareCodePoints(left.placement.region, right.placement.region)
+    || left.placement.order - right.placement.order
+    || compareCodePoints(left.id, right.id);
 }
 
 function compareCodePoints(left: string, right: string): number {
@@ -140,34 +172,33 @@ function requiredAsset(slots: readonly { required: boolean }[]): boolean {
 function resolveAsset(
   instance: ModulePlanModule,
   assetsById: Readonly<Record<string, ResolvedAsset>>,
-  asset: unknown,
+  slots: readonly { required: boolean }[],
   gaps: ModuleDeliveryGap[],
 ): ResolvedAsset | undefined {
   if (instance.assetId === undefined) return undefined;
   const resolved = assetsById[instance.assetId];
   if (resolved?.assetId === instance.assetId && resolved.status === "resolved") return resolved;
-  if (asset !== undefined) {
-    gaps.push(Object.freeze({
-      moduleId: instance.id,
-      requirement: `Resolve required asset ${instance.assetId}.`,
-      severity: "blocking",
-      status: "unresolved",
-      reason: `Asset ${instance.assetId} is not available to the module compiler.`,
-      alternatives: ["Upload or select a registered asset before building."],
-    }));
-  }
+  gaps.push(assetGap(instance.id, requiredAsset(slots) ? "blocking" : "warning", `Asset ${instance.assetId} is not available to the module compiler.`));
   return undefined;
 }
 
-function layoutGap(moduleId: string, reason: string): ModuleDeliveryGap {
+function assetGap(moduleId: string, severity: "warning" | "blocking", reason: string): ModuleDeliveryGap {
   return Object.freeze({
     moduleId,
-    requirement: "Place the module within its registered layout contract.",
-    severity: "blocking",
+    requirement: severity === "blocking" ? "Resolve the required module asset." : "Resolve the optional module asset if it is needed.",
+    severity,
     status: "unresolved",
     reason,
-    alternatives: ["Adjust the module placement, span, or variant."],
+    alternatives: ["Upload or select a registered asset before building."],
   });
+}
+
+function layoutGap(moduleId: string, code: string, reason: string): ModuleDeliveryGap {
+  return Object.freeze({ moduleId, requirement: "Place the module within its registered layout contract.", severity: "blocking", status: "unresolved", reason: `${code}: ${reason}`, alternatives: ["Adjust the module placement, span, or variant."] });
+}
+
+function layoutIssueGap(issue: PageLayoutIssue): ModuleDeliveryGap {
+  return layoutGap(issue.moduleId, issue.code, `Layout solver reported ${issue.code}.`);
 }
 
 function translateModuleOutput(
@@ -210,16 +241,63 @@ function assertLocalBounds(component: UIComponentSpec, bounds: ModuleBounds, id:
 }
 
 function assertSafeComponent(component: UIComponentSpec, id: string): void {
-  if (!component.id || component.id.includes("/") || FORBIDDEN_TEXT.test(component.content ?? "") || hasForbiddenPayload(component.properties)) {
+  if (!component.id || component.id.includes("/") || !isPlainSafe(component) || hasForbiddenPayload(component)) {
     throw new Error(`MODULE_COMPILER_UNSAFE_OUTPUT: ${id}`);
   }
 }
 
 function hasForbiddenPayload(value: unknown): boolean {
-  if (typeof value === "string") return FORBIDDEN_TEXT.test(value) || GUID_VALUE.test(value);
+  if (typeof value === "string") return FORBIDDEN_TEXT.test(value) || GUID_VALUE.test(value) || ABSOLUTE_PATH.test(value);
   if (Array.isArray(value)) return value.some(hasForbiddenPayload);
   if (value === null || typeof value !== "object") return false;
-  return Object.entries(value).some(([key, nested]) => FORBIDDEN_PROPERTY_KEY.test(key) || hasForbiddenPayload(nested));
+  if (!isPlainObject(value)) return true;
+  return Object.keys(value).some((key) => isDangerousKey(key) || hasForbiddenPayload(value[key]));
+}
+
+function isDangerousKey(key: string): boolean {
+  return key === "__proto__" || key === "prototype" || key === "constructor" || FORBIDDEN_PROPERTY_KEY.test(key);
+}
+
+function isPlainObject(value: object): value is Record<string, unknown> {
+  const prototype = Reflect.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function isPlainSafe(value: unknown): boolean {
+  if (value === null || typeof value !== "object") return true;
+  if (Array.isArray(value)) return value.every(isPlainSafe);
+  if (!isPlainObject(value)) return false;
+  return Object.keys(value).every((key) => !isDangerousKey(key) && isPlainSafe(value[key]));
+}
+
+function parseResolvedAssets(input: Readonly<Record<string, ResolvedAsset>>): Readonly<Record<string, ResolvedAsset>> {
+  if (!isPlainSafe(input) || hasForbiddenPayload(input)) throw new Error("INVALID_RESOLVED_ASSETS");
+  const output: Record<string, ResolvedAsset> = {};
+  for (const key of Object.keys(input)) {
+    const parsed = ResolvedAssetSchema.safeParse(input[key]);
+    if (!parsed.success || parsed.data.assetId !== key) throw new Error(`INVALID_RESOLVED_ASSET: ${key}`);
+    output[key] = parsed.data;
+  }
+  return Object.freeze(output);
+}
+
+function parsePreviousImplementation(input: UIImplementationSpec | undefined): UIImplementationSpec | undefined {
+  if (input === undefined) return undefined;
+  if (!isPlainSafe(input) || hasForbiddenPayload(input)) throw new Error("UNSAFE_PREVIOUS_IMPLEMENTATION");
+  const parsed = UIImplementationSpecSchema.safeParse(input);
+  if (!parsed.success) throw new Error("UNSAFE_PREVIOUS_IMPLEMENTATION");
+  // Parsing is the gate; retain the validated object so an unchanged module can
+  // preserve its exact component identity instead of a schema-cloned copy.
+  return input;
+}
+
+function parseCompilerGaps(instance: ModulePlanModule, values: readonly ModuleDeliveryGap[]): ModuleDeliveryGap[] {
+  return values.map((value) => {
+    if (!isPlainSafe(value) || hasForbiddenPayload(value)) throw new Error(`INVALID_MODULE_DELIVERY_GAP: ${instance.id}`);
+    const parsed = ModuleDeliveryGapSchema.safeParse(value);
+    if (!parsed.success || parsed.data.moduleId !== instance.id) throw new Error(`INVALID_MODULE_DELIVERY_GAP: ${instance.id}`);
+    return parsed.data;
+  });
 }
 
 function validateModuleInstance(
@@ -278,17 +356,19 @@ function reusablePreviousComponents(
   instance: ModulePlanModule,
   pageId: string,
   bounds: ModuleBounds,
+  currentTheme: ModulePlan["theme"],
+  previousTheme: ModulePlan["theme"] | undefined,
   previousModules: ReadonlyMap<string, string>,
   previousComponents: ReadonlyMap<string, readonly UIComponentSpec[]>,
   translated: readonly UIComponentSpec[],
 ): readonly UIComponentSpec[] | undefined {
   const key = `${pageId}\u0000${instance.id}`;
-  if (previousModules.get(key) !== stableJson(instance)) return undefined;
+  if (previousModules.get(key) !== stableJson(instance) || previousTheme === undefined || stableJson(previousTheme) !== stableJson(currentTheme) || instance.assetId !== undefined) return undefined;
   const prior = previousComponents.get(key);
   if (prior === undefined || prior.length !== translated.length) return undefined;
   const priorIds = prior.map((component) => component.id).sort(compareCodePoints);
   const nextIds = translated.map((component) => component.id).sort(compareCodePoints);
-  if (priorIds.some((id, index) => id !== nextIds[index]) || prior.some((component) => !inBounds(component, bounds))) return undefined;
+  if (priorIds.some((id, index) => id !== nextIds[index]) || prior.some((component) => !inBounds(component, bounds)) || !isDeepStrictEqual(prior, translated)) return undefined;
   return prior;
 }
 

@@ -16,6 +16,14 @@ const deliveryTextSchema = z
   .max(1_000)
   .refine((value) => !/<script\b|javascript\s*:|data\s*:\s*text\s*\/\s*html/i.test(value));
 
+const componentOutputIdSchema = z
+  .string()
+  .trim()
+  .min(3)
+  .max(100)
+  .regex(/^[A-Za-z][A-Za-z0-9_-]*\/[A-Za-z][A-Za-z0-9_-]*$/)
+  .refine((value) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value));
+
 export const ModuleTraceSchema = z
   .object({
     schema: z.literal("kf-module-trace/v1"),
@@ -26,7 +34,7 @@ export const ModuleTraceSchema = z
           .object({
             pageId: stableIdSchema,
             moduleId: stableIdSchema,
-            outputId: stableIdSchema,
+            outputId: componentOutputIdSchema,
           })
           .strict(),
       )
@@ -34,13 +42,8 @@ export const ModuleTraceSchema = z
   })
   .strict()
   .superRefine((trace, ctx) => {
-    const moduleIds = new Set<string>();
     const outputIds = new Set<string>();
     trace.entries.forEach((entry, index) => {
-      if (moduleIds.has(entry.moduleId)) {
-        ctx.addIssue({ code: "custom", path: ["entries", index, "moduleId"], message: `duplicate module id: ${entry.moduleId}` });
-      }
-      moduleIds.add(entry.moduleId);
       if (outputIds.has(entry.outputId)) {
         ctx.addIssue({ code: "custom", path: ["entries", index, "outputId"], message: `duplicate output id: ${entry.outputId}` });
       }

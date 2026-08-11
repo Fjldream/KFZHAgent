@@ -49,19 +49,19 @@ describe("module delivery contracts", () => {
     expect(ModuleTraceSchema.safeParse({
       schema: "kf-module-trace/v1",
       projectKey: "portal-demo",
-      entries: [{ pageId: "home", moduleId: "hero", outputId: "page-home-hero" }],
+      entries: [{ pageId: "home", moduleId: "hero", outputId: "hero/title" }],
     }).success).toBe(true);
     expect(ModuleTraceSchema.safeParse({
       schema: "kf-module-trace/v1",
       projectKey: "portal-demo",
-      entries: [{ pageId: "home", moduleId: "hero", outputId: "page-home-hero", coordinates: { x: 0, y: 0 } }],
+      entries: [{ pageId: "home", moduleId: "hero", outputId: "hero/title", coordinates: { x: 0, y: 0 } }],
     }).success).toBe(false);
     expect(ModuleTraceSchema.safeParse({
       schema: "kf-module-trace/v1",
       projectKey: "portal-demo",
       entries: [
-        { pageId: "home", moduleId: "hero", outputId: "page-home-hero" },
-        { pageId: "home", moduleId: "announcement", outputId: "page-home-hero" },
+        { pageId: "home", moduleId: "hero", outputId: "hero/title" },
+        { pageId: "home", moduleId: "announcement", outputId: "hero/title" },
       ],
     }).success).toBe(false);
   });

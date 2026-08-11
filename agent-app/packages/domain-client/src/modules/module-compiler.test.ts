@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { ModulePlan, ModulePlanModule, ResolvedAsset, UIComponentSpec } from "@kf/contracts";
 import { ModuleRegistry, type ModuleDefinition } from "./module-registry.js";
 import { compileModulePlan } from "./module-compiler.js";
+import { stableModuleComponentId } from "./stable-ids.js";
 
 const theme = {
   background: "#101827",
@@ -184,16 +185,64 @@ describe("compileModulePlan", () => {
     const registry = registryFor(definition());
     const first = compile(input, registry);
     const previous = structuredClone(first.implementation);
-    const existing = previous.pages[0]!.components[0]!;
-    previous.pages[0]!.components[0] = {
-      ...existing,
-      properties: { semantic: "heading", preserved: true },
-      style: { declarations: { fontWeight: 900, textColor: "#FFFFFF" }, states: {} },
-    };
-
     const result = compile(input, registry, { previousPlan: input, previousImplementation: previous });
 
-    expect(result.implementation.pages[0]?.components[0]).toEqual(previous.pages[0]?.components[0]);
+    expect(result.implementation.pages[0]?.components[0]).toBe(previous.pages[0]?.components[0]);
+  });
+
+  it("keeps a prior object only when the newly compiled canonical component is exactly equal", () => {
+    const input = plan([module("profile")]);
+    const registry = registryFor(definition());
+    const first = compile(input, registry).implementation;
+    const changedTheme = { ...input, theme: { ...input.theme, primary: "#000000" } };
+    expect(compile(changedTheme, registry, { previousPlan: input, previousImplementation: first }).implementation.pages[0]!.components[0])
+      .not.toBe(first.pages[0]!.components[0]);
+
+    const prefix = plan([module("prefix"), module("profile", { placement: { ...module("profile").placement, order: 1 } })]);
+    const afterPrefix = compile(prefix, registry).implementation;
+    const withoutPrefix = plan([module("profile", { placement: { ...module("profile").placement, order: 1 } })]);
+    expect(compile(withoutPrefix, registry, { previousPlan: prefix, previousImplementation: afterPrefix }).implementation.pages[0]!.components[0]?.geometry.y)
+      .not.toBe(afterPrefix.pages[0]!.components.find((item) => item.sourceModuleId === "profile")?.geometry.y);
+
+    const alteredRegistry = registryFor(definition({ compile: () => ({ components: [{ ...component("title", "text"), content: "definition changed" }], deliveryGaps: [] }) }));
+    expect(compile(input, alteredRegistry, { previousPlan: input, previousImplementation: first }).implementation.pages[0]!.components[0])
+      .not.toBe(first.pages[0]!.components[0]);
+  });
+
+  it("strictly rejects unsafe resolved assets, nested compiler payloads, and unsafe prior implementations", () => {
+    const registry = registryFor(definition({
+      compile: () => ({ components: [{ ...component("title", "text"), properties: { safe: [{ nestedStorageKey: "x" }] } }], deliveryGaps: [] }),
+    }));
+    expect(() => compile(plan([module("profile")]), registry)).toThrow("MODULE_COMPILER_UNSAFE_OUTPUT: profile/title");
+    expect(() => compile(plan([module("profile")]), registryFor(definition()), { assetsById: { portrait: { assetId: "wrong", status: "resolved" } } as never }))
+      .toThrow("INVALID_RESOLVED_ASSET: portrait");
+    const good = compile(plan([module("profile")]), registryFor(definition())).implementation;
+    const unsafe = structuredClone(good) as unknown as { pages: Array<{ components: Array<{ properties: Record<string, unknown> }> }> };
+    unsafe.pages[0]!.components[0]!.properties = Object.create({ hiddenPath: "/tmp/secret" });
+    expect(() => compile(plan([module("profile")]), registryFor(definition()), { previousPlan: plan([module("profile")]), previousImplementation: unsafe as never }))
+      .toThrow("UNSAFE_PREVIOUS_IMPLEMENTATION");
+  });
+
+  it("uses slot-aware asset gaps and exact component traces", () => {
+    const optional = definition({ kind: "optional-image", assetSlots: [{ id: "image", required: false, allowedKinds: ["image"] }] });
+    const required = definition({ kind: "required-image", assetSlots: [{ id: "image", required: true, allowedKinds: ["image"] }] });
+    const optionalPlan = plan([module("summary"), module("optional", { kind: "optional-image", assetId: "portrait", placement: { ...module("optional").placement, order: 1 } })]);
+    expect(compile(optionalPlan, registryFor(definition(), optional), { assetsById: { portrait: { assetId: "portrait", status: "pending" } } }).gaps)
+      .toEqual([expect.objectContaining({ moduleId: "optional", severity: "warning" })]);
+    const requiredPlan = plan([module("summary"), module("required", { kind: "required-image", assetId: "portrait", placement: { ...module("required").placement, order: 1 } })]);
+    const result = compile(requiredPlan, registryFor(definition(), required), { assetsById: { portrait: { assetId: "portrait", status: "unavailable" } } });
+    expect(result.gaps).toEqual([expect.objectContaining({ moduleId: "required", severity: "blocking" })]);
+    expect(result.traces.flatMap((trace) => trace.entries)).toEqual([expect.objectContaining({ moduleId: "summary", outputId: "summary/title" })]);
+  });
+
+  it("rejects malformed or cross-module compiler delivery gaps and bounds stable IDs", () => {
+    const malformed = registryFor(definition({ compile: () => ({ components: [component("title", "text")], deliveryGaps: [{ moduleId: "other", requirement: "x", severity: "warning", status: "unresolved", reason: "x" }] as never }) }));
+    expect(() => compile(plan([module("profile")]), malformed)).toThrow("INVALID_MODULE_DELIVERY_GAP: profile");
+    const left = `a${"x".repeat(99)}`;
+    const right = `b${"y".repeat(99)}`;
+    const id = stableModuleComponentId(left, right);
+    expect(id.length).toBeLessThanOrEqual(100);
+    expect(id).not.toBe(stableModuleComponentId(`${left}a`, right));
   });
 
   it("rejects duplicate stable slots and local output outside the assigned module bounds", () => {
