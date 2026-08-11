@@ -137,6 +137,24 @@ describe("portal module definitions", () => {
       }
     }
   });
+
+  it("blocks tight hero and form envelopes while retaining complete nearby variants", () => {
+    const registry = createDefaultModuleRegistry();
+    const run = (kind: "content.hero" | "form.record-editor", content: Record<string, unknown>, width: number, height: number) => {
+      const definition = registry.require(kind, "1.0.0"); const instance = module(kind, "boundary", content);
+      instance.variant = kind === "content.hero" ? "no-portrait" : "default";
+      return definition.compile({ context: { definition, instance, content: definition.contentSchema.parse(content), asset: undefined, validationContext: { availableKfCapabilities: [], approvedAuthorizationRefs: [] }, bounds: { x: 0, y: 0, width, height } } });
+    };
+    const hero = { title: "Hero", primaryAction: "Primary", secondaryAction: "Secondary" };
+    const form = { fields: [{ id: "name", label: "Name", placeholder: "Name" }], submitLabel: "Send", resetLabel: "Reset" };
+    for (const result of [run("content.hero", hero, 240, 520), run("form.record-editor", form, 220, 300)]) {
+      expect(result.components).toEqual([]); expect(result.deliveryGaps).toContainEqual(expect.objectContaining({ severity: "blocking", reason: "module-bounds-insufficient" }));
+    }
+    for (const result of [run("content.hero", hero, 360, 520), run("form.record-editor", form, 320, 300)]) {
+      expect(result.components.length).toBeGreaterThan(2);
+      expect(result.components.every((component) => component.geometry.x + component.geometry.width <= (result.components[0]?.geometry.width ?? 0))).toBe(true);
+    }
+  });
   it.each([
     ["navigation.top", "default", "header", { logo: "KF", items: ["Home", "Projects"] }],
     ["content.hero", "no-portrait", "main", { title: "Lin", subtitle: "Designer", description: "Builds useful products", primaryAction: "Contact" }],
