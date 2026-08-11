@@ -77,6 +77,17 @@ describe("ModulePlanSchema", () => {
     expect(ModulePlanSchema.parse(validPlan).schema).toBe("kf-module-plan/v1");
   });
 
+  it("accepts registered dot-separated module namespaces but not malformed kind paths", () => {
+    expect(ModulePlanSchema.safeParse({
+      ...validPlan,
+      pages: [{ ...validPlan.pages[0], modules: [{ ...hero, kind: "content.hero" }] }],
+    }).success).toBe(true);
+    expect(ModulePlanSchema.safeParse({
+      ...validPlan,
+      pages: [{ ...validPlan.pages[0], modules: [{ ...hero, kind: "content..hero" }] }],
+    }).success).toBe(false);
+  });
+
   it("requires each persisted module to pin an exact template version and variant", () => {
     expect(ModulePlanSchema.safeParse({
       ...validPlan,

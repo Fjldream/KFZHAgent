@@ -11,6 +11,7 @@ import type {
   ModuleValidationInput,
   ModuleValidationResult,
 } from "./types.js";
+import { registerPortalModules } from "./definitions/portal-modules.js";
 
 export type {
   AssetSlotDefinition,
@@ -47,6 +48,7 @@ function freezeSlot(slot: AssetSlotDefinition): AssetSlotDefinition {
   return Object.freeze({
     id: slot.id,
     required: slot.required,
+    ...(slot.requiredForVariants === undefined ? {} : { requiredForVariants: freezeArray(slot.requiredForVariants) }),
     allowedKinds: freezeArray(slot.allowedKinds),
   });
 }
@@ -117,7 +119,7 @@ function assertDefinition(definition: ModuleDefinition): void {
   if (definition.assetSlots.length > 1) {
     fail("MODULE_DEFINITION_INVALID", `${key} has more asset slots than ModulePlanModule can represent`);
   }
-  if (definition.assetSlots.some((slot) => !slot.id || slot.allowedKinds.length === 0)) {
+  if (definition.assetSlots.some((slot) => !slot.id || slot.allowedKinds.length === 0 || slot.requiredForVariants?.some((variant) => !definition.variants.includes(variant)))) {
     fail("MODULE_DEFINITION_INVALID", `${key} has an invalid asset slot`);
   }
   if (new Set(definition.assetSlots.map((slot) => slot.id)).size !== definition.assetSlots.length) {
@@ -174,7 +176,7 @@ function validateAsset(
     return undefined;
   }
   if (instance.assetId === undefined) {
-    if (slot.required) fail("MODULE_ASSET_SLOT_REQUIRED", `${key} [${slot.id}]`);
+    if (slot.required || slot.requiredForVariants?.includes(instance.variant)) fail("MODULE_ASSET_SLOT_REQUIRED", `${key} [${slot.id}]`);
     return undefined;
   }
   const asset = assets.find((candidate) => candidate.id === instance.assetId);
@@ -307,7 +309,9 @@ export class ModuleRegistry {
   }
 }
 
-/** Creates an empty registry so every supported module is registered explicitly. */
+/** Creates the explicit built-in catalog; callers may add reviewed extensions. */
 export function createDefaultModuleRegistry(): ModuleRegistry {
-  return new ModuleRegistry();
+  const registry = new ModuleRegistry();
+  registerPortalModules(registry);
+  return registry;
 }

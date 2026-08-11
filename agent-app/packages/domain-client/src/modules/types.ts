@@ -18,6 +18,8 @@ export type ModuleFallbackPolicy =
 export interface AssetSlotDefinition {
   readonly id: string;
   readonly required: boolean;
+  /** A slot can be optional generally but mandatory for an explicit variant. */
+  readonly requiredForVariants?: readonly string[];
   readonly allowedKinds: readonly AssetRecord["kind"][];
 }
 

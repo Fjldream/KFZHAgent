@@ -35,3 +35,4 @@ export * from "./modules/stable-ids.js";
 export * from "./modules/theme/module-theme.js";
 export * from "./modules/layout/layout-engine.js";
 export * from "./modules/layout/layout-errors.js";
+export * from "./modules/definitions/portal-modules.js";

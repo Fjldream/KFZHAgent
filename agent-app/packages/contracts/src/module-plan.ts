@@ -11,6 +11,15 @@ const stableIdSchema = z
   .regex(/^[A-Za-z][A-Za-z0-9_-]*$/)
   .refine((value) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value));
 
+/** Registered module namespaces are semantic identifiers, not KF IDs. */
+const moduleKindSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(100)
+  .regex(/^[A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z][A-Za-z0-9_-]*)*$/)
+  .refine((value) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value));
+
 const templateVersionSchema = z
   .string()
   .trim()
@@ -48,7 +57,7 @@ export const ModuleInteractionSchema = z.discriminatedUnion("type", [
 export const ModulePlanModuleSchema = z
   .object({
     id: stableIdSchema,
-    kind: stableIdSchema,
+    kind: moduleKindSchema,
     templateVersion: templateVersionSchema,
     variant: stableIdSchema,
     title: moduleTextSchema,
