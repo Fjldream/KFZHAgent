@@ -1,4 +1,9 @@
-import type { ChangePlan, DesignPlan, ValidationReport } from "@kf/contracts";
+import type {
+  ChangePlan,
+  DesignPlan,
+  UIImplementationSpec,
+  ValidationReport,
+} from "@kf/contracts";
 import type { ClassifyIntentResult, Intent } from "./schemas/intent.js";
 import type { ProjectDesign } from "./schemas/project-design.js";
 import type { GraphMessage } from "./state.js";
@@ -23,6 +28,10 @@ export interface ModelPortContext {
   requirementText?: string | undefined;
   /** Previous design plan when revising (REVISE_DESIGN / design iteration). */
   designPlan?: DesignPlan | undefined;
+  /** Previous internal UI implementation when revising a built preview. */
+  uiImplementation?: UIImplementationSpec | undefined;
+  /** Bounded deterministic gate failures supplied for a single repair attempt. */
+  implementationRejectionReasons?: string[] | undefined;
   /**
    * Model-editable entities of the current revision (controls/pages with their
    * KF GUIDs). A real LLM must reference these exact GUIDs in change plans —
@@ -52,6 +61,10 @@ export interface ModelPort {
     input: ModelPortContext,
     opts?: { revising?: boolean; rejectionReasons?: string[] },
   ): Promise<DesignPlan>;
+  /** Convert a confirmed customer blueprint into bounded internal UI intent. */
+  createUiImplementation(input: ModelPortContext): Promise<UIImplementationSpec>;
+  /** Revise internal UI intent without exposing or directly authoring KF JSON. */
+  reviseUiImplementation(input: ModelPortContext): Promise<UIImplementationSpec>;
   explainValidation(input: { tenantId: string; report: ValidationReport }): Promise<string>;
 }
 

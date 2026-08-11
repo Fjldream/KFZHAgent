@@ -19,6 +19,45 @@ const validPlan = {
   signature: "sig",
 };
 
+const validImplementation = {
+  schema: "kf-ui-implementation/v1",
+  theme: {
+    background: "#0f172a",
+    surface: "#111827",
+    primary: "#2563eb",
+    accent: "#38bdf8",
+    textPrimary: "#f8fafc",
+    textSecondary: "#cbd5e1",
+    fontFamily: "Arial",
+    spacingUnit: 8,
+    radiusScale: { small: 4, medium: 8, large: 16 },
+  },
+  pages: [{
+    id: "Page1",
+    width: 1440,
+    height: 900,
+    components: [{
+      id: "hero-title",
+      role: "heading",
+      sourceModuleId: "brand",
+      capabilityId: "text",
+      critical: true,
+      content: "张伟",
+      geometry: { x: 40, y: 40, width: 320, height: 48 },
+      properties: {},
+      style: { declarations: {}, states: {} },
+    }],
+  }],
+};
+
+const validCapabilityReport = {
+  status: "pass",
+  full: [],
+  partial: ["text"],
+  unsupported: [],
+  deliveryGaps: [],
+};
+
 describe("AgentGraphState v2", () => {
   it("accepts clarificationCount and designPlan fields", async () => {
     await expect(
@@ -85,6 +124,28 @@ describe("AgentGraphState v2", () => {
         ...base,
         stage: "design-review",
         designPlan: { ...validPlan, sections: [] },
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("persists a validated UI implementation and capability report", async () => {
+    await expect(
+      AgentGraphState.validateInput({
+        ...base,
+        stage: "implementation-planning",
+        uiImplementation: validImplementation,
+        uiImplementationHash: "c".repeat(64),
+        capabilityReport: validCapabilityReport,
+      }),
+    ).resolves.toBeDefined();
+  });
+
+  it("rejects malformed UI implementation state", async () => {
+    await expect(
+      AgentGraphState.validateInput({
+        ...base,
+        stage: "implementation-planning",
+        uiImplementation: { ...validImplementation, pages: [] },
       }),
     ).rejects.toThrow();
   });

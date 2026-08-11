@@ -1,4 +1,4 @@
-import type { ChangePlan, DesignPlan } from "@kf/contracts";
+import type { ChangePlan, DesignPlan, UIImplementationSpec } from "@kf/contracts";
 import { solutionId } from "@kf/contracts";
 import { deriveGuid } from "@kf/domain-client";
 import type {
@@ -82,6 +82,49 @@ export class DeterministicFakeModelPort implements ModelPort {
       dependencies: [],
       pendingRequirements: [],
     });
+  }
+
+  createUiImplementation(input: ModelPortContext): Promise<UIImplementationSpec> {
+    const pageId = input.editableEntities?.find((entity) => entity.kind === "page")?.name ?? "Page1";
+    const moduleId = input.designPlan?.schema === "kf-design-plan/v2"
+      ? input.designPlan.modules[0]?.id ?? "main"
+      : "main";
+    return Promise.resolve({
+      schema: "kf-ui-implementation/v1",
+      theme: {
+        background: "#0f172a",
+        surface: "#111827",
+        primary: "#2563eb",
+        accent: "#38bdf8",
+        textPrimary: "#f8fafc",
+        textSecondary: "#cbd5e1",
+        fontFamily: "Arial",
+        spacingUnit: 8,
+        radiusScale: { small: 4, medium: 8, large: 16 },
+      },
+      pages: [{
+        id: pageId,
+        width: 1440,
+        height: 900,
+        components: [{
+          id: "Text1",
+          role: "heading",
+          sourceModuleId: moduleId,
+          capabilityId: "text",
+          critical: true,
+          content: "由 KF Solution Agent 生成",
+          geometry: { x: 40, y: 40, width: 320, height: 48 },
+          properties: {},
+          style: { declarations: { fontSize: 28, textColor: "{theme.textPrimary}" }, states: {} },
+        }],
+      }],
+    });
+  }
+
+  reviseUiImplementation(input: ModelPortContext): Promise<UIImplementationSpec> {
+    return input.uiImplementation !== undefined
+      ? Promise.resolve(input.uiImplementation)
+      : this.createUiImplementation(input);
   }
 
   createChangePlan(input: ModelPortContext): Promise<ChangePlan> {

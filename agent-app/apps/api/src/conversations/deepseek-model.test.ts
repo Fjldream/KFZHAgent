@@ -63,6 +63,53 @@ function detailedBlueprint(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function uiImplementation(overrides: Record<string, unknown> = {}) {
+  return {
+    schema: "kf-ui-implementation/v1",
+    theme: {
+      background: "#0f172a",
+      surface: "#111827",
+      primary: "#2563eb",
+      accent: "#38bdf8",
+      textPrimary: "#f8fafc",
+      textSecondary: "#cbd5e1",
+      fontFamily: "Arial",
+      spacingUnit: 8,
+      radiusScale: { small: 4, medium: 8, large: 16 },
+    },
+    pages: [{
+      id: "Page1",
+      width: 1440,
+      height: 900,
+      components: [
+        {
+          id: "ProductsTitle",
+          role: "section-heading",
+          sourceModuleId: "products",
+          capabilityId: "text",
+          critical: true,
+          content: "我的产品",
+          geometry: { x: 60, y: 80, width: 300, height: 40 },
+          properties: {},
+          style: { declarations: { fontSize: 26, textColor: "{theme.textPrimary}" }, states: {} },
+        },
+        {
+          id: "ProjectsTitle",
+          role: "section-heading",
+          sourceModuleId: "projects",
+          capabilityId: "text",
+          critical: true,
+          content: "项目经历",
+          geometry: { x: 60, y: 180, width: 300, height: 40 },
+          properties: {},
+          style: { declarations: { fontSize: 26, textColor: "{theme.textPrimary}" }, states: {} },
+        },
+      ],
+    }],
+    ...overrides,
+  };
+}
+
 describe("extractJson", () => {
   it("parses plain JSON", () => {
     expect(extractJson('{"a":1}')).toEqual({ a: 1 });
@@ -411,6 +458,89 @@ describe("DeepSeekModelPort", () => {
     expect(userPrompt).toContain("在上一版基础上修订");
     expect(userPrompt).toContain("蓝图主体没有实质变化");
     expect(userPrompt).toContain("不要只改 revisionNotes");
+  });
+
+  it("createUiImplementation converts every blueprint module into structured components", async () => {
+    const implementation = uiImplementation();
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify(implementation) } }] }),
+    });
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+
+    const result = await port.createUiImplementation({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [],
+      designPlan: detailedBlueprint(),
+      revisionSummary: "页面 Page1 (1440x900)",
+      editableEntities: [{ kind: "page", name: "Page1", type: "page", guid: "page-guid" }],
+    });
+
+    expect(result.pages[0].components.map((component) => component.sourceModuleId)).toEqual([
+      "products",
+      "projects",
+    ]);
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    const prompt = body.messages[1].content;
+    expect(prompt).toContain("UIImplementationSpec");
+    expect(prompt).toContain("sourceModuleId");
+    expect(prompt).toContain("products");
+    expect(prompt).toContain("projects");
+    expect(prompt).toContain("Page1");
+    expect(prompt).toContain("禁止输出原始 CSS");
+    expect(prompt).toContain("每个蓝图模块");
+    expect(body.max_tokens).toBe(8000);
+  });
+
+  it("reviseUiImplementation includes the previous spec and bounded rejection reasons", async () => {
+    const previous = uiImplementation();
+    const revised = uiImplementation({
+      pages: [{
+        ...previous.pages[0],
+        components: previous.pages[0].components.map((component) => ({
+          ...component,
+          geometry: { ...component.geometry, y: component.geometry.y + 20 },
+        })),
+      }],
+    });
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify(revised) } }] }),
+    });
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+
+    await port.reviseUiImplementation({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [],
+      requirementText: "整体向下移动",
+      designPlan: detailedBlueprint(),
+      uiImplementation: previous,
+      implementationRejectionReasons: ["missing blueprint module: projects"],
+    });
+
+    const prompt = JSON.parse(fetchImpl.mock.calls[0][1].body).messages[1].content;
+    expect(prompt).toContain("上一版 UIImplementationSpec");
+    expect(prompt).toContain(JSON.stringify(previous));
+    expect(prompt).toContain("整体向下移动");
+    expect(prompt).toContain("missing blueprint module: projects");
+  });
+
+  it("createUiImplementation rejects raw or schema-invalid implementation output", async () => {
+    const port = makePort(uiImplementation({ pages: [] }));
+    await expect(port.createUiImplementation({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [],
+      designPlan: detailedBlueprint(),
+    })).rejects.toThrow(DeepSeekModelOutputError);
   });
 
   it("createChangePlan keeps only operations referencing known entity GUIDs", async () => {

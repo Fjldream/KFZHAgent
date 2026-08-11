@@ -14,6 +14,7 @@ import {
   type CustomerEffectBlueprint,
   type DesignPlan,
   type SolutionIR,
+  type UIImplementationSpec,
 } from "@kf/contracts";
 import { PrismaClient, Prisma } from "@prisma/client";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -235,6 +236,12 @@ class StubModelPort implements ModelPort {
       dependencies: [],
       pendingRequirements: [],
     };
+  }
+  async createUiImplementation(): Promise<UIImplementationSpec> {
+    throw new Error("createUiImplementation fixture not configured");
+  }
+  async reviseUiImplementation(): Promise<UIImplementationSpec> {
+    throw new Error("reviseUiImplementation fixture not configured");
   }
   async createChangePlan(input: ModelPortContext): Promise<ChangePlan> {
     return {

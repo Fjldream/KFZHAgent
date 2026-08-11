@@ -1,5 +1,16 @@
-import type { ChangePlan, DesignPlan, ValidationReport } from "@kf/contracts";
-import { changePlanSchema, CustomerEffectBlueprintSchema, solutionId } from "@kf/contracts";
+import type {
+  ChangePlan,
+  DesignPlan,
+  UIImplementationSpec,
+  ValidationReport,
+} from "@kf/contracts";
+import {
+  changePlanSchema,
+  CustomerEffectBlueprintSchema,
+  solutionId,
+  UIImplementationSpecSchema,
+} from "@kf/contracts";
+import { listControlCapabilities } from "@kf/domain-client";
 import { KF_DESIGN_PRINCIPLES_FULL } from "./kf-design-principles.js";
 import type {
   ClassifyIntentResult,
@@ -314,6 +325,84 @@ export class DeepSeekModelPort implements ModelPort {
       dependencies: [],
       pendingRequirements: [],
     };
+  }
+
+  private buildUiImplementationPrompt(input: ModelPortContext, revising: boolean): string {
+    const pages = (input.editableEntities ?? [])
+      .filter((entity) => entity.kind === "page")
+      .map((entity) => entity.name);
+    const controls = (input.editableEntities ?? [])
+      .filter((entity) => entity.kind === "control")
+      .map((entity) => `${entity.name} | capabilityId=${entity.type}`);
+    const capabilities = listControlCapabilities()
+      .filter((capability) =>
+        capability.generation.status !== "unsupported"
+        && capability.generation.status !== "preserve-only")
+      .map((capability) => `${capability.id} (${capability.displayName})`);
+    return [
+      "你是 UI 实施规划 Agent。把客户已经确认的效果蓝图转换为内部 UIImplementationSpec，不直接生成 ChangePlan 或 KF 工程 JSON。",
+      "输出严格 JSON，schema 固定为 kf-ui-implementation/v1。",
+      "顶层必须包含 theme 和 pages；theme 必须包含 background、surface、primary、accent、textPrimary、textSecondary、fontFamily、spacingUnit、radiusScale。",
+      "pages 每项必须包含 id、width、height、components，且只能使用当前工程已有页面语义 ID。",
+      "每个 component 必须包含 id、role、sourceModuleId、capabilityId、critical、geometry、properties、style。",
+      "每个蓝图模块都必须至少由一个组件实现，sourceModuleId 必须逐字使用蓝图 modules[].id；禁止把多个模块都冒充映射到一个组件。",
+      "component.id 使用稳定的英文语义 ID；若要修改已有控件，必须使用下方已有控件语义 ID；新组件使用新的唯一语义 ID。",
+      "style 只能输出结构化 declarations/states；禁止输出原始 CSS、styleDataNew、选择器、JavaScript、KF GUID、objectType、uiModelType 或原始 KF 字段。",
+      "布局坐标必须非负，且 x+width 不超过页面 width、y+height 不超过页面 height；组件不得重叠到不可阅读。",
+      "优先使用 text、richtext、image、tag、button、input、select、tabs、spacer、layout.2、layout.4、layout.5 等已审查能力。",
+      "properties 只填写控件公开语义属性；纯文本和富文本内容写在 content，不要放进 properties。",
+      "客户确认蓝图：",
+      JSON.stringify(input.designPlan ?? null),
+      "当前工程摘要：" + (input.revisionSummary ?? "（无）"),
+      "可用页面语义 ID：" + (pages.length > 0 ? pages.join(", ") : "Page1"),
+      "已有控件（语义 ID | capabilityId）：" + (controls.length > 0 ? controls.join("\n") : "（无）"),
+      "可选 capabilityId：" + capabilities.join(", "),
+      ...(revising
+        ? [
+            "上一版 UIImplementationSpec：" + JSON.stringify(input.uiImplementation ?? null),
+            "客户本次修改要求：" + (input.requirementText ?? ""),
+            "仅修改受影响组件，保留未涉及模块的稳定 ID、内容、布局和样式。",
+            ...((input.implementationRejectionReasons ?? []).length > 0
+              ? [
+                  "上一候选实施规格未通过确定性门禁，必须逐项修复：",
+                  ...(input.implementationRejectionReasons ?? []).map((reason) => `- ${reason}`),
+                ]
+              : []),
+          ]
+        : []),
+    ].join("\n");
+  }
+
+  private async generateUiImplementation(
+    input: ModelPortContext,
+    revising: boolean,
+  ): Promise<UIImplementationSpec> {
+    if (input.designPlan === undefined) {
+      throw new DeepSeekModelOutputError("confirmed design plan is required for UI implementation");
+    }
+    const raw = await this.chatJson(
+      SYSTEM_PROMPT,
+      this.buildUiImplementationPrompt(input, revising),
+      { maxTokens: 8000 },
+    );
+    const parsed = UIImplementationSpecSchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new DeepSeekModelOutputError(
+        `UI implementation failed zod gate: ${parsed.error.issues
+          .slice(0, 3)
+          .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+          .join("; ")}`,
+      );
+    }
+    return parsed.data;
+  }
+
+  createUiImplementation(input: ModelPortContext): Promise<UIImplementationSpec> {
+    return this.generateUiImplementation(input, false);
+  }
+
+  reviseUiImplementation(input: ModelPortContext): Promise<UIImplementationSpec> {
+    return this.generateUiImplementation(input, true);
   }
 
   /** 构造 create/revise 共用的计划生成 prompt。 */

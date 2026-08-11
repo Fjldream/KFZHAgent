@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { pendingRequirementSchema, DesignPlanSchema, type DesignPlan } from "@kf/contracts";
+import {
+  CapabilityReportSchema,
+  pendingRequirementSchema,
+  DesignPlanSchema,
+  UIImplementationSpecSchema,
+  type DesignPlan,
+} from "@kf/contracts";
 import { StateSchema } from "@langchain/langgraph";
 import { IntentSchema } from "./schemas/intent.js";
 
@@ -28,6 +34,7 @@ export const StageSchema = z.enum([
   "clarifying",
   "design-review",
   "design-planning",
+  "implementation-planning",
   "preview-review",
   "done",
 ]);
@@ -118,6 +125,10 @@ export const AgentGraphState = new StateSchema({
   designPlanHash: z.string().optional(),
   designRevision: z.number().int().min(0).optional(),
   revising: z.boolean().optional(),
+  /** Internal, model-authored implementation intent validated before deterministic compilation. */
+  uiImplementation: UIImplementationSpecSchema.optional(),
+  uiImplementationHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  capabilityReport: CapabilityReportSchema.optional(),
   stage: StageSchema,
   recentMessages: z.array(MessageSchema),
   conversationSummary: z.string().optional(),

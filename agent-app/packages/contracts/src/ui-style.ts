@@ -56,6 +56,8 @@ export const ThemeSpecSchema = z.object({
 export const UIComponentSpecSchema = z.object({
   id: z.string().min(1).max(100),
   role: z.string().min(1).max(100),
+  /** Customer-effect blueprint module implemented by this component. */
+  sourceModuleId: z.string().min(1).max(100).optional(),
   capabilityId: z.string().min(1).max(100),
   critical: z.boolean().default(true),
   fallbackCapabilityId: z.string().min(1).max(100).optional(),
