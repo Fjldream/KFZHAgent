@@ -305,7 +305,7 @@ function throwModulePlanError(detail: string): never {
 }
 
 /** Reject getters, symbols, prototypes, sparse arrays, and cycles before later validation/stringification can invoke them. */
-function assertDescriptorSafeJson(root: unknown, code: string, maxNodes = 20_000): void {
+export function assertDescriptorSafeJson(root: unknown, code: string, maxNodes = 20_000): void {
   const seen = new Set<object>();
   const active = new Set<object>();
   const pending: Array<{ value: unknown; exit?: true }> = [{ value: root }];
@@ -360,16 +360,18 @@ function assertSafeModulePlanOutput(root: unknown): void {
       if (FORBIDDEN_MODULE_TEXT.test(value)) throwModulePlanError("contains forbidden CSS or script text");
       const nested = value.trim();
       if (nested.length > 1 && nested.length <= 2_000 && (nested.startsWith("{") || nested.startsWith("["))) {
+        let parsed: unknown;
         try {
           // `content` is intentionally a JSON string in ModulePlan. Inspect it
           // as data too, so forbidden native/storage fields cannot hide there.
-          const parsed = JSON.parse(nested) as unknown;
-          assertDescriptorSafeJson(parsed, "embedded model JSON");
-          pending.push(parsed);
+          parsed = JSON.parse(nested) as unknown;
         } catch {
           // Content schemas decide whether non-JSON content is meaningful; the
           // safety scan must not reinterpret ordinary customer prose as JSON.
+          continue;
         }
+        assertDescriptorSafeJson(parsed, "embedded model JSON");
+        pending.push(parsed);
       }
       continue;
     }
@@ -879,7 +881,7 @@ export class DeepSeekModelPort implements ModelPort {
       throw new DeepSeekModelOutputError("empty model reply");
     }
     if (choice?.finish_reason === "length") {
-      throw new DeepSeekModelOutputError("model reply was truncated at the output token limit");
+      throw new JsonExtractionError("JSON_TRUNCATED", "model reply was truncated at the output token limit");
     }
     return extractJson(content);
   }
@@ -1144,7 +1146,7 @@ export class DeepSeekModelPort implements ModelPort {
     const recentMessages = input.recentMessages.map((message) => {
       if (message === null || typeof message !== "object" || Array.isArray(message)) throwModulePlanError("recent messages failed schema validation");
       const record = message as Record<string, unknown>;
-      if (typeof record.role !== "string" || typeof record.content !== "string") throwModulePlanError("recent messages failed schema validation");
+      if ((record.role !== "user" && record.role !== "assistant") || typeof record.content !== "string") throwModulePlanError("recent messages failed schema validation");
       return { role: record.role, content: record.content };
     });
     const selectedRecentMessages = recentMessages.slice(-MAX_MODULE_RECENT_MESSAGES);
@@ -1210,6 +1212,7 @@ export class DeepSeekModelPort implements ModelPort {
       throwModulePlanError(`failed zod gate: ${parsed.error.issues.slice(0, 3).map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")}`);
     }
     const plan = parsed.data;
+    if (!revising && plan.operations.length !== 0) throwModulePlanError("create ModulePlan operations must be empty");
     if (plan.projectKey !== accepted.projectKey) throwModulePlanError("projectKey differs from accepted artifact");
     const catalog = this.planningCatalog(input);
     const definitionByKey = new Map(catalog.map((entry) => [`${entry.kind}\u0000${entry.version}`, entry]));

@@ -7,7 +7,7 @@ import type {
   ModelPortContext,
   ProjectDesign,
 } from "@kf/agent-orchestrator";
-import { deriveExactModulePlanOperations, prepareModulePlanningInputs, validateModulePlanForContext } from "./deepseek-model.js";
+import { assertDescriptorSafeJson, deriveExactModulePlanOperations, prepareModulePlanningInputs, validateModulePlanForContext } from "./deepseek-model.js";
 
 /**
  * 确定性演示模型（E2E / 演示环境用）。
@@ -139,8 +139,18 @@ export class DeterministicFakeModelPort implements ModelPort {
   reviseModulePlan(input: ModelPortContext): Promise<ModulePlan> {
     try {
       if (input.previousModulePlan === undefined) return this.createModulePlan(input);
+      assertDescriptorSafeJson(input.previousModulePlan, "previous ModulePlan");
       const previous = ModulePlanSchema.parse(input.previousModulePlan);
-      const desired = this.deterministicModulePlan(input);
+      const rebuilt = this.deterministicModulePlan(input);
+      const desired: ModulePlan = {
+        ...rebuilt,
+        // v1 has no page-level operation. Keep existing page identity and
+        // presentation stable while rebuilding only the accepted module set.
+        pages: previous.pages.map((page, index) => ({
+          ...page,
+          modules: rebuilt.pages[index]?.modules ?? [],
+        })),
+      };
       const accepted = prepareModulePlanningInputs(input).accepted;
       const repaired: ModulePlan = {
         ...desired,

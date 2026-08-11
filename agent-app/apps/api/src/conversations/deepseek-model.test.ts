@@ -639,6 +639,12 @@ describe("DeepSeekModelPort", () => {
     expect(result.assets).toEqual(modulePlanningContext().assetCatalog);
   });
 
+  it("rejects non-empty create operations because pages are the authoritative snapshot", async () => {
+    const candidate = modulePlan({ operations: [{ op: "add", pageId: "home", module: modulePlan().pages[0].modules[0] }] });
+    await expect(makePort(candidate).createModulePlan(modulePlanningContext()))
+      .rejects.toThrow("create ModulePlan operations must be empty");
+  });
+
   it("rejects module output with forbidden implementation fields, unknown modules, beta modules, or unavailable assets", async () => {
     const candidates = [
       modulePlan({ pages: [{ ...modulePlan().pages[0], modules: [{ ...modulePlan().pages[0].modules[0], geometry: { x: 0 } }, modulePlan().pages[0].modules[1]] }]}),
@@ -731,6 +737,13 @@ describe("DeepSeekModelPort", () => {
     const prompt = JSON.parse(fetchImpl.mock.calls[0][1].body).messages[1].content;
     expect(prompt).not.toContain("turn-0");
     expect(prompt.indexOf("turn-2")).toBeLessThan(prompt.indexOf("turn-21"));
+  });
+
+  it("rejects an invalid recent-message role before invoking the model", async () => {
+    const fetchImpl = vi.fn();
+    await expect(new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" })
+      .createModulePlan(modulePlanningContext({ recentMessages: [{ role: "system", content: "no" }] }))).rejects.toThrow("recent messages failed schema validation");
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("requires the exact signed interaction identity and canonical order per mapped module", async () => {
@@ -858,6 +871,13 @@ describe("DeepSeekModelPort", () => {
     await expect(new DeepSeekModelPort({ apiKey: "test-key", fetch: forgedTextFetch, baseUrl: "https://mock.local" })
       .createModulePlan(modulePlanningContext())).rejects.toThrow(DeepSeekModelOutputError);
     expect(forgedTextFetch).toHaveBeenCalledTimes(1);
+
+    const lengthFetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ choices: [{ finish_reason: "length", message: { content: "{" } }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify(modulePlan()) } }] }) });
+    await expect(new DeepSeekModelPort({ apiKey: "test-key", fetch: lengthFetch, baseUrl: "https://mock.local" })
+      .createModulePlan(modulePlanningContext())).resolves.toEqual(modulePlan());
+    expect(lengthFetch).toHaveBeenCalledTimes(2);
   });
 
   it.each(["content.hero", "data.status-grid", "data.detail"])("fake mode plans and compiles stable %s without network", async (kind) => {
@@ -887,6 +907,15 @@ describe("DeepSeekModelPort", () => {
     const second = await fake.reviseModulePlan({ ...context, previousModulePlan: first });
     expect(second.pages).toEqual(first.pages);
     expect(second.operations).toEqual([]);
+  });
+
+  it("fake revision preserves the existing page identity and mode", async () => {
+    const context = fakeCompileContext("content.hero");
+    const fake = new DeterministicFakeModelPort();
+    const first = await fake.createModulePlan(context);
+    const previous = { ...first, pages: [{ ...first.pages[0], id: "existing", title: "保留标题", mode: "admin-shell" }] };
+    const revised = await fake.reviseModulePlan({ ...context, previousModulePlan: previous });
+    expect(revised.pages[0]).toEqual(expect.objectContaining({ id: "existing", title: "保留标题", mode: "admin-shell" }));
   });
 
   it("createUiImplementation converts every blueprint module into structured components", async () => {
