@@ -717,6 +717,11 @@ describe("DeepSeekModelPort", () => {
       "styleDataNew", "STYLE-DATA", "baseProperty", "leftTopPt", "insideObjects", "insiderObjects",
       "configureData", "layoutType", "controlGeometry", "nativePayload", "scriptBody", "pathValue",
       "__ｐｒｏｔｏ__", "prototypePollution", "constructor",
+      "prefixObjectTypeSuffix", "prefixUiModelTypeSuffix", "prefixStyleDataNewSuffix",
+      "prefixConfigureDataSuffix", "prefixBasePropertySuffix", "prefixLeftTopPtSuffix",
+      "prefixInsideObjectsSuffix", "prefixInsiderObjectsSuffix", "prefixLayoutTypeSuffix",
+      "prefixControlGeometrySuffix", "prefixNativePayloadSuffix", "prefixScriptBodySuffix",
+      "prefixCssRulesSuffix", "prefixPathValueSuffix", "preferredHeight", "preferredHeightConfig",
     ];
     const first = modulePlan().pages[0].modules[0];
     const second = modulePlan().pages[0].modules[1];

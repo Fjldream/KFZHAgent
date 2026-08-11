@@ -358,9 +358,7 @@ const FORBIDDEN_MODULE_COMPACT_KEYS = new Set([
   "insideobjects", "insiderobjects", "configuredata", "layouttype", "controlgeometry",
   "nativepayload", "scriptbody", "cssrules", "pathvalue",
 ]);
-// This is the one schema-defined semantic field that intentionally contains a
-// height word. Its finite enum is still enforced by ModulePlanSchema later.
-const SAFE_SEMANTIC_MODULE_KEYS = new Set(["preferredheight"]);
+const MAX_NORMALIZED_MODULE_KEY_CHARS = 256;
 
 function normalizedModuleKeyParts(key: string): { readonly tokens: readonly string[]; readonly compact: string } {
   const nfkc = key.normalize("NFKC");
@@ -373,20 +371,40 @@ function normalizedModuleKeyParts(key: string): { readonly tokens: readonly stri
   return { tokens, compact: tokens.join("") };
 }
 
-function forbiddenModuleKey(key: string): boolean {
+function isModulePlacementPreferredHeight(path: readonly string[], key: string): boolean {
+  // The exception is deliberately both exact and location-sensitive. An
+  // embedded content object with the same spelling is not a ModulePlan field.
+  if (key !== "preferredHeight") return false;
+  const isIndex = (value: string | undefined): boolean => value !== undefined && /^(?:0|[1-9][0-9]*)$/.test(value);
+  // resize carries the same constrained height enum directly on the operation.
+  if (isIndex(path.at(-1)) && path.at(-2) === "operations") return true;
+  if (path.at(-1) !== "placement") return false;
+  // Final page snapshot: pages[n].modules[n].placement.preferredHeight.
+  if (path.at(-3) === "modules" && isIndex(path.at(-2)) && path.at(-5) === "pages" && isIndex(path.at(-4))) return true;
+  // Server-audited operation payloads: add.module.placement and move.placement.
+  if (path.at(-2) === "module" && isIndex(path.at(-3)) && path.at(-4) === "operations") return true;
+  if (isIndex(path.at(-2)) && path.at(-3) === "operations") return true;
+  return false;
+}
+
+function forbiddenModuleKey(key: string, isSchemaDefinedPreferredHeight = false): boolean {
   const { tokens, compact } = normalizedModuleKeyParts(key);
-  if (SAFE_SEMANTIC_MODULE_KEYS.has(compact)) return false;
+  if (isSchemaDefinedPreferredHeight) return false;
+  // Bound the substring scan, and fail closed rather than allowing a giant key
+  // to turn a compact native implementation term into an allocation vector.
+  if (compact.length > MAX_NORMALIZED_MODULE_KEY_CHARS) return true;
   return tokens.some((token) => FORBIDDEN_MODULE_KEY_TOKENS.has(token))
-    || FORBIDDEN_MODULE_COMPACT_KEYS.has(compact);
+    || [...FORBIDDEN_MODULE_COMPACT_KEYS].some((term) => compact.includes(term));
 }
 
 /** Model reply has passed JSON.parse, but scan its JSON tree before schema parsing for disallowed implementation vocabulary. */
 function assertSafeModulePlanOutput(root: unknown): void {
   assertDescriptorSafeJson(root, "model output");
-  const pending: unknown[] = [root];
+  const pending: Array<{ value: unknown; path: readonly string[] }> = [{ value: root, path: [] }];
   let nodes = 0;
   while (pending.length > 0) {
-    const value = pending.pop();
+    const current = pending.pop()!;
+    const { value, path } = current;
     nodes += 1;
     if (nodes > 20_000) throwModulePlanError("exceeds raw node budget");
     if (typeof value === "string") {
@@ -404,22 +422,26 @@ function assertSafeModulePlanOutput(root: unknown): void {
           continue;
         }
         assertDescriptorSafeJson(parsed, "embedded model JSON");
-        pending.push(parsed);
+        pending.push({ value: parsed, path: [...path, "$embedded"] });
       }
       continue;
     }
     if (value === null || typeof value === "boolean" || typeof value === "number") continue;
     if (typeof value !== "object") throwModulePlanError("contains a non-JSON value");
     if (Array.isArray(value)) {
-      for (const child of value as unknown[]) pending.push(child);
+      for (let index = 0; index < value.length; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        if (descriptor === undefined || !("value" in descriptor)) throwModulePlanError("contains unsafe array item");
+        pending.push({ value: descriptor.value, path: [...path, String(index)] });
+      }
       continue;
     }
     for (const key of Reflect.ownKeys(value)) {
       if (typeof key !== "string") throwModulePlanError("contains unsafe non-string field");
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
       if (descriptor === undefined || !("value" in descriptor)) throwModulePlanError(`contains unsafe field: ${key}`);
-      if (forbiddenModuleKey(key)) throwModulePlanError(`contains forbidden field: ${key}`);
-      pending.push(descriptor.value);
+      if (forbiddenModuleKey(key, isModulePlacementPreferredHeight(path, key))) throwModulePlanError(`contains forbidden field: ${key}`);
+      pending.push({ value: descriptor.value, path: [...path, key] });
     }
   }
 }
