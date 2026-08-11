@@ -86,6 +86,7 @@ const moduleUpdateSchema = z
     placement: ModulePlacementSchema.optional(),
     interactions: z.array(ModuleInteractionSchema).max(12).optional(),
     assetId: stableIdSchema.optional(),
+    sourceBlueprintModuleIds: z.array(z.string().trim().min(1).max(100)).min(1).max(12).optional(),
   })
   .strict();
 
@@ -168,6 +169,7 @@ export const ModulePlanSchema = z
     const modulesByPage = new Map<string, Set<string>>();
     const moduleDefinitionsByPage = new Map<string, Map<string, ModulePlanModule>>();
     const moduleIds = new Set<string>();
+    const removedOperationIds = new Set<string>();
     const interactionSources: Array<{ interactions: ModuleInteraction[]; path: (string | number)[] }> = [];
     plan.pages.forEach((page, pageIndex) => {
       if (pageIds.has(page.id)) {
@@ -212,14 +214,25 @@ export const ModulePlanSchema = z
         }
         return;
       }
-      if (!pageModuleIds.has(operation.moduleId)) {
-        ctx.addIssue({ code: "custom", path: ["operations", index, "moduleId"], message: `unknown module id: ${operation.moduleId}` });
+      if (operation.op === "remove") {
+        const removalKey = `${operation.pageId}\u0000${operation.moduleId}`;
+        if (removedOperationIds.has(removalKey)) {
+          ctx.addIssue({ code: "custom", path: ["operations", index, "moduleId"], message: `duplicate remove operation: ${operation.moduleId}` });
+          return;
+        }
+        removedOperationIds.add(removalKey);
+        // Creation plans retain the legacy declarative operation stream where
+        // a remove can target the page snapshot. Revision plans are final-page
+        // authoritative and therefore legitimately omit the removed module.
+        if (pageModuleIds.has(operation.moduleId)) {
+          pageModuleIds.delete(operation.moduleId);
+          pageModules.delete(operation.moduleId);
+          moduleIds.delete(operation.moduleId);
+        }
         return;
       }
-      if (operation.op === "remove") {
-        pageModuleIds.delete(operation.moduleId);
-        pageModules.delete(operation.moduleId);
-        moduleIds.delete(operation.moduleId);
+      if (!pageModuleIds.has(operation.moduleId)) {
+        ctx.addIssue({ code: "custom", path: ["operations", index, "moduleId"], message: `unknown module id: ${operation.moduleId}` });
         return;
       }
       if (operation.op === "changeVariant") {

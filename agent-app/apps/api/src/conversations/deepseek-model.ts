@@ -4,11 +4,13 @@ import type {
   CustomerEffectBlueprint,
   DesignPlan,
   ModulePlan,
+  ModulePlanOperation,
   UIImplementationSpec,
   ValidationReport,
 } from "@kf/contracts";
 import {
   canonicalModuleCompilationHash,
+  AssetRecordSchema,
   changePlanSchema,
   CustomerEffectBlueprintSchema,
   ModulePlanSchema,
@@ -127,8 +129,62 @@ const MAX_MODULE_PLANNING_CATALOG = 50;
 const MAX_MODULE_PLANNING_ASSETS = 100;
 const MAX_MODULE_REJECTION_REASONS = 12;
 const MAX_MODULE_RECENT_MESSAGES = 20;
-const FORBIDDEN_MODULE_FIELD = /(?:^|[_-])(?:geometry|css|selector|path|filepath|storagekey|script|javascript|objecttype|uimodeltype|styledatanew|baseproperty|lefttoppt|insiderobjects|configured?ata|layouttype|prototype|guid|native)(?:$|[_-])/i;
+const MAX_MODULE_PROMPT_BYTES = 96_000;
+const MAX_MODULE_REQUIREMENT_CHARS = 6_000;
+const MAX_MODULE_CONTEXT_ITEM_CHARS = 800;
 const FORBIDDEN_MODULE_TEXT = /<\/?script\b|<style\b|javascript\s*:|data\s*:\s*text\s*\/\s*html|(?:^|[;{])\s*(?:position|display|flex|grid|font-size|background|color|margin|padding)\s*:/i;
+const PLANNING_MATURITIES = new Set(["stable", "beta", "unsupported"]);
+const PLANNING_ASSET_KINDS = new Set(["image", "icon", "document", "media", "data"]);
+const PLANNING_INTERACTIONS = new Set(["navigate", "scroll", "open-modal", "submit", "filter", "toggle"]);
+const PLANNING_REGIONS = new Set(["header", "main", "sidebar", "footer", "toolbar"]);
+const PLANNING_HEIGHTS = new Set(["compact", "small", "medium", "large", "full"]);
+const PLANNING_KIND = /^[A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z][A-Za-z0-9_-]*)*$/;
+const PLANNING_VERSION = /^[0-9A-Za-z][0-9A-Za-z._-]*$/;
+
+/** Strict, dependency-free boundary parser for Registry.listForPlanning() summaries. */
+function parsePlanningSummary(value: unknown): {
+  readonly kind: string; readonly version: string; readonly maturity: "stable" | "beta" | "unsupported";
+  readonly variants: readonly string[]; readonly slots: readonly { readonly id: string; readonly required: boolean; readonly requiredForVariants?: readonly string[]; readonly allowedKinds: readonly ("image" | "icon" | "document" | "media" | "data")[] }[];
+  readonly interactions: readonly ("navigate" | "scroll" | "open-modal" | "submit" | "filter" | "toggle")[];
+  readonly layout: { readonly regions: readonly ("header" | "main" | "sidebar" | "footer" | "toolbar")[]; readonly minColumnSpan: number; readonly maxColumnSpan: number; readonly preferredHeights: readonly ("compact" | "small" | "medium" | "large" | "full")[] };
+} {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) throwModulePlanError("planning catalog failed schema validation");
+  const record = value as Record<string, unknown>;
+  const allowed = new Set(["kind", "version", "maturity", "variants", "slots", "interactions", "layout"]);
+  if (Object.keys(record).length !== allowed.size || Object.keys(record).some((key) => !allowed.has(key))) throwModulePlanError("planning catalog failed schema validation");
+  const boundedText = (raw: unknown, expression: RegExp): string => typeof raw === "string" && raw.trim() === raw && raw.length > 0 && raw.length <= 100 && expression.test(raw)
+    ? raw : throwModulePlanError("planning catalog failed schema validation");
+  const boundedStrings = (raw: unknown, min: number, max: number, allowedValues?: ReadonlySet<string>): string[] => {
+    if (!Array.isArray(raw) || raw.length < min || raw.length > max) throwModulePlanError("planning catalog failed schema validation");
+    return raw.map((entry) => {
+      const parsed = boundedText(entry, /^[A-Za-z][A-Za-z0-9_-]*$/);
+      if (allowedValues !== undefined && !allowedValues.has(parsed)) throwModulePlanError("planning catalog failed schema validation");
+      return parsed;
+    });
+  };
+  const kind = boundedText(record.kind, PLANNING_KIND);
+  const version = boundedText(record.version, PLANNING_VERSION);
+  if (typeof record.maturity !== "string" || !PLANNING_MATURITIES.has(record.maturity)) throwModulePlanError("planning catalog failed schema validation");
+  const variants = boundedStrings(record.variants, 1, 32);
+  if (!Array.isArray(record.slots) || record.slots.length > 8) throwModulePlanError("planning catalog failed schema validation");
+  const slots = record.slots.map((slot) => {
+    if (slot === null || typeof slot !== "object" || Array.isArray(slot)) throwModulePlanError("planning catalog failed schema validation");
+    const slotRecord = slot as Record<string, unknown>;
+    const keys = Object.keys(slotRecord);
+    if (keys.some((key) => !["id", "required", "requiredForVariants", "allowedKinds"].includes(key)) || !keys.includes("id") || !keys.includes("required") || !keys.includes("allowedKinds")) throwModulePlanError("planning catalog failed schema validation");
+    if (typeof slotRecord.required !== "boolean") throwModulePlanError("planning catalog failed schema validation");
+    const requiredForVariants = slotRecord.requiredForVariants === undefined ? undefined : boundedStrings(slotRecord.requiredForVariants, 0, 32);
+    return { id: boundedText(slotRecord.id, /^[A-Za-z][A-Za-z0-9_-]*$/), required: slotRecord.required, ...(requiredForVariants === undefined ? {} : { requiredForVariants }), allowedKinds: boundedStrings(slotRecord.allowedKinds, 1, 5, PLANNING_ASSET_KINDS) as ("image" | "icon" | "document" | "media" | "data")[] };
+  });
+  if (record.layout === null || typeof record.layout !== "object" || Array.isArray(record.layout)) throwModulePlanError("planning catalog failed schema validation");
+  const layout = record.layout as Record<string, unknown>;
+  if (Object.keys(layout).length !== 4 || Object.keys(layout).some((key) => !["regions", "minColumnSpan", "maxColumnSpan", "preferredHeights"].includes(key))) throwModulePlanError("planning catalog failed schema validation");
+  const integer = (raw: unknown): number => typeof raw === "number" && Number.isInteger(raw) && raw >= 1 && raw <= 12 ? raw : throwModulePlanError("planning catalog failed schema validation");
+  const minColumnSpan = integer(layout.minColumnSpan);
+  const maxColumnSpan = integer(layout.maxColumnSpan);
+  if (minColumnSpan > maxColumnSpan) throwModulePlanError("planning catalog failed schema validation");
+  return { kind, version, maturity: record.maturity as "stable" | "beta" | "unsupported", variants, slots, interactions: boundedStrings(record.interactions, 0, 12, PLANNING_INTERACTIONS) as ("navigate" | "scroll" | "open-modal" | "submit" | "filter" | "toggle")[], layout: { regions: boundedStrings(layout.regions, 1, 5, PLANNING_REGIONS) as ("header" | "main" | "sidebar" | "footer" | "toolbar")[], minColumnSpan, maxColumnSpan, preferredHeights: boundedStrings(layout.preferredHeights, 1, 5, PLANNING_HEIGHTS) as ("compact" | "small" | "medium" | "large" | "full")[] } };
+}
 
 function codePointCompare(left: string, right: string): number {
   const leftPoints = Array.from(left);
@@ -153,12 +209,144 @@ function stableEqual(left: unknown, right: unknown): boolean {
   return canonicalJson(left) === canonicalJson(right);
 }
 
+function moduleIndex(plan: ModulePlan): Map<string, { pageId: string; module: ModulePlan["pages"][number]["modules"][number] }> {
+  return new Map(plan.pages.flatMap((page) => page.modules.map((module) => [module.id, { pageId: page.id, module }] as const)));
+}
+
+function operationSortKey(operation: ModulePlanOperation): string {
+  const moduleId = operation.op === "add" ? operation.module.id : operation.moduleId;
+  return `${operation.pageId}\u0000${moduleId}\u0000${operation.op}`;
+}
+
+function interactionTarget(interaction: ModulePlan["pages"][number]["modules"][number]["interactions"][number]): string {
+  switch (interaction.type) {
+    case "navigate": return interaction.pageId;
+    case "scroll":
+    case "open-modal": return interaction.moduleId;
+    case "submit": return interaction.action;
+    case "filter": return interaction.field;
+    case "toggle": return interaction.target;
+  }
+}
+
+function interactionIdentity(value: { type: string; target: string }): string {
+  return `${value.type}\u0000${value.target}`;
+}
+
+function exactRevisionOperations(previous: ModulePlan, current: ModulePlan, acceptedBlueprintIds: ReadonlySet<string>): readonly ModulePlanOperation[] {
+  if (!stableEqual(previous.theme, current.theme)) throwModulePlanError("theme changes require an explicit supported operation");
+  if (!stableEqual(previous.assets, current.assets)) throwModulePlanError("assets changes require an explicit supported operation");
+  const previousPages = new Map(previous.pages.map((page) => [page.id, page]));
+  const currentPages = new Map(current.pages.map((page) => [page.id, page]));
+  if (previousPages.size !== currentPages.size || [...previousPages.keys()].some((id) => !currentPages.has(id))) {
+    throwModulePlanError("page additions or removals require an explicit supported operation");
+  }
+  for (const [pageId, previousPage] of previousPages) {
+    const currentPage = currentPages.get(pageId)!;
+    if (previousPage.title !== currentPage.title || previousPage.mode !== currentPage.mode) {
+      throwModulePlanError("page title or mode changes require an explicit supported operation");
+    }
+  }
+  const before = moduleIndex(previous);
+  const after = moduleIndex(current);
+  const expected: ModulePlanOperation[] = [];
+  for (const [id, previousEntry] of before) {
+    const currentEntry = after.get(id);
+    if (currentEntry === undefined) {
+      if ((previousEntry.module.sourceBlueprintModuleIds ?? []).some((sourceId) => acceptedBlueprintIds.has(sourceId))) {
+        throwModulePlanError(`accepted blueprint still requires removed module: ${id}`);
+      }
+      expected.push({ op: "remove", pageId: previousEntry.pageId, moduleId: id });
+      continue;
+    }
+    if (previousEntry.pageId !== currentEntry.pageId) throwModulePlanError(`module page move is not supported: ${id}`);
+    const previousModule = previousEntry.module;
+    const currentModule = currentEntry.module;
+    if (previousModule.kind !== currentModule.kind || previousModule.templateVersion !== currentModule.templateVersion) {
+      throwModulePlanError(`kind or templateVersion changes are not supported for module: ${id}`);
+    }
+    const changes: Record<string, unknown> = {};
+    if (previousModule.title !== currentModule.title) changes.title = currentModule.title;
+    if (previousModule.content !== currentModule.content) {
+      if (currentModule.content === undefined) throwModulePlanError(`content removal is not supported for module: ${id}`);
+      changes.content = currentModule.content;
+    }
+    if (!stableEqual(previousModule.interactions, currentModule.interactions)) changes.interactions = currentModule.interactions;
+    if (!stableEqual(previousModule.sourceBlueprintModuleIds, currentModule.sourceBlueprintModuleIds)) changes.sourceBlueprintModuleIds = currentModule.sourceBlueprintModuleIds;
+    if (previousModule.assetId !== currentModule.assetId) {
+      if (currentModule.assetId === undefined) throwModulePlanError(`asset removal is not supported for module: ${id}`);
+      changes.assetId = currentModule.assetId;
+    }
+    if (Object.keys(changes).length > 0) expected.push({ op: "update", pageId: currentEntry.pageId, moduleId: id, changes });
+    if (!stableEqual(previousModule.placement, currentModule.placement)) {
+      const sameNonResizePlacement = previousModule.placement.region === currentModule.placement.region
+        && previousModule.placement.order === currentModule.placement.order
+        && previousModule.placement.alignment === currentModule.placement.alignment
+        && previousModule.placement.emphasis === currentModule.placement.emphasis;
+      expected.push(sameNonResizePlacement
+        ? { op: "resize", pageId: currentEntry.pageId, moduleId: id, columnSpan: currentModule.placement.columnSpan, preferredHeight: currentModule.placement.preferredHeight }
+        : { op: "move", pageId: currentEntry.pageId, moduleId: id, placement: currentModule.placement });
+    }
+    if (previousModule.variant !== currentModule.variant) {
+      expected.push({ op: "changeVariant", pageId: currentEntry.pageId, moduleId: id, templateVersion: currentModule.templateVersion, variant: currentModule.variant });
+    }
+  }
+  for (const [id, currentEntry] of after) {
+    if (!before.has(id)) expected.push({ op: "add", pageId: currentEntry.pageId, module: currentEntry.module });
+  }
+  return Object.freeze(expected.sort((left, right) => codePointCompare(operationSortKey(left), operationSortKey(right))));
+}
+
 function throwModulePlanError(detail: string): never {
   throw new DeepSeekModelOutputError(`module plan ${detail}`);
 }
 
+/** Reject getters, symbols, prototypes, sparse arrays, and cycles before later validation/stringification can invoke them. */
+function assertDescriptorSafeJson(root: unknown, code: string, maxNodes = 20_000): void {
+  const seen = new Set<object>();
+  const active = new Set<object>();
+  const pending: Array<{ value: unknown; exit?: true }> = [{ value: root }];
+  let nodes = 0;
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    nodes += 1;
+    if (nodes > maxNodes) throwModulePlanError(`${code}: unsafe node budget exceeded`);
+    const value = current.value;
+    if (value === null || typeof value === "string" || typeof value === "boolean") continue;
+    if (typeof value === "number") { if (Number.isFinite(value)) continue; throwModulePlanError(`${code}: unsafe number`); }
+    if (typeof value !== "object") throwModulePlanError(`${code}: unsafe non-JSON value`);
+    if (current.exit === true) { active.delete(value); seen.add(value); continue; }
+    if (active.has(value) || seen.has(value)) throwModulePlanError(`${code}: unsafe cyclic or shared value`);
+    active.add(value); pending.push({ value, exit: true });
+    if (Array.isArray(value)) {
+      if (Reflect.getPrototypeOf(value) !== Array.prototype || Reflect.ownKeys(value).length !== value.length + 1) throwModulePlanError(`${code}: unsafe array`);
+      for (let index = 0; index < value.length; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) throwModulePlanError(`${code}: unsafe array item`);
+        pending.push({ value: descriptor.value });
+      }
+      continue;
+    }
+    if (Reflect.getPrototypeOf(value) !== Object.prototype) throwModulePlanError(`${code}: unsafe object prototype`);
+    for (const key of Reflect.ownKeys(value)) {
+      if (typeof key !== "string" || key === "__proto__" || key === "prototype" || key === "constructor") throwModulePlanError(`${code}: unsafe key`);
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) throwModulePlanError(`${code}: unsafe property`);
+      pending.push({ value: descriptor.value });
+    }
+  }
+}
+
+function forbiddenModuleKey(key: string): boolean {
+  const normalized = key.normalize("NFKC").replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
+  const compact = normalized.replace(/[^a-z0-9]/g, "");
+  if (["x", "y", "width", "height", "geometry", "css", "selector", "html", "script", "javascript", "path", "filepath", "storagekey", "native", "guid", "controlguid", "objecttype", "uimodeltype", "styledatanew", "baseproperty", "lefttoppt", "insiderobjects", "configuredata", "layouttype", "prototype"].includes(compact)) return true;
+  return compact.includes("storagekey") || compact.includes("filepath") || compact.includes("controlguid") || compact.includes("styledatanew") || compact.includes("objecttype") || compact.includes("uimodeltype") || compact.includes("configuredata");
+}
+
 /** Model reply has passed JSON.parse, but scan its JSON tree before schema parsing for disallowed implementation vocabulary. */
 function assertSafeModulePlanOutput(root: unknown): void {
+  assertDescriptorSafeJson(root, "model output");
   const pending: unknown[] = [root];
   let nodes = 0;
   while (pending.length > 0) {
@@ -187,7 +375,7 @@ function assertSafeModulePlanOutput(root: unknown): void {
       continue;
     }
     for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-      if (FORBIDDEN_MODULE_FIELD.test(key)) throwModulePlanError(`contains forbidden field: ${key}`);
+      if (forbiddenModuleKey(key)) throwModulePlanError(`contains forbidden field: ${key}`);
       pending.push(child);
     }
   }
@@ -198,6 +386,7 @@ function acceptedModulePlanningFacts(input: ModelPortContext): {
   readonly accepted: ReturnType<typeof readVerifiedAcceptedBlueprintArtifact>;
 } {
   if (input.confirmedBlueprint === undefined) throwModulePlanError("requires a confirmed v2 blueprint");
+  assertDescriptorSafeJson(input.confirmedBlueprint, "confirmed blueprint");
   const parsedBlueprint = CustomerEffectBlueprintSchema.safeParse(input.confirmedBlueprint);
   if (!parsedBlueprint.success) throwModulePlanError("confirmed blueprint failed schema validation");
   if (input.acceptedBlueprintArtifact === undefined) throwModulePlanError("requires a verified accepted blueprint artifact");
@@ -210,10 +399,60 @@ function acceptedModulePlanningFacts(input: ModelPortContext): {
   if (canonicalModuleCompilationHash(parsedBlueprint.data) !== accepted.blueprintHash) {
     throwModulePlanError("confirmed blueprint does not match accepted artifact");
   }
+  if (input.currentProjectKey === undefined || input.currentProjectKey !== accepted.projectKey) {
+    throwModulePlanError("accepted artifact projectKey does not match currentProjectKey");
+  }
+  if (input.currentRevisionId === undefined || input.currentRevisionId !== accepted.revisionId) {
+    throwModulePlanError("accepted artifact revisionId does not match currentRevisionId");
+  }
   const acceptedIds = accepted.modules.map((module) => module.blueprintModuleId).sort(codePointCompare);
   const blueprintIds = parsedBlueprint.data.modules.map((module) => module.id).sort(codePointCompare);
   if (!stableEqual(acceptedIds, blueprintIds)) throwModulePlanError("accepted artifact module set does not match confirmed blueprint");
   return { blueprint: parsedBlueprint.data, accepted };
+}
+
+/**
+ * Normalize all server-owned planning inputs before either a real or fake
+ * model can read them. This is deliberately exported so fake mode cannot
+ * become a weaker authority boundary than production.
+ */
+export function prepareModulePlanningInputs(input: ModelPortContext): {
+  readonly blueprint: CustomerEffectBlueprint;
+  readonly accepted: ReturnType<typeof readVerifiedAcceptedBlueprintArtifact>;
+  readonly catalog: readonly ReturnType<typeof parsePlanningSummary>[];
+  readonly assets: readonly AssetRecord[];
+} {
+  const { blueprint, accepted } = acceptedModulePlanningFacts(input);
+  const supplied = input.modulePlanningCatalog ?? [];
+  assertDescriptorSafeJson(supplied, "planning catalog", 10_000);
+  if (supplied.length > MAX_MODULE_PLANNING_CATALOG) throwModulePlanError("planning catalog exceeds bound");
+  const catalog = supplied.map(parsePlanningSummary)
+    .filter((entry) => entry.maturity === "stable")
+    .map((entry) => ({
+      kind: entry.kind, version: entry.version, maturity: entry.maturity,
+      variants: [...entry.variants].sort(codePointCompare),
+      slots: entry.slots.map((slot) => ({ id: slot.id, required: slot.required, ...(slot.requiredForVariants === undefined ? {} : { requiredForVariants: [...slot.requiredForVariants].sort(codePointCompare) }), allowedKinds: [...slot.allowedKinds].sort(codePointCompare) })),
+      interactions: [...entry.interactions].sort(codePointCompare),
+      layout: { regions: [...entry.layout.regions].sort(codePointCompare), minColumnSpan: entry.layout.minColumnSpan, maxColumnSpan: entry.layout.maxColumnSpan, preferredHeights: [...entry.layout.preferredHeights].sort(codePointCompare) },
+    }))
+    .sort((left, right) => codePointCompare(`${left.kind}@${left.version}`, `${right.kind}@${right.version}`));
+  if (new Set(catalog.map((entry) => `${entry.kind}\u0000${entry.version}`)).size !== catalog.length) throwModulePlanError("planning catalog contains duplicate kind/version");
+  const rawAssets = input.assetCatalog ?? [];
+  assertDescriptorSafeJson(rawAssets, "asset catalog", 10_000);
+  if (rawAssets.length > MAX_MODULE_PLANNING_ASSETS) throwModulePlanError("asset catalog exceeds bound");
+  const assetResults = rawAssets.map((asset) => AssetRecordSchema.safeParse(asset));
+  const assets: AssetRecord[] = [];
+  for (const result of assetResults) {
+    if (!result.success) throwModulePlanError("asset catalog failed schema validation");
+    assets.push(result.data);
+  }
+  assets.sort((left, right) => codePointCompare(left.id, right.id));
+  if (new Set(assets.map((asset) => asset.id)).size !== assets.length) throwModulePlanError("asset catalog contains duplicate IDs");
+  const stableKinds = new Set(catalog.map((entry) => entry.kind));
+  const unavailable = accepted.modules.filter((module) => !stableKinds.has(module.expectedKind)).map((module) => `${module.blueprintModuleId}:${module.expectedKind}`).sort(codePointCompare);
+  if (catalog.length === 0) throwModulePlanError("no stable registry modules are currently available for planning");
+  if (unavailable.length > 0) throwModulePlanError(`accepted blueprint requires unavailable stable modules: ${unavailable.join(", ")}`);
+  return Object.freeze({ blueprint, accepted, catalog: Object.freeze(catalog), assets: Object.freeze(assets) });
 }
 
 /**
@@ -871,57 +1110,15 @@ export class DeepSeekModelPort implements ModelPort {
   }
 
   private planningCatalog(input: ModelPortContext) {
-    const supplied = input.modulePlanningCatalog ?? [];
-    if (supplied.length > MAX_MODULE_PLANNING_CATALOG) throwModulePlanError("planning catalog exceeds bound");
-    const stable = supplied
-      .filter((entry) => entry.maturity === "stable")
-      .map((entry) => ({
-        kind: entry.kind,
-        version: entry.version,
-        variants: [...entry.variants].sort(codePointCompare),
-        slots: entry.slots.map((slot) => ({
-          id: slot.id,
-          required: slot.required,
-          ...(slot.requiredForVariants === undefined ? {} : { requiredForVariants: [...slot.requiredForVariants].sort(codePointCompare) }),
-          allowedKinds: [...slot.allowedKinds].sort(codePointCompare),
-        })),
-        interactions: [...entry.interactions].sort(codePointCompare),
-        layout: {
-          regions: [...entry.layout.regions].sort(codePointCompare),
-          minColumnSpan: entry.layout.minColumnSpan,
-          maxColumnSpan: entry.layout.maxColumnSpan,
-          preferredHeights: [...entry.layout.preferredHeights].sort(codePointCompare),
-        },
-      }))
-      .sort((left, right) => codePointCompare(`${left.kind}@${left.version}`, `${right.kind}@${right.version}`));
-    if (new Set(stable.map((entry) => `${entry.kind}\u0000${entry.version}`)).size !== stable.length) {
-      throwModulePlanError("planning catalog contains duplicate kind/version");
-    }
-    return stable;
+    return prepareModulePlanningInputs(input).catalog;
   }
 
   private planningAssets(input: ModelPortContext): readonly AssetRecord[] {
-    const assets = input.assetCatalog ?? [];
-    if (assets.length > MAX_MODULE_PLANNING_ASSETS) throwModulePlanError("asset catalog exceeds bound");
-    const ids = assets.map((asset) => asset.id);
-    if (new Set(ids).size !== ids.length) throwModulePlanError("asset catalog contains duplicate IDs");
-    return [...assets].sort((left, right) => codePointCompare(left.id, right.id));
+    return prepareModulePlanningInputs(input).assets;
   }
 
   private buildModulePlanPrompt(input: ModelPortContext, revising: boolean): string {
-    const { blueprint, accepted } = acceptedModulePlanningFacts(input);
-    const catalog = this.planningCatalog(input);
-    const assets = this.planningAssets(input);
-    if (catalog.length === 0) throwModulePlanError("no stable registry modules are currently available for planning");
-
-    const stableKinds = new Set(catalog.map((entry) => entry.kind));
-    const unavailable = accepted.modules
-      .filter((module) => !stableKinds.has(module.expectedKind))
-      .map((module) => `${module.blueprintModuleId}:${module.expectedKind}`)
-      .sort(codePointCompare);
-    if (unavailable.length > 0) {
-      throwModulePlanError(`accepted blueprint requires unavailable stable modules: ${unavailable.join(", ")}`);
-    }
+    const { blueprint, accepted, catalog, assets } = prepareModulePlanningInputs(input);
 
     const acceptedById = new Map(accepted.modules.map((module) => [module.blueprintModuleId, module]));
     const confirmedModules = blueprint.modules.map((module) => {
@@ -939,14 +1136,35 @@ export class DeepSeekModelPort implements ModelPort {
         interactionRequirements: fact.interactionRequirements,
       };
     });
-    const recentConversation = input.recentMessages
-      .slice(-MAX_MODULE_RECENT_MESSAGES)
-      .map((message) => `${message.role}: ${message.content.slice(0, 800)}`)
+    assertDescriptorSafeJson(input.recentMessages, "recent messages", 10_000);
+    const recentMessages = input.recentMessages.map((message) => {
+      if (message === null || typeof message !== "object" || Array.isArray(message)) throwModulePlanError("recent messages failed schema validation");
+      const record = message as Record<string, unknown>;
+      if (typeof record.role !== "string" || typeof record.content !== "string") throwModulePlanError("recent messages failed schema validation");
+      return { role: record.role, content: record.content };
+    }).sort((left, right) => codePointCompare(`${left.role}\u0000${left.content}`, `${right.role}\u0000${right.content}`));
+    const recentTruncated = recentMessages.length > MAX_MODULE_RECENT_MESSAGES || recentMessages.some((message) => message.content.length > MAX_MODULE_CONTEXT_ITEM_CHARS);
+    const recentConversation = recentMessages
+      .slice(0, MAX_MODULE_RECENT_MESSAGES)
+      .map((message) => `${message.role}: ${message.content.slice(0, MAX_MODULE_CONTEXT_ITEM_CHARS)}`)
       .join("\n");
-    const rejectionReasons = (input.modulePlanRejectionReasons ?? [])
-      .slice(0, MAX_MODULE_REJECTION_REASONS)
-      .map((reason) => reason.slice(0, 500));
-    return [
+    const rawReasons = input.modulePlanRejectionReasons ?? [];
+    assertDescriptorSafeJson(rawReasons, "module rejection reasons", 10_000);
+    if (rawReasons.some((reason) => typeof reason !== "string")) throwModulePlanError("module rejection reasons failed schema validation");
+    const sortedReasons = [...rawReasons].sort(codePointCompare);
+    const reasonsTruncated = sortedReasons.length > MAX_MODULE_REJECTION_REASONS || sortedReasons.some((reason) => reason.length > MAX_MODULE_CONTEXT_ITEM_CHARS);
+    const rejectionReasons = sortedReasons.slice(0, MAX_MODULE_REJECTION_REASONS).map((reason) => reason.slice(0, MAX_MODULE_CONTEXT_ITEM_CHARS));
+    const requirementText = input.requirementText ?? "（无）";
+    if (typeof requirementText !== "string" || requirementText.length > MAX_MODULE_REQUIREMENT_CHARS) throwModulePlanError("requirement text exceeds prompt bound");
+    let previousPlanForPrompt: ModulePlan | undefined;
+    if (revising) {
+      if (input.previousModulePlan === undefined) throwModulePlanError("revision requires a previous ModulePlan");
+      assertDescriptorSafeJson(input.previousModulePlan, "previous ModulePlan");
+      const previous = ModulePlanSchema.safeParse(input.previousModulePlan);
+      if (!previous.success) throwModulePlanError("previous ModulePlan failed schema validation");
+      previousPlanForPrompt = previous.data;
+    }
+    const prompt = [
       "把已经确认的客户效果蓝图转换成完整 ModulePlan，而不是 UIImplementationSpec、ChangePlan 或 KF JSON。",
       "输出 schema 固定为 kf-module-plan/v1，包含 projectKey、theme、assets、pages、operations。assets 必须逐条原样使用下面的服务器资产目录；模块只能在 assetId 中引用目录中的 id，绝不写路径、URL、storageKey 或文件名替代 ID。",
       "每个 module 只能使用稳定目录中逐字一致的 kind、version(templateVersion) 和 variant；beta、unsupported 或未列出的条目一律不可用。",
@@ -965,13 +1183,18 @@ export class DeepSeekModelPort implements ModelPort {
       JSON.stringify(assets),
       "最近会话上下文：",
       recentConversation || "（无）",
-      "客户本次要求：" + (input.requirementText ?? "（无）"),
-      ...(revising ? ["上一版完整 ModulePlan：", JSON.stringify(input.previousModulePlan ?? null)] : []),
+      recentTruncated ? "[recentMessages truncated=true]" : "[recentMessages truncated=false]",
+      "客户本次要求：" + requirementText,
+      ...(revising ? ["上一版完整 ModulePlan：", JSON.stringify(previousPlanForPrompt)] : []),
+      reasonsTruncated ? "[rejectionReasons truncated=true]" : "[rejectionReasons truncated=false]",
       ...(rejectionReasons.length > 0 ? ["上一候选未通过的确定性门禁（逐项修复，不得扩展范围）：", ...rejectionReasons.map((reason) => `- ${reason}`)] : []),
     ].join("\n");
+    if (new TextEncoder().encode(prompt).byteLength > MAX_MODULE_PROMPT_BYTES) throwModulePlanError("module planning prompt exceeds aggregate bound");
+    return prompt;
   }
 
-  private validateModulePlan(input: ModelPortContext, raw: unknown, revising: boolean): ModulePlan {
+  /** Pure server gate; fake mode calls the same gate and never bypasses it. */
+  validateModulePlan(input: ModelPortContext, raw: unknown, revising: boolean): ModulePlan {
     assertSafeModulePlanOutput(raw);
     const parsed = ModulePlanSchema.safeParse(raw);
     if (!parsed.success) {
@@ -990,18 +1213,17 @@ export class DeepSeekModelPort implements ModelPort {
     const acceptedByBlueprintId = new Map(accepted.modules.map((module) => [module.blueprintModuleId, module]));
     if (revising) {
       if (input.previousModulePlan === undefined) throwModulePlanError("revision requires a previous ModulePlan");
+      assertDescriptorSafeJson(input.previousModulePlan, "previous ModulePlan");
       const previous = ModulePlanSchema.safeParse(input.previousModulePlan);
       if (!previous.success) throwModulePlanError("previous ModulePlan failed schema validation");
       if (previous.data.projectKey !== plan.projectKey) throwModulePlanError("revision projectKey differs from previous ModulePlan");
-      const currentById = new Map(plan.pages.flatMap((page) => page.modules.map((module) => [module.id, module])));
-      const operationTargets = new Set(plan.operations.flatMap((operation) => operation.op === "add" ? [] : [operation.moduleId]));
-      for (const previousModule of previous.data.pages.flatMap((page) => page.modules)) {
-        const current = currentById.get(previousModule.id);
-        if (current === undefined) throwModulePlanError(`missing previous module: ${previousModule.id}`);
-        if (!operationTargets.has(previousModule.id) && !stableEqual(current, previousModule)) {
-          throwModulePlanError(`unchanged previous module differs: ${previousModule.id}`);
-        }
-      }
+      const expectedOperations = exactRevisionOperations(
+        previous.data,
+        plan,
+        new Set(accepted.modules.map((module) => module.blueprintModuleId)),
+      );
+      const actualOperations = [...plan.operations].sort((left, right) => codePointCompare(operationSortKey(left), operationSortKey(right)));
+      if (!stableEqual(actualOperations, expectedOperations)) throwModulePlanError("operations do not exactly describe the revision delta");
     }
     const seenBlueprintIds = new Set<string>();
     for (const page of plan.pages) {
@@ -1019,6 +1241,19 @@ export class DeepSeekModelPort implements ModelPort {
           || !definition.layout.preferredHeights.includes(module.placement.preferredHeight)
           || module.interactions.some((interaction) => !definition.interactions.includes(interaction.type))) {
           throwModulePlanError(`uses invalid semantic placement or interaction for ${module.id}`);
+        }
+        const signedInteractions = (module.sourceBlueprintModuleIds ?? []).flatMap((blueprintId) => {
+          const acceptedFact = acceptedByBlueprintId.get(blueprintId);
+          return acceptedFact?.interactionRequirements.map((entry) => ({ type: entry.type, target: entry.target, actionKind: entry.actionKind })) ?? [];
+        });
+        const signedKeys = signedInteractions.map(interactionIdentity).sort(codePointCompare);
+        if (new Set(signedKeys).size !== signedKeys.length) {
+          throwModulePlanError(`accepted interaction requirements are ambiguous for ${module.id}`);
+        }
+        const actualInteractions = module.interactions.map((interaction) => ({ type: interaction.type, target: interactionTarget(interaction) }));
+        const actualKeys = actualInteractions.map(interactionIdentity);
+        if (new Set(actualKeys).size !== actualKeys.length || !stableEqual(actualKeys, signedKeys)) {
+          throwModulePlanError(`interactions do not exactly match signed requirements for ${module.id}`);
         }
         const requiredSlot = definition.slots.find((slot) => slot.required || slot.requiredForVariants?.includes(module.variant));
         if (module.assetId === undefined && requiredSlot !== undefined) {
@@ -1179,4 +1414,12 @@ export class DeepSeekModelPort implements ModelPort {
     }
     return "（DeepSeek 模型未能生成校验解释）";
   }
+}
+
+/** Shared no-network validation entry point for deterministic fixtures. */
+export function validateModulePlanForContext(input: ModelPortContext, raw: unknown, revising: boolean): ModulePlan {
+  return new DeepSeekModelPort({
+    apiKey: "internal-module-plan-validator",
+    fetch: () => { throw new Error("module plan validator must not call network"); },
+  }).validateModulePlan(input, raw, revising);
 }

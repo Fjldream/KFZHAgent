@@ -29,6 +29,8 @@ export interface ModelPortContext {
   conversationSummary?: string | undefined;
   revisionSummary?: string | undefined;
   currentRevisionId?: string | undefined;
+  /** Server-owned project binding for accepted-blueprint/module-plan artifacts. */
+  currentProjectKey?: string | undefined;
   /** The user's latest turn, used as the requirement text for planning. */
   requirementText?: string | undefined;
   /** Previous design plan when revising (REVISE_DESIGN / design iteration). */

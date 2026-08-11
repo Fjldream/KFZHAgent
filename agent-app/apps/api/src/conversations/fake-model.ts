@@ -1,6 +1,5 @@
 import type { ChangePlan, DesignPlan, ModulePlan, UIImplementationSpec } from "@kf/contracts";
 import { solutionId } from "@kf/contracts";
-import { readVerifiedAcceptedBlueprintArtifact } from "@kf/build-jobs";
 import { deriveGuid } from "@kf/domain-client";
 import type {
   ClassifyIntentResult,
@@ -8,6 +7,7 @@ import type {
   ModelPortContext,
   ProjectDesign,
 } from "@kf/agent-orchestrator";
+import { prepareModulePlanningInputs, validateModulePlanForContext } from "./deepseek-model.js";
 
 /**
  * 确定性演示模型（E2E / 演示环境用）。
@@ -129,11 +129,40 @@ export class DeterministicFakeModelPort implements ModelPort {
   }
 
   createModulePlan(input: ModelPortContext): Promise<ModulePlan> {
-    return Promise.resolve(this.deterministicModulePlan(input));
+    try {
+      return Promise.resolve(validateModulePlanForContext(input, this.deterministicModulePlan(input), false));
+    } catch (error) {
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
   }
 
   reviseModulePlan(input: ModelPortContext): Promise<ModulePlan> {
-    return Promise.resolve(input.previousModulePlan ?? this.deterministicModulePlan(input));
+    try {
+      if (input.previousModulePlan === undefined) return this.createModulePlan(input);
+      // Validate the complete prior artifact against the currently accepted
+      // facts before reusing any byte. A stale/rejected plan never passes fake
+      // mode through unchanged.
+      const previous = validateModulePlanForContext(input, input.previousModulePlan, false);
+      const page = previous.pages[0]!;
+      const module = page.modules[0]!;
+      const repaired: ModulePlan = {
+        ...previous,
+        pages: previous.pages.map((candidate, pageIndex) => pageIndex !== 0 ? candidate : {
+          ...candidate,
+          modules: candidate.modules.map((entry, moduleIndex) => moduleIndex !== 0 ? entry : {
+            ...entry,
+            title: `${entry.title.replace(/（已修订）$/, "")}（已修订）`,
+          }),
+        }),
+        operations: [{
+          op: "update", pageId: page.id, moduleId: module.id,
+          changes: { title: `${module.title.replace(/（已修订）$/, "")}（已修订）` },
+        }],
+      };
+      return Promise.resolve(validateModulePlanForContext(input, repaired, true));
+    } catch (error) {
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
   }
 
   createChangePlan(input: ModelPortContext): Promise<ChangePlan> {
@@ -200,26 +229,26 @@ export class DeterministicFakeModelPort implements ModelPort {
    * possible in fake mode.
    */
   private deterministicModulePlan(input: ModelPortContext): ModulePlan {
-    if (input.acceptedBlueprintArtifact === undefined || input.confirmedBlueprint === undefined) {
-      throw new Error("fake module planning requires accepted blueprint facts");
-    }
-    const accepted = readVerifiedAcceptedBlueprintArtifact(input.acceptedBlueprintArtifact);
-    const catalog = (input.modulePlanningCatalog ?? []).filter((entry) => entry.maturity === "stable");
-    const blueprintById = new Map(input.confirmedBlueprint.modules.map((module) => [module.id, module]));
+    const { accepted, catalog, blueprint, assets } = prepareModulePlanningInputs(input);
+    const blueprintById = new Map(blueprint.modules.map((module) => [module.id, module]));
     const modules = accepted.modules.map((fact, order) => {
       const summary = catalog.find((entry) => entry.kind === fact.expectedKind);
       const blueprint = blueprintById.get(fact.blueprintModuleId);
       if (summary === undefined || blueprint === undefined) {
         throw new Error(`fake module fixture unavailable for ${fact.blueprintModuleId}`);
       }
-      const variant = summary.variants[0]!;
+      const variant = summary.variants.find((candidate) => !summary.slots.some((slot) => slot.required || slot.requiredForVariants?.includes(candidate)));
+      const selectedVariant = variant ?? summary.variants[0]!;
+      const requiredSlot = summary.slots.find((slot) => slot.required || slot.requiredForVariants?.includes(selectedVariant));
+      const asset = requiredSlot === undefined ? undefined : assets.find((candidate) => requiredSlot.allowedKinds.includes(candidate.kind));
+      if (requiredSlot !== undefined && asset === undefined) throw new Error(`fake module fixture unavailable: required asset ${requiredSlot.id}`);
       const region = summary.layout.regions[0]!;
       const preferredHeight = summary.layout.preferredHeights.includes("medium") ? "medium" : summary.layout.preferredHeights[0]!;
       return {
         id: `module-${fact.blueprintModuleId.replace(/[^A-Za-z0-9_-]/g, "-")}`,
         kind: summary.kind,
         templateVersion: summary.version,
-        variant,
+        variant: selectedVariant,
         title: blueprint.name,
         content: JSON.stringify(fakeModuleContent(summary.kind, blueprint.name)),
         sourceBlueprintModuleIds: [fact.blueprintModuleId],
@@ -231,7 +260,17 @@ export class DeterministicFakeModelPort implements ModelPort {
           alignment: "stretch" as const,
           emphasis: order === 0 ? "primary" as const : "secondary" as const,
         },
-        interactions: [],
+        interactions: fact.interactionRequirements.map((requirement) => {
+          switch (requirement.type) {
+            case "navigate": return { type: "navigate" as const, pageId: requirement.target };
+            case "scroll": return { type: "scroll" as const, moduleId: requirement.target };
+            case "open-modal": return { type: "open-modal" as const, moduleId: requirement.target };
+            case "submit": return { type: "submit" as const, action: requirement.target };
+            case "filter": return { type: "filter" as const, field: requirement.target };
+            case "toggle": return { type: "toggle" as const, target: requirement.target };
+          }
+        }),
+        ...(asset === undefined ? {} : { assetId: asset.id }),
       };
     });
     const mode = modules.some((module) => module.kind === "navigation.sidebar")
@@ -248,7 +287,7 @@ export class DeterministicFakeModelPort implements ModelPort {
         radiusScale: { small: 4, medium: 8, large: 16 },
       },
       assets: [...(input.assetCatalog ?? [])],
-      pages: [{ id: "Page1", title: input.confirmedBlueprint.displayName, mode, modules }],
+      pages: [{ id: "Page1", title: blueprint.displayName, mode, modules }],
       operations: [],
     };
   }
