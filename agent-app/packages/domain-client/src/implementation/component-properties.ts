@@ -32,6 +32,7 @@ import {
 } from "../ir/client-project-ir.schema.js";
 import { EASYUI_PROTO_TYPES } from "../ir/easyui-types.js";
 import { controlGeometryIssues } from "./control-geometry.js";
+import { parseChartData, parseTableData } from "../modules/definitions/native-data-adapters.js";
 
 const parentId = z.string().min(1).max(100).optional();
 const boundedNumber = z.number().finite().min(-1_000_000_000).max(1_000_000_000).optional();
@@ -107,7 +108,14 @@ const chartProperties = z.object({
   title: chartTitle.optional(),
   areas: z.array(chartArea).max(100).optional(),
   comment: z.string().optional(),
-}).strict();
+  /** Typed module semantic data; the patcher alone materializes native fields. */
+  chartData: z.unknown().optional(),
+}).strict().superRefine((value, ctx) => {
+  if (value.chartData !== undefined) {
+    try { parseChartData(value.chartData); }
+    catch (error) { ctx.addIssue({ code: "custom", path: ["chartData"], message: error instanceof Error ? error.message : "invalid chart data" }); }
+  }
+});
 
 const customChartProperties = z.object({
   region: z.enum(["center", "north", "south", "east", "west"]).optional(),
@@ -118,8 +126,15 @@ const easyuiDatagridProperties = z.object({
   striped: z.boolean().optional(),
   pagination: z.boolean().optional(),
   pageSize: z.number().int().min(1).max(10_000).optional(),
+  /** Typed module semantic data; never a raw configureData script. */
+  tableData: z.unknown().optional(),
   parentId,
-}).strict();
+}).strict().superRefine((value, ctx) => {
+  if (value.tableData !== undefined) {
+    try { parseTableData(value.tableData); }
+    catch (error) { ctx.addIssue({ code: "custom", path: ["tableData"], message: error instanceof Error ? error.message : "invalid table data" }); }
+  }
+});
 const easyuiTextboxProperties = z.object({
   value: z.string().optional(),
   readonly: z.boolean().optional(),

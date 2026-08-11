@@ -20,6 +20,7 @@ import { assertStyleCompilationAccepted, compileControlStyle } from "../style/st
 import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
 import { mergeManagedStyleData } from "../style/style-data-merge.js";
 import { validateCreateComponentProperties } from "../implementation/component-properties.js";
+import { parseChartData, parseTableData, toNativeChartProperties, toNativeTableProperties } from "../modules/definitions/native-data-adapters.js";
 import { controlGeometryIssues, MAX_CONTROL_GEOMETRY } from "../implementation/control-geometry.js";
 import { mergeControlTemplate, type TemplateJson } from "../templates/merge-template.js";
 import baseFieldsJson from "../templates/base-fields.json" with { type: "json" };
@@ -1236,6 +1237,13 @@ async function applyCreate(
           const value = properties[field];
           if (value !== undefined) pass[field] = value;
         }
+        if (proto === 1 && properties["tableData"] !== undefined) {
+          try {
+            Object.assign(pass, toNativeTableProperties(parseTableData(properties["tableData"])));
+          } catch (error) {
+            throw new PatchConflictError(`invalid reviewed datagrid data: ${error instanceof Error ? error.message : "unknown"}`, { cause: error });
+          }
+        }
         const overrides: TemplateJson = {
           name: op.entityId,
           guid,
@@ -1305,12 +1313,19 @@ async function applyCreate(
         }
         const RESERVED_PROTOTYPE_FIELDS = new Set([
           "type", "prototypeName", "id", "name", "guid",
-          "x", "y", "width", "height", "pageId", "uiModelType", "style",
+          "x", "y", "width", "height", "pageId", "uiModelType", "style", "chartData",
         ]);
         const pass: Record<string, unknown> = {};
         for (const [key, value] of Object.entries(properties)) {
           if (RESERVED_PROTOTYPE_FIELDS.has(key) || value === undefined) continue;
           pass[key] = value;
+        }
+        if (properties["chartData"] !== undefined) {
+          try {
+            Object.assign(pass, toNativeChartProperties(parseChartData(properties["chartData"])));
+          } catch (error) {
+            throw new PatchConflictError(`invalid reviewed chart data: ${error instanceof Error ? error.message : "unknown"}`, { cause: error });
+          }
         }
         const overrides: TemplateJson = { ...pass, guid };
         if (prototypeName === "CustomCharts") {

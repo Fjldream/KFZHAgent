@@ -12,6 +12,8 @@ import type {
   ModuleValidationResult,
 } from "./types.js";
 import { registerPortalModules } from "./definitions/portal-modules.js";
+import { registerDashboardModules } from "./definitions/dashboard-modules.js";
+import { registerAdminModules } from "./definitions/admin-modules.js";
 import type { ModuleRuntimeEvidence } from "./types.js";
 
 export type {
@@ -339,5 +341,7 @@ export class ModuleRegistry {
 export function createDefaultModuleRegistry(evidence: readonly ModuleRuntimeEvidence[] = []): ModuleRegistry {
   const registry = new ModuleRegistry();
   registerPortalModules(registry, evidence);
+  registerDashboardModules(registry);
+  registerAdminModules(registry);
   return registry;
 }

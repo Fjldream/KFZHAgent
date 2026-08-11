@@ -79,7 +79,7 @@ const PROPERTY_KEYS: Readonly<Record<string, readonly string[]>> = Object.freeze
   treeview: ["showCheckbox"],
   upload: ["action", "accept", "multiple"],
   webcontainer: ["url", "scrollbar"],
-  "easyui.1": ["striped", "pagination", "pageSize"],
+  "easyui.1": ["striped", "pagination", "pageSize", "tableData"],
   "easyui.2": ["text"],
   "easyui.9": ["value", "readonly"],
   "layout.0": ["children", "panels"],
@@ -89,13 +89,21 @@ const PROPERTY_KEYS: Readonly<Record<string, readonly string[]>> = Object.freeze
   "layout.5": ["children", "panels"],
   "layout.6": ["children", "panels"],
   "prototype.CustomCharts": ["region"],
-  "prototype.TrendChart": ["title", "areas", "comment"],
-  "prototype.BarChart": ["title", "areas", "comment"],
-  "prototype.PieChart": ["title", "areas", "comment"],
-  "prototype.XYChart": ["title", "areas", "comment"],
+  "prototype.TrendChart": ["title", "areas", "comment", "chartData"],
+  "prototype.BarChart": ["title", "areas", "comment", "chartData"],
+  "prototype.PieChart": ["title", "areas", "comment", "chartData"],
+  "prototype.XYChart": ["title", "areas", "comment", "chartData"],
 });
 
 const CONTENT_CAPABILITIES = new Set(["button", "text", "richtext"]);
+/** Data adapters deliberately materialize reviewed native structures without CSS. */
+const CONFIGURATION_ONLY_NATIVE_CAPABILITIES = new Set([
+  "easyui.1",
+  "prototype.TrendChart",
+  "prototype.BarChart",
+  "prototype.PieChart",
+  "prototype.XYChart",
+]);
 const EMPTY_STYLE: ComponentStyleSpec = Object.freeze({ declarations: {}, states: {} });
 
 /**
@@ -399,6 +407,14 @@ function selectCapability(
       reason: `Capability ${capability.id} generation is ${capability.generation.status}`,
     });
   }
+  const hasRequestedStyle = Object.keys(style.declarations).length > 0
+    || Object.values(style.states).some((state) => state !== undefined && Object.keys(state).length > 0);
+  // Reviewed native data controls may be configuration-only while their visual
+  // adapter is still beta. An empty semantic style must not manufacture a CSS
+  // fallback or prevent deterministic KF data materialization.
+  if (!hasRequestedStyle && CONFIGURATION_ONLY_NATIVE_CAPABILITIES.has(capability.id)) {
+    return { selected: { id: capability.id, capability }, issues };
+  }
   let compiled;
   try {
     compiled = compileControlStyle({
@@ -456,7 +472,7 @@ function createProperties(
     width: component.geometry.width,
     height: component.geometry.height,
     ...validatedProperties,
-    style,
+    ...(hasStyleDelta(style) ? { style } : {}),
   };
 }
 
