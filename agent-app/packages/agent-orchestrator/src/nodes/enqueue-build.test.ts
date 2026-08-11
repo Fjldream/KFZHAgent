@@ -13,13 +13,14 @@ function state(overrides: Partial<AgentGraphStateValue> = {}): AgentGraphStateVa
 
 function bed() {
   const enqueues: unknown[] = [];
+  const messages: string[] = [];
   const deps = {
     buildJobPort: { enqueue: async (input: unknown) => { enqueues.push(input); return { id: "job", status: "QUEUED" as const }; }, getJob: async () => null },
     changePlanRepository: { findOpenChangeRequest: async () => null, saveChangeRequest: async () => {}, savePlan: async () => {}, loadPlanHash: async () => undefined, setChangeRequestStatus: async () => {} },
-    workspaceQuery: { listRecentMessages: async () => [], appendMessage: async () => {}, getConversationSummary: async () => undefined, setConversationSummary: async () => {}, getCurrentRevisionId: async () => undefined, getRevisionSummary: async () => undefined, getRevisionEntities: async () => [] },
+    workspaceQuery: { listRecentMessages: async () => [], appendMessage: async (input: { content: string }) => { messages.push(input.content); }, getConversationSummary: async () => undefined, setConversationSummary: async () => {}, getCurrentRevisionId: async () => undefined, getRevisionSummary: async () => undefined, getRevisionEntities: async () => [] },
     isDomainSupported: () => true,
   } as unknown as SolutionGraphDeps;
-  return { deps, enqueues };
+  return { deps, enqueues, messages };
 }
 
 describe("enqueue build authorization", () => {
@@ -44,5 +45,14 @@ describe("enqueue build authorization", () => {
     const rejected = await createEnqueueBuildNode(direct.deps)(state({ intent: "BUILD" }));
     expect(rejected).toMatchObject({ lastErrorCode: "BUILD_REQUIRES_APPROVAL", buildAuthorization: undefined });
     expect(direct.enqueues).toHaveLength(0);
+  });
+
+  it("keeps enqueue failures bounded and never persists raw stack or secret text", async () => {
+    const testBed = bed();
+    testBed.deps.buildJobPort.enqueue = async () => { throw new Error(`secret=token\n${"x".repeat(3_000)}\u0000`); };
+    const result = await createEnqueueBuildNode(testBed.deps)(state({ buildAuthorization: "confirmed-blueprint" }));
+    expect(result.lastErrorCode).toBe("ENQUEUE_FAILED");
+    expect(JSON.stringify(result)).not.toContain("secret");
+    expect(testBed.messages.at(-1)).toBe("构建任务提交失败，请稍后重试。");
   });
 });

@@ -79,9 +79,15 @@ export function createEnqueueBuildNode(deps: SolutionGraphDeps) {
         buildAuthorization: undefined,
         pendingRequirements: undefined,
       };
-    } catch (error) {
+    } catch {
+      await deps.workspaceQuery.appendMessage({
+        tenantId: state.tenantId,
+        conversationId: state.conversationId,
+        role: "assistant",
+        content: "构建任务提交失败，请稍后重试。",
+      }).catch(() => {});
       return {
-        lastErrorCode: `ENQUEUE_FAILED:${error instanceof Error ? error.message : String(error)}`,
+        lastErrorCode: "ENQUEUE_FAILED",
         stage: "idle",
         resumeAction: undefined,
         buildAuthorization: undefined,

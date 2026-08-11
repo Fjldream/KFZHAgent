@@ -12,12 +12,14 @@ import { imageSize } from "image-size";
 import { Transform } from "node:stream";
 import { ARTIFACT_STORAGE } from "../artifacts/artifact-storage.js";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { fromModelAssetId, toModelAssetId } from "./model-asset-id.js";
 
 const DEFAULT_MAX_ASSET_BYTES = 20 * 1024 * 1024;
 const ABSOLUTE_MAX_ASSET_BYTES = 50 * 1024 * 1024;
 
 export type WorkspaceAssetCatalogItem = {
   id: string;
+  modelAssetId: string;
   type: string;
   name: string;
   mediaType: "image/png" | "image/jpeg" | "image/webp";
@@ -132,14 +134,20 @@ export class AssetService {
     await this.requireWorkspace(input.tenantId, input.workspaceId);
     const orderedIds = uniqueStable(input.assetIds);
     if (orderedIds.length === 0) return [];
+    const internalIds = new Map<string, string>();
+    const invalid: string[] = [];
+    for (const id of orderedIds) {
+      try { internalIds.set(id, fromModelAssetId(id)); } catch { invalid.push(id); }
+    }
+    if (invalid.length > 0) throw new MissingWorkspaceAssetsError(invalid);
     const rows = await this.prisma.workspaceAsset.findMany({
       where: {
         tenantId: input.tenantId,
         workspaceId: input.workspaceId,
-        id: { in: orderedIds },
+        id: { in: [...internalIds.values()] },
       },
     });
-    const byId = new Map(rows.map((row) => [row.id, toAssetRecord(row)]));
+    const byId = new Map(rows.map((row) => [toModelAssetId(row.id), toAssetRecord(row)]));
     const missingAssetIds = orderedIds.filter((id) => !byId.has(id));
     if (missingAssetIds.length > 0) throw new MissingWorkspaceAssetsError(missingAssetIds);
     return orderedIds.map((id) => byId.get(id)!);
@@ -687,6 +695,7 @@ function toCatalogItem(row: {
   }
   return {
     id: row.id,
+    modelAssetId: toModelAssetId(row.id),
     type: row.type,
     name: row.name,
     mediaType: row.mediaType,
@@ -708,7 +717,7 @@ function toAssetRecord(row: {
     throw new Error("invalid persisted workspace asset metadata");
   }
   return {
-    id: row.id,
+    id: toModelAssetId(row.id),
     kind: "image",
     name: row.name,
     mimeType: row.mediaType,

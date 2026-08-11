@@ -169,7 +169,8 @@ function fakePrisma(options: { dbFailure?: "unreferenced" | "adopted" | "unknown
           (where.storageKey === undefined || row.storageKey === where.storageKey)) ?? null;
       },
       create: async ({ data }: { data: Omit<AssetRow, "id" | "createdAt"> }) => {
-        const row: AssetRow = { ...data, id: `asset-${++rowId}`, createdAt: new Date(0) };
+        rowId += 1;
+        const row: AssetRow = { ...data, id: `00000000-0000-4000-8000-${String(rowId).padStart(12, "0")}`, createdAt: new Date(0) };
         if (options.dbFailure === "adopted") {
           rows.push(row);
           throw new Error("commit acknowledgement lost");
@@ -349,8 +350,8 @@ describe("AssetService", () => {
     const asset = await assets.upload({ tenantId: T_A, workspaceId: W_A, name: "private.png", stream: Readable.from([PNG_1X1]) });
 
     await expect(assets.list({ tenantId: T_B, workspaceId: W_A })).rejects.toThrow("workspace");
-    await expect(assets.resolveMany({ tenantId: T_B, workspaceId: W_B, assetIds: [asset.id] }))
-      .rejects.toMatchObject({ missingAssetIds: [asset.id] });
+    await expect(assets.resolveMany({ tenantId: T_B, workspaceId: W_B, assetIds: [asset.modelAssetId] }))
+      .rejects.toMatchObject({ missingAssetIds: [asset.modelAssetId] });
     expect(await assets.list({ tenantId: T_A, workspaceId: W_A })).toEqual([asset]);
   });
 
@@ -359,12 +360,12 @@ describe("AssetService", () => {
     const first = await assets.upload({ tenantId: T_A, workspaceId: W_A, name: "first.png", stream: Readable.from([PNG_1X1]) });
     const second = await assets.upload({ tenantId: T_A, workspaceId: W_A, name: "second.jpg", stream: Readable.from([JPEG_1X1]) });
 
-    await expect(assets.resolveMany({ tenantId: T_A, workspaceId: W_A, assetIds: [second.id, "missing", first.id, "missing"] }))
+    await expect(assets.resolveMany({ tenantId: T_A, workspaceId: W_A, assetIds: [second.modelAssetId, "missing", first.modelAssetId, "missing"] }))
       .rejects.toMatchObject({ missingAssetIds: ["missing"] });
-    await expect(assets.resolveMany({ tenantId: T_A, workspaceId: W_A, assetIds: [second.id, first.id] }))
+    await expect(assets.resolveMany({ tenantId: T_A, workspaceId: W_A, assetIds: [second.modelAssetId, first.modelAssetId] }))
       .resolves.toEqual([
-        { id: second.id, kind: "image", name: "second.jpg", mimeType: "image/jpeg", description: "Uploaded workspace image" },
-        { id: first.id, kind: "image", name: "first.png", mimeType: "image/png", description: "Uploaded workspace image" },
+        { id: second.modelAssetId, kind: "image", name: "second.jpg", mimeType: "image/jpeg", description: "Uploaded workspace image" },
+        { id: first.modelAssetId, kind: "image", name: "first.png", mimeType: "image/png", description: "Uploaded workspace image" },
       ]);
   });
 

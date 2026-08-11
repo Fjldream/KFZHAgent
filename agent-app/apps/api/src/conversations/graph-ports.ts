@@ -27,6 +27,7 @@ import path from "node:path";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { BuildJobService } from "../build-jobs/build-job.service.js";
 import { signAcceptedBlueprintAtConfirmation } from "./server-plan-authority.js";
+import { toModelAssetId } from "../assets/model-asset-id.js";
 
 /**
  * Real Prisma-backed ports for the solution graph (brief "Consumes" line).
@@ -281,7 +282,7 @@ export function createGraphPorts(
         if (row.type !== "image" || (row.mediaType !== "image/png" && row.mediaType !== "image/jpeg" && row.mediaType !== "image/webp")) {
           throw new Error("invalid persisted workspace asset metadata");
         }
-        return { id: row.id, kind: "image" as const, name: row.name, mimeType: row.mediaType, description: "Uploaded workspace image" };
+        return { id: toModelAssetId(row.id), kind: "image" as const, name: row.name, mimeType: row.mediaType, description: "Uploaded workspace image" };
       });
     },
   };

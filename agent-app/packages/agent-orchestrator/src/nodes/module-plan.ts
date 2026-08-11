@@ -7,6 +7,7 @@ import {
   type ChangePlan,
   type ModuleDeliveryGap,
   type ModulePlan,
+  type ModulePlanOperation,
 } from "@kf/contracts";
 import { readVerifiedAcceptedBlueprintArtifact } from "@kf/build-jobs";
 import { planHash, type ModulePlanningSummary } from "@kf/domain-client";
@@ -136,7 +137,7 @@ export function createModulePlanNode(deps: SolutionGraphDeps) {
       const raw = state.modulePlan === undefined
         ? await deps.modelPort.createModulePlan(baseContext)
         : await deps.modelPort.reviseModulePlan(baseContext);
-      candidate = parseAndPreservePlan(raw, assets, state.modulePlan);
+      candidate = parseAndPreservePlan(raw, assets, state.modulePlan, state.modulePlan, new Set(acceptedFacts.modules.map((entry) => entry.blueprintModuleId)));
       assertPlanUsesStableCatalog(candidate, planningCatalog);
     } catch (error) {
       return fail(`MODULE_PLAN_INVALID:${errorDetail(error)}`, state);
@@ -221,7 +222,7 @@ export function createModulePlanNode(deps: SolutionGraphDeps) {
           previousModulePlan: candidate,
           modulePlanRejectionReasons: reasons,
         });
-        candidate = parseAndPreservePlan(raw, assets, candidate);
+        candidate = parseAndPreservePlan(raw, assets, candidate, state.modulePlan, new Set(acceptedFacts.modules.map((entry) => entry.blueprintModuleId)));
         assertPlanUsesStableCatalog(candidate, planningCatalog);
       } catch (error) {
         return fail(`MODULE_PLAN_REPAIR_FAILED:${errorDetail(error)}`, state, repairAttempt);
@@ -288,10 +289,10 @@ async function persistSuccessfulCompilation(input: {
   };
 }
 
-function parseAndPreservePlan(raw: unknown, assets: readonly AssetRecord[], previous: ModulePlan | undefined): ModulePlan {
+function parseAndPreservePlan(raw: unknown, assets: readonly AssetRecord[], previous: ModulePlan | undefined, revisionBase: ModulePlan | undefined, acceptedIds: ReadonlySet<string>): ModulePlan {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new Error("module plan must be an object");
   const rawRecord = shallowDataRecord(raw, "module plan");
-  if (previous === undefined) return ModulePlanSchema.parse({ ...rawRecord, assets: [...assets] });
+  if (previous === undefined) return ModulePlanSchema.parse({ ...rawRecord, assets: [...assets], operations: [] });
   const rawPages = rawRecord["pages"];
   const rawOperations = rawRecord["operations"];
   if (!Array.isArray(rawPages) || !Array.isArray(rawOperations)) throw new Error("module plan pages and operations must be arrays");
@@ -300,11 +301,6 @@ function parseAndPreservePlan(raw: unknown, assets: readonly AssetRecord[], prev
     if (!Array.isArray(pageRecord["modules"])) throw new Error(`module plan page ${index} modules must be an array`);
     return { ...pageRecord, modules: [...(pageRecord["modules"] as unknown[])] };
   });
-  const presentIds = new Set(pages.flatMap((page) => page.modules.flatMap((module) => {
-    if (module === null || typeof module !== "object" || Array.isArray(module)) return [];
-    const descriptor = Object.getOwnPropertyDescriptor(module, "id");
-    return descriptor !== undefined && "value" in descriptor && typeof descriptor.value === "string" ? [descriptor.value] : [];
-  })));
   const removals = new Set(rawOperations.flatMap((operation) => {
     if (operation === null || typeof operation !== "object" || Array.isArray(operation)) return [];
     const op = Object.getOwnPropertyDescriptor(operation, "op");
@@ -316,23 +312,86 @@ function parseAndPreservePlan(raw: unknown, assets: readonly AssetRecord[], prev
       ? [`${pageId.value}\u0000${moduleId.value}`]
       : [];
   }));
-  const byId = new Map<string, (typeof pages)[number]>();
-  for (const page of pages) {
-    if (typeof page["id"] === "string") byId.set(page["id"], page);
-  }
-  for (const previousPage of previous.pages) {
-    const missing = previousPage.modules.filter((module) => !presentIds.has(module.id) && !removals.has(`${previousPage.id}\u0000${module.id}`));
-    if (missing.length === 0) continue;
-    const target = byId.get(previousPage.id);
-    if (target === undefined) {
-      const restored = { ...previousPage, modules: [...missing] };
-      pages.push(restored);
-      byId.set(restored.id, restored);
-    } else {
-      target.modules.push(...missing);
+  const explicitAdds = new Set(rawOperations.flatMap((operation) => {
+    if (operation === null || typeof operation !== "object" || Array.isArray(operation)) return [];
+    const record = operation as Record<string, unknown>;
+    const module = record["module"];
+    const pageId = record["pageId"];
+    const moduleId = module !== null && typeof module === "object" && !Array.isArray(module)
+      ? (module as Record<string, unknown>)["id"] : undefined;
+    return record["op"] === "add" && typeof pageId === "string"
+      && module !== null && typeof module === "object" && !Array.isArray(module)
+      && typeof moduleId === "string"
+      ? [`${pageId}\u0000${moduleId}`]
+      : [];
+  }));
+  const candidatePages = new Map(pages.flatMap((page) => typeof page["id"] === "string" ? [[page["id"], page] as const] : []));
+  const rebuilt = previous.pages.map((previousPage) => {
+    const candidatePage = candidatePages.get(previousPage.id);
+    const candidateModules = new Map((candidatePage?.modules ?? []).flatMap((value) => {
+      if (value === null || typeof value !== "object" || Array.isArray(value)) return [];
+      const id = Object.getOwnPropertyDescriptor(value, "id");
+      return id !== undefined && "value" in id && typeof id.value === "string" ? [[id.value, value] as const] : [];
+    }));
+    const existingIds = new Set(previousPage.modules.map((module) => module.id));
+    const modules: unknown[] = previousPage.modules.flatMap((module) => removals.has(`${previousPage.id}\u0000${module.id}`)
+      ? [] : [candidateModules.get(module.id) ?? module]);
+    const additions = [...candidateModules.entries()].filter(([id]) => !existingIds.has(id)).map(([id, value]) => {
+      if (!explicitAdds.has(`${previousPage.id}\u0000${id}`)) throw new Error(`new module requires explicit add operation: ${id}`);
+      return value;
+    }).sort((left, right) => {
+      const a = left as { placement?: { order?: number }; id?: string }; const b = right as { placement?: { order?: number }; id?: string };
+      return (a.placement?.order ?? 0) - (b.placement?.order ?? 0) || compareCodePoints(a.id ?? "", b.id ?? "");
+    });
+    for (const addition of additions) {
+      const order = (addition as { placement?: { order?: number } }).placement?.order ?? modules.length;
+      modules.splice(Math.max(0, Math.min(order, modules.length)), 0, addition);
     }
+    return { ...(candidatePage ?? previousPage), id: previousPage.id, modules };
+  });
+  const snapshot = ModulePlanSchema.parse({ ...rawRecord, assets: [...assets], pages: rebuilt, operations: [] });
+  const operations = revisionBase === undefined ? [] : deriveOperations(revisionBase, snapshot, acceptedIds);
+  return ModulePlanSchema.parse({ ...snapshot, operations });
+}
+
+function deriveOperations(previous: ModulePlan, current: ModulePlan, acceptedIds: ReadonlySet<string>): ModulePlanOperation[] {
+  if (canonicalModuleCompilationHash(previous.theme) !== canonicalModuleCompilationHash(current.theme)) throw new Error("unsupported theme change");
+  const previousPages = new Map(previous.pages.map((page) => [page.id, page]));
+  const currentPages = new Map(current.pages.map((page) => [page.id, page]));
+  if (previousPages.size !== currentPages.size || [...previousPages.keys()].some((id) => !currentPages.has(id))) throw new Error("unsupported page change");
+  for (const [id, page] of previousPages) {
+    const next = currentPages.get(id)!;
+    if (page.title !== next.title || page.mode !== next.mode) throw new Error("unsupported page metadata change");
   }
-  return ModulePlanSchema.parse({ ...rawRecord, assets: [...assets], pages });
+  const before = new Map(previous.pages.flatMap((page) => page.modules.map((module) => [module.id, { pageId: page.id, module }] as const)));
+  const after = new Map(current.pages.flatMap((page) => page.modules.map((module) => [module.id, { pageId: page.id, module }] as const)));
+  const result: ModulePlanOperation[] = [];
+  for (const [id, entry] of before) {
+    const next = after.get(id);
+    if (next === undefined) {
+      if ((entry.module.sourceBlueprintModuleIds ?? []).some((source) => acceptedIds.has(source))) throw new Error(`accepted blueprint still requires removed module: ${id}`);
+      result.push({ op: "remove", pageId: entry.pageId, moduleId: id }); continue;
+    }
+    if (entry.pageId !== next.pageId || entry.module.kind !== next.module.kind || entry.module.templateVersion !== next.module.templateVersion) throw new Error(`unsupported module identity change: ${id}`);
+    const changes: Record<string, unknown> = {};
+    for (const key of ["title", "content", "interactions", "sourceBlueprintModuleIds", "assetId"] as const) {
+      if (canonicalModuleCompilationHash(entry.module[key] ?? null) !== canonicalModuleCompilationHash(next.module[key] ?? null)) changes[key] = next.module[key] ?? null;
+    }
+    if (Object.keys(changes).length > 0) result.push({ op: "update", pageId: next.pageId, moduleId: id, changes });
+    if (canonicalModuleCompilationHash(entry.module.placement) !== canonicalModuleCompilationHash(next.module.placement)) {
+      const beforePlacement = entry.module.placement; const afterPlacement = next.module.placement;
+      const resizeOnly = beforePlacement.region === afterPlacement.region
+        && beforePlacement.order === afterPlacement.order
+        && beforePlacement.alignment === afterPlacement.alignment
+        && beforePlacement.emphasis === afterPlacement.emphasis;
+      result.push(resizeOnly
+        ? { op: "resize", pageId: next.pageId, moduleId: id, columnSpan: afterPlacement.columnSpan, preferredHeight: afterPlacement.preferredHeight }
+        : { op: "move", pageId: next.pageId, moduleId: id, placement: afterPlacement });
+    }
+    if (entry.module.variant !== next.module.variant) result.push({ op: "changeVariant", pageId: next.pageId, moduleId: id, templateVersion: next.module.templateVersion, variant: next.module.variant });
+  }
+  for (const [id, entry] of after) if (!before.has(id)) result.push({ op: "add", pageId: entry.pageId, module: entry.module });
+  return result.sort((a, b) => compareCodePoints(`${a.pageId}\u0000${a.op === "add" ? a.module.id : a.moduleId}\u0000${a.op}`, `${b.pageId}\u0000${b.op === "add" ? b.module.id : b.moduleId}\u0000${b.op}`));
 }
 
 function shallowDataRecord(value: unknown, label: string): Record<string, unknown> {
