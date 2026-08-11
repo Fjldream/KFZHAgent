@@ -9,14 +9,6 @@ const DEFAULT_PADDING = 48;
 const DEFAULT_MODULE_GAP = 24;
 const GRID_COLUMNS = 12;
 
-const DEFAULT_HEIGHTS = {
-  compact: 120,
-  small: 200,
-  medium: 320,
-  large: 420,
-  full: 520,
-} as const;
-
 export interface ModuleBounds {
   readonly x: number;
   readonly y: number;
@@ -26,6 +18,7 @@ export interface ModuleBounds {
 
 export interface PageLayoutResult {
   readonly pageId: string;
+  readonly mode: PageLayoutInput["mode"];
   readonly width: number;
   readonly height: number;
   readonly boundsByModuleId: Readonly<Record<string, ModuleBounds>>;
@@ -58,6 +51,7 @@ interface RegionBounds {
 interface Candidate {
   readonly module: ModulePlanModule;
   readonly definition: ModuleDefinition;
+  readonly validDefinitionRegion: boolean;
 }
 
 function compareCodePoints(left: string, right: string): number {
@@ -82,10 +76,9 @@ function clampPositiveInteger(value: number | undefined, fallback: number): numb
 
 function resolveHeight(candidate: Candidate): number | undefined {
   const { height } = candidate.definition.layout;
-  const min = height?.min ?? 80;
-  const preferred = height?.preferred[candidate.module.placement.preferredHeight]
-    ?? DEFAULT_HEIGHTS[candidate.module.placement.preferredHeight];
-  const max = height?.max ?? 1200;
+  const min = height.min;
+  const preferred = height.preferred[candidate.module.placement.preferredHeight];
+  const max = height.max;
   if (!Number.isInteger(min) || !Number.isInteger(preferred) || !Number.isInteger(max) || min <= 0 || max < min) {
     return undefined;
   }
@@ -102,11 +95,34 @@ function regionContent(region: RegionBounds): RegionBounds {
   };
 }
 
-function gridWidth(region: RegionBounds, span: number): number | undefined {
-  const available = region.width - ((GRID_COLUMNS - 1) * region.gap);
-  if (available < GRID_COLUMNS || span < 1 || span > GRID_COLUMNS) return undefined;
-  const unit = Math.floor(available / GRID_COLUMNS);
-  return (unit * span) + (region.gap * (span - 1));
+interface GridSlot {
+  readonly x: number;
+  readonly width: number;
+}
+
+/** Integer quotient/remainder boundaries avoid a lost pixel in non-divisible grids. */
+function gridSlot(region: RegionBounds, column: number, span: number): GridSlot | undefined {
+  const distributedWidth = region.width - ((GRID_COLUMNS - 1) * region.gap);
+  if (distributedWidth < GRID_COLUMNS || column < 0 || span < 1 || column + span > GRID_COLUMNS) return undefined;
+  const start = Math.floor((distributedWidth * column) / GRID_COLUMNS);
+  const end = Math.floor((distributedWidth * (column + span)) / GRID_COLUMNS);
+  return {
+    x: region.x + start + (region.gap * column),
+    width: (end - start) + (region.gap * (span - 1)),
+  };
+}
+
+function alignedBounds(candidate: Candidate, region: RegionBounds, column: number, slot: GridSlot, y: number, height: number): ModuleBounds | undefined {
+  const naturalSpan = Math.min(candidate.module.placement.columnSpan, candidate.definition.layout.minColumnSpan);
+  const natural = gridSlot(region, column, naturalSpan);
+  if (natural === undefined) return undefined;
+  if (candidate.module.placement.alignment === "stretch") {
+    return Object.freeze({ x: slot.x, y, width: slot.width, height });
+  }
+  const offset = candidate.module.placement.alignment === "center"
+    ? Math.floor((slot.width - natural.width) / 2)
+    : candidate.module.placement.alignment === "end" ? slot.width - natural.width : 0;
+  return Object.freeze({ x: slot.x + offset, y, width: natural.width, height });
 }
 
 function issue(code: PageLayoutIssue["code"], moduleId: string): PageLayoutIssue {
@@ -153,34 +169,47 @@ function addFixedRegion(
   issues: PageLayoutIssue[],
 ): void {
   const content = regionContent(region);
-  let x = content.x;
   let y = content.y;
   let rowHeight = 0;
+  let column = 0;
   for (const candidate of candidates) {
     const requestedHeight = resolveHeight(candidate);
-    const width = gridWidth(content, candidate.module.placement.columnSpan);
-    if (requestedHeight === undefined || width === undefined || width > content.width) {
+    let slot = gridSlot(content, column, candidate.module.placement.columnSpan);
+    if (slot === undefined) {
+      column = 0;
+      y += rowHeight + content.gap;
+      rowHeight = 0;
+      slot = gridSlot(content, column, candidate.module.placement.columnSpan);
+    }
+    if (requestedHeight === undefined || slot === undefined || candidate.module.placement.columnSpan < candidate.definition.layout.minColumnSpan) {
       issues.push(issue("MODULE_TOO_SMALL", candidate.module.id));
       continue;
     }
     const height = region.chrome ? Math.min(requestedHeight, content.height) : requestedHeight;
-    if (height < (candidate.definition.layout.height?.min ?? 80)) {
+    if (height < candidate.definition.layout.height.min) {
       issues.push(issue("MODULE_TOO_SMALL", candidate.module.id));
       continue;
     }
-    if (x + width > content.x + content.width) {
-      x = content.x;
-      y += rowHeight + content.gap;
-      rowHeight = 0;
+    const candidateBounds = alignedBounds(candidate, content, column, slot, y, height);
+    // A rejected module still owns its requested slot. Later siblings must not
+    // backfill it, otherwise a repair changes unrelated fixed-layout geometry.
+    const consumeSlot = (): void => {
+      column += candidate.module.placement.columnSpan;
+      rowHeight = Math.max(rowHeight, height);
+    };
+    if (!candidate.validDefinitionRegion || candidateBounds === undefined) {
+      issues.push(issue(!candidate.validDefinitionRegion ? "INVALID_REGION" : "MODULE_TOO_SMALL", candidate.module.id));
+      consumeSlot();
+      continue;
     }
     if (y + height > content.y + content.height) {
       const code = requestedHeight > content.height ? "MODULE_TOO_SMALL" : "LAYOUT_OVERFLOW";
       issues.push(issue(code, candidate.module.id));
+      consumeSlot();
       continue;
     }
-    bounds[candidate.module.id] = Object.freeze({ x, y, width, height });
-    x += width + content.gap;
-    rowHeight = Math.max(rowHeight, height);
+    bounds[candidate.module.id] = candidateBounds;
+    consumeSlot();
   }
 }
 
@@ -189,6 +218,7 @@ function solveVerticalFlow(
   width: number,
   padding: number,
   gap: number,
+  minimumPageHeight: number,
   bounds: Record<string, ModuleBounds>,
   issues: PageLayoutIssue[],
 ): number {
@@ -196,15 +226,59 @@ function solveVerticalFlow(
   let y = content.y;
   for (const candidate of candidates) {
     const height = resolveHeight(candidate);
-    const moduleWidth = gridWidth(content, candidate.module.placement.columnSpan);
-    if (height === undefined || moduleWidth === undefined || moduleWidth > content.width) {
+    const slot = gridSlot(content, 0, candidate.module.placement.columnSpan);
+    if (height === undefined || slot === undefined || candidate.module.placement.columnSpan < candidate.definition.layout.minColumnSpan) {
       issues.push(issue("MODULE_TOO_SMALL", candidate.module.id));
       continue;
     }
-    bounds[candidate.module.id] = Object.freeze({ x: content.x, y, width: moduleWidth, height });
+    const candidateBounds = alignedBounds(candidate, content, 0, slot, y, height);
+    if (!candidate.validDefinitionRegion || candidateBounds === undefined) {
+      issues.push(issue(!candidate.validDefinitionRegion ? "INVALID_REGION" : "MODULE_TOO_SMALL", candidate.module.id));
+      y += height + gap;
+      continue;
+    }
+    bounds[candidate.module.id] = candidateBounds;
     y += height + gap;
   }
-  return Math.max(DEFAULT_CANVAS_HEIGHT, y - gap + padding);
+  return Math.max(minimumPageHeight, y - gap + padding);
+}
+
+function isIntegerBounds(bounds: ModuleBounds): boolean {
+  return [bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isInteger)
+    && bounds.width > 0 && bounds.height > 0;
+}
+
+function overlaps(left: ModuleBounds, right: ModuleBounds): boolean {
+  return left.x < right.x + right.width && left.x + left.width > right.x
+    && left.y < right.y + right.height && left.y + left.height > right.y;
+}
+
+function reusableAnchors(
+  page: PageLayoutInput,
+  ordered: readonly Candidate[],
+  current: Record<string, ModuleBounds>,
+): void {
+  const previous = page.previousLayout;
+  if (previous?.pageId !== page.id || previous.mode !== page.mode || previous.width <= 0 || previous.height <= 0) return;
+  const prior = ordered
+    .map((candidate) => ({ candidate, bounds: previous.boundsByModuleId[candidate.module.id] }))
+    .filter((entry): entry is { candidate: Candidate; bounds: ModuleBounds } => entry.bounds !== undefined);
+  if (prior.some(({ bounds }) => !isIntegerBounds(bounds)) || prior.some((entry, index) => prior.slice(index + 1).some((other) => overlaps(entry.bounds, other.bounds)))) return;
+
+  // The first calculated difference is the revision's affected range. Only a
+  // valid unchanged prefix may borrow prior objects; later values are always
+  // the fresh deterministic solution and anchors never override constraints.
+  let affected = false;
+  for (const candidate of ordered) {
+    const next = current[candidate.module.id];
+    const old = previous.boundsByModuleId[candidate.module.id];
+    if (next === undefined || old === undefined
+      || old.x !== next.x || old.y !== next.y || old.width !== next.width || old.height !== next.height) {
+      affected = true;
+      continue;
+    }
+    if (!affected) current[candidate.module.id] = old;
+  }
 }
 
 /**
@@ -228,16 +302,12 @@ export function solvePageLayout(page: PageLayoutInput, registry: ModuleRegistry)
       issues.push(issue("INVALID_REGION", module.id));
       continue;
     }
-    if (!definition.layout.regions.includes(module.placement.region)) {
-      issues.push(issue("INVALID_REGION", module.id));
-      continue;
-    }
-    candidates.push({ module, definition });
+    candidates.push({ module, definition, validDefinitionRegion: definition.layout.regions.includes(module.placement.region) });
   }
 
   const ordered = sortCandidates(candidates);
   const height = page.mode === "vertical-flow"
-    ? solveVerticalFlow(ordered, width, padding, gap, bounds, issues)
+    ? solveVerticalFlow(ordered, width, padding, gap, fixedHeight, bounds, issues)
     : fixedHeight;
   if (page.mode !== "vertical-flow") {
     const regions = fixedRegionBounds(page.mode, width, fixedHeight, padding, gap);
@@ -251,23 +321,11 @@ export function solvePageLayout(page: PageLayoutInput, registry: ModuleRegistry)
     }
   }
 
-  // Reuse exact prior bounds for the unchanged prefix/siblings. This keeps
-  // revision identity stable without moving unaffected modules to repair a later one.
-  if (page.previousLayout?.pageId === page.id) {
-    for (const [moduleId, current] of Object.entries(bounds)) {
-      const previous = page.previousLayout.boundsByModuleId[moduleId];
-      if (previous !== undefined
-        && previous.x === current.x
-        && previous.y === current.y
-        && previous.width === current.width
-        && previous.height === current.height) {
-        bounds[moduleId] = previous;
-      }
-    }
-  }
+  reusableAnchors(page, ordered, bounds);
 
   return Object.freeze({
     pageId: page.id,
+    mode: page.mode,
     width,
     height,
     boundsByModuleId: Object.freeze(bounds),

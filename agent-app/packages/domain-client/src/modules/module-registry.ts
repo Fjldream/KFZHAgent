@@ -58,7 +58,6 @@ function freezeFallbackPolicy(policy: ModuleFallbackPolicy): ModuleFallbackPolic
 }
 
 function freezeHeightContract(height: ModuleDefinition["layout"]["height"]): ModuleDefinition["layout"]["height"] {
-  if (height === undefined) return undefined;
   return Object.freeze({
     min: height.min,
     preferred: Object.freeze({ ...height.preferred }),
@@ -78,7 +77,7 @@ function freezeDefinition(definition: ModuleDefinition): ModuleDefinition {
     maxColumnSpan: definition.layout.maxColumnSpan,
     preferredHeights: freezeArray(definition.layout.preferredHeights),
     interactions: freezeArray(definition.layout.interactions),
-    ...(height === undefined ? {} : { height }),
+    height,
   });
 
   return Object.freeze({
@@ -134,13 +133,17 @@ function assertDefinition(definition: ModuleDefinition): void {
     fail("MODULE_DEFINITION_INVALID", `${key} has invalid layout bounds`);
   }
   const height = definition.layout.height;
-  if (height !== undefined && (
-    !Number.isInteger(height.min)
+  if (
+    height === undefined
+    || !Number.isInteger(height.min)
     || !Number.isInteger(height.max)
     || height.min <= 0
     || height.max < height.min
-    || Object.values(height.preferred).some((value) => !Number.isInteger(value) || value <= 0)
-  )) {
+    || definition.layout.preferredHeights.some((preferredHeight) => {
+      const value = height.preferred[preferredHeight];
+      return !Number.isInteger(value) || value < height.min || value > height.max;
+    })
+  ) {
     fail("MODULE_DEFINITION_INVALID", `${key} has invalid layout height bounds`);
   }
 }

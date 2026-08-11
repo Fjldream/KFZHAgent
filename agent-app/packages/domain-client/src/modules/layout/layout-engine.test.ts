@@ -22,7 +22,7 @@ function definition(overrides: Partial<ModuleDefinition> = {}): ModuleDefinition
       maxColumnSpan: 12,
       preferredHeights: ["compact", "small", "medium", "large", "full"],
       interactions: [],
-      height: { min: 80, preferred: { full: 520 }, max: 600 },
+      height: { min: 80, preferred: { compact: 120, small: 200, medium: 320, large: 420, full: 520 }, max: 600 },
     },
     compile: () => ({ components: [], deliveryGaps: [] }),
     ...overrides,
@@ -62,7 +62,7 @@ describe("solvePageLayout", () => {
       id: "portal",
       mode: "vertical-flow",
       modules: [module("hero", 0), module("portfolio", 1)],
-    }, registryFor(definition({ layout: { ...definition().layout, height: { min: 24, preferred: { full: 520 }, max: 600 } } })));
+    }, registryFor(definition({ layout: { ...definition().layout, height: { min: 24, preferred: { compact: 120, small: 200, medium: 320, large: 420, full: 520 }, max: 600 } } })));
 
     expect(result.height).toBe(1160);
     expect(result.boundsByModuleId).toEqual({
@@ -77,7 +77,7 @@ describe("solvePageLayout", () => {
       id: "portal",
       mode: "vertical-flow",
       modules: [module("hero", 0)],
-    }, registryFor(definition({ layout: { ...definition().layout, height: { min: 24, preferred: { full: 520 }, max: 600 } } })));
+    }, registryFor(definition({ layout: { ...definition().layout, height: { min: 24, preferred: { compact: 120, small: 200, medium: 320, large: 420, full: 520 }, max: 600 } } })));
 
     expect(result.boundsByModuleId.hero).toEqual({ x: 48, y: 48, width: 1344, height: 520 });
   });
@@ -105,7 +105,7 @@ describe("solvePageLayout", () => {
         module("sidebar", 0, { placement: { ...module("sidebar", 0).placement, region: "sidebar" } }),
         module("table", 0),
       ],
-    }, registryFor(definition({ layout: { ...definition().layout, height: { min: 24, preferred: { full: 520 }, max: 600 } } })));
+    }, registryFor(definition({ layout: { ...definition().layout, height: { min: 24, preferred: { compact: 120, small: 200, medium: 320, large: 420, full: 520 }, max: 600 } } })));
 
     expect(result.boundsByModuleId.header).toEqual({ x: 24, y: 12, width: 1392, height: 40 });
     expect(result.boundsByModuleId.sidebar).toEqual({ x: 24, y: 88, width: 192, height: 520 });
@@ -146,7 +146,7 @@ describe("solvePageLayout", () => {
 
   it("returns MODULE_TOO_SMALL when a fixed page cannot honor a module minimum height", () => {
     const registry = registryFor(definition({
-      layout: { ...definition().layout, height: { min: 900, preferred: { full: 900 }, max: 900 } },
+      layout: { ...definition().layout, height: { min: 900, preferred: { compact: 900, small: 900, medium: 900, large: 900, full: 900 }, max: 900 } },
     }));
     const result = solvePageLayout({
       id: "dashboard",
@@ -156,5 +156,122 @@ describe("solvePageLayout", () => {
 
     expect(result.boundsByModuleId).toEqual({});
     expect(result.issues).toEqual([{ code: "MODULE_TOO_SMALL", moduleId: "oversized" }]);
+  });
+
+  it("fills a non-divisible twelve-column content width exactly", () => {
+    const result = solvePageLayout({
+      id: "non-divisible",
+      mode: "vertical-flow",
+      canvasWidth: 1441,
+      modules: [module("full", 0)],
+    }, registryFor(definition()));
+
+    expect(result.boundsByModuleId.full).toEqual({ x: 48, y: 48, width: 1345, height: 520 });
+  });
+
+  it.each([
+    ["start", 48],
+    ["center", 162],
+    ["end", 276],
+    ["stretch", 48],
+  ] as const)("aligns a narrower module at %s within its assigned grid slot", (alignment, expectedX) => {
+    const result = solvePageLayout({
+      id: `alignment-${alignment}`,
+      mode: "vertical-flow",
+      modules: [module("aligned", 0, {
+        placement: { ...module("aligned", 0).placement, columnSpan: 6, alignment },
+      })],
+    }, registryFor(definition({ layout: { ...definition().layout, minColumnSpan: 4 } })));
+
+    expect(result.boundsByModuleId.aligned).toEqual({
+      x: expectedX,
+      y: 48,
+      width: alignment === "stretch" ? 660 : 432,
+      height: 520,
+    });
+  });
+
+  it("honors a trusted vertical-flow canvas minimum height", () => {
+    const result = solvePageLayout({
+      id: "tall-canvas",
+      mode: "vertical-flow",
+      canvasHeight: 2000,
+      modules: [module("hero", 0)],
+    }, registryFor(definition()));
+
+    expect(result.height).toBe(2000);
+  });
+
+  it("reserves a failed fixed-layout module footprint so a later sibling cannot backfill it", () => {
+    const result = solvePageLayout({
+      id: "fixed-failure",
+      mode: "dashboard-grid",
+      modules: [
+        module("a", 0, { placement: { ...module("a", 0).placement, preferredHeight: "small" } }),
+        module("b", 1),
+        module("c", 2, { placement: { ...module("c", 2).placement, preferredHeight: "small" } }),
+      ],
+    }, registryFor(definition({ layout: {
+      ...definition().layout,
+      height: { min: 80, preferred: { compact: 120, small: 200, medium: 320, large: 420, full: 700 }, max: 700 },
+    } })));
+
+    expect(result.boundsByModuleId.a).toEqual({ x: 48, y: 48, width: 1344, height: 200 });
+    expect(result.boundsByModuleId).not.toHaveProperty("b");
+    expect(result.boundsByModuleId).not.toHaveProperty("c");
+    expect(result.issues).toEqual([
+      { code: "LAYOUT_OVERFLOW", moduleId: "b" },
+      { code: "LAYOUT_OVERFLOW", moduleId: "c" },
+    ]);
+  });
+
+  it("anchors the unchanged fixed-layout prefix while recomputing its affected sibling", () => {
+    const registry = registryFor(definition());
+    const before = solvePageLayout({
+      id: "fixed-anchor",
+      mode: "dashboard-grid",
+      modules: [
+        module("a", 0, { placement: { ...module("a", 0).placement, preferredHeight: "small" } }),
+        module("b", 1, { placement: { ...module("b", 1).placement, preferredHeight: "small" } }),
+      ],
+    }, registry);
+    const after = solvePageLayout({
+      id: "fixed-anchor",
+      mode: "dashboard-grid",
+      previousLayout: before,
+      modules: [
+        module("a", 0, { placement: { ...module("a", 0).placement, preferredHeight: "small" } }),
+        module("b", 1),
+      ],
+    }, registry);
+
+    expect(after.boundsByModuleId.a).toBe(before.boundsByModuleId.a);
+    expect(after.boundsByModuleId.b).toEqual({ x: 48, y: 272, width: 1344, height: 520 });
+    expect(after.boundsByModuleId.b).not.toBe(before.boundsByModuleId.b);
+  });
+
+  it("rejects stale and overlapping previous anchors before deterministic recomputation", () => {
+    const registry = registryFor(definition());
+    const result = solvePageLayout({
+      id: "anchors",
+      mode: "vertical-flow",
+      modules: [module("a", 0), module("b", 1)],
+      previousLayout: {
+        pageId: "anchors",
+        mode: "vertical-flow",
+        width: 1440,
+        height: 1160,
+        boundsByModuleId: {
+          a: { x: 48, y: 48, width: 1344, height: 520 },
+          b: { x: 48, y: 48, width: 1344, height: 520 },
+        },
+        issues: [],
+      },
+    }, registry);
+
+    expect(result.boundsByModuleId).toEqual({
+      a: { x: 48, y: 48, width: 1344, height: 520 },
+      b: { x: 48, y: 592, width: 1344, height: 520 },
+    });
   });
 });

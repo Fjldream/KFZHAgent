@@ -12,6 +12,7 @@ const layout = {
   maxColumnSpan: 8,
   preferredHeights: ["medium"] as const,
   interactions: ["navigate", "scroll"] as const,
+  height: { min: 100, preferred: { compact: 120, small: 180, medium: 240, large: 300, full: 400 }, max: 400 },
 };
 
 function definition(overrides: Partial<ModuleDefinition> = {}): ModuleDefinition {
@@ -58,6 +59,25 @@ const assets = [{
 }];
 
 describe("versioned module registry", () => {
+  it("rejects missing, incomplete, and out-of-range module height contracts", () => {
+    const registry = new ModuleRegistry();
+    expect(() => registry.register(definition({ layout: { ...layout, height: undefined } as unknown as ModuleDefinition["layout"] })))
+      .toThrow("MODULE_DEFINITION_INVALID: hero@1.0.0 has invalid layout height bounds");
+    expect(() => registry.register(definition({ layout: { ...layout, height: { min: 100, preferred: {}, max: 400 } } as unknown as ModuleDefinition["layout"] })))
+      .toThrow("MODULE_DEFINITION_INVALID: hero@1.0.0 has invalid layout height bounds");
+    expect(() => registry.register(definition({ layout: { ...layout, height: { min: 300, preferred: { medium: 240 }, max: 400 } } as unknown as ModuleDefinition["layout"] })))
+      .toThrow("MODULE_DEFINITION_INVALID: hero@1.0.0 has invalid layout height bounds");
+  });
+
+  it("deep-freezes complete registered height contracts", () => {
+    const registry = new ModuleRegistry();
+    registry.register(definition());
+    const height = registry.require("hero", "1.0.0").layout.height;
+
+    expect(height).toEqual({ min: 100, preferred: { compact: 120, small: 180, medium: 240, large: 300, full: 400 }, max: 400 });
+    expect(Object.isFrozen(height)).toBe(true);
+    expect(Object.isFrozen(height.preferred)).toBe(true);
+  });
   it("rejects duplicate kind@version definitions", () => {
     const registry = new ModuleRegistry();
     registry.register(definition());
