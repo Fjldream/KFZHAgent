@@ -1,6 +1,6 @@
 import type { EnqueueBuildInput } from "@kf/build-jobs";
 import type { BuildJobStatus } from "@kf/build-jobs";
-import type { ChangePlan } from "@kf/contracts";
+import type { CapabilityReport, ChangePlan, UIImplementationSpec } from "@kf/contracts";
 import type { ModelPort } from "./model-port.js";
 import type { GraphMessage } from "./state.js";
 
@@ -147,6 +147,20 @@ export interface PlanArtifactsPort {
   create(input: PlanArtifactsInput): Promise<PlanArtifactRefs>;
 }
 
+export interface UiImplementationCompilerInput {
+  workspaceId: string;
+  spec: UIImplementationSpec;
+  editableEntities: EditableEntity[];
+}
+
+/** Domain-owned deterministic implementation boundary; the model never emits ChangePlan here. */
+export interface UiImplementationCompilerPort {
+  compile(input: UiImplementationCompilerInput): Promise<{
+    plan: ChangePlan;
+    capabilityReport: CapabilityReport;
+  }>;
+}
+
 /**
  * All dependencies the solution graph needs. The graph owns no persistence of
  * its own: every side effect flows through these ports so the graph itself
@@ -158,6 +172,8 @@ export interface SolutionGraphDeps {
   changePlanRepository: ChangePlanRepository;
   buildJobPort: BuildJobPort;
   planArtifacts?: PlanArtifactsPort;
+  /** Present for domains whose confirmed blueprints can compile through an implementation spec. */
+  uiImplementationCompiler?: UiImplementationCompilerPort;
   /** Domain support predicate (DomainRegistry-backed in production). */
   isDomainSupported: (domain: string) => boolean;
   /** Domain used when enqueueing a build (defaults to the KF client domain). */

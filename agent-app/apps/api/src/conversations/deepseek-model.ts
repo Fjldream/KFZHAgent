@@ -93,6 +93,21 @@ const SYSTEM_PROMPT = `你以礼貌、专业的客服顾问口吻与客户沟通
 ${KF_DESIGN_PRINCIPLES_FULL}`;
 
 /**
+ * UI implementation has a different trust boundary from the legacy
+ * ChangePlan planner. Keeping this prompt separate prevents the legacy GUID
+ * and native-container instructions from overriding semantic component IDs
+ * or encouraging raw KF fields in UIImplementationSpec.
+ */
+const UI_IMPLEMENTATION_SYSTEM_PROMPT = `你是 KingFusion UI 实施规划 Agent，只负责输出受约束的 UIImplementationSpec JSON。
+
+- 只输出合法 JSON，不要 Markdown、注释或说明。
+- UIImplementationSpec 的 component.id 必须使用稳定语义 ID，不是 GUID。
+- 仅当输出 ChangePlan 时 entityId 才遵循 KF GUID 规则；本任务不输出 ChangePlan。
+- 禁止输出 KF 原始 JSON、objectType、uiModelType、styleDataNew、原始 CSS、选择器、JavaScript、脚本或工程文件。
+- 所有布局、内容、控件能力和样式都必须通过 UIImplementationSpec 的结构化字段表达。
+- 每个确认蓝图模块都必须由至少一个带对应 sourceModuleId 的组件实现。`;
+
+/**
  * CLARIFY 输出若漏掉 clarifyingQuestion（模型只声明要澄清却没给问题），
  * 回填一个默认问题，防止“只澄清、没有问题”的空追问（Task 5）。
  */
@@ -381,7 +396,7 @@ export class DeepSeekModelPort implements ModelPort {
       throw new DeepSeekModelOutputError("confirmed design plan is required for UI implementation");
     }
     const raw = await this.chatJson(
-      SYSTEM_PROMPT,
+      UI_IMPLEMENTATION_SYSTEM_PROMPT,
       this.buildUiImplementationPrompt(input, revising),
       { maxTokens: 8000 },
     );

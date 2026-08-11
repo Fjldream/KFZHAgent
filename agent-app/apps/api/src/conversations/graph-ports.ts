@@ -1,9 +1,17 @@
-import type { BuildJobPort, WorkspaceQueryPort } from "@kf/agent-orchestrator";
+import type {
+  BuildJobPort,
+  UiImplementationCompilerPort,
+  WorkspaceQueryPort,
+} from "@kf/agent-orchestrator";
 import type { ChangePlanRepository } from "@kf/agent-orchestrator";
 import type { EditableEntity } from "@kf/agent-orchestrator";
 import type { GraphMessage } from "@kf/agent-orchestrator";
-import { deriveGuid } from "@kf/domain-client";
-import { importNativeClientPackage, inspectClientProject } from "@kf/domain-client";
+import {
+  compileUiImplementation,
+  deriveGuid,
+  importNativeClientPackage,
+  inspectClientProject,
+} from "@kf/domain-client";
 import type { ArtifactStorage } from "@kf/artifact-storage";
 import type { ChangePlan } from "@kf/contracts";
 import type { Prisma } from "@prisma/client";
@@ -26,6 +34,7 @@ export interface GraphPorts {
   workspaceQuery: WorkspaceQueryPort;
   changePlanRepository: ChangePlanRepository;
   buildJobPort: BuildJobPort;
+  uiImplementationCompiler: UiImplementationCompilerPort;
 }
 
 export function createGraphPorts(
@@ -111,7 +120,10 @@ export function createGraphPorts(
             kind: "page",
             name: pageName,
             type: "page",
-            guid: deriveGuid({ seed: workspaceId }, pageName),
+            // Page compiler uses the page name and adds the native `k`
+            // prefix. Missing that prefix makes every later create operation
+            // target a page GUID that does not exist in the package.
+            guid: `k${deriveGuid({ seed: workspaceId }, pageName)}`,
           });
         }
         const controls = Array.isArray(page["controls"]) ? page["controls"] : [];
@@ -183,7 +195,29 @@ export function createGraphPorts(
     },
   };
 
-  return { workspaceQuery, changePlanRepository, buildJobPort };
+  const uiImplementationCompiler: UiImplementationCompilerPort = {
+    compile({ workspaceId, spec, editableEntities }) {
+      const pageGuidById: Record<string, string> = Object.create(null) as Record<string, string>;
+      const existingControlGuidByComponentId: Record<string, string> = Object.create(null) as Record<string, string>;
+      const existingControlCapabilityIdByComponentId: Record<string, string> = Object.create(null) as Record<string, string>;
+      for (const entity of editableEntities) {
+        if (entity.kind === "page") {
+          pageGuidById[entity.name] = entity.guid;
+        } else if (entity.kind === "control") {
+          existingControlGuidByComponentId[entity.name] = entity.guid;
+          existingControlCapabilityIdByComponentId[entity.name] = entity.type;
+        }
+      }
+      return Promise.resolve(compileUiImplementation(spec, {
+        workspaceId,
+        pageGuidById,
+        existingControlGuidByComponentId,
+        existingControlCapabilityIdByComponentId,
+      }));
+    },
+  };
+
+  return { workspaceQuery, changePlanRepository, buildJobPort, uiImplementationCompiler };
 }
 
 async function inspectBuiltClientEntities(

@@ -238,10 +238,39 @@ class StubModelPort implements ModelPort {
     };
   }
   async createUiImplementation(): Promise<UIImplementationSpec> {
-    throw new Error("createUiImplementation fixture not configured");
+    return {
+      schema: "kf-ui-implementation/v1",
+      theme: {
+        background: "#0f172a",
+        surface: "#111827",
+        primary: "#2563eb",
+        accent: "#38bdf8",
+        textPrimary: "#f8fafc",
+        textSecondary: "#cbd5e1",
+        fontFamily: "Arial",
+        spacingUnit: 8,
+        radiusScale: { small: 4, medium: 8, large: 16 },
+      },
+      pages: [{
+        id: "Page1",
+        width: 1440,
+        height: 900,
+        components: [{
+          id: "MainTitle",
+          role: "heading",
+          sourceModuleId: "main",
+          capabilityId: "text",
+          critical: true,
+          content: "hello",
+          geometry: { x: 40, y: 40, width: 320, height: 48 },
+          properties: {},
+          style: { declarations: { fontSize: 24 }, states: {} },
+        }],
+      }],
+    };
   }
-  async reviseUiImplementation(): Promise<UIImplementationSpec> {
-    throw new Error("reviseUiImplementation fixture not configured");
+  async reviseUiImplementation(input: ModelPortContext): Promise<UIImplementationSpec> {
+    return input.uiImplementation ?? this.createUiImplementation();
   }
   async createChangePlan(input: ModelPortContext): Promise<ChangePlan> {
     return {
@@ -331,6 +360,29 @@ function makeDeps() {
     workspaceQuery: ports.workspaceQuery,
     changePlanRepository: ports.changePlanRepository,
     buildJobPort: ports.buildJobPort,
+    uiImplementationCompiler: {
+      async compile({ workspaceId, spec }) {
+        return {
+          plan: {
+            schema: "kf-change-plan/v1" as const,
+            workspaceId,
+            operations: spec.pages.flatMap((page) => page.components.map((component) => ({
+              op: "create" as const,
+              entityType: "control",
+              entityId: component.id,
+              properties: { pageId: `page-${page.id}`, type: component.capabilityId },
+            }))),
+          },
+          capabilityReport: {
+            status: "warning" as const,
+            full: [],
+            partial: ["text"],
+            unsupported: [],
+            deliveryGaps: [],
+          },
+        };
+      },
+    },
     isDomainSupported: () => true,
   };
   return deps;

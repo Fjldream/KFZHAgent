@@ -15,6 +15,7 @@ import { createPlanChangeNode } from "./nodes/plan-change.js";
 import { createDesignPlanNode } from "./nodes/design-plan.js";
 import { createApprovalNode, createCancelPlanNode } from "./nodes/approval.js";
 import { createEnqueueBuildNode } from "./nodes/enqueue-build.js";
+import { createImplementationPlanNode } from "./nodes/implementation-plan.js";
 
 /**
  * Thrown when the caller tries to run a conversation that is paused at the
@@ -43,7 +44,7 @@ export class ApprovalResumeRequiredError extends Error {
  *   CLARIFY             → clarify (question persisted, clarificationCount+1, idle)
  *   NEW_REQUIREMENT     → plan-change
  *   MODIFY_REQUIREMENT  → plan-change
- *   CONFIRM_DESIGN      → plan-change (design plan confirmed; guard requires designPlanHash)
+ *   CONFIRM_DESIGN      → implementation-plan (confirmed blueprint → deterministic ChangePlan)
  *   REVISE_DESIGN       → design-plan (revision loop, revising=true; also routes preview feedback)
  *   CONFIRM_BUILD       → done (preview-review loop lands, stage=done)
  *   MODIFY_REQUIREMENT  → plan-change (small tweaks; also routes preview feedback)
@@ -71,6 +72,7 @@ export function compileSolutionGraph(
     .addNode("classify-intent", createClassifyIntentNode(deps))
     .addNode("clarify", createClarifyNode(deps))
     .addNode("design-plan", createDesignPlanNode(deps))
+    .addNode("implementation-plan", createImplementationPlanNode(deps))
     .addNode("plan-change", createPlanChangeNode(deps))
     .addNode("approval", createApprovalNode())
     .addNode("cancel-plan", createCancelPlanNode(deps))
@@ -79,6 +81,7 @@ export function compileSolutionGraph(
     .addEdge(START, "load-context")
     .addEdge("load-context", "classify-intent")
     .addConditionalEdges("classify-intent", routeAfterClassify)
+    .addConditionalEdges("implementation-plan", routeAfterPlanChange)
     .addConditionalEdges("plan-change", routeAfterPlanChange)
     .addConditionalEdges("approval", routeAfterApproval)
     .addEdge("cancel-plan", END)
@@ -103,10 +106,11 @@ function routeAfterClassify(state: AgentGraphStateValue): string {
     case "NEW_REQUIREMENT":
     case "MODIFY_REQUIREMENT":
       // 两遍流程（spec §5）：首次需求（无已确认设计计划）必须先出设计计划，
-      // 客户确认后再进 plan-change；已有确认过的设计（如预览反馈小改）直接 plan-change。
-      return state.designPlanHash === undefined ? "design-plan" : "plan-change";
+      // 客户确认后再进 implementation-plan；已有确认过的设计（如预览反馈小改）
+      // 直接复用已确认蓝图和上一版实施规格。
+      return state.designPlanHash === undefined ? "design-plan" : "implementation-plan";
     case "CONFIRM_DESIGN":
-      return "plan-change";
+      return "implementation-plan";
     case "REVISE_DESIGN":
       return "design-plan";
     case "CONFIRM_BUILD":
@@ -158,7 +162,7 @@ function routeAfterApproval(state: AgentGraphStateValue): string {
     case "approve":
       return "enqueue-build";
     case "revise":
-      return "plan-change";
+      return state.designPlanHash === undefined ? "plan-change" : "implementation-plan";
     case "cancel":
       return "cancel-plan";
     default:

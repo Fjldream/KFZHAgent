@@ -4,6 +4,7 @@ import { deriveGuid, planHash } from "@kf/domain-client";
 import {
   solutionId,
   type ChangePlan,
+  type CapabilityReport,
   type CustomerEffectBlueprint,
   type DesignPlan,
   type SolutionIR,
@@ -77,7 +78,7 @@ interface StoredRequest {
 
 class FakeChangePlanRepository implements ChangePlanRepository {
   requests = new Map<string, StoredRequest>();
-  plans = new Map<string, { planHash: string }>();
+  plans = new Map<string, { planHash: string; plan: ChangePlan }>();
   statusCalls: { changeRequestId: string; status: string }[] = [];
 
   async findOpenChangeRequest({
@@ -93,8 +94,8 @@ class FakeChangePlanRepository implements ChangePlanRepository {
   async saveChangeRequest(input: { id: string; status: string }): Promise<void> {
     this.requests.set(input.id, { id: input.id, status: input.status });
   }
-  async savePlan(input: { id: string; planHash: string }): Promise<void> {
-    this.plans.set(input.id, { planHash: input.planHash });
+  async savePlan(input: { id: string; planHash: string; plan: ChangePlan }): Promise<void> {
+    this.plans.set(input.id, { planHash: input.planHash, plan: input.plan });
   }
   async loadPlanHash({ changePlanId }: { changePlanId: string }): Promise<string | undefined> {
     return this.plans.get(changePlanId)?.planHash;
@@ -138,6 +139,8 @@ class FakeModelPort implements ModelPort {
   classifyInputs: ModelPortContext[] = [];
   createCalls: ModelPortContext[] = [];
   reviseCalls: ModelPortContext[] = [];
+  implementationCreateCalls: ModelPortContext[] = [];
+  implementationReviseCalls: ModelPortContext[] = [];
   createdPlans: ChangePlan[] = [];
   /** When true, createChangePlan/reviseChangePlan return a schema-invalid plan. */
   invalidPlan = false;
@@ -146,6 +149,7 @@ class FakeModelPort implements ModelPort {
   /** When true, createProjectDesign returns a schema-invalid design (I1). */
   invalidDesign = false;
   private seq = 0;
+  private implementationSeq = 0;
 
   queueIntent(...intents: Intent[]): void {
     this.intents.push(...intents);
@@ -283,12 +287,14 @@ class FakeModelPort implements ModelPort {
     };
   }
 
-  async createUiImplementation(): Promise<UIImplementationSpec> {
-    throw new Error("createUiImplementation fixture not configured");
+  async createUiImplementation(input: ModelPortContext): Promise<UIImplementationSpec> {
+    this.implementationCreateCalls.push(input);
+    return this.makeImplementation(input, "new");
   }
 
-  async reviseUiImplementation(): Promise<UIImplementationSpec> {
-    throw new Error("reviseUiImplementation fixture not configured");
+  async reviseUiImplementation(input: ModelPortContext): Promise<UIImplementationSpec> {
+    this.implementationReviseCalls.push(input);
+    return this.makeImplementation(input, "rev");
   }
 
   async createChangePlan(input: ModelPortContext): Promise<ChangePlan> {
@@ -327,6 +333,43 @@ class FakeModelPort implements ModelPort {
       ],
     };
   }
+
+  private makeImplementation(input: ModelPortContext, tag: string): UIImplementationSpec {
+    this.implementationSeq += 1;
+    const moduleIds = input.designPlan?.schema === "kf-design-plan/v2"
+      ? input.designPlan.modules.map((module) => module.id)
+      : ["main"];
+    return {
+      schema: "kf-ui-implementation/v1",
+      theme: {
+        background: "#0f172a",
+        surface: "#111827",
+        primary: "#2563eb",
+        accent: "#38bdf8",
+        textPrimary: "#f8fafc",
+        textSecondary: "#cbd5e1",
+        fontFamily: "Arial",
+        spacingUnit: 8,
+        radiusScale: { small: 4, medium: 8, large: 16 },
+      },
+      pages: [{
+        id: "Page1",
+        width: 1440,
+        height: 900,
+        components: moduleIds.map((sourceModuleId, index) => ({
+          id: `${sourceModuleId}-title`,
+          role: "section-heading",
+          sourceModuleId,
+          capabilityId: "text",
+          critical: true,
+          content: `${tag}-${this.implementationSeq}-${sourceModuleId}`,
+          geometry: { x: 60, y: 60 + index * 80, width: 320, height: 40 },
+          properties: {},
+          style: { declarations: { fontSize: 24 }, states: {} },
+        })),
+      }],
+    };
+  }
 }
 
 interface Bed {
@@ -343,11 +386,40 @@ function createBed(): Bed {
   const repo = new FakeChangePlanRepository();
   const builds = new FakeBuildJobPort();
   const model = new FakeModelPort();
+  const capabilityReport: CapabilityReport = {
+    status: "warning",
+    full: [],
+    partial: ["text"],
+    unsupported: [],
+    deliveryGaps: [],
+  };
   const deps: SolutionGraphDeps = {
     modelPort: model,
     workspaceQuery: workspace,
     changePlanRepository: repo,
     buildJobPort: builds,
+    uiImplementationCompiler: {
+      async compile({ workspaceId, spec }) {
+        const plan: ChangePlan = {
+          schema: "kf-change-plan/v1",
+          workspaceId,
+          operations: spec.pages.flatMap((page) => page.components.map((component) => ({
+            op: "create" as const,
+            entityType: "control",
+            entityId: component.id,
+            properties: {
+              pageId: `page-${page.id}`,
+              type: component.capabilityId,
+              text: component.content,
+            },
+          }))),
+        };
+        if (model.invalidPlan) {
+          return { plan: { ...plan, schema: "kf-change-plan/v0" } as unknown as ChangePlan, capabilityReport };
+        }
+        return { plan, capabilityReport };
+      },
+    },
     isDomainSupported: () => true,
   };
   const graph = compileSolutionGraph(deps, { checkpointer: new MemorySaver() });
@@ -494,10 +566,24 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     expect(payload.summary).toContain("计划包含");
     expect(payload.diffArtifactId).toBeUndefined();
     expect(payload.previewArtifactId).toBeUndefined();
-    expect(bed.model.createCalls).toHaveLength(1);
-    expect(bed.model.createCalls[0]?.currentRevisionId).toBe(REVISION_1);
+    expect(bed.model.implementationCreateCalls).toHaveLength(1);
+    expect(bed.model.implementationCreateCalls[0]?.currentRevisionId).toBe(REVISION_1);
     expect(bed.repo.plans.size).toBe(1);
     expect(bed.repo.statusOf(`cr:${WORKSPACE_ID}:${CONVERSATION_ID}`)).toBe("OPEN");
+  });
+
+  it("routes a confirmed blueprint through UI implementation compilation instead of model-authored ChangePlan", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+
+    await planNewRequirement(bed, ctx, "新增一个输入框");
+
+    expect(bed.model.implementationCreateCalls).toHaveLength(1);
+    expect(bed.model.createCalls).toHaveLength(0);
+    const stored = [...bed.repo.plans.values()][0];
+    expect(stored?.plan.operations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ entityId: "main-title" }),
+    ]));
   });
 
   it("re-plans on a revise resume and interrupts again with a different planHash", async () => {
@@ -511,7 +597,7 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     );
     const second = await interruptPayload(bed, ctx);
 
-    expect(bed.model.reviseCalls).toHaveLength(1);
+    expect(bed.model.implementationReviseCalls).toHaveLength(1);
     expect(second?.planHash).toBeDefined();
     expect(second?.planHash).not.toBe(first.planHash);
     expect(second?.changeRequestId).toBe(first.changeRequestId);
@@ -756,7 +842,7 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
 
     expect(next).toBeDefined();
     expect(next?.type).toBe("plan-approval");
-    expect(bed.model.reviseCalls).toHaveLength(1);
+    expect(bed.model.implementationReviseCalls).toHaveLength(1);
   });
 
   it("preview feedback is re-classified by keywords when the model disagrees (preview-review fallback)", async () => {
@@ -880,13 +966,14 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     await bed.graph.invoke(input(ctx), config(ctx));
     const second = await interruptPayload(bed, ctx);
 
-    expect(bed.model.createCalls).toHaveLength(2);
-    expect(bed.model.createCalls[1]?.currentRevisionId).toBe("rev-2");
+    expect(bed.model.implementationCreateCalls).toHaveLength(1);
+    expect(bed.model.implementationReviseCalls).toHaveLength(1);
+    expect(bed.model.implementationReviseCalls[0]?.currentRevisionId).toBe("rev-2");
     expect(second).toBeDefined();
     expect(second?.planHash).not.toBe(payload.planHash);
   });
 
-  it("rejects an invalid model plan with INVALID_MODEL_OUTPUT and no side effects", async () => {
+  it("rejects an invalid compiled plan with UI_IMPLEMENTATION_INVALID and no side effects", async () => {
     const bed = createBed();
     const ctx = seed(bed);
     bed.model.queueIntent("NEW_REQUIREMENT");
@@ -899,7 +986,7 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     await sendUser(bed, ctx, "确认");
     const result = await bed.graph.invoke(input(ctx), config(ctx));
 
-    expect(result.lastErrorCode).toBe("INVALID_MODEL_OUTPUT");
+    expect(result.lastErrorCode).toBe("UI_IMPLEMENTATION_INVALID:compiled ChangePlan failed schema validation");
     expect(result.stage).toBe("idle");
     expect(bed.repo.plans.size).toBe(0);
     expect(bed.builds.enqueues).toHaveLength(0);
@@ -911,7 +998,7 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     expect(planShown).toBe(true);
   });
 
-  it("clears a stale INVALID_MODEL_OUTPUT when a later plan-change succeeds", async () => {
+  it("clears a stale UI implementation error when a later implementation succeeds", async () => {
     // 回归：plan-change 失败（INVALID_MODEL_OUTPUT）后残留错误码会阻断
     // 下一次成功的 plan-change 进入 approval（approval 节点检查 lastErrorCode）。
     // 修复：plan-change 成功返回必须清除 lastErrorCode。
@@ -926,7 +1013,7 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     bed.model.invalidPlan = true;
     await sendUser(bed, ctx, "确认");
     const failed = await bed.graph.invoke(input(ctx), config(ctx));
-    expect(failed.lastErrorCode).toBe("INVALID_MODEL_OUTPUT");
+    expect(failed.lastErrorCode).toBe("UI_IMPLEMENTATION_INVALID:compiled ChangePlan failed schema validation");
 
     // 第二次 plan-change 成功：必须清除错误码并进入 approval 中断
     bed.model.invalidPlan = false;
@@ -956,7 +1043,7 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     expect(bed.workspace.appendCalls.filter((call) => call.role === "assistant")).toHaveLength(0);
   });
 
-  it("rejects an invalid project design with INVALID_MODEL_OUTPUT and no summary side effect (I1)", async () => {
+  it("requires a base revision before compiling a confirmed implementation", async () => {
     const bed = createBed();
     // Brand-new workspace: no current revision yet → createProjectDesign path.
     const ctx: Ctx = {
@@ -976,7 +1063,7 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     await sendUser(bed, ctx, "确认");
     const result = await bed.graph.invoke(input(ctx), config(ctx));
 
-    expect(result.lastErrorCode).toBe("INVALID_MODEL_OUTPUT");
+    expect(result.lastErrorCode).toBe("IMPLEMENTATION_BASE_REVISION_REQUIRED");
     expect(result.stage).toBe("idle");
     // No fabricated "initial design created" summary and no plan/build.
     expect(bed.workspace.summaries.size).toBe(0);
@@ -1031,7 +1118,7 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     const payload2 = await interruptPayload(bed, ctx);
     expect(payload2).toBeDefined();
     expect(payload2?.planHash).toMatch(/^[0-9a-f]{64}$/);
-    expect(bed.model.createCalls).toHaveLength(1);
+    expect(bed.model.implementationCreateCalls).toHaveLength(1);
     await bed.graph.invoke(
       new Command({ resume: { action: "cancel", planHash: payload2!.planHash } }),
       config(ctx),
@@ -1051,7 +1138,7 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     await sendUser(bed, ctx, "新增一个文本框");
     const revised4 = await bed.graph.invoke(input(ctx), config(ctx));
     expect(revised4.stage).toBe("design-review");
-    expect(bed.model.createCalls).toHaveLength(1);
+    expect(bed.model.implementationCreateCalls).toHaveLength(1);
 
     bed.model.queueIntent("CONFIRM_DESIGN");
     await sendUser(bed, ctx, "确认");
@@ -1062,7 +1149,7 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     void held4;
     const payload4 = await interruptPayload(bed, ctx);
     expect(payload4).toBeDefined();
-    expect(bed.model.createCalls).toHaveLength(2);
+    expect(bed.model.implementationReviseCalls).toHaveLength(1);
     expect(bed.builds.enqueues).toHaveLength(0);
   });
 
@@ -1090,9 +1177,10 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     const payload = await planNewRequirement(bed, ctx, "新增一个输入框");
 
     // The planHash the user approves must be the canonical hash of the exact
-    // plan the model produced, so approve → enqueue builds the approved plan.
-    expect(bed.model.createdPlans).toHaveLength(1);
-    expect(payload.planHash).toBe(planHash(bed.model.createdPlans[0] as unknown));
+    // deterministic compiled plan, so approve → enqueue builds that plan.
+    const stored = bed.repo.plans.get(`plan:${WORKSPACE_ID}:${payload.planHash}`);
+    expect(stored).toBeDefined();
+    expect(payload.planHash).toBe(planHash(stored!.plan));
     // And it is the same hash persisted for the deterministic plan id.
     expect(bed.repo.plans.has(`plan:${WORKSPACE_ID}:${payload.planHash}`)).toBe(true);
   });

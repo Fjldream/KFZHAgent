@@ -16,6 +16,7 @@ import {
   BuildWorkerCrash,
 } from "@kf/build-jobs";
 import {
+  compileUiImplementation,
   createKingClientDomainPack,
   deriveGuid,
   importNativeClientPackage,
@@ -23,7 +24,7 @@ import {
   resolveVersionDirName,
 } from "@kf/domain-client";
 import { DomainRegistry } from "@kf/domain-registry";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, type Prisma } from "@prisma/client";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { JobRunner } from "./job-runner.js";
 
@@ -199,6 +200,84 @@ async function advanceWorkspacePastBase(seeded: Seeded): Promise<void> {
 }
 
 describe("job runner", () => {
+  it("builds a complete multi-module implementation into the native client package", async () => {
+    const seeded = await seedNewWorkspace();
+    const moduleIds = ["brand", "overview", "skills", "experience", "projects", "about", "contact"];
+    const compiled = compileUiImplementation({
+      schema: "kf-ui-implementation/v1",
+      theme: {
+        background: "#0f172a",
+        surface: "#111827",
+        primary: "#2563eb",
+        accent: "#38bdf8",
+        textPrimary: "#f8fafc",
+        textSecondary: "#cbd5e1",
+        fontFamily: "Arial",
+        spacingUnit: 8,
+        radiusScale: { small: 4, medium: 8, large: 16 },
+      },
+      pages: [{
+        id: "Page1",
+        width: 1440,
+        height: 900,
+        components: moduleIds.map((sourceModuleId, index) => ({
+          id: index === 0 ? "Text1" : sourceModuleId,
+          role: "section-heading",
+          sourceModuleId,
+          capabilityId: "text",
+          critical: true,
+          content: `${sourceModuleId} 内容`,
+          geometry: { x: 60, y: 60 + index * 100, width: 420, height: 48 },
+          properties: {},
+          style: {
+            declarations: { fontSize: 24, textColor: "{theme.textPrimary}" },
+            states: {},
+          },
+        })),
+      }],
+    }, {
+      workspaceId: seeded.workspace.id,
+      pageGuidById: { Page1: `k${deriveGuid({ seed: seeded.workspace.id }, "Page1")}` },
+      existingControlGuidByComponentId: {
+        Text1: deriveGuid({ seed: seeded.workspace.id }, "Text1"),
+      },
+      existingControlCapabilityIdByComponentId: { Text1: "text" },
+    });
+    const hash = planHash(compiled.plan);
+    await prisma.changePlan.update({
+      where: { id: seeded.plan.id },
+      data: { planHash: hash, plan: compiled.plan as Prisma.InputJsonValue },
+    });
+    seeded.hash = hash;
+
+    const runner = new JobRunner({ prisma, storage, registry });
+    await jobs.enqueue(enqueueInput(seeded));
+    const done = await runner.runOnce("worker-multi-module", new Date());
+    expect(done?.status).toBe("SUCCEEDED");
+
+    const artifact = await prisma.artifact.findFirst({ where: { buildJobId: done!.id } });
+    const packageStream = await storage.open(seeded.tenant.id, artifact!.storageKey);
+    const chunks: Buffer[] = [];
+    for await (const chunk of packageStream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    const unpacked = await importNativeClientPackage(
+      Buffer.concat(chunks),
+      await mkdtemp(path.join(tmpdir(), "kf-job-multi-module-check-")),
+    );
+    const versionDir = await resolveVersionDirName(unpacked);
+    const pageRoot = path.join(unpacked, versionDir, "project", "page");
+    const pageFile = (await readdir(pageRoot)).find((file) => file.endsWith(".json"));
+    const page = JSON.parse(await readFile(path.join(pageRoot, pageFile!), "utf8")) as {
+      objects: Array<Record<string, unknown>>;
+    };
+    expect(page.objects).toHaveLength(moduleIds.length);
+    for (const moduleId of moduleIds) {
+      expect(page.objects.some((object) => object["text"] === `${moduleId} 内容`)).toBe(true);
+    }
+    expect(page.objects.every((object) => typeof object["styleDataNew"] === "string")).toBe(true);
+  });
+
   it("executes a new-flow build end to end and advances the revision", async () => {
     const { tenant, workspace, revision, plan, hash } = await seedNewWorkspace();
     const runner = new JobRunner({ prisma, storage, registry });

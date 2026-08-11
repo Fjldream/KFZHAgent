@@ -484,6 +484,7 @@ describe("DeepSeekModelPort", () => {
       "projects",
     ]);
     const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    const systemPrompt = body.messages[0].content;
     const prompt = body.messages[1].content;
     expect(prompt).toContain("UIImplementationSpec");
     expect(prompt).toContain("sourceModuleId");
@@ -492,6 +493,8 @@ describe("DeepSeekModelPort", () => {
     expect(prompt).toContain("Page1");
     expect(prompt).toContain("禁止输出原始 CSS");
     expect(prompt).toContain("每个蓝图模块");
+    expect(systemPrompt).toContain("仅当输出 ChangePlan 时");
+    expect(systemPrompt).toContain("UIImplementationSpec 的 component.id 必须使用稳定语义 ID");
     expect(body.max_tokens).toBe(8000);
   });
 

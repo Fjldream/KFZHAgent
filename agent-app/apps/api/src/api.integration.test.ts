@@ -76,6 +76,7 @@ const CHECKPOINT_TABLES = [
 class FakeModelPort {
   intents = [];
   requestedDomains = ["kingclient"];
+  blueprintModuleIds = ["main"];
   createCalls = [];
   reviseCalls = [];
 
@@ -103,15 +104,15 @@ class FakeModelPort {
         valueProposition: "减少交付理解偏差",
       },
       informationArchitecture: { narrative: "总览到详情", wireframe: "总览 → 详情" },
-      modules: [{
-        id: "main",
-        name: "核心内容",
-        purpose: "展示主要信息",
-        content: ["标题", "说明", "指标"],
-        sampleData: [{ label: "指标", value: "98%" }],
+      modules: this.blueprintModuleIds.map((id) => ({
+        id,
+        name: `${id} 模块`,
+        purpose: `展示 ${id} 信息`,
+        content: [`${id} 标题`, `${id} 说明`],
+        sampleData: [{ label: id, value: `${id} 示例` }],
         interactions: ["查看详情"],
         presentation: "重点卡片",
-      }],
+      })),
       visualDirection: {
         tone: "专业",
         colors: ["深蓝"],
@@ -135,6 +136,14 @@ class FakeModelPort {
       pendingRequirements: [],
     };
   }
+  async createUiImplementation(input) {
+    this.createCalls.push(input);
+    return this.makeImplementation(input, "new");
+  }
+  async reviseUiImplementation(input) {
+    this.reviseCalls.push(input);
+    return this.makeImplementation(input, "rev");
+  }
   async createChangePlan(input) {
     this.createCalls.push(input);
     return this.makePlan(input.workspaceId, "new");
@@ -145,6 +154,43 @@ class FakeModelPort {
   }
   async explainValidation() {
     return "校验通过";
+  }
+  makeImplementation(input, tag) {
+    counter += 1;
+    const pageId = input.editableEntities?.find((entity) => entity.kind === "page")?.name ?? "Page1";
+    const sourceModuleIds = input.designPlan?.schema === "kf-design-plan/v2"
+      ? input.designPlan.modules.map((module) => module.id)
+      : ["main"];
+    return {
+      schema: "kf-ui-implementation/v1",
+      theme: {
+        background: "#ffffff",
+        surface: "#f8fafc",
+        primary: "#2563eb",
+        accent: "#0ea5e9",
+        textPrimary: "#0f172a",
+        textSecondary: "#475569",
+        fontFamily: "Arial",
+        spacingUnit: 8,
+        radiusScale: { small: 4, medium: 8, large: 16 },
+      },
+      pages: [{
+        id: pageId,
+        width: 1440,
+        height: 900,
+        components: sourceModuleIds.map((sourceModuleId, index) => ({
+          id: index === 0 ? "Text1" : sourceModuleId,
+          role: "heading",
+          sourceModuleId,
+          capabilityId: "text",
+          critical: true,
+          content: `${sourceModuleId}-${tag}-${counter}`,
+          geometry: { x: 40, y: 40 + index * 100, width: 320, height: 48 },
+          properties: {},
+          style: { declarations: {}, states: {} },
+        })),
+      }],
+    };
   }
   makePlan(workspaceId, tag) {
     counter += 1;
@@ -240,6 +286,7 @@ beforeEach(async () => {
   await resetDatabase();
   await seedDatabase();
   fakeModel.intents = [];
+  fakeModel.blueprintModuleIds = ["main"];
   fakeModel.createCalls = [];
   fakeModel.reviseCalls = [];
 });
@@ -1099,6 +1146,106 @@ describe("hardening fixes", () => {
 // ---------------------------------------------------------------------------
 
 describe("task 12 api surface", () => {
+  it("compiles every confirmed blueprint module instead of persisting a Text1-only plan", async () => {
+    const moduleIds = ["brand", "overview", "skills", "experience", "projects", "about", "contact"];
+    fakeModel.blueprintModuleIds = moduleIds;
+    try {
+      const cookie = await login(TENANT_A_MEMBER);
+      const ws = await createWorkspace(cookie, "Complete Blueprint WS");
+      const conv = await createConversation(cookie, ws.body.id, "Complete Blueprint");
+
+      fakeModel.queueIntent("NEW_REQUIREMENT");
+      await sendMessage(cookie, conv.body.id, "生成完整的七模块个人网站").expect(200);
+      fakeModel.queueIntent("CONFIRM_DESIGN");
+      const confirmed = await sendMessage(cookie, conv.body.id, "确认效果蓝图").expect(200);
+      const done = doneEvent(confirmed.text);
+      expect(done.data.stage).toBe("approval");
+
+      const plan = await request(server)
+        .get(`/api/change-plans/${done.data.changePlanId}`)
+        .set("Cookie", cookie)
+        .expect(200);
+      expect(plan.body.plan.operations).toHaveLength(moduleIds.length);
+      expect(plan.body.plan.operations.map((operation) => operation.entityId)).toEqual(
+        expect.arrayContaining(moduleIds.slice(1)),
+      );
+    } finally {
+      fakeModel.blueprintModuleIds = ["main"];
+    }
+  });
+
+  it("recompiles the complete implementation when the customer continues with a modification", async () => {
+    const moduleIds = ["brand", "overview", "skills", "experience", "projects", "about", "contact"];
+    fakeModel.blueprintModuleIds = moduleIds;
+    try {
+      const cookie = await login(TENANT_A_MEMBER);
+      const ws = await createWorkspace(cookie, "Iterative Blueprint WS");
+      const conv = await createConversation(cookie, ws.body.id, "Iterative Blueprint");
+
+      fakeModel.queueIntent("NEW_REQUIREMENT");
+      await sendMessage(cookie, conv.body.id, "生成完整个人网站").expect(200);
+      fakeModel.queueIntent("CONFIRM_DESIGN");
+      const confirmed = await sendMessage(cookie, conv.body.id, "确认效果蓝图").expect(200);
+      const first = doneEvent(confirmed.text);
+      await resume(cookie, conv.body.id, {
+        action: "approve",
+        planHash: first.data.interrupt?.planHash,
+      }).expect(200);
+
+      const workspace = await prisma.solutionWorkspace.findUniqueOrThrow({ where: { id: ws.body.id } });
+      const built = await prisma.solutionRevision.create({
+        data: {
+          tenantId: ws.body.tenantId,
+          workspaceId: ws.body.id,
+          revisionNumber: 2,
+          kind: "built",
+          parentRevisionId: workspace.currentRevisionId,
+          state: {
+            schema: "kf-client-project-ir/v1",
+            id: "solution",
+            name: "Solution",
+            version: "1.0.0.1",
+            pages: [{
+              id: "page-home",
+              name: "Page1",
+              width: 1440,
+              height: 900,
+              controls: moduleIds.map((id, index) => ({
+                id: index === 0 ? "Text1" : id,
+                type: "text",
+                x: 40,
+                y: 40 + index * 100,
+                width: 320,
+                height: 48,
+                text: `${id} 初稿`,
+              })),
+            }],
+            variables: [],
+            scripts: [],
+          },
+        },
+      });
+      await prisma.solutionWorkspace.update({
+        where: { id: ws.body.id },
+        data: { currentRevisionId: built.id },
+      });
+
+      fakeModel.queueIntent("MODIFY_REQUIREMENT");
+      const revised = await sendMessage(cookie, conv.body.id, "把全部模块文案调整得更专业").expect(200);
+      const second = doneEvent(revised.text);
+      expect(second.data.stage).toBe("approval");
+      const plan = await request(server)
+        .get(`/api/change-plans/${second.data.changePlanId}`)
+        .set("Cookie", cookie)
+        .expect(200);
+      expect(plan.body.plan.operations).toHaveLength(moduleIds.length);
+      expect(plan.body.plan.operations.every((operation) => operation.op === "update")).toBe(true);
+      expect(fakeModel.reviseCalls).toHaveLength(1);
+    } finally {
+      fakeModel.blueprintModuleIds = ["main"];
+    }
+  });
+
   it("serves the change-plan details shown in the confirmation UI", async () => {
     const cookie = await login(TENANT_A_MEMBER);
     const ws = await createWorkspace(cookie, "PlanDetail WS");

@@ -41,10 +41,12 @@ export interface ModelPortContext {
 }
 
 /**
- * Model abstraction (brief Step 1). The five methods mirror the brief exactly:
- * classifyIntent / createProjectDesign / createChangePlan / reviseChangePlan /
- * explainValidation. Tests inject a FakeModelPort; the production implementation
- * is wired in Task 11 (real LLM or stub).
+ * Model abstraction for bounded classification, customer blueprint planning,
+ * internal UI implementation planning, and validation explanation. Legacy
+ * direct ChangePlan methods remain for non-blueprint compatibility paths;
+ * confirmed blueprints use create/reviseUiImplementation and the deterministic
+ * domain compiler. Tests inject a FakeModelPort; production wires a real LLM
+ * or explicit stub at the API boundary.
  *
  * `ClassifyIntentResult` is defined (and zod-gated at runtime) in
  * schemas/intent.ts — re-exported here so ModelPort implementers keep a single

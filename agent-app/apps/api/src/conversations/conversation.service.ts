@@ -369,6 +369,7 @@ export class ConversationService {
         workspaceQuery: ports.workspaceQuery,
         changePlanRepository: ports.changePlanRepository,
         buildJobPort: ports.buildJobPort,
+        uiImplementationCompiler: ports.uiImplementationCompiler,
         isDomainSupported: (domain) => domain === "kingclient",
         defaultDomainKind: "kingclient",
       };
