@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { ModuleDeliveryGap, UIComponentSpec } from "@kf/contracts";
-import type { ModuleDefinition, ModuleRuntimeEvidence } from "../types.js";
+import type { ModuleCompileInput, ModuleCompileOutput, ModuleDefinition, ModuleRuntimeEvidence } from "../types.js";
 import type { ModuleRegistry } from "../module-registry.js";
 import { actionButton, formRow, imageSlot, labeledValue, repeatedCard, sectionTitle, surface, type LocalBounds } from "./shared-primitives.js";
 
@@ -19,7 +19,12 @@ function layout(regions: readonly ModuleDefinition["layout"]["regions"][number][
 }
 
 function define(input: Omit<ModuleDefinition, "version" | "maturity" | "runtimeEvidenceTarget">): ModuleDefinition {
-  return Object.freeze({ ...input, version: VERSION, runtimeEvidenceTarget: { runtimeFamily: "KingFusion", runtimeVersion: "3.6", baselineId: "kf36-portal-v1" }, maturity: "beta" });
+  const compile = input.compile;
+  return Object.freeze({ ...input, version: VERSION, runtimeEvidenceTarget: { runtimeFamily: "KingFusion", runtimeVersion: "3.6", baselineId: "kf36-portal-v1" }, maturity: "beta", compile: (input: ModuleCompileInput): ModuleCompileOutput => {
+    const result = compile(input); const { width, height } = input.context.bounds;
+    const invalid = result.components.some((component) => { const g = component.geometry; return !Number.isInteger(g.x) || !Number.isInteger(g.y) || !Number.isInteger(g.width) || !Number.isInteger(g.height) || g.width <= 0 || g.height <= 0 || g.x < 0 || g.y < 0 || g.x + g.width > width || g.y + g.height > height; });
+    return invalid ? { components: [], deliveryGaps: [...result.deliveryGaps, { moduleId: input.context.instance.id, requirement: "Module local bounds", severity: "blocking" as const, status: "unresolved" as const, reason: "module-bounds-insufficient", alternatives: ["Increase module span or semantic height."] }] } : result;
+  } });
 }
 
 function output(components: readonly UIComponentSpec[], deliveryGaps: readonly ModuleDeliveryGap[] = []) {
