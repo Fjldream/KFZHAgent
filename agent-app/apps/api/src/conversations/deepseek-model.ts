@@ -347,11 +347,37 @@ export function assertDescriptorSafeJson(root: unknown, code: string, maxNodes =
   }
 }
 
+const FORBIDDEN_MODULE_KEY_TOKENS = new Set([
+  "geometry", "css", "path", "storage", "native", "script", "html", "javascript", "selector",
+  "proto", "prototype", "constructor", "styledata", "controlguid", "guid",
+  // ModulePlan is semantic; any coordinate-like key is raw implementation data.
+  "x", "y", "width", "height",
+]);
+const FORBIDDEN_MODULE_COMPACT_KEYS = new Set([
+  "objecttype", "uimodeltype", "styledatanew", "styledata", "baseproperty", "lefttoppt",
+  "insideobjects", "insiderobjects", "configuredata", "layouttype", "controlgeometry",
+  "nativepayload", "scriptbody", "cssrules", "pathvalue",
+]);
+// This is the one schema-defined semantic field that intentionally contains a
+// height word. Its finite enum is still enforced by ModulePlanSchema later.
+const SAFE_SEMANTIC_MODULE_KEYS = new Set(["preferredheight"]);
+
+function normalizedModuleKeyParts(key: string): { readonly tokens: readonly string[]; readonly compact: string } {
+  const nfkc = key.normalize("NFKC");
+  // Preserve camel, snake, kebab, and whitespace boundaries before lowercasing.
+  // The second rule handles acronym boundaries such as CSSRules and UIModelType.
+  const segmented = nfkc
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2");
+  const tokens = segmented.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  return { tokens, compact: tokens.join("") };
+}
+
 function forbiddenModuleKey(key: string): boolean {
-  const normalized = key.normalize("NFKC").replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
-  const tokens = normalized.split(/[^a-z0-9]+/).filter(Boolean);
-  const forbidden = new Set(["geometry", "css", "path", "storage", "native", "script", "html", "javascript", "selector", "proto", "prototype", "constructor", "styledata", "controlguid", "guid"]);
-  return tokens.some((token) => forbidden.has(token));
+  const { tokens, compact } = normalizedModuleKeyParts(key);
+  if (SAFE_SEMANTIC_MODULE_KEYS.has(compact)) return false;
+  return tokens.some((token) => FORBIDDEN_MODULE_KEY_TOKENS.has(token))
+    || FORBIDDEN_MODULE_COMPACT_KEYS.has(compact);
 }
 
 /** Model reply has passed JSON.parse, but scan its JSON tree before schema parsing for disallowed implementation vocabulary. */

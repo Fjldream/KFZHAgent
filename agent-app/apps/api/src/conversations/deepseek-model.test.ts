@@ -710,6 +710,34 @@ describe("DeepSeekModelPort", () => {
     }
   });
 
+  it("rejects normalized native keys in direct, nested-object, and nested-array module content", async () => {
+    const unsafeKeys = [
+      "x", "Y", "width", "HEIGHT", "geometryValue", "Geometry_Value", "ｃｓｓＲｕｌｅｓ", "CSSRules",
+      "scriptCode", "nativeConfig", "pathName", "objectType", "Object_Type", "ｕｉＭｏｄｅｌＴｙｐｅ",
+      "styleDataNew", "STYLE-DATA", "baseProperty", "leftTopPt", "insideObjects", "insiderObjects",
+      "configureData", "layoutType", "controlGeometry", "nativePayload", "scriptBody", "pathValue",
+      "__ｐｒｏｔｏ__", "prototypePollution", "constructor",
+    ];
+    const first = modulePlan().pages[0].modules[0];
+    const second = modulePlan().pages[0].modules[1];
+    const withFirstModule = (replacement: Record<string, unknown>) => modulePlan({
+      pages: [{ ...modulePlan().pages[0], modules: [{ ...first, ...replacement }, second] }],
+    });
+    const candidates = unsafeKeys.flatMap((key) => [
+      withFirstModule({ content: { [key]: "unsafe" } }),
+      withFirstModule({ content: JSON.stringify({ semanticContent: { [key]: "unsafe" } }) }),
+      withFirstModule({ content: JSON.stringify({ semanticContent: [{ title: "safe" }, { [key]: "unsafe" }] }) }),
+    ]);
+
+    for (const candidate of candidates) {
+      await expect(makePort(candidate).createModulePlan(modulePlanningContext()))
+        .rejects.toThrow(/contains forbidden field|unsafe key/);
+    }
+
+    const safe = withFirstModule({ content: JSON.stringify({ title: "安全标题", description: "安全描述", asset: { id: "portrait", label: "头像" } }) });
+    await expect(makePort(safe).createModulePlan(modulePlanningContext())).resolves.toEqual(safe);
+  });
+
   it("rejects an unverified or mismatched confirmed blueprint before it can reach the model", async () => {
     const context = modulePlanningContext();
     await expect(makePort(modulePlan()).createModulePlan({
