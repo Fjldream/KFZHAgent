@@ -14,6 +14,8 @@ import {
   type UIImplementationSpec,
 } from "@kf/contracts";
 import type { ResolvedAssetBinding } from "./module-compiler.js";
+import type { ResolvedAsset } from "@kf/contracts";
+import type { ModuleRegistry } from "./module-registry.js";
 
 export interface EvaluateModuleDeliveryInput {
   readonly blueprint: CustomerEffectBlueprint;
@@ -22,6 +24,8 @@ export interface EvaluateModuleDeliveryInput {
   readonly traces: readonly ModuleTrace[];
   readonly assetBindings: readonly ResolvedAssetBinding[];
   readonly gaps: readonly ModuleDeliveryGap[];
+  readonly registry: ModuleRegistry;
+  readonly assetsById: Readonly<Record<string, ResolvedAsset>>;
 }
 
 export interface ModuleDeliveryEvaluation {
@@ -32,11 +36,10 @@ const COMPLEX_MODULE_KINDS = new Set([
   "metric.kpi-grid", "content.card-grid", "content.timeline", "data.chart-panel", "data.status-grid",
   "data.table", "data.detail", "interaction.tabs-filter", "form.record-editor", "action.toolbar", "feedback.alert-list",
 ]);
-const TEMPLATE_TEXT = /(?:^|\s)(?:hello|default(?:\s+(?:label|text|title))?)(?:\s|$)/i;
-const PLACEHOLDER_IMAGE = /(?:placeholder|default[-_ ]?image|\.svg$)/i;
+const PLACEHOLDER_VALUES = new Set(["__KF_SEED_PLACEHOLDER__", "__KF_PLACEHOLDER_IMAGE__", "seed-placeholder-image"]);
 
 export function evaluateModuleDelivery(input: EvaluateModuleDeliveryInput): ModuleDeliveryEvaluation {
-  assertSafeJson(input);
+  assertSafeJson({ blueprint: input.blueprint, plan: input.plan, implementation: input.implementation, traces: input.traces, assetBindings: input.assetBindings, gaps: input.gaps, assetsById: input.assetsById });
   const blueprint = CustomerEffectBlueprintSchema.parse(input.blueprint);
   const plan = ModulePlanSchema.parse(input.plan);
   const implementation = input.implementation === undefined ? undefined : UIImplementationSpecSchema.parse(input.implementation);
@@ -44,19 +47,22 @@ export function evaluateModuleDelivery(input: EvaluateModuleDeliveryInput): Modu
   const inherited = input.gaps.map((gap) => ModuleDeliveryGapSchema.parse(gap));
   const gaps: ModuleDeliveryGap[] = [...inherited];
   const planModules = plan.pages.flatMap((page) => page.modules.map((module) => ({ pageId: page.id, module })));
-  const moduleIds = new Set(planModules.map(({ module }) => module.id));
+  const blueprintToModules = new Map<string, string[]>();
+  for (const { module } of planModules) for (const blueprintId of module.sourceBlueprintModuleIds ?? []) blueprintToModules.set(blueprintId, [...(blueprintToModules.get(blueprintId) ?? []), module.id]);
 
   for (const module of blueprint.modules) {
-    if (!moduleIds.has(module.id)) gaps.push(gap(module.id, "Map this confirmed blueprint module to a registered module.", "BLUEPRINT_MODULE_UNMAPPED"));
+    const mapped = blueprintToModules.get(module.id) ?? [];
+    if (mapped.length === 0) gaps.push(gap(module.id, "Map this confirmed blueprint module to a registered module.", "BLUEPRINT_MODULE_UNMAPPED"));
+    if (module.interactions.length > 0 && !mapped.some((id) => planModules.some(({ module: candidate }) => candidate.id === id && candidate.interactions.length > 0))) gaps.push(gap(module.id, "Map confirmed blueprint interactions to registered native interactions.", "BLUEPRINT_INTERACTION_UNMAPPED"));
   }
   for (const { module } of planModules) {
-    if (!blueprint.modules.some((candidate) => candidate.id === module.id)) gaps.push(gap(module.id, "Use a stable ID from the confirmed blueprint module.", "MODULE_NOT_IN_BLUEPRINT"));
+    if ((module.sourceBlueprintModuleIds ?? []).some((id) => !blueprint.modules.some((candidate) => candidate.id === id))) gaps.push(gap(module.id, "Use only IDs from the confirmed blueprint.", "MODULE_BLUEPRINT_REFERENCE_UNKNOWN"));
   }
 
   if (implementation === undefined) {
     for (const { module } of planModules) gaps.push(gap(module.id, "Compile required module controls.", "MODULE_IMPLEMENTATION_MISSING"));
   } else {
-    inspectImplementation(plan, implementation, traces, input.assetBindings, gaps);
+    inspectImplementation(plan, implementation, traces, input.assetBindings, input.registry, input.assetsById, gaps);
   }
 
   const report = ModuleDeliveryReportSchema.parse({
@@ -73,11 +79,14 @@ function inspectImplementation(
   implementation: UIImplementationSpec,
   traces: readonly ModuleTrace[],
   assetBindings: readonly ResolvedAssetBinding[],
+  registry: ModuleRegistry,
+  assetsById: Readonly<Record<string, ResolvedAsset>>,
   gaps: ModuleDeliveryGap[],
 ): void {
   const componentsByModule = new Map<string, UIComponentSpec[]>();
-  const traceOutputIds = new Set<string>();
-  for (const trace of traces) for (const entry of trace.entries) traceOutputIds.add(entry.outputId);
+  const traceKeys = new Set<string>();
+  for (const trace of traces) for (const entry of trace.entries) traceKeys.add(`${entry.pageId}\u0000${entry.moduleId}\u0000${entry.outputId}`);
+  const expectedTraceKeys = new Set<string>();
 
   for (const page of implementation.pages) {
     inspectPageGeometry(page.id, page.width, page.height, page.components, gaps);
@@ -86,17 +95,24 @@ function inspectImplementation(
       const components = componentsByModule.get(component.sourceModuleId) ?? [];
       components.push(component);
       componentsByModule.set(component.sourceModuleId, components);
+      expectedTraceKeys.add(`${page.id}\u0000${component.sourceModuleId}\u0000${component.id}`);
       if (hasTemplateResidue(component)) gaps.push(gap(component.sourceModuleId, "Replace template residue with confirmed content or a real asset.", "TEMPLATE_RESIDUE"));
     }
   }
 
+  for (const extra of traceKeys) if (!expectedTraceKeys.has(extra)) gaps.push(gap(extra.split("\u0000")[1] ?? "trace", "Emit traces only for generated controls on their owning page/module.", "MODULE_TRACE_EXTRA_OR_MISATTRIBUTED"));
   for (const page of plan.pages) for (const module of page.modules) {
     const components = componentsByModule.get(module.id) ?? [];
+    let definition;
+    try { definition = registry.require(module.kind, module.templateVersion); } catch { gaps.push(gap(module.id, "Use a registered module definition.", "MODULE_DEFINITION_UNREGISTERED")); continue; }
+    const quality = definition.quality ?? { minimumComponentCount: 1, requiredRoles: [], requiredCapabilityIds: [] };
+    if (components.length < quality.minimumComponentCount || quality.requiredRoles.some((role) => !components.some((component) => component.role === role)) || quality.requiredCapabilityIds.some((capability) => !components.some((component) => component.capabilityId === capability))) gaps.push(gap(module.id, "Generate the module's required registered structure.", "MODULE_REQUIRED_STRUCTURE_MISSING"));
     if (!components.some((component) => component.critical)) gaps.push(gap(module.id, "Generate the module's required critical controls.", "CRITICAL_CONTROL_MISSING"));
-    if (components.some((component) => !traceOutputIds.has(component.id))) gaps.push(gap(module.id, "Emit an exact module trace for every generated control.", "MODULE_TRACE_MISSING"));
+    if (components.some((component) => !traceKeys.has(`${page.id}\u0000${module.id}\u0000${component.id}`))) gaps.push(gap(module.id, "Emit an exact module trace for every generated control.", "MODULE_TRACE_MISSING"));
     if (module.assetId !== undefined && !assetBindings.some((binding) => binding.moduleId === module.id && binding.assetId === module.assetId)) {
       gaps.push(gap(module.id, "Bind the requested module asset into the delivery package.", "ASSET_BINDING_MISSING"));
     }
+    if (module.assetId !== undefined && assetsById[module.assetId]?.status !== "resolved") gaps.push(gap(module.id, "Resolve the requested module asset before delivery.", "ASSET_RESOLUTION_MISSING"));
     if (!module.interactions.every((interaction) => components.some((component) => hasInteraction(component, interaction)))) {
       gaps.push(gap(module.id, "Materialize every required registered interaction as a native action.", "CRITICAL_INTERACTION_MISSING"));
     }
@@ -143,12 +159,12 @@ function hasInteraction(component: UIComponentSpec, interaction: ModulePlan["pag
 }
 
 function hasTemplateResidue(component: UIComponentSpec): boolean {
-  if (component.content !== undefined && TEMPLATE_TEXT.test(component.content)) return true;
-  for (const [key, value] of Object.entries(component.properties)) {
-    if (typeof value !== "string") continue;
-    if (TEMPLATE_TEXT.test(value)) return true;
-    if ((key === "src" || key === "url" || key === "alt") && PLACEHOLDER_IMAGE.test(value)) return true;
-  }
+  return containsPlaceholder(component.content) || containsPlaceholder(component.properties);
+}
+
+function containsPlaceholder(value: unknown): boolean {
+  const seen = new Set<object>(); const pending = [value];
+  while (pending.length > 0) { const current = pending.pop(); if (typeof current === "string") { if (PLACEHOLDER_VALUES.has(current)) return true; continue; } if (current === null || typeof current !== "object") continue; if (seen.has(current)) continue; seen.add(current); if (Array.isArray(current)) { for (const nested of current) pending.push(nested); continue; } for (const nested of Object.values(current as Record<string, unknown>)) pending.push(nested); }
   return false;
 }
 
@@ -164,7 +180,12 @@ function statusFor(gaps: readonly ModuleDeliveryGap[]): ModuleDeliveryReport["st
 function finalizeGaps(gaps: readonly ModuleDeliveryGap[]): readonly ModuleDeliveryGap[] {
   const unique = new Map<string, ModuleDeliveryGap>();
   for (const entry of gaps) unique.set(JSON.stringify(entry), entry);
-  return Object.freeze([...unique.values()].sort((left, right) => severityRank(right.severity) - severityRank(left.severity) || compareCodePoints(left.moduleId, right.moduleId) || compareCodePoints(left.reason, right.reason)).slice(0, 250));
+  const ordered = [...unique.values()].sort((left, right) => severityRank(right.severity) - severityRank(left.severity) || compareCodePoints(left.moduleId, right.moduleId) || compareCodePoints(left.reason, right.reason));
+  if (ordered.length <= 250) return Object.freeze(ordered);
+  const firstByModule = new Map<string, ModuleDeliveryGap>();
+  for (const entry of ordered) if (!firstByModule.has(entry.moduleId)) firstByModule.set(entry.moduleId, entry);
+  const retained = [...firstByModule.values()].sort((left, right) => compareCodePoints(left.moduleId, right.moduleId));
+  return Object.freeze([...retained, ...ordered.filter((entry) => firstByModule.get(entry.moduleId) !== entry)].slice(0, 250));
 }
 
 function severityRank(value: ModuleDeliveryGap["severity"]): number { return value === "blocking" ? 3 : value === "warning" ? 2 : 1; }

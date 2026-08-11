@@ -149,7 +149,9 @@ function fixedRegionBounds(mode: PageLayoutInput["mode"], width: number, height:
 
   const headerHeight = 64;
   const sidebarWidth = 240;
-  const toolbarHeight = 48;
+  // Native toolbar modules require a 48px usable row; 64px shell chrome
+  // leaves exactly that after the fixed 8px top/bottom padding.
+  const toolbarHeight = 64;
   const footerHeight = 48;
   const bodyBottom = height - footerHeight;
   const mainX = sidebarWidth + gap;

@@ -65,6 +65,8 @@ export const ModulePlanModuleSchema = z
     placement: ModulePlacementSchema,
     interactions: z.array(ModuleInteractionSchema).max(12),
     assetId: stableIdSchema.optional(),
+    /** Explicit confirmed-blueprint provenance; blueprint IDs are human labels and may contain spaces. */
+    sourceBlueprintModuleIds: z.array(z.string().trim().min(1).max(100)).min(1).max(12).optional(),
   })
   .strict();
 

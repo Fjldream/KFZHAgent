@@ -60,6 +60,14 @@ export interface ModuleCompileOutput {
   readonly deliveryGaps: readonly ModuleDeliveryGap[];
 }
 
+/** Registry-owned structural contract used by delivery gates, never model input. */
+export interface ModuleQualityContract {
+  readonly minimumComponentCount: number;
+  readonly requiredRoles: readonly string[];
+  readonly requiredCapabilityIds: readonly string[];
+  readonly interactionActionKinds?: Readonly<Partial<Record<ModuleInteraction["type"], string>>>;
+}
+
 export interface ModuleDefinition {
   readonly kind: string;
   readonly version: string;
@@ -73,6 +81,7 @@ export interface ModuleDefinition {
   readonly contentSchema: z.ZodType<Record<string, unknown>>;
   readonly assetSlots: readonly AssetSlotDefinition[];
   readonly requiredKfCapabilities: readonly string[];
+  readonly quality?: ModuleQualityContract;
   readonly layout: ModuleLayoutContract;
   compile(input: ModuleCompileInput): ModuleCompileOutput;
 }

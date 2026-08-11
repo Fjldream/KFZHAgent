@@ -109,7 +109,7 @@ describe("solvePageLayout", () => {
 
     expect(result.boundsByModuleId.header).toEqual({ x: 24, y: 12, width: 1392, height: 40 });
     expect(result.boundsByModuleId.sidebar).toEqual({ x: 24, y: 88, width: 192, height: 520 });
-    expect(result.boundsByModuleId.table).toEqual({ x: 288, y: 124, width: 1128, height: 520 });
+    expect(result.boundsByModuleId.table).toEqual({ x: 288, y: 140, width: 1128, height: 520 });
     expect(result.issues).toEqual([]);
   });
 

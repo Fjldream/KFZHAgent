@@ -1,4 +1,4 @@
-import type { ModulePlan, ModulePlanModule, UIComponentSpec, UIImplementationSpec } from "@kf/contracts";
+import type { ModulePlan, ModulePlanModule, ResolvedAsset, UIComponentSpec, UIImplementationSpec } from "@kf/contracts";
 import { isDeepStrictEqual } from "node:util";
 
 export interface UnexpectedModuleChange {
@@ -22,6 +22,8 @@ export interface DiffModulePlansInput {
   readonly plan: ModulePlan;
   readonly previousImplementation: UIImplementationSpec;
   readonly implementation: UIImplementationSpec;
+  readonly previousAssetsById?: Readonly<Record<string, ResolvedAsset>>;
+  readonly assetsById?: Readonly<Record<string, ResolvedAsset>>;
 }
 
 /**
@@ -52,6 +54,19 @@ export function diffModulePlans(input: DiffModulePlansInput): ModulePlanDiff {
     else unchanged.add(module.id);
   }
   for (const [key, module] of previous) if (!current.has(key)) changed.add(module.id);
+
+  const previousGroups = pageComponentGroups(input.previousImplementation);
+  const currentGroups = pageComponentGroups(input.implementation);
+  if (!isDeepStrictEqual(input.previousPlan.theme, input.plan.theme)) {
+    for (const [pageId, modules] of previousGroups) for (const [moduleId, before] of modules) {
+      const after = currentGroups.get(pageId)?.get(moduleId);
+      if (after !== undefined && JSON.stringify(before.map((component) => component.style)) !== JSON.stringify(after.map((component) => component.style))) changed.add(moduleId);
+    }
+  }
+  if (input.previousAssetsById !== undefined || input.assetsById !== undefined) for (const [key, module] of current) {
+    const prior = previous.get(key);
+    if (prior?.assetId !== undefined && prior.assetId === module.assetId && !isDeepStrictEqual(input.previousAssetsById?.[module.assetId], input.assetsById?.[module.assetId])) changed.add(module.id);
+  }
 
   const layoutAffected = layoutAffectedModuleIds(input.previousPlan, input.plan);
   const protectedModules = new Set([...unchanged].filter((id) => !layoutAffected.includes(id)));

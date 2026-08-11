@@ -60,6 +60,8 @@ export interface CompileModulePlanInput {
   readonly assetsById: Readonly<Record<string, ResolvedAsset>>;
   readonly previousPlan?: ModulePlan;
   readonly previousImplementation?: UIImplementationSpec;
+  /** Existing editable entities are preserved when not module-owned. */
+  readonly editableEntityIds?: readonly string[];
   /** Trusted capability and WebContainer authorization facts. Strictly empty by default. */
   readonly validationContext?: ModuleValidationContext;
 }
@@ -178,7 +180,7 @@ export function compileModulePlan(input: CompileModulePlanInput): ModuleCompilat
     : undefined;
   const parsedImplementation = implementation === undefined ? undefined : UIImplementationSpecSchema.safeParse(implementation);
   if (parsedImplementation !== undefined && !parsedImplementation.success) throw new Error(`INVALID_COMPILED_UI_IMPLEMENTATION: ${parsedImplementation.error.issues[0]?.message ?? "invalid implementation"}`);
-  const canonicalImplementation = parsedImplementation === undefined ? undefined : reuseCanonicalPriorComponents(parsedImplementation.data, plan, previousPlan, previousComponents);
+  const canonicalImplementation = parsedImplementation === undefined ? undefined : preserveLegacyComponents(reuseCanonicalPriorComponents(parsedImplementation.data, plan, previousPlan, previousComponents), previousImplementation, input.editableEntityIds);
   const diff = canonicalImplementation !== undefined && previousPlan !== undefined && previousImplementation !== undefined
     ? diffModulePlans({ previousPlan, plan, previousImplementation, implementation: canonicalImplementation })
     : undefined;
@@ -190,6 +192,8 @@ export function compileModulePlan(input: CompileModulePlanInput): ModuleCompilat
     traces,
     assetBindings,
     gaps: finalGaps,
+    registry: input.registry,
+    assetsById,
   }).report;
   if (canonicalImplementation === undefined || hasUnresolvedBlockingGap(finalGaps) || deliveryReport?.status === "blocked") {
     return Object.freeze({
@@ -218,6 +222,26 @@ export function compileModulePlan(input: CompileModulePlanInput): ModuleCompilat
 
 function hasUnresolvedBlockingGap(gaps: readonly ModuleDeliveryGap[]): boolean {
   return gaps.some((gap) => gap.severity === "blocking" && gap.status === "unresolved");
+}
+
+function preserveLegacyComponents(
+  implementation: UIImplementationSpec,
+  previous: UIImplementationSpec | undefined,
+  editableEntityIds: readonly string[] | undefined,
+): UIImplementationSpec {
+  if (previous === undefined) return implementation;
+  const allowed = editableEntityIds === undefined ? undefined : new Set(editableEntityIds);
+  const pages = implementation.pages.map((page) => ({ ...page, components: [...page.components] }));
+  const byPage = new Map(pages.map((page) => [page.id, page]));
+  for (const priorPage of previous.pages) {
+    const legacy = priorPage.components.filter((component) => component.sourceModuleId === undefined && (allowed === undefined || allowed.has(component.id)));
+    if (legacy.length === 0) continue;
+    const page = byPage.get(priorPage.id);
+    if (page === undefined) { pages.push({ ...priorPage, components: legacy }); continue; }
+    const ids = new Set(page.components.map((component) => component.id));
+    for (const component of legacy) if (!ids.has(component.id)) page.components.push(component);
+  }
+  return { ...implementation, pages };
 }
 
 function reuseCanonicalPriorComponents(
@@ -486,25 +510,11 @@ function finalizeGaps(values: readonly ModuleDeliveryGap[]): readonly ModuleDeli
   }
   const ordered = [...unique.values()].sort((left, right) => severityRank(right.severity) - severityRank(left.severity) || compareCodePoints(left.moduleId, right.moduleId) || compareCodePoints(left.requirement, right.requirement));
   if (ordered.length <= 250) return Object.freeze(ordered);
-  const byModule = new Map<string, ModuleDeliveryGap[]>();
-  for (const gap of ordered) byModule.set(gap.moduleId, [...(byModule.get(gap.moduleId) ?? []), gap]);
-  const summaries = [...byModule.entries()].sort(([left], [right]) => compareCodePoints(left, right)).map(([moduleId, grouped]) => summarizeModuleGaps(moduleId, grouped));
-  if (summaries.length > 250) throw new Error("MODULE_DELIVERY_GAP_MODULE_BOUND_EXCEEDED");
-  return Object.freeze(summaries);
-}
-
-function summarizeModuleGaps(moduleId: string, gaps: readonly ModuleDeliveryGap[]): ModuleDeliveryGap {
-  const unresolved = gaps.filter((gap) => gap.status === "unresolved");
-  const status = unresolved.length > 0 ? "unresolved" : gaps.every((gap) => gap.status === "accepted") ? "accepted" : "mitigated";
-  const source = unresolved.length > 0 ? unresolved : gaps;
-  const severity = source.reduce<ModuleDeliveryGap["severity"]>((current, gap) => severityRank(gap.severity) > severityRank(current) ? gap.severity : current, "info");
-  return ModuleDeliveryGapSchema.parse({
-    moduleId,
-    requirement: "Review module delivery diagnostics.",
-    severity,
-    status,
-    reason: `${gaps.length} diagnostics summarized/omitted for module ${moduleId}.`,
-  });
+  const firstByModule = new Map<string, ModuleDeliveryGap>();
+  for (const gap of ordered) if (!firstByModule.has(gap.moduleId)) firstByModule.set(gap.moduleId, gap);
+  if (firstByModule.size > 250) throw new Error("MODULE_DELIVERY_GAP_MODULE_BOUND_EXCEEDED");
+  const retained = [...firstByModule.values()].sort((left, right) => compareCodePoints(left.moduleId, right.moduleId));
+  return Object.freeze([...retained, ...ordered.filter((gap) => firstByModule.get(gap.moduleId) !== gap)].slice(0, 250));
 }
 
 function severityRank(severity: ModuleDeliveryGap["severity"]): number {

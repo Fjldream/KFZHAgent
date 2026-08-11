@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import type {
   CustomerEffectBlueprint,
   ModuleDeliveryGap,
@@ -7,6 +8,7 @@ import type {
   UIImplementationSpec,
 } from "@kf/contracts";
 import { evaluateModuleDelivery } from "./module-quality.js";
+import { ModuleRegistry } from "./module-registry.js";
 
 const theme = {
   background: "#101827", surface: "#1E293B", primary: "#2563EB", accent: "#38BDF8",
@@ -29,7 +31,7 @@ function plan(ids: string[] = ["hero"]): ModulePlan {
     schema: "kf-module-plan/v1", projectKey: "kingclient.portal", theme, assets: [], operations: [],
     pages: [{ id: "home", title: "Home", mode: "vertical-flow", modules: ids.map((id, order) => ({
       id, kind: "content.hero", templateVersion: "1.0.0", variant: "no-portrait", title: id,
-      content: JSON.stringify({ title: id }), placement: { region: "main", order, columnSpan: 12, preferredHeight: "medium", alignment: "stretch", emphasis: "primary" }, interactions: [],
+      content: JSON.stringify({ title: id }), sourceBlueprintModuleIds: [id], placement: { region: "main", order, columnSpan: 12, preferredHeight: "medium", alignment: "stretch", emphasis: "primary" }, interactions: [],
     })) }],
   };
 }
@@ -44,13 +46,14 @@ function component(moduleId = "hero", overrides: Partial<UIComponentSpec> = {}):
 function implementation(components: UIComponentSpec[] = [component()]): UIImplementationSpec {
   return { schema: "kf-ui-implementation/v1", theme, pages: [{ id: "home", width: 1440, height: 900, components }] };
 }
+function registry(): ModuleRegistry { const value = new ModuleRegistry(); const common = { version: "1.0.0", category: "content", maturity: "stable" as const, variants: ["no-portrait"], contentSchema: z.object({ title: z.string() }), assetSlots: [], requiredKfCapabilities: ["layout.2"], layout: { regions: ["main"] as const, minColumnSpan: 1, maxColumnSpan: 12, preferredHeights: ["medium"] as const, interactions: ["navigate"] as const, height: { min: 1, preferred: { compact: 1, small: 1, medium: 200, large: 300, full: 400 }, max: 400 } }, quality: { minimumComponentCount: 1, requiredRoles: [], requiredCapabilityIds: [] }, compile: () => ({ components: [], deliveryGaps: [] }) }; value.register({ ...common, kind: "content.hero" }); value.register({ ...common, kind: "content.card-grid" }); return value; }
 
 function evaluate(overrides: Partial<Parameters<typeof evaluateModuleDelivery>[0]> = {}) {
   const ui = implementation();
   return evaluateModuleDelivery({
     blueprint: blueprint(), plan: plan(), implementation: ui,
     traces: [{ schema: "kf-module-trace/v1", projectKey: "kingclient.portal", entries: [{ pageId: "home", moduleId: "hero", outputId: "hero/surface" }] }],
-    assetBindings: [], gaps: [], ...overrides,
+    assetBindings: [], gaps: [], registry: registry(), assetsById: {}, ...overrides,
   });
 }
 
@@ -75,9 +78,9 @@ describe("evaluateModuleDelivery", () => {
   });
 
   it.each([
-    ["Hello", component("hero", { content: "Hello" })],
-    ["default label", component("hero", { content: "Default label" })],
-    ["placeholder image", component("hero", { capabilityId: "image", properties: { src: "placeholder-image.png" } })],
+    ["seed token", component("hero", { content: "__KF_SEED_PLACEHOLDER__" })],
+    ["nested seed token", component("hero", { properties: { nested: { value: "__KF_PLACEHOLDER_IMAGE__" } } })],
+    ["placeholder asset", component("hero", { capabilityId: "image", properties: { src: "seed-placeholder-image" } })],
   ])("blocks template residue: %s", (_label, dirty) => {
     const report = evaluate({ implementation: implementation([dirty]) }).report;
     expect(report.status).toBe("blocked");
