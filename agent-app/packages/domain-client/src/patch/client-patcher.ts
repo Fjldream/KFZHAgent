@@ -1104,7 +1104,7 @@ function validateCreateControlProperties(properties: Record<string, unknown>): R
   }
 }
 
-/** Applies only reviewed, allowlisted native style fields to a raw KF control. */
+/** Applies only reviewed Style Adapter output to a raw KF control. */
 function applyStyleToControl(
   control: Record<string, unknown>,
   controlType: string | undefined,
@@ -1135,9 +1135,6 @@ function applyStyleToControl(
     }
   }
   if (compiled.styleDataNew !== "") {
-    if (!allowed.has("styleDataNew")) {
-      throw new PatchConflictError(`styleDataNew is not allowlisted for control/${controlType ?? "unknown"}`);
-    }
     try {
       const merged = mergeManagedStyleData(control["styleDataNew"], compiled.styleDataNew);
       if (merged !== control["styleDataNew"]) {

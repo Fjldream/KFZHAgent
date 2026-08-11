@@ -376,7 +376,6 @@ describe("client patcher — KF 容器对象（easyui / 布局）", () => {
           { layoutType: 2, objectType: 2, baseProperty: { name: "HorizontalLayout1", leftTopPt: { x: 21, y: 109 }, width: 1241, height: 40 } },
         ] },
         { path: "/panels", value: [{ region: "north", width: 1243, height: 80, split: true }] },
-        { path: "/layoutType", value: 4 },
         { path: "/x", value: 50 },
         { path: "/y", value: 60 },
       ]),
@@ -403,8 +402,8 @@ describe("client patcher — KF 容器对象（easyui / 布局）", () => {
     expect((await inspectClientProject(await rootDirOf(candidate))).index.controls[expectedChildGuid])
       .toBeDefined();
     expect(node["dPanelsOption"]).toEqual([{ region: "north", width: 1243, height: 80, split: true }]);
-    // layoutType 在顶层；几何映射进 baseProperty，其余保留。
-    expect(node["layoutType"]).toBe(4);
+    // layoutType 作为容器 capability 判别值保持不变；几何映射进 baseProperty。
+    expect(node["layoutType"]).toBe(5);
     expect(node["baseProperty"]).toEqual({
       name: "DockingLayout1",
       guid: "layout-guid-1",
@@ -425,6 +424,16 @@ describe("client patcher — KF 容器对象（easyui / 布局）", () => {
       ])),
     ).rejects.toThrow(patchConflict);
   });
+
+  it.each([999, 4])(
+    "rejects ordinary layoutType migration to %s",
+    async (layoutType) => {
+      const base = await makeContainerFixture();
+      await expect(applyClientPatch(base, plan([
+        updateOperation("layout-guid-1", [{ path: "/layoutType", value: layoutType }]),
+      ]))).rejects.toThrow(/allowlist|layoutType/i);
+    },
+  );
 
   it.each([
     ["unknown native child field", [{

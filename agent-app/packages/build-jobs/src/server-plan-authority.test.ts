@@ -37,6 +37,22 @@ function signed() {
   });
 }
 
+function signedUpdate() {
+  return createHmacServerPlanAuthority(decodeServerPlanHmacKey(keyA)).sign({
+    plan: {
+      schema: "kf-change-plan/v1",
+      workspaceId: "w",
+      operations: [{
+        op: "update",
+        entityId: "button-guid",
+        changes: [{ path: "/text", value: "Reviewed" }],
+      }],
+    },
+    revisionId: "revision-1",
+    semanticOperations: [],
+  });
+}
+
 describe("HMAC server plan authority", () => {
   it.each([undefined, "", Buffer.alloc(31, 0x41).toString("base64"), "not-base64***"])(
     "rejects missing, malformed, or short server-only key material",
@@ -50,6 +66,20 @@ describe("HMAC server plan authority", () => {
       expectedPlanHash: envelope.planHash,
       expectedRevisionId: "revision-1",
     })).toEqual(envelope);
+  });
+
+  it("accepts a semantically identical persisted object whose JSON keys were reordered", () => {
+    const envelope = signedUpdate();
+    const reordered = {
+      signature: envelope.signature,
+      semanticOperations: envelope.semanticOperations,
+      revisionId: envelope.revisionId,
+      planHash: envelope.planHash,
+      plan: envelope.plan,
+      schema: envelope.schema,
+    };
+    expect(createHmacServerPlanAuthority(decodeServerPlanHmacKey(keyA)).verify(reordered))
+      .toEqual(envelope);
   });
 
   it("rejects a valid envelope signed by another server key", () => {
@@ -94,5 +124,57 @@ describe("HMAC server plan authority", () => {
       revisionId: "revision-1",
       semanticOperations: Array.from({ length: count }, () => semantic),
     })).toThrow(/SEMANTIC_MISMATCH/);
+  });
+
+  it.each([
+    ["inner plan", (value: ReturnType<typeof signedUpdate>) => {
+      (value.plan as unknown as Record<string, unknown>)["unknownPlanField"] = true;
+    }],
+    ["operation", (value: ReturnType<typeof signedUpdate>) => {
+      (value.plan.operations[0] as unknown as Record<string, unknown>)["unknownOperationField"] = true;
+    }],
+    ["field patch", (value: ReturnType<typeof signedUpdate>) => {
+      const operation = value.plan.operations[0]!;
+      if (operation.op !== "update") throw new Error("expected update");
+      (operation.changes[0] as unknown as Record<string, unknown>)["unknownPatchField"] = true;
+    }],
+  ])("rejects unsigned unknown fields at the %s level", (_label, mutate) => {
+    const value = structuredClone(signedUpdate());
+    mutate(value);
+    expect(() => createHmacServerPlanAuthority(decodeServerPlanHmacKey(keyA)).verify(value))
+      .toThrow(/raw|unknown|exact|schema/i);
+  });
+
+  it("rejects an own property attached to a signed array", () => {
+    const value = structuredClone(signedUpdate());
+    (value.plan.operations as unknown as Record<string, unknown>)["extra"] = "unsigned";
+    expect(() => createHmacServerPlanAuthority(decodeServerPlanHmacKey(keyA)).verify(value))
+      .toThrow(/raw|array|exact|schema/i);
+  });
+
+  it("rejects accessors without executing them", () => {
+    const value = structuredClone(signedUpdate());
+    let reads = 0;
+    Object.defineProperty(value.plan, "trap", {
+      enumerable: true,
+      get() {
+        reads += 1;
+        return "unsigned";
+      },
+    });
+    expect(() => createHmacServerPlanAuthority(decodeServerPlanHmacKey(keyA)).verify(value))
+      .toThrow(/accessor|raw|schema/i);
+    expect(reads).toBe(0);
+  });
+
+  it.each([
+    ["non-enumerable", (planValue: object) => Object.defineProperty(planValue, "hidden", { value: true })],
+    ["symbol", (planValue: object) => Object.defineProperty(planValue, Symbol("hidden"), { value: true, enumerable: true })],
+    ["prototype", (planValue: object) => Object.setPrototypeOf(planValue, { unsigned: true })],
+  ])("rejects %s persisted object state", (_label, mutate) => {
+    const value = structuredClone(signedUpdate());
+    mutate(value.plan);
+    expect(() => createHmacServerPlanAuthority(decodeServerPlanHmacKey(keyA)).verify(value))
+      .toThrow(/raw|prototype|symbol|enumerable|schema/i);
   });
 });

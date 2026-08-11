@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFile } from "node:fs/promises";
 import { createServerPlanAuthorityFromEnvironment } from "./server-plan-authority.js";
 
 describe("API server plan authority configuration", () => {
@@ -13,4 +14,16 @@ describe("API server plan authority configuration", () => {
     });
     expect(Object.keys(authority).sort()).toEqual(["sign", "verify"]);
   });
+
+  it.each(["start:api", "start:worker"])(
+    "%s loads the deployment-local .env before server configuration is created",
+    async (scriptName) => {
+      const packageJson = JSON.parse(
+        await readFile(new URL("../../../../package.json", import.meta.url), "utf8"),
+      ) as { scripts?: Record<string, string> };
+      const script = packageJson.scripts?.[scriptName];
+      expect(script).toMatch(/^node --env-file=\.env /);
+      expect(script).not.toMatch(/KF_SERVER_PLAN_HMAC_KEY_BASE64=/);
+    },
+  );
 });

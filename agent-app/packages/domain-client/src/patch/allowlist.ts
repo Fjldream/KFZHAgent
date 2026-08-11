@@ -14,7 +14,7 @@
  * KF 容器对象（easyui / 布局）也走同一张表：
  * - `easyui`（objectType=3 + uiExtendType）白名单 = `EASYUI_ALL_FIELDS` 并集
  *   （约 145 个宽松字段）+ 公共几何字段，字段名与 KF 顶层字段一一对应；
- * - `layout`（objectType=2 + layoutType）白名单 = layoutType/children/panels
+ * - `layout`（objectType=2 + layoutType）白名单 = children/panels
  *   + 公共几何字段，但 IR 路径与 KF 原始路径不同（几何在 baseProperty、
  *   子对象在 insiderObjects、面板在 dPanelsOption），由
  *   `CONTROL_LAYOUT_PATH_ALIASES` 在解析阶段映射；
@@ -48,8 +48,6 @@ export const COMMON_CONTROL_ALLOWED_FIELDS: readonly string[] = [
   "sizePolicy",
   "fixedSize",
   "linkMng",
-  "styleData",
-  "styleDataNew",
   "configureData",
   "isControl",
   "resDescription",
@@ -198,10 +196,10 @@ export const CONTROL_TYPE_ALLOWED_FIELDS: Readonly<Record<string, readonly strin
   // easyui（objectType=3 + uiExtendType/proto）：白名单 = 全 proto 可修改字段并集
   // （EASYUI_ALL_FIELDS，约 145 个宽松字段）；几何走公共 leftTopPt/width/height。
   easyui: EASYUI_ALL_FIELDS,
-  // layout（objectType=2 + layoutType）：layoutType 顶层直写，children/panels 为
+  // layout（objectType=2 + layoutType）：layoutType 是 capability 判别值，不允许普通迁移；children/panels 为
   // IR 语义字段（patch 时经 CONTROL_LAYOUT_PATH_ALIASES 映射到 insiderObjects/
   // dPanelsOption），几何经映射进入 baseProperty。
-  layout: ["layoutType", "children", "panels"],
+  layout: ["children", "panels"],
   // ── KF 特殊节点（objectType=1 / prototypeName 判别）──
   // 几何/可见性/tooltip 等走公共字段（COMMON_CONTROL_ALLOWED_FIELDS）；
   // 复杂配置（pageProperty/objects JSON 字符串/areas/columns）作为整体替换

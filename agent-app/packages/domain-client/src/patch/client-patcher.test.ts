@@ -142,6 +142,16 @@ describe("client patcher (Task 7 brief Step 1)", () => {
     await expect(applyClientPatch(base, plan([updateOperation("button-guid-1", [{ path: "/configureData", value: "alert(1)" }])]))).rejects.toThrow(/configureData/);
   });
 
+  it.each(["/styleData", "/styleDataNew"])(
+    "rejects raw style field update %s so structured applyStyle remains the only writer",
+    async (path) => {
+      const base = await copyFixture("client-unknown-field");
+      await expect(applyClientPatch(base, plan([
+        updateOperation("button-guid-1", [{ path, value: "#domId{display:none}" }]),
+      ]))).rejects.toThrow(/allowlist/i);
+    },
+  );
+
   it("rejects a self-authored semantic table marker without compiler provenance", async () => {
     const base = await copyFixture("client-unknown-field");
     await expect(applyClientPatch(base, plan([

@@ -97,7 +97,7 @@ export function canonicalChangePlanHash(input: unknown): string {
  * version and the complete semantic authorization list, is covered.
  */
 export function canonicalServerPlanSigningBytes(input: ServerPlanEnvelope): Uint8Array {
-  const envelope = parseEnvelopeShape(input);
+  const envelope = parseServerPlanEnvelopeData(input);
   return Buffer.from(stableJson({
     schema: envelope.schema,
     plan: envelope.plan,
@@ -115,7 +115,7 @@ export function validateServerPlanEnvelopeData(
   input: unknown,
   expected: ServerPlanEnvelopeExpectations = {},
 ): ServerPlanEnvelope {
-  const envelope = parseEnvelopeShape(input);
+  const envelope = parseServerPlanEnvelopeData(input);
   const actualPlanHash = canonicalChangePlanHash(envelope.plan);
   if (actualPlanHash !== envelope.planHash) {
     throw new Error("SERVER_PLAN_HASH_MISMATCH: persisted hash does not match the inner plan");
@@ -183,12 +183,104 @@ function parseChangePlan(input: unknown): ChangePlan {
   return parsed.data;
 }
 
-function parseEnvelopeShape(input: unknown): ServerPlanEnvelope {
+/**
+ * Parses the exact raw persisted representation without allowing Zod to
+ * silently strip unsigned fields at any nested ChangePlan level.
+ */
+export function parseServerPlanEnvelopeData(input: unknown): ServerPlanEnvelope {
+  assertDescriptorSafeJson(input, "$", new Set());
   const parsed = ServerPlanEnvelopeSchema.safeParse(input);
   if (!parsed.success) {
     throw new Error(`SERVER_PLAN_SCHEMA_INVALID: ${parsed.error.issues[0]?.message ?? "invalid envelope"}`);
   }
+  assertDeepExact(input, parsed.data, "$", new Set());
   return parsed.data;
+}
+
+function assertDescriptorSafeJson(value: unknown, path: string, seen: Set<object>): void {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return;
+  if (typeof value === "number") {
+    if (Number.isFinite(value)) return;
+    throw new Error(`SERVER_PLAN_RAW_INVALID: non-finite number at ${path}`);
+  }
+  if (typeof value !== "object") {
+    throw new Error(`SERVER_PLAN_RAW_INVALID: non-JSON value at ${path}`);
+  }
+  if (seen.has(value)) throw new Error(`SERVER_PLAN_RAW_INVALID: cycle at ${path}`);
+  seen.add(value);
+  try {
+    if (Array.isArray(value)) {
+      if (Object.getPrototypeOf(value) !== Array.prototype) {
+        throw new Error(`SERVER_PLAN_RAW_INVALID: array prototype at ${path}`);
+      }
+      const keys = Reflect.ownKeys(value);
+      if (keys.some((key) => typeof key === "symbol")) {
+        throw new Error(`SERVER_PLAN_RAW_INVALID: symbol array property at ${path}`);
+      }
+      const expected = new Set(["length", ...Array.from({ length: value.length }, (_, index) => String(index))]);
+      if (keys.length !== expected.size || keys.some((key) => !expected.has(String(key)))) {
+        throw new Error(`SERVER_PLAN_RAW_INVALID: array has extra property or hole at ${path}`);
+      }
+      for (let index = 0; index < value.length; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) {
+          throw new Error(`SERVER_PLAN_RAW_INVALID: array accessor or non-enumerable item at ${path}[${index}]`);
+        }
+        assertDescriptorSafeJson(descriptor.value, `${path}[${index}]`, seen);
+      }
+      return;
+    }
+    if (Object.getPrototypeOf(value) !== Object.prototype) {
+      throw new Error(`SERVER_PLAN_RAW_INVALID: object prototype at ${path}`);
+    }
+    for (const key of Reflect.ownKeys(value)) {
+      if (typeof key === "symbol") {
+        throw new Error(`SERVER_PLAN_RAW_INVALID: symbol property at ${path}`);
+      }
+      if (key === "__proto__" || key === "prototype" || key === "constructor") {
+        throw new Error(`SERVER_PLAN_RAW_INVALID: reserved property at ${path}.${key}`);
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (descriptor === undefined || !("value" in descriptor)) {
+        throw new Error(`SERVER_PLAN_RAW_INVALID: accessor at ${path}.${key}`);
+      }
+      if (!descriptor.enumerable) {
+        throw new Error(`SERVER_PLAN_RAW_INVALID: non-enumerable property at ${path}.${key}`);
+      }
+      assertDescriptorSafeJson(descriptor.value, `${path}.${key}`, seen);
+    }
+  } finally {
+    seen.delete(value);
+  }
+}
+
+function assertDeepExact(raw: unknown, parsed: unknown, path: string, seen: Set<object>): void {
+  if (raw === null || parsed === null || typeof raw !== "object" || typeof parsed !== "object") {
+    if (!Object.is(raw, parsed)) throw new Error(`SERVER_PLAN_RAW_UNKNOWN_FIELD: normalized value at ${path}`);
+    return;
+  }
+  if (seen.has(raw)) throw new Error(`SERVER_PLAN_RAW_INVALID: cycle at ${path}`);
+  seen.add(raw);
+  try {
+    const rawKeys = Reflect.ownKeys(raw).filter((key) => key !== "length");
+    const parsedKeys = Reflect.ownKeys(parsed).filter((key) => key !== "length");
+    const parsedKeySet = new Set(parsedKeys);
+    if (rawKeys.length !== parsedKeys.length
+      || rawKeys.some((key) => !parsedKeySet.has(key))) {
+      throw new Error(`SERVER_PLAN_RAW_UNKNOWN_FIELD: exact schema mismatch at ${path}`);
+    }
+    for (const key of rawKeys) {
+      const rawDescriptor = Object.getOwnPropertyDescriptor(raw, key);
+      const parsedDescriptor = Object.getOwnPropertyDescriptor(parsed, key);
+      if (rawDescriptor === undefined || parsedDescriptor === undefined
+        || !("value" in rawDescriptor) || !("value" in parsedDescriptor)) {
+        throw new Error(`SERVER_PLAN_RAW_INVALID: descriptor mismatch at ${path}`);
+      }
+      assertDeepExact(rawDescriptor.value, parsedDescriptor.value, `${path}.${String(key)}`, seen);
+    }
+  } finally {
+    seen.delete(raw);
+  }
 }
 
 function stableJson(value: unknown): string {

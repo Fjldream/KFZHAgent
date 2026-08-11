@@ -7,6 +7,7 @@ import type {
 import {
   canonicalChangePlanHash,
   canonicalServerPlanSigningBytes,
+  parseServerPlanEnvelopeData,
   ServerPlanEnvelopeSchema,
   validateServerPlanEnvelopeData,
 } from "@kf/contracts";
@@ -56,16 +57,13 @@ export function createHmacServerPlanAuthority(key: Uint8Array): ServerPlanAuthor
       return { ...unsigned, signature: digest(unsigned).toString("hex") };
     },
     verify(input: unknown, expected: ServerPlanEnvelopeExpectations = {}): ServerPlanEnvelope {
-      const parsed = ServerPlanEnvelopeSchema.safeParse(input);
-      if (!parsed.success) {
-        throw new Error(`SERVER_PLAN_SCHEMA_INVALID: ${parsed.error.issues[0]?.message ?? "invalid envelope"}`);
-      }
-      const supplied = Buffer.from(parsed.data.signature, "hex");
-      const wanted = digest(parsed.data);
+      const parsed = parseServerPlanEnvelopeData(input);
+      const supplied = Buffer.from(parsed.signature, "hex");
+      const wanted = digest(parsed);
       if (supplied.length !== wanted.length || !timingSafeEqual(supplied, wanted)) {
         throw new Error("SERVER_PLAN_SIGNATURE_INVALID");
       }
-      return validateServerPlanEnvelopeData(parsed.data, expected);
+      return validateServerPlanEnvelopeData(parsed, expected);
     },
   });
 }

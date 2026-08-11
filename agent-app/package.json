@@ -8,8 +8,8 @@
     "lint": "pnpm -r lint",
     "e2e": "playwright test",
     "e2e:report": "playwright show-report",
-    "start:api": "pnpm exec vite-node -r apps/api -c tests/e2e/vite.e2e.config.ts apps/api/src/main.ts",
-    "start:worker": "pnpm exec vite-node -r apps/worker -c tests/e2e/vite.e2e.config.ts apps/worker/src/run.ts",
+    "start:api": "node --env-file=.env ./node_modules/vite-node/dist/cli.mjs -r apps/api -c tests/e2e/vite.e2e.config.ts apps/api/src/main.ts",
+    "start:worker": "node --env-file=.env ./node_modules/vite-node/dist/cli.mjs -r apps/worker -c tests/e2e/vite.e2e.config.ts apps/worker/src/run.ts",
     "start:web": "pnpm --filter web exec vite --host localhost --port 5173 --strictPort"
   },
   "devDependencies": {
