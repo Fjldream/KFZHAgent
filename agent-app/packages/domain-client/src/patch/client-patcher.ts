@@ -13,7 +13,8 @@ import { z } from "zod";
 import { inspectClientProject, type EntityIndex, type InspectResult } from "../inspect/client-inspector.js";
 import { stableStringify, type ClientWorkspace } from "../compile/client-compiler.js";
 import { deriveGuid } from "../compile/guid-factory.js";
-import { ensureChildGuids } from "../compile/control-compiler.js";
+import { compileAction, ensureChildGuids } from "../compile/control-compiler.js";
+import type { RestrictedAction } from "../ir/client-project-ir.js";
 import { assertStyleCompilationAccepted, compileControlStyle } from "../style/style-engine.js";
 import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
 import { mergeManagedStyleData } from "../style/style-data-merge.js";
@@ -1088,7 +1089,7 @@ function pushControlIntoParent(
 ): boolean {
   const target = typeof parentId === "string" ? parentId : "";
   if (target === "") return false;
-  const container = objects.find((o) => {
+  const findContainer = (nodes: unknown[]): Record<string, unknown> | undefined => nodes.find((o) => {
     if (o === null || typeof o !== "object") return false;
     const rec = o as Record<string, unknown>;
     const bp = rec["baseProperty"];
@@ -1097,7 +1098,8 @@ function pushControlIntoParent(
     const guid = typeof rec["guid"] === "string" ? (rec["guid"]) : "";
     const bpGuid = bp !== null && typeof bp === "object" ? ((bp as Record<string, unknown>)["guid"]) : undefined;
     return name === target || bpName === target || guid === target || bpGuid === target;
-  });
+  }) as Record<string, unknown> | undefined ?? nodes.flatMap((node) => isObject(node) && Array.isArray(node["insiderObjects"]) ? [node["insiderObjects"] as unknown[]] : []).map(findContainer).find((value) => value !== undefined);
+  const container = findContainer(objects);
   if (container === undefined) return false;
   const rec = container as Record<string, unknown>;
   if (!Array.isArray(rec["insiderObjects"])) rec["insiderObjects"] = [];
@@ -1300,6 +1302,23 @@ async function applyCreate(
           if (value !== undefined) (overrides as Record<string, unknown>)[key] = value;
         }
         const control = mergeControlTemplate(mergeControlTemplate(BASE_FIELDS, template), overrides);
+        if (type === "button" && properties["action"] !== undefined) {
+          const action = properties["action"] as RestrictedAction;
+          try {
+            const command = compileAction(action, {
+              variableGroupGuid: "", pageGroupGuid: "",
+              resolvePageGuid: (pageId) => {
+                const target = Object.values(inspection.index.pages).find((candidate) => candidate.id === pageId || candidate.name === pageId);
+                if (target === undefined) throw new Error(`unknown page ${pageId}`);
+                return target.guid;
+              },
+              resolveVariableName: (variableId) => variableId,
+            });
+            control["linkMng"] = { linkList: [command] };
+          } catch (error) {
+            throw new PatchConflictError(`invalid button action: ${error instanceof Error ? error.message : "unknown"}`);
+          }
+        }
         if (style !== undefined) applyStyleToControl(control, type, style);
         // 静态控件也可用 parentId 放进布局（同 easyui 分支）
         const parentId = properties["parentId"];
