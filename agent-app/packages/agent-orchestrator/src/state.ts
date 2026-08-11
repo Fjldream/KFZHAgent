@@ -138,7 +138,13 @@ export const AgentGraphState = new StateSchema({
   modulePlanHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
   moduleCompilationArtifact: ModuleCompilationArtifactSchema.optional(),
   moduleDeliveryReport: ModuleDeliveryReportSchema.optional(),
-  moduleRepairAttempt: z.number().int().min(0).max(1).optional(),
+  moduleRepairAttempt: z.number().int().min(0).max(3).optional(),
+  /** Server-routed proof of why the current ChangePlan may enter the build queue. */
+  buildAuthorization: z.enum([
+    "confirmed-blueprint",
+    "preview-feedback",
+    "legacy-plan-approval",
+  ]).optional(),
   capabilityReport: CapabilityReportSchema.optional(),
   stage: StageSchema,
   recentMessages: z.array(MessageSchema),

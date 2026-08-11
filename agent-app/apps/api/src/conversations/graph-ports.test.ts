@@ -5,6 +5,23 @@ import { createKingClientDomainPack, deriveGuid } from "@kf/domain-client";
 import { createGraphPorts } from "./graph-ports.js";
 
 describe("conversation graph workspace query", () => {
+  it("keeps beta modules out of the production planning catalog", async () => {
+    const ports = createGraphPorts({} as never, {} as never);
+    await expect(ports.modulePlanCompiler.listPlanningCatalog()).resolves.toEqual([]);
+  });
+
+  it("lists only tenant/workspace-scoped model-safe asset metadata", async () => {
+    const prisma = {
+      solutionWorkspace: { findFirst: vi.fn().mockResolvedValue({ id: "workspace" }) },
+      workspaceAsset: { findMany: vi.fn().mockResolvedValue([{ id: "portrait", type: "image", name: "portrait.png", mediaType: "image/png", storageKey: "secret/path" }]) },
+    };
+    const ports = createGraphPorts(prisma, {} as never);
+    await expect(ports.assetCatalog.list({ tenantId: "tenant", workspaceId: "workspace" })).resolves.toEqual([{
+      id: "portrait", kind: "image", name: "portrait.png", mimeType: "image/png", description: "Uploaded workspace image",
+    }]);
+    expect(prisma.workspaceAsset.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { tenantId: "tenant", workspaceId: "workspace" } }));
+  });
+
   it("derives compile-mode page GUIDs with the native compiler's page prefix", async () => {
     const prisma = {
       solutionRevision: {

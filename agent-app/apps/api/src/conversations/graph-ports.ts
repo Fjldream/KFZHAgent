@@ -1,6 +1,8 @@
 import type {
   BuildJobPort,
   AcceptedBlueprintConfirmationPort,
+  AssetCatalogPort,
+  ModulePlanCompilerPort,
   UiImplementationCompilerPort,
   WorkspaceQueryPort,
 } from "@kf/agent-orchestrator";
@@ -8,7 +10,9 @@ import type { ChangePlanRepository } from "@kf/agent-orchestrator";
 import type { EditableEntity } from "@kf/agent-orchestrator";
 import type { GraphMessage } from "@kf/agent-orchestrator";
 import {
+  compileModulePlan,
   compileUiImplementation,
+  createDefaultModuleRegistry,
   deriveGuid,
   importNativeClientPackage,
   inspectClientProject,
@@ -39,6 +43,8 @@ export interface GraphPorts {
   buildJobPort: BuildJobPort;
   uiImplementationCompiler: UiImplementationCompilerPort;
   acceptedBlueprintConfirmation: AcceptedBlueprintConfirmationPort;
+  modulePlanCompiler: ModulePlanCompilerPort;
+  assetCatalog: AssetCatalogPort;
 }
 
 export function createGraphPorts(
@@ -47,6 +53,7 @@ export function createGraphPorts(
   moduleArtifactAuthority?: ModuleArtifactAuthority,
 ): GraphPorts {
   const buildJobs = new BuildJobService(prisma);
+  const moduleRegistry = createDefaultModuleRegistry();
 
   const workspaceQuery: WorkspaceQueryPort = {
     async listRecentMessages({ tenantId, conversationId, limit }) {
@@ -254,11 +261,49 @@ export function createGraphPorts(
   const acceptedBlueprintConfirmation: AcceptedBlueprintConfirmationPort = {
     confirm(input) {
       if (moduleArtifactAuthority === undefined) throw new Error("MODULE_ARTIFACT_AUTHORITY_NOT_CONFIGURED");
-      return Promise.resolve(signAcceptedBlueprintAtConfirmation({ authority: moduleArtifactAuthority, ...input }));
+      return Promise.resolve(signAcceptedBlueprintAtConfirmation({ authority: moduleArtifactAuthority, registry: moduleRegistry, ...input }));
     },
   };
 
-  return { workspaceQuery, changePlanRepository, buildJobPort, uiImplementationCompiler, acceptedBlueprintConfirmation };
+  const assetCatalog: AssetCatalogPort = {
+    async list({ tenantId, workspaceId }) {
+      const workspace = await prisma.solutionWorkspace.findFirst({
+        where: { id: workspaceId, tenantId },
+        select: { id: true },
+      });
+      if (workspace === null) throw new Error("workspace not found");
+      const rows = await prisma.workspaceAsset.findMany({
+        where: { tenantId, workspaceId },
+        orderBy: { id: "asc" },
+        select: { id: true, type: true, name: true, mediaType: true },
+      });
+      return rows.map((row) => {
+        if (row.type !== "image" || (row.mediaType !== "image/png" && row.mediaType !== "image/jpeg" && row.mediaType !== "image/webp")) {
+          throw new Error("invalid persisted workspace asset metadata");
+        }
+        return { id: row.id, kind: "image" as const, name: row.name, mimeType: row.mediaType, description: "Uploaded workspace image" };
+      });
+    },
+  };
+
+  const modulePlanCompiler: ModulePlanCompilerPort = {
+    listPlanningCatalog() {
+      return Promise.resolve(moduleRegistry.listForPlanning());
+    },
+    compile(input) {
+      const definitions = input.plan.pages.flatMap((page) => page.modules.map((module) => moduleRegistry.require(module.kind, module.templateVersion)));
+      const availableKfCapabilities = [...new Set(definitions.flatMap((definition) => [...definition.requiredKfCapabilities]))].sort();
+      const assetsById = Object.fromEntries(input.plan.assets.map((asset) => [asset.id, { assetId: asset.id, status: "resolved" as const, resolvedName: asset.name }]));
+      return Promise.resolve(compileModulePlan({
+        ...input,
+        registry: moduleRegistry,
+        assetsById,
+        validationContext: { availableKfCapabilities, approvedAuthorizationRefs: [] },
+      }));
+    },
+  };
+
+  return { workspaceQuery, changePlanRepository, buildJobPort, uiImplementationCompiler, acceptedBlueprintConfirmation, modulePlanCompiler, assetCatalog };
 }
 
 function withoutUnverifiedModuleSources(spec: import("@kf/contracts").UIImplementationSpec): import("@kf/contracts").UIImplementationSpec {

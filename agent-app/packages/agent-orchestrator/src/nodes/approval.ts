@@ -61,12 +61,16 @@ export function createApprovalNode() {
       };
     }
     if (parsed.data.action === "approve") {
-      return { resumeAction: "approve", stage: "building" };
+      return {
+        resumeAction: "approve",
+        stage: "building",
+        buildAuthorization: "legacy-plan-approval",
+      };
     }
     if (parsed.data.action === "revise") {
       return { resumeAction: "revise", stage: "planning" };
     }
-    return { resumeAction: "cancel", stage: "idle" };
+    return { resumeAction: "cancel", stage: "idle", buildAuthorization: undefined };
   };
 }
 
@@ -86,6 +90,7 @@ export function createCancelPlanNode(deps: { changePlanRepository: ChangePlanRep
     return {
       stage: "idle",
       resumeAction: undefined,
+      buildAuthorization: undefined,
       activeChangeRequestId: undefined,
       changePlanId: undefined,
       planHash: undefined,

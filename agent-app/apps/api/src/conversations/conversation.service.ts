@@ -376,6 +376,8 @@ export class ConversationService {
         uiImplementationCompiler: ports.uiImplementationCompiler,
         serverPlanSigner: this.serverPlanAuthority,
         moduleArtifactAuthority: this.moduleArtifactAuthority,
+        modulePlanCompiler: ports.modulePlanCompiler,
+        assetCatalog: ports.assetCatalog,
         acceptedBlueprintConfirmation: ports.acceptedBlueprintConfirmation,
         isDomainSupported: (domain) => domain === "kingclient",
         defaultDomainKind: "kingclient",

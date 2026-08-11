@@ -5,12 +5,9 @@ import type { SolutionGraphDeps } from "../ports.js";
 /**
  * Enqueues the durable build job for an approved plan (brief Step 5).
  *
- * Guard: this node is reachable ONLY through the approval interrupt's
- * approve resume (resumeAction === "approve" and stage === "building"). A
- * direct BUILD intent routes here too but is rejected with
- * BUILD_REQUIRES_APPROVAL — the graph never builds without an approval, so
- * BUILD without a just-approved plan is an explicit error, not a silent
- * bypass (see I3).
+ * Guard: a build must carry one exact routing-owned authorization. Legacy
+ * plans require the approval interrupt's approve resume; module plans may
+ * arrive directly from confirmed-blueprint or preview-feedback routing.
  *
  * The enqueue is idempotent on its idempotencyKey (the underlying
  * BuildJobService deduplicates on the same key). Approving marks the change
@@ -18,11 +15,17 @@ import type { SolutionGraphDeps } from "../ports.js";
  */
 export function createEnqueueBuildNode(deps: SolutionGraphDeps) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
-    if (state.resumeAction !== "approve" || state.stage !== "building") {
+    const legacyAuthorized = state.buildAuthorization === "legacy-plan-approval"
+      && state.resumeAction === "approve";
+    const moduleAuthorized = (state.buildAuthorization === "confirmed-blueprint"
+      || state.buildAuthorization === "preview-feedback")
+      && state.resumeAction === undefined;
+    if (state.stage !== "building" || (!legacyAuthorized && !moduleAuthorized)) {
       return {
         lastErrorCode: "BUILD_REQUIRES_APPROVAL",
         stage: "idle",
         resumeAction: undefined,
+        buildAuthorization: undefined,
         pendingRequirements: undefined,
       };
     }
@@ -32,7 +35,7 @@ export function createEnqueueBuildNode(deps: SolutionGraphDeps) {
       state.planHash === undefined ||
       state.activeChangeRequestId === undefined
     ) {
-      return { lastErrorCode: "INCOMPLETE_PLAN", stage: "idle" };
+      return { lastErrorCode: "INCOMPLETE_PLAN", stage: "idle", buildAuthorization: undefined };
     }
 
     try {
@@ -73,6 +76,7 @@ export function createEnqueueBuildNode(deps: SolutionGraphDeps) {
         buildJobId: job.id,
         stage: "building",
         resumeAction: undefined,
+        buildAuthorization: undefined,
         pendingRequirements: undefined,
       };
     } catch (error) {
@@ -80,6 +84,7 @@ export function createEnqueueBuildNode(deps: SolutionGraphDeps) {
         lastErrorCode: `ENQUEUE_FAILED:${error instanceof Error ? error.message : String(error)}`,
         stage: "idle",
         resumeAction: undefined,
+        buildAuthorization: undefined,
         pendingRequirements: undefined,
       };
     }

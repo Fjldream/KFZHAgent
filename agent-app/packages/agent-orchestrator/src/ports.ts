@@ -1,5 +1,5 @@
 import type { EnqueueBuildInput, ModuleArtifactAuthority, VerifiedAcceptedBlueprintArtifact, VerifiedModuleCompilationArtifact } from "@kf/build-jobs";
-import type { ModuleCompilationOutcome } from "@kf/domain-client";
+import type { ModuleCompilationOutcome, ModulePlanningSummary } from "@kf/domain-client";
 import type { BuildJobStatus } from "@kf/build-jobs";
 import type {
   CapabilityReport,
@@ -183,6 +183,8 @@ export interface UiImplementationCompilerPort {
 
 /** Deterministic module compiler boundary. Registry/assets remain server-owned behind the port. */
 export interface ModulePlanCompilerPort {
+  /** Stable-only, bounded summaries. Beta/unsupported definitions never cross this boundary. */
+  listPlanningCatalog(): Promise<readonly ModulePlanningSummary[]>;
   compile(input: {
     plan: import("@kf/contracts").ModulePlan;
     acceptedBlueprintArtifact: VerifiedAcceptedBlueprintArtifact;
@@ -190,6 +192,11 @@ export interface ModulePlanCompilerPort {
     previousPlan?: import("@kf/contracts").ModulePlan;
     previousImplementation?: UIImplementationSpec;
   }): Promise<ModuleCompilationOutcome>;
+}
+
+/** Tenant/workspace-scoped model-safe asset metadata. Never returns storage keys or paths. */
+export interface AssetCatalogPort {
+  list(input: { tenantId: string; workspaceId: string }): Promise<readonly import("@kf/contracts").AssetRecord[]>;
 }
 
 /** API-owned confirmation boundary; model fields are inputs, never signing authority. */
@@ -229,6 +236,7 @@ export interface SolutionGraphDeps {
   moduleArtifactAuthority?: ModuleArtifactAuthority;
   /** Reserved module-generation execution port; Task 10 can wire it without changing checkpoint state. */
   modulePlanCompiler?: ModulePlanCompilerPort;
+  assetCatalog?: AssetCatalogPort;
   acceptedBlueprintConfirmation?: AcceptedBlueprintConfirmationPort;
   /** Domain support predicate (DomainRegistry-backed in production). */
   isDomainSupported: (domain: string) => boolean;

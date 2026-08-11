@@ -16,6 +16,7 @@ import { createDesignPlanNode } from "./nodes/design-plan.js";
 import { createApprovalNode, createCancelPlanNode } from "./nodes/approval.js";
 import { createEnqueueBuildNode } from "./nodes/enqueue-build.js";
 import { createImplementationPlanNode } from "./nodes/implementation-plan.js";
+import { createModulePlanNode } from "./nodes/module-plan.js";
 
 /**
  * Thrown when the caller tries to run a conversation that is paused at the
@@ -73,6 +74,7 @@ export function compileSolutionGraph(
     .addNode("clarify", createClarifyNode(deps))
     .addNode("design-plan", createDesignPlanNode(deps))
     .addNode("implementation-plan", createImplementationPlanNode(deps))
+    .addNode("module-plan", createModulePlanNode(deps))
     .addNode("plan-change", createPlanChangeNode(deps))
     .addNode("approval", createApprovalNode())
     .addNode("cancel-plan", createCancelPlanNode(deps))
@@ -80,8 +82,9 @@ export function compileSolutionGraph(
     .addNode("done", createDoneNode(deps))
     .addEdge(START, "load-context")
     .addEdge("load-context", "classify-intent")
-    .addConditionalEdges("classify-intent", routeAfterClassify)
+    .addConditionalEdges("classify-intent", (state) => routeAfterClassify(state, deps))
     .addConditionalEdges("implementation-plan", routeAfterPlanChange)
+    .addConditionalEdges("module-plan", routeAfterModulePlan)
     .addConditionalEdges("plan-change", routeAfterPlanChange)
     .addConditionalEdges("approval", routeAfterApproval)
     .addEdge("cancel-plan", END)
@@ -92,7 +95,7 @@ export function compileSolutionGraph(
 }
 
 /** Deterministic intent routing after classification (brief Step 4 + spec §5.2). */
-function routeAfterClassify(state: AgentGraphStateValue): string {
+export function routeAfterClassify(state: AgentGraphStateValue, deps?: SolutionGraphDeps): string {
   if (state.pendingRequirements !== undefined && state.pendingRequirements.length > 0) {
     // Unsupported domain requests never reach planning or the build queue.
     return END;
@@ -109,13 +112,11 @@ function routeAfterClassify(state: AgentGraphStateValue): string {
       // 客户确认后再进 implementation-plan；已有确认过的设计（如预览反馈小改）
       // 直接复用已确认蓝图和上一版实施规格。
       if (state.designPlanHash === undefined) return "design-plan";
-      return state.designPlan?.schema === "kf-design-plan/v2"
-        ? "implementation-plan"
-        : "plan-change";
+      return useModuleWorkflow(state, deps)
+        ? "module-plan"
+        : state.designPlan?.schema === "kf-design-plan/v2" ? "implementation-plan" : "plan-change";
     case "CONFIRM_DESIGN":
-      return state.designPlan?.schema === "kf-design-plan/v2"
-        ? "implementation-plan"
-        : "plan-change";
+      return useModuleWorkflow(state, deps) ? "module-plan" : state.designPlan?.schema === "kf-design-plan/v2" ? "implementation-plan" : "plan-change";
     case "REVISE_DESIGN":
       return "design-plan";
     case "CONFIRM_BUILD":
@@ -133,6 +134,25 @@ function routeAfterClassify(state: AgentGraphStateValue): string {
   }
 }
 
+function useModuleWorkflow(state: AgentGraphStateValue, deps: SolutionGraphDeps | undefined): boolean {
+  if (state.designPlan?.schema !== "kf-design-plan/v2") return false;
+  // Only an acceptance-ready v2 blueprint has server-confirmable module
+  // facts. Older v2 checkpoints created before expectedKind was introduced
+  // remain compatibility inputs until the user reconfirms an adopted mapping.
+  if (!state.designPlan.modules.every((module) => module.expectedKind !== undefined)) return false;
+  // A checkpoint with an old UI implementation but no ModulePlan belongs to
+  // the compatibility path (notably imported, not-yet-adopted controls).
+  if (state.modulePlan === undefined && state.uiImplementation !== undefined) return false;
+  // Old deployments/test harnesses without the module execution ports stay on
+  // compatibility code. Production composition wires this complete set and
+  // therefore every new v2 confirmation enters module planning.
+  return deps?.modulePlanCompiler !== undefined
+    && deps.assetCatalog !== undefined
+    && deps.moduleArtifactAuthority !== undefined
+    && deps.acceptedBlueprintConfirmation !== undefined
+    && deps.uiImplementationCompiler !== undefined;
+}
+
 /**
  * Routes plan-change output. A successful plan ends in `approval` (where the
  * approval interrupt waits); a guarded/early return (DESIGN_NOT_CONFIRMED,
@@ -141,6 +161,13 @@ function routeAfterClassify(state: AgentGraphStateValue): string {
  */
 function routeAfterPlanChange(state: AgentGraphStateValue): string {
   return state.stage === "approval" ? "approval" : END;
+}
+
+export function routeAfterModulePlan(state: AgentGraphStateValue): string {
+  return state.stage === "building"
+    && (state.buildAuthorization === "confirmed-blueprint" || state.buildAuthorization === "preview-feedback")
+    ? "enqueue-build"
+    : END;
 }
 
 /**

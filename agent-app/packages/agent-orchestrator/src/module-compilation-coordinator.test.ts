@@ -42,6 +42,7 @@ function accepted(inputRegistry: ModuleRegistry, revisionId = "revision-1") {
 
 function coordinator(inputRegistry: ModuleRegistry) {
   return new ModuleCompilationCoordinator(authority, {
+    listPlanningCatalog: async () => [],
     compile: async (input) => compileModulePlan({ ...input, registry: inputRegistry, assetsById: {}, validationContext: { availableKfCapabilities: ["text"], approvedAuthorizationRefs: [] } }),
   }, {
     compile: async ({ workspaceId, spec, previousSpec, moduleCompilationArtifact }) => compileUiImplementation(spec, { workspaceId, pageGuidById: { home: "page-home" }, existingControlGuidByComponentId: {}, existingControlCapabilityIdByComponentId: {}, ...(previousSpec === undefined ? {} : { previousImplementation: previousSpec }), ...(moduleCompilationArtifact === undefined ? {} : { moduleCompilationArtifact }) }),
@@ -60,7 +61,7 @@ describe("ModuleCompilationCoordinator", () => {
 
   it("rejects accepted-artifact binding mismatch before invoking the compiler", async () => {
     const inputRegistry = registry(); const confirmed = accepted(inputRegistry); let calls = 0;
-    const service = new ModuleCompilationCoordinator(authority, { compile: async () => { calls += 1; throw new Error("should not compile"); } }, { compile: async () => { throw new Error("should not compile UI"); } });
+    const service = new ModuleCompilationCoordinator(authority, { listPlanningCatalog: async () => [], compile: async () => { calls += 1; throw new Error("should not compile"); } }, { compile: async () => { throw new Error("should not compile UI"); } });
     await expect(service.compile({ projectKey: "project", revisionId: "wrong", acceptedBlueprintHash: confirmed.blueprintHash, acceptedBlueprintArtifact: confirmed.signed, plan: plan(), workspaceId: "workspace", editableEntities: [] })).rejects.toThrow("ACCEPTED_BLUEPRINT_BINDING_MISMATCH");
     expect(calls).toBe(0);
   });

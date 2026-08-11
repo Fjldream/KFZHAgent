@@ -149,4 +149,16 @@ describe("AgentGraphState v2", () => {
       }),
     ).rejects.toThrow();
   });
+
+  it("persists all bounded module repair attempts and exact build authorization origins", async () => {
+    for (const moduleRepairAttempt of [0, 1, 2, 3]) {
+      for (const buildAuthorization of ["confirmed-blueprint", "preview-feedback", "legacy-plan-approval"]) {
+        await expect(AgentGraphState.validateInput({
+          ...base, stage: "building", moduleRepairAttempt, buildAuthorization,
+        })).resolves.toBeDefined();
+      }
+    }
+    await expect(AgentGraphState.validateInput({ ...base, stage: "idle", moduleRepairAttempt: 4 })).rejects.toThrow();
+    await expect(AgentGraphState.validateInput({ ...base, stage: "idle", buildAuthorization: "model-approved" })).rejects.toThrow();
+  });
 });

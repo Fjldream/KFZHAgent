@@ -39,6 +39,7 @@ export {
   type UiImplementationCompilerInput,
   type ServerPlanSignerPort,
   type ModulePlanCompilerPort,
+  type AssetCatalogPort,
   type AcceptedBlueprintConfirmationPort,
 } from "./ports.js";
 export {
