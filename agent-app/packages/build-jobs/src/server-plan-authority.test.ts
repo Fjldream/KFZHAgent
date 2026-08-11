@@ -12,8 +12,8 @@ import {
   decodeServerPlanHmacKey,
   readVerifiedAcceptedBlueprintArtifact,
   readVerifiedModuleCompilationArtifact,
-  readVerifiedProjectCreationSeedArtifact,
 } from "./server-plan-authority.js";
+import * as moduleAuthorityExports from "./server-plan-authority.js";
 
 const keyA = Buffer.alloc(32, 0x41).toString("base64");
 const keyB = Buffer.alloc(32, 0x42).toString("base64");
@@ -279,7 +279,7 @@ describe("HMAC module artifact authority", () => {
   const compilationMetadata = {
     schema: "kf-module-compilation-metadata/v1" as const,
     projectKey: "kingclient.portal",
-    moduleDefinitions: [], assets: [], blueprintMappings: [], generatedSeeds: [],
+    moduleDefinitions: [], assets: [], blueprintMappings: [],
   };
   const compilationInput = {
     schema: "kf-module-compilation-artifact/v1" as const,
@@ -291,11 +291,6 @@ describe("HMAC module artifact authority", () => {
     metadataHash: hash(compilationMetadata),
     sourceModuleIds: ["hero"],
     metadata: compilationMetadata,
-  };
-  const seedComponent = {
-    id: "Text1", role: "content", capabilityId: "text", critical: true,
-    content: "__KF_SEED_PLACEHOLDER__", geometry: { x: 0, y: 0, width: 100, height: 30 },
-    properties: {}, style: { declarations: {}, states: {} },
   };
 
   it("verifies persisted JSON into non-forgeable runtime brands", () => {
@@ -335,16 +330,10 @@ describe("HMAC module artifact authority", () => {
     ]) expect(() => authority.verifyModuleCompilation(signedArtifact, expected)).toThrow(/BINDING/);
   });
 
-  it("signs project seeds from concrete components and verifies them after persistence", () => {
+  it("does not expose project seed signing or verification before a creation service exists", () => {
     const authority = createHmacModuleArtifactAuthority(artifactKeyA);
-    const seed = authority.signProjectCreationSeeds({
-      projectKey: "kingclient.portal", revisionId: "revision-1",
-      seeds: [{ pageId: "home", component: seedComponent, generator: "new-project", projectCreationMarker: "project-create-001" }],
-    });
-    const verified = authority.verifyProjectCreationSeeds(JSON.parse(JSON.stringify(seed)), {
-      projectKey: "kingclient.portal", revisionId: "revision-1",
-    });
-    expect(readVerifiedProjectCreationSeedArtifact(verified)).toEqual(seed);
-    expect(seed.seeds[0]).toEqual(expect.objectContaining({ entityId: "Text1", componentHash: `sha256:${hash(seedComponent)}` }));
+    expect(authority).not.toHaveProperty("signProjectCreationSeeds");
+    expect(authority).not.toHaveProperty("verifyProjectCreationSeeds");
+    expect(moduleAuthorityExports).not.toHaveProperty("readVerifiedProjectCreationSeedArtifact");
   });
 });

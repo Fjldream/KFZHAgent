@@ -17,6 +17,7 @@ import {
 import type { ResolvedAssetBinding } from "./module-compiler.js";
 import type { ResolvedAsset } from "@kf/contracts";
 import type { ModuleRegistry } from "./module-registry.js";
+import type { ModuleRequiredOutputContract } from "./types.js";
 import { stableModuleComponentId } from "./stable-ids.js";
 
 export interface EvaluateModuleDeliveryInput {
@@ -65,6 +66,7 @@ export function evaluateModuleDelivery(input: EvaluateModuleDeliveryInput): Modu
       let definition;
       try { definition = candidate === undefined ? undefined : input.registry.require(candidate.kind, candidate.templateVersion); } catch { definition = undefined; }
       if (candidate === undefined || definition === undefined || candidate.kind !== module.expectedKind || definition.category !== module.expectedCategory || mapping.expectedKind !== module.expectedKind || mapping.expectedCategory !== module.expectedCategory) gaps.push(gap(owner, `Keep blueprint module “${module.blueprintModuleId}” mapped to its exact accepted registered kind/category.`, "BLUEPRINT_KIND_OR_CATEGORY_MISMATCH"));
+      if (candidate !== undefined && definition !== undefined) inspectPlanInteractionAuthorization(module, candidate, definition, gaps);
     }
     if (module.interactionRequirements.length > 0 && !mapped.some((id) => planModules.some(({ module: candidate }) => candidate.id === id && candidate.interactions.length > 0))) gaps.push(gap(module.blueprintModuleId, "Map confirmed blueprint interactions to registered native interactions.", "BLUEPRINT_INTERACTION_UNMAPPED"));
   }
@@ -95,18 +97,57 @@ export function evaluateModuleDelivery(input: EvaluateModuleDeliveryInput): Modu
 }
 
 function inspectBlueprintInteractionBindings(blueprint: AcceptedBlueprintArtifact, metadata: ModuleCompilationMetadata, implementation: UIImplementationSpec, gaps: ModuleDeliveryGap[]): void {
+  const globallyBoundOutputs = new Set<string>();
   for (const requirementOwner of blueprint.modules) {
     const requirements = requirementOwner.interactionRequirements;
     const mapping = metadata.blueprintMappings.find((entry) => entry.blueprintModuleId === requirementOwner.blueprintModuleId);
     if (mapping === undefined) { gaps.push(gap("blueprint", `Map all interaction requirements for “${requirementOwner.blueprintModuleId}”.`, "BLUEPRINT_INTERACTION_UNMAPPED")); continue; }
     const outputs = implementation.pages.find((page) => page.id === mapping.pageId)?.components.filter((component) => component.sourceModuleId === mapping.moduleId) ?? [];
+    const requirementKeys = requirements.map(interactionRequirementKey);
+    const bindingKeys = mapping.interactionBindings.map(interactionRequirementKey);
+    if (JSON.stringify(requirementKeys) !== JSON.stringify(bindingKeys)) gaps.push(gap(mapping.moduleId, "Bind exactly the accepted interaction requirements without missing, duplicate, or unrelated entries.", "BLUEPRINT_INTERACTION_BINDING_SET_MISMATCH"));
+    if (new Set(mapping.interactionBindings.map((binding) => binding.outputId)).size !== mapping.interactionBindings.length) gaps.push(gap(mapping.moduleId, "Bind each accepted interaction requirement to one unique output.", "BLUEPRINT_INTERACTION_OUTPUT_REUSED"));
+    for (const binding of mapping.interactionBindings) {
+      const owner = `${mapping.pageId}\u0000${mapping.moduleId}\u0000${binding.outputId}`;
+      if (globallyBoundOutputs.has(owner)) gaps.push(gap(mapping.moduleId, "Do not reuse an implementation output across accepted interaction requirements.", "BLUEPRINT_INTERACTION_OUTPUT_REUSED"));
+      globallyBoundOutputs.add(owner);
+    }
     for (const requirement of requirements) {
       const binding = mapping.interactionBindings.find((entry) => entry.type === requirement.type && entry.actionKind === requirement.actionKind && entry.target === requirement.target);
       const output = binding === undefined ? undefined : outputs.find((component) => component.id === binding.outputId);
       if (binding === undefined || output === undefined || !actionMatches(output, binding.actionKind, binding.target)) gaps.push(gap(mapping.moduleId, "Materialize each accepted blueprint interaction on its bound native output.", "BLUEPRINT_INTERACTION_BINDING_MISSING"));
     }
     if (mapping.interactionBindings.some((binding) => !requirements.some((requirement) => requirement.type === binding.type && requirement.actionKind === binding.actionKind && requirement.target === binding.target))) gaps.push(gap(mapping.moduleId, "Do not emit unrelated blueprint interaction bindings.", "BLUEPRINT_INTERACTION_BINDING_EXTRA"));
+    const boundOutputs = new Set(mapping.interactionBindings.map((binding) => binding.outputId));
+    if (outputs.some((output) => output.properties.action !== undefined && !boundOutputs.has(output.id))) gaps.push(gap(mapping.moduleId, "Do not emit native actions outside the accepted interaction set.", "BLUEPRINT_INTERACTION_OUTPUT_EXTRA"));
   }
+}
+
+function inspectPlanInteractionAuthorization(
+  accepted: AcceptedBlueprintArtifact["modules"][number],
+  module: ModulePlan["pages"][number]["modules"][number],
+  definition: ReturnType<ModuleRegistry["require"]>,
+  gaps: ModuleDeliveryGap[],
+): void {
+  const actual = module.interactions.map((interaction) => {
+    const actionKind = definition.quality?.interactionActionKinds?.[interaction.type];
+    return actionKind === undefined ? `unregistered\u0000${interaction.type}\u0000${interactionTarget(interaction)}` : interactionRequirementKey({ type: interaction.type, actionKind, target: interactionTarget(interaction) });
+  }).sort(compareCodePoints);
+  const expected = accepted.interactionRequirements.map(interactionRequirementKey);
+  if (new Set(actual).size !== actual.length) gaps.push(gap(module.id, "Do not duplicate accepted ModulePlan interactions.", "BLUEPRINT_INTERACTION_PLAN_DUPLICATE"));
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) gaps.push(gap(module.id, "Keep ModulePlan interactions equal to the exact signed accepted interaction set.", "BLUEPRINT_INTERACTION_PLAN_SET_MISMATCH"));
+}
+
+function interactionTarget(interaction: ModulePlan["pages"][number]["modules"][number]["interactions"][number]): string {
+  if (interaction.type === "navigate") return interaction.pageId;
+  if (interaction.type === "scroll" || interaction.type === "open-modal") return interaction.moduleId;
+  if (interaction.type === "submit") return interaction.action;
+  if (interaction.type === "filter") return interaction.field;
+  return interaction.target;
+}
+
+function interactionRequirementKey(value: { type: string; actionKind: string; target: string }): string {
+  return `${value.type}\u0000${value.actionKind}\u0000${value.target}`;
 }
 
 function actionMatches(component: UIComponentSpec, actionKind: string, target: string): boolean {
@@ -150,7 +191,8 @@ function inspectImplementation(
     const quality = definition.quality ?? { minimumComponentCount: 1, minimumCriticalComponentCount: 1, requiredRoles: [], requiredCriticalRoles: [], requiredCapabilityIds: [], variantRequiredOutputs: {} };
     if (components.length < quality.minimumComponentCount || quality.requiredRoles.some((role) => !components.some((component) => component.role === role)) || quality.requiredCapabilityIds.some((capability) => !components.some((component) => component.capabilityId === capability))) gaps.push(gap(module.id, "Generate the module's required registered structure.", "MODULE_REQUIRED_STRUCTURE_MISSING"));
     if (components.filter((component) => component.critical).length < quality.minimumCriticalComponentCount || quality.requiredCriticalRoles.some((role) => !components.some((component) => component.critical && component.role === role))) gaps.push(gap(module.id, "Generate the module's required critical controls.", "CRITICAL_CONTROL_MISSING"));
-    for (const output of quality.variantRequiredOutputs[module.variant] ?? []) {
+    const requiredOutputs = deriveRequiredOutputs(module, definition, quality.variantRequiredOutputs[module.variant] ?? [], gaps);
+    for (const output of requiredOutputs) {
       const component = output.outputId === undefined
         ? components.find((candidate) => candidate.role === output.role)
         : components.find((candidate) => candidate.id === stableModuleComponentId(module.id, output.outputId!));
@@ -163,6 +205,10 @@ function inspectImplementation(
         const interactions = module.interactions.filter((interaction) => interaction.type === output.actionType);
         if (interactions.length > 0 && !interactions.some((interaction) => hasInteraction(component, interaction))) gaps.push(gap(module.id, `Bind required ${output.actionType} action to ${output.outputId ?? output.role}.`, "MODULE_REQUIRED_ACTION_OUTPUT_MISSING"));
       }
+    }
+    if (definition.quality?.deriveRequiredOutputs !== undefined) {
+      const requiredIds = new Set(requiredOutputs.flatMap((output) => output.outputId === undefined ? [] : [stableModuleComponentId(module.id, output.outputId)]));
+      if (components.some((component) => component.critical && !requiredIds.has(component.id))) gaps.push(gap(module.id, "Declare every critical compiler output in the exact instance manifest.", "MODULE_CRITICAL_OUTPUT_UNDECLARED"));
     }
     if (components.some((component) => !traceKeys.has(`${page.id}\u0000${module.id}\u0000${component.id}`))) gaps.push(gap(module.id, "Emit an exact module trace for every generated control.", "MODULE_TRACE_MISSING"));
     if (module.assetId !== undefined && !assetBindings.some((binding) => binding.moduleId === module.id && binding.assetId === module.assetId)) {
@@ -178,6 +224,23 @@ function inspectImplementation(
     if (COMPLEX_MODULE_KINDS.has(module.kind) && components.length > 0 && components.every((component) => component.capabilityId === "text")) {
       gaps.push(gap(module.id, "Use registered native controls for this complex module.", "COMPLEX_MODULE_TEXT_COLLAPSE"));
     }
+  }
+}
+
+function deriveRequiredOutputs(
+  module: ModulePlan["pages"][number]["modules"][number],
+  definition: ReturnType<ModuleRegistry["require"]>,
+  fallback: readonly ModuleRequiredOutputContract[],
+  gaps: ModuleDeliveryGap[],
+) {
+  if (definition.quality?.deriveRequiredOutputs === undefined) return fallback;
+  try {
+    const raw = module.content === undefined ? {} : JSON.parse(module.content) as unknown;
+    const content = definition.contentSchema.parse(raw);
+    return definition.quality.deriveRequiredOutputs({ instance: module, content });
+  } catch {
+    gaps.push(gap(module.id, "Derive the exact required-output manifest from schema-valid module content.", "MODULE_REQUIRED_OUTPUT_MANIFEST_INVALID"));
+    return [];
   }
 }
 

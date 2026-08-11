@@ -83,6 +83,13 @@ describe("signed module compilation flow", () => {
     expect(payload.modules).toEqual([{ blueprintModuleId: "accepted-panel", expectedKind: "test-panel", expectedCategory: "test", interactionRequirements: [] }]);
   });
 
+  it("requires legacy text interactions to be reconfirmed as machine requirements", () => {
+    expect(() => createAcceptedBlueprintArtifactPayload({
+      blueprint: blueprint({ interactions: ["点击进入详情"], interactionRequirements: [] }),
+      projectKey: "kingclient.portal", revisionId: "revision-1", registry: registry(),
+    })).toThrow("ACCEPTED_BLUEPRINT_INTERACTIONS_NEED_RECONFIRM");
+  });
+
   it("survives JSON persistence and authorizes only the exact compiled implementation", () => {
     const compiled = compileFirst();
     expect(compiled.status).toBe("compiled");
@@ -122,16 +129,14 @@ describe("signed module compilation flow", () => {
     })).toThrow("UNEXPECTED_PREVIOUS_COMPILATION_ARTIFACT");
   });
 
-  it("preserves legacy controls and reports a verified project seed as blocking residue without deleting it", () => {
+  it("preserves every legacy control without accepting seed provenance in the V1 compiler", () => {
     const legacy: UIComponentSpec = { id: "Text1", role: "content", capabilityId: "text", critical: true, content: "__KF_SEED_PLACEHOLDER__", geometry: { x: 0, y: 0, width: 100, height: 30 }, properties: {}, style: { declarations: {}, states: {} } };
     const previous: UIImplementationSpec = { schema: "kf-ui-implementation/v1", theme, pages: [{ id: "home", width: 1440, height: 900, components: [legacy] }] };
-    const signedSeed = authority.signProjectCreationSeeds({ projectKey: "kingclient.portal", revisionId: "revision-1", seeds: [{ pageId: "home", component: legacy, generator: "new-project", projectCreationMarker: "project-create-001" }] });
-    const verifiedSeed = authority.verifyProjectCreationSeeds(JSON.parse(JSON.stringify(signedSeed)));
     const outcome = compileModulePlan({
-      plan: plan(), acceptedBlueprintArtifact: accepted(), previousImplementation: previous, projectCreationSeedArtifact: verifiedSeed,
+      plan: plan(), acceptedBlueprintArtifact: accepted(), previousImplementation: previous,
       registry: registry(), assetsById: {}, validationContext: { availableKfCapabilities: ["text"], approvedAuthorizationRefs: [] },
     });
-    expect(outcome.gaps).toContainEqual(expect.objectContaining({ reason: "VERIFIED_PROJECT_SEED_RESIDUE", severity: "blocking" }));
+    expect(outcome.gaps).not.toContainEqual(expect.objectContaining({ reason: "VERIFIED_PROJECT_SEED_RESIDUE" }));
     expect(outcome.implementation?.pages[0]!.components.find((component) => component.id === "Text1")).toEqual(legacy);
   });
 });

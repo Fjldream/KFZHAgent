@@ -6,18 +6,11 @@ import type {
 } from "@kf/contracts";
 import {
   canonicalAcceptedBlueprintArtifactSigningBytes,
-  canonicalModuleCompilationHash,
   canonicalModuleCompilationArtifactSigningBytes,
-  canonicalProjectCreationSeedArtifactSigningBytes,
   parseAcceptedBlueprintArtifactData,
   parseModuleCompilationArtifactData,
-  parseProjectCreationSeedArtifactData,
-  ProjectCreationSeedArtifactSchema,
-  UIComponentSpecSchema,
   type AcceptedBlueprintArtifact,
   type ModuleCompilationArtifact,
-  type ProjectCreationSeedArtifact,
-  type UIComponentSpec,
 } from "@kf/contracts";
 import {
   canonicalChangePlanHash,
@@ -54,41 +47,19 @@ export interface ModuleCompilationArtifactExpectations {
   readonly implementationHash?: string;
 }
 
-export interface ProjectCreationSeedArtifactExpectations {
-  readonly projectKey?: string;
-  readonly revisionId?: string;
-}
-
 declare const verifiedAcceptedBlueprintBrand: unique symbol;
 declare const verifiedModuleCompilationBrand: unique symbol;
-declare const verifiedProjectCreationSeedBrand: unique symbol;
 export type VerifiedAcceptedBlueprintArtifact = Readonly<{ readonly [verifiedAcceptedBlueprintBrand]: true }>;
 export type VerifiedModuleCompilationArtifact = Readonly<{ readonly [verifiedModuleCompilationBrand]: true }>;
-export type VerifiedProjectCreationSeedArtifact = Readonly<{ readonly [verifiedProjectCreationSeedBrand]: true }>;
-
-export interface ProjectCreationSeedSignInput {
-  readonly projectKey: string;
-  readonly revisionId: string;
-  readonly seeds: readonly {
-    readonly pageId: string;
-    readonly component: UIComponentSpec;
-    readonly generator: "new-project";
-    readonly projectCreationMarker: string;
-  }[];
-}
-
 export interface ModuleArtifactAuthority {
   signModuleCompilation(input: Omit<ModuleCompilationArtifact, "signature">): ModuleCompilationArtifact;
   verifyModuleCompilation(input: unknown, expected?: ModuleCompilationArtifactExpectations): VerifiedModuleCompilationArtifact;
   signAcceptedBlueprint(input: Omit<AcceptedBlueprintArtifact, "signature">): AcceptedBlueprintArtifact;
   verifyAcceptedBlueprint(input: unknown, expected?: AcceptedBlueprintArtifactExpectations): VerifiedAcceptedBlueprintArtifact;
-  signProjectCreationSeeds(input: ProjectCreationSeedSignInput): ProjectCreationSeedArtifact;
-  verifyProjectCreationSeeds(input: unknown, expected?: ProjectCreationSeedArtifactExpectations): VerifiedProjectCreationSeedArtifact;
 }
 
 const acceptedBlueprintPayloads = new WeakMap<object, AcceptedBlueprintArtifact>();
 const moduleCompilationPayloads = new WeakMap<object, ModuleCompilationArtifact>();
-const projectCreationSeedPayloads = new WeakMap<object, ProjectCreationSeedArtifact>();
 
 export function readVerifiedAcceptedBlueprintArtifact(input: unknown): AcceptedBlueprintArtifact {
   const payload = input !== null && typeof input === "object" ? acceptedBlueprintPayloads.get(input) : undefined;
@@ -99,12 +70,6 @@ export function readVerifiedAcceptedBlueprintArtifact(input: unknown): AcceptedB
 export function readVerifiedModuleCompilationArtifact(input: unknown): ModuleCompilationArtifact {
   const payload = input !== null && typeof input === "object" ? moduleCompilationPayloads.get(input) : undefined;
   if (payload === undefined) throw new Error("UNVERIFIED_MODULE_COMPILATION_ARTIFACT");
-  return payload;
-}
-
-export function readVerifiedProjectCreationSeedArtifact(input: unknown): ProjectCreationSeedArtifact {
-  const payload = input !== null && typeof input === "object" ? projectCreationSeedPayloads.get(input) : undefined;
-  if (payload === undefined) throw new Error("UNVERIFIED_PROJECT_CREATION_SEED_ARTIFACT");
   return payload;
 }
 
@@ -132,29 +97,6 @@ export function createHmacModuleArtifactAuthority(key: Uint8Array): ModuleArtifa
       verifyDigest(parsed.signature, digest("kf-authority/accepted-blueprint/v1", canonicalAcceptedBlueprintArtifactSigningBytes(parsed)), "ACCEPTED_BLUEPRINT_SIGNATURE_INVALID");
       assertAcceptedBlueprintBindings(parsed, expected);
       return brand(acceptedBlueprintPayloads, parsed) as VerifiedAcceptedBlueprintArtifact;
-    },
-    signProjectCreationSeeds(input: ProjectCreationSeedSignInput): ProjectCreationSeedArtifact {
-      const seeds = input.seeds.map((seed) => {
-        const component = UIComponentSpecSchema.parse(seed.component);
-        return {
-          pageId: seed.pageId, entityId: component.id, generator: seed.generator,
-          schema: "kf-seed/v1" as const,
-          componentHash: `sha256:${canonicalModuleCompilationHash(component)}`,
-          projectCreationMarker: seed.projectCreationMarker,
-        };
-      }).sort((left, right) => compareCodePoints(`${left.pageId}\u0000${left.entityId}`, `${right.pageId}\u0000${right.entityId}`));
-      const unsigned = ProjectCreationSeedArtifactSchema.parse({
-        schema: "kf-project-creation-seed-artifact/v1", projectKey: input.projectKey,
-        revisionId: input.revisionId, seeds, signature: "0".repeat(64),
-      });
-      return { ...unsigned, signature: digest("kf-authority/project-creation-seed/v1", canonicalProjectCreationSeedArtifactSigningBytes(unsigned)).toString("hex") };
-    },
-    verifyProjectCreationSeeds(input: unknown, expected: ProjectCreationSeedArtifactExpectations = {}): VerifiedProjectCreationSeedArtifact {
-      const parsed = parseProjectCreationSeedArtifactData(input);
-      verifyDigest(parsed.signature, digest("kf-authority/project-creation-seed/v1", canonicalProjectCreationSeedArtifactSigningBytes(parsed)), "PROJECT_CREATION_SEED_ARTIFACT_SIGNATURE_INVALID");
-      if (expected.projectKey !== undefined && parsed.projectKey !== expected.projectKey) throw new Error("PROJECT_CREATION_SEED_ARTIFACT_BINDING_MISMATCH");
-      if (expected.revisionId !== undefined && parsed.revisionId !== expected.revisionId) throw new Error("PROJECT_CREATION_SEED_ARTIFACT_BINDING_MISMATCH");
-      return brand(projectCreationSeedPayloads, parsed) as VerifiedProjectCreationSeedArtifact;
     },
   });
 }
@@ -197,8 +139,6 @@ function assertModuleCompilationBindings(parsed: ModuleCompilationArtifact, expe
   if (expected.planHash !== undefined && parsed.planHash !== expected.planHash) throw new Error("MODULE_ARTIFACT_BINDING_MISMATCH");
   if (expected.implementationHash !== undefined && parsed.implementationHash !== expected.implementationHash) throw new Error("MODULE_ARTIFACT_BINDING_MISMATCH");
 }
-
-function compareCodePoints(left: string, right: string): number { return left < right ? -1 : left > right ? 1 : 0; }
 
 export function decodeServerPlanHmacKey(raw: string | undefined): Uint8Array {
   if (raw === undefined || raw === "" || raw.trim() !== raw

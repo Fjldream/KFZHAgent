@@ -427,6 +427,35 @@ describe("portal module definitions", () => {
     }
   });
 
+  it.each([
+    ["navigation.top", "nav-1", "nav-2"],
+    ["content.hero", "primary-action", "secondary-action"],
+    ["action.toolbar", "action-1", "action-2"],
+  ])("keeps legal multi-action %s variants bound to distinct accepted outputs", (kind, firstSlot, secondSlot) => {
+    const plan = twoTargetNavigationPlan();
+    const source = plan.pages[0]!.modules[0]!;
+    if (kind === "content.hero") {
+      plan.pages[0]!.modules[0] = {
+        ...source, id: "multi-hero", kind, variant: "no-portrait", title: "Hero",
+        content: JSON.stringify({ title: "Hero", primaryAction: "Projects", secondaryAction: "Contact" }),
+        sourceBlueprintModuleIds: ["multi-hero"], placement: { ...source.placement, region: "main", preferredHeight: "medium" },
+      };
+    } else if (kind === "action.toolbar") {
+      plan.pages[0]!.modules[0] = {
+        ...source, id: "multi-toolbar", kind, variant: "default", title: "Toolbar",
+        content: JSON.stringify({ actions: [{ label: "Projects" }, { label: "Contact" }] }),
+        sourceBlueprintModuleIds: ["multi-toolbar"], placement: { ...source.placement, region: "toolbar", preferredHeight: "compact" },
+      };
+    }
+    const compiled = compile(plan);
+    expect(compiled.status).toBe("compiled");
+    if (compiled.status !== "compiled") return;
+    const owner = plan.pages[0]!.modules[0]!.id;
+    const outputs = compiled.implementation.pages.find((page) => page.id === "Page1")!.components;
+    expect(outputs.find((component) => component.id === `${owner}/${firstSlot}`)?.properties.action).toEqual({ kind: "navigate", pageId: "Projects" });
+    expect(outputs.find((component) => component.id === `${owner}/${secondSlot}`)?.properties.action).toEqual({ kind: "navigate", pageId: "Contact" });
+  });
+
   it("reports an unmatched navigation label and never reuses a sibling KF action", async () => {
     const plan = twoTargetNavigationPlan();
     plan.pages[0]!.modules[0]!.interactions = [{ type: "navigate", pageId: "Projects" }];

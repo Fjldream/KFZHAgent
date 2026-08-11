@@ -1,9 +1,10 @@
 import { z } from "zod";
 import type { ModuleDeliveryGap, UIComponentSpec } from "@kf/contracts";
-import type { ModuleCompileInput, ModuleCompileOutput, ModuleDefinition, ModuleRequiredOutputContract, ModuleRuntimeEvidence } from "../types.js";
+import type { ModuleCompileInput, ModuleCompileOutput, ModuleDefinition, ModuleQualityManifestInput, ModuleRequiredOutputContract, ModuleRuntimeEvidence } from "../types.js";
 import type { ModuleRegistry } from "../module-registry.js";
 import { actionButton, labeledValue, sectionTitle, surface, type LocalBounds } from "./shared-primitives.js";
 import { parseChartData } from "./native-data-adapters.js";
+import { deriveV1RequiredOutputs } from "../module-required-output-manifest.js";
 
 const VERSION = "1.0.0";
 const NO_ASSETS = Object.freeze([]);
@@ -18,7 +19,7 @@ function qualityFor(kind: string): NonNullable<ModuleDefinition["quality"]> { co
   "navigation.sidebar": { minimumComponentCount: 3, minimumCriticalComponentCount: 1, requiredRoles: ["surface"], requiredCriticalRoles: ["surface"], requiredCapabilityIds: ["layout.2"], variantRequiredOutputs: perVariant(["default", "collapsed"], [surfaceOutput, output("item-1-1", "action", "button", { actionType: "navigate" })]), interactionActionKinds: { navigate: "navigate" } },
   "data.chart-panel": { minimumComponentCount: 2, minimumCriticalComponentCount: 1, requiredRoles: ["native-chart"], requiredCriticalRoles: ["native-chart"], requiredCapabilityIds: ["prototype.TrendChart"], variantRequiredOutputs: { line: [output("chart", "native-chart", "prototype.TrendChart")], bar: [output("chart", "native-chart", "prototype.BarChart")], pie: [output("chart", "native-chart", "prototype.PieChart")] } },
   "data.status-grid": { minimumComponentCount: 4, minimumCriticalComponentCount: 1, requiredRoles: ["surface", "status-tag"], requiredCriticalRoles: ["surface"], requiredCapabilityIds: ["layout.2", "tag"], variantRequiredOutputs: perVariant(["default", "compact"], [surfaceOutput, output("status-1-tag", "status-tag", "tag")]) },
-}; return Object.freeze(values[kind]!); }
+}; return Object.freeze({ ...values[kind]!, deriveRequiredOutputs: (input: ModuleQualityManifestInput) => deriveV1RequiredOutputs(kind, input) }); }
 
 function gap(id: string): ModuleCompileOutput { return { components: [], deliveryGaps: [{ moduleId: id, requirement: "Module local bounds", severity: "blocking", status: "unresolved", reason: "module-bounds-insufficient", alternatives: ["Increase module span or semantic height."] }] }; }
 function safe(definition: Omit<ModuleDefinition, "version" | "maturity" | "runtimeEvidenceTarget">): ModuleDefinition {

@@ -37,16 +37,13 @@ const ModuleBlueprintMappingSchema = z.object({
     target: text,
     outputId: z.string().trim().min(3).max(100).regex(/^[A-Za-z][A-Za-z0-9_-]*\/[A-Za-z][A-Za-z0-9_-]*$/),
   }).strict()).max(12),
-}).strict();
-
-export const GeneratedSeedProvenanceSchema = z.object({
-  pageId: id,
-  entityId: id,
-  generator: z.enum(["new-project", "import-inspector"]),
-  schema: z.literal("kf-seed/v1"),
-  componentHash: z.string().regex(/^sha256:[a-f0-9]{16,128}$/),
-  projectCreationMarker: fingerprint,
-}).strict();
+}).strict().superRefine((value, ctx) => {
+  const requirementKeys = value.interactionBindings.map(interactionRequirementKey);
+  const outputIds = value.interactionBindings.map((binding) => binding.outputId);
+  if (new Set(requirementKeys).size !== requirementKeys.length) ctx.addIssue({ code: "custom", path: ["interactionBindings"], message: "duplicate interaction binding" });
+  if (new Set(outputIds).size !== outputIds.length) ctx.addIssue({ code: "custom", path: ["interactionBindings"], message: "interaction bindings must use unique outputs" });
+  if (!isCodePointSorted(requirementKeys)) ctx.addIssue({ code: "custom", path: ["interactionBindings"], message: "interaction bindings must be canonically sorted" });
+});
 
 export const ModuleCompilationMetadataSchema = z.object({
   schema: z.literal("kf-module-compilation-metadata/v1"),
@@ -54,7 +51,6 @@ export const ModuleCompilationMetadataSchema = z.object({
   moduleDefinitions: z.array(ModuleDefinitionMetadataSchema).max(250),
   assets: z.array(ModuleAssetMetadataSchema).max(250),
   blueprintMappings: z.array(ModuleBlueprintMappingSchema).max(250),
-  generatedSeeds: z.array(GeneratedSeedProvenanceSchema).max(250),
 }).strict().superRefine((value, ctx) => {
   const unique = (entries: readonly { pageId: string; moduleId?: string; entityId?: string }[], label: string) => {
     const seen = new Set<string>();
@@ -66,15 +62,19 @@ export const ModuleCompilationMetadataSchema = z.object({
   };
   unique(value.moduleDefinitions, "moduleDefinitions");
   unique(value.assets, "assets");
-  unique(value.generatedSeeds, "generatedSeeds");
   const blueprintIds = new Set<string>();
+  const boundOutputs = new Set<string>();
   value.blueprintMappings.forEach((entry, index) => {
     if (blueprintIds.has(entry.blueprintModuleId)) ctx.addIssue({ code: "custom", path: ["blueprintMappings", index, "blueprintModuleId"], message: "duplicate blueprint mapping" });
     blueprintIds.add(entry.blueprintModuleId);
+    entry.interactionBindings.forEach((binding, bindingIndex) => {
+      const owner = `${entry.pageId}\u0000${entry.moduleId}\u0000${binding.outputId}`;
+      if (boundOutputs.has(owner)) ctx.addIssue({ code: "custom", path: ["blueprintMappings", index, "interactionBindings", bindingIndex, "outputId"], message: "interaction output must be unique across mapped module" });
+      boundOutputs.add(owner);
+    });
   });
 });
 
-export type GeneratedSeedProvenance = z.infer<typeof GeneratedSeedProvenanceSchema>;
 export type ModuleCompilationMetadata = z.infer<typeof ModuleCompilationMetadataSchema>;
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
@@ -91,7 +91,11 @@ const AcceptedBlueprintModuleSchema = z.object({
   expectedKind: kind,
   expectedCategory: text,
   interactionRequirements: z.array(BlueprintInteractionRequirementSchema).max(12),
-}).strict();
+}).strict().superRefine((value, ctx) => {
+  const keys = value.interactionRequirements.map(interactionRequirementKey);
+  if (new Set(keys).size !== keys.length) ctx.addIssue({ code: "custom", path: ["interactionRequirements"], message: "duplicate accepted interaction requirement" });
+  if (!isCodePointSorted(keys)) ctx.addIssue({ code: "custom", path: ["interactionRequirements"], message: "accepted interaction requirements must be canonically sorted" });
+});
 
 /** Server-signed durable authorization binding module metadata to exact persisted JSON. */
 export const ModuleCompilationArtifactSchema = z.object({
@@ -125,23 +129,8 @@ export const AcceptedBlueprintArtifactSchema = z.object({
   if (!isCodePointSorted(moduleIds)) ctx.addIssue({ code: "custom", path: ["modules"], message: "accepted blueprint modules must be canonically sorted" });
 });
 
-export const ProjectCreationSeedArtifactSchema = z.object({
-  schema: z.literal("kf-project-creation-seed-artifact/v1"),
-  projectKey: projectKeySchema,
-  revisionId,
-  seeds: z.array(GeneratedSeedProvenanceSchema.extend({
-    generator: z.literal("new-project"),
-  }).strict()).max(250),
-  signature,
-}).strict().superRefine((value, ctx) => {
-  const keys = value.seeds.map((seed) => `${seed.pageId}\u0000${seed.entityId}`);
-  if (new Set(keys).size !== keys.length) ctx.addIssue({ code: "custom", path: ["seeds"], message: "duplicate project seed" });
-  if (!isCodePointSorted(keys)) ctx.addIssue({ code: "custom", path: ["seeds"], message: "project seeds must be canonically sorted" });
-});
-
 export type ModuleCompilationArtifact = z.infer<typeof ModuleCompilationArtifactSchema>;
 export type AcceptedBlueprintArtifact = z.infer<typeof AcceptedBlueprintArtifactSchema>;
-export type ProjectCreationSeedArtifact = z.infer<typeof ProjectCreationSeedArtifactSchema>;
 
 export function canonicalModuleCompilationArtifactSigningBytes(value: ModuleCompilationArtifact): Uint8Array {
   const parsed = parseModuleCompilationArtifactData(value);
@@ -163,24 +152,12 @@ export function canonicalAcceptedBlueprintArtifactSigningBytes(value: AcceptedBl
   });
 }
 
-export function canonicalProjectCreationSeedArtifactSigningBytes(value: ProjectCreationSeedArtifact): Uint8Array {
-  const parsed = parseProjectCreationSeedArtifactData(value);
-  return canonicalBytes({
-    schema: parsed.schema, projectKey: parsed.projectKey, revisionId: parsed.revisionId,
-    seeds: parsed.seeds,
-  });
-}
-
 export function parseAcceptedBlueprintArtifactData(input: unknown): AcceptedBlueprintArtifact {
   return parseArtifact(input, AcceptedBlueprintArtifactSchema, "ACCEPTED_BLUEPRINT_ARTIFACT_SCHEMA_INVALID");
 }
 
 export function parseModuleCompilationArtifactData(input: unknown): ModuleCompilationArtifact {
   return parseArtifact(input, ModuleCompilationArtifactSchema, "MODULE_COMPILATION_ARTIFACT_SCHEMA_INVALID");
-}
-
-export function parseProjectCreationSeedArtifactData(input: unknown): ProjectCreationSeedArtifact {
-  return parseArtifact(input, ProjectCreationSeedArtifactSchema, "PROJECT_CREATION_SEED_ARTIFACT_SCHEMA_INVALID");
 }
 
 function parseArtifact<T>(input: unknown, schema: z.ZodType<T>, code: string): T {
@@ -207,6 +184,10 @@ function isCodePointSorted(values: readonly string[]): boolean {
 
 function compareCodePoints(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function interactionRequirementKey(value: { type: string; actionKind: string; target: string }): string {
+  return `${value.type}\u0000${value.actionKind}\u0000${value.target}`;
 }
 
 /** Artifact inputs may come from JSON columns; reject accessors/prototypes before Zod reads them. */

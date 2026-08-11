@@ -27,6 +27,15 @@ describe("API server plan authority configuration", () => {
     expect(JSON.stringify(signed)).not.toContain(environment.KF_SERVER_PLAN_HMAC_KEY_BASE64);
   });
 
+  it("blocks legacy text-only interactions until the customer reconfirms machine requirements", () => {
+    const authority = createModuleArtifactAuthorityFromEnvironment({
+      KF_SERVER_PLAN_HMAC_KEY_BASE64: Buffer.alloc(32, 0x31).toString("base64"),
+    });
+    expect(() => signAcceptedBlueprintAtConfirmation({ authority, projectKey: "project", revisionId: "revision", blueprint: {
+      schema: "kf-design-plan/v2", displayName: "Portal", overview: { objective: "Navigate", audiences: ["User"], scenarios: ["Open"], valueProposition: "Fast" }, informationArchitecture: { narrative: "Navigation", wireframe: "Header" }, modules: [{ id: "nav", name: "Navigation", purpose: "Navigate", content: ["Home"], sampleData: [], interactions: ["点击进入首页"], expectedKind: "navigation.top", interactionRequirements: [], presentation: "Header" }], visualDirection: { tone: "Clean", colors: ["Blue"], typography: "Sans", spacingAndSurfaces: "Compact" }, highlights: ["Navigation"], revisionNotes: { added: [], changed: [], retained: [] }, acceptanceCriteria: ["Works"], openQuestions: [],
+    } })).toThrow("ACCEPTED_BLUEPRINT_INTERACTIONS_NEED_RECONFIRM");
+  });
+
   it.each(["start:api", "start:worker"])(
     "%s loads the deployment-local .env before server configuration is created",
     async (scriptName) => {

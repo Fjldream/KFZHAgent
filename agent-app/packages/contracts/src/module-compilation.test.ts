@@ -3,9 +3,9 @@ import {
   AcceptedBlueprintArtifactSchema,
   ModuleCompilationArtifactSchema,
   ModuleCompilationMetadataSchema,
-  ProjectCreationSeedArtifactSchema,
   canonicalModuleCompilationHash,
 } from "./module-compilation.js";
+import * as moduleCompilationContracts from "./module-compilation.js";
 
 const metadata = {
   schema: "kf-module-compilation-metadata/v1",
@@ -13,7 +13,6 @@ const metadata = {
   moduleDefinitions: [{ pageId: "home", moduleId: "hero", kind: "content.hero", templateVersion: "1.0.0", compilerFingerprint: "kf36-content-hero-compiler-v1", layoutFingerprint: "kf36-content-hero-layout-v1" }],
   assets: [{ pageId: "home", moduleId: "hero", assetId: "portrait", status: "resolved", assetIdentity: "portrait|resolved|Portrait" }],
   blueprintMappings: [],
-  generatedSeeds: [{ pageId: "home", entityId: "Text1", generator: "new-project", schema: "kf-seed/v1", componentHash: "sha256:0123456789abcdef", projectCreationMarker: "project-create-001" }],
 };
 
 describe("ModuleCompilationMetadataSchema", () => {
@@ -68,28 +67,40 @@ describe("signed module artifact contracts", () => {
     }).success).toBe(false);
   });
 
+  it("rejects duplicate accepted interaction requirements", () => {
+    const requirement = accepted.modules[0]!.interactionRequirements[0]!;
+    expect(AcceptedBlueprintArtifactSchema.safeParse({
+      ...accepted,
+      modules: [{ ...accepted.modules[0]!, interactionRequirements: [requirement, requirement] }],
+    }).success).toBe(false);
+  });
+
   it("binds compilation metadata and source IDs to canonical hashes", () => {
     expect(ModuleCompilationArtifactSchema.parse(compilation)).toEqual(compilation);
     expect(ModuleCompilationArtifactSchema.safeParse({ ...compilation, metadataHash: sha("wrong") }).success).toBe(false);
     expect(ModuleCompilationArtifactSchema.safeParse({ ...compilation, sourceModuleIds: ["hero", "hero"] }).success).toBe(false);
   });
 
-  it("represents project-creation seeds as a separate signed artifact", () => {
-    const seed = {
-      schema: "kf-project-creation-seed-artifact/v1" as const,
-      projectKey: "kingclient.portal",
-      revisionId: "revision-1",
-      seeds: [{
-        pageId: "home",
-        entityId: "Text1",
-        generator: "new-project" as const,
-        schema: "kf-seed/v1" as const,
-        componentHash: `sha256:${"a".repeat(64)}`,
-        projectCreationMarker: "project-create-001",
+  it("rejects two accepted requirements bound to the same implementation output", () => {
+    const binding = { type: "navigate" as const, actionKind: "navigate", target: "home", outputId: "hero/action" };
+    expect(ModuleCompilationMetadataSchema.safeParse({
+      ...metadata,
+      blueprintMappings: [{
+        blueprintModuleId: "hero", pageId: "home", moduleId: "hero",
+        interactionBindings: [binding, { ...binding, type: "scroll" as const, actionKind: "scroll", target: "hero" }],
       }],
-      signature: "0".repeat(64),
-    };
-    expect(ProjectCreationSeedArtifactSchema.parse(seed)).toEqual(seed);
-    expect(ProjectCreationSeedArtifactSchema.safeParse({ ...seed, seeds: [...seed.seeds, seed.seeds[0]!] }).success).toBe(false);
+    }).success).toBe(false);
+    expect(ModuleCompilationMetadataSchema.safeParse({
+      ...metadata,
+      blueprintMappings: ["hero-a", "hero-b"].map((blueprintModuleId) => ({
+        blueprintModuleId, pageId: "home", moduleId: "hero", interactionBindings: [binding],
+      })),
+    }).success).toBe(false);
+  });
+
+  it("does not expose project-creation seed minting contracts before the creation service owns provenance", () => {
+    expect(moduleCompilationContracts).not.toHaveProperty("ProjectCreationSeedArtifactSchema");
+    expect(moduleCompilationContracts).not.toHaveProperty("canonicalProjectCreationSeedArtifactSigningBytes");
+    expect(moduleCompilationContracts).not.toHaveProperty("parseProjectCreationSeedArtifactData");
   });
 });

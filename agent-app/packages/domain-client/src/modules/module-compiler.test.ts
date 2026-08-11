@@ -132,6 +132,42 @@ describe("compileModulePlan", () => {
     expect(result.implementation.pages[0]?.components[0]?.capabilityId).toBe("text");
   });
 
+  it("accepts multi-action plans only when they equal the signed interaction set", () => {
+    const interactive = definition({
+      requiredKfCapabilities: ["text", "button"],
+      layout: { ...definition().layout, interactions: ["navigate", "scroll", "open-modal"] },
+      quality: {
+        minimumComponentCount: 1, minimumCriticalComponentCount: 1,
+        requiredRoles: ["title"], requiredCriticalRoles: ["title"], requiredCapabilityIds: ["text"],
+        variantRequiredOutputs: { default: [{ outputId: "title", role: "title", capabilityId: "text", critical: true }] },
+        interactionActionKinds: { navigate: "navigate", scroll: "scroll", "open-modal": "open-modal" },
+      },
+      compile: ({ context }) => ({
+        components: [{ ...component("title", "text"), role: "title" }, ...context.instance.interactions.map((interaction, index) => ({
+          ...component(`action-${index + 1}`, "button"), critical: false, role: "action",
+          properties: { action: interaction.type === "navigate"
+            ? { kind: "navigate", pageId: interaction.pageId }
+            : interaction.type === "scroll" || interaction.type === "open-modal"
+              ? { kind: interaction.type, moduleId: interaction.moduleId }
+              : { kind: interaction.type } },
+        }))],
+        deliveryGaps: [],
+      }),
+    });
+    const registry = registryFor(interactive);
+    const authorizedPlan = plan([module("profile", { interactions: [{ type: "scroll", moduleId: "profile" }, { type: "open-modal", moduleId: "profile" }] })]);
+    const acceptedBlueprintArtifact = acceptedArtifactForPlan(authorizedPlan, registry);
+    const run = (candidate: ModulePlan) => compileModulePlan({
+      plan: candidate, acceptedBlueprintArtifact, registry, assetsById: {},
+      validationContext: { availableKfCapabilities: ["text", "button"], approvedAuthorizationRefs: [] },
+    });
+    expect(run(authorizedPlan).status).toBe("compiled");
+    const missing = structuredClone(authorizedPlan); missing.pages[0]!.modules[0]!.interactions.pop();
+    expect(run(missing)).toEqual(expect.objectContaining({ status: "blocked", deliveryReport: expect.objectContaining({ gaps: expect.arrayContaining([expect.objectContaining({ reason: "BLUEPRINT_INTERACTION_PLAN_SET_MISMATCH" })]) }) }));
+    const extra = structuredClone(authorizedPlan); extra.pages[0]!.modules[0]!.interactions.push({ type: "navigate", pageId: "home" });
+    expect(run(extra)).toEqual(expect.objectContaining({ status: "blocked", deliveryReport: expect.objectContaining({ gaps: expect.arrayContaining([expect.objectContaining({ reason: "BLUEPRINT_INTERACTION_PLAN_SET_MISMATCH" })]) }) }));
+  });
+
   it("returns a blocking gap and never calls a required-asset module with an unresolved asset", () => {
     let compiled = false;
     const inputPlan = plan([module("summary"), module("hero", {

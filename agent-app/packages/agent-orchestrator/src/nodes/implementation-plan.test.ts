@@ -241,6 +241,18 @@ describe("implementation-plan node", () => {
     expect(result).toMatchObject({ stage: "approval", acceptedBlueprintArtifact: artifact });
   });
 
+  it("blocks implementation when legacy text interactions need machine reconfirmation", async () => {
+    const strictBlueprint = structuredClone(blueprint);
+    strictBlueprint.modules[0]!.expectedKind = "content.card-grid";
+    strictBlueprint.modules[1]!.expectedKind = "content.timeline";
+    strictBlueprint.modules[0]!.interactions = ["点击展开详情"];
+    const confirm = vi.fn().mockRejectedValue(new Error("ACCEPTED_BLUEPRINT_INTERACTIONS_NEED_RECONFIRM: products"));
+    const fixture = bed([implementation()], undefined, { acceptedBlueprintConfirmation: { confirm }, defaultProjectKey: "kingclient" });
+    const result = await fixture.node({ ...state(), designPlan: strictBlueprint });
+    expect(result).toEqual(expect.objectContaining({ stage: "idle", lastErrorCode: expect.stringContaining("ACCEPTED_BLUEPRINT_INTERACTIONS_NEED_RECONFIRM") }));
+    expect(fixture.createUiImplementation).not.toHaveBeenCalled();
+  });
+
   it("repairs a missing blueprint module once before compilation", async () => {
     const incomplete = implementation(["products"]);
     const complete = implementation();

@@ -71,6 +71,13 @@ export interface ModuleQualityContract {
   /** Exact compiler-owned output slots, selected per registered variant. */
   readonly variantRequiredOutputs: Readonly<Record<string, readonly ModuleRequiredOutputContract[]>>;
   readonly interactionActionKinds?: Readonly<Partial<Record<ModuleInteraction["type"], string>>>;
+  /** Exact instance/variant-derived manifest; it must not inspect compiler output. */
+  readonly deriveRequiredOutputs?: (input: ModuleQualityManifestInput) => readonly ModuleRequiredOutputContract[];
+}
+
+export interface ModuleQualityManifestInput {
+  readonly instance: ModulePlanModule;
+  readonly content: Readonly<Record<string, unknown>>;
 }
 
 export interface ModuleRequiredOutputContract {

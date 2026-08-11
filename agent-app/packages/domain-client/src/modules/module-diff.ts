@@ -48,6 +48,7 @@ export function diffModulePlans(input: DiffModulePlansInput): ModulePlanDiff {
   const current = indexModules(input.plan);
   const changed = new Set<string>();
   const unchanged = new Set<string>();
+  const layoutFingerprintAffected = new Set<string>();
 
   for (const [key, module] of current) {
     const prior = previous.get(key);
@@ -63,7 +64,8 @@ export function diffModulePlans(input: DiffModulePlansInput): ModulePlanDiff {
     const priorIdentity = previousDefinitions.get(key);
     const identity = definitions.get(key);
     if (priorIdentity === undefined || identity === undefined) throw new Error("MISSING_COMPILATION_METADATA_MODULE");
-    if (priorIdentity.compilerFingerprint !== identity.compilerFingerprint || priorIdentity.layoutFingerprint !== identity.layoutFingerprint) changed.add(module.id);
+    if (priorIdentity.compilerFingerprint !== identity.compilerFingerprint) changed.add(module.id);
+    else if (priorIdentity.layoutFingerprint !== identity.layoutFingerprint) layoutFingerprintAffected.add(module.id);
   }
 
   const previousGroups = pageComponentGroups(input.previousImplementation);
@@ -88,6 +90,7 @@ export function diffModulePlans(input: DiffModulePlansInput): ModulePlanDiff {
   for (const id of changed) unchanged.delete(id);
 
   const layoutAffected = layoutAffectedModuleIds(input.previousPlan, input.plan);
+  for (const id of [...layoutFingerprintAffected].sort(compareCodePoints)) if (!layoutAffected.includes(id)) layoutAffected.push(id);
   const protectedModules = new Set([...unchanged].filter((id) => !layoutAffected.includes(id)));
   const unexpected = [
     ...unexpectedModuleImplementationChanges(input.previousImplementation, input.implementation, protectedModules),

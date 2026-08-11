@@ -1,8 +1,9 @@
 import { z } from "zod";
 import type { ModuleDeliveryGap, UIComponentSpec } from "@kf/contracts";
-import type { ModuleCompileInput, ModuleCompileOutput, ModuleDefinition, ModuleRequiredOutputContract, ModuleRuntimeEvidence } from "../types.js";
+import type { ModuleCompileInput, ModuleCompileOutput, ModuleDefinition, ModuleQualityManifestInput, ModuleRequiredOutputContract, ModuleRuntimeEvidence } from "../types.js";
 import type { ModuleRegistry } from "../module-registry.js";
 import { actionButton, formRow, imageSlot, labeledValue, repeatedCard, sectionTitle, surface, type LocalBounds } from "./shared-primitives.js";
+import { deriveV1RequiredOutputs } from "../module-required-output-manifest.js";
 
 const VERSION = "1.0.0";
 const IMAGE_SLOT = Object.freeze([{ id: "image", required: false, allowedKinds: ["image"] as const }]);
@@ -32,7 +33,7 @@ function qualityFor(kind: string): NonNullable<ModuleDefinition["quality"]> {
     "form.record-editor": { minimumComponentCount: 4, minimumCriticalComponentCount: 1, requiredRoles: ["surface"], requiredCriticalRoles: ["surface"], requiredCapabilityIds: ["layout.2"], variantRequiredOutputs: perVariant(["default", "contact"], [surfaceOutput, output(undefined, "form-input", "input"), output("submit", "form-submit", "button")]) },
     "content.contact-footer": { minimumComponentCount: 3, minimumCriticalComponentCount: 1, requiredRoles: ["surface"], requiredCriticalRoles: ["surface"], requiredCapabilityIds: ["layout.2"], variantRequiredOutputs: perVariant(["default", "compact"], [surfaceOutput, output("contact-1", "labeled-value", "text")]), interactionActionKinds: { navigate: "navigate" } },
   };
-  return Object.freeze(values[kind]!);
+  return Object.freeze({ ...values[kind]!, deriveRequiredOutputs: (input: ModuleQualityManifestInput) => deriveV1RequiredOutputs(kind, input) });
 }
 
 function define(input: Omit<ModuleDefinition, "version" | "maturity" | "runtimeEvidenceTarget">): ModuleDefinition {
