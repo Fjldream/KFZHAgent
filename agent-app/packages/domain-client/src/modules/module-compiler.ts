@@ -245,6 +245,7 @@ function translateModuleOutput(
 ): UIComponentSpec[] {
   const output: UIComponentSpec[] = [];
   for (const component of compiled.components) {
+    assertPlainComponent(component, instance.id);
     const id = stableModuleComponentId(instance.id, component.id);
     if (seenIds.has(id)) throw new Error(`DUPLICATE_STABLE_COMPONENT_ID: ${id}`);
     seenIds.add(id);
@@ -281,6 +282,10 @@ function assertSafeComponent(component: UIComponentSpec, id: string): void {
   }
 }
 
+function assertPlainComponent(component: UIComponentSpec, id: string): void {
+  if (!isPlainData(component)) throw new Error(`MODULE_COMPILER_UNSAFE_OUTPUT: ${id}`);
+}
+
 function hasForbiddenPayload(value: unknown): boolean {
   if (typeof value === "string") return FORBIDDEN_TEXT.test(value) || GUID_VALUE.test(value) || ABSOLUTE_PATH.test(value);
   if (Array.isArray(value)) {
@@ -315,6 +320,16 @@ function isPlainSafe(value: unknown): boolean {
   }
   const entries = strictObjectEntries(value);
   return entries !== undefined && entries.every(([key, nested]) => !isDangerousKey(key) && isPlainSafe(nested));
+}
+
+function isPlainData(value: unknown): boolean {
+  if (value === null || typeof value !== "object") return true;
+  if (Array.isArray(value)) {
+    const values = strictArrayValues(value);
+    return values !== undefined && values.every(isPlainData);
+  }
+  const entries = strictObjectEntries(value);
+  return entries !== undefined && entries.every(([, nested]) => isPlainData(nested));
 }
 
 function strictArrayValues(value: unknown[]): unknown[] | undefined {
