@@ -18,9 +18,23 @@ function layout(regions: readonly ModuleDefinition["layout"]["regions"][number][
   return Object.freeze({ regions: Object.freeze([...regions]), minColumnSpan, maxColumnSpan: 12, preferredHeights: Object.freeze(["compact", "small", "medium", "large", "full"] as const), interactions: Object.freeze([...interactions]), height: Object.freeze({ min, preferred, max }) });
 }
 
+function qualityFor(kind: string): NonNullable<ModuleDefinition["quality"]> {
+  const values: Record<string, NonNullable<ModuleDefinition["quality"]>> = {
+    "navigation.top": { minimumComponentCount: 3, minimumCriticalComponentCount: 1, requiredRoles: ["surface"], requiredCriticalRoles: ["surface"], requiredCapabilityIds: ["layout.2"], interactionActionKinds: { navigate: "navigate" } },
+    "content.hero": { minimumComponentCount: 2, minimumCriticalComponentCount: 1, requiredRoles: ["surface"], requiredCriticalRoles: ["surface"], requiredCapabilityIds: ["layout.2"] },
+    "metric.kpi-grid": { minimumComponentCount: 4, minimumCriticalComponentCount: 1, requiredRoles: ["surface"], requiredCriticalRoles: ["surface"], requiredCapabilityIds: ["layout.2"] },
+    "content.card-grid": { minimumComponentCount: 4, minimumCriticalComponentCount: 1, requiredRoles: ["surface"], requiredCriticalRoles: ["surface"], requiredCapabilityIds: ["layout.2"], interactionActionKinds: { navigate: "navigate" } },
+    "content.timeline": { minimumComponentCount: 3, minimumCriticalComponentCount: 1, requiredRoles: ["surface"], requiredCriticalRoles: ["surface"], requiredCapabilityIds: ["layout.2"] },
+    "interaction.tabs-filter": { minimumComponentCount: 2, minimumCriticalComponentCount: 1, requiredRoles: ["filter-tabs"], requiredCriticalRoles: ["filter-tabs"], requiredCapabilityIds: ["tabs"] },
+    "form.record-editor": { minimumComponentCount: 4, minimumCriticalComponentCount: 1, requiredRoles: ["surface"], requiredCriticalRoles: ["surface"], requiredCapabilityIds: ["layout.2"] },
+    "content.contact-footer": { minimumComponentCount: 3, minimumCriticalComponentCount: 1, requiredRoles: ["surface"], requiredCriticalRoles: ["surface"], requiredCapabilityIds: ["layout.2"], interactionActionKinds: { navigate: "navigate" } },
+  };
+  return Object.freeze(values[kind]!);
+}
+
 function define(input: Omit<ModuleDefinition, "version" | "maturity" | "runtimeEvidenceTarget">): ModuleDefinition {
   const compile = input.compile;
-  return Object.freeze({ ...input, compilerFingerprint: input.compilerFingerprint ?? `kf36-${input.kind.replace(".", "-")}-compiler-v1`, layoutFingerprint: input.layoutFingerprint ?? `kf36-${input.kind.replace(".", "-")}-layout-v1`, quality: input.quality ?? Object.freeze({ minimumComponentCount: 2, minimumCriticalComponentCount: 1, requiredRoles: Object.freeze(["surface"]), requiredCriticalRoles: Object.freeze(["surface"]), requiredCapabilityIds: Object.freeze(["layout.2"]) }), version: VERSION, runtimeEvidenceTarget: { runtimeFamily: "KingFusion", runtimeVersion: "3.6", baselineId: "kf36-portal-v1" }, maturity: "beta", compile: (input: ModuleCompileInput): ModuleCompileOutput => {
+  return Object.freeze({ ...input, compilerFingerprint: input.compilerFingerprint ?? `kf36-${input.kind.replace(".", "-")}-compiler-v1`, layoutFingerprint: input.layoutFingerprint ?? `kf36-${input.kind.replace(".", "-")}-layout-v1`, quality: input.quality ?? qualityFor(input.kind), version: VERSION, runtimeEvidenceTarget: { runtimeFamily: "KingFusion", runtimeVersion: "3.6", baselineId: "kf36-portal-v1" }, maturity: "beta", compile: (input: ModuleCompileInput): ModuleCompileOutput => {
     const result = compile(input); const { width, height } = input.context.bounds;
     const invalid = result.components.some((component) => { const g = component.geometry; return !Number.isInteger(g.x) || !Number.isInteger(g.y) || !Number.isInteger(g.width) || !Number.isInteger(g.height) || g.width <= 0 || g.height <= 0 || g.x < 0 || g.y < 0 || g.x + g.width > width || g.y + g.height > height; });
     return invalid ? { components: [], deliveryGaps: [...result.deliveryGaps, { moduleId: input.context.instance.id, requirement: "Module local bounds", severity: "blocking" as const, status: "unresolved" as const, reason: "module-bounds-insufficient", alternatives: ["Increase module span or semantic height."] }] } : result;

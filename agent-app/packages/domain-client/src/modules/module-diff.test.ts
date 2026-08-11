@@ -93,6 +93,14 @@ describe("diffModulePlans", () => {
     expect(diff.unexpectedChanges).toEqual([]);
   });
 
+  it("fails closed when a previous revision references an asset without its persisted snapshot", () => {
+    const previous = plan(["hero"]);
+    previous.assets.push({ id: "portrait", kind: "image", name: "Portrait", mimeType: "image/png", description: "Portrait" });
+    previous.pages[0]!.modules[0]!.assetId = "portrait";
+    expect(() => rawDiffModulePlans({ previousPlan: previous, plan: structuredClone(previous), previousImplementation: implementation(["hero"]), implementation: implementation(["hero"]), previousMetadata: { ...metadata(previous), assets: [] }, metadata: metadata(previous) }))
+      .toThrow("MISSING_COMPILATION_METADATA_ASSET");
+  });
+
   it("rejects descriptor surprises without invoking their getters", () => {
     let reads = 0;
     const unsafe = plan(["hero"]);

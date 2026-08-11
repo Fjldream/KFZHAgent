@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import type { ModulePlan, ModulePlanModule, ResolvedAsset, UIComponentSpec } from "@kf/contracts";
 import { ModuleRegistry, type ModuleDefinition } from "./module-registry.js";
-import { compileModulePlan } from "./module-compiler.js";
+import { compileModulePlan, createGeneratedSeedProvenance } from "./module-compiler.js";
 import { stableModuleComponentId } from "./stable-ids.js";
 
 const theme = {
@@ -195,17 +195,21 @@ describe("compileModulePlan", () => {
     expect(result.implementation.pages[0]?.components[0]).toBe(previous.pages[0]?.components[0]);
   });
 
-  it("preserves customer legacy controls by explicit entity ID and removes only trusted generated seeds", () => {
+  it("removes only internally-proven seeded controls and preserves a customer control with the same ID but different hash", () => {
     const input = plan([module("profile")]);
     const registry = registryFor(definition());
     const first = compile(input, registry); const previous = first.implementation;
     const customerHello: UIComponentSpec = { ...component("Text1", "text"), id: "Text1", sourceModuleId: undefined, content: "Hello Alice" };
     previous.pages[0]!.components.push(customerHello);
 
-    const preserved = compile(input, registry, { previousPlan: input, previousImplementation: previous, editableEntityIds: ["Text1"], previousMetadata: structuredClone(first.metadata) });
-    expect(preserved.implementation.pages[0]!.components.find((item) => item.id === "Text1")).toBe(customerHello);
-
-    expect(preserved.implementation.pages[0]!.components.some((item) => item.id === "Text1")).toBe(true);
+    const seededMetadata = structuredClone(first.metadata);
+    seededMetadata.generatedSeeds = [createGeneratedSeedProvenance("home", customerHello, "new-project", "project-create-001")];
+    const removed = compile(input, registry, { previousPlan: input, previousImplementation: previous, editableEntityIds: ["Text1"], previousMetadata: seededMetadata });
+    expect(removed.implementation.pages[0]!.components.some((item) => item.id === "Text1")).toBe(false);
+    const edited = { ...customerHello, content: "Hello Alice, customer edited" };
+    previous.pages[0]!.components.splice(previous.pages[0]!.components.findIndex((item) => item.id === "Text1"), 1, edited);
+    const preserved = compile(input, registry, { previousPlan: input, previousImplementation: previous, editableEntityIds: ["Text1"], previousMetadata: seededMetadata });
+    expect(preserved.implementation.pages[0]!.components.find((item) => item.id === "Text1")).toBe(edited);
   });
 
   it("rejects accessor-backed legacy provenance without executing it", () => {

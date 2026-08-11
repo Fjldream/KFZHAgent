@@ -8,7 +8,7 @@ import type {
   UIImplementationSpec,
 } from "@kf/contracts";
 import { evaluateModuleDelivery } from "./module-quality.js";
-import { ModuleRegistry } from "./module-registry.js";
+import { createDefaultModuleRegistry, ModuleRegistry } from "./module-registry.js";
 
 const theme = {
   background: "#101827", surface: "#1E293B", primary: "#2563EB", accent: "#38BDF8",
@@ -127,6 +127,26 @@ describe("evaluateModuleDelivery", () => {
     expect(report.status).toBe("blocked");
     expect(report.gaps).toHaveLength(250);
     expect(new Set(report.gaps.map((gap) => gap.moduleId))).toEqual(new Set(moduleIds));
+  });
+
+  it("applies the exact V1 quality contracts as a table-driven deletion matrix", () => {
+    const defaults = createDefaultModuleRegistry();
+    const kinds = ["navigation.top", "navigation.sidebar", "content.hero", "metric.kpi-grid", "content.card-grid", "content.timeline", "data.chart-panel", "data.status-grid", "data.table", "data.detail", "interaction.tabs-filter", "form.record-editor", "action.toolbar", "feedback.alert-list", "content.contact-footer"];
+    for (const kind of kinds) {
+      const definition = defaults.require(kind, "1.0.0"); const quality = definition.quality!;
+      const moduleId = "module";
+      const components: UIComponentSpec[] = [...quality.requiredRoles.map((role, index) => component(moduleId, { id: `${moduleId}/role-${index}`, role, capabilityId: quality.requiredCapabilityIds[index] ?? quality.requiredCapabilityIds[0]!, critical: quality.requiredCriticalRoles.includes(role) })), ...quality.requiredCapabilityIds.map((capability, index) => component(moduleId, { id: `${moduleId}/cap-${index}`, role: "contract-extra", capabilityId: capability, critical: false }))];
+      while (components.length < quality.minimumComponentCount) components.push(component(moduleId, { id: `${moduleId}/extra-${components.length}`, role: "contract-extra", capabilityId: "text", critical: false }));
+      if (components.filter((entry) => entry.critical).length < quality.minimumCriticalComponentCount) components[0]!.critical = true;
+      const modulePlan = plan([moduleId]); modulePlan.pages[0]!.modules[0] = { ...modulePlan.pages[0]!.modules[0]!, kind, templateVersion: "1.0.0", variant: definition.variants[0]!, content: "{}" };
+      const effect = blueprint([moduleId]); effect.modules[0] = { ...effect.modules[0]!, expectedKind: kind, expectedCategory: definition.category };
+      const metadata = { schema: "kf-module-compilation-metadata/v1" as const, projectKey: modulePlan.projectKey, moduleDefinitions: [], assets: [], blueprintMappings: [{ blueprintModuleId: moduleId, pageId: "home", moduleId, expectedKind: kind, expectedCategory: definition.category, interactionBindings: [] }], generatedSeeds: [] };
+      const evaluateMatrix = (current: UIComponentSpec[]) => evaluateModuleDelivery({ blueprint: effect, plan: modulePlan, implementation: implementation(current), traces: [{ schema: "kf-module-trace/v1", projectKey: modulePlan.projectKey, entries: current.map((entry) => ({ pageId: "home", moduleId, outputId: entry.id })) }], assetBindings: [], gaps: [], registry: defaults, assetsById: {}, metadata }).report;
+      expect(evaluateMatrix(components).status).toBe("ready");
+      for (const role of quality.requiredRoles) expect(evaluateMatrix(components.filter((entry) => entry.role !== role)).status).toBe("blocked");
+      for (const capability of quality.requiredCapabilityIds) expect(evaluateMatrix(components.map((entry) => entry.capabilityId === capability ? { ...entry, capabilityId: "text" } : entry)).status).toBe("blocked");
+      expect(evaluateMatrix(components.map((entry) => ({ ...entry, critical: false }))).status).toBe("blocked");
+    }
   });
 
   it("rejects descriptor surprises without invoking their getters", () => {

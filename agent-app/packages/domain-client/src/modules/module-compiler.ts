@@ -105,6 +105,7 @@ export function compileModulePlan(input: CompileModulePlanInput): ModuleCompilat
   const rawPreviousMetadata = optionalOwnDataField(input, "previousMetadata", "INVALID_PREVIOUS_COMPILATION_METADATA");
   const previousMetadata = rawPreviousMetadata === undefined ? undefined : parseCompilationMetadata(rawPreviousMetadata as ModuleCompilationMetadata);
   if (previousPlan !== undefined && previousImplementation !== undefined && previousMetadata === undefined) throw new Error("MISSING_PREVIOUS_COMPILATION_METADATA");
+  const effectivePreviousMetadata = previousImplementation === undefined || previousMetadata === undefined ? previousMetadata : metadataWithValidatedSeeds(previousImplementation, previousMetadata);
   const previousModules = previousModuleIndex(previousPlan);
   const previousComponents = previousComponentIndex(previousImplementation);
   const pages: UIImplementationSpec["pages"] = [];
@@ -191,10 +192,10 @@ export function compileModulePlan(input: CompileModulePlanInput): ModuleCompilat
     : undefined;
   const parsedImplementation = implementation === undefined ? undefined : UIImplementationSpecSchema.safeParse(implementation);
   if (parsedImplementation !== undefined && !parsedImplementation.success) throw new Error(`INVALID_COMPILED_UI_IMPLEMENTATION: ${parsedImplementation.error.issues[0]?.message ?? "invalid implementation"}`);
-  const canonicalImplementation = parsedImplementation === undefined ? undefined : validatePreservedImplementation(preserveLegacyComponents(reuseCanonicalPriorComponents(parsedImplementation.data, plan, previousPlan, previousComponents), previousImplementation, editableEntityIds, previousMetadata));
-  const metadata = buildCompilationMetadata(plan, input.registry, assetsById, canonicalImplementation, input.blueprint, previousMetadata);
+  const canonicalImplementation = parsedImplementation === undefined ? undefined : validatePreservedImplementation(preserveLegacyComponents(reuseCanonicalPriorComponents(parsedImplementation.data, plan, previousPlan, previousComponents), previousImplementation, editableEntityIds, effectivePreviousMetadata));
+  const metadata = buildCompilationMetadata(plan, input.registry, assetsById, canonicalImplementation, input.blueprint, effectivePreviousMetadata);
   const diff = canonicalImplementation !== undefined && previousPlan !== undefined && previousImplementation !== undefined
-    ? diffModulePlans({ previousPlan, plan, previousImplementation, implementation: canonicalImplementation, assetsById, previousMetadata: previousMetadata!, metadata })
+    ? diffModulePlans({ previousPlan, plan, previousImplementation, implementation: canonicalImplementation, assetsById, previousMetadata: effectivePreviousMetadata!, metadata })
     : undefined;
   if (diff !== undefined && diff.unexpectedChanges.length > 0) throw new UnexpectedModuleChangeError(diff);
   const deliveryReport = input.blueprint === undefined ? undefined : evaluateModuleDelivery({
@@ -263,11 +264,11 @@ function buildCompilationMetadata(
     const component = implementation.pages.find((page) => page.id === seed.pageId)?.components.find((candidate) => candidate.id === seed.entityId && candidate.sourceModuleId === undefined);
     return component !== undefined && componentCanonicalHash(component) === seed.componentHash;
   });
-  const blueprintMappings = blueprint === undefined ? [] : deriveBlueprintMappings(blueprint, plan, previousMetadata);
+  const blueprintMappings = blueprint === undefined ? [] : deriveBlueprintMappings(blueprint, plan, implementation, previousMetadata);
   return ModuleCompilationMetadataSchema.parse({ schema: "kf-module-compilation-metadata/v1", projectKey: plan.projectKey, moduleDefinitions, assets, blueprintMappings, generatedSeeds });
 }
 
-function deriveBlueprintMappings(blueprint: CustomerEffectBlueprint, plan: ModulePlan, previousMetadata: ModuleCompilationMetadata | undefined): unknown[] {
+function deriveBlueprintMappings(blueprint: CustomerEffectBlueprint, plan: ModulePlan, implementation: UIImplementationSpec | undefined, previousMetadata: ModuleCompilationMetadata | undefined): unknown[] {
   return blueprint.modules.flatMap((blueprintModule) => {
     if (blueprintModule.expectedKind === undefined || blueprintModule.expectedCategory === undefined) {
       return previousMetadata?.blueprintMappings.filter((entry) => entry.blueprintModuleId === blueprintModule.id) ?? [];
@@ -277,8 +278,29 @@ function deriveBlueprintMappings(blueprint: CustomerEffectBlueprint, plan: Modul
     const match = matches[0]!;
     const definition = plan.pages.flatMap((page) => page.modules).find((module) => module.id === match.module.id);
     if (definition?.kind !== blueprintModule.expectedKind) return [];
-    return [{ blueprintModuleId: blueprintModule.id, pageId: match.pageId, moduleId: match.module.id, expectedKind: blueprintModule.expectedKind, expectedCategory: blueprintModule.expectedCategory, interactionBindings: [] }];
+    const outputs = implementation?.pages.find((page) => page.id === match.pageId)?.components.filter((component) => component.sourceModuleId === match.module.id) ?? [];
+    const interactionBindings = (blueprintModule.interactionRequirements ?? []).flatMap((requirement) => {
+      const planInteraction = match.module.interactions.find((interaction) => interaction.type === requirement.type && interactionTarget(interaction) === requirement.target);
+      const output = outputs.find((component) => actionMatches(component, requirement.actionKind, requirement.target));
+      return planInteraction === undefined || output === undefined ? [] : [{ type: requirement.type, actionKind: requirement.actionKind, target: requirement.target, outputId: output.id }];
+    });
+    return [{ blueprintModuleId: blueprintModule.id, pageId: match.pageId, moduleId: match.module.id, expectedKind: blueprintModule.expectedKind, expectedCategory: blueprintModule.expectedCategory, interactionBindings }];
   });
+}
+
+function interactionTarget(interaction: ModulePlanModule["interactions"][number]): string {
+  if (interaction.type === "navigate") return interaction.pageId;
+  if (interaction.type === "scroll" || interaction.type === "open-modal") return interaction.moduleId;
+  if (interaction.type === "submit") return interaction.action;
+  if (interaction.type === "filter") return interaction.field;
+  return interaction.target;
+}
+
+function actionMatches(component: UIComponentSpec, actionKind: string, target: string): boolean {
+  const action = component.properties.action;
+  if (action === null || typeof action !== "object" || Array.isArray(action)) return false;
+  const value = action as Record<string, unknown>;
+  return value.kind === actionKind && (value.pageId === target || value.moduleId === target || value.action === target || value.field === target || value.target === target);
 }
 
 /** Internal import/new-project port: a seed can only be removed when this hash still matches. */
@@ -340,6 +362,14 @@ function validatedSeedKeys(previous: UIImplementationSpec, metadata: ModuleCompi
     if (component !== undefined && componentCanonicalHash(component) === seed.componentHash) output.add(`${seed.pageId}\u0000${seed.entityId}`);
   }
   return output;
+}
+
+function metadataWithValidatedSeeds(previous: UIImplementationSpec, metadata: ModuleCompilationMetadata): ModuleCompilationMetadata {
+  const valid = metadata.generatedSeeds.filter((seed) => {
+    const component = previous.pages.find((page) => page.id === seed.pageId)?.components.find((candidate) => candidate.id === seed.entityId && candidate.sourceModuleId === undefined);
+    return component !== undefined && componentCanonicalHash(component) === seed.componentHash;
+  });
+  return valid.length === metadata.generatedSeeds.length ? metadata : ModuleCompilationMetadataSchema.parse({ ...metadata, generatedSeeds: valid });
 }
 
 function validatePreservedImplementation(value: UIImplementationSpec): UIImplementationSpec {

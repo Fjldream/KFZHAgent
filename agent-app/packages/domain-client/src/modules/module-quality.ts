@@ -79,6 +79,7 @@ export function evaluateModuleDelivery(input: EvaluateModuleDeliveryInput): Modu
     for (const { module } of planModules) gaps.push(gap(module.id, "Compile required module controls.", "MODULE_IMPLEMENTATION_MISSING"));
   } else {
     inspectImplementation(plan, implementation, traces, input.assetBindings, input.registry, input.assetsById, gaps);
+    inspectBlueprintInteractionBindings(blueprint, input.metadata, implementation, gaps);
   }
 
   const report = ModuleDeliveryReportSchema.parse({
@@ -88,6 +89,29 @@ export function evaluateModuleDelivery(input: EvaluateModuleDeliveryInput): Modu
     gaps: finalizeGaps(gaps),
   });
   return Object.freeze({ report });
+}
+
+function inspectBlueprintInteractionBindings(blueprint: CustomerEffectBlueprint, metadata: ModuleCompilationMetadata, implementation: UIImplementationSpec, gaps: ModuleDeliveryGap[]): void {
+  for (const requirementOwner of blueprint.modules) {
+    const requirements = requirementOwner.interactionRequirements;
+    if (requirements === undefined) continue; // legacy text-only interactions have no machine-verifiable action requirement.
+    const mapping = metadata.blueprintMappings.find((entry) => entry.blueprintModuleId === requirementOwner.id);
+    if (mapping === undefined) { gaps.push(gap("blueprint", `Map all interaction requirements for “${requirementOwner.id}”.`, "BLUEPRINT_INTERACTION_UNMAPPED")); continue; }
+    const outputs = implementation.pages.find((page) => page.id === mapping.pageId)?.components.filter((component) => component.sourceModuleId === mapping.moduleId) ?? [];
+    for (const requirement of requirements) {
+      const binding = mapping.interactionBindings.find((entry) => entry.type === requirement.type && entry.actionKind === requirement.actionKind && entry.target === requirement.target);
+      const output = binding === undefined ? undefined : outputs.find((component) => component.id === binding.outputId);
+      if (binding === undefined || output === undefined || !actionMatches(output, binding.actionKind, binding.target)) gaps.push(gap(mapping.moduleId, "Materialize each accepted blueprint interaction on its bound native output.", "BLUEPRINT_INTERACTION_BINDING_MISSING"));
+    }
+    if (mapping.interactionBindings.some((binding) => !requirements.some((requirement) => requirement.type === binding.type && requirement.actionKind === binding.actionKind && requirement.target === binding.target))) gaps.push(gap(mapping.moduleId, "Do not emit unrelated blueprint interaction bindings.", "BLUEPRINT_INTERACTION_BINDING_EXTRA"));
+  }
+}
+
+function actionMatches(component: UIComponentSpec, actionKind: string, target: string): boolean {
+  const action = component.properties.action;
+  if (action === null || typeof action !== "object" || Array.isArray(action)) return false;
+  const value = action as Record<string, unknown>;
+  return value.kind === actionKind && (value.pageId === target || value.moduleId === target || value.action === target || value.field === target || value.target === target);
 }
 
 function inspectImplementation(
