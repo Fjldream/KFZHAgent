@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
+import { cp, mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ModulePlan, ModulePlanModule, ResolvedAsset } from "@kf/contracts";
 import { compileModulePlan } from "../module-compiler.js";
 import { createDefaultModuleRegistry } from "../module-registry.js";
 import { compileUiImplementation } from "../../implementation/ui-implementation-compiler.js";
+import { applyClientPatch } from "../../patch/client-patcher.js";
+import { inspectClientProject } from "../../inspect/client-inspector.js";
 import { createPortalPlan } from "./fixtures/portal-plan.js";
 
 const theme = {
@@ -15,6 +21,13 @@ const assets: Readonly<Record<string, ResolvedAsset>> = {
   portrait: { assetId: "portrait", status: "resolved", resolvedName: "portrait.png" },
   project: { assetId: "project", status: "resolved", resolvedName: "project.png" },
 };
+const fixturesRoot = join(fileURLToPath(new URL(".", import.meta.url)), "../../../../../tests/fixtures");
+
+async function fixture(name: string): Promise<string> {
+  const target = await mkdtemp(join(tmpdir(), "kf-portal-tree-"));
+  await cp(join(fixturesRoot, name), target, { recursive: true });
+  return target;
+}
 
 function module(kind: string, id = "module", content: Record<string, unknown> = {}): ModulePlanModule {
   return {
@@ -155,7 +168,7 @@ describe("portal module definitions", () => {
     expect(result.status).toBe("compiled");
     if (result.status !== "compiled") return;
     const change = compileUiImplementation(result.implementation, {
-      workspaceId: "workspace", pageGuidById: { home: "page-guid-home" },
+      workspaceId: "workspace", pageGuidById: { Page1: "page-guid-home" },
       existingControlGuidByComponentId: {}, existingControlCapabilityIdByComponentId: {},
     });
     expect(change.plan.operations.filter((operation) => operation.op === "create")).not.toHaveLength(0);
@@ -163,7 +176,20 @@ describe("portal module definitions", () => {
       op: "create", entityType: "control", properties: expect.objectContaining({ pageId: "page-guid-home" }),
     }));
     expect(change.plan.operations).toContainEqual(expect.objectContaining({
-      op: "create", entityId: "portal-hero/primary-action", properties: expect.objectContaining({ parentId: "portal-hero/surface", action: { kind: "navigate", pageId: "home" } }),
+      op: "create", entityId: "portal-hero/primary-action", properties: expect.objectContaining({ parentId: "portal-hero/surface", action: { kind: "navigate", pageId: "Page1" } }),
     }));
+  });
+
+  it("materializes the golden portal as nested KF controls with a resolved navigation link", async () => {
+    const compiled = compile(createPortalPlan());
+    if (compiled.status !== "compiled") throw new Error("expected compiled portal");
+    const change = compileUiImplementation(compiled.implementation, { workspaceId: "workspace", pageGuidById: { Page1: "page-guid-1" }, existingControlGuidByComponentId: {}, existingControlCapabilityIdByComponentId: {} });
+    const root = await fixture("client-unknown-field");
+    const candidate = await applyClientPatch(root, change.plan);
+    const inspection = await inspectClientProject(candidate.rootDir);
+    expect(Object.values(inspection.index.controls).map((entry) => entry.id)).toContain("portal-portfolio/surface");
+    const page = JSON.parse(await readFile(join(candidate.rootDir, "1.0.0.1/project/page/Page1.json"), "utf8")) as Record<string, unknown>;
+    expect(JSON.stringify(page)).toContain("navigatePage");
+    expect(JSON.stringify(page)).toContain("page-guid-1");
   });
 });

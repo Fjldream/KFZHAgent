@@ -1102,6 +1102,7 @@ function pushControlIntoParent(
   const container = findContainer(objects);
   if (container === undefined) return false;
   const rec = container as Record<string, unknown>;
+  if (typeof rec["layoutType"] !== "number") return false;
   if (!Array.isArray(rec["insiderObjects"])) rec["insiderObjects"] = [];
   const lt = rec["layoutType"];
   if (lt === 5) {
@@ -1221,7 +1222,9 @@ async function applyCreate(
         if (properties["panels"] !== undefined) overrides["dPanelsOption"] = properties["panels"];
         const control = mergeControlTemplate(layoutTemplate, overrides);
         if (style !== undefined) applyStyleToControl(control, type, style);
-        objects.push(control);
+        const parentId = properties["parentId"];
+        if (parentId === undefined) objects.push(control);
+        else if (!pushControlIntoParent(objects, control, parentId)) throw new PatchConflictError(`create layout: parent "${String(parentId)}" not found or is not a layout`);
       } else if (type === "prototype") {
         // KF 特殊节点（prototypeName 判别）：模板 = 该原型的基础字段 + 宽容
         // 透传（prototype IR 是 passthrough）。判别/身份/几何字段不透传；
@@ -1322,9 +1325,8 @@ async function applyCreate(
         if (style !== undefined) applyStyleToControl(control, type, style);
         // 静态控件也可用 parentId 放进布局（同 easyui 分支）
         const parentId = properties["parentId"];
-        if (parentId === undefined || !pushControlIntoParent(objects, control, parentId)) {
-          objects.push(control);
-        }
+        if (parentId === undefined) objects.push(control);
+        else if (!pushControlIntoParent(objects, control, parentId)) throw new PatchConflictError(`create control: parent "${String(parentId)}" not found or is not a layout`);
       }
       await writeJsonFile(candidate, versionDir, page.file, doc);
       break;
