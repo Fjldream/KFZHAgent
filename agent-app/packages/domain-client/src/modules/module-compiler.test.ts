@@ -276,6 +276,25 @@ describe("compileModulePlan", () => {
     expect(() => compile(plan([module("profile")]), registryFor(definition()), { assetsById: { "brand-css": { assetId: "brand-css", status: "resolved", resolvedName: "brand" } } })).not.toThrow();
   });
 
+  it("never invokes compile-output or output-array getters before rejecting them", () => {
+    for (const field of ["components", "deliveryGaps"] as const) {
+      let reads = 0;
+      const output: Record<string, unknown> = {};
+      Object.defineProperty(output, field, { enumerable: true, get: () => { reads += 1; return []; } });
+      Object.defineProperty(output, field === "components" ? "deliveryGaps" : "components", { enumerable: true, value: [] });
+      expect(() => compile(plan([module("profile")]), registryFor(definition({ compile: () => output as never })))).toThrow("MODULE_COMPILER_INVALID_OUTPUT: profile");
+      expect(reads).toBe(0);
+    }
+    for (const field of ["components", "deliveryGaps"] as const) {
+      let reads = 0;
+      const values: unknown[] = [];
+      Object.defineProperty(values, "0", { enumerable: true, get: () => { reads += 1; return component("title", "text"); } });
+      const output = field === "components" ? { components: values, deliveryGaps: [] } : { components: [], deliveryGaps: values };
+      expect(() => compile(plan([module("profile")]), registryFor(definition({ compile: () => output as never })))).toThrow("MODULE_COMPILER_INVALID_OUTPUT: profile");
+      expect(reads).toBe(0);
+    }
+  });
+
   it("rejects duplicate stable slots and local output outside the assigned module bounds", () => {
     const duplicate = registryFor(definition({
       compile: () => ({ components: [component("title", "text"), component("title", "text")], deliveryGaps: [] }),

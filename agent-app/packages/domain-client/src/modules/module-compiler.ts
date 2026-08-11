@@ -122,7 +122,7 @@ export function compileModulePlan(input: CompileModulePlanInput): ModuleCompilat
         }));
       }
 
-      const compiled = validation.definition.compile({
+      const compiled = extractModuleCompileOutput(instance.id, validation.definition.compile({
         context: Object.freeze({
           definition: validation.definition,
           instance,
@@ -130,7 +130,7 @@ export function compileModulePlan(input: CompileModulePlanInput): ModuleCompilat
           asset: resolvedAsset,
           validationContext,
         }),
-      });
+      }));
       const translated = translateModuleOutput(instance, bounds, compiled, plan.theme, seenIds);
       const parsedGaps = parseCompilerGaps(instance, compiled.deliveryGaps);
       gaps.push(...parsedGaps);
@@ -284,6 +284,24 @@ function assertSafeComponent(component: UIComponentSpec, id: string): void {
 
 function assertPlainComponent(component: UIComponentSpec, id: string): void {
   if (!isPlainData(component)) throw new Error(`MODULE_COMPILER_UNSAFE_OUTPUT: ${id}`);
+}
+
+/** Extract untrusted definition output through descriptors before any field access. */
+function extractModuleCompileOutput(moduleId: string, value: unknown): ModuleCompileOutput {
+  if (value === null || typeof value !== "object") throw new Error(`MODULE_COMPILER_INVALID_OUTPUT: ${moduleId}`);
+  const entries = strictObjectEntries(value);
+  if (entries === undefined || entries.length !== 2) throw new Error(`MODULE_COMPILER_INVALID_OUTPUT: ${moduleId}`);
+  const fields = new Map(entries);
+  if (!fields.has("components") || !fields.has("deliveryGaps") || [...fields.keys()].some((key) => key !== "components" && key !== "deliveryGaps")) {
+    throw new Error(`MODULE_COMPILER_INVALID_OUTPUT: ${moduleId}`);
+  }
+  const components = fields.get("components");
+  const deliveryGaps = fields.get("deliveryGaps");
+  if (!Array.isArray(components) || !Array.isArray(deliveryGaps)) throw new Error(`MODULE_COMPILER_INVALID_OUTPUT: ${moduleId}`);
+  const componentValues = strictArrayValues(components);
+  const gapValues = strictArrayValues(deliveryGaps);
+  if (componentValues === undefined || gapValues === undefined) throw new Error(`MODULE_COMPILER_INVALID_OUTPUT: ${moduleId}`);
+  return Object.freeze({ components: componentValues as readonly UIComponentSpec[], deliveryGaps: gapValues as readonly ModuleDeliveryGap[] });
 }
 
 function hasForbiddenPayload(value: unknown): boolean {
