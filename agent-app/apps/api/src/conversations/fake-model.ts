@@ -1,5 +1,5 @@
 import type { ChangePlan, DesignPlan, ModulePlan, UIImplementationSpec } from "@kf/contracts";
-import { solutionId } from "@kf/contracts";
+import { ModulePlanSchema, solutionId } from "@kf/contracts";
 import { deriveGuid } from "@kf/domain-client";
 import type {
   ClassifyIntentResult,
@@ -7,7 +7,7 @@ import type {
   ModelPortContext,
   ProjectDesign,
 } from "@kf/agent-orchestrator";
-import { prepareModulePlanningInputs, validateModulePlanForContext } from "./deepseek-model.js";
+import { deriveExactModulePlanOperations, prepareModulePlanningInputs, validateModulePlanForContext } from "./deepseek-model.js";
 
 /**
  * 确定性演示模型（E2E / 演示环境用）。
@@ -139,25 +139,12 @@ export class DeterministicFakeModelPort implements ModelPort {
   reviseModulePlan(input: ModelPortContext): Promise<ModulePlan> {
     try {
       if (input.previousModulePlan === undefined) return this.createModulePlan(input);
-      // Validate the complete prior artifact against the currently accepted
-      // facts before reusing any byte. A stale/rejected plan never passes fake
-      // mode through unchanged.
-      const previous = validateModulePlanForContext(input, input.previousModulePlan, false);
-      const page = previous.pages[0]!;
-      const module = page.modules[0]!;
+      const previous = ModulePlanSchema.parse(input.previousModulePlan);
+      const desired = this.deterministicModulePlan(input);
+      const accepted = prepareModulePlanningInputs(input).accepted;
       const repaired: ModulePlan = {
-        ...previous,
-        pages: previous.pages.map((candidate, pageIndex) => pageIndex !== 0 ? candidate : {
-          ...candidate,
-          modules: candidate.modules.map((entry, moduleIndex) => moduleIndex !== 0 ? entry : {
-            ...entry,
-            title: `${entry.title.replace(/（已修订）$/, "")}（已修订）`,
-          }),
-        }),
-        operations: [{
-          op: "update", pageId: page.id, moduleId: module.id,
-          changes: { title: `${module.title.replace(/（已修订）$/, "")}（已修订）` },
-        }],
+        ...desired,
+        operations: [...deriveExactModulePlanOperations(previous, desired, new Set(accepted.modules.map((module) => module.blueprintModuleId)))],
       };
       return Promise.resolve(validateModulePlanForContext(input, repaired, true));
     } catch (error) {

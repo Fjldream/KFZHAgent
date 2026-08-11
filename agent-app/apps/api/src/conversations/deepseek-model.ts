@@ -66,6 +66,11 @@ export class DeepSeekModelOutputError extends Error {
   }
 }
 
+type JsonRepairCode = "JSON_PARSE" | "JSON_TRUNCATED" | "NO_JSON_OBJECT";
+class JsonExtractionError extends DeepSeekModelOutputError {
+  constructor(readonly code: JsonRepairCode, detail: string) { super(detail); }
+}
+
 const SYSTEM_PROMPT = `你以礼貌、专业的客服顾问口吻与客户沟通，回复简洁自然，像真人顾问在对话，避免机械罗列。
 
 你是 KingFusion（KF）客户端工程生成 Agent 的规划模型。你负责把用户需求转成结构化输出，绝不执行任何代码。
@@ -233,9 +238,8 @@ function interactionIdentity(value: { type: string; target: string }): string {
   return `${value.type}\u0000${value.target}`;
 }
 
-function exactRevisionOperations(previous: ModulePlan, current: ModulePlan, acceptedBlueprintIds: ReadonlySet<string>): readonly ModulePlanOperation[] {
+export function deriveExactModulePlanOperations(previous: ModulePlan, current: ModulePlan, acceptedBlueprintIds: ReadonlySet<string>): readonly ModulePlanOperation[] {
   if (!stableEqual(previous.theme, current.theme)) throwModulePlanError("theme changes require an explicit supported operation");
-  if (!stableEqual(previous.assets, current.assets)) throwModulePlanError("assets changes require an explicit supported operation");
   const previousPages = new Map(previous.pages.map((page) => [page.id, page]));
   const currentPages = new Map(current.pages.map((page) => [page.id, page]));
   if (previousPages.size !== currentPages.size || [...previousPages.keys()].some((id) => !currentPages.has(id))) {
@@ -274,8 +278,7 @@ function exactRevisionOperations(previous: ModulePlan, current: ModulePlan, acce
     if (!stableEqual(previousModule.interactions, currentModule.interactions)) changes.interactions = currentModule.interactions;
     if (!stableEqual(previousModule.sourceBlueprintModuleIds, currentModule.sourceBlueprintModuleIds)) changes.sourceBlueprintModuleIds = currentModule.sourceBlueprintModuleIds;
     if (previousModule.assetId !== currentModule.assetId) {
-      if (currentModule.assetId === undefined) throwModulePlanError(`asset removal is not supported for module: ${id}`);
-      changes.assetId = currentModule.assetId;
+      changes.assetId = currentModule.assetId ?? null;
     }
     if (Object.keys(changes).length > 0) expected.push({ op: "update", pageId: currentEntry.pageId, moduleId: id, changes });
     if (!stableEqual(previousModule.placement, currentModule.placement)) {
@@ -360,7 +363,9 @@ function assertSafeModulePlanOutput(root: unknown): void {
         try {
           // `content` is intentionally a JSON string in ModulePlan. Inspect it
           // as data too, so forbidden native/storage fields cannot hide there.
-          pending.push(JSON.parse(nested) as unknown);
+          const parsed = JSON.parse(nested) as unknown;
+          assertDescriptorSafeJson(parsed, "embedded model JSON");
+          pending.push(parsed);
         } catch {
           // Content schemas decide whether non-JSON content is meaningful; the
           // safety scan must not reinterpret ordinary customer prose as JSON.
@@ -374,9 +379,12 @@ function assertSafeModulePlanOutput(root: unknown): void {
       for (const child of value as unknown[]) pending.push(child);
       continue;
     }
-    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    for (const key of Reflect.ownKeys(value)) {
+      if (typeof key !== "string") throwModulePlanError("contains unsafe non-string field");
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (descriptor === undefined || !("value" in descriptor)) throwModulePlanError(`contains unsafe field: ${key}`);
       if (forbiddenModuleKey(key)) throwModulePlanError(`contains forbidden field: ${key}`);
-      pending.push(child);
+      pending.push(descriptor.value);
     }
   }
 }
@@ -498,14 +506,13 @@ export function extractJson(content: string): unknown {
   const start = body.indexOf("{");
   const end = body.lastIndexOf("}");
   if (start === -1 || end === -1 || end <= start) {
-    throw new DeepSeekModelOutputError("no JSON object in model reply");
+    throw new JsonExtractionError("NO_JSON_OBJECT", "no JSON object in model reply");
   }
   try {
     return JSON.parse(body.slice(start, end + 1));
   } catch (error) {
-    throw new DeepSeekModelOutputError(
-      `unparseable JSON: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new JsonExtractionError(/unexpected end/i.test(detail) ? "JSON_TRUNCATED" : "JSON_PARSE", `unparseable JSON: ${detail}`);
   }
 }
 
@@ -1113,10 +1120,6 @@ export class DeepSeekModelPort implements ModelPort {
     return prepareModulePlanningInputs(input).catalog;
   }
 
-  private planningAssets(input: ModelPortContext): readonly AssetRecord[] {
-    return prepareModulePlanningInputs(input).assets;
-  }
-
   private buildModulePlanPrompt(input: ModelPortContext, revising: boolean): string {
     const { blueprint, accepted, catalog, assets } = prepareModulePlanningInputs(input);
 
@@ -1142,10 +1145,10 @@ export class DeepSeekModelPort implements ModelPort {
       const record = message as Record<string, unknown>;
       if (typeof record.role !== "string" || typeof record.content !== "string") throwModulePlanError("recent messages failed schema validation");
       return { role: record.role, content: record.content };
-    }).sort((left, right) => codePointCompare(`${left.role}\u0000${left.content}`, `${right.role}\u0000${right.content}`));
-    const recentTruncated = recentMessages.length > MAX_MODULE_RECENT_MESSAGES || recentMessages.some((message) => message.content.length > MAX_MODULE_CONTEXT_ITEM_CHARS);
-    const recentConversation = recentMessages
-      .slice(0, MAX_MODULE_RECENT_MESSAGES)
+    });
+    const selectedRecentMessages = recentMessages.slice(-MAX_MODULE_RECENT_MESSAGES);
+    const recentTruncated = recentMessages.length > MAX_MODULE_RECENT_MESSAGES || selectedRecentMessages.some((message) => message.content.length > MAX_MODULE_CONTEXT_ITEM_CHARS);
+    const recentConversation = selectedRecentMessages
       .map((message) => `${message.role}: ${message.content.slice(0, MAX_MODULE_CONTEXT_ITEM_CHARS)}`)
       .join("\n");
     const rawReasons = input.modulePlanRejectionReasons ?? [];
@@ -1166,7 +1169,7 @@ export class DeepSeekModelPort implements ModelPort {
     }
     const prompt = [
       "把已经确认的客户效果蓝图转换成完整 ModulePlan，而不是 UIImplementationSpec、ChangePlan 或 KF JSON。",
-      "输出 schema 固定为 kf-module-plan/v1，包含 projectKey、theme、assets、pages、operations。assets 必须逐条原样使用下面的服务器资产目录；模块只能在 assetId 中引用目录中的 id，绝不写路径、URL、storageKey 或文件名替代 ID。",
+      "输出 schema 固定为 kf-module-plan/v1，包含 projectKey、theme、assets、pages、operations。顶层 assets 由服务器强制替换为当前目录快照，模型不得决定它；模块只能在 assetId 中引用目录中的 id，绝不写路径、URL、storageKey 或文件名替代 ID。",
       "每个 module 只能使用稳定目录中逐字一致的 kind、version(templateVersion) 和 variant；beta、unsupported 或未列出的条目一律不可用。",
       "placement 只能表达 region、order、columnSpan、preferredHeight、alignment、emphasis；禁止输出 geometry、x、y、width、height 或任何 CSS。",
       "每个已确认蓝图模块 ID 必须且只能出现一次 sourceBlueprintModuleIds；其 module.kind 必须逐字匹配服务器已确认的 expectedKind。不要新增、删除或改写这些来源 ID。",
@@ -1196,19 +1199,19 @@ export class DeepSeekModelPort implements ModelPort {
   /** Pure server gate; fake mode calls the same gate and never bypasses it. */
   validateModulePlan(input: ModelPortContext, raw: unknown, revising: boolean): ModulePlan {
     assertSafeModulePlanOutput(raw);
-    const parsed = ModulePlanSchema.safeParse(raw);
+    const { accepted, assets } = prepareModulePlanningInputs(input);
+    // assets are a server-owned catalog snapshot. A model's echoed top-level
+    // list is never authoritative; retain its page intent but overwrite the
+    // snapshot before the strict ModulePlan parse and semantic gate.
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throwModulePlanError("failed zod gate: plan must be an object");
+    const parsed = ModulePlanSchema.safeParse({ ...(raw as Record<string, unknown>), assets });
     if (!parsed.success) {
       throwModulePlanError(`failed zod gate: ${parsed.error.issues.slice(0, 3).map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")}`);
     }
     const plan = parsed.data;
-    const { accepted } = acceptedModulePlanningFacts(input);
     if (plan.projectKey !== accepted.projectKey) throwModulePlanError("projectKey differs from accepted artifact");
     const catalog = this.planningCatalog(input);
     const definitionByKey = new Map(catalog.map((entry) => [`${entry.kind}\u0000${entry.version}`, entry]));
-    const assets = this.planningAssets(input);
-    if (!stableEqual([...plan.assets].sort((left, right) => codePointCompare(left.id, right.id)), assets)) {
-      throwModulePlanError("assets must exactly match the server asset catalog");
-    }
     const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
     const acceptedByBlueprintId = new Map(accepted.modules.map((module) => [module.blueprintModuleId, module]));
     if (revising) {
@@ -1217,7 +1220,7 @@ export class DeepSeekModelPort implements ModelPort {
       const previous = ModulePlanSchema.safeParse(input.previousModulePlan);
       if (!previous.success) throwModulePlanError("previous ModulePlan failed schema validation");
       if (previous.data.projectKey !== plan.projectKey) throwModulePlanError("revision projectKey differs from previous ModulePlan");
-      const expectedOperations = exactRevisionOperations(
+      const expectedOperations = deriveExactModulePlanOperations(
         previous.data,
         plan,
         new Set(accepted.modules.map((module) => module.blueprintModuleId)),
@@ -1295,11 +1298,7 @@ export class DeepSeekModelPort implements ModelPort {
     try {
       return await this.requestModulePlan(input, revising);
     } catch (error) {
-      const detail = error instanceof DeepSeekModelOutputError ? error.message : "";
-      const malformed = detail.includes("no JSON object")
-        || detail.includes("unparseable JSON")
-        || detail.includes("truncated at the output token limit");
-      if (!malformed) throw error;
+      if (!(error instanceof JsonExtractionError)) throw error;
       return this.requestModulePlan(input, revising, [
         "上一轮仅因 JSON 无法解析或被截断而失败。只修复 JSON 语法并输出完整对象；不要改变已确认蓝图、目录、资产或修订范围。",
         "只修复 JSON 语法，不要续写残片，不要添加解释、CSS、坐标或原生 KF 字段。",

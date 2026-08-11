@@ -85,7 +85,8 @@ const moduleUpdateSchema = z
     content: moduleTextSchema.optional(),
     placement: ModulePlacementSchema.optional(),
     interactions: z.array(ModuleInteractionSchema).max(12).optional(),
-    assetId: stableIdSchema.optional(),
+    /** null is an explicit remove; undefined means this operation does not touch the binding. */
+    assetId: stableIdSchema.nullable().optional(),
     sourceBlueprintModuleIds: z.array(z.string().trim().min(1).max(100)).min(1).max(12).optional(),
   })
   .strict();
@@ -170,6 +171,7 @@ export const ModulePlanSchema = z
     const moduleDefinitionsByPage = new Map<string, Map<string, ModulePlanModule>>();
     const moduleIds = new Set<string>();
     const removedOperationIds = new Set<string>();
+    const addedOperationIds = new Set<string>();
     const interactionSources: Array<{ interactions: ModuleInteraction[]; path: (string | number)[] }> = [];
     plan.pages.forEach((page, pageIndex) => {
       if (pageIds.has(page.id)) {
@@ -202,15 +204,15 @@ export const ModulePlanSchema = z
       const pageModuleIds = modulesByPage.get(operation.pageId)!;
       const pageModules = moduleDefinitionsByPage.get(operation.pageId)!;
       if (operation.op === "add") {
-        if (moduleIds.has(operation.module.id)) {
-          ctx.addIssue({ code: "custom", path: ["operations", index, "module", "id"], message: `duplicate module id: ${operation.module.id}` });
+        const addKey = `${operation.pageId}\u0000${operation.module.id}`;
+        if (addedOperationIds.has(addKey)) {
+          ctx.addIssue({ code: "custom", path: ["operations", index, "module", "id"], message: `duplicate add operation: ${operation.module.id}` });
+          return;
         }
-        moduleIds.add(operation.module.id);
-        pageModuleIds.add(operation.module.id);
-        pageModules.set(operation.module.id, operation.module);
-        interactionSources.push({ interactions: operation.module.interactions, path: ["operations", index, "module", "interactions"] });
-        if (operation.module.assetId !== undefined && !assetIds.has(operation.module.assetId)) {
-          ctx.addIssue({ code: "custom", path: ["operations", index, "module", "assetId"], message: `unknown asset id: ${operation.module.assetId}` });
+        addedOperationIds.add(addKey);
+        const finalModule = pageModules.get(operation.module.id);
+        if (finalModule === undefined || JSON.stringify(finalModule) !== JSON.stringify(operation.module)) {
+          ctx.addIssue({ code: "custom", path: ["operations", index, "module"], message: `added module must exactly match final page snapshot: ${operation.module.id}` });
         }
         return;
       }
@@ -249,7 +251,7 @@ export const ModulePlanSchema = z
         return;
       }
       if (operation.op === "update") {
-        if (operation.changes.assetId !== undefined && !assetIds.has(operation.changes.assetId)) {
+        if (operation.changes.assetId !== undefined && operation.changes.assetId !== null && !assetIds.has(operation.changes.assetId)) {
           ctx.addIssue({ code: "custom", path: ["operations", index, "changes", "assetId"], message: `unknown asset id: ${operation.changes.assetId}` });
         }
         if (operation.changes.interactions !== undefined) {

@@ -69,7 +69,7 @@ const validPlan = {
       modules: [hero],
     },
   ],
-  operations: [{ op: "add", pageId: "home", module: announcement }],
+  operations: [],
 } as const;
 
 describe("ModulePlanSchema", () => {
@@ -136,14 +136,34 @@ describe("ModulePlanSchema", () => {
     expect(ModulePlanSchema.safeParse({
       ...validPlan,
       operations: [{ op: "add", pageId: "home", module: hero }],
-    }).success).toBe(false);
+    }).success).toBe(true);
     expect(ModulePlanSchema.safeParse({
       ...validPlan,
       operations: [
-        validPlan.operations[0],
+        { op: "add", pageId: "home", module: announcement },
         { op: "add", pageId: "home", module: announcement },
       ],
     }).success).toBe(false);
+  });
+
+  it("treats pages as the final snapshot and requires add payload to match it exactly", () => {
+    const finalPlan = {
+      ...validPlan,
+      pages: [{ ...validPlan.pages[0], modules: [hero, announcement] }],
+      operations: [{ op: "add", pageId: "home", module: announcement }],
+    };
+    expect(ModulePlanSchema.safeParse(finalPlan).success).toBe(true);
+    expect(ModulePlanSchema.safeParse({
+      ...finalPlan,
+      operations: [{ op: "add", pageId: "home", module: { ...announcement, title: "different" } }],
+    }).success).toBe(false);
+  });
+
+  it("allows an update operation to explicitly clear an optional asset binding", () => {
+    expect(ModulePlanSchema.safeParse({
+      ...validPlan,
+      operations: [{ op: "update", pageId: "home", moduleId: "hero", changes: { assetId: null } }],
+    }).success).toBe(true);
   });
 
   it("rejects GUID-shaped ids and executable model-authored module text", () => {
