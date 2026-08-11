@@ -214,6 +214,12 @@ function stableEqual(left: unknown, right: unknown): boolean {
   return canonicalJson(left) === canonicalJson(right);
 }
 
+/** Return a detached, canonical JSON value so audit operations never retain page-object references. */
+function detachedCanonical<T>(value: T): T {
+  assertDescriptorSafeJson(value, "revision delta payload");
+  return JSON.parse(canonicalJson(value)) as T;
+}
+
 function moduleIndex(plan: ModulePlan): Map<string, { pageId: string; module: ModulePlan["pages"][number]["modules"][number] }> {
   return new Map(plan.pages.flatMap((page) => page.modules.map((module) => [module.id, { pageId: page.id, module }] as const)));
 }
@@ -275,8 +281,8 @@ export function deriveExactModulePlanOperations(previous: ModulePlan, current: M
       if (currentModule.content === undefined) throwModulePlanError(`content removal is not supported for module: ${id}`);
       changes.content = currentModule.content;
     }
-    if (!stableEqual(previousModule.interactions, currentModule.interactions)) changes.interactions = currentModule.interactions;
-    if (!stableEqual(previousModule.sourceBlueprintModuleIds, currentModule.sourceBlueprintModuleIds)) changes.sourceBlueprintModuleIds = currentModule.sourceBlueprintModuleIds;
+    if (!stableEqual(previousModule.interactions, currentModule.interactions)) changes.interactions = detachedCanonical(currentModule.interactions);
+    if (!stableEqual(previousModule.sourceBlueprintModuleIds, currentModule.sourceBlueprintModuleIds)) changes.sourceBlueprintModuleIds = detachedCanonical(currentModule.sourceBlueprintModuleIds);
     if (previousModule.assetId !== currentModule.assetId) {
       changes.assetId = currentModule.assetId ?? null;
     }
@@ -288,14 +294,14 @@ export function deriveExactModulePlanOperations(previous: ModulePlan, current: M
         && previousModule.placement.emphasis === currentModule.placement.emphasis;
       expected.push(sameNonResizePlacement
         ? { op: "resize", pageId: currentEntry.pageId, moduleId: id, columnSpan: currentModule.placement.columnSpan, preferredHeight: currentModule.placement.preferredHeight }
-        : { op: "move", pageId: currentEntry.pageId, moduleId: id, placement: currentModule.placement });
+        : { op: "move", pageId: currentEntry.pageId, moduleId: id, placement: detachedCanonical(currentModule.placement) });
     }
     if (previousModule.variant !== currentModule.variant) {
       expected.push({ op: "changeVariant", pageId: currentEntry.pageId, moduleId: id, templateVersion: currentModule.templateVersion, variant: currentModule.variant });
     }
   }
   for (const [id, currentEntry] of after) {
-    if (!before.has(id)) expected.push({ op: "add", pageId: currentEntry.pageId, module: currentEntry.module });
+    if (!before.has(id)) expected.push({ op: "add", pageId: currentEntry.pageId, module: detachedCanonical(currentEntry.module) });
   }
   return Object.freeze(expected.sort((left, right) => codePointCompare(operationSortKey(left), operationSortKey(right))));
 }
@@ -332,7 +338,8 @@ export function assertDescriptorSafeJson(root: unknown, code: string, maxNodes =
     }
     if (Reflect.getPrototypeOf(value) !== Object.prototype) throwModulePlanError(`${code}: unsafe object prototype`);
     for (const key of Reflect.ownKeys(value)) {
-      if (typeof key !== "string" || key === "__proto__" || key === "prototype" || key === "constructor") throwModulePlanError(`${code}: unsafe key`);
+      const normalizedKey = typeof key === "string" ? key.normalize("NFKC").toLowerCase() : "";
+      if (typeof key !== "string" || normalizedKey === "__proto__" || normalizedKey === "prototype" || normalizedKey === "constructor") throwModulePlanError(`${code}: unsafe key`);
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
       if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) throwModulePlanError(`${code}: unsafe property`);
       pending.push({ value: descriptor.value });
@@ -342,9 +349,9 @@ export function assertDescriptorSafeJson(root: unknown, code: string, maxNodes =
 
 function forbiddenModuleKey(key: string): boolean {
   const normalized = key.normalize("NFKC").replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
-  const compact = normalized.replace(/[^a-z0-9]/g, "");
-  if (["x", "y", "width", "height", "geometry", "controlgeometry", "css", "cssrules", "selector", "html", "script", "scriptbody", "javascript", "path", "pathvalue", "filepath", "storagekey", "native", "nativepayload", "guid", "controlguid", "objecttype", "uimodeltype", "styledatanew", "baseproperty", "lefttoppt", "insiderobjects", "configuredata", "layouttype", "prototype"].includes(compact)) return true;
-  return compact.includes("storagekey") || compact.includes("filepath") || compact.includes("pathvalue") || compact.includes("controlgeometry") || compact.includes("controlguid") || compact.includes("nativepayload") || compact.includes("scriptbody") || compact.includes("cssrules") || compact.includes("styledatanew") || compact.includes("objecttype") || compact.includes("uimodeltype") || compact.includes("configuredata");
+  const tokens = normalized.split(/[^a-z0-9]+/).filter(Boolean);
+  const forbidden = new Set(["geometry", "css", "path", "storage", "native", "script", "html", "javascript", "selector", "proto", "prototype", "constructor", "styledata", "controlguid", "guid"]);
+  return tokens.some((token) => forbidden.has(token));
 }
 
 /** Model reply has passed JSON.parse, but scan its JSON tree before schema parsing for disallowed implementation vocabulary. */
