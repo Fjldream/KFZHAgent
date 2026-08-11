@@ -1,0 +1,22 @@
+flowchart TB
+    U["客户对话需求"] --> CA["需求澄清 Agent"]
+    CA --> BP["客户效果蓝图"]
+    BP --> CR{"客户确认蓝图"}
+    CR --> PA["模块规划 Agent"]
+    PA --> MP["ModulePlan"]
+    MP --> BC{"蓝图覆盖校验"}
+    MR["通用模块注册表"] --> MC["确定性 Module Compiler"]
+    KR["KF 能力注册表"] --> MC
+    AR["资产目录与 Asset Tool"] --> MC
+    BC --> MC
+    MC --> UIS["UIImplementationSpec"]
+    UIS --> KT["KF Client Tools"]
+    KT --> CP["ChangePlan"]
+    CP --> KJ["KF JSON + 资源文件"]
+    KJ --> VG{"双层质量门禁"}
+    VG -->|"强制项失败"| RA["自动修复 Agent"]
+    RA --> MP
+    VG -->|"通过，可带非阻断警告"| PKG["KF 客户端工程包"]
+    PKG --> OUT["预览 + 下载 + 交付报告"]
+    OUT --> MOD["继续对话做模块级增量修改"]
+    MOD --> PA

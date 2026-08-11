@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KF 通用模块生成架构基线</title>
+<style>
+  * { box-sizing:border-box; }
+  body { margin:0; padding:32px; background:#f5f7fb; color:#1f2937; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif; }
+  body > h2, body > p, body > .legend, body > .arch { max-width:1280px; margin-left:auto; margin-right:auto; }
+  .arch { display:grid; gap:18px; }
+  .lane { border:1px solid #dbe3ee; border-radius:16px; padding:18px; background:#fff; }
+  .lane h3 { margin:0 0 12px; color:#172033; }
+  .flow { display:flex; align-items:stretch; gap:10px; flex-wrap:wrap; }
+  .node { flex:1; min-width:170px; border-radius:12px; padding:14px; border:1px solid #ccd6e5; background:#f8fafc; }
+  .node strong { display:block; margin-bottom:6px; color:#18243a; }
+  .node span { color:#596579; font-size:13px; line-height:1.5; }
+  .agent { background:#eef5ff; border-color:#8bb7ff; }
+  .det { background:#ecfdf3; border-color:#72d39c; }
+  .gate { background:#fff7e8; border-color:#f0b44e; }
+  .out { background:#f4efff; border-color:#ad8bea; }
+  .arrow { display:flex; align-items:center; color:#8793a5; font-size:24px; }
+  .split-row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; }
+  .legend { display:flex; gap:18px; flex-wrap:wrap; font-size:13px; color:#5d6879; }
+  .dot { width:10px; height:10px; display:inline-block; border-radius:50%; margin-right:6px; }
+  .rule { margin-top:14px; padding:12px 14px; border-left:4px solid #537adf; background:#f5f7fb; color:#344054; }
+  @media (max-width:800px){ .split-row{grid-template-columns:1fr;} .arrow{display:none;} }
+</style>
+
+<h2>KF 通用模块生成架构</h2>
+<p class="subtitle">模型负责理解和组合，确定性引擎负责把方案可靠地落成 KF 原生工程。</p>
+
+<div class="legend">
+  <span><i class="dot" style="background:#8bb7ff"></i>Agent / 大模型决策</span>
+  <span><i class="dot" style="background:#72d39c"></i>确定性平台能力</span>
+  <span><i class="dot" style="background:#f0b44e"></i>交付质量门禁</span>
+  <span><i class="dot" style="background:#ad8bea"></i>交付成果</span>
+</div>
+
+<div class="arch">
+  <div class="lane">
+    <h3>1. 需求与效果蓝图</h3>
+    <div class="flow">
+      <div class="node agent"><strong>需求澄清 Agent</strong><span>理解业务目标、用户、数据、交互和视觉方向。</span></div>
+      <div class="arrow">→</div>
+      <div class="node agent"><strong>效果蓝图 Agent</strong><span>输出页面模块、内容样例、关键交互和验收标准。</span></div>
+      <div class="arrow">→</div>
+      <div class="node gate"><strong>客户确认</strong><span>确认最终效果目标，而不是直接确认底层控件 JSON。</span></div>
+    </div>
+  </div>
+
+  <div class="lane">
+    <h3>2. 模块级实施规划</h3>
+    <div class="flow">
+      <div class="node agent"><strong>模块规划 Agent</strong><span>选择模块类型、顺序、内容、数据绑定及受控视觉变体。</span></div>
+      <div class="arrow">→</div>
+      <div class="node det"><strong>ModulePlan</strong><span>结构化计划：Hero、KPI、卡片网格、趋势图、表格、表单等。</span></div>
+      <div class="arrow">→</div>
+      <div class="node gate"><strong>蓝图覆盖校验</strong><span>每个核心蓝图模块必须映射到真实 ModulePlan。</span></div>
+    </div>
+  </div>
+
+  <div class="split-row">
+    <div class="node det"><strong>通用模块注册表</strong><span>门户模块、工业看板模块、管理页面模块；含布局变体和必需槽位。</span></div>
+    <div class="node det"><strong>KF 能力注册表</strong><span>记录可用原生控件、字段、样式、状态、交互及版本化适配信息。</span></div>
+    <div class="node det"><strong>资产目录与 Asset Tool</strong><span>内置资源、用户上传资源、包内路径；禁止模型编造文件名。</span></div>
+  </div>
+
+  <div class="lane">
+    <h3>3. 确定性展开与 KF 工程生成</h3>
+    <div class="flow">
+      <div class="node det"><strong>Module Compiler</strong><span>把模块展开为布局、控件树、约束、内容槽位和交互声明。</span></div>
+      <div class="arrow">→</div>
+      <div class="node det"><strong>UIImplementationSpec</strong><span>只包含经过注册表验证的原生控件、资产引用和结构化样式。</span></div>
+      <div class="arrow">→</div>
+      <div class="node det"><strong>KF Client Tools</strong><span>生成 ChangePlan、JSON、资源文件与可导入客户端工程。</span></div>
+    </div>
+    <div class="rule"><strong>核心原则：</strong>模块内部布局由模板保证；Agent 可以组合模块和选择变体，但不能绕过 KF 能力注册表直接写任意 CSS、资源路径或原生 JSON。</div>
+  </div>
+
+  <div class="lane">
+    <h3>4. 双层质量门禁</h3>
+    <div class="flow">
+      <div class="node gate"><strong>强制阻断</strong><span>缺模块、缺资源、残留模板控件、越界、关键字段/交互缺失、未验证 KF 能力。</span></div>
+      <div class="arrow">+</div>
+      <div class="node gate"><strong>交付警告</strong><span>次要间距、阴影、非关键动画、可选装饰缺失；进入交付报告。</span></div>
+      <div class="arrow">→</div>
+      <div class="node agent"><strong>自动修复 Agent</strong><span>仅针对门禁报告修改 ModulePlan，再重新编译，不直接篡改工程 JSON。</span></div>
+    </div>
+  </div>
+
+  <div class="lane">
+    <h3>5. 成果与持续修改</h3>
+    <div class="flow">
+      <div class="node out"><strong>KF 客户端工程包</strong><span>原生可编辑、可导入、可继续在 KF 开发态修改。</span></div>
+      <div class="node out"><strong>交付报告</strong><span>蓝图覆盖、模块清单、能力缺口、警告和资产清单。</span></div>
+      <div class="node out"><strong>继续对话修改</strong><span>定位到模块和槽位做增量变更，未涉及模块保持不动。</span></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
