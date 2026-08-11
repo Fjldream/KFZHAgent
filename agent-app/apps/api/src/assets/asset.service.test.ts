@@ -12,19 +12,17 @@ const W_B = "workspace-b";
 // Hand-checked valid 1×1 images. Tests intentionally give false HTTP MIME
 // headers: the service must derive media type from bytes, not client claims.
 const PNG_1X1 = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLq7wAAAABJRU5ErkJggg==",
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/mXPo5QAAAABJRU5ErkJggg==",
   "base64",
 );
 const JPEG_1X1 = Buffer.from(
   "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAH/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAEFAqf/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/Aaf/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/Aaf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAY/Aqf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAQEA/6f/2gAMAwEAAgADAAAAEP/EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQMBAT8QH//EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQIBAT8QH//EABQQAQAAAAAAAAAAAAAAAAAAABD/2gAIAQEAAT8QH//Z",
   "base64",
 );
-const WEBP_1X1 = Buffer.from([
-  0x52, 0x49, 0x46, 0x46, 0x1a, 0x00, 0x00, 0x00,
-  0x57, 0x45, 0x42, 0x50, 0x56, 0x50, 0x38, 0x58,
-  0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-]);
+const WEBP_1X1 = Buffer.from(
+  "UklGRiIAAABXRUJQVlA4IBYAAABwAQCdASoBAAEAAUAmJaQAA3AA/vuU",
+  "base64",
+);
 
 class MemoryStorage implements ArtifactStorage {
   readonly bytes = new Map<string, Buffer>();
@@ -83,7 +81,15 @@ function fakePrisma(options: { dbFailure?: "unreferenced" | "adopted" | "unknown
   const rows: AssetRow[] = [];
   const workspaceIds = new Set([`${T_A}/${W_A}`, `${T_B}/${W_B}`]);
   let rowId = 0;
-  return {
+  const workspaceLock = async <T>(
+    _strings: TemplateStringsArray,
+    ...values: unknown[]
+  ): Promise<T> => {
+    const [workspaceId, tenantId] = values;
+    return (typeof workspaceId === "string" && typeof tenantId === "string" &&
+      workspaceIds.has(`${tenantId}/${workspaceId}`) ? [{ id: workspaceId }] : []) as T;
+  };
+  const client = {
     rows,
     solutionWorkspace: {
       findFirst: async ({ where }: { where: { id: string; tenantId: string } }) =>
@@ -119,6 +125,11 @@ function fakePrisma(options: { dbFailure?: "unreferenced" | "adopted" | "unknown
         return { count: before - rows.length };
       },
     },
+    $queryRaw: workspaceLock,
+  };
+  return {
+    ...client,
+    $transaction: async <T>(callback: (tx: typeof client) => Promise<T>): Promise<T> => callback(client),
   };
 }
 
@@ -147,6 +158,34 @@ describe("AssetService", () => {
     expect(result).not.toHaveProperty("storageKey");
   });
 
+  it.each([
+    ["PNG", PNG_1X1],
+    ["JPEG", JPEG_1X1],
+    ["WebP", WEBP_1X1],
+  ])("rejects a structurally complete-looking %s with trailing executable bytes before database adoption", async (_label, bytes) => {
+    const { service: assets, prisma, storage } = service();
+    await expect(assets.upload({
+      tenantId: T_A,
+      workspaceId: W_A,
+      name: "trailing-image",
+      stream: Readable.from([Buffer.concat([bytes, Buffer.from("<script>alert(1)</script>")])]),
+    })).rejects.toThrow("ASSET_INVALID_CONTAINER");
+    expect(prisma.rows).toHaveLength(0);
+    expect(storage.bytes.size).toBe(0);
+  });
+
+  it("rejects a truncated PNG that still declares dimensions before database adoption", async () => {
+    const { service: assets, prisma, storage } = service();
+    await expect(assets.upload({
+      tenantId: T_A,
+      workspaceId: W_A,
+      name: "truncated.png",
+      stream: Readable.from([PNG_1X1.subarray(0, PNG_1X1.length - 4)]),
+    })).rejects.toThrow("ASSET_INVALID_CONTAINER");
+    expect(prisma.rows).toHaveLength(0);
+    expect(storage.bytes.size).toBe(0);
+  });
+
   it("rejects non-image, empty, dimensionless, and oversized upload bodies", async () => {
     const { service: assets } = service();
     await expect(assets.upload({ tenantId: T_A, workspaceId: W_A, name: "evil.svg", stream: Readable.from(["<svg onload=alert(1) />"]) }))
@@ -154,7 +193,7 @@ describe("AssetService", () => {
     await expect(assets.upload({ tenantId: T_A, workspaceId: W_A, name: "empty", stream: Readable.from([]) }))
       .rejects.toThrow("ASSET_EMPTY");
     await expect(assets.upload({ tenantId: T_A, workspaceId: W_A, name: "dimensionless", stream: Readable.from([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])]) }))
-      .rejects.toThrow("ASSET_INVALID_DIMENSIONS");
+      .rejects.toThrow("ASSET_INVALID_CONTAINER");
     await expect(assets.upload({ tenantId: T_A, workspaceId: W_A, name: "large", maxBytes: 20, stream: Readable.from([PNG_1X1]) }))
       .rejects.toThrow("ASSET_TOO_LARGE");
   });

@@ -74,6 +74,7 @@ model SolutionWorkspace {
   currentRevisionId String? // advanced only after validation passes
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+  assets            WorkspaceAsset[]
 
   @@unique([tenantId, name])
 }
@@ -224,6 +225,7 @@ model WorkspaceAsset {
   height      Int?
   tags        Json
   createdAt   DateTime @default(now())
+  workspace   SolutionWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, workspaceId, sha256])
   @@index([tenantId, workspaceId])

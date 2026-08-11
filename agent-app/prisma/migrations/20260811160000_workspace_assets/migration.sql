@@ -24,3 +24,9 @@ ON "WorkspaceAsset"("tenantId", "workspaceId", "sha256");
 -- CreateIndex
 CREATE INDEX "WorkspaceAsset_tenantId_workspaceId_idx"
 ON "WorkspaceAsset"("tenantId", "workspaceId");
+
+-- AddForeignKey
+ALTER TABLE "WorkspaceAsset"
+ADD CONSTRAINT "WorkspaceAsset_workspaceId_fkey"
+FOREIGN KEY ("workspaceId") REFERENCES "SolutionWorkspace"("id")
+ON DELETE CASCADE ON UPDATE CASCADE;

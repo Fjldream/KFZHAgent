@@ -9,7 +9,7 @@ process.env.DATABASE_URL =
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import cookieParser from "cookie-parser";
-import type { ArtifactStorage } from "@kf/artifact-storage";
+import type { ArtifactStorage, StoredArtifact } from "@kf/artifact-storage";
 import { BuildExecutor, BuildJobService } from "@kf/build-jobs";
 import { decodeBlueprintMessage } from "@kf/agent-orchestrator";
 import {
@@ -32,6 +32,8 @@ import { PasswordService } from "./auth/password.service.js";
 import { TenantsService } from "./tenants/tenants.service.js";
 import { ARTIFACT_STORAGE } from "./artifacts/artifact-storage.js";
 import { MODEL_PORT } from "./conversations/model-port.js";
+import { AssetService } from "./assets/asset.service.js";
+import { WorkspaceService } from "./workspaces/workspace.service.js";
 
 const unknownFieldClientDir = fileURLToPath(
   new URL("../../../tests/fixtures/client-unknown-field", import.meta.url),
@@ -42,7 +44,15 @@ const TENANT_A = { tenant: "Acme Corp", username: "alice", password: "TempPass-1
 const TENANT_A_MEMBER = { tenant: "Acme Corp", username: "carol", password: "CarolPass-123" };
 const TENANT_B = { tenant: "Globex", username: "bob", password: "TempPass-123" };
 const ASSET_PNG_1X1 = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLq7wAAAABJRU5ErkJggg==",
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/mXPo5QAAAABJRU5ErkJggg==",
+  "base64",
+);
+const ASSET_JPEG_1X1 = Buffer.from(
+  "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAH/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAEFAqf/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/Aaf/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/Aaf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAY/Aqf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAQEA/6f/2gAMAwEAAgADAAAAEP/EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQMBAT8QH//EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQIBAT8QH//EABQQAQAAAAAAAAAAAAAAAAAAABD/2gAIAQEAAT8QH//Z",
+  "base64",
+);
+const ASSET_WEBP_1X1 = Buffer.from(
+  "UklGRiIAAABXRUJQVlA4IBYAAABwAQCdASoBAAEAAUAmJaQAA3AA/vuU",
   "base64",
 );
 
@@ -55,6 +65,37 @@ let fakeModel: FakeModelPort;
 let storage: ArtifactStorage;
 let storageRoot: string;
 let counter = 0;
+
+class AdoptionGateStorage implements ArtifactStorage {
+  private readonly delegate: ArtifactStorage;
+  private resolveStored!: (artifact: StoredArtifact) => void;
+  private resolveRelease!: () => void;
+  readonly stored = new Promise<StoredArtifact>((resolve) => { this.resolveStored = resolve; });
+  private readonly releaseGate = new Promise<void>((resolve) => { this.resolveRelease = resolve; });
+
+  constructor(delegate: ArtifactStorage) {
+    this.delegate = delegate;
+  }
+
+  async put(input: Parameters<ArtifactStorage["put"]>[0]): Promise<StoredArtifact> {
+    const stored = await this.delegate.put(input);
+    this.resolveStored(stored);
+    await this.releaseGate;
+    return stored;
+  }
+
+  open(tenantId: string, artifactId: string): Promise<NodeJS.ReadableStream> {
+    return this.delegate.open(tenantId, artifactId);
+  }
+
+  delete(tenantId: string, artifactId: string): Promise<void> {
+    return this.delegate.delete(tenantId, artifactId);
+  }
+
+  release(): void {
+    this.resolveRelease();
+  }
+}
 
 const TABLES = [
   "DownloadToken",
@@ -878,6 +919,66 @@ describe("api contract", () => {
       .expect(204);
     await expect(storage.open(ws.body.tenantId, persisted.storageKey)).rejects.toThrow();
   });
+
+  it("rejects trailing executable bytes and truncated containers through the real asset endpoint", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createWorkspace(cookie, "Asset Container Validation WS");
+    for (const [name, bytes] of [
+      ["trailing.png", ASSET_PNG_1X1],
+      ["trailing.jpg", ASSET_JPEG_1X1],
+      ["trailing.webp", ASSET_WEBP_1X1],
+      ["truncated.png", ASSET_PNG_1X1.subarray(0, ASSET_PNG_1X1.length - 4)],
+    ] as const) {
+      const response = await request(server)
+        .post(`/api/workspaces/${ws.body.id}/assets`)
+        .query({ name })
+        .set("Cookie", cookie)
+        .set("Content-Type", "image/png")
+        .send(name === "truncated.png" ? bytes : Buffer.concat([bytes, Buffer.from("<script>run()</script>")]))
+        .expect(422);
+      expect(response.body.message).toBe("ASSET_INVALID_CONTAINER");
+    }
+    expect(await prisma.workspaceAsset.count({ where: { tenantId: ws.body.tenantId, workspaceId: ws.body.id } })).toBe(0);
+  });
+
+  it("serializes workspace deletion against a stored-but-unadopted asset without orphaning a row or blob", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createWorkspace(cookie, "Asset Delete Race WS");
+    const gate = new AdoptionGateStorage(storage);
+    const assets = new AssetService(prisma, gate);
+    const workspaces = new WorkspaceService(prisma, storage);
+    const upload = assets.upload({
+      tenantId: ws.body.tenantId,
+      workspaceId: ws.body.id,
+      name: "race.png",
+      stream: Readable.from([ASSET_PNG_1X1]),
+    });
+    const stored = await gate.stored;
+
+    // No sleep: the gate proves storage completed but upload has not yet
+    // entered its workspace-row adoption transaction. Deletion wins the same
+    // row lock, then release lets upload observe the deleted workspace.
+    await workspaces.deleteWorkspace(ws.body.tenantId, ws.body.id);
+    gate.release();
+    await expect(upload).rejects.toThrow("workspace");
+    expect(await prisma.workspaceAsset.count({ where: { tenantId: ws.body.tenantId, workspaceId: ws.body.id } })).toBe(0);
+    await expect(storage.open(ws.body.tenantId, stored.artifactId)).rejects.toThrow();
+  });
+
+  it("returns one logical asset for concurrent same-checksum uploads", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createWorkspace(cookie, "Asset Concurrent Upload WS");
+    const [one, two] = await Promise.all([
+      request(server).post(`/api/workspaces/${ws.body.id}/assets`).query({ name: "one.png" })
+        .set("Cookie", cookie).set("Content-Type", "application/octet-stream").send(ASSET_PNG_1X1),
+      request(server).post(`/api/workspaces/${ws.body.id}/assets`).query({ name: "two.png" })
+        .set("Cookie", cookie).set("Content-Type", "application/octet-stream").send(ASSET_PNG_1X1),
+    ]);
+    expect(one.status).toBe(201);
+    expect(two.status).toBe(201);
+    expect(one.body.id).toBe(two.body.id);
+    expect(await prisma.workspaceAsset.count({ where: { tenantId: ws.body.tenantId, workspaceId: ws.body.id } })).toBe(1);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -906,6 +1007,12 @@ describe("api security", () => {
       .post(`/api/workspaces/w1/uploads`)
       .set("Content-Type", "application/octet-stream")
       .send(pkg)
+      .expect(401);
+    await request(server).get("/api/workspaces/w1/assets").expect(401);
+    await request(server)
+      .post("/api/workspaces/w1/assets")
+      .set("Content-Type", "image/png")
+      .send(ASSET_PNG_1X1)
       .expect(401);
   });
 
@@ -962,6 +1069,16 @@ describe("api security", () => {
       .set("Cookie", cookieB)
       .set("Content-Type", "application/octet-stream")
       .send(pkg)
+      .expect(404);
+    await request(server)
+      .get(`/api/workspaces/${wsA.body.id}/assets`)
+      .set("Cookie", cookieB)
+      .expect(404);
+    await request(server)
+      .post(`/api/workspaces/${wsA.body.id}/assets`)
+      .set("Cookie", cookieB)
+      .set("Content-Type", "image/png")
+      .send(ASSET_PNG_1X1)
       .expect(404);
   });
 

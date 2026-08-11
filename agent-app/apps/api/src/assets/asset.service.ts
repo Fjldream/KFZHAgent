@@ -83,56 +83,19 @@ export class AssetService {
       });
       const metadata = inspectImage(inspection.bytes(), stored.size);
 
-      // Content-addressed per workspace: an identical body returns its
-      // existing logical asset, while the just-written unadopted blob is
-      // removed conservatively below.
-      const duplicate = await this.prisma.workspaceAsset.findFirst({
-        where: {
-          tenantId: input.tenantId,
-          workspaceId: input.workspaceId,
-          sha256: stored.sha256,
-        },
+      const adopted = await this.adoptStoredAsset({
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        stored,
+        metadata,
+        name,
+        tags,
       });
-      if (duplicate !== null) {
+      if (adopted.adopted === "duplicate") {
         await this.cleanupUnadoptedAsset(input.tenantId, input.workspaceId, stored.artifactId);
-        return toCatalogItem(duplicate);
+        return toCatalogItem(adopted.row);
       }
-
-      try {
-        const created = await this.prisma.workspaceAsset.create({
-          data: {
-            tenantId: input.tenantId,
-            workspaceId: input.workspaceId,
-            type: "image",
-            name,
-            mediaType: metadata.mediaType,
-            storageKey: stored.artifactId,
-            sha256: stored.sha256,
-            sizeBytes: stored.size,
-            width: metadata.width,
-            height: metadata.height,
-            tags,
-          },
-        });
-        return toCatalogItem(created);
-      } catch (error) {
-        // A concurrent identical upload can win after our first lookup. The
-        // unique index is the authority; return its adopted row if visible.
-        if (isUniqueViolation(error)) {
-          const concurrent = await this.prisma.workspaceAsset.findFirst({
-            where: {
-              tenantId: input.tenantId,
-              workspaceId: input.workspaceId,
-              sha256: stored.sha256,
-            },
-          });
-          if (concurrent !== null) {
-            await this.cleanupUnadoptedAsset(input.tenantId, input.workspaceId, stored.artifactId);
-            return toCatalogItem(concurrent);
-          }
-        }
-        throw error;
-      }
+      return toCatalogItem(adopted.row);
     } catch (error) {
       if (stored !== undefined) {
         await this.cleanupUnadoptedAsset(input.tenantId, input.workspaceId, stored.artifactId);
@@ -188,6 +151,68 @@ export class AssetService {
       select: { id: true },
     });
     if (workspace === null) throw new NotFoundException("workspace");
+  }
+
+  /**
+   * Storage happens before this transaction, but adoption never does: all
+   * writers and workspace deletion serialize through this exact row lock.
+   * Consequently a delete that wins between storage and adoption leaves no
+   * asset row, and the outer catch can conservatively reclaim its blob.
+   */
+  private async adoptStoredAsset(input: {
+    tenantId: string;
+    workspaceId: string;
+    stored: StoredArtifact;
+    metadata: { mediaType: "image/png" | "image/jpeg" | "image/webp"; width: number; height: number };
+    name: string;
+    tags: string[];
+  }): Promise<{ adopted: "created" | "duplicate"; row: {
+    id: string; type: string; name: string; mediaType: string; sizeBytes: number;
+    width: number | null; height: number | null; tags: unknown; createdAt: Date;
+  } }> {
+    return this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" /* kf_workspace_asset_lock */
+        FROM "SolutionWorkspace"
+        WHERE "id" = ${input.workspaceId}
+          AND "tenantId" = ${input.tenantId}
+        FOR UPDATE
+      `;
+      if (locked[0] === undefined) throw new NotFoundException("workspace");
+
+      const duplicate = await tx.workspaceAsset.findFirst({
+        where: { tenantId: input.tenantId, workspaceId: input.workspaceId, sha256: input.stored.sha256 },
+      });
+      if (duplicate !== null) return { adopted: "duplicate" as const, row: duplicate };
+      try {
+        const created = await tx.workspaceAsset.create({
+          data: {
+            tenantId: input.tenantId,
+            workspaceId: input.workspaceId,
+            type: "image",
+            name: input.name,
+            mediaType: input.metadata.mediaType,
+            storageKey: input.stored.artifactId,
+            sha256: input.stored.sha256,
+            sizeBytes: input.stored.size,
+            width: input.metadata.width,
+            height: input.metadata.height,
+            tags: input.tags,
+          },
+        });
+        return { adopted: "created" as const, row: created };
+      } catch (error) {
+        // This fallback only handles a transaction that lost a unique race
+        // outside a serializable local lock (for example after deployment to
+        // a non-PostgreSQL test double). It still never selects "latest".
+        if (!isUniqueViolation(error)) throw error;
+        const concurrent = await tx.workspaceAsset.findFirst({
+          where: { tenantId: input.tenantId, workspaceId: input.workspaceId, sha256: input.stored.sha256 },
+        });
+        if (concurrent !== null) return { adopted: "duplicate" as const, row: concurrent };
+        throw error;
+      }
+    });
   }
 
   /**
@@ -256,6 +281,9 @@ function inspectImage(bytes: Buffer, storageSize: number): {
   if (mediaType === undefined) {
     throw new UnprocessableEntityException("ASSET_UNSUPPORTED_MEDIA");
   }
+  if (!hasCompleteImageContainer(mediaType, bytes)) {
+    throw new UnprocessableEntityException("ASSET_INVALID_CONTAINER");
+  }
   let dimensions: { width?: number; height?: number; type?: string };
   try {
     dimensions = imageSize(bytes);
@@ -289,6 +317,175 @@ function sniffMediaType(bytes: Buffer): "image/png" | "image/jpeg" | "image/webp
     return "image/webp";
   }
   return undefined;
+}
+
+/**
+ * `image-size` deliberately reads only enough metadata to report dimensions.
+ * That is useful after, but never instead of, container validation: every
+ * accepted image must terminate at EOF with its format's declared boundaries.
+ */
+function hasCompleteImageContainer(
+  mediaType: "image/png" | "image/jpeg" | "image/webp",
+  bytes: Buffer,
+): boolean {
+  switch (mediaType) {
+    case "image/png":
+      return isCompletePng(bytes);
+    case "image/jpeg":
+      return isCompleteJpeg(bytes);
+    case "image/webp":
+      return isCompleteWebp(bytes);
+  }
+}
+
+function isCompletePng(bytes: Buffer): boolean {
+  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  if (bytes.length < signature.length + 12 || !bytes.subarray(0, 8).equals(signature)) return false;
+  let offset = signature.length;
+  let sawIhdr = false;
+  let sawIdat = false;
+  while (offset < bytes.length) {
+    if (offset + 12 > bytes.length) return false;
+    const length = bytes.readUInt32BE(offset);
+    const dataStart = offset + 8;
+    const dataEnd = dataStart + length;
+    const crcEnd = dataEnd + 4;
+    if (dataEnd < dataStart || crcEnd > bytes.length) return false;
+    const type = bytes.subarray(offset + 4, offset + 8);
+    if (!isPngChunkType(type) || crc32(bytes.subarray(offset + 4, dataEnd)) !== bytes.readUInt32BE(dataEnd)) {
+      return false;
+    }
+    const typeName = type.toString("ascii");
+    if (!sawIhdr) {
+      if (typeName !== "IHDR" || length !== 13) return false;
+      if (bytes.readUInt32BE(dataStart) === 0 || bytes.readUInt32BE(dataStart + 4) === 0) return false;
+      sawIhdr = true;
+    } else if (typeName === "IHDR") {
+      return false;
+    }
+    if (typeName === "IDAT") sawIdat = true;
+    if (typeName === "IEND") return length === 0 && sawIdat && crcEnd === bytes.length;
+    offset = crcEnd;
+  }
+  return false;
+}
+
+function isPngChunkType(type: Buffer): boolean {
+  return type.length === 4 && [...type].every((byte) =>
+    (byte >= 0x41 && byte <= 0x5a) || (byte >= 0x61 && byte <= 0x7a),
+  );
+}
+
+function isCompleteJpeg(bytes: Buffer): boolean {
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return false;
+  let offset = 2;
+  let sawFrame = false;
+  while (offset < bytes.length) {
+    const markerStart = consumeJpegMarker(bytes, offset);
+    if (markerStart === undefined) return false;
+    const marker = bytes[markerStart + 1]!;
+    offset = markerStart + 2;
+    if (marker === 0xd9) return sawFrame && offset === bytes.length;
+    if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+    if (offset + 2 > bytes.length) return false;
+    const segmentLength = bytes.readUInt16BE(offset);
+    if (segmentLength < 2 || offset + segmentLength > bytes.length) return false;
+    const dataStart = offset + 2;
+    const dataEnd = offset + segmentLength;
+    if (isJpegStartOfFrame(marker)) {
+      if (segmentLength < 8 || bytes.readUInt16BE(dataStart + 1) === 0 || bytes.readUInt16BE(dataStart + 3) === 0) return false;
+      sawFrame = true;
+    }
+    offset = dataEnd;
+    if (marker === 0xda) {
+      const scanEnd = consumeJpegScan(bytes, offset);
+      if (scanEnd === undefined) return false;
+      if (bytes[scanEnd] === 0xff && bytes[scanEnd + 1] === 0xd9) {
+        return sawFrame && scanEnd + 2 === bytes.length;
+      }
+      offset = scanEnd;
+    }
+  }
+  return false;
+}
+
+function consumeJpegMarker(bytes: Buffer, offset: number): number | undefined {
+  if (bytes[offset] !== 0xff) return undefined;
+  let cursor = offset;
+  while (bytes[cursor] === 0xff) cursor += 1;
+  if (cursor >= bytes.length || bytes[cursor] === 0x00) return undefined;
+  return cursor - 1;
+}
+
+function consumeJpegScan(bytes: Buffer, offset: number): number | undefined {
+  let cursor = offset;
+  while (cursor < bytes.length) {
+    if (bytes[cursor] !== 0xff) {
+      cursor += 1;
+      continue;
+    }
+    let marker = cursor + 1;
+    while (bytes[marker] === 0xff) marker += 1;
+    if (marker >= bytes.length) return undefined;
+    const value = bytes[marker]!;
+    if (value === 0x00 || (value >= 0xd0 && value <= 0xd7)) {
+      cursor = marker + 1;
+      continue;
+    }
+    return marker - 1;
+  }
+  return undefined;
+}
+
+function isJpegStartOfFrame(marker: number): boolean {
+  return marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker);
+}
+
+function isCompleteWebp(bytes: Buffer): boolean {
+  if (bytes.length < 20 || !bytes.subarray(0, 4).equals(Buffer.from("RIFF")) || !bytes.subarray(8, 12).equals(Buffer.from("WEBP"))) {
+    return false;
+  }
+  if (bytes.readUInt32LE(4) + 8 !== bytes.length) return false;
+  let offset = 12;
+  let imageChunks = 0;
+  while (offset < bytes.length) {
+    if (offset + 8 > bytes.length) return false;
+    const type = bytes.subarray(offset, offset + 4).toString("ascii");
+    const length = bytes.readUInt32LE(offset + 4);
+    const dataStart = offset + 8;
+    const dataEnd = dataStart + length;
+    if (dataEnd < dataStart || dataEnd > bytes.length) return false;
+    if (type === "VP8 " || type === "VP8L") {
+      imageChunks += 1;
+      if (!hasValidWebpBitstream(type, bytes.subarray(dataStart, dataEnd))) return false;
+    }
+    offset = dataEnd + (length % 2);
+    if (offset > bytes.length) return false;
+  }
+  return offset === bytes.length && imageChunks === 1;
+}
+
+function hasValidWebpBitstream(type: string, bytes: Buffer): boolean {
+  if (type === "VP8 ") {
+    return bytes.length >= 10 && bytes.subarray(3, 6).equals(Buffer.from([0x9d, 0x01, 0x2a]));
+  }
+  return bytes.length >= 5 && bytes[0] === 0x2f;
+}
+
+const CRC32_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let index = 0; index < table.length; index += 1) {
+    let value = index;
+    for (let bit = 0; bit < 8; bit += 1) value = (value >>> 1) ^ (value & 1 ? 0xedb88320 : 0);
+    table[index] = value >>> 0;
+  }
+  return table;
+})();
+
+function crc32(bytes: Buffer): number {
+  let value = 0xffffffff;
+  for (const byte of bytes) value = CRC32_TABLE[(value ^ byte) & 0xff]! ^ (value >>> 8);
+  return (value ^ 0xffffffff) >>> 0;
 }
 
 function sanitizeMaxBytes(value: number | undefined): number {

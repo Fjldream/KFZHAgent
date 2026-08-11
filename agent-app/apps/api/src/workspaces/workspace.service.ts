@@ -328,6 +328,17 @@ export class WorkspaceService {
     }
     const removedStorageKeys: string[] = [];
     await this.prisma.$transaction(async (tx) => {
+      // Asset adoption takes the same workspace-row lock before it creates a
+      // row. Keep deletion on the identical lock/order so it cannot collect
+      // storage keys while an upload is about to adopt a new blob.
+      const locked = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" /* kf_workspace_asset_lock */
+        FROM "SolutionWorkspace"
+        WHERE "id" = ${workspaceId}
+          AND "tenantId" = ${tenantId}
+        FOR UPDATE
+      `;
+      if (locked[0] === undefined) throw new NotFoundException("workspace");
       const revisionIds = (
         await tx.solutionRevision.findMany({
           where: { workspaceId, tenantId },
