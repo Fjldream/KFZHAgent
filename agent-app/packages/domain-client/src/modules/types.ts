@@ -21,12 +21,21 @@ export interface AssetSlotDefinition {
   readonly allowedKinds: readonly AssetRecord["kind"][];
 }
 
+/** Pixel bounds declared by a module template, not model-authored coordinates. */
+export interface ModuleHeightContract {
+  readonly min: number;
+  readonly preferred: Readonly<Partial<Record<ModulePlacement["preferredHeight"], number>>>;
+  readonly max: number;
+}
+
 export interface ModuleLayoutContract {
   readonly regions: readonly ModulePlacement["region"][];
   readonly minColumnSpan: number;
   readonly maxColumnSpan: number;
   readonly preferredHeights: readonly ModulePlacement["preferredHeight"][];
   readonly interactions: readonly ModuleInteraction["type"][];
+  /** Legacy definitions may omit this until their exact runtime dimensions are verified. */
+  readonly height?: ModuleHeightContract;
 }
 
 export interface ModuleCompileContext {

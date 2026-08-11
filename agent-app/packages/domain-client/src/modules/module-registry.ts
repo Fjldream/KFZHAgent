@@ -19,6 +19,7 @@ export type {
   ModuleCompileOutput,
   ModuleDefinition,
   ModuleFallbackPolicy,
+  ModuleHeightContract,
   ModuleLayoutContract,
   ModuleMaturity,
   ModulePlanningSummary,
@@ -56,17 +57,28 @@ function freezeFallbackPolicy(policy: ModuleFallbackPolicy): ModuleFallbackPolic
     : Object.freeze({ mode: "allow-webcontainer", authorizationRef: policy.authorizationRef });
 }
 
+function freezeHeightContract(height: ModuleDefinition["layout"]["height"]): ModuleDefinition["layout"]["height"] {
+  if (height === undefined) return undefined;
+  return Object.freeze({
+    min: height.min,
+    preferred: Object.freeze({ ...height.preferred }),
+    max: height.max,
+  });
+}
+
 function fallbackPolicyOf(definition: ModuleDefinition): ModuleFallbackPolicy {
   return definition.fallbackPolicy ?? NATIVE_ONLY_FALLBACK_POLICY;
 }
 
 function freezeDefinition(definition: ModuleDefinition): ModuleDefinition {
+  const height = freezeHeightContract(definition.layout.height);
   const layout = Object.freeze({
     regions: freezeArray(definition.layout.regions),
     minColumnSpan: definition.layout.minColumnSpan,
     maxColumnSpan: definition.layout.maxColumnSpan,
     preferredHeights: freezeArray(definition.layout.preferredHeights),
     interactions: freezeArray(definition.layout.interactions),
+    ...(height === undefined ? {} : { height }),
   });
 
   return Object.freeze({
@@ -120,6 +132,16 @@ function assertDefinition(definition: ModuleDefinition): void {
     || definition.layout.minColumnSpan > definition.layout.maxColumnSpan
   ) {
     fail("MODULE_DEFINITION_INVALID", `${key} has invalid layout bounds`);
+  }
+  const height = definition.layout.height;
+  if (height !== undefined && (
+    !Number.isInteger(height.min)
+    || !Number.isInteger(height.max)
+    || height.min <= 0
+    || height.max < height.min
+    || Object.values(height.preferred).some((value) => !Number.isInteger(value) || value <= 0)
+  )) {
+    fail("MODULE_DEFINITION_INVALID", `${key} has invalid layout height bounds`);
   }
 }
 
