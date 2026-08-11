@@ -8,9 +8,15 @@ const stableIdSchema = z
   .trim()
   .min(1)
   .max(100)
-  .regex(/^[A-Za-z][A-Za-z0-9_-]*$/);
+  .regex(/^[A-Za-z][A-Za-z0-9_-]*$/)
+  .refine((value) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value));
 
-const moduleTextSchema = z.string().trim().min(1).max(2_000);
+const moduleTextSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(2_000)
+  .refine((value) => !/<script\b|javascript\s*:|data\s*:\s*text\s*\/\s*html/i.test(value));
 
 export const ModulePlacementSchema = z
   .object({
@@ -24,11 +30,9 @@ export const ModulePlacementSchema = z
   .strict();
 
 export const ModuleInteractionSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("navigate"), target: stableIdSchema }).strict(),
-  z.object({ type: z.literal("open-modal"), target: stableIdSchema }).strict(),
-  z.object({ type: z.literal("submit"), action: stableIdSchema }).strict(),
-  z.object({ type: z.literal("filter"), field: stableIdSchema }).strict(),
-  z.object({ type: z.literal("toggle"), target: stableIdSchema }).strict(),
+  z.object({ type: z.literal("navigate"), pageId: stableIdSchema }).strict(),
+  z.object({ type: z.literal("scroll"), moduleId: stableIdSchema }).strict(),
+  z.object({ type: z.literal("open-modal"), moduleId: stableIdSchema }).strict(),
 ]);
 
 export const ModulePlanModuleSchema = z
@@ -131,6 +135,7 @@ export const ModulePlanSchema = z
     const pageIds = new Set<string>();
     const modulesByPage = new Map<string, Set<string>>();
     const moduleIds = new Set<string>();
+    const interactionSources: Array<{ interactions: ModuleInteraction[]; path: (string | number)[] }> = [];
     plan.pages.forEach((page, pageIndex) => {
       if (pageIds.has(page.id)) {
         ctx.addIssue({ code: "custom", path: ["pages", pageIndex, "id"], message: `duplicate page id: ${page.id}` });
@@ -144,6 +149,7 @@ export const ModulePlanSchema = z
         }
         pageModuleIds.add(module.id);
         moduleIds.add(module.id);
+        interactionSources.push({ interactions: module.interactions, path: ["pages", pageIndex, "modules", moduleIndex, "interactions"] });
         if (module.assetId !== undefined && !assetIds.has(module.assetId)) {
           ctx.addIssue({ code: "custom", path: ["pages", pageIndex, "modules", moduleIndex, "assetId"], message: `unknown asset id: ${module.assetId}` });
         }
@@ -155,23 +161,45 @@ export const ModulePlanSchema = z
         ctx.addIssue({ code: "custom", path: ["operations", index, "pageId"], message: `unknown page id: ${operation.pageId}` });
         return;
       }
+      const pageModuleIds = modulesByPage.get(operation.pageId)!;
       if (operation.op === "add") {
         if (moduleIds.has(operation.module.id)) {
           ctx.addIssue({ code: "custom", path: ["operations", index, "module", "id"], message: `duplicate module id: ${operation.module.id}` });
         }
         moduleIds.add(operation.module.id);
-        modulesByPage.get(operation.pageId)?.add(operation.module.id);
+        pageModuleIds.add(operation.module.id);
+        interactionSources.push({ interactions: operation.module.interactions, path: ["operations", index, "module", "interactions"] });
         if (operation.module.assetId !== undefined && !assetIds.has(operation.module.assetId)) {
           ctx.addIssue({ code: "custom", path: ["operations", index, "module", "assetId"], message: `unknown asset id: ${operation.module.assetId}` });
         }
         return;
       }
-      if (!modulesByPage.get(operation.pageId)?.has(operation.moduleId)) {
+      if (!pageModuleIds.has(operation.moduleId)) {
         ctx.addIssue({ code: "custom", path: ["operations", index, "moduleId"], message: `unknown module id: ${operation.moduleId}` });
+        return;
+      }
+      if (operation.op === "remove") {
+        pageModuleIds.delete(operation.moduleId);
+        moduleIds.delete(operation.moduleId);
+        return;
       }
       if (operation.op === "update" && operation.changes.assetId !== undefined && !assetIds.has(operation.changes.assetId)) {
         ctx.addIssue({ code: "custom", path: ["operations", index, "changes", "assetId"], message: `unknown asset id: ${operation.changes.assetId}` });
       }
+    });
+
+    interactionSources.forEach((source) => {
+      source.interactions.forEach((interaction, index) => {
+        if (interaction.type === "navigate" && !pageIds.has(interaction.pageId)) {
+          ctx.addIssue({ code: "custom", path: [...source.path, index, "pageId"], message: `unknown page id: ${interaction.pageId}` });
+        }
+        if (
+          (interaction.type === "scroll" || interaction.type === "open-modal")
+          && !moduleIds.has(interaction.moduleId)
+        ) {
+          ctx.addIssue({ code: "custom", path: [...source.path, index, "moduleId"], message: `unknown module id: ${interaction.moduleId}` });
+        }
+      });
     });
   });
 

@@ -5,7 +5,15 @@ const stableIdSchema = z
   .trim()
   .min(1)
   .max(100)
-  .regex(/^[A-Za-z][A-Za-z0-9_-]*$/);
+  .regex(/^[A-Za-z][A-Za-z0-9_-]*$/)
+  .refine((value) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value));
+
+const modelTextSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(1_000)
+  .refine((value) => !/<script\b|javascript\s*:|data\s*:\s*text\s*\/\s*html/i.test(value));
 
 /**
  * Registered logical asset metadata. Physical paths, storage credentials, and
@@ -15,9 +23,9 @@ export const AssetRecordSchema = z
   .object({
     id: stableIdSchema,
     kind: z.enum(["image", "icon", "document", "media", "data"]),
-    name: z.string().trim().min(1).max(200),
+    name: modelTextSchema.max(200),
     mimeType: z.string().trim().min(1).max(200),
-    description: z.string().trim().min(1).max(1_000),
+    description: modelTextSchema,
   })
   .strict();
 
@@ -26,7 +34,7 @@ export const ResolvedAssetSchema = z
   .object({
     assetId: stableIdSchema,
     status: z.enum(["resolved", "unavailable", "pending"]),
-    resolvedName: z.string().trim().min(1).max(200).optional(),
+    resolvedName: modelTextSchema.max(200).optional(),
   })
   .strict();
 

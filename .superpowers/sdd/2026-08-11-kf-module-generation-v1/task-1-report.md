@@ -57,3 +57,38 @@ Result: all commands exited successfully with no diagnostics.
   x64. Temporary ignored-node_modules links to the matching x64 packages were
   used solely to execute verification; no tracked dependency or configuration
   files changed.
+
+## Review fix round 1/5
+
+### RED evidence
+
+Command:
+
+```sh
+PATH="/Users/fengjinlong/.nvm/versions/node/v22.14.0/bin:$PATH" pnpm --filter @kf/contracts exec vitest run src/module-plan.test.ts src/asset.test.ts src/module-delivery.test.ts
+```
+
+Result: 3 test files failed with 6 failing assertions before implementation:
+GUID-shaped IDs and executable model text were accepted; delivery reports
+misrepresented unresolved gaps; duplicate trace output IDs were accepted; and
+the old interaction shape rejected the new typed navigation fixture.
+
+### GREEN evidence
+
+Command:
+
+```sh
+PATH="/Users/fengjinlong/.nvm/versions/node/v22.14.0/bin:$PATH" pnpm --filter @kf/contracts exec vitest run src/module-plan.test.ts src/asset.test.ts src/module-delivery.test.ts
+```
+
+Result: 3 test files passed; 18 tests passed.
+
+### Typecheck, lint, and diff evidence
+
+```sh
+PATH="/Users/fengjinlong/.nvm/versions/node/v22.14.0/bin:$PATH" pnpm --filter @kf/contracts typecheck
+PATH="/Users/fengjinlong/.nvm/versions/node/v22.14.0/bin:$PATH" pnpm --filter @kf/contracts lint
+git diff --check
+```
+
+Result: all commands exited successfully with no diagnostics.

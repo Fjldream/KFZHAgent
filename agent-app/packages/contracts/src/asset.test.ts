@@ -19,6 +19,15 @@ describe("module asset contracts", () => {
     expect(AssetRecordSchema.safeParse({ ...asset, script: "alert(1)" }).success).toBe(false);
   });
 
+  it("rejects GUID-shaped ids and executable text while retaining ordinary data-like prose", () => {
+    const asset = { id: "brand-mark", kind: "image", name: "品牌标识", mimeType: "image/svg+xml", description: "品牌标识" };
+    expect(AssetRecordSchema.safeParse({ ...asset, id: "a0b1c2d3-e4f5-6789-abcd-ef0123456789" }).success).toBe(false);
+    expect(AssetRecordSchema.safeParse({ ...asset, name: "<script>alert(1)</script>" }).success).toBe(false);
+    expect(AssetRecordSchema.safeParse({ ...asset, description: "javascript:alert(1)" }).success).toBe(false);
+    expect(AssetRecordSchema.safeParse({ ...asset, description: "data:text/html,<h1>x</h1>" }).success).toBe(false);
+    expect(AssetRecordSchema.safeParse({ ...asset, description: "JSON {\"theme\": \"CSS grid\"} 是设计说明" }).success).toBe(true);
+  });
+
   it("keeps resolution results logical and non-executable", () => {
     expect(ResolvedAssetSchema.safeParse({
       assetId: "brand-mark",

@@ -6,9 +6,15 @@ const stableIdSchema = z
   .trim()
   .min(1)
   .max(100)
-  .regex(/^[A-Za-z][A-Za-z0-9_-]*$/);
+  .regex(/^[A-Za-z][A-Za-z0-9_-]*$/)
+  .refine((value) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value));
 
-const deliveryTextSchema = z.string().trim().min(1).max(1_000);
+const deliveryTextSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(1_000)
+  .refine((value) => !/<script\b|javascript\s*:|data\s*:\s*text\s*\/\s*html/i.test(value));
 
 export const ModuleTraceSchema = z
   .object({
@@ -29,11 +35,16 @@ export const ModuleTraceSchema = z
   .strict()
   .superRefine((trace, ctx) => {
     const moduleIds = new Set<string>();
+    const outputIds = new Set<string>();
     trace.entries.forEach((entry, index) => {
       if (moduleIds.has(entry.moduleId)) {
         ctx.addIssue({ code: "custom", path: ["entries", index, "moduleId"], message: `duplicate module id: ${entry.moduleId}` });
       }
       moduleIds.add(entry.moduleId);
+      if (outputIds.has(entry.outputId)) {
+        ctx.addIssue({ code: "custom", path: ["entries", index, "outputId"], message: `duplicate output id: ${entry.outputId}` });
+      }
+      outputIds.add(entry.outputId);
     });
   });
 
@@ -55,7 +66,24 @@ export const ModuleDeliveryReportSchema = z
     status: z.enum(["ready", "ready_with_warnings", "blocked"]),
     gaps: z.array(ModuleDeliveryGapSchema).max(200),
   })
-  .strict();
+  .strict()
+  .superRefine((report, ctx) => {
+    const unresolved = report.gaps.filter((gap) => gap.status === "unresolved");
+    const unresolvedBlocking = unresolved.filter((gap) => gap.severity === "blocking");
+
+    if (report.status === "ready" && unresolved.length > 0) {
+      ctx.addIssue({ code: "custom", path: ["status"], message: "ready delivery cannot contain unresolved gaps" });
+    }
+    if (report.status === "ready_with_warnings" && unresolved.some((gap) => gap.severity !== "warning")) {
+      ctx.addIssue({ code: "custom", path: ["status"], message: "ready_with_warnings delivery can contain only unresolved warnings" });
+    }
+    if (report.status === "blocked" && unresolvedBlocking.length === 0) {
+      ctx.addIssue({ code: "custom", path: ["status"], message: "blocked delivery requires an unresolved blocking gap" });
+    }
+    if (report.status !== "blocked" && unresolvedBlocking.length > 0) {
+      ctx.addIssue({ code: "custom", path: ["status"], message: "an unresolved blocking gap requires blocked delivery" });
+    }
+  });
 
 export type ModuleTrace = z.infer<typeof ModuleTraceSchema>;
 export type ModuleDeliveryGap = z.infer<typeof ModuleDeliveryGapSchema>;

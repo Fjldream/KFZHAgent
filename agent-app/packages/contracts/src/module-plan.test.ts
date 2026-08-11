@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ModulePlanOperationSchema, ModulePlanSchema } from "./module-plan.js";
+import { ModuleInteractionSchema, ModulePlanOperationSchema, ModulePlanSchema } from "./module-plan.js";
 
 const theme = {
   background: "#ffffff",
@@ -25,7 +25,7 @@ const hero = {
     alignment: "start",
     emphasis: "primary",
   },
-  interactions: [{ type: "navigate", target: "projects" }],
+  interactions: [{ type: "navigate", pageId: "home" }],
   assetId: "brand-mark",
 } as const;
 
@@ -119,6 +119,54 @@ describe("ModulePlanSchema", () => {
       ],
     }).success).toBe(false);
   });
+
+  it("rejects GUID-shaped ids and executable model-authored module text", () => {
+    expect(ModulePlanSchema.safeParse({
+      ...validPlan,
+      pages: [{ ...validPlan.pages[0], modules: [{ ...hero, id: "a0b1c2d3-e4f5-6789-abcd-ef0123456789" }] }],
+    }).success).toBe(false);
+    expect(ModulePlanSchema.safeParse({
+      ...validPlan,
+      pages: [{ ...validPlan.pages[0], modules: [{ ...hero, title: "<script>alert(1)</script>" }] }],
+    }).success).toBe(false);
+    expect(ModulePlanSchema.safeParse({
+      ...validPlan,
+      pages: [{ ...validPlan.pages[0], modules: [{ ...hero, content: "data:text/html,<h1>x</h1>" }] }],
+    }).success).toBe(false);
+    expect(ModulePlanSchema.safeParse({
+      ...validPlan,
+      pages: [{ ...validPlan.pages[0], modules: [{ ...hero, content: "JSON {\"layout\": \"CSS grid\"}" }] }],
+    }).success).toBe(true);
+  });
+
+  it("requires registered interaction targets to exist in their domain", () => {
+    expect(ModulePlanSchema.safeParse({
+      ...validPlan,
+      pages: [{ ...validPlan.pages[0], modules: [{ ...hero, interactions: [{ type: "navigate", pageId: "missing-page" }] }] }],
+    }).success).toBe(false);
+    expect(ModulePlanSchema.safeParse({
+      ...validPlan,
+      pages: [{ ...validPlan.pages[0], modules: [{ ...hero, interactions: [{ type: "scroll", moduleId: "missing-module" }] }] }],
+    }).success).toBe(false);
+    expect(ModuleInteractionSchema.safeParse({
+      type: "navigate",
+      target: "anything",
+    }).success).toBe(false);
+  });
+
+  it("processes remove operations before later module operations", () => {
+    for (const operation of [
+      { op: "update", pageId: "home", moduleId: "hero", changes: { title: "更新" } },
+      { op: "move", pageId: "home", moduleId: "hero", placement: announcement.placement },
+      { op: "resize", pageId: "home", moduleId: "hero", columnSpan: 6, preferredHeight: "medium" },
+      { op: "remove", pageId: "home", moduleId: "hero" },
+    ]) {
+      expect(ModulePlanSchema.safeParse({
+        ...validPlan,
+        operations: [{ op: "remove", pageId: "home", moduleId: "hero" }, operation],
+      }).success).toBe(false);
+    }
+  });
 });
 
 describe("ModulePlanOperationSchema", () => {
@@ -130,5 +178,6 @@ describe("ModulePlanOperationSchema", () => {
       placement: { region: "sidebar", order: 1, columnSpan: 4, preferredHeight: "medium", alignment: "stretch", emphasis: "secondary" },
     }).success).toBe(true);
     expect(ModulePlanOperationSchema.safeParse({ op: "move", pageId: "home", moduleId: "hero", x: 0, y: 0 }).success).toBe(false);
+    expect(ModulePlanOperationSchema.safeParse({ type: "navigate", target: "anything" }).success).toBe(false);
   });
 });
