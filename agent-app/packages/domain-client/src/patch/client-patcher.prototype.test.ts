@@ -283,46 +283,36 @@ describe("client patcher — KF 特殊节点（prototypeName 判别）", () => {
     ]))).rejects.toThrow(/PATCH_CONFLICT: INVALID_COMPONENT_PROPERTY/);
   });
 
-  it("updates CustomCharts through the allowlist (pageProperty/objects 整体替换 + 几何别名)", async () => {
+  it("updates reviewed CustomCharts scalar/geometry fields and preserves imported complex values", async () => {
     const base = await makePrototypeFixture();
     const candidate = await applyClientPatch(base, plan([
       updateOperation("prototype-custom-guid", [
-        {
-          path: "/pageProperty",
-          value: {
-            name: "CustomCharts1",
-            pagePos: { x: 50, y: 60 },
-            pageSize: { width: 500, height: 400 },
-            windowSize: { width: 1440, height: 900 },
-            title: "新窗口标题",
-            titleBar: true,
-            closeBox: true,
-            sizeable: false,
-          },
-        },
-        { path: "/objects", value: ['{"name":"echart","customChartsType":1,"option":{"title":{"text":"新配置"}}}'] },
+        { path: "/region", value: "north" },
         { path: "/x", value: 100 },
         { path: "/width", value: 800 },
       ]),
     ]));
     const node = await rawPrototype(candidate, "prototype-custom-guid");
-    // pageProperty 整体替换（title/closeBox/sizeable 为新值）。
-    expect(node["pageProperty"]).toMatchObject({
-      name: "CustomCharts1",
-      title: "新窗口标题",
-      closeBox: true,
-      sizeable: false,
-    });
     // 几何别名：/x 与 /width 映射进 pageProperty.pagePos/pageSize。
-    expect((node["pageProperty"] as Record<string, unknown>)["pagePos"]).toEqual({ x: 100, y: 60 });
-    expect((node["pageProperty"] as Record<string, unknown>)["pageSize"]).toEqual({ width: 800, height: 400 });
-    // objects 整体替换。
-    expect(node["objects"]).toEqual(['{"name":"echart","customChartsType":1,"option":{"title":{"text":"新配置"}}}']);
-    // 未 patch 的字段保留（modlePrototype/region/guid/version）。
+    expect((node["pageProperty"] as Record<string, unknown>)["pagePos"]).toEqual({ x: 100, y: 5 });
+    expect((node["pageProperty"] as Record<string, unknown>)["pageSize"]).toEqual({ width: 800, height: 513 });
+    // Import compatibility: untyped complex values remain losslessly preserved.
+    expect(node["objects"]).toEqual(['{"name":"echart","customChartsType":1,"option":{"title":{"text":"旧配置"}}}']);
     expect((node["modlePrototype"] as Record<string, unknown>)["guid"]).toBe("kmod-1");
-    expect(node["region"]).toBe("center");
+    expect(node["region"]).toBe("north");
     expect(node["guid"]).toBe("prototype-custom-guid");
     expect(node["version"]).toBe("2.0.0.1.1");
+  });
+
+  it.each([
+    ["CustomCharts pageProperty", "prototype-custom-guid", "/pageProperty", { name: "forged", nativePayload: {} }],
+    ["CustomCharts objects", "prototype-custom-guid", "/objects", ['{"name":"echart","option":{"script":"evil"}}']],
+    ["chart area unknown descendant", "prototype-chart-guid", "/areas", [{ top: 0, left: 0, width: 100, height: 100, series: [{ script: "evil" }] }]],
+  ])("rejects untyped complex %s updates", async (_label, entityId, path, value) => {
+    const base = await makePrototypeFixture();
+    await expect(applyClientPatch(base, plan([
+      updateOperation(entityId, [{ path, value }]),
+    ]))).rejects.toThrow(patchConflict);
   });
 
   it("updates a chart prototype (title/comment/几何) and keeps untouched fields", async () => {

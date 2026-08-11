@@ -3,7 +3,7 @@ import { cp, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createServerPlanEnvelope, type ModulePlanModule } from "@kf/contracts";
+import { type ModulePlanModule } from "@kf/contracts";
 import { createDefaultModuleRegistry } from "../module-registry.js";
 import { compileModulePlan } from "../module-compiler.js";
 import { compileUiImplementation } from "../../implementation/ui-implementation-compiler.js";
@@ -80,13 +80,9 @@ describe("dashboard modules", () => {
       const compiled = compileModulePlan({ plan, registry, assetsById: {}, validationContext: context });
       expect(compiled.status).toBe("compiled"); if (compiled.status !== "compiled") continue;
       const changes = compileUiImplementation(compiled.implementation, { workspaceId: "module-golden", pageGuidById: { Page1: "page-guid-1" }, existingControlGuidByComponentId: {}, existingControlCapabilityIdByComponentId: {}, trustedModuleImplementation: compiled.implementation });
+      expect(changes.semanticOperations).toHaveLength(1);
       const base = await fixture();
-      const envelope = createServerPlanEnvelope({
-        plan: changes.plan,
-        revisionId: "revision-1",
-        semanticOperations: changes.semanticOperations,
-      });
-      const persisted = JSON.parse(JSON.stringify(envelope)) as typeof envelope;
+      const persisted = JSON.parse(JSON.stringify(changes)) as typeof changes;
       const candidate = await applyClientPatch(base, persisted.plan, {
         semanticOperations: persisted.semanticOperations,
       });
@@ -133,6 +129,38 @@ describe("dashboard modules", () => {
         component.id,
         component.geometry,
       ]));
+      const toolbarOnlyAdmin = {
+        ...admin,
+        pages: [{
+          ...admin.pages[0]!,
+          modules: admin.pages[0]!.modules.map((module) => module.id === "admin-toolbar"
+            ? { ...module, content: JSON.stringify({ actions: [{ label: "新建设备" }, { label: "导出" }] }) }
+            : module),
+        }],
+      };
+      const toolbarOnly = compileModulePlan({
+        plan: toolbarOnlyAdmin,
+        previousPlan: admin,
+        previousImplementation: compiled.implementation,
+        registry,
+        assetsById: {},
+        validationContext: context,
+      });
+      expect(toolbarOnly.status).toBe("compiled");
+      if (toolbarOnly.status !== "compiled") continue;
+      const toolbarDelta = compileUiImplementation(toolbarOnly.implementation, {
+        workspaceId: "module-golden",
+        pageGuidById: { Page1: "page-guid-1" },
+        existingControlGuidByComponentId,
+        existingControlCapabilityIdByComponentId,
+        existingControlGeometryByComponentId,
+        previousImplementation: compiled.implementation,
+        trustedModuleImplementation: toolbarOnly.implementation,
+      });
+      expect(toolbarDelta.plan.operations.some((operation) => operation.op === "update"
+        && operation.changes.some((change) => change.path === "/__kfModuleTableData"))).toBe(false);
+      expect(toolbarDelta.semanticOperations).toEqual([]);
+
       const delta = compileUiImplementation(revised.implementation, {
         workspaceId: "module-golden",
         pageGuidById: { Page1: "page-guid-1" },
@@ -147,12 +175,8 @@ describe("dashboard modules", () => {
         entityId: deriveGuid({ seed: "module-golden" }, tableComponentId),
         changes: expect.arrayContaining([expect.objectContaining({ path: "/__kfModuleTableData" })]),
       }));
-      const revisedEnvelope = createServerPlanEnvelope({
-        plan: delta.plan,
-        revisionId: "revision-2",
-        semanticOperations: delta.semanticOperations,
-      });
-      const revisedPersisted = JSON.parse(JSON.stringify(revisedEnvelope)) as typeof revisedEnvelope;
+      expect(delta.semanticOperations).toHaveLength(1);
+      const revisedPersisted = JSON.parse(JSON.stringify(delta)) as typeof delta;
       const revisedCandidate = await applyClientPatch(candidate.rootDir, revisedPersisted.plan, {
         semanticOperations: revisedPersisted.semanticOperations,
       });

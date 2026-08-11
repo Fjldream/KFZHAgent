@@ -4,6 +4,7 @@ import "reflect-metadata";
 process.env.DATABASE_URL =
   process.env.TEST_DATABASE_URL ??
   "postgresql://postgres@127.0.0.1:5432/kf_agent_test";
+process.env.KF_SERVER_PLAN_HMAC_KEY_BASE64 ??= Buffer.alloc(32, 0x54).toString("base64");
 
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";

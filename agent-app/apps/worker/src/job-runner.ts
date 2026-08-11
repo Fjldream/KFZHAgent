@@ -4,6 +4,7 @@ import {
   BuildJobService,
   type BuildExecutorHooks,
   type BuildJob,
+  type ServerPlanAuthority,
 } from "@kf/build-jobs";
 import type { DomainRegistry } from "@kf/domain-registry";
 import type { PrismaClient } from "@prisma/client";
@@ -33,6 +34,7 @@ export class JobRunner {
     pollIntervalMs?: number;
     leaseMs?: number;
     maxArtifactBytes?: number;
+    serverPlanVerifier?: Pick<ServerPlanAuthority, "verify">;
   }) {
     this.#leaseMs = deps.leaseMs ?? DEFAULT_LEASE_MS;
     this.#pollIntervalMs = deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
@@ -45,6 +47,7 @@ export class JobRunner {
       ...(deps.workRoot !== undefined ? { workRoot: deps.workRoot } : {}),
       leaseMs: this.#leaseMs,
       ...(deps.maxArtifactBytes !== undefined ? { maxArtifactBytes: deps.maxArtifactBytes } : {}),
+      ...(deps.serverPlanVerifier !== undefined ? { serverPlanVerifier: deps.serverPlanVerifier } : {}),
     });
   }
 

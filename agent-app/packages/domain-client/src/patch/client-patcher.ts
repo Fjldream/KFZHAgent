@@ -22,7 +22,10 @@ import { RestrictedAction as RestrictedActionSchema } from "../ir/client-project
 import { assertStyleCompilationAccepted, compileControlStyle } from "../style/style-engine.js";
 import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
 import { mergeManagedStyleData } from "../style/style-data-merge.js";
-import { validateCreateComponentProperties } from "../implementation/component-properties.js";
+import {
+  validateCreateComponentProperties,
+  validateGeneratedComponentProperties,
+} from "../implementation/component-properties.js";
 import { parseTableData, toNativeTableProperties } from "../modules/definitions/native-data-adapters.js";
 import { controlGeometryIssues, MAX_CONTROL_GEOMETRY } from "../implementation/control-geometry.js";
 import { mergeControlTemplate, type TemplateJson } from "../templates/merge-template.js";
@@ -889,7 +892,12 @@ async function applyUpdate(
     const resolvedPath = isControlLocation(loc)
       ? resolveControlPathFor(loc.controlType, change.path, prototypeName)
       : change.path;
-    let value = change.value;
+    let value = validateNativeComplexUpdateValue(
+      loc,
+      root,
+      change.path,
+      change.value,
+    );
     if (isControlLocation(loc) && loc.controlType === "button" && change.path === "/linkMng") {
       if (value === null) {
         value = { linkList: [] };
@@ -931,6 +939,48 @@ async function applyUpdate(
     setByTokens(root, parseJsonPointer(resolvedPath), value);
   }
   await writeJsonFile(candidate, versionDir, loc.file, doc);
+}
+
+const UNTYPED_PROTOTYPE_COMPLEX_FIELDS = new Set([
+  "pageProperty", "objects", "modlePrototype", "columns", "dateSource",
+  "list", "toolBar", "statusBar", "boundRect", "relativePt", "absolutePt",
+  "brushArray",
+]);
+
+function validateNativeComplexUpdateValue(
+  loc: EntityLocation,
+  root: Record<string, unknown>,
+  path: string,
+  value: unknown,
+): unknown {
+  if (!isControlLocation(loc)) return value;
+  const field = path.slice(1);
+  try {
+    if (loc.controlType === "layout" && (field === "children" || field === "panels")) {
+      const capabilityId = `layout.${asNumber(root["layoutType"])}`;
+      return validateGeneratedComponentProperties(capabilityId, { [field]: value })[field];
+    }
+    if (loc.controlType !== "prototype") return value;
+    const prototypeName = typeof root["prototypeName"] === "string" ? root["prototypeName"] : "";
+    const capabilityId = `prototype.${prototypeName}`;
+    if ((prototypeName === "TrendChart" || prototypeName === "BarChart"
+      || prototypeName === "PieChart" || prototypeName === "XYChart")
+      && (field === "title" || field === "areas" || field === "comment")) {
+      return validateGeneratedComponentProperties(capabilityId, { [field]: value })[field];
+    }
+    if (prototypeName === "CustomCharts" && field === "region") {
+      return validateGeneratedComponentProperties(capabilityId, { region: value })["region"];
+    }
+    if (UNTYPED_PROTOTYPE_COMPLEX_FIELDS.has(field)) {
+      throw new Error(`INVALID_COMPONENT_PROPERTY: ${capabilityId}.${field} requires a typed semantic adapter`);
+    }
+    return value;
+  } catch (error) {
+    throw new PatchConflictError(
+      error instanceof Error ? error.message : "INVALID_COMPONENT_PROPERTY",
+      { cause: error },
+    );
+  }
 }
 
 function capabilityIdForImportedControl(

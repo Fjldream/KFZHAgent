@@ -447,7 +447,7 @@ function stripKfContainerKeys(node: unknown): unknown {
     }
     // easyui 子对象：补 proto 模板缺省字段（data/queryParams 等 KF 加载必需）
     if (raw["objectType"] === 3 && typeof raw["uiExtendType"] === "number") {
-      const proto = raw["uiExtendType"] as number;
+      const proto = raw["uiExtendType"];
       const protoTemplate = EASYUI_TEMPLATES[proto];
       if (protoTemplate) {
         for (const [k, v] of Object.entries(protoTemplate)) {
@@ -477,7 +477,7 @@ function normalizeDockPanels(
   return panels.map((panel) => {
     if (panel === null || typeof panel !== "object") return panel;
     const p = structuredClone(panel) as Record<string, unknown>;
-    const region = String(p["region"] ?? "center");
+    const region = typeof p["region"] === "string" ? p["region"] : "center";
     const hasSize = typeof p["size"] === "number" && p["width"] === undefined && p["height"] === undefined;
     if (hasSize) {
       const size = p["size"] as number;
@@ -595,7 +595,7 @@ const SPECIAL_PROTOTYPE_SET: ReadonlySet<string> = new Set(SPECIAL_PROTOTYPE_NAM
  */
 export function compileSpecialNode(build: BuildSeed, control: ControlIR): TemplateJson {
   const raw = control as unknown as Record<string, unknown>;
-  const prototypeName = String(raw["prototypeName"] ?? "");
+  const prototypeName = typeof raw["prototypeName"] === "string" ? raw["prototypeName"] : "";
   if (!SPECIAL_PROTOTYPE_SET.has(prototypeName)) {
     throw new ModelOutputInvalidError(
       `prototypeName "${prototypeName}" is not a supported KF special node ` +

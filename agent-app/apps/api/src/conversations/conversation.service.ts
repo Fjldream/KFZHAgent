@@ -21,6 +21,8 @@ import { ARTIFACT_STORAGE } from "../artifacts/artifact-storage.js";
 import { PG_POOL, createCheckpointSaver } from "./checkpointer.js";
 import { createGraphPorts } from "./graph-ports.js";
 import { MODEL_PORT } from "./model-port.js";
+import { SERVER_PLAN_AUTHORITY } from "./server-plan-authority.js";
+import type { ServerPlanAuthority } from "@kf/build-jobs";
 
 type CompiledGraph = ReturnType<typeof compileSolutionGraph>;
 
@@ -73,6 +75,7 @@ export class ConversationService {
     @Inject(MODEL_PORT) private readonly modelPort: SolutionGraphDeps["modelPort"],
     @Inject(PG_POOL) private readonly pool: pg.Pool,
     @Inject(ARTIFACT_STORAGE) private readonly artifactStorage: ArtifactStorage,
+    @Inject(SERVER_PLAN_AUTHORITY) private readonly serverPlanAuthority: ServerPlanAuthority,
   ) {}
 
   async create(tenantId: string, workspaceId: string, title?: string): Promise<Conversation> {
@@ -370,6 +373,7 @@ export class ConversationService {
         changePlanRepository: ports.changePlanRepository,
         buildJobPort: ports.buildJobPort,
         uiImplementationCompiler: ports.uiImplementationCompiler,
+        serverPlanSigner: this.serverPlanAuthority,
         isDomainSupported: (domain) => domain === "kingclient",
         defaultDomainKind: "kingclient",
       };

@@ -41,6 +41,7 @@ services:
       MODEL_PORT_MODE: ${MODEL_PORT_MODE:-}
       COOKIE_SECURE: "true"
       PORT: "3000"
+      KF_SERVER_PLAN_HMAC_KEY_BASE64: ${KF_SERVER_PLAN_HMAC_KEY_BASE64:?KF_SERVER_PLAN_HMAC_KEY_BASE64 is required}
     ports:
       - "3000:3000"
     volumes:
@@ -58,6 +59,7 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/kf_agent
       ARTIFACT_STORAGE_ROOT: /artifacts
+      KF_SERVER_PLAN_HMAC_KEY_BASE64: ${KF_SERVER_PLAN_HMAC_KEY_BASE64:?KF_SERVER_PLAN_HMAC_KEY_BASE64 is required}
     volumes:
       - artifacts:/artifacts
     depends_on:

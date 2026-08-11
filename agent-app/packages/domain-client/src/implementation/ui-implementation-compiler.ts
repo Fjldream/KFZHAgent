@@ -164,20 +164,55 @@ export function compileUiImplementation(
   }
 
   const plan: ChangePlan = { schema: "kf-change-plan/v1", workspaceId: context.workspaceId, operations };
-  const semanticOperations = spec.pages.flatMap((page) => page.components
-    .filter((component) => component.capabilityId === "easyui.1" && component.properties["tableData"] !== undefined && component.sourceModuleId !== undefined)
-    .map((component) => ({
-      kind: "kf.table-data/v1" as const,
-      entityId: context.existingControlGuidByComponentId[component.id] ?? component.id,
-      capabilityId: "easyui.1" as const,
-      sourceModuleId: component.sourceModuleId!,
-      payloadHash: semanticPayloadHash(component.properties["tableData"]),
-    })));
+  const semanticOperations = semanticOperationsForActualPlan(plan, spec, context);
   return {
     plan,
     capabilityReport: finalizeReport(report),
     semanticOperations,
   };
+}
+
+function semanticOperationsForActualPlan(
+  plan: ChangePlan,
+  spec: UIImplementationSpec,
+  context: ImplementationCompileContext,
+): UiImplementationCompileResult["semanticOperations"] {
+  const sourceByEntityId = new Map<string, string>();
+  for (const component of spec.pages.flatMap((page) => page.components)) {
+    if (component.capabilityId !== "easyui.1" || component.sourceModuleId === undefined) continue;
+    sourceByEntityId.set(
+      context.existingControlGuidByComponentId[component.id] ?? component.id,
+      component.sourceModuleId,
+    );
+  }
+  const output: Array<UiImplementationCompileResult["semanticOperations"][number]> = [];
+  for (const operation of plan.operations) {
+    const sourceModuleId = sourceByEntityId.get(operation.entityId);
+    if (sourceModuleId === undefined) continue;
+    if (operation.op === "create" && operation.properties["type"] === "easyui"
+      && operation.properties["proto"] === 1 && Object.hasOwn(operation.properties, "tableData")) {
+      output.push({
+        kind: "kf.table-data/v1",
+        entityId: operation.entityId,
+        capabilityId: "easyui.1",
+        sourceModuleId,
+        payloadHash: semanticPayloadHash(operation.properties["tableData"]),
+      });
+    }
+    if (operation.op === "update") {
+      for (const change of operation.changes) {
+        if (change.path !== "/__kfModuleTableData") continue;
+        output.push({
+          kind: "kf.table-data/v1",
+          entityId: operation.entityId,
+          capabilityId: "easyui.1",
+          sourceModuleId,
+          payloadHash: semanticPayloadHash(change.value),
+        });
+      }
+    }
+  }
+  return output;
 }
 
 function compileComponent(

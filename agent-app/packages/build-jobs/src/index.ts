@@ -6,6 +6,12 @@ export {
   BuildJobLeaseError,
 } from "./build-job.service.js";
 export { BuildExecutor, BuildWorkerCrash } from "./job-executor.js";
+export {
+  createHmacServerPlanAuthority,
+  decodeServerPlanHmacKey,
+  type ServerPlanAuthority,
+  type ServerPlanSignInput,
+} from "./server-plan-authority.js";
 export type {
   BuildExecutorDeps,
   BuildExecutorHooks,

@@ -29,6 +29,7 @@ import type { ModelPort, ModelPortContext } from "./model-port.js";
 import type { GraphMessage, ApprovalInterrupt } from "./state.js";
 import type { Intent } from "./schemas/intent.js";
 import { compileSolutionGraph } from "./solution-graph.js";
+import { TEST_SERVER_PLAN_SIGNER } from "./test-server-plan-signer.js";
 
 type CompiledGraph = ReturnType<typeof compileSolutionGraph>;
 
@@ -383,6 +384,7 @@ function makeDeps() {
         };
       },
     },
+    serverPlanSigner: TEST_SERVER_PLAN_SIGNER,
     isDomainSupported: () => true,
   };
   return deps;

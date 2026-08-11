@@ -37,6 +37,7 @@ export {
   type EditableEntity,
   type UiImplementationCompilerPort,
   type UiImplementationCompilerInput,
+  type ServerPlanSignerPort,
 } from "./ports.js";
 export { compileSolutionGraph, ApprovalResumeRequiredError } from "./solution-graph.js";
 export { assessBlueprintRevision } from "./blueprint-quality.js";

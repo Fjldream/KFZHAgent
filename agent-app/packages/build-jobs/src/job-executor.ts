@@ -13,10 +13,10 @@ import {
   changePlanSchema,
   normalizeArtifactFileExtension,
   normalizeArtifactMediaType,
-  parseServerPlanEnvelope,
   type ChangePlan,
   type TrustedSemanticOperation,
 } from "@kf/contracts";
+import type { ServerPlanAuthority } from "./server-plan-authority.js";
 import type { DomainRegistry } from "@kf/domain-registry";
 import { Prisma, type BuildJob, type PrismaClient } from "@prisma/client";
 import { Readable } from "node:stream";
@@ -50,6 +50,8 @@ export interface BuildExecutorDeps {
   workRoot?: string;
   maxArtifactBytes?: number;
   leaseMs?: number;
+  /** Server-only HMAC verifier; required when a persisted internal envelope is encountered. */
+  serverPlanVerifier?: Pick<ServerPlanAuthority, "verify">;
 }
 
 export interface ResolvedStoredPlan {
@@ -64,12 +66,14 @@ export interface ResolvedStoredPlan {
 export function resolveStoredPlan(
   input: unknown,
   expected: { expectedPlanHash: string; expectedRevisionId: string },
+  verifier?: Pick<ServerPlanAuthority, "verify">,
 ): ResolvedStoredPlan {
   const record = input !== null && typeof input === "object" && !Array.isArray(input)
     ? input as Record<string, unknown>
     : undefined;
   if (record?.["schema"] === "kf-server-plan-envelope/v1") {
-    const envelope = parseServerPlanEnvelope(input, expected);
+    if (verifier === undefined) throw new Error("server plan verifier is not configured");
+    const envelope = verifier.verify(input, expected);
     return { plan: envelope.plan, semanticOperations: envelope.semanticOperations };
   }
   const parsed = changePlanSchema.safeParse(input);
@@ -294,7 +298,7 @@ export class BuildExecutor {
     const resolved = resolveStoredPlan(plan.plan ?? {}, {
       expectedPlanHash: job.planHash,
       expectedRevisionId: job.baseRevisionId,
-    });
+    }, this.#deps.serverPlanVerifier);
     const planInput = resolved.plan;
     const workRoot =
       this.#deps.workRoot === undefined ? {} : { workRoot: this.#deps.workRoot };

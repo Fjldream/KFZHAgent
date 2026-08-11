@@ -5,6 +5,7 @@ import "reflect-metadata";
 process.env.DATABASE_URL =
   process.env.TEST_DATABASE_URL ??
   "postgresql://postgres@127.0.0.1:5432/kf_agent_test";
+process.env.KF_SERVER_PLAN_HMAC_KEY_BASE64 ??= Buffer.alloc(32, 0x54).toString("base64");
 
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
@@ -34,6 +35,7 @@ import { ARTIFACT_STORAGE } from "./artifacts/artifact-storage.js";
 import { MODEL_PORT } from "./conversations/model-port.js";
 import { AssetService } from "./assets/asset.service.js";
 import { WorkspaceService } from "./workspaces/workspace.service.js";
+import { SERVER_PLAN_AUTHORITY } from "./conversations/server-plan-authority.js";
 
 const unknownFieldClientDir = fileURLToPath(
   new URL("../../../tests/fixtures/client-unknown-field", import.meta.url),
@@ -518,7 +520,12 @@ async function runNextBuild(owner: string) {
   if (leased === null) throw new Error("expected a queued build job");
   const registry = new DomainRegistry();
   registry.register(createKingClientDomainPack({ nativeAccepted: true }));
-  return new BuildExecutor({ prisma, storage, registry }).execute(leased);
+  return new BuildExecutor({
+    prisma,
+    storage,
+    registry,
+    serverPlanVerifier: app.get(SERVER_PLAN_AUTHORITY),
+  }).execute(leased);
 }
 
 /** Plans a NEW_REQUIREMENT turn up to the approval interrupt and returns the planHash. */
@@ -1539,6 +1546,47 @@ describe("task 12 api surface", () => {
     expect(plan.body.plan.schema).toBe("kf-change-plan/v1");
     expect(Array.isArray(plan.body.plan.operations)).toBe(true);
     expect(plan.body.plan.operations.length).toBeGreaterThan(0);
+    expect(JSON.stringify(plan.body)).not.toMatch(/signature|semanticOperations|sourceModuleId/);
+  });
+
+  it("fails closed for a corrupt internal or envelope-like plan without leaking server fields", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createWorkspace(cookie, "Corrupt Plan WS");
+    const row = await prisma.changePlan.create({
+      data: {
+        tenantId: ws.body.tenantId,
+        workspaceId: ws.body.id,
+        planHash: "0".repeat(64),
+        plan: {
+          schema: "kf-server-plan-envelope/v1",
+          plan: { schema: "kf-change-plan/v1", workspaceId: ws.body.id, operations: [] },
+          planHash: "0".repeat(64),
+          revisionId: "revision-1",
+          semanticOperations: [{ sourceModuleId: "must-not-leak" }],
+          signature: "0".repeat(64),
+        },
+      },
+    });
+    const result = await request(server)
+      .get(`/api/change-plans/${row.id}`)
+      .set("Cookie", cookie)
+      .expect(500);
+    expect(JSON.stringify(result.body)).not.toMatch(/must-not-leak|semanticOperations|signature/);
+
+    const near = await prisma.changePlan.create({
+      data: {
+        tenantId: ws.body.tenantId,
+        workspaceId: ws.body.id,
+        planHash: "0".repeat(64),
+        plan: {
+          schema: "kf-change-plan/v1",
+          workspaceId: ws.body.id,
+          operations: [],
+          signature: "0".repeat(64),
+        },
+      },
+    });
+    await request(server).get(`/api/change-plans/${near.id}`).set("Cookie", cookie).expect(500);
   });
 
   it("isolates change-plan details across tenants", async () => {

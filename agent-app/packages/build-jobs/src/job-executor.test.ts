@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
-  createServerPlanEnvelope,
   semanticPayloadHash,
   type ChangePlan,
   type TrustedSemanticOperationInput,
 } from "@kf/contracts";
 import { resolveStoredPlan } from "./job-executor.js";
+import { createHmacServerPlanAuthority } from "./server-plan-authority.js";
+
+const authority = createHmacServerPlanAuthority(Buffer.alloc(32, 0x54));
 
 const table = {
   columns: [{ key: "name", label: "设备", align: "left" }],
@@ -14,7 +16,7 @@ const table = {
 };
 
 function stored(plan: ChangePlan, semanticOperations: TrustedSemanticOperationInput[]) {
-  return createServerPlanEnvelope({ plan, revisionId: "rev-1", semanticOperations });
+  return authority.sign({ plan, revisionId: "rev-1", semanticOperations });
 }
 
 describe("resolveStoredPlan", () => {
@@ -41,7 +43,7 @@ describe("resolveStoredPlan", () => {
     const result = resolveStoredPlan(JSON.parse(JSON.stringify(envelope)), {
       expectedPlanHash: envelope.planHash,
       expectedRevisionId: "rev-1",
-    });
+    }, authority);
     expect(result.plan).toEqual(plan);
     expect(result.semanticOperations).toEqual(envelope.semanticOperations);
   });

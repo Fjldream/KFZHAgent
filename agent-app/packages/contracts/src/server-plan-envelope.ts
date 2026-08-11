@@ -4,7 +4,7 @@ import { changePlanSchema, type ChangePlan } from "./change-plan.js";
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 
-export const TrustedSemanticOperationInputSchema = z.object({
+export const TrustedSemanticOperationSchema = z.object({
   kind: z.literal("kf.table-data/v1"),
   entityId: z.string().trim().min(1).max(100),
   capabilityId: z.literal("easyui.1"),
@@ -12,10 +12,7 @@ export const TrustedSemanticOperationInputSchema = z.object({
   payloadHash: Sha256Schema,
 }).strict();
 
-export const TrustedSemanticOperationSchema = TrustedSemanticOperationInputSchema.extend({
-  /** Server-issued digest binding this authorization to one plan and revision. */
-  bindingHash: Sha256Schema,
-}).strict();
+export const TrustedSemanticOperationInputSchema = TrustedSemanticOperationSchema;
 
 export const ServerPlanEnvelopeSchema = z.object({
   schema: z.literal("kf-server-plan-envelope/v1"),
@@ -23,6 +20,8 @@ export const ServerPlanEnvelopeSchema = z.object({
   planHash: Sha256Schema,
   revisionId: z.string().trim().min(1).max(100),
   semanticOperations: z.array(TrustedSemanticOperationSchema).max(500),
+  /** HMAC-SHA-256 issued by the server; never returned by the public API. */
+  signature: Sha256Schema,
 }).strict();
 
 export type TrustedSemanticOperationInput = z.infer<typeof TrustedSemanticOperationInputSchema>;
@@ -34,17 +33,15 @@ export interface ServerPlanEnvelopeExpectations {
   expectedRevisionId?: string;
 }
 
-/** Canonical JSON digest shared by the graph, Prisma boundary, and worker. */
+/** Stable public digest. This is integrity metadata, never authorization. */
 export function canonicalServerHash(value: unknown): string {
   return createHash("sha256").update(stableJson(value)).digest("hex");
 }
 
-/** Digest of the exact typed semantic payload materialized by a native adapter. */
 export function semanticPayloadHash(value: unknown): string {
   return canonicalServerHash(value);
 }
 
-/** Canonical hash of the normalized runtime patch shape used by every build job. */
 export function canonicalChangePlanHash(input: unknown): string {
   const plan = parseChangePlan(input);
   return canonicalServerHash({
@@ -94,51 +91,34 @@ export function canonicalChangePlanHash(input: unknown): string {
   });
 }
 
-export function createServerPlanEnvelope(input: {
-  plan: ChangePlan;
-  revisionId: string;
-  semanticOperations: readonly TrustedSemanticOperationInput[];
-}): ServerPlanEnvelope {
-  const plan = parseChangePlan(input.plan);
-  const planHash = canonicalChangePlanHash(plan);
-  const semanticOperations = input.semanticOperations.map((raw) => {
-    const operation = parseSemanticInput(raw);
-    return {
-      ...operation,
-      bindingHash: semanticBindingHash(input.revisionId, planHash, operation),
-    };
-  });
-  const envelope = parseEnvelopeShape({
-    schema: "kf-server-plan-envelope/v1",
-    plan,
-    planHash,
-    revisionId: input.revisionId,
-    semanticOperations,
-  });
-  assertServerPlanEnvelope(envelope);
-  return envelope;
+/**
+ * Canonical bytes covered by the server HMAC. The signature itself is
+ * deliberately excluded; every other persisted field, including schema
+ * version and the complete semantic authorization list, is covered.
+ */
+export function canonicalServerPlanSigningBytes(input: ServerPlanEnvelope): Uint8Array {
+  const envelope = parseEnvelopeShape(input);
+  return Buffer.from(stableJson({
+    schema: envelope.schema,
+    plan: envelope.plan,
+    planHash: envelope.planHash,
+    revisionId: envelope.revisionId,
+    semanticOperations: envelope.semanticOperations,
+  }), "utf8");
 }
 
 /**
- * Parses a database/checkpoint clone and re-verifies every server-owned
- * binding. Merely satisfying the Zod shape is intentionally insufficient.
+ * Strict structural and semantic consistency validation only. This function
+ * does not establish authorization; server code must verify the HMAC first.
  */
-export function parseServerPlanEnvelope(
+export function validateServerPlanEnvelopeData(
   input: unknown,
   expected: ServerPlanEnvelopeExpectations = {},
 ): ServerPlanEnvelope {
   const envelope = parseEnvelopeShape(input);
-  assertServerPlanEnvelope(envelope, expected);
-  return envelope;
-}
-
-function assertServerPlanEnvelope(
-  envelope: ServerPlanEnvelope,
-  expected: ServerPlanEnvelopeExpectations = {},
-): void {
   const actualPlanHash = canonicalChangePlanHash(envelope.plan);
   if (actualPlanHash !== envelope.planHash) {
-    throw new Error(`SERVER_PLAN_HASH_MISMATCH: expected ${envelope.planHash}, got ${actualPlanHash}`);
+    throw new Error("SERVER_PLAN_HASH_MISMATCH: persisted hash does not match the inner plan");
   }
   if (expected.expectedPlanHash !== undefined && envelope.planHash !== expected.expectedPlanHash) {
     throw new Error("SERVER_PLAN_HASH_MISMATCH: persisted plan does not match the build job");
@@ -147,15 +127,8 @@ function assertServerPlanEnvelope(
     throw new Error("SERVER_PLAN_BINDING_MISMATCH: persisted plan belongs to another base revision");
   }
 
-  const payloads = semanticPayloadsFromPlan(envelope.plan);
-  const remaining = [...payloads];
-  const seenBindings = new Set<string>();
+  const remaining = semanticPayloadsFromPlan(envelope.plan);
   for (const operation of envelope.semanticOperations) {
-    const expectedBinding = semanticBindingHash(envelope.revisionId, envelope.planHash, operation);
-    if (operation.bindingHash !== expectedBinding || seenBindings.has(operation.bindingHash)) {
-      throw new Error("SERVER_PLAN_BINDING_MISMATCH: semantic authorization was copied or rebound");
-    }
-    seenBindings.add(operation.bindingHash);
     const match = remaining.findIndex((payload) =>
       payload.entityId === operation.entityId
       && payload.capabilityId === operation.capabilityId
@@ -168,6 +141,7 @@ function assertServerPlanEnvelope(
   if (remaining.length > 0) {
     throw new Error("SERVER_PLAN_SEMANTIC_MISMATCH: plan payload has no server authorization");
   }
+  return envelope;
 }
 
 function semanticPayloadsFromPlan(plan: ChangePlan): Array<{
@@ -201,35 +175,10 @@ function semanticPayloadsFromPlan(plan: ChangePlan): Array<{
   return payloads;
 }
 
-function semanticBindingHash(
-  revisionId: string,
-  planHash: string,
-  operation: TrustedSemanticOperationInput,
-): string {
-  return canonicalServerHash({
-    schema: "kf-server-semantic-binding/v1",
-    revisionId,
-    planHash,
-    kind: operation.kind,
-    entityId: operation.entityId,
-    capabilityId: operation.capabilityId,
-    sourceModuleId: operation.sourceModuleId,
-    payloadHash: operation.payloadHash,
-  });
-}
-
 function parseChangePlan(input: unknown): ChangePlan {
   const parsed = changePlanSchema.safeParse(input);
   if (!parsed.success) {
     throw new Error(`SERVER_PLAN_SCHEMA_INVALID: ${parsed.error.issues[0]?.message ?? "invalid plan"}`);
-  }
-  return parsed.data;
-}
-
-function parseSemanticInput(input: unknown): TrustedSemanticOperationInput {
-  const parsed = TrustedSemanticOperationInputSchema.safeParse(input);
-  if (!parsed.success) {
-    throw new Error(`SERVER_PLAN_SCHEMA_INVALID: ${parsed.error.issues[0]?.message ?? "invalid semantic operation"}`);
   }
   return parsed.data;
 }

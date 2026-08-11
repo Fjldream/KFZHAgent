@@ -7,6 +7,10 @@ import { DEFAULT_MODEL_PORT, MODEL_PORT } from "./model-port.js";
 import { DeterministicFakeModelPort } from "./fake-model.js";
 import { DeepSeekModelPort } from "./deepseek-model.js";
 import { ArtifactsModule } from "../artifacts/artifacts.module.js";
+import {
+  SERVER_PLAN_AUTHORITY,
+  createServerPlanAuthorityFromEnvironment,
+} from "./server-plan-authority.js";
 
 @Module({
   imports: [ArtifactsModule],
@@ -40,6 +44,7 @@ import { ArtifactsModule } from "../artifacts/artifacts.module.js";
       },
     },
     { provide: PG_POOL, useFactory: createPgPool },
+    { provide: SERVER_PLAN_AUTHORITY, useFactory: createServerPlanAuthorityFromEnvironment },
   ],
   exports: [ConversationService],
 })

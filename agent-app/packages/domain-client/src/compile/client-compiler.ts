@@ -656,7 +656,7 @@ function validateControlShape(value: unknown, index: number): ControlIR {
         const uiExtendType = requireNumber(rec["uiExtendType"], "easyui.uiExtendType");
         if (!Number.isInteger(uiExtendType) || uiExtendType !== proto) {
           throw new ModelOutputInvalidError(
-            `control "${id}" easyui.uiExtendType (${String(rec["uiExtendType"])}) ` +
+            `control "${id}" easyui.uiExtendType (${String(uiExtendType)}) ` +
               `must be an integer equal to proto (${proto})`,
           );
         }

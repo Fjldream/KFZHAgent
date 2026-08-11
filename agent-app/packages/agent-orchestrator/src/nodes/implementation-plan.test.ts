@@ -15,6 +15,7 @@ import type {
 } from "../ports.js";
 import type { AgentGraphStateValue } from "../state.js";
 import { createImplementationPlanNode } from "./implementation-plan.js";
+import { TEST_SERVER_PLAN_SIGNER } from "../test-server-plan-signer.js";
 
 const blueprint: CustomerEffectBlueprint = {
   schema: "kf-design-plan/v2",
@@ -179,6 +180,7 @@ function bed(specs: UIImplementationSpec[], compileError?: Error) {
     changePlanRepository,
     buildJobPort: {} as BuildJobPort,
     uiImplementationCompiler,
+    serverPlanSigner: TEST_SERVER_PLAN_SIGNER,
     isDomainSupported: () => true,
   };
   return {

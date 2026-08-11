@@ -26,6 +26,7 @@ import type { GraphMessage, ApprovalInterrupt } from "./state.js";
 import type { Intent } from "./schemas/intent.js";
 import { compileSolutionGraph, ApprovalResumeRequiredError } from "./solution-graph.js";
 import { decodeBlueprintMessage } from "./blueprint-message.js";
+import { TEST_SERVER_PLAN_SIGNER } from "./test-server-plan-signer.js";
 
 type CompiledGraph = ReturnType<typeof compileSolutionGraph>;
 
@@ -421,6 +422,7 @@ function createBed(): Bed {
         return { plan, capabilityReport };
       },
     },
+    serverPlanSigner: TEST_SERVER_PLAN_SIGNER,
     isDomainSupported: () => true,
   };
   const graph = compileSolutionGraph(deps, { checkpointer: new MemorySaver() });

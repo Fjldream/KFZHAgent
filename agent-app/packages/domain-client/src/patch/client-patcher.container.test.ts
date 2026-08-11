@@ -214,7 +214,7 @@ describe("client patcher — KF 容器对象（easyui / 布局）", () => {
           }],
         },
       },
-    ]))).rejects.toThrow(/PATCH_CONFLICT: INVALID_COMPONENT_PROPERTY/);
+    ]))).rejects.toThrow(/PATCH_CONFLICT: (?:INVALID|UNSAFE)_COMPONENT_PROPERTY/);
   });
 
   it("preserves the reviewed docking edge coordinate through strict create validation", async () => {
@@ -424,6 +424,23 @@ describe("client patcher — KF 容器对象（easyui / 布局）", () => {
         updateOperation("layout-guid-1", [{ path: "/arbitraryRawField", value: "x" }]),
       ])),
     ).rejects.toThrow(patchConflict);
+  });
+
+  it.each([
+    ["unknown native child field", [{
+      layoutType: 2, objectType: 2,
+      baseProperty: { name: "Nested", leftTopPt: { x: 0, y: 0 }, width: 100, height: 40, nativePayload: {} },
+    }]],
+    ["reserved descendant", [{
+      layoutType: 2, objectType: 2,
+      baseProperty: { name: "Nested", leftTopPt: { x: 0, y: 0 }, width: 100, height: 40 },
+      insiderObjects: [{ styleData: "forged" }],
+    }]],
+  ])("rejects %s in a whole layout children update", async (_label, children) => {
+    const base = await makeContainerFixture();
+    await expect(applyClientPatch(base, plan([
+      updateOperation("layout-guid-1", [{ path: "/children", value: children }]),
+    ]))).rejects.toThrow(/PATCH_CONFLICT: (?:INVALID|UNSAFE)_COMPONENT_PROPERTY/);
   });
 
   it("preserves an imported child GUID when patching an unrelated layout field", async () => {

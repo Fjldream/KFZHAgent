@@ -482,6 +482,8 @@ describe("control compiler — KF special nodes (prototypeName dispatch)", () =>
 const REF_DIR = "/tmp/kf_ref/1.0.0.1/project/page";
 
 describe.skipIf(!existsSync(REF_DIR))("golden alignment with the reference project (/tmp/kf_ref)", () => {
+  // Optional external KF fixtures have heterogeneous native object shapes.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async function loadReferenceObject(pageFile: string, predicate: (o: Record<string, any>) => boolean) {
     const page = JSON.parse(await readFile(path.join(REF_DIR, pageFile), "utf8"));
     return page["objects"].find(predicate);

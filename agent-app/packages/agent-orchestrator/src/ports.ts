@@ -176,6 +176,15 @@ export interface UiImplementationCompilerPort {
   }>;
 }
 
+/** Server-only authority port. Implementations hold the HMAC key outside graph state. */
+export interface ServerPlanSignerPort {
+  sign(input: {
+    plan: ChangePlan;
+    revisionId: string;
+    semanticOperations: readonly TrustedSemanticOperationInput[];
+  }): ServerPlanEnvelope;
+}
+
 /**
  * All dependencies the solution graph needs. The graph owns no persistence of
  * its own: every side effect flows through these ports so the graph itself
@@ -189,6 +198,8 @@ export interface SolutionGraphDeps {
   planArtifacts?: PlanArtifactsPort;
   /** Present for domains whose confirmed blueprints can compile through an implementation spec. */
   uiImplementationCompiler?: UiImplementationCompilerPort;
+  /** Required before any internal semantic envelope may be persisted. */
+  serverPlanSigner?: ServerPlanSignerPort;
   /** Domain support predicate (DomainRegistry-backed in production). */
   isDomainSupported: (domain: string) => boolean;
   /** Domain used when enqueueing a build (defaults to the KF client domain). */

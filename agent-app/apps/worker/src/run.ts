@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { LocalArtifactStorage } from "@kf/artifact-storage";
 import { createWorkerDomainRegistry } from "./domain-packs.js";
 import { JobRunner } from "./job-runner.js";
+import { createWorkerServerPlanAuthorityFromEnvironment } from "./server-plan-authority.js";
 import { createWorkerInstanceId } from "./worker-instance-id.js";
 
 /**
@@ -26,6 +27,7 @@ import { createWorkerInstanceId } from "./worker-instance-id.js";
 const NATIVE_ACCEPTED_ENV = "KINGCLIENT_NATIVE_ACCEPTED";
 
 async function main(): Promise<never> {
+  const serverPlanAuthority = createWorkerServerPlanAuthorityFromEnvironment();
   const prisma = new PrismaClient();
   await prisma.$connect();
   const storageRoot =
@@ -46,6 +48,7 @@ async function main(): Promise<never> {
     registry,
     pollIntervalMs: 1_000,
     leaseMs: 30_000,
+    serverPlanVerifier: serverPlanAuthority,
   });
   const workerInstanceId = createWorkerInstanceId();
   console.log(`[worker] KF Solution Agent worker started (${workerInstanceId})`);
