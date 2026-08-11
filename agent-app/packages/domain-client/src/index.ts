@@ -30,5 +30,8 @@ export * from "./validate/client-validator.js";
 export * from "./validate/report.js";
 export * from "./domain-pack/king-client-domain-pack.js";
 export * from "./modules/module-registry.js";
+export * from "./modules/module-compiler.js";
+export * from "./modules/stable-ids.js";
+export * from "./modules/theme/module-theme.js";
 export * from "./modules/layout/layout-engine.js";
 export * from "./modules/layout/layout-errors.js";
