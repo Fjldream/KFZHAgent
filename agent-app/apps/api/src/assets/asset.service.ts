@@ -382,6 +382,7 @@ function isCompleteJpeg(bytes: Buffer): boolean {
   let frame: JpegFrame | undefined;
   let sawSos = false;
   let sawEntropyScan = false;
+  const progressiveState: ProgressiveCoefficientState = new Map();
   while (offset < bytes.length) {
     const markerStart = consumeJpegMarker(bytes, offset);
     if (markerStart === undefined) return false;
@@ -399,7 +400,7 @@ function isCompleteJpeg(bytes: Buffer): boolean {
       frame = validateJpegFrame(marker, bytes.subarray(dataStart, dataEnd));
       if (frame === undefined) return false;
     }
-    if (marker === 0xda && (frame === undefined || !isValidJpegSos(bytes.subarray(dataStart, dataEnd), frame))) {
+    if (marker === 0xda && (frame === undefined || !isValidJpegSos(bytes.subarray(dataStart, dataEnd), frame, progressiveState))) {
       return false;
     }
     offset = dataEnd;
@@ -462,7 +463,13 @@ function jpegFrameMode(marker: number): JpegFrame["mode"] | undefined {
   return undefined;
 }
 
-function isValidJpegSos(segment: Buffer, frame: JpegFrame): boolean {
+type ProgressiveCoefficientState = Map<number, Array<number | undefined>>;
+
+function isValidJpegSos(
+  segment: Buffer,
+  frame: JpegFrame,
+  progressiveState: ProgressiveCoefficientState,
+): boolean {
   // component-count(1), selector pairs, spectral start/end, approximation.
   if (segment.length < 6) return false;
   const count = segment[0]!;
@@ -490,8 +497,55 @@ function isValidJpegSos(segment: Buffer, frame: JpegFrame): boolean {
   } else if (spectralStart > spectralEnd || spectralEnd > 63) {
     return false;
   }
-  if (successiveHigh === 0) return successiveLow <= 13;
-  return successiveHigh <= 13 && successiveLow === successiveHigh - 1;
+  if (spectralStart > 0 && count !== 1) return false;
+  if (successiveHigh === 0) {
+    if (successiveLow > 13) return false;
+    return initializeProgressiveCoefficients(progressiveState, selected, spectralStart, spectralEnd, successiveLow);
+  }
+  if (successiveHigh > 13 || successiveLow !== successiveHigh - 1) return false;
+  return refineProgressiveCoefficients(progressiveState, selected, spectralStart, spectralEnd, successiveHigh, successiveLow);
+}
+
+function initializeProgressiveCoefficients(
+  state: ProgressiveCoefficientState,
+  components: ReadonlySet<number>,
+  start: number,
+  end: number,
+  approximation: number,
+): boolean {
+  for (const component of components) {
+    const coefficients = state.get(component);
+    for (let coefficient = start; coefficient <= end; coefficient += 1) {
+      if (coefficients?.[coefficient] !== undefined) return false;
+    }
+  }
+  for (const component of components) {
+    const coefficients = state.get(component) ?? new Array<number | undefined>(64);
+    for (let coefficient = start; coefficient <= end; coefficient += 1) coefficients[coefficient] = approximation;
+    state.set(component, coefficients);
+  }
+  return true;
+}
+
+function refineProgressiveCoefficients(
+  state: ProgressiveCoefficientState,
+  components: ReadonlySet<number>,
+  start: number,
+  end: number,
+  previousApproximation: number,
+  nextApproximation: number,
+): boolean {
+  for (const component of components) {
+    const coefficients = state.get(component);
+    for (let coefficient = start; coefficient <= end; coefficient += 1) {
+      if (coefficients?.[coefficient] !== previousApproximation) return false;
+    }
+  }
+  for (const component of components) {
+    const coefficients = state.get(component)!;
+    for (let coefficient = start; coefficient <= end; coefficient += 1) coefficients[coefficient] = nextApproximation;
+  }
+  return true;
 }
 
 function consumeJpegScan(bytes: Buffer, offset: number): { offset: number; hasEntropy: boolean } | undefined {

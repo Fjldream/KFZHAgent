@@ -43,6 +43,53 @@ INVALID_BASELINE_SOS_JPEG[42] = 0x01;
 const INVALID_PROGRESSIVE_SOS_JPEG = Buffer.from(PROGRESSIVE_JPEG_1X1);
 INVALID_PROGRESSIVE_SOS_JPEG[41] = 0x01;
 
+type ProgressiveScanFixture = {
+  components: number[];
+  spectralStart: number;
+  spectralEnd: number;
+  successiveHigh: number;
+  successiveLow: number;
+};
+
+function progressiveJpeg(scans: ProgressiveScanFixture[], frameComponents = [1, 2]): Buffer {
+  const bytes = [
+    0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
+    0xff, 0xc2, 0x00, 8 + frameComponents.length * 3, 0x08, 0x00, 0x01, 0x00, 0x01, frameComponents.length,
+  ];
+  for (const component of frameComponents) bytes.push(component, 0x11, 0x00);
+  for (const scan of scans) {
+    bytes.push(0xff, 0xda, 0x00, 6 + scan.components.length * 2, scan.components.length);
+    for (const component of scan.components) bytes.push(component, 0x00);
+    bytes.push(scan.spectralStart, scan.spectralEnd, (scan.successiveHigh << 4) | scan.successiveLow, 0x01);
+  }
+  bytes.push(0xff, 0xd9);
+  return Buffer.from(bytes);
+}
+
+const VALID_PROGRESSIVE_MULTI_SCAN = progressiveJpeg([
+  { components: [1, 2], spectralStart: 0, spectralEnd: 0, successiveHigh: 0, successiveLow: 1 },
+  { components: [1, 2], spectralStart: 0, spectralEnd: 0, successiveHigh: 1, successiveLow: 0 },
+  { components: [1], spectralStart: 1, spectralEnd: 2, successiveHigh: 0, successiveLow: 0 },
+]);
+const PROGRESSIVE_AC_TWO_COMPONENTS = progressiveJpeg([
+  { components: [1, 2], spectralStart: 1, spectralEnd: 1, successiveHigh: 0, successiveLow: 0 },
+]);
+const PROGRESSIVE_REFINE_WITHOUT_INITIAL = progressiveJpeg([
+  { components: [1], spectralStart: 0, spectralEnd: 0, successiveHigh: 1, successiveLow: 0 },
+]);
+const PROGRESSIVE_DUPLICATE_INITIAL = progressiveJpeg([
+  { components: [1], spectralStart: 0, spectralEnd: 0, successiveHigh: 0, successiveLow: 0 },
+  { components: [1], spectralStart: 0, spectralEnd: 0, successiveHigh: 0, successiveLow: 0 },
+]);
+const PROGRESSIVE_SKIPPED_REFINEMENT = progressiveJpeg([
+  { components: [1], spectralStart: 0, spectralEnd: 0, successiveHigh: 0, successiveLow: 2 },
+  { components: [1], spectralStart: 0, spectralEnd: 0, successiveHigh: 1, successiveLow: 0 },
+]);
+const PROGRESSIVE_OVERLAPPING_INITIAL = progressiveJpeg([
+  { components: [1], spectralStart: 1, spectralEnd: 3, successiveHigh: 0, successiveLow: 0 },
+  { components: [1], spectralStart: 3, spectralEnd: 4, successiveHigh: 0, successiveLow: 0 },
+]);
+
 class MemoryStorage implements ArtifactStorage {
   readonly bytes = new Map<string, Buffer>();
   failPut = false;
@@ -187,6 +234,16 @@ describe("AssetService", () => {
     })).resolves.toMatchObject({ mediaType: "image/jpeg", width: 1, height: 1 });
   });
 
+  it("accepts valid multi-component DC and single-component AC progressive scans", async () => {
+    const { service: assets } = service();
+    await expect(assets.upload({
+      tenantId: T_A,
+      workspaceId: W_A,
+      name: "multi-progressive.jpg",
+      stream: Readable.from([VALID_PROGRESSIVE_MULTI_SCAN]),
+    })).resolves.toMatchObject({ mediaType: "image/jpeg", width: 1, height: 1 });
+  });
+
   it.each([
     ["PNG", PNG_1X1],
     ["JPEG", JPEG_1X1],
@@ -225,6 +282,24 @@ describe("AssetService", () => {
       tenantId: T_A,
       workspaceId: W_A,
       name: "invalid.jpg",
+      stream: Readable.from([bytes]),
+    })).rejects.toThrow("ASSET_INVALID_CONTAINER");
+    expect(prisma.rows).toHaveLength(0);
+    expect(storage.bytes.size).toBe(0);
+  });
+
+  it.each([
+    ["a two-component progressive AC scan", PROGRESSIVE_AC_TWO_COMPONENTS],
+    ["a progressive refinement without initial coefficients", PROGRESSIVE_REFINE_WITHOUT_INITIAL],
+    ["a duplicate progressive initial scan", PROGRESSIVE_DUPLICATE_INITIAL],
+    ["a skipped progressive refinement", PROGRESSIVE_SKIPPED_REFINEMENT],
+    ["an overlapping progressive initial band", PROGRESSIVE_OVERLAPPING_INITIAL],
+  ])("rejects %s before database adoption", async (_label, bytes) => {
+    const { service: assets, prisma, storage } = service();
+    await expect(assets.upload({
+      tenantId: T_A,
+      workspaceId: W_A,
+      name: "invalid-progressive.jpg",
       stream: Readable.from([bytes]),
     })).rejects.toThrow("ASSET_INVALID_CONTAINER");
     expect(prisma.rows).toHaveLength(0);

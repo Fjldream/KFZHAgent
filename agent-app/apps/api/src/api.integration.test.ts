@@ -65,6 +65,27 @@ const ASSET_INCOMPLETE_SOS_JPEG = ASSET_JPEG_1X1.subarray(
 const ASSET_INVALID_VERTICAL_SAMPLING_JPEG = Buffer.from(ASSET_JPEG_1X1);
 ASSET_INVALID_VERTICAL_SAMPLING_JPEG[31] = 0x10;
 
+function assetProgressiveJpeg(scans: Array<{ components: number[]; start: number; end: number; ah: number; al: number }>): Buffer {
+  const bytes = [
+    0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
+    0xff, 0xc2, 0x00, 0x0e, 0x08, 0x00, 0x01, 0x00, 0x01, 0x02, 0x01, 0x11, 0x00, 0x02, 0x11, 0x00,
+  ];
+  for (const scan of scans) {
+    bytes.push(0xff, 0xda, 0x00, 6 + scan.components.length * 2, scan.components.length);
+    for (const component of scan.components) bytes.push(component, 0x00);
+    bytes.push(scan.start, scan.end, (scan.ah << 4) | scan.al, 0x01);
+  }
+  bytes.push(0xff, 0xd9);
+  return Buffer.from(bytes);
+}
+
+const ASSET_PROGRESSIVE_AC_TWO_COMPONENTS = assetProgressiveJpeg([
+  { components: [1, 2], start: 1, end: 1, ah: 0, al: 0 },
+]);
+const ASSET_PROGRESSIVE_REFINE_WITHOUT_INITIAL = assetProgressiveJpeg([
+  { components: [1], start: 0, end: 0, ah: 1, al: 0 },
+]);
+
 let app: INestApplication;
 let server: ReturnType<INestApplication["getHttpServer"]>;
 let prisma: PrismaService;
@@ -957,6 +978,8 @@ describe("api contract", () => {
       ["header-only.jpg", ASSET_HEADER_ONLY_JPEG],
       ["incomplete-sos.jpg", ASSET_INCOMPLETE_SOS_JPEG],
       ["vertical-sampling-zero.jpg", ASSET_INVALID_VERTICAL_SAMPLING_JPEG],
+      ["progressive-ac-two-components.jpg", ASSET_PROGRESSIVE_AC_TWO_COMPONENTS],
+      ["progressive-refine-without-initial.jpg", ASSET_PROGRESSIVE_REFINE_WITHOUT_INITIAL],
     ] as const) {
       const response = await request(server)
         .post(`/api/workspaces/${ws.body.id}/assets`)
