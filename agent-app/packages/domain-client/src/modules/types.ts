@@ -11,6 +11,10 @@ import type { z } from "zod";
 
 export type ModuleMaturity = "stable" | "beta" | "unsupported";
 
+export type ModuleFallbackPolicy =
+  | Readonly<{ mode: "native-only" }>
+  | Readonly<{ mode: "allow-webcontainer"; authorizationRef: string }>;
+
 export interface AssetSlotDefinition {
   readonly id: string;
   readonly required: boolean;
@@ -28,10 +32,9 @@ export interface ModuleLayoutContract {
 export interface ModuleCompileContext {
   readonly definition: ModuleDefinition;
   readonly instance: ModulePlanModule;
-  readonly variant: string;
   readonly content: Record<string, unknown>;
   readonly asset: ResolvedAsset | undefined;
-  readonly availableKfCapabilities: ReadonlySet<string>;
+  readonly validationContext: ModuleValidationContext;
 }
 
 export interface ModuleCompileInput {
@@ -49,6 +52,8 @@ export interface ModuleDefinition {
   readonly category: string;
   readonly maturity: ModuleMaturity;
   readonly variants: readonly string[];
+  /** Omitted policies normalize to native-only when registered. */
+  readonly fallbackPolicy?: ModuleFallbackPolicy;
   readonly contentSchema: z.ZodType<Record<string, unknown>>;
   readonly assetSlots: readonly AssetSlotDefinition[];
   readonly requiredKfCapabilities: readonly string[];
@@ -58,11 +63,14 @@ export interface ModuleDefinition {
 
 export interface ModuleValidationInput {
   readonly instance: ModulePlanModule;
-  /** Module plans must pin this exact registered version. */
-  readonly version: string;
-  readonly variant: string;
   readonly assets: readonly AssetRecord[];
+  readonly context: ModuleValidationContext;
+}
+
+/** Trusted delivery-time facts, never values supplied by a model-authored plan. */
+export interface ModuleValidationContext {
   readonly availableKfCapabilities: readonly string[];
+  readonly approvedAuthorizationRefs: readonly string[];
 }
 
 export interface ModuleValidationResult {

@@ -33,6 +33,8 @@ function definition(overrides: Partial<ModuleDefinition> = {}): ModuleDefinition
 const instance = {
   id: "hero-banner",
   kind: "hero",
+  templateVersion: "1.0.0",
+  variant: "default",
   title: "欢迎",
   content: JSON.stringify({ headline: "欢迎来到门户" }),
   placement: {
@@ -88,10 +90,8 @@ describe("versioned module registry", () => {
 
     expect(registry.validateInstance({
       instance,
-      version: "1.0.0",
-      variant: "default",
       assets,
-      availableKfCapabilities: ["text", "image"],
+      context: { availableKfCapabilities: ["text", "image"], approvedAuthorizationRefs: [] },
     }).deliveryGaps).toMatchObject([{
       moduleId: "hero-banner",
       severity: "warning",
@@ -105,20 +105,16 @@ describe("versioned module registry", () => {
 
     expect(() => registry.validateInstance({
       instance,
-      version: "1.0.0",
-      variant: "default",
       assets,
-      availableKfCapabilities: ["text", "image"],
+      context: { availableKfCapabilities: ["text", "image"], approvedAuthorizationRefs: [] },
     })).toThrow("MODULE_UNSUPPORTED: hero@1.0.0");
 
     const supportedRegistry = new ModuleRegistry();
     supportedRegistry.register(definition());
     expect(() => supportedRegistry.validateInstance({
       instance,
-      version: "1.0.0",
-      variant: "default",
       assets,
-      availableKfCapabilities: ["text"],
+      context: { availableKfCapabilities: ["text"], approvedAuthorizationRefs: [] },
     })).toThrow("MODULE_KF_CAPABILITY_MISSING: hero@1.0.0 [image]");
   });
 
@@ -127,33 +123,88 @@ describe("versioned module registry", () => {
     registry.register(definition());
 
     expect(() => registry.validateInstance({
-      instance,
-      version: "1.0.0",
-      variant: "unknown",
+      instance: { ...instance, variant: "unknown" },
       assets,
-      availableKfCapabilities: ["text", "image"],
+      context: { availableKfCapabilities: ["text", "image"], approvedAuthorizationRefs: [] },
     })).toThrow("MODULE_VARIANT_UNSUPPORTED: hero@1.0.0 [unknown]");
     expect(() => registry.validateInstance({
       instance: { ...instance, content: JSON.stringify({ headline: "" }) },
-      version: "1.0.0",
-      variant: "default",
       assets,
-      availableKfCapabilities: ["text", "image"],
+      context: { availableKfCapabilities: ["text", "image"], approvedAuthorizationRefs: [] },
     })).toThrow("MODULE_CONTENT_INVALID: hero@1.0.0");
     expect(() => registry.validateInstance({
       instance: { ...instance, assetId: undefined },
-      version: "1.0.0",
-      variant: "default",
       assets,
-      availableKfCapabilities: ["text", "image"],
+      context: { availableKfCapabilities: ["text", "image"], approvedAuthorizationRefs: [] },
     })).toThrow("MODULE_ASSET_SLOT_REQUIRED: hero@1.0.0 [image]");
     expect(() => registry.validateInstance({
       instance: { ...instance, placement: { ...instance.placement, columnSpan: 3 } },
-      version: "1.0.0",
-      variant: "default",
       assets,
-      availableKfCapabilities: ["text", "image"],
+      context: { availableKfCapabilities: ["text", "image"], approvedAuthorizationRefs: [] },
     })).toThrow("MODULE_LAYOUT_INVALID: hero@1.0.0");
+  });
+
+  it("resolves the exact persisted template version and rejects an unknown version or variant", () => {
+    const registry = new ModuleRegistry();
+    registry.register(definition());
+    registry.register(definition({ version: "2.0.0" }));
+
+    expect(registry.validateInstance({
+      instance,
+      assets,
+      context: { availableKfCapabilities: ["text", "image"], approvedAuthorizationRefs: [] },
+    }).definition.version).toBe("1.0.0");
+    expect(() => registry.validateInstance({
+      instance: { ...instance, templateVersion: "3.0.0" },
+      assets,
+      context: { availableKfCapabilities: ["text", "image"], approvedAuthorizationRefs: [] },
+    })).toThrow("MODULE_DEFINITION_NOT_FOUND: hero@3.0.0");
+    expect(() => registry.validateInstance({
+      instance: { ...instance, variant: "unknown" },
+      assets,
+      context: { availableKfCapabilities: ["text", "image"], approvedAuthorizationRefs: [] },
+    })).toThrow("MODULE_VARIANT_UNSUPPORTED: hero@1.0.0 [unknown]");
+  });
+
+  it("permits WebContainer only for a trusted approved fallback authorization", () => {
+    const registry = new ModuleRegistry();
+    registry.register(definition({ requiredKfCapabilities: ["webcontainer"] }));
+
+    expect(() => registry.validateInstance({
+      instance,
+      assets,
+      context: { availableKfCapabilities: ["webcontainer"], approvedAuthorizationRefs: [] },
+    })).toThrow("MODULE_WEBCONTAINER_DISALLOWED: hero@1.0.0");
+
+    const authorizedRegistry = new ModuleRegistry();
+    authorizedRegistry.register(definition({
+      requiredKfCapabilities: ["webcontainer"],
+      fallbackPolicy: { mode: "allow-webcontainer", authorizationRef: "invented-ref" },
+    }));
+    expect(() => authorizedRegistry.validateInstance({
+      instance,
+      assets,
+      context: { availableKfCapabilities: ["webcontainer"], approvedAuthorizationRefs: ["approved-webcontainer"] },
+    })).toThrow("MODULE_WEBCONTAINER_UNAUTHORIZED: hero@1.0.0 [invented-ref]");
+    const approvedRegistry = new ModuleRegistry();
+    approvedRegistry.register(definition({
+      requiredKfCapabilities: ["webcontainer"],
+      fallbackPolicy: { mode: "allow-webcontainer", authorizationRef: "approved-webcontainer" },
+    }));
+    expect(approvedRegistry.validateInstance({
+      instance,
+      assets,
+      context: { availableKfCapabilities: ["webcontainer"], approvedAuthorizationRefs: ["approved-webcontainer"] },
+    }).definition.kind).toBe("hero");
+  });
+
+  it("sorts planning catalog entries by code point rather than locale", () => {
+    const registry = new ModuleRegistry();
+    registry.register(definition({ version: "a" }));
+    registry.register(definition({ version: "_" }));
+    registry.register(definition({ version: "A" }));
+
+    expect(registry.listForPlanning().map((item) => item.version)).toEqual(["A", "_", "a"]);
   });
 
   it("returns immutable catalog snapshots without compiler functions or native templates", () => {

@@ -16,6 +16,8 @@ const theme = {
 const hero = {
   id: "hero",
   kind: "hero",
+  templateVersion: "1.0.0",
+  variant: "default",
   title: "欢迎使用门户",
   placement: {
     region: "main",
@@ -32,6 +34,8 @@ const hero = {
 const announcement = {
   id: "announcement",
   kind: "notice",
+  templateVersion: "1.0.0",
+  variant: "default",
   title: "本周更新",
   placement: {
     region: "main",
@@ -71,6 +75,17 @@ const validPlan = {
 describe("ModulePlanSchema", () => {
   it("accepts a vertical-flow portal with declaration-only placement", () => {
     expect(ModulePlanSchema.parse(validPlan).schema).toBe("kf-module-plan/v1");
+  });
+
+  it("requires each persisted module to pin an exact template version and variant", () => {
+    expect(ModulePlanSchema.safeParse({
+      ...validPlan,
+      pages: [{ ...validPlan.pages[0], modules: [{ ...hero, templateVersion: undefined }] }],
+    }).success).toBe(false);
+    expect(ModulePlanSchema.safeParse({
+      ...validPlan,
+      pages: [{ ...validPlan.pages[0], modules: [{ ...hero, variant: undefined }] }],
+    }).success).toBe(false);
   });
 
   it("rejects duplicate page and module ids", () => {
@@ -179,6 +194,56 @@ describe("ModulePlanSchema", () => {
         },
       }],
     }).success).toBe(true);
+  });
+
+  it("keeps template identity attached to a module update and changes variants explicitly", () => {
+    expect(ModulePlanSchema.safeParse({
+      ...validPlan,
+      operations: [{
+        op: "update",
+        pageId: "home",
+        moduleId: "hero",
+        changes: { kind: "notice" },
+      }],
+    }).success).toBe(false);
+    expect(ModulePlanSchema.safeParse({
+      ...validPlan,
+      operations: [{
+        op: "update",
+        pageId: "home",
+        moduleId: "hero",
+        changes: { templateVersion: "2.0.0" },
+      }],
+    }).success).toBe(false);
+    expect(ModulePlanSchema.safeParse({
+      ...validPlan,
+      operations: [{
+        op: "update",
+        pageId: "home",
+        moduleId: "hero",
+        changes: { variant: "compact" },
+      }],
+    }).success).toBe(false);
+    expect(ModulePlanSchema.safeParse({
+      ...validPlan,
+      operations: [{
+        op: "changeVariant",
+        pageId: "home",
+        moduleId: "hero",
+        templateVersion: "1.0.0",
+        variant: "compact",
+      }],
+    }).success).toBe(true);
+    expect(ModulePlanSchema.safeParse({
+      ...validPlan,
+      operations: [{
+        op: "changeVariant",
+        pageId: "home",
+        moduleId: "hero",
+        templateVersion: "2.0.0",
+        variant: "compact",
+      }],
+    }).success).toBe(false);
   });
 
   it("keeps legacy v1 submit, filter, and toggle interactions registered and safe", () => {

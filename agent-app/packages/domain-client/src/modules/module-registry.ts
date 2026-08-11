@@ -6,6 +6,7 @@ import type {
 import type {
   AssetSlotDefinition,
   ModuleDefinition,
+  ModuleFallbackPolicy,
   ModulePlanningSummary,
   ModuleValidationInput,
   ModuleValidationResult,
@@ -17,14 +18,17 @@ export type {
   ModuleCompileInput,
   ModuleCompileOutput,
   ModuleDefinition,
+  ModuleFallbackPolicy,
   ModuleLayoutContract,
   ModuleMaturity,
   ModulePlanningSummary,
+  ModuleValidationContext,
   ModuleValidationInput,
   ModuleValidationResult,
 } from "./types.js";
 
 const MATURITIES = new Set(["stable", "beta", "unsupported"]);
+const NATIVE_ONLY_FALLBACK_POLICY: ModuleFallbackPolicy = Object.freeze({ mode: "native-only" });
 
 function definitionKey(kind: string, version: string): string {
   return `${kind}@${version}`;
@@ -46,6 +50,16 @@ function freezeSlot(slot: AssetSlotDefinition): AssetSlotDefinition {
   });
 }
 
+function freezeFallbackPolicy(policy: ModuleFallbackPolicy): ModuleFallbackPolicy {
+  return policy.mode === "native-only"
+    ? Object.freeze({ mode: "native-only" })
+    : Object.freeze({ mode: "allow-webcontainer", authorizationRef: policy.authorizationRef });
+}
+
+function fallbackPolicyOf(definition: ModuleDefinition): ModuleFallbackPolicy {
+  return definition.fallbackPolicy ?? NATIVE_ONLY_FALLBACK_POLICY;
+}
+
 function freezeDefinition(definition: ModuleDefinition): ModuleDefinition {
   const layout = Object.freeze({
     regions: freezeArray(definition.layout.regions),
@@ -57,6 +71,7 @@ function freezeDefinition(definition: ModuleDefinition): ModuleDefinition {
 
   return Object.freeze({
     ...definition,
+    fallbackPolicy: freezeFallbackPolicy(fallbackPolicyOf(definition)),
     variants: freezeArray(definition.variants),
     assetSlots: freezeArray(definition.assetSlots.map(freezeSlot)),
     requiredKfCapabilities: freezeArray(definition.requiredKfCapabilities),
@@ -77,6 +92,16 @@ function assertDefinition(definition: ModuleDefinition): void {
   }
   if (new Set(definition.variants).size !== definition.variants.length) {
     fail("MODULE_DEFINITION_INVALID", `${key} has duplicate variants`);
+  }
+  const fallbackPolicy = fallbackPolicyOf(definition);
+  if (
+    fallbackPolicy.mode !== "native-only"
+    && (
+      fallbackPolicy.mode !== "allow-webcontainer"
+      || !fallbackPolicy.authorizationRef
+    )
+  ) {
+    fail("MODULE_DEFINITION_INVALID", `${key} has an invalid fallback policy`);
   }
   if (definition.assetSlots.length > 1) {
     fail("MODULE_DEFINITION_INVALID", `${key} has more asset slots than ModulePlanModule can represent`);
@@ -166,6 +191,33 @@ function planningSummary(definition: ModuleDefinition): ModulePlanningSummary {
   });
 }
 
+function compareCodePoints(left: string, right: string): number {
+  const leftPoints = Array.from(left);
+  const rightPoints = Array.from(right);
+  const length = Math.min(leftPoints.length, rightPoints.length);
+  for (let index = 0; index < length; index += 1) {
+    const leftPoint = leftPoints[index]!.codePointAt(0)!;
+    const rightPoint = rightPoints[index]!.codePointAt(0)!;
+    if (leftPoint !== rightPoint) return leftPoint < rightPoint ? -1 : 1;
+  }
+  return leftPoints.length === rightPoints.length ? 0 : leftPoints.length < rightPoints.length ? -1 : 1;
+}
+
+function assertWebContainerAuthorization(
+  definition: ModuleDefinition,
+  approvedAuthorizationRefs: readonly string[],
+  key: string,
+): void {
+  if (!definition.requiredKfCapabilities.includes("webcontainer")) return;
+  const fallbackPolicy = fallbackPolicyOf(definition);
+  if (fallbackPolicy.mode === "native-only") {
+    fail("MODULE_WEBCONTAINER_DISALLOWED", key);
+  }
+  if (!approvedAuthorizationRefs.includes(fallbackPolicy.authorizationRef)) {
+    fail("MODULE_WEBCONTAINER_UNAUTHORIZED", `${key} [${fallbackPolicy.authorizationRef}]`);
+  }
+}
+
 /**
  * The authoritative module capability boundary. A caller must always provide
  * an exact version; this registry intentionally has no latest-version lookup.
@@ -192,20 +244,21 @@ export class ModuleRegistry {
     return Object.freeze(
       [...this.#definitions.values()]
         .filter((definition) => definition.maturity === "stable")
-        .sort((left, right) => definitionKey(left.kind, left.version).localeCompare(definitionKey(right.kind, right.version)))
+        .sort((left, right) => compareCodePoints(definitionKey(left.kind, left.version), definitionKey(right.kind, right.version)))
         .map(planningSummary),
     );
   }
 
   validateInstance(input: ModuleValidationInput): ModuleValidationResult {
-    const definition = this.require(input.instance.kind, input.version);
+    const definition = this.require(input.instance.kind, input.instance.templateVersion);
     const key = definitionKey(definition.kind, definition.version);
     if (definition.maturity === "unsupported") fail("MODULE_UNSUPPORTED", key);
-    if (!definition.variants.includes(input.variant)) {
-      fail("MODULE_VARIANT_UNSUPPORTED", `${key} [${input.variant}]`);
+    if (!definition.variants.includes(input.instance.variant)) {
+      fail("MODULE_VARIANT_UNSUPPORTED", `${key} [${input.instance.variant}]`);
     }
+    assertWebContainerAuthorization(definition, input.context.approvedAuthorizationRefs, key);
     const missingCapabilities = definition.requiredKfCapabilities.filter(
-      (capability) => !input.availableKfCapabilities.includes(capability),
+      (capability) => !input.context.availableKfCapabilities.includes(capability),
     );
     if (missingCapabilities.length > 0) {
       fail("MODULE_KF_CAPABILITY_MISSING", `${key} [${missingCapabilities.join(", ")}]`);

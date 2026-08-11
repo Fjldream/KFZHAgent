@@ -11,6 +11,13 @@ const stableIdSchema = z
   .regex(/^[A-Za-z][A-Za-z0-9_-]*$/)
   .refine((value) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value));
 
+const templateVersionSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(100)
+  .regex(/^[0-9A-Za-z][0-9A-Za-z._-]*$/);
+
 const moduleTextSchema = z
   .string()
   .trim()
@@ -42,6 +49,8 @@ export const ModulePlanModuleSchema = z
   .object({
     id: stableIdSchema,
     kind: stableIdSchema,
+    templateVersion: templateVersionSchema,
+    variant: stableIdSchema,
     title: moduleTextSchema,
     content: moduleTextSchema.optional(),
     placement: ModulePlacementSchema,
@@ -61,7 +70,6 @@ export const ModulePlanPageSchema = z
 
 const moduleUpdateSchema = z
   .object({
-    kind: stableIdSchema.optional(),
     title: moduleTextSchema.optional(),
     content: moduleTextSchema.optional(),
     placement: ModulePlacementSchema.optional(),
@@ -84,6 +92,16 @@ export const ModulePlanOperationSchema = z.discriminatedUnion("op", [
       pageId: stableIdSchema,
       moduleId: stableIdSchema,
       changes: moduleUpdateSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("changeVariant"),
+      pageId: stableIdSchema,
+      moduleId: stableIdSchema,
+      /** Must match the persisted module version; upgrades need a new module plan. */
+      templateVersion: templateVersionSchema,
+      variant: stableIdSchema,
     })
     .strict(),
   z
@@ -137,6 +155,7 @@ export const ModulePlanSchema = z
 
     const pageIds = new Set<string>();
     const modulesByPage = new Map<string, Set<string>>();
+    const moduleDefinitionsByPage = new Map<string, Map<string, ModulePlanModule>>();
     const moduleIds = new Set<string>();
     const interactionSources: Array<{ interactions: ModuleInteraction[]; path: (string | number)[] }> = [];
     plan.pages.forEach((page, pageIndex) => {
@@ -146,11 +165,14 @@ export const ModulePlanSchema = z
       pageIds.add(page.id);
       const pageModuleIds = new Set<string>();
       modulesByPage.set(page.id, pageModuleIds);
+      const pageModules = new Map<string, ModulePlanModule>();
+      moduleDefinitionsByPage.set(page.id, pageModules);
       page.modules.forEach((module, moduleIndex) => {
         if (pageModuleIds.has(module.id) || moduleIds.has(module.id)) {
           ctx.addIssue({ code: "custom", path: ["pages", pageIndex, "modules", moduleIndex, "id"], message: `duplicate module id: ${module.id}` });
         }
         pageModuleIds.add(module.id);
+        pageModules.set(module.id, module);
         moduleIds.add(module.id);
         interactionSources.push({ interactions: module.interactions, path: ["pages", pageIndex, "modules", moduleIndex, "interactions"] });
         if (module.assetId !== undefined && !assetIds.has(module.assetId)) {
@@ -165,12 +187,14 @@ export const ModulePlanSchema = z
         return;
       }
       const pageModuleIds = modulesByPage.get(operation.pageId)!;
+      const pageModules = moduleDefinitionsByPage.get(operation.pageId)!;
       if (operation.op === "add") {
         if (moduleIds.has(operation.module.id)) {
           ctx.addIssue({ code: "custom", path: ["operations", index, "module", "id"], message: `duplicate module id: ${operation.module.id}` });
         }
         moduleIds.add(operation.module.id);
         pageModuleIds.add(operation.module.id);
+        pageModules.set(operation.module.id, operation.module);
         interactionSources.push({ interactions: operation.module.interactions, path: ["operations", index, "module", "interactions"] });
         if (operation.module.assetId !== undefined && !assetIds.has(operation.module.assetId)) {
           ctx.addIssue({ code: "custom", path: ["operations", index, "module", "assetId"], message: `unknown asset id: ${operation.module.assetId}` });
@@ -183,7 +207,21 @@ export const ModulePlanSchema = z
       }
       if (operation.op === "remove") {
         pageModuleIds.delete(operation.moduleId);
+        pageModules.delete(operation.moduleId);
         moduleIds.delete(operation.moduleId);
+        return;
+      }
+      if (operation.op === "changeVariant") {
+        const module = pageModules.get(operation.moduleId)!;
+        if (module.templateVersion !== operation.templateVersion) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["operations", index, "templateVersion"],
+            message: `template version must remain pinned to module ${operation.moduleId}`,
+          });
+          return;
+        }
+        pageModules.set(operation.moduleId, { ...module, variant: operation.variant });
         return;
       }
       if (operation.op === "update") {
