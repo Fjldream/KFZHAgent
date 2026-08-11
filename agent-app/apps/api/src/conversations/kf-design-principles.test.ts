@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   KF_DESIGN_PRINCIPLES,
   KF_DESIGN_PRINCIPLES_FULL,
+  KF_MODULE_PLANNING_PRINCIPLES,
 } from "./kf-design-principles.js";
 import { DeepSeekModelPort } from "./deepseek-model.js";
 
@@ -143,6 +144,16 @@ describe("KF_DESIGN_PRINCIPLES_FULL", () => {
   it("marks chart special nodes as placeholders that only render at KF runtime", () => {
     expect(KF_DESIGN_PRINCIPLES_FULL).toContain("KF 渲染");
     expect(KF_DESIGN_PRINCIPLES_FULL).toContain("占位");
+  });
+});
+
+describe("KF_MODULE_PLANNING_PRINCIPLES", () => {
+  it("keeps module planning semantic and stable-only", () => {
+    expect(KF_MODULE_PLANNING_PRINCIPLES).toContain("稳定 Module Registry");
+    expect(KF_MODULE_PLANNING_PRINCIPLES).toContain("sourceBlueprintModuleIds");
+    expect(KF_MODULE_PLANNING_PRINCIPLES).toContain("assetId");
+    expect(KF_MODULE_PLANNING_PRINCIPLES).toContain("geometry");
+    expect(KF_MODULE_PLANNING_PRINCIPLES).toContain("storageKey");
   });
 });
 

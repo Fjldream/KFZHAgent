@@ -273,6 +273,12 @@ class StubModelPort implements ModelPort {
   async reviseUiImplementation(input: ModelPortContext): Promise<UIImplementationSpec> {
     return input.uiImplementation ?? this.createUiImplementation();
   }
+  async createModulePlan(): Promise<never> {
+    throw new Error("module planning is not exercised by the legacy graph fixture");
+  }
+  async reviseModulePlan(): Promise<never> {
+    throw new Error("module planning is not exercised by the legacy graph fixture");
+  }
   async createChangePlan(input: ModelPortContext): Promise<ChangePlan> {
     return {
       schema: "kf-change-plan/v1",

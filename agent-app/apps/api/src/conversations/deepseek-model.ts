@@ -1,17 +1,23 @@
 import type {
+  AssetRecord,
   ChangePlan,
+  CustomerEffectBlueprint,
   DesignPlan,
+  ModulePlan,
   UIImplementationSpec,
   ValidationReport,
 } from "@kf/contracts";
 import {
+  canonicalModuleCompilationHash,
   changePlanSchema,
   CustomerEffectBlueprintSchema,
+  ModulePlanSchema,
   solutionId,
   UIImplementationSpecSchema,
 } from "@kf/contracts";
+import { readVerifiedAcceptedBlueprintArtifact } from "@kf/build-jobs";
 import { listControlCapabilities } from "@kf/domain-client";
-import { KF_DESIGN_PRINCIPLES_FULL } from "./kf-design-principles.js";
+import { KF_DESIGN_PRINCIPLES_FULL, KF_MODULE_PLANNING_PRINCIPLES } from "./kf-design-principles.js";
 import type {
   ClassifyIntentResult,
   EditableEntity,
@@ -106,6 +112,109 @@ const UI_IMPLEMENTATION_SYSTEM_PROMPT = `你是 KingFusion UI 实施规划 Agent
 - 禁止输出 KF 原始 JSON、objectType、uiModelType、styleDataNew、原始 CSS、选择器、JavaScript、脚本或工程文件。
 - 所有布局、内容、控件能力和样式都必须通过 UIImplementationSpec 的结构化字段表达。
 - 每个确认蓝图模块都必须由至少一个带对应 sourceModuleId 的组件实现。`;
+
+/** Module planning is deliberately separate from both the legacy ChangePlan and raw KF implementation prompts. */
+const MODULE_PLAN_SYSTEM_PROMPT = `你是 KingFusion 模块规划 Agent，只输出严格的 kf-module-plan/v1 JSON。
+
+- 你只选择服务器登记且明确列出的 stable 模块、版本、变体、语义区域、顺序、列宽、期望高度、对齐、层级、内容、交互和 assetId。
+- 你绝不输出逐控件坐标、geometry、CSS、选择器、工程文件路径、存储键、KF 原生字段、objectType、uiModelType、styleDataNew、脚本、JavaScript 或 HTML。
+- 已确认蓝图事实、模块 kind/category/交互约束、资产目录和稳定目录均由服务器授权；不得编造、替换或扩展它们。
+- 只输出合法 JSON；不要 Markdown 围栏、解释、注释或额外文本。
+
+${KF_MODULE_PLANNING_PRINCIPLES}`;
+
+const MAX_MODULE_PLANNING_CATALOG = 50;
+const MAX_MODULE_PLANNING_ASSETS = 100;
+const MAX_MODULE_REJECTION_REASONS = 12;
+const MAX_MODULE_RECENT_MESSAGES = 20;
+const FORBIDDEN_MODULE_FIELD = /(?:^|[_-])(?:geometry|css|selector|path|filepath|storagekey|script|javascript|objecttype|uimodeltype|styledatanew|baseproperty|lefttoppt|insiderobjects|configured?ata|layouttype|prototype|guid|native)(?:$|[_-])/i;
+const FORBIDDEN_MODULE_TEXT = /<\/?script\b|<style\b|javascript\s*:|data\s*:\s*text\s*\/\s*html|(?:^|[;{])\s*(?:position|display|flex|grid|font-size|background|color|margin|padding)\s*:/i;
+
+function codePointCompare(left: string, right: string): number {
+  const leftPoints = Array.from(left);
+  const rightPoints = Array.from(right);
+  const length = Math.min(leftPoints.length, rightPoints.length);
+  for (let index = 0; index < length; index += 1) {
+    const leftPoint = leftPoints[index]!.codePointAt(0)!;
+    const rightPoint = rightPoints[index]!.codePointAt(0)!;
+    if (leftPoint !== rightPoint) return leftPoint < rightPoint ? -1 : 1;
+  }
+  return leftPoints.length === rightPoints.length ? 0 : leftPoints.length < rightPoints.length ? -1 : 1;
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort(codePointCompare).map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
+}
+
+function stableEqual(left: unknown, right: unknown): boolean {
+  return canonicalJson(left) === canonicalJson(right);
+}
+
+function throwModulePlanError(detail: string): never {
+  throw new DeepSeekModelOutputError(`module plan ${detail}`);
+}
+
+/** Model reply has passed JSON.parse, but scan its JSON tree before schema parsing for disallowed implementation vocabulary. */
+function assertSafeModulePlanOutput(root: unknown): void {
+  const pending: unknown[] = [root];
+  let nodes = 0;
+  while (pending.length > 0) {
+    const value = pending.pop();
+    nodes += 1;
+    if (nodes > 20_000) throwModulePlanError("exceeds raw node budget");
+    if (typeof value === "string") {
+      if (FORBIDDEN_MODULE_TEXT.test(value)) throwModulePlanError("contains forbidden CSS or script text");
+      const nested = value.trim();
+      if (nested.length > 1 && nested.length <= 2_000 && (nested.startsWith("{") || nested.startsWith("["))) {
+        try {
+          // `content` is intentionally a JSON string in ModulePlan. Inspect it
+          // as data too, so forbidden native/storage fields cannot hide there.
+          pending.push(JSON.parse(nested) as unknown);
+        } catch {
+          // Content schemas decide whether non-JSON content is meaningful; the
+          // safety scan must not reinterpret ordinary customer prose as JSON.
+        }
+      }
+      continue;
+    }
+    if (value === null || typeof value === "boolean" || typeof value === "number") continue;
+    if (typeof value !== "object") throwModulePlanError("contains a non-JSON value");
+    if (Array.isArray(value)) {
+      for (const child of value as unknown[]) pending.push(child);
+      continue;
+    }
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      if (FORBIDDEN_MODULE_FIELD.test(key)) throwModulePlanError(`contains forbidden field: ${key}`);
+      pending.push(child);
+    }
+  }
+}
+
+function acceptedModulePlanningFacts(input: ModelPortContext): {
+  readonly blueprint: CustomerEffectBlueprint;
+  readonly accepted: ReturnType<typeof readVerifiedAcceptedBlueprintArtifact>;
+} {
+  if (input.confirmedBlueprint === undefined) throwModulePlanError("requires a confirmed v2 blueprint");
+  const parsedBlueprint = CustomerEffectBlueprintSchema.safeParse(input.confirmedBlueprint);
+  if (!parsedBlueprint.success) throwModulePlanError("confirmed blueprint failed schema validation");
+  if (input.acceptedBlueprintArtifact === undefined) throwModulePlanError("requires a verified accepted blueprint artifact");
+  let accepted: ReturnType<typeof readVerifiedAcceptedBlueprintArtifact>;
+  try {
+    accepted = readVerifiedAcceptedBlueprintArtifact(input.acceptedBlueprintArtifact);
+  } catch (error) {
+    throwModulePlanError(error instanceof Error ? error.message : "accepted blueprint artifact is invalid");
+  }
+  if (canonicalModuleCompilationHash(parsedBlueprint.data) !== accepted.blueprintHash) {
+    throwModulePlanError("confirmed blueprint does not match accepted artifact");
+  }
+  const acceptedIds = accepted.modules.map((module) => module.blueprintModuleId).sort(codePointCompare);
+  const blueprintIds = parsedBlueprint.data.modules.map((module) => module.id).sort(codePointCompare);
+  if (!stableEqual(acceptedIds, blueprintIds)) throwModulePlanError("accepted artifact module set does not match confirmed blueprint");
+  return { blueprint: parsedBlueprint.data, accepted };
+}
 
 /**
  * CLARIFY 输出若漏掉 clarifyingQuestion（模型只声明要澄清却没给问题），
@@ -759,6 +868,216 @@ export class DeepSeekModelPort implements ModelPort {
 
   reviseUiImplementation(input: ModelPortContext): Promise<UIImplementationSpec> {
     return this.generateUiImplementation(input, true);
+  }
+
+  private planningCatalog(input: ModelPortContext) {
+    const supplied = input.modulePlanningCatalog ?? [];
+    if (supplied.length > MAX_MODULE_PLANNING_CATALOG) throwModulePlanError("planning catalog exceeds bound");
+    const stable = supplied
+      .filter((entry) => entry.maturity === "stable")
+      .map((entry) => ({
+        kind: entry.kind,
+        version: entry.version,
+        variants: [...entry.variants].sort(codePointCompare),
+        slots: entry.slots.map((slot) => ({
+          id: slot.id,
+          required: slot.required,
+          ...(slot.requiredForVariants === undefined ? {} : { requiredForVariants: [...slot.requiredForVariants].sort(codePointCompare) }),
+          allowedKinds: [...slot.allowedKinds].sort(codePointCompare),
+        })),
+        interactions: [...entry.interactions].sort(codePointCompare),
+        layout: {
+          regions: [...entry.layout.regions].sort(codePointCompare),
+          minColumnSpan: entry.layout.minColumnSpan,
+          maxColumnSpan: entry.layout.maxColumnSpan,
+          preferredHeights: [...entry.layout.preferredHeights].sort(codePointCompare),
+        },
+      }))
+      .sort((left, right) => codePointCompare(`${left.kind}@${left.version}`, `${right.kind}@${right.version}`));
+    if (new Set(stable.map((entry) => `${entry.kind}\u0000${entry.version}`)).size !== stable.length) {
+      throwModulePlanError("planning catalog contains duplicate kind/version");
+    }
+    return stable;
+  }
+
+  private planningAssets(input: ModelPortContext): readonly AssetRecord[] {
+    const assets = input.assetCatalog ?? [];
+    if (assets.length > MAX_MODULE_PLANNING_ASSETS) throwModulePlanError("asset catalog exceeds bound");
+    const ids = assets.map((asset) => asset.id);
+    if (new Set(ids).size !== ids.length) throwModulePlanError("asset catalog contains duplicate IDs");
+    return [...assets].sort((left, right) => codePointCompare(left.id, right.id));
+  }
+
+  private buildModulePlanPrompt(input: ModelPortContext, revising: boolean): string {
+    const { blueprint, accepted } = acceptedModulePlanningFacts(input);
+    const catalog = this.planningCatalog(input);
+    const assets = this.planningAssets(input);
+    if (catalog.length === 0) throwModulePlanError("no stable registry modules are currently available for planning");
+
+    const stableKinds = new Set(catalog.map((entry) => entry.kind));
+    const unavailable = accepted.modules
+      .filter((module) => !stableKinds.has(module.expectedKind))
+      .map((module) => `${module.blueprintModuleId}:${module.expectedKind}`)
+      .sort(codePointCompare);
+    if (unavailable.length > 0) {
+      throwModulePlanError(`accepted blueprint requires unavailable stable modules: ${unavailable.join(", ")}`);
+    }
+
+    const acceptedById = new Map(accepted.modules.map((module) => [module.blueprintModuleId, module]));
+    const confirmedModules = blueprint.modules.map((module) => {
+      const fact = acceptedById.get(module.id)!;
+      return {
+        id: module.id,
+        name: module.name,
+        purpose: module.purpose,
+        content: module.content,
+        sampleData: module.sampleData,
+        presentation: module.presentation,
+        interactions: module.interactions,
+        expectedKind: fact.expectedKind,
+        expectedCategory: fact.expectedCategory,
+        interactionRequirements: fact.interactionRequirements,
+      };
+    });
+    const recentConversation = input.recentMessages
+      .slice(-MAX_MODULE_RECENT_MESSAGES)
+      .map((message) => `${message.role}: ${message.content.slice(0, 800)}`)
+      .join("\n");
+    const rejectionReasons = (input.modulePlanRejectionReasons ?? [])
+      .slice(0, MAX_MODULE_REJECTION_REASONS)
+      .map((reason) => reason.slice(0, 500));
+    return [
+      "把已经确认的客户效果蓝图转换成完整 ModulePlan，而不是 UIImplementationSpec、ChangePlan 或 KF JSON。",
+      "输出 schema 固定为 kf-module-plan/v1，包含 projectKey、theme、assets、pages、operations。assets 必须逐条原样使用下面的服务器资产目录；模块只能在 assetId 中引用目录中的 id，绝不写路径、URL、storageKey 或文件名替代 ID。",
+      "每个 module 只能使用稳定目录中逐字一致的 kind、version(templateVersion) 和 variant；beta、unsupported 或未列出的条目一律不可用。",
+      "placement 只能表达 region、order、columnSpan、preferredHeight、alignment、emphasis；禁止输出 geometry、x、y、width、height 或任何 CSS。",
+      "每个已确认蓝图模块 ID 必须且只能出现一次 sourceBlueprintModuleIds；其 module.kind 必须逐字匹配服务器已确认的 expectedKind。不要新增、删除或改写这些来源 ID。",
+      "内容只能写 title 与 JSON 字符串 content；theme 只能使用 ModulePlan 的结构化 theme 字段。禁止原生 KF 字段、objectType、uiModelType、styleDataNew、脚本、HTML、JavaScript、CSS、文件路径与存储键。",
+      "交互只能使用登记模块允许的 ModulePlan 交互类型，并匹配已确认蓝图交互要求。",
+      revising
+        ? "这是完整修订：pages 必须保留所有上一版模块；没有显式 operations 目标的旧模块必须逐字保持不变。不得把遗漏当作删除。"
+        : "这是首次完整规划：所有已确认蓝图模块都必须落到 pages.modules。",
+      "已确认且服务器签名的蓝图事实（模型不得改变其中 expectedKind/category/interactionRequirements）：",
+      JSON.stringify({ projectKey: accepted.projectKey, revisionId: accepted.revisionId, modules: confirmedModules }),
+      "生产稳定模块目录（来自 Registry.listForPlanning()）：",
+      catalog.map((entry) => `${entry.kind}@${entry.version} variants=${entry.variants.join(",")} layout=${JSON.stringify(entry.layout)} interactions=${entry.interactions.join(",") || "none"} assetSlots=${JSON.stringify(entry.slots)}`).join("\n"),
+      "服务器资产目录（只能按 id 引用；assets 顶层必须逐条原样回显）：",
+      JSON.stringify(assets),
+      "最近会话上下文：",
+      recentConversation || "（无）",
+      "客户本次要求：" + (input.requirementText ?? "（无）"),
+      ...(revising ? ["上一版完整 ModulePlan：", JSON.stringify(input.previousModulePlan ?? null)] : []),
+      ...(rejectionReasons.length > 0 ? ["上一候选未通过的确定性门禁（逐项修复，不得扩展范围）：", ...rejectionReasons.map((reason) => `- ${reason}`)] : []),
+    ].join("\n");
+  }
+
+  private validateModulePlan(input: ModelPortContext, raw: unknown, revising: boolean): ModulePlan {
+    assertSafeModulePlanOutput(raw);
+    const parsed = ModulePlanSchema.safeParse(raw);
+    if (!parsed.success) {
+      throwModulePlanError(`failed zod gate: ${parsed.error.issues.slice(0, 3).map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")}`);
+    }
+    const plan = parsed.data;
+    const { accepted } = acceptedModulePlanningFacts(input);
+    if (plan.projectKey !== accepted.projectKey) throwModulePlanError("projectKey differs from accepted artifact");
+    const catalog = this.planningCatalog(input);
+    const definitionByKey = new Map(catalog.map((entry) => [`${entry.kind}\u0000${entry.version}`, entry]));
+    const assets = this.planningAssets(input);
+    if (!stableEqual([...plan.assets].sort((left, right) => codePointCompare(left.id, right.id)), assets)) {
+      throwModulePlanError("assets must exactly match the server asset catalog");
+    }
+    const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
+    const acceptedByBlueprintId = new Map(accepted.modules.map((module) => [module.blueprintModuleId, module]));
+    if (revising) {
+      if (input.previousModulePlan === undefined) throwModulePlanError("revision requires a previous ModulePlan");
+      const previous = ModulePlanSchema.safeParse(input.previousModulePlan);
+      if (!previous.success) throwModulePlanError("previous ModulePlan failed schema validation");
+      if (previous.data.projectKey !== plan.projectKey) throwModulePlanError("revision projectKey differs from previous ModulePlan");
+      const currentById = new Map(plan.pages.flatMap((page) => page.modules.map((module) => [module.id, module])));
+      const operationTargets = new Set(plan.operations.flatMap((operation) => operation.op === "add" ? [] : [operation.moduleId]));
+      for (const previousModule of previous.data.pages.flatMap((page) => page.modules)) {
+        const current = currentById.get(previousModule.id);
+        if (current === undefined) throwModulePlanError(`missing previous module: ${previousModule.id}`);
+        if (!operationTargets.has(previousModule.id) && !stableEqual(current, previousModule)) {
+          throwModulePlanError(`unchanged previous module differs: ${previousModule.id}`);
+        }
+      }
+    }
+    const seenBlueprintIds = new Set<string>();
+    for (const page of plan.pages) {
+      for (const module of page.modules) {
+        if (/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(module.id)) {
+          throwModulePlanError(`module ID must be semantic and stable: ${module.id}`);
+        }
+        const definition = definitionByKey.get(`${module.kind}\u0000${module.templateVersion}`);
+        if (definition === undefined || !definition.variants.includes(module.variant)) {
+          throwModulePlanError(`uses unknown, beta, unsupported, or unavailable module: ${module.kind}@${module.templateVersion}/${module.variant}`);
+        }
+        if (!definition.layout.regions.includes(module.placement.region)
+          || module.placement.columnSpan < definition.layout.minColumnSpan
+          || module.placement.columnSpan > definition.layout.maxColumnSpan
+          || !definition.layout.preferredHeights.includes(module.placement.preferredHeight)
+          || module.interactions.some((interaction) => !definition.interactions.includes(interaction.type))) {
+          throwModulePlanError(`uses invalid semantic placement or interaction for ${module.id}`);
+        }
+        const requiredSlot = definition.slots.find((slot) => slot.required || slot.requiredForVariants?.includes(module.variant));
+        if (module.assetId === undefined && requiredSlot !== undefined) {
+          throwModulePlanError(`omits required asset for ${module.id}: ${requiredSlot.id}`);
+        }
+        if (module.assetId !== undefined) {
+          const asset = assetsById.get(module.assetId);
+          if (asset === undefined) throwModulePlanError(`references unknown asset ID: ${module.assetId}`);
+          if (!definition.slots.some((slot) => slot.allowedKinds.includes(asset.kind))) {
+            throwModulePlanError(`uses asset kind unavailable to ${module.id}`);
+          }
+        }
+        for (const blueprintId of module.sourceBlueprintModuleIds ?? []) {
+          const acceptedFact = acceptedByBlueprintId.get(blueprintId);
+          if (acceptedFact === undefined || acceptedFact.expectedKind !== module.kind || seenBlueprintIds.has(blueprintId)) {
+            throwModulePlanError(`has invalid sourceBlueprintModuleIds declaration for ${module.id}`);
+          }
+          seenBlueprintIds.add(blueprintId);
+        }
+      }
+    }
+    const expectedBlueprintIds = accepted.modules.map((module) => module.blueprintModuleId).sort(codePointCompare);
+    const actualBlueprintIds = [...seenBlueprintIds].sort(codePointCompare);
+    if (!stableEqual(actualBlueprintIds, expectedBlueprintIds)) throwModulePlanError("does not cover every accepted blueprint module exactly once");
+
+    return plan;
+  }
+
+  private async requestModulePlan(input: ModelPortContext, revising: boolean, repair?: string): Promise<ModulePlan> {
+    const raw = await this.chatJson(
+      MODULE_PLAN_SYSTEM_PROMPT,
+      [this.buildModulePlanPrompt(input, revising), ...(repair === undefined ? [] : [repair])].join("\n"),
+      { maxTokens: 8000 },
+    );
+    return this.validateModulePlan(input, raw, revising);
+  }
+
+  private async generateModulePlan(input: ModelPortContext, revising: boolean): Promise<ModulePlan> {
+    try {
+      return await this.requestModulePlan(input, revising);
+    } catch (error) {
+      const detail = error instanceof DeepSeekModelOutputError ? error.message : "";
+      const malformed = detail.includes("no JSON object")
+        || detail.includes("unparseable JSON")
+        || detail.includes("truncated at the output token limit");
+      if (!malformed) throw error;
+      return this.requestModulePlan(input, revising, [
+        "上一轮仅因 JSON 无法解析或被截断而失败。只修复 JSON 语法并输出完整对象；不要改变已确认蓝图、目录、资产或修订范围。",
+        "只修复 JSON 语法，不要续写残片，不要添加解释、CSS、坐标或原生 KF 字段。",
+      ].join("\n"));
+    }
+  }
+
+  createModulePlan(input: ModelPortContext): Promise<ModulePlan> {
+    return this.generateModulePlan(input, false);
+  }
+
+  reviseModulePlan(input: ModelPortContext): Promise<ModulePlan> {
+    return this.generateModulePlan(input, true);
   }
 
   /** 构造 create/revise 共用的计划生成 prompt。 */

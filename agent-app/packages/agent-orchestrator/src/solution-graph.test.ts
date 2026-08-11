@@ -299,6 +299,14 @@ class FakeModelPort implements ModelPort {
     return this.makeImplementation(input, "rev");
   }
 
+  async createModulePlan(): Promise<never> {
+    throw new Error("module planning is not exercised by the legacy graph fixture");
+  }
+
+  async reviseModulePlan(): Promise<never> {
+    throw new Error("module planning is not exercised by the legacy graph fixture");
+  }
+
   async createChangePlan(input: ModelPortContext): Promise<ChangePlan> {
     this.createCalls.push(input);
     return this.recordPlan(this.makePlan(input.workspaceId, "new"));

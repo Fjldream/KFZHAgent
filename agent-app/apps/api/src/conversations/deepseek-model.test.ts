@@ -1,5 +1,7 @@
 // @ts-nocheck -- mock-fetch 场景的 JS 风格测试；行为由 vitest 断言验证。
 import { describe, expect, it, vi } from "vitest";
+import { canonicalModuleCompilationHash } from "@kf/contracts";
+import { createHmacModuleArtifactAuthority } from "@kf/build-jobs";
 import { DeepSeekModelPort, extractJson, DeepSeekModelOutputError } from "./deepseek-model.js";
 
 function makePort(reply: unknown, status = 200) {
@@ -106,6 +108,118 @@ function uiImplementation(overrides: Record<string, unknown> = {}) {
         },
       ],
     }],
+    ...overrides,
+  };
+}
+
+function modulePlanningContext(overrides: Record<string, unknown> = {}) {
+  const blueprint = detailedBlueprint({
+    modules: [
+      {
+        id: "products",
+        name: "我的产品",
+        purpose: "展示产品能力",
+        content: ["产品定位"],
+        sampleData: [{ label: "产品", value: "KingFusion" }],
+        interactions: [],
+        expectedKind: "content.hero",
+        presentation: "首屏介绍",
+      },
+      {
+        id: "projects",
+        name: "项目经历",
+        purpose: "展示项目成果",
+        content: ["项目成果"],
+        sampleData: [{ label: "项目", value: "工业平台" }],
+        interactions: [],
+        expectedKind: "content.timeline",
+        presentation: "纵向时间线",
+      },
+    ],
+  });
+  const authority = createHmacModuleArtifactAuthority(new Uint8Array(32).fill(7));
+  const signed = authority.signAcceptedBlueprint({
+    schema: "kf-accepted-blueprint-artifact/v1",
+    projectKey: "kingclient.portal",
+    revisionId: "revision-1",
+    blueprintHash: canonicalModuleCompilationHash(blueprint),
+    modules: [
+      { blueprintModuleId: "products", expectedKind: "content.hero", expectedCategory: "content", interactionRequirements: [] },
+      { blueprintModuleId: "projects", expectedKind: "content.timeline", expectedCategory: "content", interactionRequirements: [] },
+    ],
+  });
+  const acceptedBlueprintArtifact = authority.verifyAcceptedBlueprint(signed);
+  return {
+    tenantId: "t",
+    userId: "u",
+    workspaceId: "w",
+    conversationId: "c",
+    recentMessages: [{ role: "user", content: "创建个人作品集" }],
+    requirementText: "创建个人作品集",
+    confirmedBlueprint: blueprint,
+    acceptedBlueprintArtifact,
+    modulePlanningCatalog: [
+      {
+        kind: "content.hero",
+        version: "1.0.0",
+        maturity: "stable",
+        variants: ["no-portrait"],
+        slots: [],
+        interactions: [],
+        layout: { regions: ["main"], minColumnSpan: 6, maxColumnSpan: 12, preferredHeights: ["large"] },
+      },
+      {
+        kind: "content.timeline",
+        version: "1.0.0",
+        maturity: "stable",
+        variants: ["experience"],
+        slots: [],
+        interactions: [],
+        layout: { regions: ["main"], minColumnSpan: 6, maxColumnSpan: 12, preferredHeights: ["medium"] },
+      },
+      {
+        kind: "data.table",
+        version: "1.0.0",
+        maturity: "beta",
+        variants: ["default"],
+        slots: [],
+        interactions: [],
+        layout: { regions: ["main"], minColumnSpan: 6, maxColumnSpan: 12, preferredHeights: ["medium"] },
+      },
+    ],
+    assetCatalog: [{ id: "portrait", kind: "image", name: "头像", mimeType: "image/png", description: "已上传头像" }],
+    ...overrides,
+  };
+}
+
+function modulePlan(overrides: Record<string, unknown> = {}) {
+  return {
+    schema: "kf-module-plan/v1",
+    projectKey: "kingclient.portal",
+    theme: {
+      background: "#0f172a", surface: "#111827", primary: "#2563eb", accent: "#38bdf8",
+      textPrimary: "#f8fafc", textSecondary: "#cbd5e1", fontFamily: "Arial", spacingUnit: 8,
+      radiusScale: { small: 4, medium: 8, large: 16 },
+    },
+    assets: [{ id: "portrait", kind: "image", name: "头像", mimeType: "image/png", description: "已上传头像" }],
+    pages: [{
+      id: "home", title: "个人作品集", mode: "vertical-flow",
+      modules: [
+        {
+          id: "productsHero", kind: "content.hero", templateVersion: "1.0.0", variant: "no-portrait",
+          title: "我的产品", content: '{"title":"KingFusion"}', sourceBlueprintModuleIds: ["products"],
+          placement: { region: "main", order: 0, columnSpan: 12, preferredHeight: "large", alignment: "stretch", emphasis: "primary" },
+          interactions: [],
+        },
+        {
+          id: "projectsTimeline", kind: "content.timeline", templateVersion: "1.0.0", variant: "experience",
+          title: "项目经历", content: '{"items":["工业平台"]}', sourceBlueprintModuleIds: ["projects"],
+          placement: { region: "main", order: 1, columnSpan: 12, preferredHeight: "medium", alignment: "stretch", emphasis: "secondary" },
+          interactions: [],
+        },
+      ],
+    }],
+    operations: [],
     ...overrides,
   };
 }
@@ -458,6 +572,124 @@ describe("DeepSeekModelPort", () => {
     expect(userPrompt).toContain("在上一版基础上修订");
     expect(userPrompt).toContain("蓝图主体没有实质变化");
     expect(userPrompt).toContain("不要只改 revisionNotes");
+  });
+
+  it("creates a strict ModulePlan from server-verified accepted blueprint facts and stable registry entries", async () => {
+    const candidate = modulePlan();
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify(candidate) } }] }),
+    });
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+
+    const result = await port.createModulePlan(modulePlanningContext());
+
+    expect(result).toEqual(candidate);
+    expect(result.pages[0].modules.map((module) => module.sourceBlueprintModuleIds)).toEqual([
+      ["products"], ["projects"],
+    ]);
+    const prompt = JSON.parse(fetchImpl.mock.calls[0][1].body).messages[1].content;
+    expect(prompt).toContain("ModulePlan");
+    expect(prompt).toContain("已确认且服务器签名的蓝图事实");
+    expect(prompt).toContain("content.hero@1.0.0");
+    expect(prompt).toContain("content.timeline@1.0.0");
+    expect(prompt).not.toContain("data.table@1.0.0");
+    expect(prompt).toContain("assetId");
+    expect(prompt).toContain("禁止输出 geometry");
+  });
+
+  it("rejects module output with forbidden implementation fields, unknown modules, beta modules, or unavailable assets", async () => {
+    const candidates = [
+      modulePlan({ pages: [{ ...modulePlan().pages[0], modules: [{ ...modulePlan().pages[0].modules[0], geometry: { x: 0 } }, modulePlan().pages[0].modules[1]] }]}),
+      modulePlan({ pages: [{ ...modulePlan().pages[0], modules: [{ ...modulePlan().pages[0].modules[0], css: ".hero{}" }, modulePlan().pages[0].modules[1]] }]}),
+      modulePlan({ pages: [{ ...modulePlan().pages[0], modules: [{ ...modulePlan().pages[0].modules[0], path: "/tmp/kf" }, modulePlan().pages[0].modules[1]] }]}),
+      modulePlan({ pages: [{ ...modulePlan().pages[0], modules: [{ ...modulePlan().pages[0].modules[0], content: '{"storageKey":"assets/private"}' }, modulePlan().pages[0].modules[1]] }]}),
+      modulePlan({ pages: [{ ...modulePlan().pages[0], modules: [{ ...modulePlan().pages[0].modules[0], objectType: 3 }, modulePlan().pages[0].modules[1]] }]}),
+      modulePlan({ pages: [{ ...modulePlan().pages[0], modules: [{ ...modulePlan().pages[0].modules[0], kind: "data.table", variant: "default" }, modulePlan().pages[0].modules[1]] }]}),
+      modulePlan({ pages: [{ ...modulePlan().pages[0], modules: [{ ...modulePlan().pages[0].modules[0], assetId: "not-uploaded" }, modulePlan().pages[0].modules[1]] }]}),
+    ];
+    for (const candidate of candidates) {
+      await expect(makePort(candidate).createModulePlan(modulePlanningContext()))
+        .rejects.toThrow(DeepSeekModelOutputError);
+    }
+  });
+
+  it("rejects an unverified or mismatched confirmed blueprint before it can reach the model", async () => {
+    const context = modulePlanningContext();
+    await expect(makePort(modulePlan()).createModulePlan({
+      ...context,
+      acceptedBlueprintArtifact: {} as never,
+    })).rejects.toThrow("UNVERIFIED_ACCEPTED_BLUEPRINT_ARTIFACT");
+    await expect(makePort(modulePlan()).createModulePlan({
+      ...context,
+      confirmedBlueprint: detailedBlueprint(),
+    })).rejects.toThrow("confirmed blueprint does not match accepted artifact");
+  });
+
+  it("does not call the model when accepted blueprint facts need an unavailable stable module", async () => {
+    const fetchImpl = vi.fn();
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+    await expect(port.createModulePlan(modulePlanningContext({
+      modulePlanningCatalog: [],
+    }))).rejects.toThrow("no stable registry modules");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("revises a complete ModulePlan and rejects omitted or silently changed prior modules", async () => {
+    const previous = modulePlan();
+    const changed = modulePlan({
+      pages: [{
+        ...previous.pages[0],
+        modules: previous.pages[0].modules.map((module) => module.id === "productsHero"
+          ? { ...module, title: "更新后的产品", operations: undefined }
+          : module),
+      }],
+      operations: [{
+        op: "update", pageId: "home", moduleId: "productsHero", changes: { title: "更新后的产品" },
+      }],
+    });
+    const result = await makePort(changed).reviseModulePlan(modulePlanningContext({
+      previousModulePlan: previous,
+      modulePlanRejectionReasons: ["hero 标题需要更具体"],
+      requirementText: "把产品标题改得更具体",
+    }));
+    expect(result.pages[0].modules.map((module) => module.id)).toEqual(["productsHero", "projectsTimeline"]);
+    expect(result.pages[0].modules[1]).toEqual(previous.pages[0].modules[1]);
+
+    const omitted = modulePlan({ pages: [{ ...previous.pages[0], modules: [previous.pages[0].modules[0]] }] });
+    await expect(makePort(omitted).reviseModulePlan(modulePlanningContext({ previousModulePlan: previous })))
+      .rejects.toThrow("missing previous module");
+
+    const silentChange = modulePlan({ pages: [{
+      ...previous.pages[0],
+      modules: [{ ...previous.pages[0].modules[0], title: "偷改标题" }, previous.pages[0].modules[1]],
+    }] });
+    await expect(makePort(silentChange).reviseModulePlan(modulePlanningContext({ previousModulePlan: previous })))
+      .rejects.toThrow("unchanged previous module differs");
+  });
+
+  it("repairs malformed module JSON once but never retries semantic rejections", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: '{"schema":"kf-module-plan/v1"' } }] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: JSON.stringify(modulePlan()) } }] }),
+      });
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+    await expect(port.createModulePlan(modulePlanningContext())).resolves.toEqual(modulePlan());
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fetchImpl.mock.calls[1][1].body).messages[1].content).toContain("只修复 JSON 语法");
+
+    const semanticFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify(modulePlan({ css: "*{}" })) } }] }),
+    });
+    await expect(new DeepSeekModelPort({ apiKey: "test-key", fetch: semanticFetch, baseUrl: "https://mock.local" })
+      .createModulePlan(modulePlanningContext())).rejects.toThrow(DeepSeekModelOutputError);
+    expect(semanticFetch).toHaveBeenCalledTimes(1);
   });
 
   it("createUiImplementation converts every blueprint module into structured components", async () => {

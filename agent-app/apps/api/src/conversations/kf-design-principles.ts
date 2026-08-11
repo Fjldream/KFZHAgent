@@ -50,3 +50,11 @@ export const KF_DESIGN_PRINCIPLES_FULL = `${KF_DESIGN_PRINCIPLES}
 4. **Docking 布局必须提供 panels（dPanelsOption）**，每个 panel 至少含「region」+ 尺寸（west/east 用 width、north/south 用 height，或统一用「size」字段由编译器转换）；region 必须与 children 里子对象的 region 对应。
 5. **树/菜单类控件必须给非空 data 数组**：tree 用「[{id,text,state,children}]」，sidemenu 用「[{text,iconCls,state,children}]」；空 data 渲染空白，缺 data 会让 sidemenu 崩溃。datagrid 的 data/columns 复杂内容不建模（走 configureData 脚本），模板自动提供空 data。
 6. **easyui 控件不要用「type」字段表达业务属性**（type 是 IR 判别保留字，白名单透传时会被过滤）：textbox 输入类型用「inputType」表达。`;
+
+/** A separate planning boundary: agent chooses semantic modules, deterministic tools own KF controls and pixels. */
+export const KF_MODULE_PLANNING_PRINCIPLES = `### 模块规划边界
+确认客户效果蓝图后，模块规划 Agent 只选择已登记模块的 kind、templateVersion、variant、语义 placement、内容、交互和 assetId。
+模块必须来自服务器提供的稳定 Module Registry 目录；beta、unsupported 和未登记模块不能进入生产计划。
+每个已确认蓝图模块都要用 sourceBlueprintModuleIds 精确映射，模块 ID 在 Revision 间保持稳定；修订必须返回完整计划并保留未受影响模块。
+模块规划绝不输出 geometry、x/y/width/height、CSS、选择器、文件路径、storageKey、KF 原生字段、脚本或工程 JSON。
+资产只允许引用 Asset Registry 中的 assetId；确定性 Layout Tool 负责像素坐标，Module Compiler 负责 KF 控件与工程 JSON。`;

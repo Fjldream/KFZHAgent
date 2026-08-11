@@ -1,5 +1,6 @@
-import type { ChangePlan, DesignPlan, UIImplementationSpec } from "@kf/contracts";
+import type { ChangePlan, DesignPlan, ModulePlan, UIImplementationSpec } from "@kf/contracts";
 import { solutionId } from "@kf/contracts";
+import { readVerifiedAcceptedBlueprintArtifact } from "@kf/build-jobs";
 import { deriveGuid } from "@kf/domain-client";
 import type {
   ClassifyIntentResult,
@@ -127,6 +128,14 @@ export class DeterministicFakeModelPort implements ModelPort {
       : this.createUiImplementation(input);
   }
 
+  createModulePlan(input: ModelPortContext): Promise<ModulePlan> {
+    return Promise.resolve(this.deterministicModulePlan(input));
+  }
+
+  reviseModulePlan(input: ModelPortContext): Promise<ModulePlan> {
+    return Promise.resolve(input.previousModulePlan ?? this.deterministicModulePlan(input));
+  }
+
   createChangePlan(input: ModelPortContext): Promise<ChangePlan> {
     // new 流程：编译后的控件 GUID 由 build seed（=workspaceId）确定性派生，
     // 因此 fake model 用同一 seed 计算 entityId，change-scope 才能定位实体。
@@ -182,5 +191,87 @@ export class DeterministicFakeModelPort implements ModelPort {
 
   explainValidation(): Promise<string> {
     return Promise.resolve("（确定性演示模型）校验已通过。");
+  }
+
+  /**
+   * Offline-only fixtures for portal, dashboard, and admin acceptance paths.
+   * They derive the exact kind/version/variant from the server planning catalog
+   * and the source IDs from the verified artifact; no network/model fallback is
+   * possible in fake mode.
+   */
+  private deterministicModulePlan(input: ModelPortContext): ModulePlan {
+    if (input.acceptedBlueprintArtifact === undefined || input.confirmedBlueprint === undefined) {
+      throw new Error("fake module planning requires accepted blueprint facts");
+    }
+    const accepted = readVerifiedAcceptedBlueprintArtifact(input.acceptedBlueprintArtifact);
+    const catalog = (input.modulePlanningCatalog ?? []).filter((entry) => entry.maturity === "stable");
+    const blueprintById = new Map(input.confirmedBlueprint.modules.map((module) => [module.id, module]));
+    const modules = accepted.modules.map((fact, order) => {
+      const summary = catalog.find((entry) => entry.kind === fact.expectedKind);
+      const blueprint = blueprintById.get(fact.blueprintModuleId);
+      if (summary === undefined || blueprint === undefined) {
+        throw new Error(`fake module fixture unavailable for ${fact.blueprintModuleId}`);
+      }
+      const variant = summary.variants[0]!;
+      const region = summary.layout.regions[0]!;
+      const preferredHeight = summary.layout.preferredHeights.includes("medium") ? "medium" : summary.layout.preferredHeights[0]!;
+      return {
+        id: `module-${fact.blueprintModuleId.replace(/[^A-Za-z0-9_-]/g, "-")}`,
+        kind: summary.kind,
+        templateVersion: summary.version,
+        variant,
+        title: blueprint.name,
+        content: JSON.stringify(fakeModuleContent(summary.kind, blueprint.name)),
+        sourceBlueprintModuleIds: [fact.blueprintModuleId],
+        placement: {
+          region,
+          order,
+          columnSpan: Math.min(12, summary.layout.maxColumnSpan),
+          preferredHeight,
+          alignment: "stretch" as const,
+          emphasis: order === 0 ? "primary" as const : "secondary" as const,
+        },
+        interactions: [],
+      };
+    });
+    const mode = modules.some((module) => module.kind === "navigation.sidebar")
+      ? "admin-shell" as const
+      : modules.some((module) => module.kind.startsWith("data."))
+        ? "dashboard-grid" as const
+        : "vertical-flow" as const;
+    return {
+      schema: "kf-module-plan/v1",
+      projectKey: accepted.projectKey,
+      theme: {
+        background: "#0f172a", surface: "#111827", primary: "#2563eb", accent: "#38bdf8",
+        textPrimary: "#f8fafc", textSecondary: "#cbd5e1", fontFamily: "Arial", spacingUnit: 8,
+        radiusScale: { small: 4, medium: 8, large: 16 },
+      },
+      assets: [...(input.assetCatalog ?? [])],
+      pages: [{ id: "Page1", title: input.confirmedBlueprint.displayName, mode, modules }],
+      operations: [],
+    };
+  }
+}
+
+function fakeModuleContent(kind: string, title: string): Record<string, unknown> {
+  const label = title.slice(0, 80) || "示例";
+  switch (kind) {
+    case "navigation.top": return { logo: label, items: ["首页"] };
+    case "navigation.sidebar": return { groups: [{ label, items: ["总览"] }] };
+    case "content.hero": return { title: label, subtitle: "KF 确定性演示" };
+    case "metric.kpi-grid": return { items: [{ label, value: "98%" }] };
+    case "content.card-grid": return { items: [{ title: label, summary: "确定性示例内容", tag: "示例" }] };
+    case "content.timeline": return { items: [{ date: "2026", title: label, detail: "确定性示例内容" }] };
+    case "interaction.tabs-filter": return { tabs: ["全部"], active: "全部" };
+    case "form.record-editor": return { fields: [{ id: "name", label: "名称", placeholder: "请输入名称" }], submitLabel: "提交" };
+    case "content.contact-footer": return { contacts: [{ label: "邮箱", value: "demo@example.com" }], copyright: "KF Demo" };
+    case "data.chart-panel": return { chart: { kind: "line", labels: ["现在"], series: [{ name: label, values: [1] }] } };
+    case "data.status-grid": return { items: [{ name: label, severity: "online" }] };
+    case "data.table": return { table: { columns: [{ key: "name", label: "名称", align: "left" }], rows: [{ name: label }], pageSize: 20 } };
+    case "data.detail": return { fields: [{ label: "名称", value: label }] };
+    case "action.toolbar": return { actions: [{ label: "新增" }] };
+    case "feedback.alert-list": return { alerts: [{ title: label, message: "确定性示例提醒", severity: "info" }] };
+    default: return { title: label };
   }
 }

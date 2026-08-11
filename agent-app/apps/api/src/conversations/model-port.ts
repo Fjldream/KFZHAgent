@@ -51,6 +51,12 @@ export const DEFAULT_MODEL_PORT: ModelPort = {
   reviseUiImplementation() {
     return Promise.reject(new ModelPortNotConfiguredError("reviseUiImplementation"));
   },
+  createModulePlan() {
+    return Promise.reject(new ModelPortNotConfiguredError("createModulePlan"));
+  },
+  reviseModulePlan() {
+    return Promise.reject(new ModelPortNotConfiguredError("reviseModulePlan"));
+  },
   reviseChangePlan() {
     return Promise.reject(new ModelPortNotConfiguredError("reviseChangePlan"));
   },

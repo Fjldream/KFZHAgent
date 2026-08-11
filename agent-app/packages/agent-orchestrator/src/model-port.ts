@@ -1,9 +1,14 @@
 import type {
+  AssetRecord,
   ChangePlan,
+  CustomerEffectBlueprint,
   DesignPlan,
+  ModulePlan,
   UIImplementationSpec,
   ValidationReport,
 } from "@kf/contracts";
+import type { VerifiedAcceptedBlueprintArtifact } from "@kf/build-jobs";
+import type { ModulePlanningSummary } from "@kf/domain-client";
 import type { ClassifyIntentResult, Intent } from "./schemas/intent.js";
 import type { ProjectDesign } from "./schemas/project-design.js";
 import type { GraphMessage } from "./state.js";
@@ -30,6 +35,18 @@ export interface ModelPortContext {
   designPlan?: DesignPlan | undefined;
   /** Previous internal UI implementation when revising a built preview. */
   uiImplementation?: UIImplementationSpec | undefined;
+  /** Customer-confirmed v2 blueprint. It is usable for module planning only when hash-bound to acceptedBlueprintArtifact. */
+  confirmedBlueprint?: CustomerEffectBlueprint | undefined;
+  /** Server-verified, opaque authority handle. Never substitute raw model claims for this artifact. */
+  acceptedBlueprintArtifact?: VerifiedAcceptedBlueprintArtifact | undefined;
+  /** Bounded production catalog supplied from ModuleRegistry.listForPlanning(); beta/unsupported never belong here. */
+  modulePlanningCatalog?: readonly ModulePlanningSummary[] | undefined;
+  /** Bounded server-owned asset metadata catalog. Model output may reference only these logical IDs. */
+  assetCatalog?: readonly AssetRecord[] | undefined;
+  /** Full prior plan for a revision. Omitted prior modules are rejected rather than treated as deletions. */
+  previousModulePlan?: ModulePlan | undefined;
+  /** Bounded deterministic delivery/compiler failures for a single module-plan repair attempt. */
+  modulePlanRejectionReasons?: string[] | undefined;
   /** Bounded deterministic gate failures supplied for a single repair attempt. */
   implementationRejectionReasons?: string[] | undefined;
   /**
@@ -67,6 +84,10 @@ export interface ModelPort {
   createUiImplementation(input: ModelPortContext): Promise<UIImplementationSpec>;
   /** Revise internal UI intent without exposing or directly authoring KF JSON. */
   reviseUiImplementation(input: ModelPortContext): Promise<UIImplementationSpec>;
+  /** Plan registered KF modules from confirmed server-authorized blueprint facts. */
+  createModulePlan(input: ModelPortContext): Promise<ModulePlan>;
+  /** Return a complete revision while retaining every unaffected prior module exactly. */
+  reviseModulePlan(input: ModelPortContext): Promise<ModulePlan>;
   explainValidation(input: { tenantId: string; report: ValidationReport }): Promise<string>;
 }
 
