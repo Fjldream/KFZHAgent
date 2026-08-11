@@ -5,6 +5,8 @@ import {
   type CapabilityReport,
   type ChangeOperation,
   type ChangePlan,
+  type ChangePlanAssetBinding,
+  type InternalChangePlan,
   type ComponentStyleSpec,
   type ControlCapability,
   type UIComponentSpec,
@@ -39,7 +41,7 @@ export interface ImplementationCompileContext {
 }
 
 export interface UiImplementationCompileResult {
-  plan: ChangePlan;
+  plan: InternalChangePlan;
   capabilityReport: CapabilityReport;
   /** Server port persists these separately from model-facing plan/spec JSON. */
   semanticOperations: readonly { kind: "kf.table-data/v1"; entityId: string; capabilityId: "easyui.1"; sourceModuleId: string; payloadHash: string }[];
@@ -129,17 +131,23 @@ export function compileUiImplementation(
   const actualSourceModuleIds = sourceModuleIdsFor(spec);
   const artifactHandle = optionalOwnDataField(context, "moduleCompilationArtifact", "INVALID_MODULE_COMPILATION_ARTIFACT");
   let trustedSourceModuleIds: readonly string[] = [];
+  const trustedAssetByModule = new Map<string, string>();
   if (actualSourceModuleIds.length > 0) {
     if (artifactHandle === undefined) throw new Error("VERIFIED_MODULE_COMPILATION_ARTIFACT_REQUIRED");
     const artifact = readVerifiedModuleCompilationArtifact(artifactHandle);
     if (artifact.implementationHash !== canonicalModuleCompilationHash(spec)) throw new Error("MODULE_IMPLEMENTATION_ARTIFACT_HASH_MISMATCH");
     if (!isDeepStrictEqual(artifact.sourceModuleIds, actualSourceModuleIds)) throw new Error("MODULE_IMPLEMENTATION_ARTIFACT_SOURCE_MISMATCH");
     trustedSourceModuleIds = artifact.sourceModuleIds;
+    for (const asset of artifact.metadata.assets) {
+      if (asset.status !== "resolved") continue;
+      trustedAssetByModule.set(`${asset.pageId}\u0000${asset.moduleId}`, asset.assetId);
+    }
   } else if (artifactHandle !== undefined) {
     const artifact = readVerifiedModuleCompilationArtifact(artifactHandle);
     if (artifact.implementationHash !== canonicalModuleCompilationHash(spec) || artifact.sourceModuleIds.length !== 0) throw new Error("MODULE_IMPLEMENTATION_ARTIFACT_BINDING_MISMATCH");
   }
   const operations: ChangeOperation[] = [];
+  const assetBindings: ChangePlanAssetBinding[] = [];
   const report = createReportAccumulator();
   const previous = previousComponentIndex(context.previousImplementation);
   const seenComponentIds = new Set<string>();
@@ -165,8 +173,12 @@ export function compileUiImplementation(
       }
       seenComponentIds.add(component.id);
       assertGeometryInPage(component, page);
+      const assetId = component.sourceModuleId === undefined
+        ? undefined
+        : trustedAssetByModule.get(`${page.id}\u0000${component.sourceModuleId}`);
+      const compiledComponent = moduleAssetComponent(component, assetId);
       operations.push(...compileComponent(
-        component,
+        compiledComponent,
         previous.get(component.id),
         spec,
         pageGuid,
@@ -174,15 +186,44 @@ export function compileUiImplementation(
         trustedSourceModuleIds,
         report,
       ));
+      if (assetId !== undefined && compiledComponent.capabilityId === "image") {
+        const existingGuid = optionalContextStringValue(
+          context.existingControlGuidByComponentId,
+          component.id,
+          "INVALID_EXISTING_CONTROL_GUID",
+        );
+        assetBindings.push({ assetId, entityId: existingGuid ?? component.id });
+      }
     }
   }
 
-  const plan: ChangePlan = { schema: "kf-change-plan/v1", workspaceId: context.workspaceId, operations };
+  const plan: InternalChangePlan = {
+    schema: "kf-change-plan/v1",
+    workspaceId: context.workspaceId,
+    operations,
+    ...(assetBindings.length === 0 ? {} : { assetBindings }),
+  };
   const semanticOperations = semanticOperationsForActualPlan(plan, spec, context);
   return {
     plan,
     capabilityReport: finalizeReport(report),
     semanticOperations,
+  };
+}
+
+function moduleAssetComponent(component: UIComponentSpec, assetId: string | undefined): UIComponentSpec {
+  if (component.capabilityId !== "image") return component;
+  const src = component.properties["src"];
+  if (assetId === undefined) {
+    if (component.sourceModuleId !== undefined && src === "asset") {
+      throw new Error(`MODULE_IMAGE_ASSET_BINDING_MISSING: ${component.id}`);
+    }
+    return component;
+  }
+  if (src !== "asset") throw new Error(`MODULE_IMAGE_ASSET_PLACEHOLDER_INVALID: ${component.id}`);
+  return {
+    ...component,
+    properties: { ...component.properties, src: `static/agent-assets/pending-${assetId}` },
   };
 }
 

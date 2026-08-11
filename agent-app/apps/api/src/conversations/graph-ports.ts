@@ -27,7 +27,7 @@ import path from "node:path";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { BuildJobService } from "../build-jobs/build-job.service.js";
 import { signAcceptedBlueprintAtConfirmation } from "./server-plan-authority.js";
-import { toModelAssetId } from "../assets/model-asset-id.js";
+import type { AssetService } from "../assets/asset.service.js";
 
 /**
  * Real Prisma-backed ports for the solution graph (brief "Consumes" line).
@@ -52,6 +52,7 @@ export function createGraphPorts(
   prisma: PrismaService,
   storage: ArtifactStorage,
   moduleArtifactAuthority?: ModuleArtifactAuthority,
+  assetService?: Pick<AssetService, "list" | "resolveMany">,
 ): GraphPorts {
   const buildJobs = new BuildJobService(prisma);
   const moduleRegistry = createDefaultModuleRegistry();
@@ -268,21 +269,13 @@ export function createGraphPorts(
 
   const assetCatalog: AssetCatalogPort = {
     async list({ tenantId, workspaceId }) {
-      const workspace = await prisma.solutionWorkspace.findFirst({
-        where: { id: workspaceId, tenantId },
-        select: { id: true },
-      });
-      if (workspace === null) throw new Error("workspace not found");
-      const rows = await prisma.workspaceAsset.findMany({
-        where: { tenantId, workspaceId },
-        orderBy: { id: "asc" },
-        select: { id: true, type: true, name: true, mediaType: true },
-      });
+      if (assetService === undefined) throw new Error("ASSET_SERVICE_NOT_CONFIGURED");
+      const rows = await assetService.list({ tenantId, workspaceId });
       return rows.map((row) => {
         if (row.type !== "image" || (row.mediaType !== "image/png" && row.mediaType !== "image/jpeg" && row.mediaType !== "image/webp")) {
           throw new Error("invalid persisted workspace asset metadata");
         }
-        return { id: toModelAssetId(row.id), kind: "image" as const, name: row.name, mimeType: row.mediaType, description: "Uploaded workspace image" };
+        return { id: row.modelAssetId, kind: "image" as const, name: row.name, mimeType: row.mediaType, description: "Uploaded workspace image" };
       });
     },
   };
@@ -291,16 +284,22 @@ export function createGraphPorts(
     listPlanningCatalog() {
       return Promise.resolve(moduleRegistry.listForPlanning());
     },
-    compile(input) {
+    async compile(input) {
+      if (assetService === undefined) throw new Error("ASSET_SERVICE_NOT_CONFIGURED");
+      const catalogAssets = await assetService.resolveMany({
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        assetIds: input.plan.assets.map((asset) => asset.id),
+      });
       const definitions = input.plan.pages.flatMap((page) => page.modules.map((module) => moduleRegistry.require(module.kind, module.templateVersion)));
       const availableKfCapabilities = [...new Set(definitions.flatMap((definition) => [...definition.requiredKfCapabilities]))].sort();
-      const assetsById = Object.fromEntries(input.plan.assets.map((asset) => [asset.id, { assetId: asset.id, status: "resolved" as const, resolvedName: asset.name }]));
-      return Promise.resolve(compileModulePlan({
+      const assetsById = Object.fromEntries(catalogAssets.map((asset) => [asset.id, { assetId: asset.id, status: "resolved" as const, resolvedName: asset.name }]));
+      return compileModulePlan({
         ...input,
         registry: moduleRegistry,
         assetsById,
         validationContext: { availableKfCapabilities, approvedAuthorizationRefs: [] },
-      }));
+      });
     },
   };
 

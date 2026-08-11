@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { changePlanSchema } from "./change-plan.js";
+import {
+  changePlanSchema,
+  internalChangePlanSchema,
+} from "./change-plan.js";
+import { canonicalChangePlanHash } from "./server-plan-envelope.js";
 
 /**
  * Change-plan contract tests.
@@ -12,6 +16,43 @@ import { changePlanSchema } from "./change-plan.js";
  */
 
 describe("change plan schema", () => {
+  const assetBinding = {
+    assetId: "asset-00000000000040008000000000000001",
+    entityId: "hero/portrait",
+  };
+
+  it("keeps compiler-owned asset bindings only in the internal plan contract", () => {
+    const input = {
+      schema: "kf-change-plan/v1" as const,
+      workspaceId: "w-1",
+      operations: [],
+      assetBindings: [assetBinding],
+    };
+
+    expect(changePlanSchema.safeParse(input).success).toBe(false);
+    expect(internalChangePlanSchema.parse(input).assetBindings).toEqual([assetBinding]);
+  });
+
+  it("binds asset authorization into the canonical plan hash", () => {
+    const plain = {
+      schema: "kf-change-plan/v1" as const,
+      workspaceId: "w-1",
+      operations: [],
+    };
+    const bound = { ...plain, assetBindings: [assetBinding] };
+
+    expect(canonicalChangePlanHash(bound)).not.toBe(canonicalChangePlanHash(plain));
+  });
+
+  it("rejects ambiguous duplicate asset bindings for one control", () => {
+    expect(internalChangePlanSchema.safeParse({
+      schema: "kf-change-plan/v1",
+      workspaceId: "w-1",
+      operations: [],
+      assetBindings: [assetBinding, { ...assetBinding, assetId: "asset-00000000000040008000000000000002" }],
+    }).success).toBe(false);
+  });
+
   it("keeps the delete operation digest after parsing", () => {
     const parsed = changePlanSchema.parse({
       schema: "kf-change-plan/v1",

@@ -7,7 +7,7 @@ import { ComponentStyleSpecSchema } from "./ui-style.js";
 export const fieldPatchSchema = z.object({
   path: z.string(),
   value: z.unknown()
-});
+}).strict();
 export type FieldPatch = z.infer<typeof fieldPatchSchema>;
 
 /** Canonical bounded identifier shared by every change operation. */
@@ -21,7 +21,7 @@ export const createOperationSchema = z.object({
   entityType: z.string(),
   entityId: ChangeEntityIdSchema,
   properties: z.record(z.string(), z.unknown()).default({})
-});
+}).strict();
 export type CreateOperation = z.infer<typeof createOperationSchema>;
 
 /**
@@ -37,7 +37,7 @@ export const updateOperationSchema = z.object({
   entityId: ChangeEntityIdSchema,
   entityType: z.string().optional(),
   changes: z.array(fieldPatchSchema)
-});
+}).strict();
 export type UpdateOperation = z.infer<typeof updateOperationSchema>;
 
 /**
@@ -54,7 +54,7 @@ export const deleteOperationSchema = z.object({
   entityId: ChangeEntityIdSchema,
   destructiveConfirmed: z.boolean(),
   digest: z.string()
-});
+}).strict();
 export type DeleteOperation = z.infer<typeof deleteOperationSchema>;
 
 /**
@@ -76,9 +76,44 @@ export const changeOperationSchema = z.discriminatedUnion("op", [
 ]);
 export type ChangeOperation = z.infer<typeof changeOperationSchema>;
 
+/** Model/public plan: server-owned asset bindings are deliberately absent. */
 export const changePlanSchema = z.object({
   schema: z.literal("kf-change-plan/v1"),
   workspaceId: z.string(),
   operations: z.array(changeOperationSchema)
-});
+}).strict();
 export type ChangePlan = z.infer<typeof changePlanSchema>;
+
+const ModelAssetIdSchema = z.string().regex(/^asset-[0-9a-f]{32}$/);
+
+/** Server/compiler-owned binding from one native image entity to a catalog asset. */
+export const ChangePlanAssetBindingSchema = z.object({
+  assetId: ModelAssetIdSchema,
+  entityId: ChangeEntityIdSchema,
+}).strict();
+export type ChangePlanAssetBinding = z.infer<typeof ChangePlanAssetBindingSchema>;
+
+/**
+ * Durable internal plan persisted only inside the HMAC server envelope.
+ * Keeping this separate from `changePlanSchema` makes model-authored
+ * `assetBindings` a schema error instead of silently stripping the field.
+ */
+export const internalChangePlanSchema = z.object({
+  schema: z.literal("kf-change-plan/v1"),
+  workspaceId: z.string(),
+  operations: z.array(changeOperationSchema),
+  assetBindings: z.array(ChangePlanAssetBindingSchema).max(500).optional(),
+}).strict().superRefine((plan, ctx) => {
+  const entities = new Set<string>();
+  for (const [index, binding] of (plan.assetBindings ?? []).entries()) {
+    if (entities.has(binding.entityId)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["assetBindings", index, "entityId"],
+        message: `duplicate asset binding entity: ${binding.entityId}`,
+      });
+    }
+    entities.add(binding.entityId);
+  }
+});
+export type InternalChangePlan = z.infer<typeof internalChangePlanSchema>;

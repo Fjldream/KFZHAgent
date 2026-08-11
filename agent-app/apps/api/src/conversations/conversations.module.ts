@@ -7,6 +7,7 @@ import { DEFAULT_MODEL_PORT, MODEL_PORT } from "./model-port.js";
 import { DeterministicFakeModelPort } from "./fake-model.js";
 import { DeepSeekModelPort } from "./deepseek-model.js";
 import { ArtifactsModule } from "../artifacts/artifacts.module.js";
+import { AssetsModule } from "../assets/assets.module.js";
 import {
   SERVER_PLAN_AUTHORITY,
   MODULE_ARTIFACT_AUTHORITY,
@@ -15,7 +16,7 @@ import {
 } from "./server-plan-authority.js";
 
 @Module({
-  imports: [ArtifactsModule],
+  imports: [ArtifactsModule, AssetsModule],
   controllers: [ConversationController, ChangePlanController],
   providers: [
     ConversationService,

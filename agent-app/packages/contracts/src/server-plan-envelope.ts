@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { changePlanSchema, type ChangePlan } from "./change-plan.js";
+import { internalChangePlanSchema, type InternalChangePlan } from "./change-plan.js";
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 
@@ -16,7 +16,7 @@ export const TrustedSemanticOperationInputSchema = TrustedSemanticOperationSchem
 
 export const ServerPlanEnvelopeSchema = z.object({
   schema: z.literal("kf-server-plan-envelope/v1"),
-  plan: changePlanSchema,
+  plan: internalChangePlanSchema,
   planHash: Sha256Schema,
   revisionId: z.string().trim().min(1).max(100),
   semanticOperations: z.array(TrustedSemanticOperationSchema).max(500),
@@ -101,6 +101,7 @@ export function canonicalChangePlanHash(input: unknown): string {
           };
       }
     }),
+    ...(plan.assetBindings === undefined ? {} : { assetBindings: plan.assetBindings }),
   });
 }
 
@@ -157,7 +158,7 @@ export function validateServerPlanEnvelopeData(
   return envelope;
 }
 
-function semanticPayloadsFromPlan(plan: ChangePlan): Array<{
+function semanticPayloadsFromPlan(plan: InternalChangePlan): Array<{
   entityId: string;
   capabilityId: "easyui.1";
   payloadHash: string;
@@ -188,8 +189,8 @@ function semanticPayloadsFromPlan(plan: ChangePlan): Array<{
   return payloads;
 }
 
-function parseChangePlan(input: unknown): ChangePlan {
-  const parsed = changePlanSchema.safeParse(input);
+function parseChangePlan(input: unknown): InternalChangePlan {
+  const parsed = internalChangePlanSchema.safeParse(input);
   if (!parsed.success) {
     throw new Error(`SERVER_PLAN_SCHEMA_INVALID: ${parsed.error.issues[0]?.message ?? "invalid plan"}`);
   }

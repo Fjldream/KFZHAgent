@@ -1,15 +1,16 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { cp, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ModulePlan, ModulePlanModule, ResolvedAsset } from "@kf/contracts";
+import type { DomainAssetInput, ModulePlan, ModulePlanModule, ResolvedAsset } from "@kf/contracts";
 import { compileModulePlan } from "../module-compiler.js";
 import { createDefaultModuleRegistry } from "../module-registry.js";
 import { compileUiImplementation } from "../../implementation/ui-implementation-compiler.js";
 import { applyClientPatch } from "../../patch/client-patcher.js";
 import { inspectClientProject } from "../../inspect/client-inspector.js";
-import { createPortalPlan } from "./fixtures/portal-plan.js";
+import { createPortalPlan, PORTAL_PORTRAIT_ASSET_ID, PORTAL_PROJECT_ASSET_ID } from "./fixtures/portal-plan.js";
 import { acceptedArtifactForPlan, verifiedCompilationFor } from "../testing/module-artifact-test-helpers.js";
 
 const theme = {
@@ -21,6 +22,8 @@ const theme = {
 const assets: Readonly<Record<string, ResolvedAsset>> = {
   portrait: { assetId: "portrait", status: "resolved", resolvedName: "portrait.png" },
   project: { assetId: "project", status: "resolved", resolvedName: "project.png" },
+  [PORTAL_PORTRAIT_ASSET_ID]: { assetId: PORTAL_PORTRAIT_ASSET_ID, status: "resolved", resolvedName: "portrait.png" },
+  [PORTAL_PROJECT_ASSET_ID]: { assetId: PORTAL_PROJECT_ASSET_ID, status: "resolved", resolvedName: "project.png" },
 };
 const fixturesRoot = join(fileURLToPath(new URL(".", import.meta.url)), "../../../../../tests/fixtures");
 
@@ -351,7 +354,12 @@ describe("portal module definitions", () => {
     if (compiled.status !== "compiled") throw new Error("expected compiled portal");
     const change = compileUiImplementation(compiled.implementation, { workspaceId: "workspace", pageGuidById: { Page1: "page-guid-1" }, existingControlGuidByComponentId: {}, existingControlCapabilityIdByComponentId: {}, moduleCompilationArtifact: verifiedCompilationFor(compiled) });
     const root = await fixture("client-unknown-field");
-    const candidate = await applyClientPatch(root, change.plan);
+    const portalAssets = [PORTAL_PORTRAIT_ASSET_ID, PORTAL_PROJECT_ASSET_ID].map((assetId): DomainAssetInput => {
+      const bytes = Buffer.from(`approved bytes for ${assetId}`);
+      const sha256 = createHash("sha256").update(bytes).digest("hex");
+      return { assetId, bytes, sha256, mediaType: "image/png", targetPath: `static/agent-assets/${sha256}.png` };
+    });
+    const candidate = await applyClientPatch(root, change.plan, { assets: portalAssets });
     const inspection = await inspectClientProject(candidate.rootDir);
     const indexedIds = Object.values(inspection.index.controls).map((entry) => entry.id);
     expect(indexedIds).toEqual(expect.arrayContaining([

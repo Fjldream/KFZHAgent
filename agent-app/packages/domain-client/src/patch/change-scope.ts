@@ -635,6 +635,8 @@ export function diffJsonDocuments(base: unknown, cand: unknown): JsonDiff[] {
 export interface ScopeVerifyOptions {
   /** Report planned pointers with no observable effect as warnings. */
   reportNoopPlanned?: boolean;
+  /** Worker-verified files deterministically added by signed asset bindings. */
+  assetTargetPaths?: readonly string[];
 }
 
 /** Verifies the candidate deviates from the base only within the plan scope. */
@@ -645,6 +647,12 @@ export async function verifyChangeScope(
   options?: ScopeVerifyOptions,
 ): Promise<ScopeVerifyResult> {
   const scope = await computeChangeScope(baseRoot, plan);
+  for (const targetPath of options?.assetTargetPaths ?? []) {
+    if (!/^static\/agent-assets\/[0-9a-f]{64}\.(?:png|jpg|webp)$/.test(targetPath)) {
+      throw new Error(`invalid asset scope path: ${targetPath}`);
+    }
+    scope.touchedFiles.add(relFile(targetPath, scope.versionDir));
+  }
   const violations: ScopeViolation[] = [];
   const warnings: string[] = [];
 

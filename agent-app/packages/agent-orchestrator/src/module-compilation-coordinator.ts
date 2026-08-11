@@ -15,6 +15,7 @@ import type {
 } from "./ports.js";
 
 export interface CoordinateModuleCompilationInput {
+  readonly tenantId: string;
   readonly projectKey: string;
   readonly revisionId: string;
   readonly acceptedBlueprintHash: string;
@@ -70,6 +71,8 @@ export class ModuleCompilationCoordinator {
           ...(input.previousImplementation === undefined ? {} : { implementationHash: canonicalModuleCompilationHash(input.previousImplementation) }),
         });
     const outcome = await this.moduleCompiler.compile({
+      tenantId: input.tenantId,
+      workspaceId: input.workspaceId,
       plan: input.plan,
       acceptedBlueprintArtifact: accepted,
       ...(previous === undefined ? {} : { previousCompilationArtifact: previous }),

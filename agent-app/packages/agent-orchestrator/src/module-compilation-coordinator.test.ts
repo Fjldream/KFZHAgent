@@ -52,7 +52,7 @@ function coordinator(inputRegistry: ModuleRegistry) {
 describe("ModuleCompilationCoordinator", () => {
   it("compiles without a current artifact, then signs, checkpoints, verifies and feeds the verified current artifact to UI compilation", async () => {
     const inputRegistry = registry(); const confirmed = accepted(inputRegistry); const currentPlan = plan();
-    const result = await coordinator(inputRegistry).compile({ projectKey: "project", revisionId: "revision-1", acceptedBlueprintHash: confirmed.blueprintHash, acceptedBlueprintArtifact: confirmed.signed, plan: currentPlan, workspaceId: "workspace", editableEntities: [] });
+    const result = await coordinator(inputRegistry).compile({ tenantId: "tenant", projectKey: "project", revisionId: "revision-1", acceptedBlueprintHash: confirmed.blueprintHash, acceptedBlueprintArtifact: confirmed.signed, plan: currentPlan, workspaceId: "workspace", editableEntities: [] });
     expect(result.status).toBe("compiled"); if (result.status !== "compiled") return;
     expect(result.moduleCompilationArtifact.planHash).toBe(canonicalModuleCompilationHash(currentPlan));
     expect(JSON.parse(JSON.stringify(result.moduleCompilationArtifact))).toEqual(result.moduleCompilationArtifact);
@@ -62,16 +62,16 @@ describe("ModuleCompilationCoordinator", () => {
   it("rejects accepted-artifact binding mismatch before invoking the compiler", async () => {
     const inputRegistry = registry(); const confirmed = accepted(inputRegistry); let calls = 0;
     const service = new ModuleCompilationCoordinator(authority, { listPlanningCatalog: async () => [], compile: async () => { calls += 1; throw new Error("should not compile"); } }, { compile: async () => { throw new Error("should not compile UI"); } });
-    await expect(service.compile({ projectKey: "project", revisionId: "wrong", acceptedBlueprintHash: confirmed.blueprintHash, acceptedBlueprintArtifact: confirmed.signed, plan: plan(), workspaceId: "workspace", editableEntities: [] })).rejects.toThrow("ACCEPTED_BLUEPRINT_BINDING_MISMATCH");
+    await expect(service.compile({ tenantId: "tenant", projectKey: "project", revisionId: "wrong", acceptedBlueprintHash: confirmed.blueprintHash, acceptedBlueprintArtifact: confirmed.signed, plan: plan(), workspaceId: "workspace", editableEntities: [] })).rejects.toThrow("ACCEPTED_BLUEPRINT_BINDING_MISMATCH");
     expect(calls).toBe(0);
   });
 
   it("verifies a persisted previous artifact before revision compilation", async () => {
     const inputRegistry = registry(); const firstAccepted = accepted(inputRegistry); const service = coordinator(inputRegistry);
-    const first = await service.compile({ projectKey: "project", revisionId: "revision-1", acceptedBlueprintHash: firstAccepted.blueprintHash, acceptedBlueprintArtifact: firstAccepted.signed, plan: plan(), workspaceId: "workspace", editableEntities: [] });
+    const first = await service.compile({ tenantId: "tenant", projectKey: "project", revisionId: "revision-1", acceptedBlueprintHash: firstAccepted.blueprintHash, acceptedBlueprintArtifact: firstAccepted.signed, plan: plan(), workspaceId: "workspace", editableEntities: [] });
     expect(first.status).toBe("compiled"); if (first.status !== "compiled") return;
     const secondAccepted = accepted(inputRegistry, "revision-2");
-    const second = await service.compile({ projectKey: "project", revisionId: "revision-2", acceptedBlueprintHash: secondAccepted.blueprintHash, acceptedBlueprintArtifact: secondAccepted.signed, plan: plan("Revised"), previousPlan: plan(), previousImplementation: first.outcome.implementation, previousCompilationArtifact: JSON.parse(JSON.stringify(first.moduleCompilationArtifact)), workspaceId: "workspace", editableEntities: [] });
+    const second = await service.compile({ tenantId: "tenant", projectKey: "project", revisionId: "revision-2", acceptedBlueprintHash: secondAccepted.blueprintHash, acceptedBlueprintArtifact: secondAccepted.signed, plan: plan("Revised"), previousPlan: plan(), previousImplementation: first.outcome.implementation, previousCompilationArtifact: JSON.parse(JSON.stringify(first.moduleCompilationArtifact)), workspaceId: "workspace", editableEntities: [] });
     expect(second.status).toBe("compiled");
   });
 });

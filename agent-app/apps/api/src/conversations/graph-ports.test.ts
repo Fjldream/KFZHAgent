@@ -2,6 +2,7 @@
 import { Readable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { createKingClientDomainPack, deriveGuid } from "@kf/domain-client";
+import { createHmacModuleArtifactAuthority } from "@kf/build-jobs";
 import { createGraphPorts } from "./graph-ports.js";
 
 describe("conversation graph workspace query", () => {
@@ -11,15 +12,104 @@ describe("conversation graph workspace query", () => {
   });
 
   it("lists only tenant/workspace-scoped model-safe asset metadata", async () => {
-    const prisma = {
-      solutionWorkspace: { findFirst: vi.fn().mockResolvedValue({ id: "workspace" }) },
-      workspaceAsset: { findMany: vi.fn().mockResolvedValue([{ id: "00000000-0000-4000-8000-000000000001", type: "image", name: "portrait.png", mediaType: "image/png", storageKey: "secret/path" }]) },
+    const assets = {
+      list: vi.fn().mockResolvedValue([{
+        id: "00000000-0000-4000-8000-000000000001",
+        modelAssetId: "asset-00000000000040008000000000000001",
+        type: "image", name: "portrait.png", mediaType: "image/png",
+        sizeBytes: 10, width: 1, height: 1, tags: [], createdAt: new Date(0),
+      }]),
+      resolveMany: vi.fn(),
     };
-    const ports = createGraphPorts(prisma, {} as never);
+    const ports = createGraphPorts({} as never, {} as never, undefined, assets);
     await expect(ports.assetCatalog.list({ tenantId: "tenant", workspaceId: "workspace" })).resolves.toEqual([{
       id: "asset-00000000000040008000000000000001", kind: "image", name: "portrait.png", mimeType: "image/png", description: "Uploaded workspace image",
     }]);
-    expect(prisma.workspaceAsset.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { tenantId: "tenant", workspaceId: "workspace" } }));
+    expect(assets.list).toHaveBeenCalledWith({ tenantId: "tenant", workspaceId: "workspace" });
+  });
+
+  it("resolves module assets through the tenant/workspace-scoped AssetService before compilation", async () => {
+    const assetId = "asset-00000000000040008000000000000001";
+    const assets = {
+      list: vi.fn(),
+      resolveMany: vi.fn().mockResolvedValue([{
+        id: assetId,
+        kind: "image",
+        name: "portrait.png",
+        mimeType: "image/png",
+        description: "Uploaded workspace image",
+      }]),
+    };
+    const authority = createHmacModuleArtifactAuthority(Buffer.alloc(32, 0x67));
+    const ports = createGraphPorts({} as never, {} as never, authority, assets);
+    const signedAcceptedBlueprint = await ports.acceptedBlueprintConfirmation.confirm({
+      projectKey: "kingclient.portal",
+      revisionId: "revision-asset",
+      blueprint: {
+        schema: "kf-design-plan/v2",
+        displayName: "Portrait portal",
+        overview: { objective: "Profile", audiences: ["Visitor"], scenarios: ["View"], valueProposition: "Clear" },
+        informationArchitecture: { narrative: "Hero", wireframe: "Hero" },
+        modules: [{
+          id: "hero",
+          name: "Hero",
+          purpose: "Show profile",
+          content: ["Profile"],
+          sampleData: [],
+          interactions: [],
+          expectedKind: "content.hero",
+          expectedCategory: "content",
+          interactionRequirements: [],
+          presentation: "Portrait hero",
+        }],
+        visualDirection: { tone: "Clean", colors: ["Blue"], typography: "Sans", spacingAndSurfaces: "Open" },
+        highlights: ["Portrait"],
+        revisionNotes: { added: [], changed: [], retained: [] },
+        acceptanceCriteria: ["Portrait is visible"],
+        openQuestions: [],
+      },
+    });
+    const acceptedBlueprintArtifact = authority.verifyAcceptedBlueprint(
+      JSON.parse(JSON.stringify(signedAcceptedBlueprint)),
+      { projectKey: "kingclient.portal", revisionId: "revision-asset" },
+    );
+    const result = await ports.modulePlanCompiler.compile({
+      tenantId: "tenant-a",
+      workspaceId: "workspace-a",
+      acceptedBlueprintArtifact,
+      plan: {
+        schema: "kf-module-plan/v1",
+        projectKey: "kingclient.portal",
+        theme: {
+          background: "#101827", surface: "#1E293B", primary: "#2563EB", accent: "#38BDF8",
+          textPrimary: "#F8FAFC", textSecondary: "#94A3B8", fontFamily: "Inter", spacingUnit: 8,
+          radiusScale: { small: 4, medium: 8, large: 16 },
+        },
+        assets: [{ id: assetId, kind: "image", name: "Portrait", mimeType: "image/png", description: "Profile" }],
+        pages: [{
+          id: "Page1",
+          title: "Home",
+          mode: "vertical-flow",
+          modules: [{
+            id: "hero", kind: "content.hero", templateVersion: "1.0.0", variant: "portrait-right",
+            title: "Hero", content: JSON.stringify({ title: "Lin" }), sourceBlueprintModuleIds: ["hero"],
+            placement: { region: "main", order: 0, columnSpan: 12, preferredHeight: "large", alignment: "stretch", emphasis: "primary" },
+            interactions: [], assetId,
+          }],
+        }],
+        operations: [],
+      },
+    });
+
+    expect(assets.resolveMany).toHaveBeenCalledWith({
+      tenantId: "tenant-a",
+      workspaceId: "workspace-a",
+      assetIds: [assetId],
+    });
+    expect(result.status).toBe("compiled");
+    if (result.status === "compiled") {
+      expect(result.metadata.assets).toContainEqual(expect.objectContaining({ assetId, status: "resolved" }));
+    }
   });
 
   it("derives compile-mode page GUIDs with the native compiler's page prefix", async () => {

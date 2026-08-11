@@ -1487,6 +1487,25 @@ describe("DeepSeekModelPort", () => {
     expect(plan.operations[0].entityId).toBe(knownGuid);
   });
 
+  it("rejects model-authored compiler asset bindings instead of persisting or ignoring them", async () => {
+    const port = makePort({
+      operations: [],
+      assetBindings: [{
+        assetId: "asset-00000000000040008000000000000001",
+        entityId: "portrait",
+      }],
+    });
+    await expect(port.createChangePlan({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [],
+      requirementText: "使用头像",
+      editableEntities: [],
+    })).rejects.toThrow(/assetBindings.*server|compiler-owned/i);
+  });
+
   it("system prompt exposes easyui and layout container generation capability", async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,

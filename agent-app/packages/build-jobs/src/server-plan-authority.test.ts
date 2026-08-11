@@ -5,6 +5,7 @@ import {
   canonicalModuleCompilationHash,
   semanticPayloadHash,
   type ChangePlan,
+  type InternalChangePlan,
 } from "@kf/contracts";
 import {
   createHmacModuleArtifactAuthority,
@@ -32,6 +33,26 @@ const plan: ChangePlan = {
     properties: { type: "easyui", proto: 1, tableData },
   }],
 };
+const assetId = "asset-00000000000040008000000000000001";
+
+function signedAssets() {
+  const assetPlan: InternalChangePlan = {
+    schema: "kf-change-plan/v1",
+    workspaceId: "w",
+    operations: [{
+      op: "create",
+      entityType: "control",
+      entityId: "portrait-guid",
+      properties: { type: "image", src: `static/agent-assets/pending-${assetId}` },
+    }],
+    assetBindings: [{ assetId, entityId: "portrait-guid" }],
+  };
+  return createHmacServerPlanAuthority(decodeServerPlanHmacKey(keyA)).sign({
+    plan: assetPlan,
+    revisionId: "revision-1",
+    semanticOperations: [],
+  });
+}
 
 function signed() {
   return createHmacServerPlanAuthority(decodeServerPlanHmacKey(keyA)).sign({
@@ -97,6 +118,23 @@ describe("HMAC server plan authority", () => {
       expectedPlanHash: envelope.planHash,
       expectedRevisionId: "revision-1",
     })).toEqual(envelope);
+  });
+
+  it("retains compiler-owned asset bindings through persistence and rejects binding tampering", () => {
+    const envelope = signedAssets();
+    const roundTripped: unknown = JSON.parse(JSON.stringify(envelope));
+    expect(createHmacServerPlanAuthority(decodeServerPlanHmacKey(keyA)).verify(roundTripped))
+      .toEqual(envelope);
+
+    for (const field of ["assetId", "entityId"] as const) {
+      const tampered = structuredClone(envelope);
+      tampered.plan.assetBindings![0]![field] = field === "assetId"
+        ? "asset-00000000000040008000000000000002"
+        : "different-guid";
+      tampered.planHash = canonicalChangePlanHash(tampered.plan);
+      expect(() => createHmacServerPlanAuthority(decodeServerPlanHmacKey(keyA)).verify(tampered))
+        .toThrow(/signature/i);
+    }
   });
 
   it("accepts a semantically identical persisted object whose JSON keys were reordered", () => {

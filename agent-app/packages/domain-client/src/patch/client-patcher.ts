@@ -8,6 +8,7 @@ import {
   canonicalChangePlanHash,
   semanticPayloadHash,
   type ComponentStyleSpec,
+  type DomainAssetInput,
   type FieldPatch,
   type ThemeSpec,
   type TrustedSemanticOperation,
@@ -28,6 +29,7 @@ import {
 } from "../implementation/component-properties.js";
 import { parseTableData, toNativeTableProperties } from "../modules/definitions/native-data-adapters.js";
 import { controlGeometryIssues, MAX_CONTROL_GEOMETRY } from "../implementation/control-geometry.js";
+import { materializeClientAssets } from "../assets/materialize-client-assets.js";
 import { mergeControlTemplate, type TemplateJson } from "../templates/merge-template.js";
 import baseFieldsJson from "../templates/base-fields.json" with { type: "json" };
 import buttonTemplate from "../templates/control-templates/button.json" with { type: "json" };
@@ -697,6 +699,8 @@ export interface ApplyPatchOptions {
   workRoot?: string;
   /** Validated by the worker's durable server-envelope trust boundary. */
   semanticOperations?: readonly TrustedSemanticOperation[];
+  /** Verified worker-owned bytes for the signed internal asset bindings. */
+  assets?: readonly DomainAssetInput[];
 }
 
 function hasTrustedTableOperation(
@@ -1795,6 +1799,11 @@ export async function applyClientPatch(
   }
 
   await growPagesToFitControls(candidate, versionDir, inspection, pagesNeedingBoundsCheck);
+  await materializeClientAssets({
+    workspaceRoot: candidate,
+    plan: input,
+    assets: options?.assets ?? [],
+  });
 
   return { id: plan.workspaceId, rootDir: candidate, mode: "candidate", path: candidate };
 }

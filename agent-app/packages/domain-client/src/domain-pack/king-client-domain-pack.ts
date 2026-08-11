@@ -49,21 +49,22 @@ export function createKingClientDomainPack(options: {
       return { id: workspace.id, rootDir: workspace.rootDir, mode: "candidate" };
     },
 
-    async patch({ baseWorkspace, changePlan, expectedPlanHash, semanticOperations, workRoot }) {
+    async patch({ baseWorkspace, changePlan, expectedPlanHash, semanticOperations, assets, workRoot }) {
       const workspace = await applyClientPatch(baseWorkspace.rootDir, changePlan, {
         planHash: expectedPlanHash,
         ...(semanticOperations === undefined ? {} : { semanticOperations }),
+        ...(assets === undefined ? {} : { assets }),
         ...(workRoot === undefined ? {} : { workRoot }),
       });
       return { id: workspace.id, rootDir: workspace.rootDir, mode: "candidate" };
     },
 
-    async validate({ baseWorkspace, candidateWorkspace, changePlan }) {
+    async validate({ baseWorkspace, candidateWorkspace, changePlan, assets }) {
       return validateClientProject(
         baseWorkspace.rootDir,
         candidateWorkspace.rootDir,
         changePlan,
-        { skipRoundTrip: false },
+        { skipRoundTrip: false, assetTargetPaths: assets?.map((asset) => asset.targetPath) ?? [] },
       );
     },
 

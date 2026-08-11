@@ -1,4 +1,5 @@
 import { mkdtemp, readdir, readFile, stat } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ValidationReport } from "@kf/contracts";
@@ -179,6 +180,22 @@ async function checkReferences(candidate: string): Promise<CheckOutcome> {
   const rawPages = inspection.raw.pages;
   const pageGuids = new Set(Object.keys(rawPages));
 
+  const versionDir = await resolveVersionDirName(candidate);
+  const versionRoot = versionDir === "." ? candidate : path.join(candidate, versionDir);
+  for (const [pageGuid, tree] of Object.entries(rawPages)) {
+    walkControls(tree, `page ${pageGuid}`, (control, where) => {
+      const src = control["src"];
+      if (typeof src !== "string" || !src.startsWith("static/agent-assets/")) return;
+      if (!/^static\/agent-assets\/[0-9a-f]{64}\.(?:png|jpg|webp)$/.test(src)) {
+        issues.push(`${where}: invalid agent asset reference "${src}"`);
+        return;
+      }
+      if (!existsSync(path.join(versionRoot, ...src.split("/")))) {
+        issues.push(`${where}: missing agent asset resource "${src}"`);
+      }
+    });
+  }
+
   // GUID uniqueness across all controls.
   const guidCount = new Map<string, string[]>();
   for (const [pageGuid, tree] of Object.entries(rawPages)) {
@@ -348,6 +365,7 @@ async function checkChangeScope(
   base: string,
   candidate: string,
   plan: NormalizedPlan,
+  assetTargetPaths: readonly string[],
 ): Promise<{ outcome: CheckOutcome; warnings: string[] }> {
   // C1 defense-in-depth: when the base and the candidate resolve to the same
   // directory while the confirmed plan still has operations, the patch was
@@ -363,7 +381,7 @@ async function checkChangeScope(
     };
   }
   try {
-    const scope = await verifyChangeScope(base, candidate, plan);
+    const scope = await verifyChangeScope(base, candidate, plan, { assetTargetPaths });
     if (scope.violations.length > 0) {
       return {
         outcome: fail(scope.violations.map((v) => v.detail)),
@@ -448,6 +466,7 @@ async function checkRoundTrip(candidate: string): Promise<CheckOutcome> {
 export interface ValidateOptions {
   /** Skip the (expensive) package round-trip check. Defaults to false. */
   skipRoundTrip?: boolean;
+  assetTargetPaths?: readonly string[];
 }
 
 export async function validateClientProject(
@@ -503,7 +522,7 @@ export async function validateClientProject(
 
   const extraWarnings: string[] = [];
 
-  const scope = await checkChangeScope(base, candidate, plan);
+  const scope = await checkChangeScope(base, candidate, plan, options?.assetTargetPaths ?? []);
   outcomes.changeScope = scope.outcome;
   extraWarnings.push(...scope.warnings);
 

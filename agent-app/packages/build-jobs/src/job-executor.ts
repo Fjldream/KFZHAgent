@@ -3,8 +3,11 @@ import type {
   StoredArtifact,
 } from "@kf/artifact-storage";
 import type {
+  ChangePlanAssetBinding,
+  DomainAssetInput,
   DomainPack,
   DomainWorkspace,
+  InternalChangePlan,
   PackagedDomainArtifact,
   ValidationReport,
 } from "@kf/contracts";
@@ -13,13 +16,14 @@ import {
   changePlanSchema,
   normalizeArtifactFileExtension,
   normalizeArtifactMediaType,
-  type ChangePlan,
+  modelAssetIdToWorkspaceAssetId,
   type TrustedSemanticOperation,
 } from "@kf/contracts";
 import type { ServerPlanAuthority } from "./server-plan-authority.js";
 import type { DomainRegistry } from "@kf/domain-registry";
 import { Prisma, type BuildJob, type PrismaClient } from "@prisma/client";
 import { Readable } from "node:stream";
+import { createHash } from "node:crypto";
 import { BuildJobService } from "./build-job.service.js";
 import {
   resolveRevisionProjectIr,
@@ -55,7 +59,7 @@ export interface BuildExecutorDeps {
 }
 
 export interface ResolvedStoredPlan {
-  plan: ChangePlan;
+  plan: InternalChangePlan;
   semanticOperations: readonly TrustedSemanticOperation[];
 }
 
@@ -89,10 +93,118 @@ export function resolveStoredPlan(
   return { plan: parsed.data, semanticOperations: [] };
 }
 
-function hasInternalSemanticPayload(plan: ChangePlan): boolean {
+function hasInternalSemanticPayload(plan: InternalChangePlan): boolean {
   return plan.operations.some((operation) =>
     (operation.op === "create" && Object.hasOwn(operation.properties, "tableData"))
     || (operation.op === "update" && operation.changes.some((change) => change.path === "/__kfModuleTableData")));
+}
+
+const DEFAULT_MAX_ASSET_AGGREGATE_BYTES = 100 * 1024 * 1024;
+const MAX_SINGLE_ASSET_BYTES = 50 * 1024 * 1024;
+const ASSET_SHA256 = /^[0-9a-f]{64}$/;
+
+type AssetResolutionRow = {
+  id: string;
+  type: string;
+  mediaType: string;
+  storageKey: string;
+  sha256: string;
+  sizeBytes: number;
+};
+type AssetResolutionPrisma = {
+  workspaceAsset: {
+    findMany(input: {
+      where: { tenantId: string; workspaceId: string; id: { in: string[] } };
+    }): Promise<AssetResolutionRow[]>;
+  };
+};
+type AssetResolutionStorage = Pick<ArtifactStorage, "open">;
+
+/**
+ * Resolves only signed compiler bindings. Public aliases are reversed before,
+ * but trusted only after, the exact tenant/workspace-scoped database lookup.
+ */
+export async function resolveBuildAssets(input: {
+  prisma: AssetResolutionPrisma;
+  storage: AssetResolutionStorage;
+  tenantId: string;
+  workspaceId: string;
+  bindings: readonly ChangePlanAssetBinding[];
+  maxAggregateBytes?: number;
+}): Promise<DomainAssetInput[]> {
+  if (input.bindings.length === 0) return [];
+  const orderedAssetIds = [...new Set(input.bindings.map((binding) => binding.assetId))];
+  const internalIds = orderedAssetIds.map((assetId) => {
+    try { return modelAssetIdToWorkspaceAssetId(assetId); }
+    catch { throw new Error(`workspace asset missing or outside scope: ${assetId}`); }
+  });
+  const rows = await input.prisma.workspaceAsset.findMany({
+    where: {
+      tenantId: input.tenantId,
+      workspaceId: input.workspaceId,
+      id: { in: internalIds },
+    },
+  });
+  const byInternalId = new Map(rows.map((row) => [row.id, row]));
+  const missing = orderedAssetIds.filter((_, index) => !byInternalId.has(internalIds[index]!));
+  if (missing.length > 0) throw new Error(`workspace assets missing or outside scope: ${missing.join(",")}`);
+
+  const maxAggregate = input.maxAggregateBytes ?? DEFAULT_MAX_ASSET_AGGREGATE_BYTES;
+  if (!Number.isSafeInteger(maxAggregate) || maxAggregate < 0 || maxAggregate > DEFAULT_MAX_ASSET_AGGREGATE_BYTES) {
+    throw new Error("invalid asset aggregate size limit");
+  }
+  let aggregate = 0;
+  const output: DomainAssetInput[] = [];
+  for (const [index, assetId] of orderedAssetIds.entries()) {
+    const row = byInternalId.get(internalIds[index]!)!;
+    const extension = mediaTypeExtension(row.mediaType);
+    if (row.type !== "image" || extension === undefined || !ASSET_SHA256.test(row.sha256)
+      || !Number.isSafeInteger(row.sizeBytes) || row.sizeBytes < 1 || row.sizeBytes > MAX_SINGLE_ASSET_BYTES) {
+      throw new Error(`invalid persisted workspace asset metadata: ${assetId}`);
+    }
+    aggregate += row.sizeBytes;
+    if (aggregate > maxAggregate) throw new Error("workspace asset aggregate size exceeds build limit");
+    const bytes = await readVerifiedAssetStream(input.storage, input.tenantId, row.storageKey, row.sizeBytes, row.sha256, assetId);
+    output.push({
+      assetId,
+      targetPath: `static/agent-assets/${row.sha256}.${extension}`,
+      mediaType: row.mediaType,
+      sha256: row.sha256,
+      bytes,
+    });
+  }
+  return output;
+}
+
+function mediaTypeExtension(mediaType: string): "png" | "jpg" | "webp" | undefined {
+  if (mediaType === "image/png") return "png";
+  if (mediaType === "image/jpeg") return "jpg";
+  if (mediaType === "image/webp") return "webp";
+  return undefined;
+}
+
+async function readVerifiedAssetStream(
+  storage: AssetResolutionStorage,
+  tenantId: string,
+  storageKey: string,
+  expectedSize: number,
+  expectedSha: string,
+  assetId: string,
+): Promise<Uint8Array> {
+  const stream = await storage.open(tenantId, storageKey);
+  const chunks: Buffer[] = [];
+  let size = 0;
+  const hash = createHash("sha256");
+  for await (const chunk of stream as AsyncIterable<Buffer | string>) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += bytes.length;
+    if (size > expectedSize || size > MAX_SINGLE_ASSET_BYTES) throw new Error(`workspace asset size mismatch: ${assetId}`);
+    hash.update(bytes);
+    chunks.push(bytes);
+  }
+  if (size !== expectedSize) throw new Error(`workspace asset size mismatch: ${assetId}`);
+  if (hash.digest("hex") !== expectedSha) throw new Error(`workspace asset checksum mismatch: ${assetId}`);
+  return Buffer.concat(chunks, size);
 }
 
 /**
@@ -163,6 +275,7 @@ export class BuildExecutor {
         baseWorkspace: candidate.baseWorkspace,
         candidateWorkspace: candidate.candidateWorkspace,
         changePlan: candidate.planInput,
+        assets: candidate.assets,
       });
       if (report.status === "fail") {
         await heartbeat.stop();
@@ -292,7 +405,8 @@ export class BuildExecutor {
   ): Promise<{
     baseWorkspace: DomainWorkspace;
     candidateWorkspace: DomainWorkspace;
-    planInput: ChangePlan;
+    planInput: InternalChangePlan;
+    assets: readonly DomainAssetInput[];
     mode: string;
   }> {
     const resolved = resolveStoredPlan(plan.plan ?? {}, {
@@ -300,6 +414,13 @@ export class BuildExecutor {
       expectedRevisionId: job.baseRevisionId,
     }, this.#deps.serverPlanVerifier);
     const planInput = resolved.plan;
+    const assets = await resolveBuildAssets({
+      prisma: this.#deps.prisma,
+      storage: this.#deps.storage,
+      tenantId: job.tenantId,
+      workspaceId: job.workspaceId,
+      bindings: planInput.assetBindings ?? [],
+    });
     const workRoot =
       this.#deps.workRoot === undefined ? {} : { workRoot: this.#deps.workRoot };
     const domainProject = await this.#deps.prisma.domainProjectRevision.findFirst({
@@ -341,12 +462,14 @@ export class BuildExecutor {
         changePlan: planInput,
         expectedPlanHash: job.planHash,
         semanticOperations: resolved.semanticOperations,
+        assets,
         ...workRoot,
       });
       return {
         baseWorkspace,
         candidateWorkspace,
         planInput,
+        assets,
         mode: "compile",
       };
     }
@@ -366,12 +489,14 @@ export class BuildExecutor {
       changePlan: planInput,
       expectedPlanHash: job.planHash,
       semanticOperations: resolved.semanticOperations,
+      assets,
       ...workRoot,
     });
     return {
       baseWorkspace,
       candidateWorkspace,
       planInput,
+      assets,
       mode: "patch",
     };
   }
@@ -422,7 +547,7 @@ export class BuildExecutor {
       report?: ValidationReport;
       error?: unknown;
       stored?: StoredArtifact;
-      planInput?: ChangePlan;
+      planInput?: InternalChangePlan;
       mode?: string;
       packaged?: PackagedDomainArtifact;
     },

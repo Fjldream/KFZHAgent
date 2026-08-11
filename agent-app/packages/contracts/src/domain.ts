@@ -48,6 +48,8 @@ export interface DomainPatchInput {
   expectedPlanHash: string;
   /** Server-validated native adapter authorizations; never model-authored. */
   semanticOperations?: readonly TrustedSemanticOperation[];
+  /** Worker-resolved private bytes. Neither storage keys nor internal UUIDs cross this boundary. */
+  assets?: readonly DomainAssetInput[];
   workRoot?: string;
 }
 
@@ -55,6 +57,15 @@ export interface DomainValidateInput {
   baseWorkspace: DomainWorkspace;
   candidateWorkspace: DomainWorkspace;
   changePlan: unknown;
+  assets?: readonly DomainAssetInput[];
+}
+
+export interface DomainAssetInput {
+  assetId: string;
+  targetPath: string;
+  mediaType: string;
+  sha256: string;
+  bytes: Uint8Array;
 }
 
 export interface DomainPackageInput {

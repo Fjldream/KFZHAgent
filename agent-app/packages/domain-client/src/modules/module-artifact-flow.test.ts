@@ -76,6 +76,57 @@ function compileFirst(inputPlan = plan(), revisionId = "revision-1") {
 }
 
 describe("signed module compilation flow", () => {
+  it("derives internal image bindings only from a verified module compilation artifact", () => {
+    const assetId = "asset-00000000000040008000000000000001";
+    const spec: UIImplementationSpec = {
+      schema: "kf-ui-implementation/v1",
+      theme,
+      pages: [{ id: "home", width: 800, height: 600, components: [{
+        id: "hero/portrait",
+        role: "image",
+        sourceModuleId: "hero",
+        capabilityId: "image",
+        critical: true,
+        geometry: { x: 20, y: 20, width: 160, height: 160 },
+        properties: { src: "asset", fit: "cover", alt: "Portrait" },
+        style: { declarations: {}, states: {} },
+      }] }],
+    };
+    const metadata = {
+      schema: "kf-module-compilation-metadata/v1" as const,
+      projectKey: "kingclient.portal",
+      moduleDefinitions: [{ pageId: "home", moduleId: "hero", kind: "content.hero", templateVersion: "1.0.0", compilerFingerprint: "hero-compiler-v1", layoutFingerprint: "hero-layout-v1" }],
+      assets: [{ pageId: "home", moduleId: "hero", assetId, status: "resolved" as const, assetIdentity: `${assetId}|resolved|Portrait` }],
+      blueprintMappings: [],
+    };
+    const signed = authority.signModuleCompilation({
+      schema: "kf-module-compilation-artifact/v1",
+      projectKey: "kingclient.portal",
+      revisionId: "revision-asset",
+      acceptedBlueprintHash: "1".repeat(64),
+      planHash: "2".repeat(64),
+      implementationHash: canonicalModuleCompilationHash(spec),
+      metadataHash: canonicalModuleCompilationHash(metadata),
+      sourceModuleIds: ["hero"],
+      metadata,
+    });
+    const verified = authority.verifyModuleCompilation(JSON.parse(JSON.stringify(signed)));
+    const compiled = compileUiImplementation(spec, {
+      workspaceId: "workspace-assets",
+      pageGuidById: { home: "page-guid" },
+      existingControlGuidByComponentId: {},
+      existingControlCapabilityIdByComponentId: {},
+      moduleCompilationArtifact: verified,
+    });
+
+    expect(compiled.plan.assetBindings).toEqual([{ assetId, entityId: "hero/portrait" }]);
+    expect(compiled.plan.operations[0]).toMatchObject({
+      op: "create",
+      entityId: "hero/portrait",
+      properties: { src: `static/agent-assets/pending-${assetId}` },
+    });
+  });
+
   it("derives accepted category and interaction action kinds from Registry, not model authority", () => {
     const payload = createAcceptedBlueprintArtifactPayload({
       blueprint: blueprint({ expectedCategory: "wrong" }), projectKey: "kingclient.portal", revisionId: "revision-1", registry: registry(),

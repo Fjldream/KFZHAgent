@@ -3,8 +3,9 @@ import {
   AssetRecordSchema,
   ModulePlanSchema,
   canonicalModuleCompilationHash,
+  internalChangePlanSchema,
   type AssetRecord,
-  type ChangePlan,
+  type InternalChangePlan,
   type ModuleDeliveryGap,
   type ModulePlan,
   type ModulePlanOperation,
@@ -14,7 +15,6 @@ import { planHash, type ModulePlanningSummary } from "@kf/domain-client";
 import { ModuleCompilationCoordinator } from "../module-compilation-coordinator.js";
 import type { ModelPortContext } from "../model-port.js";
 import type { SolutionGraphDeps } from "../ports.js";
-import { GraphPlanSchema } from "../schemas/change-plan.js";
 import type { AgentGraphStateValue, AgentGraphUpdate } from "../state.js";
 
 const MAX_REPAIR_CALLS = 3;
@@ -153,6 +153,7 @@ export function createModulePlanNode(deps: SolutionGraphDeps) {
       let coordinated;
       try {
         coordinated = await coordinator.compile({
+          tenantId: state.tenantId,
           projectKey,
           revisionId: state.currentRevisionId,
           acceptedBlueprintHash: acceptedBlueprintArtifact.blueprintHash,
@@ -172,7 +173,7 @@ export function createModulePlanNode(deps: SolutionGraphDeps) {
         if (coordinated.outcome.deliveryReport === undefined || coordinated.outcome.deliveryReport.status === "blocked") {
           return fail("MODULE_DELIVERY_REPORT_MISSING", state, repairAttempt);
         }
-        const parsedPlan = GraphPlanSchema.safeParse(coordinated.uiCompilation.plan);
+        const parsedPlan = internalChangePlanSchema.safeParse(coordinated.uiCompilation.plan);
         if (!parsedPlan.success || parsedPlan.data.operations.length === 0) {
           return fail("MODULE_CHANGE_PLAN_INVALID", state, repairAttempt);
         }
@@ -239,7 +240,7 @@ async function persistSuccessfulCompilation(input: {
   moduleCompilationArtifact: NonNullable<AgentGraphStateValue["moduleCompilationArtifact"]>;
   implementation: NonNullable<AgentGraphStateValue["uiImplementation"]>;
   deliveryReport: NonNullable<AgentGraphStateValue["moduleDeliveryReport"]>;
-  compiledPlan: ChangePlan;
+  compiledPlan: InternalChangePlan;
   capabilityReport: NonNullable<AgentGraphStateValue["capabilityReport"]>;
   semanticOperations: Parameters<NonNullable<SolutionGraphDeps["serverPlanSigner"]>["sign"]>[0]["semanticOperations"];
   repairAttempt: number;

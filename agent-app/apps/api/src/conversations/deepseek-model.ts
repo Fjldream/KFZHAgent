@@ -1401,6 +1401,7 @@ export class DeepSeekModelPort implements ModelPort {
         : "请根据需求输出变更计划 JSON。",
       "变更计划 JSON 格式（严格）：",
       '{"operations":[{"op":"update","entityId":"<清单中的 GUID>","entityType":"control","changes":[{"path":"/text","value":"..."}]}]}',
+      "只允许输出 operations；禁止输出 assetBindings。资产绑定是服务端模块编译器专属字段，模型无权生成。",
       "create（新增控件）格式：{\"op\":\"create\",\"entityType\":\"control\",\"entityId\":\"新语义id如NewTitle\",\"properties\":{\"pageId\":\"<清单中的页面GUID>\",\"type\":\"text|button|inputnumber|switch|checkbox|radio|select|image|tabs|table|richtext|spacer|radiolegacy|checkboxlegacy|combobox|scale|list|treeview|webcontainer|gantt|factorycalendar|input|cascader|datetimepicker|dropdown|navmenu|tree|upload|transfer|tag|timeline|steps|easyui|layout|prototype\",\"text\":\"控件文本\",\"x\":60,\"y\":50,\"width\":300,\"height\":40}}",
       "create 控件类型说明：静态控件用 type=上述枚举（text/button/input/...）；easyui 控件用 type=\"easyui\" + properties.proto（KF uiExtendType 数字，如 1=datagrid、2=linkbutton、11=datebox、17=tree、18=treegrid、26=sidemenu、5=propertygrid、9=textbox、0=combobox、28=validatebox）；布局用 type=\"layout\" + properties.layoutType；特殊节点用 type=\"prototype\" + properties.prototypeName（CustomCharts/AlarmWindow/TrendChart/BarChart/PieChart/XYChart/EventWindow）。",
       "delete 格式：{\"op\":\"delete\",\"entityId\":\"<清单中的 GUID>\",\"entityType\":\"control\",\"destructiveConfirmed\":true}",
@@ -1425,6 +1426,9 @@ export class DeepSeekModelPort implements ModelPort {
 
   /** 校验并组装 ChangePlan；非法 GUID 的操作被拒绝（防止幻觉实体进入构建）。 */
   private assemblePlan(input: ModelPortContext, raw: unknown, revising: boolean): ChangePlan {
+    if (raw !== null && typeof raw === "object" && Object.hasOwn(raw, "assetBindings")) {
+      throw new DeepSeekModelOutputError("assetBindings is compiler-owned server data and cannot be model-authored");
+    }
     const record = raw as Record<string, unknown>;
     const operations = Array.isArray(record["operations"]) ? record["operations"] : [];
     const known = knownGuidSet(input.editableEntities);

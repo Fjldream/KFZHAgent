@@ -23,6 +23,7 @@ import { createGraphPorts } from "./graph-ports.js";
 import { MODEL_PORT } from "./model-port.js";
 import { MODULE_ARTIFACT_AUTHORITY, SERVER_PLAN_AUTHORITY } from "./server-plan-authority.js";
 import type { ModuleArtifactAuthority, ServerPlanAuthority } from "@kf/build-jobs";
+import { AssetService } from "../assets/asset.service.js";
 
 type CompiledGraph = ReturnType<typeof compileSolutionGraph>;
 
@@ -77,6 +78,7 @@ export class ConversationService {
     @Inject(ARTIFACT_STORAGE) private readonly artifactStorage: ArtifactStorage,
     @Inject(SERVER_PLAN_AUTHORITY) private readonly serverPlanAuthority: ServerPlanAuthority,
     @Inject(MODULE_ARTIFACT_AUTHORITY) private readonly moduleArtifactAuthority: ModuleArtifactAuthority,
+    private readonly assetService: AssetService,
   ) {}
 
   async create(tenantId: string, workspaceId: string, title?: string): Promise<Conversation> {
@@ -367,7 +369,7 @@ export class ConversationService {
 
   private async getGraph(): Promise<CompiledGraph> {
     if (this.#graph === undefined) {
-      const ports = createGraphPorts(this.prisma, this.artifactStorage, this.moduleArtifactAuthority);
+      const ports = createGraphPorts(this.prisma, this.artifactStorage, this.moduleArtifactAuthority, this.assetService);
       const deps: SolutionGraphDeps = {
         modelPort: this.modelPort,
         workspaceQuery: ports.workspaceQuery,

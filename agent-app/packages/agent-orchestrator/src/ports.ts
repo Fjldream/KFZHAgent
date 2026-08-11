@@ -4,6 +4,7 @@ import type { BuildJobStatus } from "@kf/build-jobs";
 import type {
   CapabilityReport,
   ChangePlan,
+  InternalChangePlan,
   ServerPlanEnvelope,
   TrustedSemanticOperationInput,
   UIImplementationSpec,
@@ -111,7 +112,7 @@ export interface SavePlanInput {
   changeRequestId: string;
   planHash: string;
   /** Model-safe plans or server-owned persisted envelopes; internal envelopes never reach the model. */
-  plan: ChangePlan | ServerPlanEnvelope;
+  plan: ChangePlan | InternalChangePlan | ServerPlanEnvelope;
 }
 
 export interface ChangePlanRepository {
@@ -175,7 +176,7 @@ export interface UiImplementationCompilerInput {
 /** Domain-owned deterministic implementation boundary; the model never emits ChangePlan here. */
 export interface UiImplementationCompilerPort {
   compile(input: UiImplementationCompilerInput): Promise<{
-    plan: ChangePlan;
+    plan: InternalChangePlan;
     capabilityReport: CapabilityReport;
     semanticOperations?: readonly TrustedSemanticOperationInput[];
   }>;
@@ -186,6 +187,8 @@ export interface ModulePlanCompilerPort {
   /** Stable-only, bounded summaries. Beta/unsupported definitions never cross this boundary. */
   listPlanningCatalog(): Promise<readonly ModulePlanningSummary[]>;
   compile(input: {
+    tenantId: string;
+    workspaceId: string;
     plan: import("@kf/contracts").ModulePlan;
     acceptedBlueprintArtifact: VerifiedAcceptedBlueprintArtifact;
     previousCompilationArtifact?: VerifiedModuleCompilationArtifact;
@@ -211,7 +214,7 @@ export interface AcceptedBlueprintConfirmationPort {
 /** Server-only authority port. Implementations hold the HMAC key outside graph state. */
 export interface ServerPlanSignerPort {
   sign(input: {
-    plan: ChangePlan;
+    plan: InternalChangePlan;
     revisionId: string;
     semanticOperations: readonly TrustedSemanticOperationInput[];
   }): ServerPlanEnvelope;

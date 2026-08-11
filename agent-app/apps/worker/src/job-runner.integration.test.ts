@@ -14,6 +14,7 @@ import {
   BuildExecutor,
   BuildJobService,
   BuildWorkerCrash,
+  createHmacServerPlanAuthority,
 } from "@kf/build-jobs";
 import {
   compileUiImplementation,
@@ -45,6 +46,7 @@ const TABLES = [
   "ChangeRequest",
   "Message",
   "Conversation",
+  "WorkspaceAsset",
   "SolutionWorkspace",
   "UserSession",
   "User",
@@ -220,13 +222,12 @@ describe("job runner", () => {
         id: "Page1",
         width: 1440,
         height: 900,
-        components: moduleIds.map((sourceModuleId, index) => ({
-          id: index === 0 ? "Text1" : sourceModuleId,
+        components: moduleIds.map((sectionId, index) => ({
+          id: index === 0 ? "Text1" : sectionId,
           role: "section-heading",
-          sourceModuleId,
           capabilityId: "text",
           critical: true,
-          content: `${sourceModuleId} 内容`,
+          content: `${sectionId} 内容`,
           geometry: { x: 60, y: 60 + index * 100, width: 420, height: 48 },
           properties: {},
           style: {
@@ -383,6 +384,45 @@ describe("job runner", () => {
     expect(report).not.toBeNull();
     expect(report!.outcome).toBe("fail");
     expect(report!.details).toHaveProperty("error");
+  });
+
+  it("fails a signed build with a deleted asset without advancing the workspace revision", async () => {
+    const seeded = await seedNewWorkspace();
+    const authority = createHmacServerPlanAuthority(Buffer.alloc(32, 0x61));
+    const missingAssetId = "asset-00000000000040008000000000000001";
+    const internalPlan = {
+      schema: "kf-change-plan/v1" as const,
+      workspaceId: seeded.workspace.id,
+      operations: [],
+      assetBindings: [{ assetId: missingAssetId, entityId: "missing-image" }],
+    };
+    const envelope = authority.sign({
+      plan: internalPlan,
+      revisionId: seeded.revision.id,
+      semanticOperations: [],
+    });
+    await prisma.changePlan.update({
+      where: { id: seeded.plan.id },
+      data: { planHash: envelope.planHash, plan: envelope as Prisma.InputJsonValue },
+    });
+    const queued = await jobs.enqueue(enqueueInput({ ...seeded, hash: envelope.planHash }));
+    const leased = await jobs.leaseNext("missing-asset-worker", new Date());
+    const executor = new BuildExecutor({
+      prisma,
+      storage,
+      registry,
+      serverPlanVerifier: authority,
+    });
+
+    expect((await executor.execute(leased!)).status).toBe("FAILED");
+    expect(await prisma.solutionRevision.count({ where: { workspaceId: seeded.workspace.id } })).toBe(1);
+    expect(await prisma.artifact.count({ where: { buildJobId: queued.id } })).toBe(0);
+    expect((await prisma.solutionWorkspace.findUnique({ where: { id: seeded.workspace.id } }))?.currentRevisionId)
+      .toBe(seeded.revision.id);
+    expect((await prisma.validationReport.findFirst({ where: { buildJobId: queued.id } }))?.details)
+      .toEqual(expect.objectContaining({
+        error: expect.objectContaining({ message: expect.stringMatching(/asset.*missing|missing.*asset/i) }),
+      }));
   });
 
   it("deletes the stored blob when a stale completion does not adopt it", async () => {

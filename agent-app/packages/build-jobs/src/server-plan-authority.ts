@@ -1,5 +1,5 @@
 import type {
-  ChangePlan,
+  InternalChangePlan,
   ServerPlanEnvelope,
   ServerPlanEnvelopeExpectations,
   TrustedSemanticOperationInput,
@@ -22,7 +22,7 @@ import {
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 export interface ServerPlanSignInput {
-  plan: ChangePlan;
+  plan: InternalChangePlan;
   revisionId: string;
   semanticOperations: readonly TrustedSemanticOperationInput[];
 }
