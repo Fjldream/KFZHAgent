@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { canonicalModuleCompilationHash } from "@kf/contracts";
 import { createHmacModuleArtifactAuthority } from "@kf/build-jobs";
 import { compileModulePlan, createDefaultModuleRegistry } from "@kf/domain-client";
-import { DeepSeekModelPort, extractJson, DeepSeekModelOutputError } from "./deepseek-model.js";
+import { DeepSeekModelPort, deriveExactModulePlanOperations, extractJson, DeepSeekModelOutputError } from "./deepseek-model.js";
 import { DeterministicFakeModelPort } from "./fake-model.js";
 
 function makePort(reply: unknown, status = 200) {
@@ -839,6 +839,20 @@ describe("DeepSeekModelPort", () => {
     });
     await expect(makePort(resizeMasksTitle).reviseModulePlan(modulePlanningContext({ previousModulePlan: previous })))
       .rejects.toThrow("operations do not exactly describe");
+  });
+
+  it("derives detached composite revision payloads", () => {
+    const previous = modulePlan();
+    const current = modulePlan({ pages: [{ ...previous.pages[0], modules: [
+      { ...previous.pages[0].modules[0], placement: { ...previous.pages[0].modules[0].placement, alignment: "center" } },
+      previous.pages[0].modules[1],
+    ] }] });
+    const operations = deriveExactModulePlanOperations(previous, current, new Set(["products", "projects"]));
+    const move = operations.find((entry) => entry.op === "move");
+    expect(move?.op).toBe("move");
+    if (move?.op !== "move") throw new Error("expected move");
+    move.placement.alignment = "end";
+    expect(current.pages[0].modules[0].placement.alignment).toBe("center");
   });
 
   it("repairs malformed module JSON once but never retries semantic rejections", async () => {
