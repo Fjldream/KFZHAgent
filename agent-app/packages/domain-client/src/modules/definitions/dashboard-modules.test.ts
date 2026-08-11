@@ -69,12 +69,13 @@ describe("dashboard modules", () => {
     dashboardStatus.id = "dashboard-status"; dashboardStatus.placement = { ...dashboardStatus.placement, columnSpan: 6, preferredHeight: "medium" };
     const dashboard = { schema: "kf-module-plan/v1" as const, projectKey: "kingclient.dashboard", theme, assets: [], pages: [{ id: "Page1", title: "Dashboard", mode: "dashboard-grid" as const, modules: [dashboardChart, dashboardStatus] }], operations: [] };
     const adminSidebar = instance("navigation.sidebar", { groups: [{ label: "管理", items: ["设备"] }] }); adminSidebar.id = "admin-sidebar"; adminSidebar.placement = { ...adminSidebar.placement, region: "sidebar", preferredHeight: "large" };
-    const adminToolbar = instance("action.toolbar", { actions: [{ label: "新增" }, { label: "导出" }] }); adminToolbar.id = "admin-toolbar"; adminToolbar.placement = { ...adminToolbar.placement, region: "toolbar", preferredHeight: "compact" };
+    const adminToolbar = instance("action.toolbar", { actions: [{ label: "新增" }, { label: "导出" }] }); adminToolbar.id = "admin-toolbar"; adminToolbar.placement = { ...adminToolbar.placement, region: "main", preferredHeight: "compact" };
     const adminTable = instance("data.table", { table: { columns: [{ key: "name", label: "设备" }, { key: "temperature", label: "温度", align: "right" }], rows: [{ name: "泵 A", temperature: 42 }] } }); adminTable.id = "admin-table"; adminTable.placement = { ...adminTable.placement, preferredHeight: "small" };
     const admin = { schema: "kf-module-plan/v1" as const, projectKey: "kingclient.admin", theme, assets: [], pages: [{ id: "Page1", title: "Admin", mode: "admin-shell" as const, modules: [adminSidebar, adminToolbar, adminTable] }], operations: [] };
     const registry = createDefaultModuleRegistry();
     const context = { availableKfCapabilities: ["layout.2", "text", "button", "tag", "input", "easyui.1", "prototype.TrendChart", "prototype.BarChart", "prototype.PieChart"], approvedAuthorizationRefs: [] };
     const blockedDashboard = compileModulePlan({ plan: dashboard, registry, assetsById: {}, validationContext: context });
+    expect(blockedDashboard.status).toBe("blocked");
     expect(blockedDashboard.gaps).toContainEqual(expect.objectContaining({ moduleId: "dashboard-chart", severity: "blocking", reason: "kf36-static-chart-series-mapping-unverified" }));
     for (const [plan, expected] of [[admin, "admin-table/datagrid"]] as const) {
       const compiled = compileModulePlan({ plan, registry, assetsById: {}, validationContext: context });

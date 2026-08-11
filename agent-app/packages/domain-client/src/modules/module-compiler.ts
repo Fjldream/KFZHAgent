@@ -1,5 +1,7 @@
 import {
+  type CustomerEffectBlueprint,
   ModuleDeliveryGapSchema,
+  type ModuleDeliveryReport,
   ModulePlanSchema,
   ModuleTraceSchema,
   ResolvedAssetSchema,
@@ -19,6 +21,8 @@ import { ModuleRegistry } from "./module-registry.js";
 import { stableModuleComponentId } from "./stable-ids.js";
 import { resolveModuleComponentStyle, type ModuleThemeRole } from "./theme/module-theme.js";
 import type { ModuleCompileOutput, ModuleValidationContext } from "./types.js";
+import { diffModulePlans, UnexpectedModuleChangeError, type ModulePlanDiff } from "./module-diff.js";
+import { evaluateModuleDelivery } from "./module-quality.js";
 
 export interface ResolvedAssetBinding {
   readonly moduleId: string;
@@ -32,6 +36,8 @@ export interface ModuleCompilationResult {
   readonly traces: readonly ModuleTrace[];
   readonly assetBindings: readonly ResolvedAssetBinding[];
   readonly gaps: readonly ModuleDeliveryGap[];
+  readonly deliveryReport?: ModuleDeliveryReport;
+  readonly diff?: ModulePlanDiff;
 }
 
 export interface ModuleCompilationBlockedResult {
@@ -39,12 +45,16 @@ export interface ModuleCompilationBlockedResult {
   readonly traces: readonly ModuleTrace[];
   readonly assetBindings: readonly ResolvedAssetBinding[];
   readonly gaps: readonly ModuleDeliveryGap[];
+  readonly deliveryReport?: ModuleDeliveryReport;
+  readonly diff?: ModulePlanDiff;
 }
 
 export type ModuleCompilationOutcome = ModuleCompilationResult | ModuleCompilationBlockedResult;
 
 export interface CompileModulePlanInput {
   readonly plan: ModulePlan;
+  /** Confirmed customer-effect blueprint. Omitted only by legacy callers. */
+  readonly blueprint?: CustomerEffectBlueprint;
   readonly registry: ModuleRegistry;
   /** Opaque IDs resolve to safe metadata only; paths and storage keys never enter this boundary. */
   readonly assetsById: Readonly<Record<string, ResolvedAsset>>;
@@ -163,13 +173,34 @@ export function compileModulePlan(input: CompileModulePlanInput): ModuleCompilat
   }
 
   const finalGaps = finalizeGaps(gaps);
-  if (pages.length !== plan.pages.length) {
-    return Object.freeze({ status: "blocked", traces: Object.freeze(traces), assetBindings: Object.freeze(assetBindings), gaps: finalGaps });
+  const implementation: UIImplementationSpec | undefined = pages.length === plan.pages.length
+    ? { schema: "kf-ui-implementation/v1", theme: plan.theme, pages }
+    : undefined;
+  const parsedImplementation = implementation === undefined ? undefined : UIImplementationSpecSchema.safeParse(implementation);
+  if (parsedImplementation !== undefined && !parsedImplementation.success) throw new Error(`INVALID_COMPILED_UI_IMPLEMENTATION: ${parsedImplementation.error.issues[0]?.message ?? "invalid implementation"}`);
+  const canonicalImplementation = parsedImplementation === undefined ? undefined : reuseCanonicalPriorComponents(parsedImplementation.data, plan, previousPlan, previousComponents);
+  const diff = canonicalImplementation !== undefined && previousPlan !== undefined && previousImplementation !== undefined
+    ? diffModulePlans({ previousPlan, plan, previousImplementation, implementation: canonicalImplementation })
+    : undefined;
+  if (diff !== undefined && diff.unexpectedChanges.length > 0) throw new UnexpectedModuleChangeError(diff);
+  const deliveryReport = input.blueprint === undefined ? undefined : evaluateModuleDelivery({
+    blueprint: input.blueprint,
+    plan,
+    ...(canonicalImplementation === undefined ? {} : { implementation: canonicalImplementation }),
+    traces,
+    assetBindings,
+    gaps: finalGaps,
+  }).report;
+  if (canonicalImplementation === undefined || hasUnresolvedBlockingGap(finalGaps) || deliveryReport?.status === "blocked") {
+    return Object.freeze({
+      status: "blocked",
+      traces: Object.freeze(traces),
+      assetBindings: Object.freeze(assetBindings),
+      gaps: finalGaps,
+      ...(deliveryReport === undefined ? {} : { deliveryReport }),
+      ...(diff === undefined ? {} : { diff }),
+    });
   }
-  const implementation: UIImplementationSpec = { schema: "kf-ui-implementation/v1", theme: plan.theme, pages };
-  const parsedImplementation = UIImplementationSpecSchema.safeParse(implementation);
-  if (!parsedImplementation.success) throw new Error(`INVALID_COMPILED_UI_IMPLEMENTATION: ${parsedImplementation.error.issues[0]?.message ?? "invalid implementation"}`);
-  const canonicalImplementation = reuseCanonicalPriorComponents(parsedImplementation.data, plan, previousPlan, previousComponents);
   TRUSTED_MODULE_SOURCE_IDS.set(
     canonicalImplementation,
     Object.freeze(plan.pages.flatMap((page) => page.modules.map((module) => module.id)).sort(compareCodePoints)),
@@ -180,7 +211,13 @@ export function compileModulePlan(input: CompileModulePlanInput): ModuleCompilat
     traces: Object.freeze(traces),
     assetBindings: Object.freeze(assetBindings),
     gaps: finalGaps,
+    ...(deliveryReport === undefined ? {} : { deliveryReport }),
+    ...(diff === undefined ? {} : { diff }),
   });
+}
+
+function hasUnresolvedBlockingGap(gaps: readonly ModuleDeliveryGap[]): boolean {
+  return gaps.some((gap) => gap.severity === "blocking" && gap.status === "unresolved");
 }
 
 function reuseCanonicalPriorComponents(

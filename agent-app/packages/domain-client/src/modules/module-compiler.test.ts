@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { ModulePlan, ModulePlanModule, ResolvedAsset, UIComponentSpec } from "@kf/contracts";
 import { ModuleRegistry, type ModuleDefinition } from "./module-registry.js";
 import { compileModulePlan } from "./module-compiler.js";
+import { UnexpectedModuleChangeError } from "./module-diff.js";
 import { stableModuleComponentId } from "./stable-ids.js";
 
 const theme = {
@@ -128,7 +129,9 @@ describe("compileModulePlan", () => {
 
   it("returns a blocking gap and never calls a required-asset module with an unresolved asset", () => {
     let compiled = false;
-    const result = compile(plan([module("summary"), module("hero", { assetId: "portrait", placement: { ...module("hero").placement, order: 1 } })]), registryFor(
+    const result = compileModulePlan({ plan: plan([module("summary"), module("hero", {
+      kind: "image-panel", assetId: "portrait", placement: { ...module("hero").placement, order: 1 },
+    })]), registry: registryFor(
       definition(),
       definition({
         kind: "image-panel",
@@ -136,25 +139,24 @@ describe("compileModulePlan", () => {
         requiredKfCapabilities: ["image"],
         compile: () => { compiled = true; return { components: [component("image", "image")], deliveryGaps: [] }; },
       }),
-    ), {
-      plan: plan([module("summary"), module("hero", {
-        kind: "image-panel", assetId: "portrait", placement: { ...module("hero").placement, order: 1 },
-      })]),
+    ),
       assetsById: { portrait: { assetId: "portrait", status: "unavailable" } },
+      validationContext: { availableKfCapabilities: ["text", "image"], approvedAuthorizationRefs: [] },
     });
 
     expect(compiled).toBe(false);
     expect(result.gaps).toEqual([expect.objectContaining({ moduleId: "hero", severity: "blocking", status: "unresolved" })]);
-    expect(result.implementation.pages[0]?.components.map((item) => item.sourceModuleId)).toEqual(["summary"]);
+    expect(result.status).toBe("blocked");
   });
 
   it("reports a missing required KF capability as a blocking delivery gap instead of fabricating a fallback", () => {
-    const result = compile(plan([module("summary"), module("image", {
+    const result = compileModulePlan({ plan: plan([module("summary"), module("image", {
       kind: "image-panel", placement: { ...module("image").placement, order: 1 },
-    })]), registryFor(
+    })]), registry: registryFor(
       definition(),
       definition({ kind: "image-panel", requiredKfCapabilities: ["image"] }),
-    ), {
+    ),
+      assetsById: {},
       validationContext: { availableKfCapabilities: ["text"], approvedAuthorizationRefs: [] },
     });
 
@@ -164,7 +166,7 @@ describe("compileModulePlan", () => {
       status: "unresolved",
       reason: expect.stringContaining("MODULE_KF_CAPABILITY_MISSING"),
     })]);
-    expect(result.implementation.pages[0]?.components.map((component) => component.sourceModuleId)).toEqual(["summary"]);
+    expect(result.status).toBe("blocked");
   });
 
   it("rejects raw CSS or native payloads from a module compiler", () => {
@@ -207,8 +209,8 @@ describe("compileModulePlan", () => {
       .not.toBe(afterPrefix.pages[0]!.components.find((item) => item.sourceModuleId === "profile")?.geometry.y);
 
     const alteredRegistry = registryFor(definition({ compile: () => ({ components: [{ ...component("title", "text"), content: "definition changed" }], deliveryGaps: [] }) }));
-    expect(compile(input, alteredRegistry, { previousPlan: input, previousImplementation: first }).implementation.pages[0]!.components[0])
-      .not.toBe(first.pages[0]!.components[0]);
+    expect(() => compile(input, alteredRegistry, { previousPlan: input, previousImplementation: first }))
+      .toThrow(UnexpectedModuleChangeError);
   });
 
   it("strictly rejects unsafe resolved assets, nested compiler payloads, and unsafe prior implementations", () => {
@@ -232,9 +234,10 @@ describe("compileModulePlan", () => {
     expect(compile(optionalPlan, registryFor(definition(), optional), { assetsById: { portrait: { assetId: "portrait", status: "pending" } } }).gaps)
       .toEqual([expect.objectContaining({ moduleId: "optional", severity: "warning" })]);
     const requiredPlan = plan([module("summary"), module("required", { kind: "required-image", assetId: "portrait", placement: { ...module("required").placement, order: 1 } })]);
-    const result = compile(requiredPlan, registryFor(definition(), required), { assetsById: { portrait: { assetId: "portrait", status: "unavailable" } } });
+    const result = compileModulePlan({ plan: requiredPlan, registry: registryFor(definition(), required), assetsById: { portrait: { assetId: "portrait", status: "unavailable" } }, validationContext: { availableKfCapabilities: ["text"], approvedAuthorizationRefs: [] } });
     expect(result.gaps).toEqual([expect.objectContaining({ moduleId: "required", severity: "blocking" })]);
     expect(result.traces.flatMap((trace) => trace.entries)).toEqual([expect.objectContaining({ moduleId: "summary", outputId: "summary/title" })]);
+    expect(result.status).toBe("blocked");
   });
 
   it("rejects malformed or cross-module compiler delivery gaps and bounds stable IDs", () => {
