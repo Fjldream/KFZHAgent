@@ -20,7 +20,7 @@ import { PrismaService } from "../prisma/prisma.service.js";
 export class BuildJobService {
   readonly #inner: BuildJobsCore;
 
-  constructor(prisma: PrismaService) {
+  constructor(private readonly prisma: PrismaService) {
     this.#inner = new BuildJobsCore(prisma);
   }
 
@@ -42,6 +42,14 @@ export class BuildJobService {
 
   getByKey(idempotencyKey: string, tenantId: string): Promise<BuildJob | null> {
     return this.#inner.getByKey(idempotencyKey, tenantId);
+  }
+
+  /** Latest durable job for reopening a workspace; tenant predicate prevents enumeration. */
+  getLatestForWorkspace(workspaceId: string, tenantId: string): Promise<BuildJob | null> {
+    return this.prisma.buildJob.findFirst({
+      where: { workspaceId, tenantId },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    });
   }
 }
 

@@ -50,15 +50,11 @@ export function createLoadContextNode(deps: SolutionGraphDeps) {
     let summaryAddition: string | undefined;
     let refreshedRevisionId = workspaceRevisionId;
 
-    if (state.buildJobId !== undefined) {
+    if (state.buildJobId !== undefined && state.stage === "building") {
       const job = await deps.buildJobPort.getJob({ tenantId, jobId: state.buildJobId });
       if (job !== null) {
         if (job.status === "SUCCEEDED") {
-          // preview-review is a user-driven stage (post-build feedback loop);
-          // do not clobber it back to idle when the job is already succeeded.
-          if (stage !== "preview-review") {
-            stage = "idle";
-          }
+          stage = "preview-review";
           lastErrorCode = undefined;
           refreshedRevisionId =
             (await deps.workspaceQuery.getCurrentRevisionId({ tenantId, workspaceId })) ??

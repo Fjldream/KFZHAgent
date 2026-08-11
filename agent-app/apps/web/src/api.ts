@@ -171,6 +171,12 @@ export const api = {
   },
 
   // ---- 构建 / 制品 / 下载 -------------------------------------------------
+  async getLatestBuildJob(workspaceId: string): Promise<BuildJob | null> {
+    const response = await jsonResponse<{ job: BuildJob | null }>(
+      `/api/build-jobs?workspaceId=${encodeURIComponent(workspaceId)}`,
+    );
+    return response.job;
+  },
   async getBuildJob(jobId: string): Promise<BuildJob> {
     return jsonResponse<BuildJob>(`/api/build-jobs/${jobId}`);
   },

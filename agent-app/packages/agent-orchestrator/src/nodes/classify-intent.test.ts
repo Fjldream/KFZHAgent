@@ -58,6 +58,39 @@ describe("classify-intent node CLARIFY gate", () => {
 });
 
 describe("classify-intent node design-review routing", () => {
+  it.each(["done", "idle"])(
+    "routes an implementation retry from a stale %s checkpoint back to confirmed-design planning",
+    async (stage) => {
+    const deps = {
+      modelPort: {
+        classifyIntent: vi.fn().mockResolvedValue({
+          intent: "CONFIRM_PLAN",
+          requestedDomains: ["kingclient"],
+        } satisfies ClassifyIntentResult),
+      },
+      workspaceQuery: { appendMessage: vi.fn().mockResolvedValue(undefined) },
+      isDomainSupported: () => true,
+    };
+
+    const update = await createClassifyIntentNode(deps as never)(
+      baseState({
+        stage,
+        designPlanHash: "a".repeat(64),
+        planHash: "b".repeat(64),
+        buildJobId: "job-old",
+        buildConfirmed: true,
+        lastErrorCode: "UI_IMPLEMENTATION_INVALID:button property rejected",
+        recentMessages: [{ role: "user", content: "重新生成工程实施计划" }],
+      }) as never,
+    );
+
+      expect(update.intent).toBe("CONFIRM_DESIGN");
+      expect(update.buildConfirmed).toBe(false);
+      expect(update.lastErrorCode).toBeUndefined();
+      expect(deps.modelPort.classifyIntent).not.toHaveBeenCalled();
+    },
+  );
+
   it("treats supplemental requirements as a design revision before design confirmation", async () => {
     const deps = {
       modelPort: {

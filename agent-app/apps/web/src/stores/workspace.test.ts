@@ -10,12 +10,17 @@ const api = vi.hoisted(() => ({
   listMessages: vi.fn(),
   createDownloadToken: vi.fn(),
   previewUrl: vi.fn(),
+  getLatestBuildJob: vi.fn(),
   getBuildJob: vi.fn(),
   listBuildArtifacts: vi.fn(),
   getBuildJobReport: vi.fn(),
+  resume: vi.fn(),
 }));
 
+const streamMessageTurn = vi.hoisted(() => vi.fn());
+
 vi.mock("../api", () => ({ api }));
+vi.mock("../sse", () => ({ streamMessageTurn }));
 
 import { useWorkspace } from "./workspace";
 
@@ -31,12 +36,16 @@ beforeEach(() => {
   api.listMessages.mockReset();
   api.createDownloadToken.mockReset();
   api.previewUrl.mockReset();
+  api.getLatestBuildJob.mockReset();
   api.getBuildJob.mockReset();
   api.listBuildArtifacts.mockReset();
   api.getBuildJobReport.mockReset();
+  api.resume.mockReset();
+  streamMessageTurn.mockReset();
 
   api.getWorkspace.mockResolvedValue(ws);
   api.listRevisions.mockResolvedValue([]);
+  api.getLatestBuildJob.mockResolvedValue(null);
 });
 
 describe("workspace store load() 会话绑定", () => {
@@ -127,6 +136,181 @@ describe("workspace store load() 会话绑定", () => {
     expect(store.state.previewArtifactId).toBe("art-pkg");
   });
 
+  it("restores the latest successful build artifacts and preview when reopening a workspace", async () => {
+    api.listConversations.mockResolvedValue([convA]);
+    api.listMessages.mockResolvedValue([]);
+    api.getLatestBuildJob.mockResolvedValue({ id: "job-restored", status: "SUCCEEDED" });
+    api.getBuildJob.mockResolvedValue({ id: "job-restored", status: "SUCCEEDED" });
+    api.listBuildArtifacts.mockResolvedValue([
+      { id: "art-restored", kind: "client-package" },
+    ]);
+    api.getBuildJobReport.mockResolvedValue({ outcome: "pass" });
+
+    const store = useWorkspace();
+    await store.load("ws-1");
+
+    expect(api.getLatestBuildJob).toHaveBeenCalledWith("ws-1");
+    expect(store.state.buildJobId).toBe("job-restored");
+    expect(store.state.buildJobStatus).toBe("SUCCEEDED");
+    expect(store.state.previewArtifactId).toBe("art-restored");
+    expect(store.state.validationReport).toEqual({ outcome: "pass" });
+  });
+
+  it("does not let a restored active build overwrite a different workspace after navigation", async () => {
+    let finishOldBuild: (job: { id: string; status: string }) => void = () => {};
+    const oldBuild = new Promise((resolve) => {
+      finishOldBuild = resolve;
+    });
+    api.getWorkspace.mockImplementation(async (id) => ({
+      id,
+      name: id === "ws-a" ? "工程A" : "工程B",
+      mode: "new",
+      currentRevisionId: null,
+    }));
+    api.listConversations.mockResolvedValue([convA]);
+    api.listMessages.mockResolvedValue([]);
+    api.getLatestBuildJob
+      .mockResolvedValueOnce({ id: "job-a", status: "VALIDATING" })
+      .mockResolvedValueOnce(null);
+    api.getBuildJob.mockReturnValue(oldBuild);
+    api.listBuildArtifacts.mockResolvedValue([{ id: "art-a", kind: "client-package" }]);
+    api.getBuildJobReport.mockResolvedValue({ outcome: "pass" });
+
+    const store = useWorkspace();
+    await store.load("ws-a");
+    expect(store.state.buildJobStatus).toBe("VALIDATING");
+    await store.load("ws-b");
+    finishOldBuild({ id: "job-a", status: "SUCCEEDED" });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(store.state.workspaceId).toBe("ws-b");
+    expect(store.state.buildJobId).toBeNull();
+    expect(store.state.previewArtifactId).toBeUndefined();
+    expect(api.listBuildArtifacts).not.toHaveBeenCalled();
+  });
+
+  it("ignores an older overlapping workspace load that finishes after the current workspace", async () => {
+    let resolveLatestA: (job: { id: string; status: string }) => void = () => {};
+    let markLatestARequested: () => void = () => {};
+    const latestA = new Promise((resolve) => {
+      resolveLatestA = resolve;
+    });
+    const latestARequested = new Promise<void>((resolve) => {
+      markLatestARequested = resolve;
+    });
+    api.getWorkspace.mockImplementation(async (id) => ({
+      id,
+      name: id === "ws-a" ? "工程A" : "工程B",
+      mode: "new",
+      currentRevisionId: null,
+    }));
+    api.listConversations.mockImplementation(async (id) => [
+      { id: `conv-${id}`, title: `${id} 对话` },
+    ]);
+    api.listMessages.mockResolvedValue([]);
+    api.getLatestBuildJob.mockImplementation(async (id) => {
+      if (id === "ws-a") {
+        markLatestARequested();
+        return latestA;
+      }
+      return { id: "job-b", status: "SUCCEEDED" };
+    });
+    api.getBuildJob.mockImplementation(async (id) => ({ id, status: "SUCCEEDED" }));
+    api.listBuildArtifacts.mockImplementation(async (id) => [
+      { id: id === "job-a" ? "art-a" : "art-b", kind: "client-package" },
+    ]);
+    api.getBuildJobReport.mockResolvedValue({ outcome: "pass" });
+
+    const store = useWorkspace();
+    const loadingA = store.load("ws-a");
+    await latestARequested;
+    await store.load("ws-b");
+    expect(store.state.previewArtifactId).toBe("art-b");
+
+    resolveLatestA({ id: "job-a", status: "SUCCEEDED" });
+    await loadingA;
+
+    expect(store.state.workspaceId).toBe("ws-b");
+    expect(store.state.buildJobId).toBe("job-b");
+    expect(store.state.previewArtifactId).toBe("art-b");
+    expect(api.getBuildJob).not.toHaveBeenCalledWith("job-a");
+  });
+
+  it("ignores a message result from the workspace the user already left", async () => {
+    let finishMessageA: (done: { buildJobId: string }) => void = () => {};
+    const messageA = new Promise((resolve) => {
+      finishMessageA = resolve;
+    });
+    api.getWorkspace.mockImplementation(async (id) => ({ id, name: id, mode: "new", currentRevisionId: null }));
+    api.listConversations.mockImplementation(async (id) => [{ id: `conv-${id}`, title: id }]);
+    api.listMessages.mockResolvedValue([]);
+    api.getLatestBuildJob.mockResolvedValue(null);
+    streamMessageTurn.mockReturnValue(messageA);
+
+    const store = useWorkspace();
+    await store.load("ws-a");
+    const sendingA = store.sendMessage("生成工程");
+    await store.load("ws-b");
+    finishMessageA({ buildJobId: "job-a" });
+    await sendingA;
+
+    expect(store.state.workspaceId).toBe("ws-b");
+    expect(store.state.buildJobId).toBeNull();
+    expect(api.getBuildJob).not.toHaveBeenCalledWith("job-a");
+  });
+
+  it("ignores an approval result from the workspace the user already left", async () => {
+    let finishApprovalA: (done: { buildJobId: string }) => void = () => {};
+    const approvalA = new Promise((resolve) => {
+      finishApprovalA = resolve;
+    });
+    api.getWorkspace.mockImplementation(async (id) => ({ id, name: id, mode: "new", currentRevisionId: null }));
+    api.listConversations.mockImplementation(async (id) => [{ id: `conv-${id}`, title: id }]);
+    api.listMessages.mockResolvedValue([]);
+    api.getLatestBuildJob.mockResolvedValue(null);
+    streamMessageTurn.mockResolvedValue({ interrupt: { planHash: "a".repeat(64) } });
+    api.resume.mockReturnValue(approvalA);
+
+    const store = useWorkspace();
+    await store.load("ws-a");
+    await store.sendMessage("生成方案");
+    const approvingA = store.resumeApproval("approve");
+    await store.load("ws-b");
+    finishApprovalA({ buildJobId: "job-a" });
+    await approvingA;
+
+    expect(store.state.workspaceId).toBe("ws-b");
+    expect(store.state.buildJobId).toBeNull();
+    expect(api.getBuildJob).not.toHaveBeenCalledWith("job-a");
+  });
+
+  it("does not start a message turn while approval is being resumed", async () => {
+    let finishApproval: (done: Record<string, unknown>) => void = () => {};
+    const approval = new Promise((resolve) => {
+      finishApproval = resolve;
+    });
+    api.listConversations.mockResolvedValue([convA]);
+    api.listMessages.mockResolvedValue([]);
+    api.getLatestBuildJob.mockResolvedValue(null);
+    streamMessageTurn.mockResolvedValue({ interrupt: { planHash: "b".repeat(64) } });
+    api.resume.mockReturnValue(approval);
+
+    const store = useWorkspace();
+    await store.load("ws-1");
+    await store.sendMessage("生成方案");
+    const approving = store.resumeApproval("approve");
+    expect(store.state.resuming).toBe(true);
+    streamMessageTurn.mockClear();
+
+    await store.sendMessage("审批中不应发送");
+    expect(streamMessageTurn).not.toHaveBeenCalled();
+
+    finishApproval({});
+    await approving;
+    expect(store.state.resuming).toBe(false);
+  });
+
   it("delegates createPreviewUrl to the rendered HTML endpoint without blob download", async () => {
     api.previewUrl.mockReturnValue("/api/artifacts/art-abc/preview");
     const store = useWorkspace();
@@ -134,5 +318,20 @@ describe("workspace store load() 会话绑定", () => {
     expect(url).toBe("/api/artifacts/art-abc/preview");
     expect(api.previewUrl).toHaveBeenCalledWith("art-abc");
     expect(api.createDownloadToken).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a workflow error returned in the SSE done snapshot", async () => {
+    api.listConversations.mockResolvedValue([convA]);
+    api.listMessages.mockResolvedValue([]);
+    streamMessageTurn.mockResolvedValue({
+      stage: "idle",
+      lastErrorCode: "UI_IMPLEMENTATION_INVALID:deepseek model output rejected: unparseable JSON",
+    });
+    const store = useWorkspace();
+    await store.load("ws-1");
+
+    await store.sendMessage("确认");
+
+    expect(store.state.error).toContain("工程实施计划生成失败");
   });
 });

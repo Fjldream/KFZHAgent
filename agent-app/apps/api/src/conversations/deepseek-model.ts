@@ -165,6 +165,304 @@ function knownGuidSet(entities: EditableEntity[] | undefined): Set<string> {
   return new Set((entities ?? []).map((entity) => entity.guid));
 }
 
+function normalizeStyleDeclarationAliases(raw: unknown): unknown {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const declarations = { ...(raw as Record<string, unknown>) };
+  if (declarations["textColor"] === undefined && typeof declarations["color"] === "string") {
+    declarations["textColor"] = declarations["color"];
+  }
+  delete declarations["color"];
+  if (typeof declarations["fontWeight"] === "string") {
+    const weight = declarations["fontWeight"].trim().toLowerCase();
+    if (weight === "bold") declarations["fontWeight"] = 700;
+    else if (weight === "normal") declarations["fontWeight"] = 400;
+    else if (/^[1-9]00$/.test(weight)) declarations["fontWeight"] = Number(weight);
+  }
+  for (const property of [
+    "borderRadius",
+    "fontSize",
+    "lineHeight",
+    "padding",
+    "margin",
+    "gap",
+    "opacity",
+  ]) {
+    const value = declarations[property];
+    if (typeof value !== "string") continue;
+    const match = value.match(/^\s*(\d+(?:\.\d+)?|\.\d+)\s*(?:px)?\s*$/i);
+    if (match !== null) declarations[property] = Number(match[1]);
+  }
+  const boxShadow = declarations["boxShadow"];
+  if (
+    typeof boxShadow === "string"
+    && !["none", "small", "medium", "large"].includes(boxShadow)
+  ) {
+    const normalizedShadow = boxShadow.trim();
+    const colorStart = normalizedShadow.search(/\s+(?=#|rgba?\()/i);
+    const lengthPart = colorStart === -1
+      ? normalizedShadow
+      : normalizedShadow.slice(0, colorStart).trim();
+    const colorPart = colorStart === -1 ? "" : normalizedShadow.slice(colorStart).trim();
+    const lengths = lengthPart.split(/\s+/);
+    const safeLength = /^-?(?:\d+(?:\.\d+)?|\.\d+)(?:px)?$/i;
+    const safeColor = /^(?:#[0-9a-f]{3,8}|rgba?\(\s*(?:\d+(?:\.\d+)?|\.\d+)(?:\s*,\s*(?:\d+(?:\.\d+)?|\.\d+)){2,3}\s*\))$/i;
+    if (
+      lengths.length >= 2
+      && lengths.length <= 4
+      && lengths.every((length) => safeLength.test(length))
+      && (colorPart.length === 0 || safeColor.test(colorPart))
+    ) {
+      const blur = lengths.length >= 3 ? Number.parseFloat(lengths[2]!) : 0;
+      declarations["boxShadow"] = blur <= 4 ? "small" : blur <= 16 ? "medium" : "large";
+    }
+  }
+  return declarations;
+}
+
+function fitComponentGeometryToPage(
+  components: unknown[],
+  pageWidth: unknown,
+  pageHeight: unknown,
+): unknown[] {
+  if (
+    typeof pageWidth !== "number"
+    || !Number.isFinite(pageWidth)
+    || pageWidth <= 0
+    || typeof pageHeight !== "number"
+    || !Number.isFinite(pageHeight)
+    || pageHeight <= 0
+  ) {
+    return components;
+  }
+  const round = (value: number) => Math.round(value * 1_000_000) / 1_000_000;
+  return components.map((component) => {
+    if (component === null || typeof component !== "object" || Array.isArray(component)) {
+      return component;
+    }
+    const geometry = (component as Record<string, unknown>)["geometry"];
+    if (geometry === null || typeof geometry !== "object" || Array.isArray(geometry)) {
+      return component;
+    }
+    const record = geometry as Record<string, unknown>;
+    const { x, y, width, height } = record;
+    if (![x, y, width, height].every(
+      (value) => typeof value === "number" && Number.isFinite(value),
+    )) return component;
+    const fittedWidth = Math.min(Math.max(width as number, 0), pageWidth);
+    const fittedHeight = Math.min(Math.max(height as number, 0), pageHeight);
+    const fittedX = Math.min(Math.max(x as number, 0), pageWidth - fittedWidth);
+    const fittedY = Math.min(Math.max(y as number, 0), pageHeight - fittedHeight);
+    if (
+      fittedX === x
+      && fittedY === y
+      && fittedWidth === width
+      && fittedHeight === height
+    ) return component;
+    return {
+      ...(component as Record<string, unknown>),
+      geometry: {
+        x: round(fittedX),
+        y: round(fittedY),
+        width: round(fittedWidth),
+        height: round(fittedHeight),
+      },
+    };
+  });
+}
+
+function stableTabId(label: string): string {
+  const normalized = label.trim().normalize("NFKC").toLowerCase();
+  const asciiSlug = normalized
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  if (asciiSlug.length > 0) return `tab-${asciiSlug}`;
+  const codePoints = Array.from(normalized, (character) =>
+    character.codePointAt(0)!.toString(36));
+  return `tab-${codePoints.join("-") || "item"}`;
+}
+
+function normalizeUiImplementationAliases(raw: unknown): unknown {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const implementation = raw as Record<string, unknown>;
+  if (!Array.isArray(implementation["pages"])) return raw;
+  let normalizedTheme = implementation["theme"];
+  if (
+    normalizedTheme !== null
+    && typeof normalizedTheme === "object"
+    && !Array.isArray(normalizedTheme)
+  ) {
+    const themeRecord = normalizedTheme as Record<string, unknown>;
+    const radiusScale = themeRecord["radiusScale"];
+    if (radiusScale !== null && typeof radiusScale === "object" && !Array.isArray(radiusScale)) {
+      const normalizedRadiusScale = { ...(radiusScale as Record<string, unknown>) };
+      if (normalizedRadiusScale["small"] === undefined) {
+        normalizedRadiusScale["small"] = normalizedRadiusScale["sm"];
+      }
+      if (normalizedRadiusScale["medium"] === undefined) {
+        normalizedRadiusScale["medium"] = normalizedRadiusScale["md"];
+      }
+      if (normalizedRadiusScale["large"] === undefined) {
+        normalizedRadiusScale["large"] = normalizedRadiusScale["lg"];
+      }
+      delete normalizedRadiusScale["sm"];
+      delete normalizedRadiusScale["md"];
+      delete normalizedRadiusScale["lg"];
+      normalizedTheme = {
+        ...themeRecord,
+        radiusScale: normalizedRadiusScale,
+      };
+    }
+  }
+  return {
+    ...implementation,
+    theme: normalizedTheme,
+    pages: (implementation["pages"] as unknown[]).map((page) => {
+      if (page === null || typeof page !== "object" || Array.isArray(page)) return page;
+      const pageRecord = page as Record<string, unknown>;
+      if (!Array.isArray(pageRecord["components"])) return page;
+      const normalizedComponents = (pageRecord["components"] as unknown[]).map((component) => {
+        if (component === null || typeof component !== "object" || Array.isArray(component)) {
+          return component;
+        }
+        const componentRecord = component as Record<string, unknown>;
+        let normalizedContent = componentRecord["content"];
+        let normalizedProperties = componentRecord["properties"];
+        let inferredBorderRadius: number | undefined;
+        if (
+          (componentRecord["capabilityId"] === "text"
+            || componentRecord["capabilityId"] === "richtext")
+          && normalizedProperties !== null
+          && typeof normalizedProperties === "object"
+          && !Array.isArray(normalizedProperties)
+        ) {
+          const properties = { ...(normalizedProperties as Record<string, unknown>) };
+          if (normalizedContent === undefined && typeof properties["content"] === "string") {
+            normalizedContent = properties["content"];
+          }
+          delete properties["content"];
+          normalizedProperties = properties;
+        }
+        if (
+          componentRecord["capabilityId"] === "image"
+          && normalizedProperties !== null
+          && typeof normalizedProperties === "object"
+          && !Array.isArray(normalizedProperties)
+        ) {
+          const properties = { ...(normalizedProperties as Record<string, unknown>) };
+          const shape = properties["shape"];
+          if (shape === "circle") inferredBorderRadius = 100;
+          else if (shape === "rounded") inferredBorderRadius = 16;
+          if (shape === "circle" || shape === "rounded") delete properties["shape"];
+          if (typeof properties["src"] === "string") normalizedContent = undefined;
+          normalizedProperties = properties;
+        }
+        if (
+          componentRecord["capabilityId"] === "tabs"
+          && normalizedProperties !== null
+          && typeof normalizedProperties === "object"
+          && !Array.isArray(normalizedProperties)
+        ) {
+          const properties = { ...(normalizedProperties as Record<string, unknown>) };
+          if (Array.isArray(properties["tabs"])) {
+            const tabs = properties["tabs"] as unknown[];
+            const usedIds = new Set(
+              tabs.flatMap((tab) => {
+                if (tab === null || typeof tab !== "object" || Array.isArray(tab)) return [];
+                const id = (tab as Record<string, unknown>)["id"];
+                return typeof id === "string" && id.length > 0 ? [id] : [];
+              }),
+            );
+            properties["tabs"] = tabs.map((tab) => {
+              if (tab === null || typeof tab !== "object" || Array.isArray(tab)) return tab;
+              const tabRecord = tab as Record<string, unknown>;
+              if (typeof tabRecord["label"] !== "string" || tabRecord["id"] !== undefined) {
+                return tab;
+              }
+              const baseId = stableTabId(tabRecord["label"]);
+              let id = baseId;
+              let suffix = 2;
+              while (usedIds.has(id)) {
+                id = `${baseId}-${suffix}`;
+                suffix += 1;
+              }
+              usedIds.add(id);
+              return { ...tabRecord, id };
+            });
+          }
+          normalizedProperties = properties;
+        }
+        if (
+          componentRecord["capabilityId"] === "button"
+          && normalizedProperties !== null
+          && typeof normalizedProperties === "object"
+          && !Array.isArray(normalizedProperties)
+        ) {
+          const properties = { ...(normalizedProperties as Record<string, unknown>) };
+          if (normalizedContent === undefined) {
+            if (typeof properties["label"] === "string") {
+              normalizedContent = properties["label"];
+            } else if (typeof properties["text"] === "string") {
+              normalizedContent = properties["text"];
+            }
+          }
+          delete properties["label"];
+          delete properties["text"];
+          normalizedProperties = properties;
+        }
+        const style = componentRecord["style"];
+        if (style === null || typeof style !== "object" || Array.isArray(style)) {
+          return {
+            ...componentRecord,
+            content: normalizedContent,
+            ...(normalizedProperties !== undefined ? { properties: normalizedProperties } : {}),
+          };
+        }
+        const styleRecord = style as Record<string, unknown>;
+        const states = styleRecord["states"];
+        const normalizedStates =
+          states !== null && typeof states === "object" && !Array.isArray(states)
+            ? Object.fromEntries(
+                Object.entries(states as Record<string, unknown>).map(([name, declarations]) => [
+                  name,
+                  normalizeStyleDeclarationAliases(declarations),
+                ]),
+              )
+            : states;
+        const normalizedDeclarations = normalizeStyleDeclarationAliases(styleRecord["declarations"]);
+        const declarationsWithShape =
+          inferredBorderRadius !== undefined
+          && normalizedDeclarations !== null
+          && typeof normalizedDeclarations === "object"
+          && !Array.isArray(normalizedDeclarations)
+          && (normalizedDeclarations as Record<string, unknown>)["borderRadius"] === undefined
+            ? {
+                ...(normalizedDeclarations as Record<string, unknown>),
+                borderRadius: inferredBorderRadius,
+              }
+            : normalizedDeclarations;
+        return {
+          ...componentRecord,
+          content: normalizedContent,
+          ...(normalizedProperties !== undefined ? { properties: normalizedProperties } : {}),
+          style: {
+            ...styleRecord,
+            declarations: declarationsWithShape,
+            ...(normalizedStates !== undefined ? { states: normalizedStates } : {}),
+          },
+        };
+      });
+      return {
+        ...pageRecord,
+        components: fitComponentGeometryToPage(
+          normalizedComponents,
+          pageRecord["width"],
+          pageRecord["height"],
+        ),
+      };
+    }),
+  };
+}
+
 export class DeepSeekModelPort implements ModelPort {
   private readonly baseUrl: string;
   private readonly model: string;
@@ -217,11 +515,15 @@ export class DeepSeekModelPort implements ModelPort {
       throw new DeepSeekModelOutputError(`api http ${response.status}: ${text.slice(0, 300)}`);
     }
     const data = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
+      choices?: Array<{ finish_reason?: string; message?: { content?: string } }>;
     };
-    const content = data.choices?.[0]?.message?.content;
+    const choice = data.choices?.[0];
+    const content = choice?.message?.content;
     if (typeof content !== "string" || content.length === 0) {
       throw new DeepSeekModelOutputError("empty model reply");
+    }
+    if (choice?.finish_reason === "length") {
+      throw new DeepSeekModelOutputError("model reply was truncated at the output token limit");
     }
     return extractJson(content);
   }
@@ -349,23 +651,36 @@ export class DeepSeekModelPort implements ModelPort {
     const controls = (input.editableEntities ?? [])
       .filter((entity) => entity.kind === "control")
       .map((entity) => `${entity.name} | capabilityId=${entity.type}`);
-    const capabilities = listControlCapabilities()
+    const availableCapabilities = listControlCapabilities()
       .filter((capability) =>
         capability.generation.status !== "unsupported"
-        && capability.generation.status !== "preserve-only")
+        && capability.generation.status !== "preserve-only");
+    const capabilities = availableCapabilities
       .map((capability) => `${capability.id} (${capability.displayName})`);
+    const styleUnavailable = availableCapabilities
+      .filter((capability) => capability.style.adapter === undefined)
+      .map((capability) => capability.id);
     return [
       "你是 UI 实施规划 Agent。把客户已经确认的效果蓝图转换为内部 UIImplementationSpec，不直接生成 ChangePlan 或 KF 工程 JSON。",
       "输出严格 JSON，schema 固定为 kf-ui-implementation/v1。",
-      "顶层必须包含 theme 和 pages；theme 必须包含 background、surface、primary、accent、textPrimary、textSecondary、fontFamily、spacingUnit、radiusScale。",
+      "顶层必须包含 theme 和 pages；theme 必须包含 background、surface、primary、accent、textPrimary、textSecondary、fontFamily、spacingUnit、radiusScale；radiusScale 必须使用 {\"small\":4,\"medium\":8,\"large\":16} 这三个完整键名，不得使用 sm/md/lg。",
       "pages 每项必须包含 id、width、height、components，且只能使用当前工程已有页面语义 ID。",
       "每个 component 必须包含 id、role、sourceModuleId、capabilityId、critical、geometry、properties、style。",
       "每个蓝图模块都必须至少由一个组件实现，sourceModuleId 必须逐字使用蓝图 modules[].id；禁止把多个模块都冒充映射到一个组件。",
+      "控制输出规模：每个蓝图模块使用 1-2 个组件，总组件数不超过 24；需要承载多段说明时优先合并到 richtext 内容，避免为每行文字单独创建组件。",
       "component.id 使用稳定的英文语义 ID；若要修改已有控件，必须使用下方已有控件语义 ID；新组件使用新的唯一语义 ID。",
       "style 只能输出结构化 declarations/states；禁止输出原始 CSS、styleDataNew、选择器、JavaScript、KF GUID、objectType、uiModelType 或原始 KF 字段。",
+      "style.declarations/states 仅允许 backgroundColor、textColor、borderColor、borderRadius、fontSize、fontWeight、lineHeight、padding、margin、gap、boxShadow、opacity、textAlign；borderRadius/fontSize/lineHeight/padding/margin/gap/opacity 必须是单个数值，不得带 px、不得写多值字符串；boxShadow 只能是 none/small/medium/large；文字颜色必须写 textColor，fontWeight 必须是 100-900 的数值（如 400/600/700），不能写 color、bold 或 normal。",
+      "若蓝图包含当前样式白名单无法表达的悬停放大、过渡动画或鼠标样式，暂不实现该视觉细节；不得输出 transform、transition 或 cursor，优先保证其余内容可生成、可校验。",
       "布局坐标必须非负，且 x+width 不超过页面 width、y+height 不超过页面 height；组件不得重叠到不可阅读。",
-      "优先使用 text、richtext、image、tag、button、input、select、tabs、spacer、layout.2、layout.4、layout.5 等已审查能力。",
-      "properties 只填写控件公开语义属性；纯文本和富文本内容写在 content，不要放进 properties。",
+      "首版优先使用页面绝对几何布局，以 text、richtext、image、tag、button、input、select、tabs、spacer 等扁平组件完成页面；除非确实需要 KF 容器语义，否则不要创建 layout.*。",
+      "若使用 layout.*，properties 只能填写该 KF capability 已公开的语义属性，不得输出 justifyContent、alignItems、display、flexDirection、gridTemplateColumns 等 Web 布局字段。",
+      "以下 capabilityId 只允许空 style（style 必须为 {declarations:{},states:{}}），不得添加任何 declarations/states；需要卡片化视觉时改用可样式化的 text/richtext/image："
+        + (styleUnavailable.length > 0 ? styleUnavailable.join(", ") : "（无）"),
+      "properties 只填写控件公开语义属性；button、text、richtext 的显示内容写在 component.content，不要放进 properties。",
+      "tabs 控件的 properties.tabs 每项必须使用 {\"id\":\"稳定英文ID\",\"label\":\"显示名称\"}，不得省略 id。",
+      "button 控件的显示文字必须写在 component.content，不得使用 properties.label 或 properties.text。",
+      "image 控件只使用 properties.src/fit/alt，不得填写 component.content。",
       "客户确认蓝图：",
       JSON.stringify(input.designPlan ?? null),
       "当前工程摘要：" + (input.revisionSummary ?? "（无）"),
@@ -388,19 +703,20 @@ export class DeepSeekModelPort implements ModelPort {
     ].join("\n");
   }
 
-  private async generateUiImplementation(
+  private async requestUiImplementation(
     input: ModelPortContext,
     revising: boolean,
+    recoveryInstruction?: string,
   ): Promise<UIImplementationSpec> {
-    if (input.designPlan === undefined) {
-      throw new DeepSeekModelOutputError("confirmed design plan is required for UI implementation");
-    }
     const raw = await this.chatJson(
       UI_IMPLEMENTATION_SYSTEM_PROMPT,
-      this.buildUiImplementationPrompt(input, revising),
+      [
+        this.buildUiImplementationPrompt(input, revising),
+        ...(recoveryInstruction !== undefined ? [recoveryInstruction] : []),
+      ].join("\n"),
       { maxTokens: 8000 },
     );
-    const parsed = UIImplementationSpecSchema.safeParse(raw);
+    const parsed = UIImplementationSpecSchema.safeParse(normalizeUiImplementationAliases(raw));
     if (!parsed.success) {
       throw new DeepSeekModelOutputError(
         `UI implementation failed zod gate: ${parsed.error.issues
@@ -410,6 +726,31 @@ export class DeepSeekModelPort implements ModelPort {
       );
     }
     return parsed.data;
+  }
+
+  private async generateUiImplementation(
+    input: ModelPortContext,
+    revising: boolean,
+  ): Promise<UIImplementationSpec> {
+    if (input.designPlan === undefined) {
+      throw new DeepSeekModelOutputError("confirmed design plan is required for UI implementation");
+    }
+    try {
+      return await this.requestUiImplementation(input, revising);
+    } catch (error) {
+      if (!(error instanceof DeepSeekModelOutputError)) throw error;
+      const reason = error.message.slice(0, 300);
+      return this.requestUiImplementation(
+        input,
+        revising,
+        [
+          "上一轮输出未形成完整合法 JSON，必须重新生成一份完整、可解析的 UIImplementationSpec，不要续写残片。",
+          `上一轮失败原因：${reason}`,
+          "本次务必压缩规模：每个蓝图模块 1-2 个组件，总组件数不超过 16；合并同模块的说明文字，所有 JSON 对象和数组必须完整闭合。",
+          "删除所有不在结构化样式白名单内的效果，不得输出 transform、transition 或 cursor；不要用原始 CSS 补偿。",
+        ].join("\n"),
+      );
+    }
   }
 
   createUiImplementation(input: ModelPortContext): Promise<UIImplementationSpec> {

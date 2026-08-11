@@ -1,6 +1,9 @@
 import type { AgentGraphStateValue, AgentGraphUpdate } from "../state.js";
 import type { SolutionGraphDeps } from "../ports.js";
-import { ClassifyIntentResultSchema } from "../schemas/intent.js";
+import {
+  ClassifyIntentResultSchema,
+  type ClassifyIntentResult,
+} from "../schemas/intent.js";
 
 /**
  * 澄清追问轮数上限（Task 5）：state.clarificationCount 达到该值后，模型再
@@ -60,27 +63,40 @@ const PREVIEW_SMALL_CHANGE_WORDS = [
 export function createClassifyIntentNode(deps: SolutionGraphDeps) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
     const requirementText = latestUserMessage(state);
-    const rawResult: unknown = await deps.modelPort.classifyIntent({
-      tenantId: state.tenantId,
-      userId: state.userId,
-      workspaceId: state.workspaceId,
-      conversationId: state.conversationId,
-      recentMessages: state.recentMessages,
-      conversationSummary: state.conversationSummary,
-      revisionSummary: state.revisionSummary,
-      currentRevisionId: state.currentRevisionId,
-      requirementText,
-    });
-    const parsed = ClassifyIntentResultSchema.safeParse(rawResult);
-    if (!parsed.success) {
-      return {
-        stage: "idle",
-        lastErrorCode: "INVALID_MODEL_OUTPUT",
-        pendingRequirements: undefined,
-        resumeAction: undefined,
-      };
+    const isImplementationRetry =
+      state.designPlanHash !== undefined
+      && state.lastErrorCode?.startsWith("UI_IMPLEMENTATION_INVALID") === true
+      && requirementText?.trim() === "重新生成工程实施计划";
+    let result: ClassifyIntentResult;
+    if (isImplementationRetry) {
+      // This exact phrase is emitted by our own UI after a persisted
+      // implementation failure. Route it deterministically so an old approved
+      // plan/build checkpoint cannot hijack the retry and no classifier call
+      // adds latency or cost.
+      result = { intent: "CONFIRM_DESIGN", requestedDomains: ["kingclient"] };
+    } else {
+      const rawResult: unknown = await deps.modelPort.classifyIntent({
+        tenantId: state.tenantId,
+        userId: state.userId,
+        workspaceId: state.workspaceId,
+        conversationId: state.conversationId,
+        recentMessages: state.recentMessages,
+        conversationSummary: state.conversationSummary,
+        revisionSummary: state.revisionSummary,
+        currentRevisionId: state.currentRevisionId,
+        requirementText,
+      });
+      const parsed = ClassifyIntentResultSchema.safeParse(rawResult);
+      if (!parsed.success) {
+        return {
+          stage: "idle",
+          lastErrorCode: "INVALID_MODEL_OUTPUT",
+          pendingRequirements: undefined,
+          resumeAction: undefined,
+        };
+      }
+      result = parsed.data;
     }
-    let result = parsed.data;
 
     // preview-review 阶段：对看预览后的反馈做关键词兜底分档（见上面词表）。
     // 误判防护：确认词只在短消息（≤20 字符）命中时生效，避免
@@ -117,12 +133,14 @@ export function createClassifyIntentNode(deps: SolutionGraphDeps) {
     if (
       !unsupported &&
       (state.stage === "design-review" ||
-        (state.stage === "idle" && hasUncommittedDesign))
+        isImplementationRetry ||
+        ((state.stage === "idle" || state.stage === "done") && hasUncommittedDesign))
     ) {
       const text = requirementText ?? "";
       if (
-        text.length <= 12 &&
-        /确认|可以|没问题|同意|就这样|挺好的|就按这个/.test(text)
+        isImplementationRetry
+        || (text.length <= 12
+          && /确认|可以|没问题|同意|就这样|挺好的|就按这个/.test(text))
       ) {
         result = { ...result, intent: "CONFIRM_DESIGN" };
       } else if (
@@ -212,7 +230,13 @@ export function createClassifyIntentNode(deps: SolutionGraphDeps) {
     // Clear only the pendingRequirements channel so this turn is routed on its
     // own signal (see C1). lastErrorCode is left untouched here: load-context
     // may have just set BUILD_FAILED (planning) and the plan node must see it.
-    return { intent: result.intent, pendingRequirements: undefined };
+    return {
+      intent: result.intent,
+      pendingRequirements: undefined,
+      ...(isImplementationRetry
+        ? { buildConfirmed: false, lastErrorCode: undefined }
+        : {}),
+    };
   };
 }
 

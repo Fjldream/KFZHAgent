@@ -638,7 +638,7 @@ describe("api contract", () => {
     const planHash = await planRequirement(cookie, conv.body.id);
 
     const res = await resume(cookie, conv.body.id, { action: "approve", planHash }).expect(200);
-    expect(res.body.stage).toBe("preview-review"); // enqueue-build enters the preview feedback loop
+    expect(res.body.stage).toBe("building"); // enqueue-build only confirms durable queueing
     expect(res.body.buildJobId).toBeTruthy();
 
     const job = await request(server)
@@ -647,6 +647,28 @@ describe("api contract", () => {
       .expect(200);
     expect(job.body.planHash).toBe(planHash);
     expect(job.body.status).toBe("QUEUED");
+  });
+
+  it("returns the latest tenant-scoped build job for workspace restoration", async () => {
+    const cookieA = await login(TENANT_A_MEMBER);
+    const cookieB = await login(TENANT_B);
+    const ws = await createUploadWorkspace(cookieA, "Restore Latest Build WS");
+    await uploadPackage(cookieA, ws.body.id, await makePackage()).expect(201);
+    const conv = await createConversation(cookieA, ws.body.id, "Restore latest build");
+    const planHash = await planRequirement(cookieA, conv.body.id);
+    const approved = await resume(cookieA, conv.body.id, { action: "approve", planHash }).expect(200);
+
+    const latest = await request(server)
+      .get(`/api/build-jobs?workspaceId=${encodeURIComponent(ws.body.id)}`)
+      .set("Cookie", cookieA)
+      .expect(200);
+    expect(latest.body.job).toMatchObject({ id: approved.body.buildJobId, workspaceId: ws.body.id });
+
+    await request(server)
+      .get(`/api/build-jobs?workspaceId=${encodeURIComponent(ws.body.id)}`)
+      .set("Cookie", cookieB)
+      .expect(200)
+      .expect(({ body }) => expect(body.job).toBeNull());
   });
 
   it("rejects a plain message while an approval is pending", async () => {
@@ -1160,7 +1182,7 @@ describe("hardening fixes", () => {
     expect(statuses).toEqual([200, 409, 409]);
 
     const ok = [r1, r2, r3].find((r) => r.status === 200);
-    expect(ok.body.stage).toBe("preview-review"); // enqueue-build enters preview feedback loop
+    expect(ok.body.stage).toBe("building"); // enqueue-build only confirms durable queueing
     expect(ok.body.buildJobId).toBeTruthy();
     const conflicts = [r1, r2, r3].filter((r) => r.status === 409);
     expect(conflicts).toHaveLength(2);

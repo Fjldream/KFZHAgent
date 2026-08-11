@@ -10,6 +10,15 @@ import {
   parseDesignPlan,
 } from "../types";
 
+it("disables the composer while an approval request is busy", () => {
+  const wrapper = mount(ConversationPanel, {
+    props: { messages: [], busy: true },
+  });
+  expect(wrapper.get('[data-testid="message-input"]').attributes("disabled")).toBeDefined();
+  expect(wrapper.get('[data-testid="send-message"]').attributes("disabled")).toBeDefined();
+  expect(wrapper.get('[data-testid="send-message"]').text()).toBe("处理中…");
+});
+
 function blueprintMessage(revision = 1): string {
   return `KF_BLUEPRINT_MESSAGE/1\n${JSON.stringify({
     kind: "kf-customer-effect-blueprint",
@@ -247,6 +256,27 @@ describe("ConversationPanel enriched rendering", () => {
     expect(wrapper.find('[data-testid="blueprint-confirm"]').exists()).toBe(false);
     expect(wrapper.get('[data-testid="blueprint-status"]').text()).toBe("已确认");
     expect(wrapper.emitted("send")).toBeUndefined();
+  });
+
+  it("allows retrying a blueprint confirmation after implementation planning failed", async () => {
+    const wrapper = mount(ConversationPanel, {
+      props: {
+        messages: [
+          { id: "blueprint-1", role: "assistant", content: blueprintMessage() },
+          { id: "confirm-1", role: "user", content: "确认" },
+          {
+            id: "failure-1",
+            role: "assistant",
+            content: "工程实施计划暂未生成：模型输出不完整。请点击下方按钮重试。",
+          },
+        ],
+      },
+    });
+
+    const retry = wrapper.get('[data-testid="blueprint-confirm"]');
+    expect(retry.text()).toContain("重新生成工程实施计划");
+    await retry.trigger("click");
+    expect(wrapper.emitted("send")?.[0]?.[0]).toBe("重新生成工程实施计划");
   });
 
   it("shows substantive changes before module details on later revisions", () => {

@@ -144,6 +144,7 @@ function bed(specs: UIImplementationSpec[], compileError?: Error) {
     explainValidation: vi.fn(),
   } as unknown as ModelPort;
   const savePlan = vi.fn();
+  const appendMessage = vi.fn();
   const changePlanRepository = {
     findOpenChangeRequest: vi.fn().mockResolvedValue(null),
     saveChangeRequest: vi.fn(),
@@ -153,7 +154,7 @@ function bed(specs: UIImplementationSpec[], compileError?: Error) {
   } satisfies ChangePlanRepository;
   const workspaceQuery = {
     listRecentMessages: vi.fn(),
-    appendMessage: vi.fn(),
+    appendMessage,
     getConversationSummary: vi.fn(),
     setConversationSummary: vi.fn(),
     getCurrentRevisionId: vi.fn(),
@@ -187,6 +188,7 @@ function bed(specs: UIImplementationSpec[], compileError?: Error) {
     createChangePlan,
     compile,
     savePlan,
+    appendMessage,
   };
 }
 
@@ -253,6 +255,10 @@ describe("implementation-plan node", () => {
     });
     expect(fixture.compile).not.toHaveBeenCalled();
     expect(fixture.savePlan).not.toHaveBeenCalled();
+    expect(fixture.appendMessage).toHaveBeenCalledWith(expect.objectContaining({
+      role: "assistant",
+      content: expect.stringContaining("工程实施计划暂未生成"),
+    }));
   });
 
   it("preserves previously managed components omitted by a partial model revision", async () => {

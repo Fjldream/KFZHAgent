@@ -1,4 +1,4 @@
-import { Controller, Get, NotFoundException, Param, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Controller, Get, NotFoundException, Param, Query, Req, UseGuards } from "@nestjs/common";
 import type { BuildJob, ValidationReport } from "@prisma/client";
 import { AUDIT_ACTIONS, AuditService } from "../audit/audit.service.js";
 import { TenantGuard, type AuthenticatedRequest } from "../auth/tenant.guard.js";
@@ -20,6 +20,22 @@ export class BuildJobController {
     private readonly prisma: PrismaService,
     private readonly artifacts: ArtifactService,
   ) {}
+
+  /** Rehydrates build/preview state after the browser reopens a workspace. */
+  @Get()
+  async getLatestBuildJob(
+    @Query("workspaceId") workspaceId: string | undefined,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<{ job: BuildJob | null }> {
+    if (workspaceId === undefined || workspaceId.trim().length === 0) {
+      throw new BadRequestException("workspaceId is required");
+    }
+    const job = await this.jobs.getLatestForWorkspace(workspaceId, req.principal.tenantId);
+    if (job !== null) {
+      await this.recordBuildResultOnce(job);
+    }
+    return { job };
+  }
 
   @Get(":id")
   async getBuildJob(

@@ -151,13 +151,50 @@ function routeAfterPlanChange(state: AgentGraphStateValue): string {
  */
 function createDoneNode(deps: SolutionGraphDeps) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
+    const job = state.buildJobId === undefined
+      ? null
+      : await deps.buildJobPort.getJob({
+          tenantId: state.tenantId,
+          jobId: state.buildJobId,
+        });
+    const previewReady =
+      job?.status === "SUCCEEDED"
+      && (state.stage === "preview-review" || state.stage === "building");
+    if (!previewReady) {
+      const buildInProgress =
+        state.stage === "building"
+        && (job?.status === "QUEUED"
+          || job?.status === "RUNNING"
+          || job?.status === "VALIDATING");
+      await deps.workspaceQuery.appendMessage({
+        tenantId: state.tenantId,
+        conversationId: state.conversationId,
+        role: "assistant" as const,
+        content: buildInProgress
+          ? "工程仍在构建和校验中，完成后右侧会自动显示预览，请稍后再确认落地。"
+          : "当前还没有可确认的工程预览。请先完成效果蓝图确认、工程实施计划确认和构建；"
+            + "如果实施计划生成失败，请重新生成实施计划后再继续。",
+      });
+      if (buildInProgress) {
+        return {
+          stage: "building",
+          buildConfirmed: false,
+          lastErrorCode: undefined,
+        };
+      }
+      return {
+        stage: "idle",
+        buildConfirmed: false,
+        lastErrorCode: "BUILD_PREVIEW_NOT_AVAILABLE",
+      };
+    }
     await deps.workspaceQuery.appendMessage({
       tenantId: state.tenantId,
       conversationId: state.conversationId,
       role: "assistant" as const,
       content: "方案已确认落地。感谢您的沟通！后续如需继续调整或新增需求，随时找我。",
     });
-    return { stage: "done", buildConfirmed: true };
+    return { stage: "done", buildConfirmed: true, lastErrorCode: undefined };
   };
 }
 

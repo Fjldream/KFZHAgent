@@ -50,7 +50,7 @@ export function createImplementationPlanNode(deps: SolutionGraphDeps) {
         : await deps.modelPort.reviseUiImplementation(baseContext);
       candidate = preservePriorComponents(state.uiImplementation, candidate);
     } catch (error) {
-      return failure(error);
+      return persistInvalidImplementation(deps, state, [errorDetail(error)]);
     }
 
     let compiled: Awaited<ReturnType<NonNullable<typeof deps.uiImplementationCompiler>["compile"]>>;
@@ -78,7 +78,9 @@ export function createImplementationPlanNode(deps: SolutionGraphDeps) {
         });
         candidate = preservePriorComponents(state.uiImplementation, candidate);
         const repairedCoverage = assessCoverage(state.designPlan, candidate);
-        if (repairedCoverage.length > 0) return invalid(repairedCoverage);
+        if (repairedCoverage.length > 0) {
+          return persistInvalidImplementation(deps, state, repairedCoverage);
+        }
         compiled = await deps.uiImplementationCompiler.compile({
           workspaceId: state.workspaceId,
           spec: candidate,
@@ -86,14 +88,22 @@ export function createImplementationPlanNode(deps: SolutionGraphDeps) {
           editableEntities,
         });
         const repairedPlanIssues = validateCompiledPlan(compiled.plan);
-        if (repairedPlanIssues.length > 0) return invalid(repairedPlanIssues);
+        if (repairedPlanIssues.length > 0) {
+          return persistInvalidImplementation(deps, state, repairedPlanIssues);
+        }
       } catch (error) {
-        return invalid([errorDetail(error)]);
+        return persistInvalidImplementation(deps, state, [errorDetail(error)]);
       }
     }
 
     const parsedPlan = GraphPlanSchema.safeParse(compiled!.plan);
-    if (!parsedPlan.success) return invalid(["compiled ChangePlan failed schema validation"]);
+    if (!parsedPlan.success) {
+      return persistInvalidImplementation(
+        deps,
+        state,
+        ["compiled ChangePlan failed schema validation"],
+      );
+    }
     const plan: ChangePlan = parsedPlan.data;
     const hash = planHash(plan);
     const existing = await deps.changePlanRepository.findOpenChangeRequest({
@@ -215,8 +225,20 @@ function invalid(reasons: string[]): AgentGraphUpdate {
   };
 }
 
-function failure(error: unknown): AgentGraphUpdate {
-  return invalid([errorDetail(error)]);
+async function persistInvalidImplementation(
+  deps: SolutionGraphDeps,
+  state: AgentGraphStateValue,
+  reasons: string[],
+): Promise<AgentGraphUpdate> {
+  await deps.workspaceQuery.appendMessage({
+    tenantId: state.tenantId,
+    conversationId: state.conversationId,
+    role: "assistant",
+    content:
+      "工程实施计划暂未生成：大模型返回的实施规格不完整或未通过工程约束。"
+      + "已保留当前效果蓝图且没有写入工程；请点击蓝图下方的“重新生成工程实施计划”重试。",
+  });
+  return invalid(reasons);
 }
 
 function errorDetail(error: unknown): string {

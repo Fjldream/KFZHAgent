@@ -493,9 +493,317 @@ describe("DeepSeekModelPort", () => {
     expect(prompt).toContain("Page1");
     expect(prompt).toContain("禁止输出原始 CSS");
     expect(prompt).toContain("每个蓝图模块");
+    expect(prompt).toContain("首版优先使用页面绝对几何布局");
+    expect(prompt).toContain("不得输出 justifyContent");
+    expect(prompt).toContain("以下 capabilityId 只允许空 style");
+    expect(prompt).toContain("list");
     expect(systemPrompt).toContain("仅当输出 ChangePlan 时");
     expect(systemPrompt).toContain("UIImplementationSpec 的 component.id 必须使用稳定语义 ID");
     expect(body.max_tokens).toBe(8000);
+  });
+
+  it("retries once with a compact regeneration prompt when the first implementation JSON is malformed", async () => {
+    const implementation = uiImplementation();
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [{
+            finish_reason: "length",
+            message: { content: '{"schema":"kf-ui-implementation/v1","theme":{' },
+          }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [{ finish_reason: "stop", message: { content: JSON.stringify(implementation) } }],
+        }),
+      });
+    const port = new DeepSeekModelPort({
+      apiKey: "test-key",
+      fetch: fetchImpl,
+      baseUrl: "https://mock.local",
+    });
+
+    const result = await port.createUiImplementation({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [],
+      designPlan: detailedBlueprint(),
+      revisionSummary: "页面 Page1 (1440x900)",
+      editableEntities: [{ kind: "page", name: "Page1", type: "page", guid: "page-guid" }],
+    });
+
+    expect(result).toEqual(implementation);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const retryBody = JSON.parse(fetchImpl.mock.calls[1][1].body);
+    expect(retryBody.messages[1].content).toContain("上一轮输出未形成完整合法 JSON");
+    expect(retryBody.messages[1].content).toContain("每个蓝图模块 1-2 个组件");
+    expect(retryBody.messages[1].content).toContain("不得输出 transform、transition 或 cursor");
+  });
+
+  it("canonicalizes safe CSS-style aliases before applying the strict implementation schema", async () => {
+    const raw = JSON.parse(JSON.stringify(uiImplementation()));
+    raw.pages[0].components[0].style.declarations = {
+      color: "{theme.textPrimary}",
+      fontWeight: "bold",
+    };
+    const port = makePort(raw);
+
+    const result = await port.createUiImplementation({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [],
+      designPlan: detailedBlueprint(),
+    });
+
+    expect(result.pages[0].components[0].style.declarations).toEqual({
+      textColor: "{theme.textPrimary}",
+      fontWeight: 700,
+    });
+  });
+
+  it("moves duplicated text content out of semantic properties before compilation", async () => {
+    const raw = JSON.parse(JSON.stringify(uiImplementation()));
+    raw.pages[0].components[0].capabilityId = "richtext";
+    raw.pages[0].components[0].content = "完整的个人简介";
+    raw.pages[0].components[0].properties = { content: "完整的个人简介" };
+    const port = makePort(raw);
+
+    const result = await port.createUiImplementation({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [],
+      designPlan: detailedBlueprint(),
+    });
+
+    expect(result.pages[0].components[0].content).toBe("完整的个人简介");
+    expect(result.pages[0].components[0].properties).toEqual({});
+  });
+
+  it("fits model-authored component geometry inside the declared KF page", async () => {
+    const raw = JSON.parse(JSON.stringify(uiImplementation()));
+    const inBoundsGeometry = { ...raw.pages[0].components[0].geometry };
+    raw.pages[0].components[1].geometry = { x: 100, y: 920, width: 600, height: 200 };
+    const port = makePort(raw);
+
+    const result = await port.createUiImplementation({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [],
+      designPlan: detailedBlueprint(),
+    });
+
+    for (const component of result.pages[0].components) {
+      expect(component.geometry.x + component.geometry.width).toBeLessThanOrEqual(1440);
+      expect(component.geometry.y + component.geometry.height).toBeLessThanOrEqual(900);
+    }
+    expect(result.pages[0].components[0].geometry).toEqual(inBoundsGeometry);
+  });
+
+  it("converts a semantic image shape alias into reviewed border radius styling", async () => {
+    const raw = JSON.parse(JSON.stringify(uiImplementation()));
+    raw.pages[0].components[0].capabilityId = "image";
+    raw.pages[0].components[0].properties = {
+      src: "professional_portrait.jpg",
+      fit: "cover",
+      alt: "个人头像",
+      shape: "circle",
+    };
+    const port = makePort(raw);
+
+    const result = await port.createUiImplementation({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [],
+      designPlan: detailedBlueprint(),
+    });
+
+    expect(result.pages[0].components[0].properties).not.toHaveProperty("shape");
+    expect(result.pages[0].components[0].style.declarations.borderRadius).toBe(100);
+  });
+
+  it("canonicalizes common theme radius scale aliases", async () => {
+    const raw = JSON.parse(JSON.stringify(uiImplementation()));
+    raw.theme.radiusScale = { sm: 4, md: 8, lg: 16 };
+    const port = makePort(raw);
+
+    const result = await port.createUiImplementation({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [],
+      designPlan: detailedBlueprint(),
+    });
+
+    expect(result.theme.radiusScale).toEqual({ small: 4, medium: 8, large: 16 });
+  });
+
+  it("canonicalizes safe numeric style values with an optional px suffix", async () => {
+    const raw = JSON.parse(JSON.stringify(uiImplementation()));
+    raw.pages[0].components[0].style.declarations = {
+      padding: "24px",
+      margin: "12",
+      fontSize: "18px",
+    };
+    const port = makePort(raw);
+
+    const result = await port.createUiImplementation({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [],
+      designPlan: detailedBlueprint(),
+    });
+
+    expect(result.pages[0].components[0].style.declarations).toMatchObject({
+      padding: 24,
+      margin: 12,
+      fontSize: 18,
+    });
+  });
+
+  it("canonicalizes a safe CSS box shadow into a reviewed semantic shadow tier", async () => {
+    const raw = JSON.parse(JSON.stringify(uiImplementation()));
+    raw.pages[0].components[0].style.declarations.boxShadow =
+      "0 4px 12px rgba(0, 0, 0, 0.15)";
+    const port = makePort(raw);
+
+    const result = await port.createUiImplementation({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [],
+      designPlan: detailedBlueprint(),
+    });
+
+    expect(result.pages[0].components[0].style.declarations.boxShadow).toBe("medium");
+  });
+
+  it("assigns stable semantic IDs to model-authored tab labels", async () => {
+    const raw = JSON.parse(JSON.stringify(uiImplementation()));
+    raw.pages[0].components[0].capabilityId = "tabs";
+    raw.pages[0].components[0].properties = {
+      tabs: [{ label: "全部" }, { label: "网页设计" }, { label: "移动应用" }],
+    };
+    const port = makePort(raw);
+
+    const result = await port.createUiImplementation({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [],
+      designPlan: detailedBlueprint(),
+    });
+
+    const reversedRaw = JSON.parse(JSON.stringify(raw));
+    reversedRaw.pages[0].components[0].properties.tabs.reverse();
+    const reversed = await makePort(reversedRaw).createUiImplementation({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [],
+      designPlan: detailedBlueprint(),
+    });
+    const idByLabel = Object.fromEntries(
+      result.pages[0].components[0].properties.tabs.map((tab: { id: string; label: string }) => [
+        tab.label,
+        tab.id,
+      ]),
+    );
+    const reversedIdByLabel = Object.fromEntries(
+      reversed.pages[0].components[0].properties.tabs.map((tab: { id: string; label: string }) => [
+        tab.label,
+        tab.id,
+      ]),
+    );
+    expect(reversedIdByLabel).toEqual(idByLabel);
+    expect(new Set(Object.values(idByLabel)).size).toBe(3);
+  });
+
+  it("never collides a generated tab ID with an explicit model-authored ID", async () => {
+    const raw = JSON.parse(JSON.stringify(uiImplementation()));
+    raw.pages[0].components[0].capabilityId = "tabs";
+    raw.pages[0].components[0].properties = {
+      tabs: [{ id: "tab-2", label: "全部" }, { label: "网页设计" }],
+    };
+
+    const result = await makePort(raw).createUiImplementation({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [],
+      designPlan: detailedBlueprint(),
+    });
+
+    const ids = result.pages[0].components[0].properties.tabs.map(
+      (tab: { id: string }) => tab.id,
+    );
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("maps a model-authored button label to the KF component content field", async () => {
+    const raw = JSON.parse(JSON.stringify(uiImplementation()));
+    raw.pages[0].components[0].capabilityId = "button";
+    raw.pages[0].components[0].properties = { label: "联系我" };
+    delete raw.pages[0].components[0].content;
+    const port = makePort(raw);
+
+    const result = await port.createUiImplementation({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [],
+      designPlan: detailedBlueprint(),
+    });
+
+    expect(result.pages[0].components[0].properties).toEqual({});
+    expect(result.pages[0].components[0].content).toBe("联系我");
+  });
+
+  it("drops redundant content from an image that already has a resource source", async () => {
+    const raw = JSON.parse(JSON.stringify(uiImplementation()));
+    raw.pages[0].components[0].capabilityId = "image";
+    raw.pages[0].components[0].content = "个人头像";
+    raw.pages[0].components[0].properties = {
+      src: "professional_portrait.jpg",
+      fit: "cover",
+      alt: "个人头像",
+    };
+    const port = makePort(raw);
+
+    const result = await port.createUiImplementation({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [],
+      designPlan: detailedBlueprint(),
+    });
+
+    expect(result.pages[0].components[0].content).toBeUndefined();
+    expect(result.pages[0].components[0].properties).toMatchObject({
+      src: "professional_portrait.jpg",
+      alt: "个人头像",
+    });
   });
 
   it("reviseUiImplementation includes the previous spec and bounded rejection reasons", async () => {

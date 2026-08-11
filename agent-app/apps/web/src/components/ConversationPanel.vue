@@ -33,9 +33,10 @@ const props = withDefaults(
   defineProps<{
     messages: ChatMessage[];
     streaming?: boolean;
+    busy?: boolean;
     phaseHint?: string | null;
   }>(),
-  { streaming: false, phaseHint: null },
+  { streaming: false, busy: false, phaseHint: null },
 );
 
 const emit = defineEmits<{
@@ -75,6 +76,8 @@ const renderedMessages = computed<RenderedMessage[]>(() =>
 );
 
 const BLUEPRINT_CONFIRMATIONS = new Set(["确认", "确认蓝图", "确认效果蓝图"]);
+const BLUEPRINT_RETRY_REQUEST = "重新生成工程实施计划";
+const IMPLEMENTATION_FAILURE_PREFIX = "工程实施计划暂未生成：";
 
 const latestBlueprintIndex = computed(() => {
   for (let index = renderedMessages.value.length - 1; index >= 0; index -= 1) {
@@ -84,16 +87,54 @@ const latestBlueprintIndex = computed(() => {
 });
 
 function isBlueprintConfirmed(index: number): boolean {
-  return renderedMessages.value
-    .slice(index + 1)
-    .some(
-      (message) =>
-        message.role === "user" && BLUEPRINT_CONFIRMATIONS.has(message.content.trim()),
-    );
+  const tail = renderedMessages.value.slice(index + 1);
+  let latestSubmission = -1;
+  let latestFailure = -1;
+  tail.forEach((message, offset) => {
+    if (
+      message.role === "user"
+      && (BLUEPRINT_CONFIRMATIONS.has(message.content.trim())
+        || message.content.trim() === BLUEPRINT_RETRY_REQUEST)
+    ) {
+      latestSubmission = offset;
+    }
+    if (message.role === "assistant" && message.content.startsWith(IMPLEMENTATION_FAILURE_PREFIX)) {
+      latestFailure = offset;
+    }
+  });
+  return latestSubmission >= 0 && latestSubmission > latestFailure;
+}
+
+function needsImplementationRetry(index: number): boolean {
+  const tail = renderedMessages.value.slice(index + 1);
+  let latestSubmission = -1;
+  let latestFailure = -1;
+  tail.forEach((message, offset) => {
+    if (
+      message.role === "user"
+      && (BLUEPRINT_CONFIRMATIONS.has(message.content.trim())
+        || message.content.trim() === BLUEPRINT_RETRY_REQUEST)
+    ) {
+      latestSubmission = offset;
+    }
+    if (message.role === "assistant" && message.content.startsWith(IMPLEMENTATION_FAILURE_PREFIX)) {
+      latestFailure = offset;
+    }
+  });
+  return latestFailure > latestSubmission;
 }
 
 function isBlueprintActionable(index: number): boolean {
-  return index === latestBlueprintIndex.value && !isBlueprintConfirmed(index);
+  return index === latestBlueprintIndex.value
+    && (!isBlueprintConfirmed(index) || needsImplementationRetry(index));
+}
+
+function blueprintActionLabel(index: number): string {
+  return needsImplementationRetry(index) ? BLUEPRINT_RETRY_REQUEST : "确认效果蓝图";
+}
+
+function submitBlueprint(index: number): void {
+  sendOption(needsImplementationRetry(index) ? BLUEPRINT_RETRY_REQUEST : "确认");
 }
 
 const draft = ref("");
@@ -153,13 +194,13 @@ function isStreamingTail(index: number, message: RenderedMessage): boolean {
 
 /** 澄清选项 / 计划「确认」的回传：与输入框发送同路径，流式时忽略防误触。 */
 function sendOption(text: string): void {
-  if (props.streaming === true) return;
+  if (props.streaming === true || props.busy === true) return;
   emit("send", text);
 }
 
 function submit(): void {
   const text = draft.value.trim();
-  if (text.length === 0 || props.streaming === true) return;
+  if (text.length === 0 || props.streaming === true || props.busy === true) return;
   emit("send", text);
   draft.value = "";
 }
@@ -296,8 +337,8 @@ function submit(): void {
             </section>
 
             <p class="blueprint-guidance">可以继续告诉我需要修改的细节；确认这份效果蓝图后，我再生成工程实施计划。</p>
-            <button v-if="isBlueprintActionable(index)" type="button" class="plan-confirm" data-testid="blueprint-confirm" @click="sendOption('确认')">
-              确认效果蓝图
+            <button v-if="isBlueprintActionable(index)" type="button" class="plan-confirm" data-testid="blueprint-confirm" @click="submitBlueprint(index)">
+              {{ blueprintActionLabel(index) }}
             </button>
             <span v-else class="blueprint-status" data-testid="blueprint-status">
               {{ isBlueprintConfirmed(index) ? "已确认" : "历史版本" }}
@@ -346,11 +387,11 @@ function submit(): void {
         data-testid="message-input"
         type="text"
         placeholder="描述需求…"
-        :disabled="streaming"
+        :disabled="streaming || busy"
         @keyup.enter="submit"
       />
-      <button type="button" data-testid="send-message" :disabled="streaming" @click="submit">
-        {{ streaming ? "生成中…" : "发送" }}
+      <button type="button" data-testid="send-message" :disabled="streaming || busy" @click="submit">
+        {{ streaming ? "生成中…" : busy ? "处理中…" : "发送" }}
       </button>
     </div>
   </section>

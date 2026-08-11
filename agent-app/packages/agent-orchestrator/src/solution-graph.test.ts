@@ -670,7 +670,7 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
         `${CONVERSATION_ID}:plan:${WORKSPACE_ID}:${payload.planHash}:${payload.planHash}`,
     });
     expect(result.buildJobId).toBe("job-1");
-    expect(result.stage).toBe("preview-review");
+    expect(result.stage).toBe("building");
     expect(bed.repo.statusOf(payload.changeRequestId)).toBe("APPROVED");
   });
 
@@ -722,27 +722,29 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     });
   });
 
-  it("build success enters preview-review with a hint message; CONFIRM_BUILD lands (stage=done)", async () => {
+  it("enters preview review only after build success; CONFIRM_BUILD then lands", async () => {
     const bed = createBed();
     const ctx = seed(bed);
     const payload = await planNewRequirement(bed, ctx, "新增一个按钮");
 
     const built = await approve(bed, ctx, payload);
 
-    expect(built.stage).toBe("preview-review");
+    expect(built.stage).toBe("building");
     expect(built.buildJobId).toBe("job-1");
     expect(bed.workspace.appendCalls).toContainEqual(
       expect.objectContaining({
         role: "assistant",
-        content: "预览已生成，您可以在右侧查看实际效果；满意的话回复「确认落地」，需要调整也可以直接告诉我。",
+        content: expect.stringContaining("构建任务已提交"),
       }),
     );
+
+    bed.builds.setStatus("job-1", "SUCCEEDED");
 
     // 预览反馈循环：用户确认落地 → 终态 done
     bed.model.queueIntent("CONFIRM_BUILD");
     await sendUser(bed, ctx, "确认落地");
     const landed = await bed.graph.invoke(
-      { ...input(ctx), stage: "preview-review" },
+      { ...input(ctx), stage: "building" },
       config(ctx),
     );
 
@@ -754,6 +756,48 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
         content: "方案已确认落地。感谢您的沟通！后续如需继续调整或新增需求，随时找我。",
       }),
     );
+  });
+
+  it("does not claim delivery while the tracked build is still queued", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+    const payload = await planNewRequirement(bed, ctx, "新增一个按钮");
+    const queued = await approve(bed, ctx, payload);
+    expect(queued.buildJobId).toBe("job-1");
+
+    bed.model.queueIntent("CONFIRM_BUILD");
+    await sendUser(bed, ctx, "确认落地");
+    const result = await bed.graph.invoke({ ...input(ctx), stage: "building" }, config(ctx));
+
+    expect(result.stage).toBe("building");
+    expect(result.buildConfirmed).not.toBe(true);
+    expect(result.lastErrorCode).toBeUndefined();
+    expect(bed.workspace.appendCalls).toContainEqual(expect.objectContaining({
+      content: expect.stringContaining("仍在构建和校验中"),
+    }));
+    expect(bed.workspace.appendCalls).not.toContainEqual(expect.objectContaining({
+      content: expect.stringContaining("方案已确认落地"),
+    }));
+  });
+
+  it("does not claim delivery when CONFIRM_BUILD arrives before any preview exists", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+    bed.model.queueIntent("CONFIRM_BUILD");
+    await sendUser(bed, ctx, "生成预览");
+
+    const result = await bed.graph.invoke({ ...input(ctx), stage: "building" }, config(ctx));
+
+    expect(result.stage).toBe("idle");
+    expect(result.buildConfirmed).not.toBe(true);
+    expect(result.lastErrorCode).toBe("BUILD_PREVIEW_NOT_AVAILABLE");
+    expect(bed.workspace.appendCalls).toContainEqual(expect.objectContaining({
+      role: "assistant",
+      content: expect.stringContaining("还没有可确认的工程预览"),
+    }));
+    expect(bed.workspace.appendCalls).not.toContainEqual(expect.objectContaining({
+      content: expect.stringContaining("方案已确认落地"),
+    }));
   });
 
   it("revises the design instead of creating a ChangePlan when requirements are added during design review", async () => {
@@ -877,6 +921,7 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     const ctx = seed(bed);
     const payload = await planNewRequirement(bed, ctx, "新增一个按钮");
     await approve(bed, ctx, payload);
+    bed.builds.setStatus("job-1", "SUCCEEDED");
 
     // 模型把"确认落地"分类成 QUESTION，但预览阶段的确认词兜底为 CONFIRM_BUILD
     bed.model.queueIntent("QUESTION");
@@ -948,14 +993,14 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
 
     // The next turn re-enters the workflow with no new user requirement.
     bed.model.queueIntent("CONFIRM_PLAN");
-    const result = await bed.graph.invoke(input(ctx), config(ctx));
+    const result = await bed.graph.invoke({ ...input(ctx), stage: "building" }, config(ctx));
 
     expect(result.stage).toBe("planning");
     expect(result.lastErrorCode).toBe("BUILD_FAILED");
     expect(result.buildJobId).toBe(jobId);
   });
 
-  it("returns to idle and refreshes the current revision after a successful build", async () => {
+  it("refreshes the current revision after a successful build", async () => {
     const bed = createBed();
     const ctx = seed(bed);
     const payload = await planNewRequirement(bed, ctx, "新增一个按钮");
@@ -969,7 +1014,7 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
 
     bed.model.queueIntent("QUESTION");
     await sendUser(bed, ctx, "构建完成了吗？");
-    const result = await bed.graph.invoke(input(ctx), config(ctx));
+    const result = await bed.graph.invoke({ ...input(ctx), stage: "building" }, config(ctx));
 
     expect(result.stage).toBe("idle");
     expect(result.currentRevisionId).toBe("rev-2");
