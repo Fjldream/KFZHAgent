@@ -15,6 +15,7 @@ import { stableStringify, type ClientWorkspace } from "../compile/client-compile
 import { deriveGuid } from "../compile/guid-factory.js";
 import { compileAction, ensureChildGuids } from "../compile/control-compiler.js";
 import type { RestrictedAction } from "../ir/client-project-ir.js";
+import { RestrictedAction as RestrictedActionSchema } from "../ir/client-project-ir.schema.js";
 import { assertStyleCompilationAccepted, compileControlStyle } from "../style/style-engine.js";
 import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
 import { mergeManagedStyleData } from "../style/style-data-merge.js";
@@ -636,6 +637,10 @@ function asNumber(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+function parentLabel(value: unknown): string {
+  return typeof value === "string" ? value : "<invalid parentId>";
+}
+
 /** Container keys under which controls nest inside a page tree. */
 const CONTROL_CONTAINER_KEYS = ["objects", "children", "layoutItems", "insiderObjects"] as const;
 const PAGE_EDGE_PADDING = 40;
@@ -808,7 +813,7 @@ async function applyUpdate(
   const prototypeName =
     isControlLocation(loc) && loc.controlType === "prototype"
       ? typeof root["prototypeName"] === "string"
-        ? (root["prototypeName"] as string)
+        ? root["prototypeName"]
         : undefined
       : undefined;
   for (const change of op.changes) {
@@ -828,6 +833,28 @@ async function applyUpdate(
       ? resolveControlPathFor(loc.controlType, change.path, prototypeName)
       : change.path;
     let value = change.value;
+    if (isControlLocation(loc) && loc.controlType === "button" && change.path === "/linkMng") {
+      if (value === null) {
+        value = { linkList: [] };
+      } else {
+        const parsedAction = RestrictedActionSchema.safeParse(value);
+        if (!parsedAction.success) throw new PatchConflictError("button linkMng update requires a reviewed RestrictedAction or null");
+        try {
+          value = { linkList: [compileAction(parsedAction.data, {
+            variableGroupGuid: "",
+            pageGroupGuid: "",
+            resolvePageGuid: (pageId) => {
+              const target = Object.values(inspection.index.pages).find((page) => page.id === pageId || page.name === pageId);
+              if (target === undefined) throw new Error(`unknown page ${pageId}`);
+              return target.guid;
+            },
+            resolveVariableName: (id) => id,
+          })] };
+        } catch (error) {
+          throw new PatchConflictError(`invalid button action: ${error instanceof Error ? error.message : "unknown"}`);
+        }
+      }
+    }
     if (
       isControlLocation(loc)
       && loc.controlType === "layout"
@@ -1077,32 +1104,68 @@ async function applyDelete(
 
 /**
  * 把新建控件插入指定布局的 insiderObjects（LLM 用 properties.parentId 表达容器
- * 嵌套，如「在垂直布局里放两个按钮」）。找不到目标布局时返回 false（回退页面
- * 顶层 objects）。KF 布局子控件需要内部定位字段：Docking 用 region、水平/垂直/
- * 导航布局用 internalVertex——缺失时按目标布局类型补默认（Docking 缺省 center、
- * 水平/垂直缺省 {0,0} 左上角），避免 KF 加载时位置错乱。
+ * 嵌套，如「在垂直布局里放两个按钮」。调用方对显式 parentId 必须将 false 视为
+ * 冲突，绝不能静默回退到页面顶层。输入几何始终是页面绝对坐标；这里在写入
+ * insiderObjects 前递归计算父布局的绝对原点并转换为父局部坐标。KF 布局子控件
+ * 还需要内部定位字段：Docking 用 region、水平/垂直/导航布局用 internalVertex。
  */
 function pushControlIntoParent(
   objects: unknown[],
   control: Record<string, unknown>,
   parentId: unknown,
+  hasExplicitPosition = true,
 ): boolean {
   const target = typeof parentId === "string" ? parentId : "";
   if (target === "") return false;
-  const findContainer = (nodes: unknown[]): Record<string, unknown> | undefined => nodes.find((o) => {
-    if (o === null || typeof o !== "object") return false;
-    const rec = o as Record<string, unknown>;
-    const bp = rec["baseProperty"];
-    const name = typeof rec["name"] === "string" ? (rec["name"]) : "";
-    const bpName = bp !== null && typeof bp === "object" ? ((bp as Record<string, unknown>)["name"]) : undefined;
-    const guid = typeof rec["guid"] === "string" ? (rec["guid"]) : "";
-    const bpGuid = bp !== null && typeof bp === "object" ? ((bp as Record<string, unknown>)["guid"]) : undefined;
-    return name === target || bpName === target || guid === target || bpGuid === target;
-  }) as Record<string, unknown> | undefined ?? nodes.flatMap((node) => isObject(node) && Array.isArray(node["insiderObjects"]) ? [node["insiderObjects"] as unknown[]] : []).map(findContainer).find((value) => value !== undefined);
-  const container = findContainer(objects);
-  if (container === undefined) return false;
-  const rec = container as Record<string, unknown>;
-  if (typeof rec["layoutType"] !== "number") return false;
+  type LocatedLayout = { node: Record<string, unknown>; origin: { x: number; y: number } };
+  const matches = (node: Record<string, unknown>): boolean => {
+    const base = asRecord(node["baseProperty"]);
+    return node["name"] === target
+      || base["name"] === target
+      || node["guid"] === target
+      || base["guid"] === target;
+  };
+  const findLayout = (nodes: unknown[], origin = { x: 0, y: 0 }): LocatedLayout | undefined => {
+    for (const node of nodes) {
+      if (!isObject(node)) continue;
+      const base = asRecord(node["baseProperty"]);
+      const point = asRecord(base["leftTopPt"]);
+      if (matches(node)) {
+        return typeof node["layoutType"] === "number"
+          ? { node, origin: { x: origin.x + asNumber(point["x"]), y: origin.y + asNumber(point["y"]) } }
+          : undefined;
+      }
+      const nested = Array.isArray(node["insiderObjects"]) ? node["insiderObjects"] as unknown[] : [];
+      const found = findLayout(nested, { x: origin.x + asNumber(point["x"]), y: origin.y + asNumber(point["y"]) });
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  };
+  const located = findLayout(objects);
+  if (located === undefined) return false;
+  const { node: rec, origin } = located;
+  const parentBase = asRecord(rec["baseProperty"]);
+  const parentWidth = asNumber(parentBase["width"]);
+  const parentHeight = asNumber(parentBase["height"]);
+  const childBase = asRecord(control["baseProperty"]);
+  const childIsLayout = Object.keys(childBase).length > 0;
+  const currentPoint = childIsLayout ? asRecord(childBase["leftTopPt"]) : asRecord(control["leftTopPt"]);
+  // Legacy direct ChangePlans may omit x/y for a container child. In that
+  // case no page-space coordinate was supplied, so preserve the old safe
+  // semantic of the parent origin (local 0,0); supplied coordinates are
+  // always page-absolute and are translated below.
+  const absoluteX = hasExplicitPosition ? asNumber(currentPoint["x"]) : origin.x;
+  const absoluteY = hasExplicitPosition ? asNumber(currentPoint["y"]) : origin.y;
+  const localX = absoluteX - origin.x;
+  const localY = absoluteY - origin.y;
+  const width = childIsLayout ? asNumber(childBase["width"]) : asNumber(control["width"]);
+  const height = childIsLayout ? asNumber(childBase["height"]) : asNumber(control["height"]);
+  if (localX < 0 || localY < 0 || (parentWidth > 0 && localX + width > parentWidth) || (parentHeight > 0 && localY + height > parentHeight)) return false;
+  if (childIsLayout) {
+    childBase["leftTopPt"] = { x: localX, y: localY };
+  } else {
+    control["leftTopPt"] = { x: localX, y: localY };
+  }
   if (!Array.isArray(rec["insiderObjects"])) rec["insiderObjects"] = [];
   const lt = rec["layoutType"];
   if (lt === 5) {
@@ -1111,7 +1174,7 @@ function pushControlIntoParent(
   } else if (lt === 2 || lt === 4 || lt === 6) {
     // 水平/垂直/导航布局：子对象用 internalVertex 定位，缺省 {0,0}
     if (control["internalVertex"] === undefined) {
-      control["internalVertex"] = { left: 0, top: 0 };
+      control["internalVertex"] = { left: localX, top: localY };
     }
   }
   (rec["insiderObjects"] as unknown[]).push(control);
@@ -1188,12 +1251,10 @@ async function applyCreate(
           delete control["objectType"];
         }
         if (style !== undefined) applyStyleToControl(control, type, style);
-        // LLM 可用 properties.parentId 表达容器嵌套（布局内子控件）；找不到目标
-        // 布局时回退页面顶层 objects。
+        // 显式 parentId 是结构契约：目标不存在或不是布局时不能悄悄改成顶层控件。
         const parentId = properties["parentId"];
-        if (parentId === undefined || !pushControlIntoParent(objects, control, parentId)) {
-          objects.push(control);
-        }
+        if (parentId === undefined) objects.push(control);
+        else if (!pushControlIntoParent(objects, control, parentId, properties["x"] !== undefined || properties["y"] !== undefined)) throw new PatchConflictError(`create easyui control: parent "${parentLabel(parentId)}" not found or is not a layout`);
       } else if (type === "layout") {
         // 布局容器：objectType=2 + layoutType 顶层；几何进 baseProperty；
         // children/panels 作为整体写入 insiderObjects/dPanelsOption（嵌套 JSON patch 复杂，整体 set 最稳）。
@@ -1224,7 +1285,7 @@ async function applyCreate(
         if (style !== undefined) applyStyleToControl(control, type, style);
         const parentId = properties["parentId"];
         if (parentId === undefined) objects.push(control);
-        else if (!pushControlIntoParent(objects, control, parentId)) throw new PatchConflictError(`create layout: parent "${String(parentId)}" not found or is not a layout`);
+        else if (!pushControlIntoParent(objects, control, parentId, properties["x"] !== undefined || properties["y"] !== undefined)) throw new PatchConflictError(`create layout: parent "${parentLabel(parentId)}" not found or is not a layout`);
       } else if (type === "prototype") {
         // KF 特殊节点（prototypeName 判别）：模板 = 该原型的基础字段 + 宽容
         // 透传（prototype IR 是 passthrough）。判别/身份/几何字段不透传；
@@ -1255,7 +1316,7 @@ async function applyCreate(
           const pageProperty: TemplateJson = {
             ...CUSTOMCHARTS_BASE_PAGE_PROPERTY,
             ...(isObject(pass["pageProperty"])
-              ? (pass["pageProperty"] as Record<string, unknown>)
+              ? pass["pageProperty"]
               : {}),
             name: op.entityId,
             pagePos: { x: asNumber(properties["x"]), y: asNumber(properties["y"]) },
@@ -1326,7 +1387,7 @@ async function applyCreate(
         // 静态控件也可用 parentId 放进布局（同 easyui 分支）
         const parentId = properties["parentId"];
         if (parentId === undefined) objects.push(control);
-        else if (!pushControlIntoParent(objects, control, parentId)) throw new PatchConflictError(`create control: parent "${String(parentId)}" not found or is not a layout`);
+        else if (!pushControlIntoParent(objects, control, parentId, properties["x"] !== undefined || properties["y"] !== undefined)) throw new PatchConflictError(`create control: parent "${parentLabel(parentId)}" not found or is not a layout`);
       }
       await writeJsonFile(candidate, versionDir, page.file, doc);
       break;

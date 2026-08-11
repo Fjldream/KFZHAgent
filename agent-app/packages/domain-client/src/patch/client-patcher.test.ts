@@ -328,6 +328,81 @@ describe("client patcher (Task 7 brief Step 1)", () => {
     }]))).resolves.toBeDefined();
   });
 
+  it("rejects a button navigate action whose semantic page target is unknown", async () => {
+    const base = await copyFixture("client-unknown-field");
+    await expect(applyClientPatch(base, plan([{
+      op: "create", entityType: "control", entityId: "UnknownNavigateButton",
+      properties: { pageId: "page-guid-1", type: "button", text: "Go", action: { kind: "navigate", pageId: "missing-page" } },
+    }]))).rejects.toThrow(/PATCH_CONFLICT: invalid button action: unknown page missing-page/);
+  });
+
+  it("nests static, EasyUI, and layout controls using parent-local coordinates", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const candidate = await applyClientPatch(base, plan([
+      {
+        op: "create", entityType: "control", entityId: "OuterLayout",
+        properties: { pageId: "page-guid-1", type: "layout", layoutType: 2, x: 100, y: 80, width: 500, height: 360 },
+      },
+      {
+        op: "create", entityType: "control", entityId: "InnerLayout",
+        properties: { pageId: "page-guid-1", type: "layout", layoutType: 2, parentId: "OuterLayout", x: 140, y: 120, width: 300, height: 200 },
+      },
+      {
+        op: "create", entityType: "control", entityId: "NestedText",
+        properties: { pageId: "page-guid-1", type: "text", parentId: "InnerLayout", x: 170, y: 150, width: 120, height: 30, text: "Nested" },
+      },
+      {
+        op: "create", entityType: "control", entityId: "NestedEasyUi",
+        properties: { pageId: "page-guid-1", type: "easyui", proto: 9, parentId: "InnerLayout", x: 180, y: 190, width: 180, height: 32 },
+      },
+    ]));
+
+    const outer = await wholeControl(candidate, deriveGuid({ seed: "w-test" }, "OuterLayout"));
+    const inner = (outer["insiderObjects"] as Record<string, unknown>[])[0]!;
+    const children = inner["insiderObjects"] as Record<string, unknown>[];
+    const text = children.find((child) => child["name"] === "NestedText")!;
+    const easyui = children.find((child) => child["name"] === "NestedEasyUi")!;
+
+    expect((outer["baseProperty"] as Record<string, unknown>)["leftTopPt"]).toEqual({ x: 100, y: 80 });
+    expect((inner["baseProperty"] as Record<string, unknown>)["leftTopPt"]).toEqual({ x: 40, y: 40 });
+    expect(inner["internalVertex"]).toEqual({ left: 40, top: 40 });
+    expect(text["leftTopPt"]).toEqual({ x: 30, y: 30 });
+    expect(text["internalVertex"]).toEqual({ left: 30, top: 30 });
+    expect(easyui["leftTopPt"]).toEqual({ x: 40, y: 70 });
+    expect(easyui["internalVertex"]).toEqual({ left: 40, top: 70 });
+
+    const inspection = await inspectClientProject(await rootDirOf(candidate));
+    expect(inspection.index.controls[deriveGuid({ seed: "w-test" }, "InnerLayout")]?.id).toBe("InnerLayout");
+    expect(inspection.index.controls[deriveGuid({ seed: "w-test" }, "NestedText")]?.id).toBe("NestedText");
+    expect(inspection.index.controls[deriveGuid({ seed: "w-test" }, "NestedEasyUi")]?.id).toBe("NestedEasyUi");
+  });
+
+  it.each([
+    { label: "static", type: "text", properties: { text: "no parent" } },
+    { label: "easyui", type: "easyui", properties: { proto: 9 } },
+    { label: "layout", type: "layout", properties: { layoutType: 2 } },
+  ])("rejects an explicit missing parent for $label controls", async ({ type, properties }) => {
+    const base = await copyFixture("client-unknown-field");
+    await expect(applyClientPatch(base, plan([{
+      op: "create", entityType: "control", entityId: `MissingParent-${type}`,
+      properties: { pageId: "page-guid-1", type, parentId: "DoesNotExist", x: 20, y: 20, width: 100, height: 40, ...properties },
+    }]))).rejects.toThrow(/PATCH_CONFLICT: create/);
+  });
+
+  it("rejects a non-layout explicit parent instead of falling back to page root", async () => {
+    const base = await copyFixture("client-unknown-field");
+    await expect(applyClientPatch(base, plan([
+      {
+        op: "create", entityType: "control", entityId: "NotALayout",
+        properties: { pageId: "page-guid-1", type: "text", x: 10, y: 10, width: 100, height: 30, text: "Not a layout" },
+      },
+      {
+        op: "create", entityType: "control", entityId: "NestedUnderText",
+        properties: { pageId: "page-guid-1", type: "easyui", proto: 9, parentId: "NotALayout", x: 20, y: 20, width: 100, height: 30 },
+      },
+    ]))).rejects.toThrow(/PATCH_CONFLICT: create easyui control/);
+  });
+
   it.each(["   ", "x".repeat(101)])("rejects invalid runtime-normalized entityId %j", async (entityId) => {
     const base = await copyFixture("client-unknown-field");
     await expect(applyClientPatch(base, plan([{

@@ -29,6 +29,53 @@ async function fixture(name: string): Promise<string> {
   return target;
 }
 
+function record(value: unknown): Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("expected a JSON object");
+  }
+  return value as Record<string, unknown>;
+}
+
+function controlName(control: Record<string, unknown>): string {
+  const base = record(control["baseProperty"] ?? {});
+  const name = base["name"] ?? control["name"];
+  if (typeof name !== "string") throw new Error("control does not have a name");
+  return name;
+}
+
+function childrenOf(control: Record<string, unknown>): Record<string, unknown>[] {
+  const children = control["insiderObjects"];
+  return Array.isArray(children) ? children.map(record) : [];
+}
+
+function namedChild(control: Record<string, unknown>, name: string): Record<string, unknown> {
+  const child = childrenOf(control).find((entry) => controlName(entry) === name);
+  if (child === undefined) throw new Error(`missing nested child ${name}`);
+  return child;
+}
+
+function geometryOf(control: Record<string, unknown>): { x: number; y: number; width: number; height: number } {
+  const base = record(control["baseProperty"] ?? {});
+  const point = record(base["leftTopPt"] ?? control["leftTopPt"] ?? {});
+  const x = point["x"];
+  const y = point["y"];
+  const width = base["width"] ?? control["width"];
+  const height = base["height"] ?? control["height"];
+  if (![x, y, width, height].every((value) => typeof value === "number")) {
+    throw new Error(`invalid geometry for ${controlName(control)}`);
+  }
+  return { x: x as number, y: y as number, width: width as number, height: height as number };
+}
+
+function expectInsideParent(child: Record<string, unknown>, parent: Record<string, unknown>): void {
+  const box = geometryOf(child);
+  const parentBox = geometryOf(parent);
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(parentBox.width);
+  expect(box.y + box.height).toBeLessThanOrEqual(parentBox.height);
+}
+
 function module(kind: string, id = "module", content: Record<string, unknown> = {}): ModulePlanModule {
   return {
     id,
@@ -187,9 +234,33 @@ describe("portal module definitions", () => {
     const root = await fixture("client-unknown-field");
     const candidate = await applyClientPatch(root, change.plan);
     const inspection = await inspectClientProject(candidate.rootDir);
-    expect(Object.values(inspection.index.controls).map((entry) => entry.id)).toContain("portal-portfolio/surface");
+    const indexedIds = Object.values(inspection.index.controls).map((entry) => entry.id);
+    expect(indexedIds).toEqual(expect.arrayContaining([
+      "portal-portfolio/surface",
+      "portal-portfolio/card-1-surface",
+      "portal-portfolio/card-1-title",
+      "portal-portfolio/card-1-image",
+      "portal-portfolio/card-1-action",
+      "portal-hero/primary-action",
+    ]));
     const page = JSON.parse(await readFile(join(candidate.rootDir, "1.0.0.1/project/page/Page1.json"), "utf8")) as Record<string, unknown>;
-    expect(JSON.stringify(page)).toContain("navigatePage");
-    expect(JSON.stringify(page)).toContain("page-guid-1");
+    const pageObjects = (page["objects"] as unknown[]).map(record);
+    const portfolio = pageObjects.find((entry) => controlName(entry) === "portal-portfolio/surface");
+    if (portfolio === undefined) throw new Error("missing portfolio surface");
+    const card = namedChild(portfolio, "portal-portfolio/card-1-surface");
+    const title = namedChild(card, "portal-portfolio/card-1-title");
+    const image = namedChild(card, "portal-portfolio/card-1-image");
+    const action = namedChild(card, "portal-portfolio/card-1-action");
+    expectInsideParent(card, portfolio);
+    expectInsideParent(title, card);
+    expectInsideParent(image, card);
+    expectInsideParent(action, card);
+
+    const hero = pageObjects.find((entry) => controlName(entry) === "portal-hero/surface");
+    if (hero === undefined) throw new Error("missing hero surface");
+    const primaryAction = namedChild(hero, "portal-hero/primary-action");
+    expect(primaryAction["linkMng"]).toEqual({ linkList: [{ action: "navigatePage", pageId: "page-guid-1" }] });
+    expect(primaryAction["script"]).toBeUndefined();
+    expect(Object.keys(record(primaryAction["linkMng"]))).toEqual(["linkList"]);
   });
 });

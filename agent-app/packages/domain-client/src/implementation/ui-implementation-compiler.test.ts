@@ -558,6 +558,20 @@ describe("compileUiImplementation", () => {
     }));
   });
 
+  it("emits a semantic button action delta and an explicit clear for an existing control", () => {
+    const button = { ...specFixture.pages[0]!.components[1]!, id: "ExistingTitle", properties: { action: { kind: "navigate" as const, pageId: "overview" } }, style: { declarations: {}, states: {} } };
+    const actionResult = compileUiImplementation({ ...specFixture, pages: [{ ...specFixture.pages[0]!, components: [button] }] }, {
+      ...context, existingControlCapabilityIdByComponentId: { ExistingTitle: "button" },
+      previousImplementation: { ...specFixture, pages: [{ ...specFixture.pages[0]!, components: [{ ...button, properties: {} }] }] },
+    });
+    expect(actionResult.plan.operations).toContainEqual(expect.objectContaining({ op: "update", changes: expect.arrayContaining([{ path: "/linkMng", value: { kind: "navigate", pageId: "overview" } }]) }));
+    const clearResult = compileUiImplementation({ ...specFixture, pages: [{ ...specFixture.pages[0]!, components: [{ ...button, properties: {} }] }] }, {
+      ...context, existingControlCapabilityIdByComponentId: { ExistingTitle: "button" },
+      previousImplementation: { ...specFixture, pages: [{ ...specFixture.pages[0]!, components: [button] }] },
+    });
+    expect(clearResult.plan.operations).toContainEqual(expect.objectContaining({ op: "update", changes: expect.arrayContaining([{ path: "/linkMng", value: null }]) }));
+  });
+
   it.each([
     {
       name: "nested styleDataNew",

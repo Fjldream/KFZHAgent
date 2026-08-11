@@ -288,6 +288,7 @@ function geometryChanges(
 }
 
 const EXISTING_PROPERTY_ALIASES: Readonly<Record<string, Readonly<Record<string, string>>>> = Object.freeze({
+  button: { action: "linkMng" },
   checkbox: { label: "checkboxData", checked: "checkedData" },
   checkboxlegacy: { label: "span/thisElement/innerText", checked: "check" },
   input: { inputType: "type" },
@@ -304,13 +305,17 @@ function existingPropertyChanges(
   previousComponent: UIComponentSpec | undefined,
   capabilityId: string,
 ): Array<{ path: string; value: unknown }> {
-  if (Object.keys(component.properties).length === 0) return [];
   const validated = validateGeneratedComponentProperties(capabilityId, component.properties);
   const variant = capabilityVariant(capabilityId);
   if (variant === undefined) throw new Error(`UNSUPPORTED_CAPABILITY_VARIANT: ${capabilityId}`);
   const allowed = allowedFieldsFor({ kind: "control", controlType: variant.type });
   const aliases = EXISTING_PROPERTY_ALIASES[variant.type] ?? {};
   const changes: Array<{ path: string; value: unknown }> = [];
+  if (variant.type === "button"
+    && previousComponent?.properties["action"] !== undefined
+    && validated["action"] === undefined) {
+    changes.push({ path: "/linkMng", value: null });
+  }
   const checkboxLabelChanged = variant.type === "checkbox"
     && previousComponent !== undefined
     && !isDeepStrictEqual(previousComponent.properties["label"], validated["label"]);
