@@ -92,6 +92,54 @@ async function setControlField(root: string, guid: string, field: string, value:
 }
 
 describe("client patcher (Task 7 brief Step 1)", () => {
+  it.each(["/__proto__/polluted", "/prototype/polluted", "/constructor/polluted", "/safe/~1__proto__"])("rejects dangerous JSON Pointer segment %s without polluting Object.prototype", async (path) => {
+    const base = await copyFixture("client-unknown-field");
+    await expect(applyClientPatch(base, plan([updateOperation("button-guid-1", [{ path, value: "owned" }])]))).rejects.toThrow(/dangerous JSON Pointer/i);
+    expect((Object.prototype as Record<string, unknown>)["polluted"]).toBeUndefined();
+  });
+
+  it("rejects a dangerous descendant token before any control update is applied", async () => {
+    const base = await copyFixture("client-unknown-field");
+    await expect(applyClientPatch(base, plan([
+      updateOperation("button-guid-1", [{ path: "/backgroundColor/__proto__/polluted", value: "owned" }]),
+    ]))).rejects.toThrow(/dangerous JSON Pointer/i);
+    expect((Object.prototype as Record<string, unknown>)["polluted"]).toBeUndefined();
+  });
+
+  it("rejects prototype-polluting create properties without mutating Object.prototype", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const poisonedProperties = JSON.parse('{"pageId":"page-guid-1","type":"button","text":"safe","__proto__":{"polluted":"owned"}}');
+    await expect(applyClientPatch(base, plan([{
+      op: "create", entityType: "control", entityId: "PoisonedButton", properties: poisonedProperties,
+    }]))).rejects.toThrow(/reserved key|__proto__/i);
+    expect((Object.prototype as Record<string, unknown>)["polluted"]).toBeUndefined();
+  });
+
+  it("rejects a generic configureData update instead of accepting executable KF script", async () => {
+    const base = await copyFixture("client-unknown-field");
+    await expect(applyClientPatch(base, plan([updateOperation("button-guid-1", [{ path: "/configureData", value: "alert(1)" }])]))).rejects.toThrow(/configureData/);
+  });
+
+  it("rejects a self-authored semantic table marker without compiler provenance", async () => {
+    const base = await copyFixture("client-unknown-field");
+    await expect(applyClientPatch(base, plan([
+      updateOperation("button-guid-1", [{
+        path: "/__kfModuleTableData",
+        value: { columns: [{ key: "name", label: "名称" }], rows: [{ name: "泵 A" }] },
+      }]),
+    ]))).rejects.toThrow(/trusted module compiler plan/i);
+  });
+
+  it("rejects a self-authored configuration-only datagrid create without compiler provenance", async () => {
+    const base = await copyFixture("client-unknown-field");
+    await expect(applyClientPatch(base, plan([{
+      op: "create", entityType: "control", entityId: "UntrustedTable",
+      properties: {
+        pageId: "page-guid-1", type: "easyui", proto: 1, x: 10, y: 10, width: 500, height: 300,
+        tableData: { columns: [{ key: "name", label: "名称" }], rows: [{ name: "泵 A" }] },
+      },
+    }]))).rejects.toThrow(/trusted module compiler plan/i);
+  });
   it("applies structured style to an imported control without changing unknown fields", async () => {
     const base = await copyFixture("client-unknown-field");
     const candidate = await applyClientPatch(base, plan([{

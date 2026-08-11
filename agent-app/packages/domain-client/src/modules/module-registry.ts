@@ -341,7 +341,7 @@ export class ModuleRegistry {
 export function createDefaultModuleRegistry(evidence: readonly ModuleRuntimeEvidence[] = []): ModuleRegistry {
   const registry = new ModuleRegistry();
   registerPortalModules(registry, evidence);
-  registerDashboardModules(registry);
-  registerAdminModules(registry);
+  registerDashboardModules(registry, evidence);
+  registerAdminModules(registry, evidence);
   return registry;
 }

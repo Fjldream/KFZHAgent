@@ -7,6 +7,11 @@ function instance(kind: string, content: Record<string, unknown>): ModulePlanMod
 }
 
 describe("admin modules", () => {
+  it("reports an owned deterministic gap when toolbar actions do not have one reviewed interaction each", () => {
+    const registry = createDefaultModuleRegistry(); const definition = registry.require("action.toolbar", "1.0.0"); const content = { actions: [{ label: "新增" }, { label: "导出" }] }; const value = instance("action.toolbar", content);
+    const result = definition.compile({ context: { definition, instance: value, content: definition.contentSchema.parse(content), asset: undefined, validationContext: { availableKfCapabilities: [], approvedAuthorizationRefs: [] }, bounds: { x: 0, y: 0, width: 300, height: 80 } } });
+    expect(result.deliveryGaps).toContainEqual(expect.objectContaining({ reason: "toolbar-interaction-mismatch" }));
+  });
   it.each([
     ["data.table", { table: { columns: [{ key: "name", label: "名称" }], rows: [{ name: "设备 A" }] } }, "easyui.1"],
     ["data.detail", { fields: [{ label: "设备名称", value: "泵 A", editable: true }] }, "input"],

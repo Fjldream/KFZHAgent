@@ -1,7 +1,7 @@
 import { z } from "zod";
-import type { ModuleCompileInput, ModuleCompileOutput, ModuleDefinition } from "../types.js";
+import type { ModuleCompileInput, ModuleCompileOutput, ModuleDefinition, ModuleRuntimeEvidence } from "../types.js";
 import type { ModuleRegistry } from "../module-registry.js";
-import type { UIComponentSpec } from "@kf/contracts";
+import type { ModuleDeliveryGap, UIComponentSpec } from "@kf/contracts";
 import { actionButton, labeledValue, sectionTitle, surface, type LocalBounds } from "./shared-primitives.js";
 import { parseTableData } from "./native-data-adapters.js";
 
@@ -15,6 +15,7 @@ function safe(definition: Omit<ModuleDefinition, "version" | "maturity" | "runti
 function local(input: ModuleCompileInput, minWidth: number, minHeight: number): LocalBounds | undefined { const { width, height } = input.context.bounds; return width >= minWidth && height >= minHeight ? { x: 0, y: 0, width, height } : undefined; }
 function tag(id: string, box: LocalBounds, parentId: string): UIComponentSpec { return Object.freeze({ id, role: "alert-tag", capabilityId: "tag", critical: true, geometry: Object.freeze(box), properties: Object.freeze({ effect: "dark", closable: false, hit: false, parentId }), style: Object.freeze({ role: "accent", declarations: Object.freeze({}), states: Object.freeze({}) }) }); }
 function action(input: ModuleCompileInput, index: number): { kind: "navigate"; pageId: string } | undefined { const entry = input.context.instance.interactions.filter((item) => item.type === "navigate")[index]; return entry?.type === "navigate" ? { kind: "navigate", pageId: entry.pageId } : undefined; }
+function actionGaps(input: ModuleCompileInput, expected: number): readonly ModuleDeliveryGap[] { const navigations = input.context.instance.interactions.filter((entry) => entry.type === "navigate").length; return navigations === expected && input.context.instance.interactions.length === expected ? [] : [{ moduleId: input.context.instance.id, requirement: "Declared native toolbar actions", severity: "warning", status: "unresolved", reason: "toolbar-interaction-mismatch", alternatives: ["Supply exactly one navigate interaction for each action."] }]; }
 
 const table = safe({
   kind: "data.table", category: "data", variants: ["default", "compact"], contentSchema: schema(z.object({ table: z.unknown() }).strict().superRefine((value, ctx) => { try { parseTableData(value.table); } catch (error) { ctx.addIssue({ code: "custom", path: ["table"], message: error instanceof Error ? error.message : "invalid table" }); } })), assetSlots: NO_ASSETS, requiredKfCapabilities: ["layout.2", "text", "easyui.1"], layout: layout(["main"], ["filter"], 180, 960),
@@ -28,7 +29,7 @@ const detail = safe({
 
 const toolbar = safe({
   kind: "action.toolbar", category: "action", variants: ["default", "compact"], contentSchema: schema(z.object({ actions: z.array(z.object({ label: text(80) }).strict()).min(1).max(12) }).strict()), assetSlots: NO_ASSETS, requiredKfCapabilities: ["layout.2", "button"], layout: layout(["toolbar", "main"], ["navigate"], 48, 240),
-  compile: (input) => { const box = local(input, 120, 48); if (!box) return gap(input.context.instance.id); const actions = (input.context.content as { actions: Array<{ label: string }> }).actions; const width = Math.floor((box.width - 16 - (actions.length - 1) * 8) / actions.length); if (width < 60) return gap(input.context.instance.id); return { components: [surface("surface", box), ...actions.map((item, index) => actionButton(`action-${index + 1}`, item.label, { x: 8 + index * (width + 8), y: 8, width, height: box.height - 16 }, "surface", action(input, index)))], deliveryGaps: [] }; },
+  compile: (input) => { const box = local(input, 120, 48); if (!box) return gap(input.context.instance.id); const actions = (input.context.content as { actions: Array<{ label: string }> }).actions; const width = Math.floor((box.width - 16 - (actions.length - 1) * 8) / actions.length); if (width < 60) return gap(input.context.instance.id); return { components: [surface("surface", box), ...actions.map((item, index) => actionButton(`action-${index + 1}`, item.label, { x: 8 + index * (width + 8), y: 8, width, height: box.height - 16 }, "surface", action(input, index)))], deliveryGaps: actionGaps(input, actions.length) }; },
 });
 
 const alertList = safe({
@@ -36,4 +37,11 @@ const alertList = safe({
   compile: (input) => { const box = local(input, 220, 100); if (!box) return gap(input.context.instance.id); const alerts = (input.context.content as { alerts: Array<{ title: string; message: string; severity: string }> }).alerts; const row = input.context.instance.variant === "compact" ? 42 : 64; if (box.height < 10 + alerts.length * row) return gap(input.context.instance.id); const components: UIComponentSpec[] = [surface("surface", box)]; alerts.forEach((alert, index) => { const y = 8 + index * row; components.push(tag(`alert-${index + 1}-tag`, { x: 10, y, width: 24, height: 24 }, "surface"), labeledValue(`alert-${index + 1}`, alert.title, `${alert.severity.toUpperCase()} · ${alert.message}`, { x: 42, y, width: box.width - 52, height: row - 8 }, "surface")); }); return { components, deliveryGaps: [] }; },
 });
 
-export function registerAdminModules(registry: ModuleRegistry): void { [table, detail, toolbar, alertList].forEach((definition) => registry.register(definition)); }
+export function registerAdminModules(registry: ModuleRegistry, evidence: readonly ModuleRuntimeEvidence[] = []): void {
+  for (const definition of [table, detail, toolbar, alertList]) {
+    const accepted = evidence.some((entry) => entry.kind === definition.kind && entry.version === definition.version
+      && entry.runtimeFamily === definition.runtimeEvidenceTarget?.runtimeFamily && entry.runtimeVersion === definition.runtimeEvidenceTarget?.runtimeVersion
+      && entry.baselineId === definition.runtimeEvidenceTarget?.baselineId && definition.requiredKfCapabilities.every((capability) => entry.verifiedCapabilities.includes(capability)));
+    registry.register(accepted ? { ...definition, maturity: "stable" } : definition);
+  }
+}

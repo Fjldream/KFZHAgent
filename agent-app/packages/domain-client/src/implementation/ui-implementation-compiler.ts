@@ -18,6 +18,9 @@ import {
   validateGeneratedComponentProperties,
 } from "./component-properties.js";
 import { isDeepStrictEqual } from "node:util";
+import { trustedModuleSourceIdsFor } from "../modules/module-compiler.js";
+import { parseTableData } from "../modules/definitions/native-data-adapters.js";
+import { stableStringify } from "../compile/client-compiler.js";
 
 export interface ImplementationCompileContext {
   workspaceId: string;
@@ -27,6 +30,8 @@ export interface ImplementationCompileContext {
   existingControlGeometryByComponentId?: Readonly<Record<string, UIComponentSpec["geometry"]>>;
   /** Last confirmed model spec, used only to emit true semantic deltas. */
   previousImplementation?: UIImplementationSpec;
+  /** Must be the exact object returned by compileModulePlan; copied JSON is untrusted. */
+  trustedModuleImplementation?: UIImplementationSpec;
 }
 
 export interface UiImplementationCompileResult {
@@ -89,22 +94,34 @@ const PROPERTY_KEYS: Readonly<Record<string, readonly string[]>> = Object.freeze
   "layout.5": ["children", "panels"],
   "layout.6": ["children", "panels"],
   "prototype.CustomCharts": ["region"],
-  "prototype.TrendChart": ["title", "areas", "comment", "chartData"],
-  "prototype.BarChart": ["title", "areas", "comment", "chartData"],
-  "prototype.PieChart": ["title", "areas", "comment", "chartData"],
-  "prototype.XYChart": ["title", "areas", "comment", "chartData"],
+  "prototype.TrendChart": ["title", "areas", "comment"],
+  "prototype.BarChart": ["title", "areas", "comment"],
+  "prototype.PieChart": ["title", "areas", "comment"],
+  "prototype.XYChart": ["title", "areas", "comment"],
 });
 
 const CONTENT_CAPABILITIES = new Set(["button", "text", "richtext"]);
 /** Data adapters deliberately materialize reviewed native structures without CSS. */
 const CONFIGURATION_ONLY_NATIVE_CAPABILITIES = new Set([
   "easyui.1",
-  "prototype.TrendChart",
-  "prototype.BarChart",
-  "prototype.PieChart",
-  "prototype.XYChart",
 ]);
 const EMPTY_STYLE: ComponentStyleSpec = Object.freeze({ declarations: {}, states: {} });
+const TRUSTED_TABLE_PLAN_TOKENS = new WeakMap<ChangePlan, readonly string[]>();
+
+export function semanticTableUpdateToken(entityId: string, value: unknown): string {
+  return `${entityId}\u0000${stableStringify(value)}`;
+}
+
+/**
+ * The token is held out-of-band from JSON. It cannot be self-reported by a
+ * model or reconstructed after plan serialization; the patcher only accepts
+ * it when it receives this exact compiler-created ChangePlan object.
+ */
+export function trustedTablePlanTokensFor(plan: unknown): readonly string[] {
+  return plan !== null && typeof plan === "object"
+    ? TRUSTED_TABLE_PLAN_TOKENS.get(plan as ChangePlan) ?? []
+    : [];
+}
 
 /**
  * Compiles a validated UI implementation spec into a deterministic, structured
@@ -120,6 +137,9 @@ export function compileUiImplementation(
     throw new Error(`INVALID_UI_IMPLEMENTATION_SPEC: ${parsed.error.issues[0]?.message ?? "invalid spec"}`);
   }
   const spec = parsed.data;
+  const trustedSourceModuleIds = context.trustedModuleImplementation === input
+    ? trustedModuleSourceIdsFor(input) ?? []
+    : [];
   const operations: ChangeOperation[] = [];
   const report = createReportAccumulator();
   const previous = previousComponentIndex(context.previousImplementation);
@@ -152,13 +172,27 @@ export function compileUiImplementation(
         spec,
         pageGuid,
         context,
+        trustedSourceModuleIds,
         report,
       ));
     }
   }
 
+  const plan: ChangePlan = { schema: "kf-change-plan/v1", workspaceId: context.workspaceId, operations };
+  const tableTokens = operations.flatMap((operation) => {
+    if (operation.op === "update") {
+      return operation.changes
+        .filter((change) => change.path === "/__kfModuleTableData")
+        .map((change) => semanticTableUpdateToken(operation.entityId, change.value));
+    }
+    if (operation.op === "create" && operation.properties["type"] === "easyui" && operation.properties["proto"] === 1 && operation.properties["tableData"] !== undefined) {
+      return [semanticTableUpdateToken(operation.entityId, operation.properties["tableData"])];
+    }
+    return [];
+  });
+  if (tableTokens.length > 0) TRUSTED_TABLE_PLAN_TOKENS.set(plan, Object.freeze(tableTokens));
   return {
-    plan: { schema: "kf-change-plan/v1", workspaceId: context.workspaceId, operations },
+    plan,
     capabilityReport: finalizeReport(report),
   };
 }
@@ -169,9 +203,12 @@ function compileComponent(
   spec: UIImplementationSpec,
   pageGuid: string,
   context: ImplementationCompileContext,
+  trustedSourceModuleIds: readonly string[],
   report: ReportAccumulator,
 ): ChangeOperation[] {
   const style = resolveComponentStyle(spec.theme, EMPTY_STYLE, EMPTY_STYLE, component.style);
+  const configurationOnlyData = component.capabilityId === "easyui.1" && !hasStyleDelta(style);
+  if (configurationOnlyData) assertTrustedTableDataComponent(component, trustedSourceModuleIds);
   const existingGuid = optionalContextStringValue(
     context.existingControlGuidByComponentId,
     component.id,
@@ -196,7 +233,7 @@ function compileComponent(
   }
 
   const primaryCapabilityId = actualCapabilityId ?? component.capabilityId;
-  const primary = selectCapability(primaryCapabilityId, style, spec);
+  const primary = selectCapability(primaryCapabilityId, style, spec, configurationOnlyData);
   const primaryIssues = primary.issues;
   let selected = primary.selected;
 
@@ -211,7 +248,7 @@ function compileComponent(
     if (existingGuid !== undefined) {
       throw unsupportedCapabilityError("UNSUPPORTED_EXISTING_CONTROL_FALLBACK", component, primaryIssues);
     }
-    const fallback = selectCapability(component.fallbackCapabilityId, style, spec);
+    const fallback = selectCapability(component.fallbackCapabilityId, style, spec, false);
     if (fallback.selected === undefined || fallback.issues.length > 0) {
       throw unsupportedCapabilityError("UNVERIFIED_FALLBACK_CAPABILITY", component, fallback.issues);
     }
@@ -342,6 +379,12 @@ function existingPropertyChanges(
     if (semanticKey === "parentId") {
       throw new Error(`UNSUPPORTED_EXISTING_COMPONENT_PROPERTY: ${component.id}.parentId`);
     }
+    if (capabilityId === "easyui.1" && semanticKey === "tableData") {
+      // This is a semantic patch marker, not a raw KF JSON pointer. The
+      // patcher parses it again and owns the only data/columns materialization.
+      changes.push({ path: "/__kfModuleTableData", value: semanticValue });
+      continue;
+    }
     const nativePath = aliases[semanticKey] ?? semanticKey;
     const nativeKey = nativePath.split("/", 1)[0]!;
     if (!allowed.has(nativeKey)) {
@@ -388,6 +431,7 @@ function selectCapability(
   capabilityId: string,
   style: ComponentStyleSpec,
   spec: UIImplementationSpec,
+  allowConfigurationOnly: boolean,
 ): { selected?: SelectedCapability; issues: CapabilityIssue[] } {
   const capability = getControlCapability(capabilityId);
   if (capability === undefined) {
@@ -412,7 +456,7 @@ function selectCapability(
   // Reviewed native data controls may be configuration-only while their visual
   // adapter is still beta. An empty semantic style must not manufacture a CSS
   // fallback or prevent deterministic KF data materialization.
-  if (!hasRequestedStyle && CONFIGURATION_ONLY_NATIVE_CAPABILITIES.has(capability.id)) {
+  if (allowConfigurationOnly && !hasRequestedStyle && CONFIGURATION_ONLY_NATIVE_CAPABILITIES.has(capability.id)) {
     return { selected: { id: capability.id, capability }, issues };
   }
   let compiled;
@@ -434,6 +478,23 @@ function selectCapability(
     selected: { id: capability.id, capability },
     issues: deduplicateIssues(issues),
   };
+}
+
+function assertTrustedTableDataComponent(
+  component: UIComponentSpec,
+  trustedSourceModuleIds: readonly string[],
+): void {
+  const sourceModuleId = component.sourceModuleId;
+  if (sourceModuleId === undefined || !trustedSourceModuleIds.includes(sourceModuleId)) {
+    throw new Error(`UNTRUSTED_CONFIGURATION_ONLY_DATA: ${component.id}`);
+  }
+  // Parsing here is intentional defense in depth: a configuration-only
+  // control must carry a nonempty, typed semantic payload before any native
+  // adapter marker can be emitted.
+  if (!Object.hasOwn(component.properties, "tableData")) {
+    throw new Error(`INVALID_TRUSTED_CONFIGURATION_ONLY_DATA: ${component.id} requires nonempty tableData`);
+  }
+  parseTableData(component.properties["tableData"]);
 }
 
 function createProperties(

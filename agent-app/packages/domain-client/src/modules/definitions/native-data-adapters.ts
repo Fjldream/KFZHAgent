@@ -17,7 +17,7 @@ export interface TableData {
 
 const SAFE_KEY = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 const FORBIDDEN_KEY = /^(?:__proto__|prototype|constructor)$/i;
-const FORBIDDEN_TEXT = /<[^>]*>|<\/?script\b|javascript\s*:|data\s*:\s*text\s*\/\s*html|\bfunction\b|=>|\{\{|\}\}/i;
+const FORBIDDEN_TEXT = /<[^>]*>|<\/?script\b|javascript\s*:|data\s*:\s*text\s*\/\s*html|\bfunction\b|=>|\{\{|\}\}|\$\{|`/i;
 const finiteNumber = z.number().finite().min(-1_000_000_000).max(1_000_000_000);
 const primitive = z.union([z.string().max(500), finiteNumber, z.boolean(), z.null()]);
 
@@ -55,7 +55,7 @@ const chartSchema = z.object({
 
 const tableSchema = z.object({
   columns: z.array(z.object({ key: z.string().regex(SAFE_KEY), label: z.string().min(1).max(120), align: z.enum(["left", "center", "right"]).default("left") }).strict()).min(1).max(32),
-  rows: z.array(z.record(z.string(), primitive)).max(500),
+  rows: z.array(z.record(z.string(), primitive)).min(1).max(500),
   pageSize: z.number().int().min(1).max(500).default(20),
 }).strict().superRefine((value, ctx) => {
   const keys = value.columns.map((column) => column.key);
@@ -107,18 +107,13 @@ export function serializeNativeData(value: ChartData | TableData): string {
   return JSON.stringify(value).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
 }
 
-export function toNativeChartProperties(data: ChartData): Readonly<Record<string, unknown>> {
-  return Object.freeze({
-    title: Object.freeze({ show: true, text: data.title ?? "", position: 1 }),
-    areas: Object.freeze([]),
-    comment: `kf-module-chart/v1:${serializeNativeData(data)}`,
-  });
-}
-
 export function toNativeTableProperties(data: TableData): Readonly<Record<string, unknown>> {
+  const width = `${Math.floor(100 / data.columns.length)}%`;
   return Object.freeze({
     data: Object.freeze(data.rows.map((row) => Object.freeze({ ...row }))),
-    queryParams: Object.freeze({ kfModuleColumns: Object.freeze(data.columns.map((column) => Object.freeze({ ...column }))) }),
+    // KF 3.6 development-state projects persist these reviewed EasyUI fields
+    // directly: `data` and nested `columns`; no configureData script is used.
+    columns: Object.freeze([Object.freeze(data.columns.map((column) => Object.freeze({ field: column.key, title: column.label, width, align: column.align })))]),
     pageSize: data.pageSize,
   });
 }

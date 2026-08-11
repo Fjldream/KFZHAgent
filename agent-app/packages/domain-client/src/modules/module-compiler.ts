@@ -58,6 +58,16 @@ const EMPTY_VALIDATION_CONTEXT: ModuleValidationContext = Object.freeze({
   availableKfCapabilities: Object.freeze([]),
   approvedAuthorizationRefs: Object.freeze([]),
 });
+/**
+ * Provenance is intentionally object-identity based: only an implementation
+ * returned by this compiler can carry a trusted module-source set into the UI
+ * compiler. A copied/model-authored JSON spec has no entry in this WeakMap.
+ */
+const TRUSTED_MODULE_SOURCE_IDS = new WeakMap<UIImplementationSpec, readonly string[]>();
+
+export function trustedModuleSourceIdsFor(implementation: UIImplementationSpec): readonly string[] | undefined {
+  return TRUSTED_MODULE_SOURCE_IDS.get(implementation);
+}
 
 const FORBIDDEN_PROPERTY_KEY = /(?:css|native|guid|path|storagekey|styledata|script)$/i;
 const FORBIDDEN_TEXT = /<\/?script\b|javascript\s*:|data\s*:\s*text\s*\/\s*html|<style\b/i;
@@ -160,6 +170,10 @@ export function compileModulePlan(input: CompileModulePlanInput): ModuleCompilat
   const parsedImplementation = UIImplementationSpecSchema.safeParse(implementation);
   if (!parsedImplementation.success) throw new Error(`INVALID_COMPILED_UI_IMPLEMENTATION: ${parsedImplementation.error.issues[0]?.message ?? "invalid implementation"}`);
   const canonicalImplementation = reuseCanonicalPriorComponents(parsedImplementation.data, plan, previousPlan, previousComponents);
+  TRUSTED_MODULE_SOURCE_IDS.set(
+    canonicalImplementation,
+    Object.freeze(plan.pages.flatMap((page) => page.modules.map((module) => module.id)).sort(compareCodePoints)),
+  );
   return Object.freeze({
     status: "compiled",
     implementation: canonicalImplementation,

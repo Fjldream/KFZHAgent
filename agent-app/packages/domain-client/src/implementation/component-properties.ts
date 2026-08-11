@@ -32,7 +32,7 @@ import {
 } from "../ir/client-project-ir.schema.js";
 import { EASYUI_PROTO_TYPES } from "../ir/easyui-types.js";
 import { controlGeometryIssues } from "./control-geometry.js";
-import { parseChartData, parseTableData } from "../modules/definitions/native-data-adapters.js";
+import { parseTableData } from "../modules/definitions/native-data-adapters.js";
 
 const parentId = z.string().min(1).max(100).optional();
 const boundedNumber = z.number().finite().min(-1_000_000_000).max(1_000_000_000).optional();
@@ -108,14 +108,7 @@ const chartProperties = z.object({
   title: chartTitle.optional(),
   areas: z.array(chartArea).max(100).optional(),
   comment: z.string().optional(),
-  /** Typed module semantic data; the patcher alone materializes native fields. */
-  chartData: z.unknown().optional(),
-}).strict().superRefine((value, ctx) => {
-  if (value.chartData !== undefined) {
-    try { parseChartData(value.chartData); }
-    catch (error) { ctx.addIssue({ code: "custom", path: ["chartData"], message: error instanceof Error ? error.message : "invalid chart data" }); }
-  }
-});
+}).strict();
 
 const customChartProperties = z.object({
   region: z.enum(["center", "north", "south", "east", "west"]).optional(),

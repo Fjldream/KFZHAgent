@@ -20,7 +20,8 @@ import { assertStyleCompilationAccepted, compileControlStyle } from "../style/st
 import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
 import { mergeManagedStyleData } from "../style/style-data-merge.js";
 import { validateCreateComponentProperties } from "../implementation/component-properties.js";
-import { parseChartData, parseTableData, toNativeChartProperties, toNativeTableProperties } from "../modules/definitions/native-data-adapters.js";
+import { semanticTableUpdateToken, trustedTablePlanTokensFor } from "../implementation/ui-implementation-compiler.js";
+import { parseTableData, toNativeTableProperties } from "../modules/definitions/native-data-adapters.js";
 import { controlGeometryIssues, MAX_CONTROL_GEOMETRY } from "../implementation/control-geometry.js";
 import { mergeControlTemplate, type TemplateJson } from "../templates/merge-template.js";
 import baseFieldsJson from "../templates/base-fields.json" with { type: "json" };
@@ -800,6 +801,7 @@ async function applyUpdate(
   baseRoot: string,
   op: NormalizedOperation,
   workspaceId: string,
+  trustedTableUpdateTokens: readonly string[],
 ): Promise<void> {
   const loc = await locateEntity(baseRoot, inspection.index, versionDir, op.entityId, op.entityType);
   const { doc, root } = await entityRootOf(candidate, versionDir, loc);
@@ -823,6 +825,26 @@ async function applyUpdate(
     }
     const tokens = parseJsonPointer(change.path);
     const firstToken = tokens[0] as string;
+    if (change.path === "/__kfModuleTableData") {
+      if (!trustedTableUpdateTokens.includes(semanticTableUpdateToken(op.entityId, change.value))) {
+        throw new PatchConflictError("reviewed table data requires a trusted module compiler plan");
+      }
+      if (!(isControlLocation(loc) && loc.controlType === "easyui" && root["uiExtendType"] === 1)) {
+        throw new PatchConflictError("reviewed table data may only target an EasyUI datagrid");
+      }
+      try {
+        const native = toNativeTableProperties(parseTableData(change.value));
+        setByTokens(root, ["data"], native["data"]);
+        setByTokens(root, ["columns"], native["columns"]);
+        setByTokens(root, ["pageSize"], native["pageSize"]);
+      } catch (error) {
+        throw new PatchConflictError(`invalid reviewed datagrid data: ${error instanceof Error ? error.message : "unknown"}`, { cause: error });
+      }
+      continue;
+    }
+    if (firstToken === "configureData") {
+      throw new PatchConflictError("configureData is not an allowed generic update; use a reviewed semantic adapter");
+    }
     if (firstToken === "linkMng" && !(isControlLocation(loc) && loc.controlType === "button" && change.path === "/linkMng")) {
       throw new PatchConflictError("linkMng may only be updated through the exact reviewed button /linkMng action boundary");
     }
@@ -1192,6 +1214,7 @@ async function applyCreate(
   baseRoot: string,
   op: NormalizedOperation,
   workspaceId: string,
+  trustedTablePlanTokens: readonly string[],
 ): Promise<void> {
   const build = { seed: workspaceId };
   switch (op.entityType) {
@@ -1238,6 +1261,9 @@ async function applyCreate(
           if (value !== undefined) pass[field] = value;
         }
         if (proto === 1 && properties["tableData"] !== undefined) {
+          if (!trustedTablePlanTokens.includes(semanticTableUpdateToken(op.entityId, properties["tableData"]))) {
+            throw new PatchConflictError("reviewed table data requires a trusted module compiler plan");
+          }
           try {
             Object.assign(pass, toNativeTableProperties(parseTableData(properties["tableData"])));
           } catch (error) {
@@ -1313,19 +1339,12 @@ async function applyCreate(
         }
         const RESERVED_PROTOTYPE_FIELDS = new Set([
           "type", "prototypeName", "id", "name", "guid",
-          "x", "y", "width", "height", "pageId", "uiModelType", "style", "chartData",
+          "x", "y", "width", "height", "pageId", "uiModelType", "style",
         ]);
         const pass: Record<string, unknown> = {};
         for (const [key, value] of Object.entries(properties)) {
           if (RESERVED_PROTOTYPE_FIELDS.has(key) || value === undefined) continue;
           pass[key] = value;
-        }
-        if (properties["chartData"] !== undefined) {
-          try {
-            Object.assign(pass, toNativeChartProperties(parseChartData(properties["chartData"])));
-          } catch (error) {
-            throw new PatchConflictError(`invalid reviewed chart data: ${error instanceof Error ? error.message : "unknown"}`, { cause: error });
-          }
         }
         const overrides: TemplateJson = { ...pass, guid };
         if (prototypeName === "CustomCharts") {
@@ -1523,6 +1542,7 @@ export async function applyClientPatch(
   input: unknown,
   options?: ApplyPatchOptions,
 ): Promise<ClientWorkspace> {
+  const trustedTablePlanTokens = trustedTablePlanTokensFor(input);
   const plan = normalizeChangePlan(input);
   if (options?.planHash !== undefined) {
     const actual = planHash(plan);
@@ -1547,9 +1567,9 @@ export async function applyClientPatch(
 
   for (const op of plan.operations) {
     if (op.op === "create") {
-      await applyCreate(candidate, versionDir, inspection, base, op, plan.workspaceId);
+      await applyCreate(candidate, versionDir, inspection, base, op, plan.workspaceId, trustedTablePlanTokens);
     } else if (op.op === "update") {
-      await applyUpdate(candidate, versionDir, inspection, base, op, plan.workspaceId);
+      await applyUpdate(candidate, versionDir, inspection, base, op, plan.workspaceId, trustedTablePlanTokens);
     } else if (op.op === "applyStyle") {
       await applyStyle(candidate, versionDir, inspection, base, op);
     } else {

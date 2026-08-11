@@ -282,6 +282,18 @@ export async function computeChangeScope(
         op.entityType,
       );
       for (const change of op.changes ?? []) {
+        // Semantic data updates never name arbitrary native fields in the
+        // change plan. The patcher owns this marker and deterministically
+        // materializes only the reviewed EasyUI datagrid fields below.
+        if (change.path === "/__kfModuleTableData") {
+          if (!(isControlLocation(loc) && loc.controlType === "easyui" && inspection.index.controls[op.entityId]?.capabilityId === "easyui.1")) {
+            throw new PatchConflictError("reviewed table data scope may only target an EasyUI datagrid");
+          }
+          touchPointer(loc.file, joinPointer(loc.pointer, "/data"));
+          touchPointer(loc.file, joinPointer(loc.pointer, "/columns"));
+          touchPointer(loc.file, joinPointer(loc.pointer, "/pageSize"));
+          continue;
+        }
         const capabilityId = inspection.index.controls[op.entityId]?.capabilityId;
         const prototypeName = capabilityId?.startsWith("prototype.")
           ? capabilityId.slice("prototype.".length)

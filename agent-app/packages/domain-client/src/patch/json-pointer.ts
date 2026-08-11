@@ -22,6 +22,16 @@ function decodeToken(token: string): string {
   return token.replace(/~1/g, "/").replace(/~0/g, "~");
 }
 
+function assertSafeToken(token: string): string {
+  // Validate after RFC6901 decoding: an escaped segment must not smuggle a
+  // prototype-mutating member into traversal or object creation.
+  if (/(?:^|[/~])(?:__proto__|prototype|constructor)(?:$|[/~])/i.test(token)
+    || /^(?:__proto__|prototype|constructor)$/i.test(token)) {
+    throw new PatchConflictError(`dangerous JSON Pointer segment: ${JSON.stringify(token)}`);
+  }
+  return token;
+}
+
 /** Encodes one reference token (reverse of decodeToken). */
 export function escapeToken(token: string): string {
   return token.replace(/~/g, "~0").replace(/\//g, "~1");
@@ -40,7 +50,7 @@ export function parseJsonPointer(pointer: string): string[] {
   return pointer
     .slice(1)
     .split("/")
-    .map((token) => decodeToken(token));
+    .map((token) => assertSafeToken(decodeToken(token)));
 }
 
 /**
