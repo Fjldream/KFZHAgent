@@ -214,7 +214,7 @@ describe("client patcher — KF 容器对象（easyui / 布局）", () => {
           }],
         },
       },
-    ]))).rejects.toThrow(/PATCH_CONFLICT: (?:INVALID|UNSAFE)_COMPONENT_PROPERTY/);
+    ]))).rejects.toThrow(/PATCH_CONFLICT: (?:INVALID|UNSAFE)_(?:COMPONENT_PROPERTY|FIELD_PATCH_VALUE)/);
   });
 
   it("preserves the reviewed docking edge coordinate through strict create validation", async () => {
@@ -449,7 +449,7 @@ describe("client patcher — KF 容器对象（easyui / 布局）", () => {
     const base = await makeContainerFixture();
     await expect(applyClientPatch(base, plan([
       updateOperation("layout-guid-1", [{ path: "/children", value: children }]),
-    ]))).rejects.toThrow(/PATCH_CONFLICT: (?:INVALID|UNSAFE)_COMPONENT_PROPERTY/);
+    ]))).rejects.toThrow(/PATCH_CONFLICT: (?:INVALID|UNSAFE)_(?:COMPONENT_PROPERTY|FIELD_PATCH_VALUE)/);
   });
 
   it("preserves an imported child GUID when patching an unrelated layout field", async () => {

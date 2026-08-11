@@ -178,7 +178,79 @@ function normalizeFieldPatch(raw: unknown, index: number): FieldPatch {
   if (!patchPath.startsWith("/") && patchPath !== "") {
     throw new PatchConflictError(`update.changes[${index}].path must be a JSON Pointer`);
   }
-  return { path: patchPath, value: rec["value"] };
+  const valueDescriptor = Object.getOwnPropertyDescriptor(rec, "value");
+  if (valueDescriptor === undefined || !("value" in valueDescriptor)) {
+    throw new PatchConflictError(`UNSAFE_FIELD_PATCH_VALUE: update.changes[${index}].value must be an own data property`);
+  }
+  assertSafeFieldPatchValue(valueDescriptor.value);
+  return { path: patchPath, value: valueDescriptor.value };
+}
+
+const FIELD_PATCH_RESERVED_VALUE_KEYS = new Set([
+  "__proto__", "prototype", "constructor",
+  "style", "css", "raw", "native", "nativefields", "nativepayload", "kfpayload",
+  "styledata", "styledatanew", "modlestyle", "configuredata", "linkmng",
+  "script", "scripts", "runtimeprofile", "selector", "selectors",
+]);
+const MAX_FIELD_PATCH_VALUE_NODES = 100_000;
+const MAX_FIELD_PATCH_VALUE_DEPTH = 128;
+
+function unsafeFieldPatchValue(detail: string): never {
+  throw new PatchConflictError(`UNSAFE_FIELD_PATCH_VALUE: ${detail}`);
+}
+
+function assertSafeFieldPatchValue(value: unknown): void {
+  const stack: Array<{ value: unknown; path: string; depth: number }> = [{ value, path: "value", depth: 0 }];
+  const seen = new Set<object>();
+  let nodes = 0;
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    nodes += 1;
+    if (nodes > MAX_FIELD_PATCH_VALUE_NODES) unsafeFieldPatchValue("node budget exceeded");
+    if (current.depth > MAX_FIELD_PATCH_VALUE_DEPTH) unsafeFieldPatchValue("depth budget exceeded");
+    const nested = current.value;
+    if (nested === null || typeof nested === "string" || typeof nested === "boolean") continue;
+    if (typeof nested === "number" && Number.isFinite(nested)) continue;
+    if (typeof nested !== "object") unsafeFieldPatchValue(`non-JSON value at ${current.path}`);
+    if (seen.has(nested)) unsafeFieldPatchValue(`cyclic or shared object at ${current.path}`);
+    seen.add(nested);
+    if (Array.isArray(nested)) {
+      if (Object.getPrototypeOf(nested) !== Array.prototype) unsafeFieldPatchValue(`array prototype at ${current.path}`);
+      const lengthDescriptor = Object.getOwnPropertyDescriptor(nested, "length");
+      const lengthValue: unknown = lengthDescriptor !== undefined && "value" in lengthDescriptor
+        ? lengthDescriptor.value
+        : undefined;
+      if (typeof lengthValue !== "number" || !Number.isSafeInteger(lengthValue)
+        || lengthValue < 0 || lengthValue > MAX_FIELD_PATCH_VALUE_NODES) {
+        unsafeFieldPatchValue(`invalid array length at ${current.path}`);
+      }
+      const length = lengthValue;
+      const keys = Reflect.ownKeys(nested);
+      if (keys.length !== length + 1) unsafeFieldPatchValue(`sparse or extended array at ${current.path}`);
+      for (let index = 0; index < length; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(nested, String(index));
+        if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) {
+          unsafeFieldPatchValue(`array accessor or non-enumerable item at ${current.path}[${index}]`);
+        }
+        stack.push({ value: descriptor.value, path: `${current.path}[${index}]`, depth: current.depth + 1 });
+      }
+      continue;
+    }
+    if (Object.getPrototypeOf(nested) !== Object.prototype) unsafeFieldPatchValue(`object prototype at ${current.path}`);
+    const keys = Reflect.ownKeys(nested);
+    for (const key of keys) {
+      if (typeof key === "symbol") unsafeFieldPatchValue(`symbol property at ${current.path}`);
+      if (FIELD_PATCH_RESERVED_VALUE_KEYS.has(key.toLowerCase())) {
+        unsafeFieldPatchValue(`reserved key ${current.path}.${key}`);
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(nested, key);
+      if (descriptor === undefined || !("value" in descriptor)) {
+        unsafeFieldPatchValue(`accessor at ${current.path}.${key}`);
+      }
+      if (!descriptor.enumerable) unsafeFieldPatchValue(`non-enumerable property at ${current.path}.${key}`);
+      stack.push({ value: descriptor.value, path: `${current.path}.${key}`, depth: current.depth + 1 });
+    }
+  }
 }
 
 export function normalizeChangePlan(input: unknown): NormalizedPlan {
@@ -850,6 +922,9 @@ async function applyUpdate(
     }
     const tokens = parseJsonPointer(change.path);
     const firstToken = tokens[0] as string;
+    if (tokens.some(isRawStylePointerToken)) {
+      throw new PatchConflictError("raw style fields are read-only; use applyStyle");
+    }
     if (change.path === "/__kfModuleTableData") {
       if (!hasTrustedTableOperation(semanticOperations, op.entityId, change.value)) {
         throw new PatchConflictError("reviewed table data requires a trusted module compiler plan");
@@ -867,10 +942,13 @@ async function applyUpdate(
       }
       continue;
     }
-    if (isControlLocation(loc)
-      && (loc.controlType === "easyui" || loc.controlType === "layout" || loc.controlType === "prototype")
-      && tokens.length !== 1) {
-      throw new PatchConflictError("native container updates must address one exact reviewed top-level field");
+    const reviewedDescendantPath = isControlLocation(loc)
+      && loc.controlType === "checkboxlegacy"
+      && change.path === "/span/thisElement/innerText";
+    if (isControlLocation(loc) && tokens.length !== 1 && !reviewedDescendantPath) {
+      throw new PatchConflictError(
+        "native container/complex control updates must use one reviewed whole-value top-level field",
+      );
     }
     if (loc.controlType === "easyui" && easyuiProto === 1
       && (firstToken === "data" || firstToken === "columns")) {
@@ -947,20 +1025,78 @@ const UNTYPED_PROTOTYPE_COMPLEX_FIELDS = new Set([
   "brushArray",
 ]);
 
+const RAW_STYLE_POINTER_NAMES = new Set(["styledata", "styledatanew", "modlestyle"]);
+
+function isRawStylePointerToken(token: string): boolean {
+  return token.toLowerCase().split(/[~/]/).some((part) => RAW_STYLE_POINTER_NAMES.has(part));
+}
+
+const semanticComplexUpdateField: Readonly<Record<string, Readonly<Record<string, string>>>> = Object.freeze({
+  select: { selectData: "options" },
+  list: { options: "options" },
+  dropdown: { options: "options" },
+  tabs: { tabData: "tabs" },
+});
+
+const nativeRadioData = z.array(z.object({
+  text: z.string(),
+  disabled: z.boolean(),
+  visible: z.boolean(),
+}).strict()).min(1).max(1_000);
+const nativeCheckboxData = z.array(z.object({
+  text: z.string(),
+  label: z.string(),
+  disabled: z.boolean(),
+  visible: z.boolean(),
+}).strict()).min(1).max(1_000);
+const nativeCheckedData = z.array(z.string()).max(1_000);
+const nativePageList = z.array(z.number().int().min(1).max(10_000)).min(1).max(100);
+
 function validateNativeComplexUpdateValue(
   loc: EntityLocation,
   root: Record<string, unknown>,
   path: string,
   value: unknown,
 ): unknown {
-  if (!isControlLocation(loc)) return value;
+  const complex = value !== null && typeof value === "object";
+  if (!isControlLocation(loc)) {
+    if (complex) throw new PatchConflictError("complex update value requires a reviewed entity schema");
+    return value;
+  }
   const field = path.slice(1);
   try {
     if (loc.controlType === "layout" && (field === "children" || field === "panels")) {
       const capabilityId = `layout.${asNumber(root["layoutType"])}`;
       return validateGeneratedComponentProperties(capabilityId, { [field]: value })[field];
     }
-    if (loc.controlType !== "prototype") return value;
+    if (loc.controlType === "button" && field === "linkMng") return value;
+    if (complex) {
+      const semanticField = semanticComplexUpdateField[loc.controlType ?? ""]?.[field];
+      if (semanticField !== undefined) {
+        return validateGeneratedComponentProperties(
+          capabilityIdForImportedControl(loc.controlType, root),
+          { [semanticField]: value },
+        )[semanticField];
+      }
+      if ((loc.controlType === "radio" || loc.controlType === "radiolegacy") && field === "radioData") {
+        return nativeRadioData.parse(value);
+      }
+      if (loc.controlType === "checkbox" && field === "checkboxData") {
+        return nativeCheckboxData.parse(value);
+      }
+      if (loc.controlType === "checkbox" && field === "checkedData") {
+        return nativeCheckedData.parse(value);
+      }
+      if (loc.controlType === "easyui" && field === "pageList") {
+        return nativePageList.parse(value);
+      }
+    }
+    if (loc.controlType !== "prototype") {
+      if (complex) {
+        throw new Error(`INVALID_COMPONENT_PROPERTY: ${loc.controlType ?? "control"}.${field} requires a reviewed whole-value schema`);
+      }
+      return value;
+    }
     const prototypeName = typeof root["prototypeName"] === "string" ? root["prototypeName"] : "";
     const capabilityId = `prototype.${prototypeName}`;
     if ((prototypeName === "TrendChart" || prototypeName === "BarChart"
@@ -973,6 +1109,9 @@ function validateNativeComplexUpdateValue(
     }
     if (UNTYPED_PROTOTYPE_COMPLEX_FIELDS.has(field)) {
       throw new Error(`INVALID_COMPONENT_PROPERTY: ${capabilityId}.${field} requires a typed semantic adapter`);
+    }
+    if (complex) {
+      throw new Error(`INVALID_COMPONENT_PROPERTY: ${capabilityId}.${field} requires a reviewed whole-value schema`);
     }
     return value;
   } catch (error) {

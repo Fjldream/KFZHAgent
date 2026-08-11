@@ -148,9 +148,119 @@ describe("client patcher (Task 7 brief Step 1)", () => {
       const base = await copyFixture("client-unknown-field");
       await expect(applyClientPatch(base, plan([
         updateOperation("button-guid-1", [{ path, value: "#domId{display:none}" }]),
-      ]))).rejects.toThrow(/allowlist/i);
+      ]))).rejects.toThrow(/raw style|allowlist/i);
     },
   );
+
+  it.each([
+    "/modleStyle",
+    "/selectData/0/styleData",
+    "/selectData/0/~1styleData",
+  ])("rejects raw style token at any decoded pointer depth: %s", async (path) => {
+    const base = await copyFixture("client-unknown-field");
+    const seeded = await applyClientPatch(base, plan([{
+      op: "create", entityType: "control", entityId: "StyleTokenSelect",
+      properties: {
+        pageId: "page-guid-1", type: "select",
+        options: [{ label: "A", value: "a" }], value: "a",
+      },
+    }]));
+    const guid = deriveGuid({ seed: "w-test" }, "StyleTokenSelect");
+    await expect(applyClientPatch(seeded.rootDir, plan([
+      updateOperation(guid, [{ path, value: "#domId{display:none}" }]),
+    ]))).rejects.toThrow(/raw style|reserved.*style/i);
+  });
+
+  it.each([
+    ["nested raw style", [{ label: "B", value: "b", meta: { styleDataNew: "forged" } }]],
+    ["nested native payload in an array", [{ label: "B", value: "b", meta: [{ nativePayload: {} }] }]],
+    ["nested script", [{ label: "B", value: "b", script: "evil()" }]],
+  ])("rejects %s in a whole complex fieldPatch value", async (_label, value) => {
+    const base = await copyFixture("client-unknown-field");
+    const seeded = await applyClientPatch(base, plan([{
+      op: "create", entityType: "control", entityId: "UnsafeWholeSelect",
+      properties: {
+        pageId: "page-guid-1", type: "select",
+        options: [{ label: "A", value: "a" }], value: "a",
+      },
+    }]));
+    await expect(applyClientPatch(seeded.rootDir, plan([
+      updateOperation(deriveGuid({ seed: "w-test" }, "UnsafeWholeSelect"), [
+        { path: "/selectData", value },
+      ]),
+    ]))).rejects.toThrow(/UNSAFE_FIELD_PATCH_VALUE|reserved/i);
+  });
+
+  it("rejects a fieldPatch value accessor without executing it", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const seeded = await applyClientPatch(base, plan([{
+      op: "create", entityType: "control", entityId: "AccessorSelect",
+      properties: {
+        pageId: "page-guid-1", type: "select",
+        options: [{ label: "A", value: "a" }], value: "a",
+      },
+    }]));
+    let reads = 0;
+    const option = { value: "b" } as Record<string, unknown>;
+    Object.defineProperty(option, "label", {
+      enumerable: true,
+      get() {
+        reads += 1;
+        return "forged";
+      },
+    });
+    await expect(applyClientPatch(seeded.rootDir, plan([
+      updateOperation(deriveGuid({ seed: "w-test" }, "AccessorSelect"), [
+        { path: "/selectData", value: [option] },
+      ]),
+    ]))).rejects.toThrow(/UNSAFE_FIELD_PATCH_VALUE.*accessor/i);
+    expect(reads).toBe(0);
+  });
+
+  it("accepts strictly validated whole option updates for select, list, and dropdown", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const seeded = await applyClientPatch(base, plan([
+      {
+        op: "create", entityType: "control", entityId: "ReviewedSelect",
+        properties: { pageId: "page-guid-1", type: "select", options: [{ label: "A", value: "a" }] },
+      },
+      {
+        op: "create", entityType: "control", entityId: "ReviewedList",
+        properties: { pageId: "page-guid-1", type: "list", options: [{ label: "A", value: "a" }] },
+      },
+      {
+        op: "create", entityType: "control", entityId: "ReviewedDropdown",
+        properties: { pageId: "page-guid-1", type: "dropdown", options: [{ label: "A", value: "a" }] },
+      },
+    ]));
+    const selectGuid = deriveGuid({ seed: "w-test" }, "ReviewedSelect");
+    const listGuid = deriveGuid({ seed: "w-test" }, "ReviewedList");
+    const dropdownGuid = deriveGuid({ seed: "w-test" }, "ReviewedDropdown");
+    const options = [{ label: "B", value: "b" }];
+    const updated = await applyClientPatch(seeded.rootDir, plan([
+      updateOperation(selectGuid, [{ path: "/selectData", value: options }]),
+      updateOperation(listGuid, [{ path: "/options", value: options }]),
+      updateOperation(dropdownGuid, [{ path: "/options", value: options }]),
+    ]));
+    expect(await controlField(updated, selectGuid, "selectData")).toEqual(options);
+    expect(await controlField(updated, listGuid, "options")).toEqual(options);
+    expect(await controlField(updated, dropdownGuid, "options")).toEqual(options);
+  });
+
+  it("rejects descendant mutation of a complex field that has a reviewed whole-value schema", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const seeded = await applyClientPatch(base, plan([{
+      op: "create", entityType: "control", entityId: "WholeOnlySelect",
+      properties: { pageId: "page-guid-1", type: "select", options: [{ label: "A", value: "a" }] },
+    }]));
+    const guid = deriveGuid({ seed: "w-test" }, "WholeOnlySelect");
+    const populated = await applyClientPatch(seeded.rootDir, plan([
+      updateOperation(guid, [{ path: "/selectData", value: [{ label: "A", value: "a" }] }]),
+    ]));
+    await expect(applyClientPatch(populated.rootDir, plan([
+      updateOperation(guid, [{ path: "/selectData/0/label", value: "forged descendant" }]),
+    ]))).rejects.toThrow(/whole-value|top-level/i);
+  });
 
   it("rejects a self-authored semantic table marker without compiler provenance", async () => {
     const base = await copyFixture("client-unknown-field");

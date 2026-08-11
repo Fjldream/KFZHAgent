@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { canonicalChangePlanHash, semanticPayloadHash, type ChangePlan } from "@kf/contracts";
+import {
+  SERVER_PLAN_RAW_LIMITS,
+  canonicalChangePlanHash,
+  semanticPayloadHash,
+  type ChangePlan,
+} from "@kf/contracts";
 import {
   createHmacServerPlanAuthority,
   decodeServerPlanHmacKey,
@@ -51,6 +56,27 @@ function signedUpdate() {
     revisionId: "revision-1",
     semanticOperations: [],
   });
+}
+
+function envelopeWithUnsignedUpdateValue(value: unknown) {
+  const envelope = structuredClone(signedUpdate());
+  const operation = envelope.plan.operations[0]!;
+  if (operation.op !== "update") throw new Error("expected update");
+  operation.changes[0]!.value = value;
+  return envelope;
+}
+
+function expectRawBudgetFailure(value: unknown): void {
+  let caught: unknown;
+  try {
+    createHmacServerPlanAuthority(decodeServerPlanHmacKey(keyA))
+      .verify(envelopeWithUnsignedUpdateValue(value));
+  } catch (error) {
+    caught = error;
+  }
+  expect(caught).toBeInstanceOf(Error);
+  expect(caught).not.toBeInstanceOf(RangeError);
+  expect((caught as Error).message).toMatch(/^SERVER_PLAN_RAW_INVALID:/);
 }
 
 describe("HMAC server plan authority", () => {
@@ -176,5 +202,55 @@ describe("HMAC server plan authority", () => {
     mutate(value.plan);
     expect(() => createHmacServerPlanAuthority(decodeServerPlanHmacKey(keyA)).verify(value))
       .toThrow(/raw|prototype|symbol|enumerable|schema/i);
+  });
+
+  it("rejects a 12k-deep raw value with a uniform budget error instead of recursing", () => {
+    let value: unknown = "leaf";
+    for (let depth = 0; depth < 12_000; depth += 1) value = { next: value };
+    expectRawBudgetFailure(value);
+  });
+
+  it("rejects a sparse super-long array before allocating from its untrusted length", () => {
+    const value: unknown[] = [];
+    value.length = 1_000_000;
+    expectRawBudgetFailure(value);
+  });
+
+  it("rejects raw values beyond the node budget", () => {
+    const groups: unknown[][] = [];
+    for (let group = 0; group < 51; group += 1) groups.push(new Array(1_000).fill(null));
+    expectRawBudgetFailure({ groups });
+  });
+
+  it("rejects objects beyond the per-object key budget", () => {
+    const value: Record<string, unknown> = {};
+    for (let index = 0; index <= SERVER_PLAN_RAW_LIMITS.maxKeysPerObject; index += 1) {
+      value[`key${index}`] = index;
+    }
+    expectRawBudgetFailure(value);
+  });
+
+  it("rejects values beyond the total UTF-8 string budget", () => {
+    expectRawBudgetFailure("x".repeat(SERVER_PLAN_RAW_LIMITS.maxTotalStringBytes + 1));
+  });
+
+  it("accepts the reviewed boundary array length and a normal 500-operation plan", () => {
+    const authority = createHmacServerPlanAuthority(decodeServerPlanHmacKey(keyA));
+    const operations: ChangePlan["operations"] = Array.from({ length: 500 }, (_, index) => ({
+      op: "update" as const,
+      entityId: `control-${index}`,
+      changes: [{
+        path: "/value",
+        value: index === 0
+          ? new Array(SERVER_PLAN_RAW_LIMITS.maxArrayLength).fill(null)
+          : index,
+      }],
+    }));
+    const envelope = authority.sign({
+      plan: { schema: "kf-change-plan/v1", workspaceId: "large-reviewed", operations },
+      revisionId: "revision-large",
+      semanticOperations: [],
+    });
+    expect(authority.verify(structuredClone(envelope))).toEqual(envelope);
   });
 });
