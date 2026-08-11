@@ -1,7 +1,8 @@
 # KF 通用模块生成架构基线
 
 日期：2026-08-11
-状态：架构基线已确认，ModulePlan 详细契约与 V1 模块清单待继续评审。
+状态：架构基线已确认；完整设计见
+[`2026-08-11-kf-module-generation-design.md`](./2026-08-11-kf-module-generation-design.md)。
 
 ## 1. 目标
 
@@ -125,11 +126,17 @@ flowchart TB
 | 主要校验控件和 JSON 是否合法 | 同时校验蓝图覆盖与交付完整性 |
 | 结果自由但随机 | 模块内部稳定、页面组合灵活 |
 
-## 7. 后续待评审
+## 7. 完整设计
 
-- `kf-module-plan/v1` 的完整数据结构。
-- V1 第一批通用模块及每个模块的变体。
-- 页面级布局规则与响应式/分辨率策略。
-- 模块、KF 控件和 Tool 的接口边界。
-- 模块级修改、删除、迁移和兼容策略。
+以下内容已经在完整设计中确认：
+
+- `kf-module-plan/v1` 的数据边界与增量操作；
+- V1 通用模块目录和 Module Registry；
+- Agent 布局自主权与确定性坐标求解边界；
+- Asset Registry、ThemeSpec 和 KF Style Adapter；
+- 持续对话、自动修复和 Revision 机制；
+- 数据源、计算和采集工程扩展接口；
 - 真实 KF 开发态与运行态验收矩阵。
+
+详见
+[`2026-08-11-kf-module-generation-design.md`](./2026-08-11-kf-module-generation-design.md)。
