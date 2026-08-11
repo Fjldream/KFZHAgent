@@ -792,6 +792,7 @@ async function applyUpdate(
   inspection: InspectResult,
   baseRoot: string,
   op: NormalizedOperation,
+  workspaceId: string,
 ): Promise<void> {
   const loc = await locateEntity(baseRoot, inspection.index, versionDir, op.entityId, op.entityType);
   const { doc, root } = await entityRootOf(candidate, versionDir, loc);
@@ -825,7 +826,24 @@ async function applyUpdate(
     const resolvedPath = isControlLocation(loc)
       ? resolveControlPathFor(loc.controlType, change.path, prototypeName)
       : change.path;
-    setByTokens(root, parseJsonPointer(resolvedPath), change.value);
+    let value = change.value;
+    if (
+      isControlLocation(loc)
+      && loc.controlType === "layout"
+      && change.path === "/children"
+      && Array.isArray(value)
+    ) {
+      const baseProperty = asRecord(root["baseProperty"]);
+      const parentId = typeof baseProperty["name"] === "string"
+        ? baseProperty["name"]
+        : op.entityId;
+      value = ensureChildGuids(
+        { seed: workspaceId },
+        structuredClone(value) as unknown[],
+        parentId,
+      );
+    }
+    setByTokens(root, parseJsonPointer(resolvedPath), value);
   }
   await writeJsonFile(candidate, versionDir, loc.file, doc);
 }
@@ -1431,7 +1449,7 @@ export async function applyClientPatch(
     if (op.op === "create") {
       await applyCreate(candidate, versionDir, inspection, base, op, plan.workspaceId);
     } else if (op.op === "update") {
-      await applyUpdate(candidate, versionDir, inspection, base, op);
+      await applyUpdate(candidate, versionDir, inspection, base, op, plan.workspaceId);
     } else if (op.op === "applyStyle") {
       await applyStyle(candidate, versionDir, inspection, base, op);
     } else {

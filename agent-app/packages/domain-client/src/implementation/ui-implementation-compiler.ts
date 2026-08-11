@@ -12,13 +12,21 @@ import { getControlCapability } from "../style/control-capability-registry.js";
 import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
 import { compileControlStyle, listStyleCompilationIssues } from "../style/style-engine.js";
 import { resolveComponentStyle } from "../style/theme-resolver.js";
-import { validateCreateComponentProperties } from "./component-properties.js";
+import { allowedFieldsFor } from "../patch/allowlist.js";
+import {
+  validateCreateComponentProperties,
+  validateGeneratedComponentProperties,
+} from "./component-properties.js";
+import { isDeepStrictEqual } from "node:util";
 
 export interface ImplementationCompileContext {
   workspaceId: string;
   pageGuidById: Readonly<Record<string, string>>;
   existingControlGuidByComponentId: Readonly<Record<string, string>>;
   existingControlCapabilityIdByComponentId: Readonly<Record<string, string>>;
+  existingControlGeometryByComponentId?: Readonly<Record<string, UIComponentSpec["geometry"]>>;
+  /** Last confirmed model spec, used only to emit true semantic deltas. */
+  previousImplementation?: UIImplementationSpec;
 }
 
 export interface UiImplementationCompileResult {
@@ -70,6 +78,20 @@ const PROPERTY_KEYS: Readonly<Record<string, readonly string[]>> = Object.freeze
   treeview: ["showCheckbox"],
   upload: ["action", "accept", "multiple"],
   webcontainer: ["url", "scrollbar"],
+  "easyui.1": ["striped", "pagination", "pageSize"],
+  "easyui.2": ["text"],
+  "easyui.9": ["value", "readonly"],
+  "layout.0": ["children", "panels"],
+  "layout.2": ["children", "panels"],
+  "layout.3": ["children", "panels"],
+  "layout.4": ["children", "panels"],
+  "layout.5": ["children", "panels"],
+  "layout.6": ["children", "panels"],
+  "prototype.CustomCharts": ["region"],
+  "prototype.TrendChart": ["title", "areas", "comment"],
+  "prototype.BarChart": ["title", "areas", "comment"],
+  "prototype.PieChart": ["title", "areas", "comment"],
+  "prototype.XYChart": ["title", "areas", "comment"],
 });
 
 const CONTENT_CAPABILITIES = new Set(["button", "text", "richtext"]);
@@ -91,6 +113,7 @@ export function compileUiImplementation(
   const spec = parsed.data;
   const operations: ChangeOperation[] = [];
   const report = createReportAccumulator();
+  const previous = previousComponentIndex(context.previousImplementation);
   const seenComponentIds = new Set<string>();
   const pageIds = new Set<string>();
 
@@ -114,7 +137,14 @@ export function compileUiImplementation(
       }
       seenComponentIds.add(component.id);
       assertGeometryInPage(component, page);
-      operations.push(...compileComponent(component, spec, pageGuid, context, report));
+      operations.push(...compileComponent(
+        component,
+        previous.get(component.id),
+        spec,
+        pageGuid,
+        context,
+        report,
+      ));
     }
   }
 
@@ -126,6 +156,7 @@ export function compileUiImplementation(
 
 function compileComponent(
   component: UIComponentSpec,
+  previousComponent: UIComponentSpec | undefined,
   spec: UIImplementationSpec,
   pageGuid: string,
   context: ImplementationCompileContext,
@@ -199,7 +230,11 @@ function compileComponent(
 
   if (existingGuid !== undefined) {
     const existingOperations: ChangeOperation[] = [];
-    if (hasStyleDelta(style)) {
+    const themeChanged = context.previousImplementation !== undefined
+      && !isDeepStrictEqual(context.previousImplementation.theme, spec.theme);
+    const styleChanged = previousComponent === undefined
+      || !isDeepStrictEqual(previousComponent.style, component.style);
+    if (hasStyleDelta(style) && (themeChanged || styleChanged)) {
       existingOperations.push({
         op: "applyStyle",
         entityId: existingGuid,
@@ -207,15 +242,23 @@ function compileComponent(
         style,
       });
     }
-    if (component.content !== undefined) {
+    const changes = geometryChanges(component, context);
+    changes.push(...existingPropertyChanges(component, previousComponent, selected.id));
+    if (
+      component.content !== undefined
+      && (previousComponent === undefined || previousComponent.content !== component.content)
+    ) {
       if (!CONTENT_CAPABILITIES.has(selected.id)) {
         throw new Error(`UNSUPPORTED_COMPONENT_CONTENT: ${component.id} for ${selected.id}`);
       }
+      changes.push({ path: "/text", value: component.content });
+    }
+    if (changes.length > 0) {
       existingOperations.push({
         op: "update",
         entityId: existingGuid,
         entityType: "control",
-        changes: [{ path: "/text", value: component.content }],
+        changes,
       });
     }
     return existingOperations;
@@ -227,6 +270,104 @@ function compileComponent(
     entityType: "control",
     properties: createProperties(component, selected.id, pageGuid, style),
   }];
+}
+
+function geometryChanges(
+  component: UIComponentSpec,
+  context: ImplementationCompileContext,
+): Array<{ path: string; value: unknown }> {
+  const known = context.existingControlGeometryByComponentId;
+  const current = known !== undefined && Object.hasOwn(known, component.id)
+    ? known[component.id]
+    : undefined;
+  const entries = ["x", "y", "width", "height"] as const;
+  return entries
+    .filter((field) => current === undefined || current[field] !== component.geometry[field])
+    .map((field) => ({ path: `/${field}`, value: component.geometry[field] }));
+}
+
+const EXISTING_PROPERTY_ALIASES: Readonly<Record<string, Readonly<Record<string, string>>>> = Object.freeze({
+  checkbox: { label: "checkboxData", checked: "checkedData" },
+  checkboxlegacy: { label: "span/thisElement/innerText", checked: "check" },
+  input: { inputType: "type" },
+  datetimepicker: { pickerType: "type" },
+  radio: { options: "radioData", value: "radioValue" },
+  radiolegacy: { options: "radioData" },
+  select: { options: "selectData", value: "selectValue" },
+  tabs: { tabs: "tabData", activeId: "activeName" },
+  scale: { min: "minValue", max: "maxValue", value: "numerical" },
+});
+
+function existingPropertyChanges(
+  component: UIComponentSpec,
+  previousComponent: UIComponentSpec | undefined,
+  capabilityId: string,
+): Array<{ path: string; value: unknown }> {
+  if (Object.keys(component.properties).length === 0) return [];
+  const validated = validateGeneratedComponentProperties(capabilityId, component.properties);
+  const variant = capabilityVariant(capabilityId);
+  if (variant === undefined) throw new Error(`UNSUPPORTED_CAPABILITY_VARIANT: ${capabilityId}`);
+  const allowed = allowedFieldsFor({ kind: "control", controlType: variant.type });
+  const aliases = EXISTING_PROPERTY_ALIASES[variant.type] ?? {};
+  const changes: Array<{ path: string; value: unknown }> = [];
+  const checkboxLabelChanged = variant.type === "checkbox"
+    && previousComponent !== undefined
+    && !isDeepStrictEqual(previousComponent.properties["label"], validated["label"]);
+  for (const [semanticKey, semanticValue] of Object.entries(validated)) {
+    const coupledCheckedValue = checkboxLabelChanged
+      && semanticKey === "checked"
+      && semanticValue === true;
+    if (
+      previousComponent !== undefined
+      && Object.hasOwn(previousComponent.properties, semanticKey)
+      && isDeepStrictEqual(previousComponent.properties[semanticKey], semanticValue)
+      && !coupledCheckedValue
+    ) {
+      continue;
+    }
+    if (semanticKey === "parentId") {
+      throw new Error(`UNSUPPORTED_EXISTING_COMPONENT_PROPERTY: ${component.id}.parentId`);
+    }
+    const nativePath = aliases[semanticKey] ?? semanticKey;
+    const nativeKey = nativePath.split("/", 1)[0]!;
+    if (!allowed.has(nativeKey)) {
+      throw new Error(
+        `UNSUPPORTED_EXISTING_COMPONENT_PROPERTY: ${component.id}.${semanticKey} for ${capabilityId}`,
+      );
+    }
+    let value = (variant.type === "radio" || variant.type === "radiolegacy")
+      && semanticKey === "options"
+      && Array.isArray(semanticValue)
+      ? semanticValue.map((option) => ({
+          text: (option as { label: string }).label,
+          disabled: false,
+          visible: true,
+        }))
+      : semanticValue;
+    if (variant.type === "checkbox" && semanticKey === "label") {
+      value = [{ text: semanticValue, label: semanticValue, disabled: false, visible: true }];
+    } else if (variant.type === "checkbox" && semanticKey === "checked") {
+      const label = validated["label"];
+      value = semanticValue === true && typeof label === "string" ? [label] : [];
+    }
+    changes.push({ path: `/${nativePath}`, value });
+  }
+  return changes;
+}
+
+function previousComponentIndex(
+  input: UIImplementationSpec | undefined,
+): ReadonlyMap<string, UIComponentSpec> {
+  if (input === undefined) return new Map();
+  const parsed = UIImplementationSpecSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new Error(
+      `INVALID_PREVIOUS_UI_IMPLEMENTATION_SPEC: ${parsed.error.issues[0]?.message ?? "invalid spec"}`,
+    );
+  }
+  return new Map(
+    parsed.data.pages.flatMap((page) => page.components.map((component) => [component.id, component])),
+  );
 }
 
 function selectCapability(
@@ -284,7 +425,7 @@ function createProperties(
     throw new Error(`UNSUPPORTED_CAPABILITY_VARIANT: ${capabilityId}`);
   }
   const allowed = new Set([
-    ...(PROPERTY_KEYS[variant.type] ?? []),
+    ...(PROPERTY_KEYS[capabilityId] ?? PROPERTY_KEYS[variant.type] ?? []),
     ...(variant.type === "layout" || variant.type === "prototype" ? [] : ["parentId"]),
   ]);
   const properties: Record<string, unknown> = {};

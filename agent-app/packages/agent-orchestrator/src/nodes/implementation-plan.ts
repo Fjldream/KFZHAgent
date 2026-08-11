@@ -48,6 +48,7 @@ export function createImplementationPlanNode(deps: SolutionGraphDeps) {
       candidate = state.uiImplementation === undefined
         ? await deps.modelPort.createUiImplementation(baseContext)
         : await deps.modelPort.reviseUiImplementation(baseContext);
+      candidate = preservePriorComponents(state.uiImplementation, candidate);
     } catch (error) {
       return failure(error);
     }
@@ -59,6 +60,7 @@ export function createImplementationPlanNode(deps: SolutionGraphDeps) {
         compiled = await deps.uiImplementationCompiler.compile({
           workspaceId: state.workspaceId,
           spec: candidate,
+          ...(state.uiImplementation !== undefined ? { previousSpec: state.uiImplementation } : {}),
           editableEntities,
         });
         rejectionReasons = validateCompiledPlan(compiled.plan);
@@ -74,11 +76,13 @@ export function createImplementationPlanNode(deps: SolutionGraphDeps) {
           uiImplementation: candidate,
           implementationRejectionReasons: rejectionReasons,
         });
+        candidate = preservePriorComponents(state.uiImplementation, candidate);
         const repairedCoverage = assessCoverage(state.designPlan, candidate);
         if (repairedCoverage.length > 0) return invalid(repairedCoverage);
         compiled = await deps.uiImplementationCompiler.compile({
           workspaceId: state.workspaceId,
           spec: candidate,
+          ...(state.uiImplementation !== undefined ? { previousSpec: state.uiImplementation } : {}),
           editableEntities,
         });
         const repairedPlanIssues = validateCompiledPlan(compiled.plan);
@@ -144,6 +148,36 @@ export function createImplementationPlanNode(deps: SolutionGraphDeps) {
       lastErrorCode: undefined,
     };
   };
+}
+
+/**
+ * A revision is a partial intent update, not a replacement license. Until the
+ * contract grows an explicit, confirmed delete operation, components omitted
+ * by the model remain managed and are carried forward deterministically.
+ */
+function preservePriorComponents(
+  previous: UIImplementationSpec | undefined,
+  revised: UIImplementationSpec,
+): UIImplementationSpec {
+  if (previous === undefined) return revised;
+  const revisedIds = new Set(
+    revised.pages.flatMap((page) => page.components.map((component) => component.id)),
+  );
+  const pages = revised.pages.map((page) => ({ ...page, components: [...page.components] }));
+  const pageById = new Map(pages.map((page) => [page.id, page]));
+  for (const previousPage of previous.pages) {
+    const omitted = previousPage.components.filter((component) => !revisedIds.has(component.id));
+    if (omitted.length === 0) continue;
+    const target = pageById.get(previousPage.id);
+    if (target !== undefined) {
+      target.components.push(...omitted);
+    } else {
+      const retainedPage = { ...previousPage, components: omitted };
+      pages.push(retainedPage);
+      pageById.set(retainedPage.id, retainedPage);
+    }
+  }
+  return { ...revised, pages };
 }
 
 function assessCoverage(designPlan: DesignPlan, spec: UIImplementationSpec): string[] {

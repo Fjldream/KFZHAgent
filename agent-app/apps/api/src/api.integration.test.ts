@@ -10,8 +10,15 @@ import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import cookieParser from "cookie-parser";
 import type { ArtifactStorage } from "@kf/artifact-storage";
+import { BuildExecutor, BuildJobService } from "@kf/build-jobs";
 import { decodeBlueprintMessage } from "@kf/agent-orchestrator";
-import { packageNativeClientProject } from "@kf/domain-client";
+import {
+  createKingClientDomainPack,
+  importNativeClientPackage,
+  inspectClientProject,
+  packageNativeClientProject,
+} from "@kf/domain-client";
+import { DomainRegistry } from "@kf/domain-registry";
 import request from "supertest";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -77,6 +84,7 @@ class FakeModelPort {
   intents = [];
   requestedDomains = ["kingclient"];
   blueprintModuleIds = ["main"];
+  layoutModuleId = undefined;
   createCalls = [];
   reviseCalls = [];
 
@@ -179,14 +187,34 @@ class FakeModelPort {
         width: 1440,
         height: 900,
         components: sourceModuleIds.map((sourceModuleId, index) => ({
-          id: index === 0 ? "Text1" : sourceModuleId,
+          id: sourceModuleId === this.layoutModuleId ? "MainLayout" : index === 0 ? "Text1" : sourceModuleId,
           role: "heading",
           sourceModuleId,
-          capabilityId: "text",
+          capabilityId: sourceModuleId === this.layoutModuleId ? "layout.2" : "text",
           critical: true,
-          content: `${sourceModuleId}-${tag}-${counter}`,
-          geometry: { x: 40, y: 40 + index * 100, width: 320, height: 48 },
-          properties: {},
+          ...(sourceModuleId === this.layoutModuleId
+            ? {}
+            : { content: `${sourceModuleId}-${tag}-${counter}` }),
+          geometry: {
+            x: 40 + (tag === "rev" ? 20 : 0),
+            y: 40 + index * 100,
+            width: sourceModuleId === this.layoutModuleId ? 700 : 320,
+            height: sourceModuleId === this.layoutModuleId ? 80 : 48,
+          },
+          properties: sourceModuleId === this.layoutModuleId
+            ? {
+                children: [{
+                  layoutType: 4,
+                  objectType: 2,
+                  baseProperty: {
+                    name: "NestedLayout",
+                    leftTopPt: { x: 0, y: 0 },
+                    width: 600,
+                    height: 60,
+                  },
+                }],
+              }
+            : {},
           style: { declarations: {}, states: {} },
         })),
       }],
@@ -287,6 +315,7 @@ beforeEach(async () => {
   await seedDatabase();
   fakeModel.intents = [];
   fakeModel.blueprintModuleIds = ["main"];
+  fakeModel.layoutModuleId = undefined;
   fakeModel.createCalls = [];
   fakeModel.reviseCalls = [];
 });
@@ -405,6 +434,15 @@ function doneEvent(text: string): { data: { stage?: string; interrupt?: { planHa
 
 async function makePackage(): Promise<Buffer> {
   return packageNativeClientProject(unknownFieldClientDir);
+}
+
+async function runNextBuild(owner: string) {
+  const jobs = new BuildJobService(prisma);
+  const leased = await jobs.leaseNext(owner, new Date());
+  if (leased === null) throw new Error("expected a queued build job");
+  const registry = new DomainRegistry();
+  registry.register(createKingClientDomainPack({ nativeAccepted: true }));
+  return new BuildExecutor({ prisma, storage, registry }).execute(leased);
 }
 
 /** Plans a NEW_REQUIREMENT turn up to the approval interrupt and returns the planHash. */
@@ -1177,6 +1215,7 @@ describe("task 12 api surface", () => {
   it("recompiles the complete implementation when the customer continues with a modification", async () => {
     const moduleIds = ["brand", "overview", "skills", "experience", "projects", "about", "contact"];
     fakeModel.blueprintModuleIds = moduleIds;
+    fakeModel.layoutModuleId = "overview";
     try {
       const cookie = await login(TENANT_A_MEMBER);
       const ws = await createWorkspace(cookie, "Iterative Blueprint WS");
@@ -1191,44 +1230,7 @@ describe("task 12 api surface", () => {
         action: "approve",
         planHash: first.data.interrupt?.planHash,
       }).expect(200);
-
-      const workspace = await prisma.solutionWorkspace.findUniqueOrThrow({ where: { id: ws.body.id } });
-      const built = await prisma.solutionRevision.create({
-        data: {
-          tenantId: ws.body.tenantId,
-          workspaceId: ws.body.id,
-          revisionNumber: 2,
-          kind: "built",
-          parentRevisionId: workspace.currentRevisionId,
-          state: {
-            schema: "kf-client-project-ir/v1",
-            id: "solution",
-            name: "Solution",
-            version: "1.0.0.1",
-            pages: [{
-              id: "page-home",
-              name: "Page1",
-              width: 1440,
-              height: 900,
-              controls: moduleIds.map((id, index) => ({
-                id: index === 0 ? "Text1" : id,
-                type: "text",
-                x: 40,
-                y: 40 + index * 100,
-                width: 320,
-                height: 48,
-                text: `${id} 初稿`,
-              })),
-            }],
-            variables: [],
-            scripts: [],
-          },
-        },
-      });
-      await prisma.solutionWorkspace.update({
-        where: { id: ws.body.id },
-        data: { currentRevisionId: built.id },
-      });
+      expect((await runNextBuild("api-mainline-first")).status).toBe("SUCCEEDED");
 
       fakeModel.queueIntent("MODIFY_REQUIREMENT");
       const revised = await sendMessage(cookie, conv.body.id, "把全部模块文案调整得更专业").expect(200);
@@ -1240,9 +1242,43 @@ describe("task 12 api surface", () => {
         .expect(200);
       expect(plan.body.plan.operations).toHaveLength(moduleIds.length);
       expect(plan.body.plan.operations.every((operation) => operation.op === "update")).toBe(true);
+      const layoutUpdate = plan.body.plan.operations.find(
+        (operation) => operation.entityType === "control"
+          && operation.changes?.some((change) => change.path === "/x"),
+      );
+      expect(layoutUpdate?.changes).toEqual(expect.arrayContaining([
+        { path: "/x", value: 60 },
+      ]));
+      expect(layoutUpdate?.changes).not.toContainEqual({ path: "/children", value: [] });
       expect(fakeModel.reviseCalls).toHaveLength(1);
+
+      await resume(cookie, conv.body.id, {
+        action: "approve",
+        planHash: second.data.interrupt?.planHash,
+      }).expect(200);
+      const secondBuild = await runNextBuild("api-mainline-second");
+      expect(secondBuild.status).toBe("SUCCEEDED");
+      const artifact = await prisma.artifact.findFirstOrThrow({
+        where: { buildJobId: secondBuild.id },
+      });
+      const stream = await storage.open(ws.body.tenantId, artifact.storageKey);
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream as AsyncIterable<Buffer | string>) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      const unpacked = await importNativeClientPackage(
+        Buffer.concat(chunks),
+        await mkdtemp(path.join(tmpdir(), "kf-api-mainline-check-")),
+      );
+      const inspection = await inspectClientProject(unpacked);
+      expect(Object.values(inspection.index.controls)).toHaveLength(moduleIds.length + 1);
+      expect(Object.values(inspection.index.controls)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: "MainLayout", capabilityId: "layout.2", x: 60 }),
+        expect.objectContaining({ id: "NestedLayout", capabilityId: "layout.4" }),
+      ]));
     } finally {
       fakeModel.blueprintModuleIds = ["main"];
+      fakeModel.layoutModuleId = undefined;
     }
   });
 

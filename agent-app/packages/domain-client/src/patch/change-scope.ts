@@ -4,7 +4,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { FieldPatch } from "@kf/contracts";
 import { inspectClientProject, type EntityIndex } from "../inspect/client-inspector.js";
-import { resolveControlPath } from "./allowlist.js";
+import { resolveControlPathFor } from "./allowlist.js";
 import {
   PatchConflictError,
   escapeToken,
@@ -282,7 +282,13 @@ export async function computeChangeScope(
         op.entityType,
       );
       for (const change of op.changes ?? []) {
-        const resolved = isControlLocation(loc) ? resolveControlPath(change.path) : change.path;
+        const capabilityId = inspection.index.controls[op.entityId]?.capabilityId;
+        const prototypeName = capabilityId?.startsWith("prototype.")
+          ? capabilityId.slice("prototype.".length)
+          : undefined;
+        const resolved = isControlLocation(loc)
+          ? resolveControlPathFor(loc.controlType, change.path, prototypeName)
+          : change.path;
         touchPointer(loc.file, joinPointer(loc.pointer, resolved));
       }
     } else {

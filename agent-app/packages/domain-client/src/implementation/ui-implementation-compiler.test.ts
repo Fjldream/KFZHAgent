@@ -46,6 +46,9 @@ const context = {
   pageGuidById: { overview: "page-guid-1" },
   existingControlGuidByComponentId: { ExistingTitle: "title-guid-1" },
   existingControlCapabilityIdByComponentId: { ExistingTitle: "text" },
+  existingControlGeometryByComponentId: {
+    ExistingTitle: { x: 40, y: 32, width: 320, height: 48 },
+  },
 } as const;
 
 const specFixture: UIImplementationSpec = {
@@ -136,6 +139,165 @@ describe("compileUiImplementation", () => {
         changes: [{ path: "/text", value: "新的标题" }],
       },
     ]);
+  });
+
+  it("updates existing control geometry and reviewed semantic properties", () => {
+    const result = compileUiImplementation({
+      ...specFixture,
+      pages: [{
+        ...specFixture.pages[0]!,
+        components: [{
+          ...specFixture.pages[0]!.components[0]!,
+          capabilityId: "input",
+          geometry: { x: 900, y: 500, width: 360, height: 44 },
+          properties: { placeholder: "请输入姓名", clearable: true },
+          style: { declarations: {}, states: {} },
+        }],
+      }],
+    }, {
+      ...context,
+      existingControlCapabilityIdByComponentId: { ExistingTitle: "input" },
+    });
+
+    expect(result.plan.operations).toEqual([{
+      op: "update",
+      entityId: "title-guid-1",
+      entityType: "control",
+      changes: [
+        { path: "/x", value: 900 },
+        { path: "/y", value: 500 },
+        { path: "/width", value: 360 },
+        { path: "/height", value: 44 },
+        { path: "/placeholder", value: "请输入姓名" },
+        { path: "/clearable", value: true },
+      ],
+    }]);
+  });
+
+  it("does not reapply unchanged properties, parent placement, content, or style from the prior spec", () => {
+    const checkbox: UIImplementationSpec = {
+      ...specFixture,
+      pages: [{
+        ...specFixture.pages[0]!,
+        components: [{
+          id: "Agree",
+          role: "consent",
+          capabilityId: "checkbox",
+          critical: true,
+          geometry: { x: 40, y: 120, width: 160, height: 32 },
+          properties: { label: "同意", checked: false, parentId: "FormLayout" },
+          style: { declarations: { fontSize: 14 }, states: {} },
+        }],
+      }],
+    };
+
+    const result = compileUiImplementation(checkbox, {
+      ...context,
+      existingControlGuidByComponentId: { Agree: "checkbox-guid-1" },
+      existingControlCapabilityIdByComponentId: { Agree: "checkbox" },
+      existingControlGeometryByComponentId: {
+        Agree: { x: 40, y: 120, width: 160, height: 32 },
+      },
+      previousImplementation: checkbox,
+    });
+
+    expect(result.plan.operations).toEqual([]);
+  });
+
+  it("maps a changed checkbox value to reviewed KF native fields", () => {
+    const previous: UIImplementationSpec = {
+      ...specFixture,
+      pages: [{
+        ...specFixture.pages[0]!,
+        components: [{
+          id: "Agree",
+          role: "consent",
+          capabilityId: "checkbox",
+          critical: true,
+          geometry: { x: 40, y: 120, width: 160, height: 32 },
+          properties: { label: "同意", checked: false },
+          style: { declarations: {}, states: {} },
+        }],
+      }],
+    };
+    const revised: UIImplementationSpec = {
+      ...previous,
+      pages: [{
+        ...previous.pages[0]!,
+        components: [{
+          ...previous.pages[0]!.components[0]!,
+          properties: { label: "同意", checked: true },
+        }],
+      }],
+    };
+
+    const result = compileUiImplementation(revised, {
+      ...context,
+      existingControlGuidByComponentId: { Agree: "checkbox-guid-1" },
+      existingControlCapabilityIdByComponentId: { Agree: "checkbox" },
+      existingControlGeometryByComponentId: {
+        Agree: { x: 40, y: 120, width: 160, height: 32 },
+      },
+      previousImplementation: previous,
+    });
+
+    expect(result.plan.operations).toEqual([{
+      op: "update",
+      entityId: "checkbox-guid-1",
+      entityType: "control",
+      changes: [{ path: "/checkedData", value: ["同意"] }],
+    }]);
+  });
+
+  it("keeps checkedData synchronized when a checked checkbox label changes", () => {
+    const previous: UIImplementationSpec = {
+      ...specFixture,
+      pages: [{
+        ...specFixture.pages[0]!,
+        components: [{
+          id: "Agree",
+          role: "consent",
+          capabilityId: "checkbox",
+          critical: true,
+          geometry: { x: 40, y: 120, width: 160, height: 32 },
+          properties: { label: "旧标签", checked: true },
+          style: { declarations: {}, states: {} },
+        }],
+      }],
+    };
+    const revised: UIImplementationSpec = {
+      ...previous,
+      pages: [{
+        ...previous.pages[0]!,
+        components: [{
+          ...previous.pages[0]!.components[0]!,
+          properties: { label: "新标签", checked: true },
+        }],
+      }],
+    };
+
+    const result = compileUiImplementation(revised, {
+      ...context,
+      existingControlGuidByComponentId: { Agree: "checkbox-guid-1" },
+      existingControlCapabilityIdByComponentId: { Agree: "checkbox" },
+      existingControlGeometryByComponentId: {
+        Agree: { x: 40, y: 120, width: 160, height: 32 },
+      },
+      previousImplementation: previous,
+    });
+
+    expect(result.plan.operations).toEqual([{
+      op: "update",
+      entityId: "checkbox-guid-1",
+      entityType: "control",
+      changes: [
+        {
+          path: "/checkboxData",
+          value: [{ text: "新标签", label: "新标签", disabled: false, visible: true }],
+        },
+        { path: "/checkedData", value: ["新标签"] },
+      ],
+    }]);
   });
 
   it("fails on a critical unsupported control", () => {
@@ -271,7 +433,7 @@ describe("compileUiImplementation", () => {
           style: { declarations: {}, states: {} },
         }],
       }],
-    }, context)).toThrow(/UNSUPPORTED_COMPONENT_PROPERTY/);
+    }, context)).toThrow(/UNSAFE_COMPONENT_PROPERTY/);
   });
 
   it("rejects raw nested layout panels instead of forwarding CSS-shaped values", () => {
@@ -288,7 +450,7 @@ describe("compileUiImplementation", () => {
           style: { declarations: {}, states: {} },
         }],
       }],
-    }, context)).toThrow(/UNSUPPORTED_COMPONENT_PROPERTY/);
+    }, context)).toThrow(/UNSAFE_COMPONENT_PROPERTY/);
   });
 
   it("accepts geometry exactly at the page boundary and rejects overflow", () => {

@@ -8,7 +8,7 @@
 4. 编排节点检查每个蓝图模块是否至少有一个可追溯组件；缺失或编译失败时只允许一次带原因的修复。
 5. 现有 `compileUiImplementation()`、控件能力注册表、主题解析器和安全样式引擎确定性生成 `ChangePlan`。
 6. 客户批准计划后，现有 worker 执行补丁、校验、原生工程打包、制品存储和 Revision 提交。
-7. 客户继续提出修改时，流程复用上一次 `UIImplementationSpec` 和最新工程 Revision，重新生成增量计划；未纳入规格的导入工程控件不会被主动删除。
+7. 客户继续提出修改时，流程复用上一次 `UIImplementationSpec` 和最新工程 Revision，按语义差异生成局部增量计划；未变化的属性、样式、父容器关系不会重复写入，未纳入规格的导入工程控件不会被主动删除。
 
 LLM 不负责生成 KF 原始 JSON、GUID、原始 CSS、JavaScript、ChangePlan 或工程压缩包。
 
@@ -17,8 +17,19 @@ LLM 不负责生成 KF 原始 JSON、GUID、原始 CSS、JavaScript、ChangePlan
 - `implementation-plan.test.ts`：完整模块覆盖、缺失模块修复、确定性编译失败修复、失败后禁止持久化。
 - `solution-graph.test.ts` / `solution-graph.integration.test.ts`：确认蓝图进入实施规划节点并到达计划审批边界。
 - `graph-ports.test.ts`：生产编译端口复用既有 KingClient 编译器，并验证 KF 原生页面 GUID 前缀映射。
-- `api.integration.test.ts`：七模块蓝图不能退化为单个 `Text1` 操作；客户继续修改后仍生成覆盖全部模块的更新计划。
+- `api.integration.test.ts`：七模块蓝图不能退化为单个 `Text1` 操作；计划获批后由真实 worker 完成第一次构建；客户继续修改时从第一次原生工程包回读准确的 `layout.2` 能力、位置和属性，再生成增量计划并完成第二次构建；最终解包确认七个模块控件和嵌套 `layout.4` 均仍可索引，且容器修改已经落盘。
 - `job-runner.integration.test.ts`：七模块计划经过真实 worker 构建成功，解包后的原生客户端工程包含七个控件及样式字段。
+- `ui-implementation-compiler.test.ts`：已有控件可以安全修改位置、尺寸和受支持的语义属性；未变化的属性、`parentId`、内容和样式不会重复写入；复选框语义值会映射为 KF 原生字段。
+- `client-patcher.container.test.ts`：布局 `children` 整体更新时为嵌套布局派生稳定 GUID，二次修改后仍能被 inspector 索引。
+- `solution-graph.test.ts`：`DesignPlan v2` 进入实施规划节点；旧 `DesignPlan v1` 仍保留原有直接规划兼容路径。
+
+## 2026-08-11 自动化验收证据
+
+- 全工作区测试：68 个测试文件、797 项测试全部通过。
+- 全工作区 TypeScript：11 个项目全部通过。
+- 主链路集成测试实际执行两轮 `计划审批 -> 入队 -> worker 构建 -> Revision/Artifact 提交`，不是只调用编译函数的模拟测试。
+- 第二轮构建使用第一轮生成的原生工程作为基线，验证了原生容器精确能力回读、语义差异编译、嵌套布局 GUID 保留和增量修改闭环。
+- 真实 DeepSeek 网络冒烟未在自动化环境中执行：仓库和工作树不保存 API Key。启动测试环境时通过进程环境注入 `DEEPSEEK_API_KEY` 后，按下方人工步骤执行。
 
 ## 人工验收步骤
 

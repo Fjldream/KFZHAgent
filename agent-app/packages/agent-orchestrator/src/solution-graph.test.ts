@@ -845,6 +845,33 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     expect(bed.model.implementationReviseCalls).toHaveLength(1);
   });
 
+  it("keeps legacy v1 design checkpoints on the direct ChangePlan compatibility path", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+    bed.model.queueIntent("CONFIRM_DESIGN");
+    await sendUser(bed, ctx, "确认");
+
+    const held = await bed.graph.invoke({
+      ...input(ctx),
+      designPlan: {
+        schema: "kf-design-plan/v1",
+        displayName: "旧版设计",
+        summary: "旧版持久化计划",
+        layoutConcept: "单页",
+        styleDirection: "简洁",
+        sections: [{ id: "main", label: "主体", controls: [{ type: "text", text: "标题" }] }],
+        signature: "legacy",
+      },
+      designPlanHash: "legacy-plan-hash",
+    }, config(ctx));
+    expect(held).toMatchObject({ stage: "approval" });
+
+    expect(await interruptPayload(bed, ctx)).toBeDefined();
+    expect(bed.model.createCalls).toHaveLength(1);
+    expect(bed.model.implementationCreateCalls).toHaveLength(0);
+    expect(bed.model.implementationReviseCalls).toHaveLength(0);
+  });
+
   it("preview feedback is re-classified by keywords when the model disagrees (preview-review fallback)", async () => {
     const bed = createBed();
     const ctx = seed(bed);

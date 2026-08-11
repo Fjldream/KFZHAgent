@@ -35,6 +35,11 @@ export interface EditableEntity {
   type: string;
   /** KF GUID the change plan must reference. */
   guid: string;
+  /** Current control geometry, when the entity is a control. */
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
 }
 
 export interface AppendMessageInput {
@@ -150,6 +155,8 @@ export interface PlanArtifactsPort {
 export interface UiImplementationCompilerInput {
   workspaceId: string;
   spec: UIImplementationSpec;
+  /** Last confirmed implementation, allowing the compiler to emit local deltas. */
+  previousSpec?: UIImplementationSpec;
   editableEntities: EditableEntity[];
 }
 

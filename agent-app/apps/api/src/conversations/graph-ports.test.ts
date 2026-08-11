@@ -57,6 +57,15 @@ describe("conversation graph workspace query", () => {
             width: 400,
             height: 60,
             text: "张伟",
+          }, {
+            id: "MainLayout",
+            type: "layout",
+            layoutType: 2,
+            x: 40,
+            y: 140,
+            width: 800,
+            height: 500,
+            children: [],
           }],
         }],
       },
@@ -86,6 +95,15 @@ describe("conversation graph workspace query", () => {
     expect(entities).toEqual([
       expect.objectContaining({ kind: "page", name: "Home", type: "page" }),
       expect.objectContaining({ kind: "control", name: "HeroTitle", type: "text" }),
+      expect.objectContaining({
+        kind: "control",
+        name: "MainLayout",
+        type: "layout.2",
+        x: 40,
+        y: 140,
+        width: 800,
+        height: 500,
+      }),
     ]);
     expect(storage.open).toHaveBeenCalledWith("tenant-1", "built-package-key");
   });

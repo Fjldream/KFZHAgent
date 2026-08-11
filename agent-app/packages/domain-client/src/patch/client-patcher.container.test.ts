@@ -377,9 +377,25 @@ describe("client patcher — KF 容器对象（easyui / 布局）", () => {
     ]));
     const node = await rawContainer(candidate, "layout-guid-1");
     // children/panels 作为整体替换到 KF 的 insiderObjects/dPanelsOption。
+    const expectedChildGuid = deriveGuid(
+      { seed: "w-test" },
+      "child:DockingLayout1:HorizontalLayout1",
+    );
     expect(node["insiderObjects"]).toEqual([
-      { layoutType: 2, objectType: 2, baseProperty: { name: "HorizontalLayout1", leftTopPt: { x: 21, y: 109 }, width: 1241, height: 40 } },
+      {
+        layoutType: 2,
+        objectType: 2,
+        baseProperty: {
+          name: "HorizontalLayout1",
+          guid: expectedChildGuid,
+          leftTopPt: { x: 21, y: 109 },
+          width: 1241,
+          height: 40,
+        },
+      },
     ]);
+    expect((await inspectClientProject(await rootDirOf(candidate))).index.controls[expectedChildGuid])
+      .toBeDefined();
     expect(node["dPanelsOption"]).toEqual([{ region: "north", width: 1243, height: 80, split: true }]);
     // layoutType 在顶层；几何映射进 baseProperty，其余保留。
     expect(node["layoutType"]).toBe(4);

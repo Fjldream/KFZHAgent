@@ -133,8 +133,9 @@ export function createGraphPorts(
           entities.push({
             kind: "control",
             name: id,
-            type: typeof control["type"] === "string" ? control["type"] : "?",
+            type: capabilityIdFromIrControl(control),
             guid: deriveGuid({ seed: workspaceId }, id),
+            ...controlGeometry(control),
           });
         }
       }
@@ -196,16 +197,33 @@ export function createGraphPorts(
   };
 
   const uiImplementationCompiler: UiImplementationCompilerPort = {
-    compile({ workspaceId, spec, editableEntities }) {
+    compile({ workspaceId, spec, previousSpec, editableEntities }) {
       const pageGuidById: Record<string, string> = Object.create(null) as Record<string, string>;
       const existingControlGuidByComponentId: Record<string, string> = Object.create(null) as Record<string, string>;
       const existingControlCapabilityIdByComponentId: Record<string, string> = Object.create(null) as Record<string, string>;
+      const existingControlGeometryByComponentId: Record<
+        string,
+        { x: number; y: number; width: number; height: number }
+      > = Object.create(null) as Record<string, { x: number; y: number; width: number; height: number }>;
       for (const entity of editableEntities) {
         if (entity.kind === "page") {
           pageGuidById[entity.name] = entity.guid;
         } else if (entity.kind === "control") {
           existingControlGuidByComponentId[entity.name] = entity.guid;
           existingControlCapabilityIdByComponentId[entity.name] = entity.type;
+          if (
+            entity.x !== undefined
+            && entity.y !== undefined
+            && entity.width !== undefined
+            && entity.height !== undefined
+          ) {
+            existingControlGeometryByComponentId[entity.name] = {
+              x: entity.x,
+              y: entity.y,
+              width: entity.width,
+              height: entity.height,
+            };
+          }
         }
       }
       return Promise.resolve(compileUiImplementation(spec, {
@@ -213,6 +231,8 @@ export function createGraphPorts(
         pageGuidById,
         existingControlGuidByComponentId,
         existingControlCapabilityIdByComponentId,
+        existingControlGeometryByComponentId,
+        ...(previousSpec !== undefined ? { previousImplementation: previousSpec } : {}),
       }));
     },
   };
@@ -249,8 +269,12 @@ async function inspectBuiltClientEntities(
         entities.push({
           kind: "control",
           name: control.name ?? control.id,
-          type: control.type,
+          type: control.capabilityId,
           guid: control.guid,
+          x: control.x,
+          y: control.y,
+          width: control.width,
+          height: control.height,
         });
       }
     }
@@ -258,6 +282,31 @@ async function inspectBuiltClientEntities(
   } finally {
     await rm(destination, { recursive: true, force: true });
   }
+}
+
+function capabilityIdFromIrControl(control: Record<string, unknown>): string {
+  const type = typeof control["type"] === "string" ? control["type"] : "?";
+  if (type === "easyui" && typeof control["proto"] === "number") {
+    return `easyui.${control["proto"]}`;
+  }
+  if (type === "layout" && typeof control["layoutType"] === "number") {
+    return `layout.${control["layoutType"]}`;
+  }
+  if (type === "prototype" && typeof control["prototypeName"] === "string") {
+    return `prototype.${control["prototypeName"]}`;
+  }
+  return type;
+}
+
+function controlGeometry(
+  control: Record<string, unknown>,
+): { x?: number; y?: number; width?: number; height?: number } {
+  return {
+    ...(typeof control["x"] === "number" ? { x: control["x"] } : {}),
+    ...(typeof control["y"] === "number" ? { y: control["y"] } : {}),
+    ...(typeof control["width"] === "number" ? { width: control["width"] } : {}),
+    ...(typeof control["height"] === "number" ? { height: control["height"] } : {}),
+  };
 }
 
 /**

@@ -68,6 +68,12 @@ export interface ControlIndexEntry {
   guid: string;
   pageGuid: string;
   type: string;
+  /** Exact reviewed capability variant (for example layout.2/easyui.17). */
+  capabilityId: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
   /** Stable semantic id (the KF control `name`), never a KF GUID. */
   id: string;
   name?: string;
@@ -401,6 +407,7 @@ async function resolveProjectRoot(rootDir: string): Promise<string> {
 interface RawControl {
   guid: string;
   type: string;
+  capabilityId: string;
   id: string;
   name?: string;
   x: number;
@@ -444,9 +451,11 @@ function collectControls(node: unknown, rawPath: string, out: RawControl[]): voi
     // objects — and a traversal ordinal would drift when controls are added or
     // removed), and only then a positional fallback.
     const semanticId = name !== "" ? name : guid !== "" ? guid : `control-${out.length}`;
+    const type = CONTROL_TYPE_BY_UIMODEL_TYPE[uiModelType] ?? `kf-${uiModelType}`;
     out.push({
       guid,
-      type: CONTROL_TYPE_BY_UIMODEL_TYPE[uiModelType] ?? `kf-${uiModelType}`,
+      type,
+      capabilityId: type,
       id: semanticId,
       ...(name !== "" ? { name } : {}),
       x: asNumber((asRecord(record["leftTopPt"])["x"]) ?? 0),
@@ -467,6 +476,7 @@ function collectControls(node: unknown, rawPath: string, out: RawControl[]): voi
     out.push({
       guid,
       type: "easyui",
+      capabilityId: `easyui.${proto}`,
       id: semanticId,
       ...(name !== "" ? { name } : {}),
       x: asNumber((asRecord(record["leftTopPt"])["x"]) ?? 0),
@@ -490,6 +500,7 @@ function collectControls(node: unknown, rawPath: string, out: RawControl[]): voi
     out.push({
       guid,
       type: "easyui",
+      capabilityId: `easyui.${proto}`,
       id: semanticId,
       ...(name !== "" ? { name } : {}),
       x: asNumber((asRecord(record["leftTopPt"])["x"]) ?? 0),
@@ -522,6 +533,7 @@ function collectControls(node: unknown, rawPath: string, out: RawControl[]): voi
       out.push({
         guid,
         type: "layout",
+        capabilityId: `layout.${layoutType}`,
         id: semanticId,
         ...(name !== "" ? { name } : {}),
         x: asNumber((asRecord(baseProperty["leftTopPt"])["x"]) ?? 0),
@@ -547,6 +559,7 @@ function collectControls(node: unknown, rawPath: string, out: RawControl[]): voi
       out.push({
         guid,
         type: "prototype",
+        capabilityId: `prototype.${prototypeName}`,
         id: semanticId,
         ...(name !== "" ? { name } : {}),
         x: geometry.x,
@@ -878,6 +891,11 @@ export async function inspectClientProject(
           guid: control.guid,
           pageGuid: guid,
           type: control.type,
+          capabilityId: control.capabilityId,
+          x: control.x,
+          y: control.y,
+          width: control.width,
+          height: control.height,
           id: control.id,
           ...(control.name !== undefined ? { name: control.name } : {}),
           rawPath: control.rawPath,

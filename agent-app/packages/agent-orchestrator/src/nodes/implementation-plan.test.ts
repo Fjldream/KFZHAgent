@@ -254,4 +254,36 @@ describe("implementation-plan node", () => {
     expect(fixture.compile).not.toHaveBeenCalled();
     expect(fixture.savePlan).not.toHaveBeenCalled();
   });
+
+  it("preserves previously managed components omitted by a partial model revision", async () => {
+    const previous = implementation();
+    previous.pages[0]!.components.push({
+      ...previous.pages[0]!.components[0]!,
+      id: "products-detail",
+      content: "产品详情",
+      geometry: { x: 420, y: 60, width: 320, height: 40 },
+    });
+    const partialRevision = implementation();
+    const fixture = bed([partialRevision]);
+    const revisingState = { ...state(), uiImplementation: previous } as AgentGraphStateValue;
+
+    const result = await fixture.node(revisingState);
+
+    expect(fixture.reviseUiImplementation).toHaveBeenCalledTimes(1);
+    expect(fixture.compile).toHaveBeenCalledWith(expect.objectContaining({
+      previousSpec: previous,
+      spec: expect.objectContaining({
+        pages: [expect.objectContaining({
+          components: expect.arrayContaining([
+            expect.objectContaining({ id: "products-title" }),
+            expect.objectContaining({ id: "projects-title" }),
+            expect.objectContaining({ id: "products-detail" }),
+          ]),
+        })],
+      }),
+    }));
+    expect(result.uiImplementation?.pages[0]?.components).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "products-detail" })]),
+    );
+  });
 });

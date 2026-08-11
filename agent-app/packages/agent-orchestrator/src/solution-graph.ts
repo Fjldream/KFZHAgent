@@ -108,9 +108,14 @@ function routeAfterClassify(state: AgentGraphStateValue): string {
       // 两遍流程（spec §5）：首次需求（无已确认设计计划）必须先出设计计划，
       // 客户确认后再进 implementation-plan；已有确认过的设计（如预览反馈小改）
       // 直接复用已确认蓝图和上一版实施规格。
-      return state.designPlanHash === undefined ? "design-plan" : "implementation-plan";
+      if (state.designPlanHash === undefined) return "design-plan";
+      return state.designPlan?.schema === "kf-design-plan/v2"
+        ? "implementation-plan"
+        : "plan-change";
     case "CONFIRM_DESIGN":
-      return "implementation-plan";
+      return state.designPlan?.schema === "kf-design-plan/v2"
+        ? "implementation-plan"
+        : "plan-change";
     case "REVISE_DESIGN":
       return "design-plan";
     case "CONFIRM_BUILD":
@@ -162,7 +167,9 @@ function routeAfterApproval(state: AgentGraphStateValue): string {
     case "approve":
       return "enqueue-build";
     case "revise":
-      return state.designPlanHash === undefined ? "plan-change" : "implementation-plan";
+      return state.designPlan?.schema === "kf-design-plan/v2"
+        ? "implementation-plan"
+        : "plan-change";
     case "cancel":
       return "cancel-plan";
     default:
