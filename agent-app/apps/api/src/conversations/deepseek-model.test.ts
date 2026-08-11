@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { canonicalModuleCompilationHash } from "@kf/contracts";
 import { createHmacModuleArtifactAuthority } from "@kf/build-jobs";
 import { compileModulePlan, createDefaultModuleRegistry } from "@kf/domain-client";
-import { DeepSeekModelPort, deriveExactModulePlanOperations, extractJson, DeepSeekModelOutputError } from "./deepseek-model.js";
+import { DeepSeekModelPort, deriveExactModulePlanOperations, extractJson, DeepSeekModelOutputError, validateModulePlanForContext } from "./deepseek-model.js";
 import { DeterministicFakeModelPort } from "./fake-model.js";
 
 function makePort(reply: unknown, status = 200) {
@@ -256,6 +256,54 @@ function fakeCompileContext(kind: string) {
     currentProjectKey: "kingclient.portal", currentRevisionId: "revision-fake", recentMessages: [],
     requirementText: "生成工程", confirmedBlueprint: blueprint, acceptedBlueprintArtifact,
     modulePlanningCatalog: registry.listForPlanning(), assetCatalog: [], registry, definition,
+  };
+}
+
+function fakeCompileContextForKinds(kinds: readonly string[]) {
+  // The accepted artifact, registry evidence and catalog are deliberately built
+  // together: this is the same authority boundary the fake port sees at runtime.
+  const initialRegistry = createDefaultModuleRegistry();
+  const definitions = kinds.map((kind) => initialRegistry.require(kind, "1.0.0"));
+  const registry = createDefaultModuleRegistry(definitions.map((definition) => {
+    const target = definition.runtimeEvidenceTarget!;
+    return {
+      kind: definition.kind,
+      version: definition.version,
+      runtimeFamily: target.runtimeFamily,
+      runtimeVersion: target.runtimeVersion,
+      baselineId: target.baselineId,
+      verifiedCapabilities: [...definition.requiredKfCapabilities],
+    };
+  }));
+  const modules = definitions.map((definition) => ({
+    id: definition.kind === "content.hero" ? "hero" : "status",
+    name: definition.kind === "content.hero" ? "首屏介绍" : "状态概览",
+    purpose: "验证 fake 修订严格遵循已确认蓝图",
+    content: ["测试内容"],
+    sampleData: [{ label: "名称", value: "示例" }],
+    interactions: [],
+    presentation: "测试",
+    expectedKind: definition.kind,
+  }));
+  const blueprint = detailedBlueprint({ displayName: "多模块 fake 修订测试", modules });
+  const authority = createHmacModuleArtifactAuthority(new Uint8Array(32).fill(12));
+  const acceptedBlueprintArtifact = authority.verifyAcceptedBlueprint(authority.signAcceptedBlueprint({
+    schema: "kf-accepted-blueprint-artifact/v1",
+    projectKey: "kingclient.portal",
+    revisionId: "revision-fake-multi",
+    blueprintHash: canonicalModuleCompilationHash(blueprint),
+    modules: definitions.map((definition) => ({
+      blueprintModuleId: definition.kind === "content.hero" ? "hero" : "status",
+      expectedKind: definition.kind,
+      expectedCategory: definition.category,
+      interactionRequirements: [],
+    })),
+  }));
+  return {
+    tenantId: "t", userId: "u", workspaceId: "w", conversationId: "c",
+    currentProjectKey: "kingclient.portal", currentRevisionId: "revision-fake-multi", recentMessages: [],
+    requirementText: "生成工程", confirmedBlueprint: blueprint, acceptedBlueprintArtifact,
+    modulePlanningCatalog: registry.listForPlanning(), assetCatalog: [], registry, definitions,
   };
 }
 
@@ -930,6 +978,44 @@ describe("DeepSeekModelPort", () => {
     const previous = { ...first, pages: [{ ...first.pages[0], id: "existing", title: "保留标题", mode: "admin-shell" }] };
     const revised = await fake.reviseModulePlan({ ...context, previousModulePlan: previous });
     expect(revised.pages[0]).toEqual(expect.objectContaining({ id: "existing", title: "保留标题", mode: "admin-shell" }));
+  });
+
+  it("fake revision adds and removes accepted modules as compilable authoritative snapshots", async () => {
+    const fake = new DeterministicFakeModelPort();
+    const heroContext = fakeCompileContextForKinds(["content.hero"]);
+    const heroPlan = await fake.createModulePlan(heroContext);
+    const withStatusContext = fakeCompileContextForKinds(["content.hero", "data.status-grid"]);
+    const added = await fake.reviseModulePlan({ ...withStatusContext, previousModulePlan: heroPlan });
+
+    expect(added.operations).toEqual([expect.objectContaining({ op: "add", module: expect.objectContaining({ kind: "data.status-grid" }) })]);
+    expect(validateModulePlanForContext({ ...withStatusContext, previousModulePlan: heroPlan }, added, true)).toEqual(added);
+    expect(compileModulePlan({
+      plan: added,
+      acceptedBlueprintArtifact: withStatusContext.acceptedBlueprintArtifact,
+      registry: withStatusContext.registry,
+      assetsById: {},
+      validationContext: {
+        availableKfCapabilities: withStatusContext.definitions.flatMap((definition) => definition.requiredKfCapabilities),
+        approvedAuthorizationRefs: [],
+      },
+    }).status).toBe("compiled");
+
+    const unchanged = await fake.reviseModulePlan({ ...withStatusContext, previousModulePlan: added });
+    expect(unchanged.operations).toEqual([]);
+
+    const removed = await fake.reviseModulePlan({ ...heroContext, previousModulePlan: unchanged });
+    expect(removed.operations).toEqual([expect.objectContaining({ op: "remove", moduleId: "module-status" })]);
+    expect(validateModulePlanForContext({ ...heroContext, previousModulePlan: unchanged }, removed, true)).toEqual(removed);
+    expect(compileModulePlan({
+      plan: removed,
+      acceptedBlueprintArtifact: heroContext.acceptedBlueprintArtifact,
+      registry: heroContext.registry,
+      assetsById: {},
+      validationContext: {
+        availableKfCapabilities: heroContext.definitions.flatMap((definition) => definition.requiredKfCapabilities),
+        approvedAuthorizationRefs: [],
+      },
+    }).status).toBe("compiled");
   });
 
   it("createUiImplementation converts every blueprint module into structured components", async () => {
