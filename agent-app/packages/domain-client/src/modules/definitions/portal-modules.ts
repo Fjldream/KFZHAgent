@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { ModuleDeliveryGap, UIComponentSpec } from "@kf/contracts";
 import { getControlCapability } from "../../style/control-capability-registry.js";
-import type { ModuleDefinition } from "../types.js";
+import type { ModuleDefinition, ModuleRuntimeEvidence } from "../types.js";
 import type { ModuleRegistry } from "../module-registry.js";
 import { actionButton, formRow, imageSlot, labeledValue, repeatedCard, sectionTitle, surface, type LocalBounds } from "./shared-primitives.js";
 
@@ -93,12 +93,12 @@ const cardGrid = define({
 });
 
 const timeline = define({
-  kind: "content.timeline", category: "content", variants: ["default", "experience"], contentSchema: definitionSchema(z.object({ items: items(z.object({ title: text(160), detail: text(400), date: text(80) }).strict(), 10) }).strict()), assetSlots: NO_ASSETS, requiredKfCapabilities: ["layout.2", "timeline", "text"], layout: layout(["main"], []),
+  kind: "content.timeline", category: "content", variants: ["default", "experience"], contentSchema: definitionSchema(z.object({ items: items(z.object({ title: text(160), detail: text(400), date: text(80) }).strict(), 10) }).strict()), assetSlots: NO_ASSETS, requiredKfCapabilities: ["layout.2", "text"], layout: layout(["main"], []),
   compile: ({ context }) => {
     const values = (context.content as { items: Array<{ title: string; detail: string; date: string }> }).items;
     const components: UIComponentSpec[] = [surface("surface", bounds(1344, 260)), sectionTitle("title", context.instance.title, { x: 0, y: 0, width: 1344, height: 36 }, "surface")];
     values.forEach((item, index) => components.push(labeledValue(`event-${index + 1}`, item.date, `${item.title} · ${item.detail}`, { x: 36, y: 62 + index * 54, width: 900, height: 32 }, "surface")));
-    return output(components);
+    return output(components, [{ moduleId: context.instance.id, requirement: "Native timeline", severity: "warning", status: "unresolved", reason: "native-timeline-not-implemented", alternatives: ["Use the generated text timeline or complete native timeline runtime verification."] }]);
   },
 });
 
@@ -119,6 +119,11 @@ const contactFooter = define({
 
 export const PORTAL_MODULE_DEFINITIONS: readonly ModuleDefinition[] = Object.freeze([navigationTop, hero, kpiGrid, cardGrid, timeline, tabsFilter, recordEditor, contactFooter]);
 
-export function registerPortalModules(registry: ModuleRegistry): void {
-  for (const definition of PORTAL_MODULE_DEFINITIONS) registry.register(definition);
+export function registerPortalModules(registry: ModuleRegistry, evidence: readonly ModuleRuntimeEvidence[] = []): void {
+  for (const definition of PORTAL_MODULE_DEFINITIONS) {
+    const accepted = evidence.some((entry) => entry.kind === definition.kind && entry.version === definition.version
+      && entry.runtimeFamily === definition.runtimeEvidenceTarget?.runtimeFamily && entry.runtimeVersion === definition.runtimeEvidenceTarget?.runtimeVersion
+      && entry.baselineId === definition.runtimeEvidenceTarget?.baselineId && definition.requiredKfCapabilities.every((capability) => entry.verifiedCapabilities.includes(capability)));
+    registry.register(accepted ? { ...definition, maturity: "stable" } : definition);
+  }
 }

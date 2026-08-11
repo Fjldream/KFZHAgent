@@ -12,6 +12,7 @@ import type {
   ModuleValidationResult,
 } from "./types.js";
 import { registerPortalModules } from "./definitions/portal-modules.js";
+import type { ModuleRuntimeEvidence } from "./types.js";
 
 export type {
   AssetSlotDefinition,
@@ -335,8 +336,8 @@ export class ModuleRegistry {
 }
 
 /** Creates the explicit built-in catalog; callers may add reviewed extensions. */
-export function createDefaultModuleRegistry(): ModuleRegistry {
+export function createDefaultModuleRegistry(evidence: readonly ModuleRuntimeEvidence[] = []): ModuleRegistry {
   const registry = new ModuleRegistry();
-  registerPortalModules(registry);
+  registerPortalModules(registry, evidence);
   return registry;
 }

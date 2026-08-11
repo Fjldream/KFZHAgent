@@ -36,7 +36,7 @@ export function sectionTitle(id: string, text: string, bounds: LocalBounds, pare
 }
 
 export function labeledValue(id: string, label: string, value: string, bounds: LocalBounds, parentId?: string): UIComponentSpec {
-  return component(id, "labeled-value", "text", `${label}: ${value}`, bounds, parentId === undefined ? {} : { parentId }, "description");
+  return component(id, "labeled-value", "text", label === "" ? value : `${label}: ${value}`, bounds, parentId === undefined ? {} : { parentId }, "description");
 }
 
 export function imageSlot(id: string, alt: string, bounds: LocalBounds, parentId?: string): UIComponentSpec {
