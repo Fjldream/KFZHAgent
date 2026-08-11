@@ -283,16 +283,22 @@ function assertSafeComponent(component: UIComponentSpec, id: string): void {
 
 function hasForbiddenPayload(value: unknown): boolean {
   if (typeof value === "string") return FORBIDDEN_TEXT.test(value) || GUID_VALUE.test(value) || ABSOLUTE_PATH.test(value);
-  if (Array.isArray(value)) return !isStrictArray(value) || value.some(hasForbiddenPayload);
+  if (Array.isArray(value)) {
+    const values = strictArrayValues(value);
+    return values === undefined || values.some(hasForbiddenPayload);
+  }
   if (value === null || typeof value !== "object") return false;
-  if (!isPlainObject(value)) return true;
-  return Object.keys(value).some((key) => isDangerousKey(key) || hasForbiddenPayload(value[key]));
+  const entries = strictObjectEntries(value);
+  return entries === undefined || entries.some(([key, nested]) => isDangerousKey(key) || hasForbiddenPayload(nested));
 }
 
 function isDangerousKey(key: string): boolean {
   if (key === "__proto__" || key === "prototype" || key === "constructor") return true;
-  const tokens = key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(/[^A-Za-z0-9]+/).filter(Boolean).map((part) => part.toLowerCase());
-  return tokens.some((token) => ["css", "native", "guid", "path", "storage", "key", "script", "styledata"].includes(token))
+  const tokens = key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(/[^A-Za-z0-9]+/).filter(Boolean).flatMap((part) => part.toLowerCase() === "styledata" ? ["style", "data"] : [part.toLowerCase()]);
+  const forbidden = new Set(["css", "native", "guid", "path", "script"]);
+  return tokens.some((token) => forbidden.has(token))
+    || tokens.some((token, index) => token === "style" && tokens[index + 1] === "data")
+    || tokens.some((token, index) => token === "storage" && tokens[index + 1] === "key")
     || FORBIDDEN_PROPERTY_KEY.test(key);
 }
 
@@ -303,30 +309,49 @@ function isPlainObject(value: object): value is Record<string, unknown> {
 
 function isPlainSafe(value: unknown): boolean {
   if (value === null || typeof value !== "object") return true;
-  if (Array.isArray(value)) return isStrictArray(value) && value.every(isPlainSafe);
-  if (!isStrictPlainObject(value)) return false;
-  return Object.keys(value).every((key) => !isDangerousKey(key) && isPlainSafe(value[key]));
+  if (Array.isArray(value)) {
+    const values = strictArrayValues(value);
+    return values !== undefined && values.every(isPlainSafe);
+  }
+  const entries = strictObjectEntries(value);
+  return entries !== undefined && entries.every(([key, nested]) => !isDangerousKey(key) && isPlainSafe(nested));
 }
 
-function isStrictArray(value: unknown[]): boolean {
-  if (Object.getPrototypeOf(value) !== Array.prototype || Object.getOwnPropertySymbols(value).length > 0) return false;
-  return Reflect.ownKeys(value).every((key) => key === "length" || (typeof key === "string" && /^(0|[1-9][0-9]*)$/.test(key) && Number(key) < value.length));
+function strictArrayValues(value: unknown[]): unknown[] | undefined {
+  if (Reflect.getPrototypeOf(value) !== Array.prototype) return undefined;
+  const keys = Reflect.ownKeys(value);
+  if (keys.some((key) => typeof key !== "string")) return undefined;
+  const length = Object.getOwnPropertyDescriptor(value, "length");
+  if (length === undefined || length.enumerable || length.configurable || length.writable !== true || !("value" in length) || length.value !== value.length) return undefined;
+  if (keys.length !== value.length + 1) return undefined;
+  const output: unknown[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) return undefined;
+    output.push(descriptor.value);
+  }
+  return output;
 }
 
-function isStrictPlainObject(value: object): value is Record<string, unknown> {
-  if (!isPlainObject(value) || Object.getOwnPropertySymbols(value).length > 0) return false;
-  return Object.keys(value).every((key) => {
+function strictObjectEntries(value: object): Array<readonly [string, unknown]> | undefined {
+  if (!isPlainObject(value)) return undefined;
+  const output: Array<readonly [string, unknown]> = [];
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== "string") return undefined;
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    return descriptor !== undefined && descriptor.enumerable && "value" in descriptor;
-  });
+    if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) return undefined;
+    output.push([key, descriptor.value]);
+  }
+  return output;
 }
 
 function parseResolvedAssets(input: Readonly<Record<string, ResolvedAsset>>): Readonly<Record<string, ResolvedAsset>> {
-  if (!isStrictPlainObject(input)) throw new Error("INVALID_RESOLVED_ASSETS");
+  const entries = strictObjectEntries(input);
+  if (entries === undefined) throw new Error("INVALID_RESOLVED_ASSETS");
   const output: Record<string, ResolvedAsset> = {};
-  for (const key of Object.keys(input)) {
-    if (!isPlainSafe(input[key]) || hasForbiddenPayload(input[key])) throw new Error(`INVALID_RESOLVED_ASSET: ${key}`);
-    const parsed = ResolvedAssetSchema.safeParse(input[key]);
+  for (const [key, value] of entries) {
+    if (!isPlainSafe(value) || hasForbiddenPayload(value)) throw new Error(`INVALID_RESOLVED_ASSET: ${key}`);
+    const parsed = ResolvedAssetSchema.safeParse(value);
     if (!parsed.success || parsed.data.assetId !== key) throw new Error(`INVALID_RESOLVED_ASSET: ${key}`);
     output[key] = parsed.data;
   }
@@ -360,16 +385,26 @@ function finalizeGaps(values: readonly ModuleDeliveryGap[]): readonly ModuleDeli
     unique.set(stableJson(parsed), parsed);
   }
   const ordered = [...unique.values()].sort((left, right) => severityRank(right.severity) - severityRank(left.severity) || compareCodePoints(left.moduleId, right.moduleId) || compareCodePoints(left.requirement, right.requirement));
-  if (ordered.length <= 200) return Object.freeze(ordered);
-  const overflow = ordered.slice(199);
-  const summary = ModuleDeliveryGapSchema.parse({
-    moduleId: overflow[0]!.moduleId,
-    requirement: "Review additional module delivery gaps.",
-    severity: overflow.some((gap) => gap.severity === "blocking") ? "blocking" : "warning",
-    status: "unresolved",
-    reason: `MODULE_DELIVERY_GAP_OVERFLOW: ${overflow.length} additional gaps retained in compiler diagnostics.`,
+  if (ordered.length <= 250) return Object.freeze(ordered);
+  const byModule = new Map<string, ModuleDeliveryGap[]>();
+  for (const gap of ordered) byModule.set(gap.moduleId, [...(byModule.get(gap.moduleId) ?? []), gap]);
+  const summaries = [...byModule.entries()].sort(([left], [right]) => compareCodePoints(left, right)).map(([moduleId, grouped]) => summarizeModuleGaps(moduleId, grouped));
+  if (summaries.length > 250) throw new Error("MODULE_DELIVERY_GAP_MODULE_BOUND_EXCEEDED");
+  return Object.freeze(summaries);
+}
+
+function summarizeModuleGaps(moduleId: string, gaps: readonly ModuleDeliveryGap[]): ModuleDeliveryGap {
+  const unresolved = gaps.filter((gap) => gap.status === "unresolved");
+  const status = unresolved.length > 0 ? "unresolved" : gaps.every((gap) => gap.status === "accepted") ? "accepted" : "mitigated";
+  const source = unresolved.length > 0 ? unresolved : gaps;
+  const severity = source.reduce<ModuleDeliveryGap["severity"]>((current, gap) => severityRank(gap.severity) > severityRank(current) ? gap.severity : current, "info");
+  return ModuleDeliveryGapSchema.parse({
+    moduleId,
+    requirement: "Review module delivery diagnostics.",
+    severity,
+    status,
+    reason: `${gaps.length} diagnostics summarized/omitted for module ${moduleId}.`,
   });
-  return Object.freeze([...ordered.slice(0, 199), summary]);
 }
 
 function severityRank(severity: ModuleDeliveryGap["severity"]): number {

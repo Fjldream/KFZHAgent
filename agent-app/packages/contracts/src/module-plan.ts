@@ -140,7 +140,7 @@ export const ModulePlanSchema = z
     projectKey: projectKeySchema,
     theme: ThemeSpecSchema,
     assets: z.array(AssetRecordSchema).max(100),
-    pages: z.array(ModulePlanPageSchema).min(1).max(20),
+    pages: z.array(ModulePlanPageSchema).min(1).max(5),
     operations: z.array(ModulePlanOperationSchema).max(200),
   })
   .strict()

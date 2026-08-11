@@ -266,6 +266,16 @@ describe("compileModulePlan", () => {
     expect(result.implementation.pages[0]!.components[0]!.critical).toBe(true);
   });
 
+  it("never invokes getters while rejecting descriptor surprises and preserves safe asset identity keys", () => {
+    let reads = 0;
+    const payload: Record<string, unknown> = {};
+    Object.defineProperty(payload, "nativeConfig", { enumerable: true, get: () => { reads += 1; return {}; } });
+    const registry = registryFor(definition({ compile: () => ({ components: [{ ...component("title", "text"), properties: payload }], deliveryGaps: [] }) }));
+    expect(() => compile(plan([module("profile")]), registry)).toThrow("MODULE_COMPILER_UNSAFE_OUTPUT");
+    expect(reads).toBe(0);
+    expect(() => compile(plan([module("profile")]), registryFor(definition()), { assetsById: { "brand-css": { assetId: "brand-css", status: "resolved", resolvedName: "brand" } } })).not.toThrow();
+  });
+
   it("rejects duplicate stable slots and local output outside the assigned module bounds", () => {
     const duplicate = registryFor(definition({
       compile: () => ({ components: [component("title", "text"), component("title", "text")], deliveryGaps: [] }),

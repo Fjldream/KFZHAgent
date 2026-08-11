@@ -67,7 +67,8 @@ export const ModuleDeliveryReportSchema = z
     schema: z.literal("kf-module-delivery/v1"),
     projectKey: projectKeySchema,
     status: z.enum(["ready", "ready_with_warnings", "blocked"]),
-    gaps: z.array(ModuleDeliveryGapSchema).max(200),
+    /** Module plans are bounded at 5 pages × 50 modules; preserve one owned gap per module. */
+    gaps: z.array(ModuleDeliveryGapSchema).max(250),
   })
   .strict()
   .superRefine((report, ctx) => {

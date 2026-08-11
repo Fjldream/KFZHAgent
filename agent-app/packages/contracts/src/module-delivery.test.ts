@@ -45,6 +45,11 @@ describe("module delivery contracts", () => {
     }).success).toBe(false);
   });
 
+  it("allows one module-owned delivery diagnostic for each bounded module", () => {
+    const gaps = Array.from({ length: 250 }, (_, index) => ({ moduleId: `module${index}`, requirement: "review", severity: "warning" as const, status: "unresolved" as const, reason: "review" }));
+    expect(ModuleDeliveryReportSchema.safeParse({ schema: "kf-module-delivery/v1", projectKey: "portal-demo", status: "ready_with_warnings", gaps }).success).toBe(true);
+  });
+
   it("traces declared modules without raw coordinates or storage details", () => {
     expect(ModuleTraceSchema.safeParse({
       schema: "kf-module-trace/v1",
