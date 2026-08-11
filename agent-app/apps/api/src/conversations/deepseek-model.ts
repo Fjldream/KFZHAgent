@@ -371,20 +371,33 @@ function normalizedModuleKeyParts(key: string): { readonly tokens: readonly stri
   return { tokens, compact: tokens.join("") };
 }
 
-function isModulePlacementPreferredHeight(path: readonly string[], key: string): boolean {
+function operationKind(operation: object | undefined): string | undefined {
+  if (operation === undefined) return undefined;
+  // `assertDescriptorSafeJson` already verified this object. Reading a value
+  // descriptor here therefore cannot execute an operation-owned getter.
+  const descriptor = Object.getOwnPropertyDescriptor(operation, "op");
+  return descriptor !== undefined && "value" in descriptor && typeof descriptor.value === "string"
+    ? descriptor.value : undefined;
+}
+
+function isModulePlacementPreferredHeight(path: readonly string[], key: string, operation: object | undefined): boolean {
   // The exception is deliberately both exact and location-sensitive. An
   // embedded content object with the same spelling is not a ModulePlan field.
   if (key !== "preferredHeight") return false;
   const isIndex = (value: string | undefined): boolean => value !== undefined && /^(?:0|[1-9][0-9]*)$/.test(value);
-  // resize carries the same constrained height enum directly on the operation.
-  if (isIndex(path.at(-1)) && path.at(-2) === "operations") return true;
-  if (path.at(-1) !== "placement") return false;
-  // Final page snapshot: pages[n].modules[n].placement.preferredHeight.
-  if (path.at(-3) === "modules" && isIndex(path.at(-2)) && path.at(-5) === "pages" && isIndex(path.at(-4))) return true;
-  // Server-audited operation payloads: add.module.placement and move.placement.
-  if (path.at(-2) === "module" && isIndex(path.at(-3)) && path.at(-4) === "operations") return true;
-  if (isIndex(path.at(-2)) && path.at(-3) === "operations") return true;
-  return false;
+  const fullPath = [...path, key];
+  // Final snapshot: pages[index].modules[index].placement.preferredHeight.
+  if (fullPath.length === 6
+    && fullPath[0] === "pages" && isIndex(fullPath[1])
+    && fullPath[2] === "modules" && isIndex(fullPath[3])
+    && fullPath[4] === "placement") return true;
+  // Operations are legal only at their exact root shapes and with the matching
+  // discriminator. A nested JSON/content wrapper cannot satisfy these paths.
+  if (fullPath[0] !== "operations" || !isIndex(fullPath[1])) return false;
+  const kind = operationKind(operation);
+  if (fullPath.length === 3) return kind === "resize";
+  if (fullPath.length === 4 && fullPath[2] === "placement") return kind === "move";
+  return fullPath.length === 5 && fullPath[2] === "module" && fullPath[3] === "placement" && kind === "add";
 }
 
 function forbiddenModuleKey(key: string, isSchemaDefinedPreferredHeight = false): boolean {
@@ -400,11 +413,11 @@ function forbiddenModuleKey(key: string, isSchemaDefinedPreferredHeight = false)
 /** Model reply has passed JSON.parse, but scan its JSON tree before schema parsing for disallowed implementation vocabulary. */
 function assertSafeModulePlanOutput(root: unknown): void {
   assertDescriptorSafeJson(root, "model output");
-  const pending: Array<{ value: unknown; path: readonly string[] }> = [{ value: root, path: [] }];
+  const pending: Array<{ value: unknown; path: readonly string[]; operation: object | undefined }> = [{ value: root, path: [], operation: undefined }];
   let nodes = 0;
   while (pending.length > 0) {
     const current = pending.pop()!;
-    const { value, path } = current;
+    const { value, path, operation } = current;
     nodes += 1;
     if (nodes > 20_000) throwModulePlanError("exceeds raw node budget");
     if (typeof value === "string") {
@@ -422,7 +435,7 @@ function assertSafeModulePlanOutput(root: unknown): void {
           continue;
         }
         assertDescriptorSafeJson(parsed, "embedded model JSON");
-        pending.push({ value: parsed, path: [...path, "$embedded"] });
+        pending.push({ value: parsed, path: [...path, "$embedded"], operation });
       }
       continue;
     }
@@ -432,7 +445,12 @@ function assertSafeModulePlanOutput(root: unknown): void {
       for (let index = 0; index < value.length; index += 1) {
         const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
         if (descriptor === undefined || !("value" in descriptor)) throwModulePlanError("contains unsafe array item");
-        pending.push({ value: descriptor.value, path: [...path, String(index)] });
+        const childPath = [...path, String(index)];
+        const childValue = descriptor.value as unknown;
+        const rootOperation = path.length === 1 && path[0] === "operations"
+          && childValue !== null && typeof childValue === "object" && !Array.isArray(childValue)
+          ? childValue : operation;
+        pending.push({ value: childValue, path: childPath, operation: rootOperation });
       }
       continue;
     }
@@ -440,8 +458,8 @@ function assertSafeModulePlanOutput(root: unknown): void {
       if (typeof key !== "string") throwModulePlanError("contains unsafe non-string field");
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
       if (descriptor === undefined || !("value" in descriptor)) throwModulePlanError(`contains unsafe field: ${key}`);
-      if (forbiddenModuleKey(key, isModulePlacementPreferredHeight(path, key))) throwModulePlanError(`contains forbidden field: ${key}`);
-      pending.push({ value: descriptor.value, path: [...path, key] });
+      if (forbiddenModuleKey(key, isModulePlacementPreferredHeight(path, key, operation))) throwModulePlanError(`contains forbidden field: ${key}`);
+      pending.push({ value: descriptor.value, path: [...path, key], operation });
     }
   }
 }

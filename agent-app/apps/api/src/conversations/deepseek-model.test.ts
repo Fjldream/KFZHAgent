@@ -741,6 +741,18 @@ describe("DeepSeekModelPort", () => {
 
     const safe = withFirstModule({ content: JSON.stringify({ title: "安全标题", description: "安全描述", asset: { id: "portrait", label: "头像" } }) });
     await expect(makePort(safe).createModulePlan(modulePlanningContext())).resolves.toEqual(safe);
+
+    const embeddedOperationsWrapper = withFirstModule({
+      content: JSON.stringify({ operations: [{ op: "move", placement: { preferredHeight: "large" } }] }),
+    });
+    await expect(makePort(embeddedOperationsWrapper).createModulePlan(modulePlanningContext()))
+      .rejects.toThrow("contains forbidden field: preferredHeight");
+
+    const wrongRootOperation = modulePlan({
+      operations: [{ op: "remove", pageId: "home", moduleId: "productsHero", placement: { preferredHeight: "large" } }],
+    });
+    await expect(makePort(wrongRootOperation).createModulePlan(modulePlanningContext()))
+      .rejects.toThrow("contains forbidden field: preferredHeight");
   });
 
   it("rejects an unverified or mismatched confirmed blueprint before it can reach the model", async () => {
@@ -902,6 +914,14 @@ describe("DeepSeekModelPort", () => {
     }));
     expect(result.pages[0].modules.map((module) => module.id)).toEqual(["productsHero", "projectsTimeline"]);
     expect(result.pages[0].modules[1]).toEqual(previous.pages[0].modules[1]);
+
+    const movedPlacement = { ...previous.pages[0].modules[0].placement, alignment: "center" };
+    const moved = modulePlan({
+      pages: [{ ...previous.pages[0], modules: [{ ...previous.pages[0].modules[0], placement: movedPlacement }, previous.pages[0].modules[1]] }],
+      operations: [{ op: "move", pageId: "home", moduleId: "productsHero", placement: movedPlacement }],
+    });
+    await expect(makePort(moved).reviseModulePlan(modulePlanningContext({ previousModulePlan: previous })))
+      .resolves.toEqual(expect.objectContaining({ schema: "kf-module-plan/v1" }));
 
     const omitted = modulePlan({ pages: [{ ...previous.pages[0], modules: [previous.pages[0].modules[0]] }] });
     await expect(makePort(omitted).reviseModulePlan(modulePlanningContext({ previousModulePlan: previous })))
