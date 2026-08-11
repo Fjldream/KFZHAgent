@@ -86,6 +86,9 @@ export const CustomerEffectBlueprintSchema = z
               )
               .max(10),
             interactions: blueprintTextList,
+            /** Controlled acceptance-boundary expectation; not a KF implementation detail. */
+            expectedKind: z.string().trim().min(1).max(100).regex(/^[A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z][A-Za-z0-9_-]*)*$/).optional(),
+            expectedCategory: blueprintText.optional(),
             presentation: blueprintText,
           })
           .strict(),

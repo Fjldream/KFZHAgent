@@ -114,7 +114,7 @@ describe("dashboard modules", () => {
             : module),
         }],
       };
-      const revised = compileModulePlan({ plan: revisedAdmin, previousPlan: admin, previousImplementation: compiled.implementation, registry, assetsById: {}, validationContext: context });
+      const revised = compileModulePlan({ plan: revisedAdmin, previousPlan: admin, previousImplementation: compiled.implementation, previousMetadata: structuredClone(compiled.metadata), registry, assetsById: {}, validationContext: context });
       expect(revised.status).toBe("compiled"); if (revised.status !== "compiled") continue;
       const tableComponentId = "admin-table/datagrid";
       const existingComponents = compiled.implementation.pages.flatMap((page) => page.components);
@@ -143,6 +143,7 @@ describe("dashboard modules", () => {
         plan: toolbarOnlyAdmin,
         previousPlan: admin,
         previousImplementation: compiled.implementation,
+        previousMetadata: structuredClone(compiled.metadata),
         registry,
         assetsById: {},
         validationContext: context,

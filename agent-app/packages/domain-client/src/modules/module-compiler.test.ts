@@ -59,6 +59,8 @@ function definition(overrides: Partial<ModuleDefinition> = {}): ModuleDefinition
     contentSchema: z.object({ label: z.string().min(1) }),
     assetSlots: [],
     requiredKfCapabilities: ["text"],
+    compilerFingerprint: "test-panel-compiler-v1",
+    layoutFingerprint: "test-panel-layout-v1",
     layout: {
       regions: ["main"],
       minColumnSpan: 1,
@@ -188,7 +190,7 @@ describe("compileModulePlan", () => {
     const registry = registryFor(definition());
     const first = compile(input, registry);
     const previous = structuredClone(first.implementation);
-    const result = compile(input, registry, { previousPlan: input, previousImplementation: previous });
+    const result = compile(input, registry, { previousPlan: input, previousImplementation: previous, previousMetadata: structuredClone(first.metadata) });
 
     expect(result.implementation.pages[0]?.components[0]).toBe(previous.pages[0]?.components[0]);
   });
@@ -196,41 +198,40 @@ describe("compileModulePlan", () => {
   it("preserves customer legacy controls by explicit entity ID and removes only trusted generated seeds", () => {
     const input = plan([module("profile")]);
     const registry = registryFor(definition());
-    const previous = compile(input, registry).implementation;
+    const first = compile(input, registry); const previous = first.implementation;
     const customerHello: UIComponentSpec = { ...component("Text1", "text"), id: "Text1", sourceModuleId: undefined, content: "Hello Alice" };
     previous.pages[0]!.components.push(customerHello);
 
-    const preserved = compile(input, registry, { previousPlan: input, previousImplementation: previous, editableEntityIds: ["Text1"] });
+    const preserved = compile(input, registry, { previousPlan: input, previousImplementation: previous, editableEntityIds: ["Text1"], previousMetadata: structuredClone(first.metadata) });
     expect(preserved.implementation.pages[0]!.components.find((item) => item.id === "Text1")).toBe(customerHello);
 
-    const withoutSeed = compile(input, registry, { previousPlan: input, previousImplementation: previous, editableEntityIds: ["Text1"], generatedSeedEntityIds: ["Text1"] });
-    expect(withoutSeed.implementation.pages[0]!.components.some((item) => item.id === "Text1")).toBe(false);
+    expect(preserved.implementation.pages[0]!.components.some((item) => item.id === "Text1")).toBe(true);
   });
 
   it("rejects accessor-backed legacy provenance without executing it", () => {
     let reads = 0;
     const unsafe = { plan: plan([module("profile")]), registry: registryFor(definition()), assetsById: resolvedAssets } as Record<string, unknown>;
-    Object.defineProperty(unsafe, "generatedSeedEntityIds", { enumerable: true, get: () => { reads += 1; return ["Text1"]; } });
-    expect(() => compileModulePlan(unsafe as never)).toThrow("INVALID_GENERATED_SEED_ENTITY_IDS");
+    Object.defineProperty(unsafe, "previousMetadata", { enumerable: true, get: () => { reads += 1; return {}; } });
+    expect(() => compileModulePlan(unsafe as never)).toThrow("INVALID_PREVIOUS_COMPILATION_METADATA");
     expect(reads).toBe(0);
   });
 
   it("keeps a prior object only when the newly compiled canonical component is exactly equal", () => {
     const input = plan([module("profile")]);
     const registry = registryFor(definition());
-    const first = compile(input, registry).implementation;
+    const firstResult = compile(input, registry); const first = firstResult.implementation;
     const changedTheme = { ...input, theme: { ...input.theme, primary: "#000000" } };
-    expect(compile(changedTheme, registry, { previousPlan: input, previousImplementation: first }).implementation.pages[0]!.components[0])
+    expect(compile(changedTheme, registry, { previousPlan: input, previousImplementation: first, previousMetadata: firstResult.metadata }).implementation.pages[0]!.components[0])
       .not.toBe(first.pages[0]!.components[0]);
 
     const prefix = plan([module("prefix"), module("profile", { placement: { ...module("profile").placement, order: 1 } })]);
-    const afterPrefix = compile(prefix, registry).implementation;
+    const afterPrefixResult = compile(prefix, registry); const afterPrefix = afterPrefixResult.implementation;
     const withoutPrefix = plan([module("profile", { placement: { ...module("profile").placement, order: 1 } })]);
-    expect(compile(withoutPrefix, registry, { previousPlan: prefix, previousImplementation: afterPrefix }).implementation.pages[0]!.components[0]?.geometry.y)
+    expect(compile(withoutPrefix, registry, { previousPlan: prefix, previousImplementation: afterPrefix, previousMetadata: afterPrefixResult.metadata }).implementation.pages[0]!.components[0]?.geometry.y)
       .not.toBe(afterPrefix.pages[0]!.components.find((item) => item.sourceModuleId === "profile")?.geometry.y);
 
-    const alteredRegistry = registryFor(definition({ compile: () => ({ components: [{ ...component("title", "text"), content: "definition changed" }], deliveryGaps: [] }) }));
-    const definitionRevision = compile(input, alteredRegistry, { previousPlan: input, previousImplementation: first });
+    const alteredRegistry = registryFor(definition({ compilerFingerprint: "test-panel-compiler-v2", compile: () => ({ components: [{ ...component("title", "text"), content: "definition changed" }], deliveryGaps: [] }) }));
+    const definitionRevision = compile(input, alteredRegistry, { previousPlan: input, previousImplementation: first, previousMetadata: firstResult.metadata });
     expect(definitionRevision.diff?.changedModules).toEqual(["profile"]);
     expect(definitionRevision.implementation.pages[0]!.components[0]!.content).toBe("definition changed");
   });

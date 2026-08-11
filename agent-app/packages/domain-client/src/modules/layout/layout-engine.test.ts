@@ -16,6 +16,8 @@ function definition(overrides: Partial<ModuleDefinition> = {}): ModuleDefinition
     contentSchema,
     assetSlots: [],
     requiredKfCapabilities: [],
+    compilerFingerprint: "test-layout-compiler-v1",
+    layoutFingerprint: "test-layout-layout-v1",
     layout: {
       regions: ["header", "main", "sidebar", "footer", "toolbar"],
       minColumnSpan: 1,

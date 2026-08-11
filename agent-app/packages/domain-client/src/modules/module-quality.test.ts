@@ -20,7 +20,7 @@ function blueprint(ids: string[] = ["hero"]): CustomerEffectBlueprint {
   return {
     schema: "kf-design-plan/v2", displayName: "Portal", overview: { objective: "Show profile", audiences: ["Visitors"], scenarios: ["Browse"], valueProposition: "Clarity" },
     informationArchitecture: { narrative: "Hero first", wireframe: "hero" },
-    modules: ids.map((id) => ({ id, name: id, purpose: "Present content", content: ["content"], sampleData: [], interactions: [], presentation: "Clear" })),
+    modules: ids.map((id) => ({ id, name: id, purpose: "Present content", content: ["content"], sampleData: [], interactions: [], expectedKind: "content.hero", expectedCategory: "content", presentation: "Clear" })),
     visualDirection: { tone: "Dark", colors: ["blue"], typography: "Modern", spacingAndSurfaces: "Comfortable" }, highlights: ["Clear"],
     revisionNotes: { added: [], changed: [], retained: [] }, acceptanceCriteria: ["Works"], openQuestions: [],
   };
@@ -46,14 +46,14 @@ function component(moduleId = "hero", overrides: Partial<UIComponentSpec> = {}):
 function implementation(components: UIComponentSpec[] = [component(), component("hero", { id: "hero/title", role: "title", capabilityId: "text", critical: false })]): UIImplementationSpec {
   return { schema: "kf-ui-implementation/v1", theme, pages: [{ id: "home", width: 1440, height: 900, components }] };
 }
-function registry(): ModuleRegistry { const value = new ModuleRegistry(); const common = { version: "1.0.0", category: "content", maturity: "stable" as const, variants: ["no-portrait"], contentSchema: z.object({ title: z.string() }), assetSlots: [], requiredKfCapabilities: ["layout.2"], layout: { regions: ["main"] as const, minColumnSpan: 1, maxColumnSpan: 12, preferredHeights: ["medium"] as const, interactions: ["navigate"] as const, height: { min: 1, preferred: { compact: 1, small: 1, medium: 200, large: 300, full: 400 }, max: 400 } }, quality: { minimumComponentCount: 2, minimumCriticalComponentCount: 1, requiredRoles: ["surface"], requiredCriticalRoles: ["surface"], requiredCapabilityIds: ["layout.2"] }, compile: () => ({ components: [], deliveryGaps: [] }) }; value.register({ ...common, kind: "content.hero" }); value.register({ ...common, kind: "content.card-grid" }); return value; }
+function registry(): ModuleRegistry { const value = new ModuleRegistry(); const common = { version: "1.0.0", category: "content", maturity: "stable" as const, variants: ["no-portrait"], contentSchema: z.object({ title: z.string() }), assetSlots: [], requiredKfCapabilities: ["layout.2"], compilerFingerprint: "test-content-compiler-v1", layoutFingerprint: "test-content-layout-v1", layout: { regions: ["main"] as const, minColumnSpan: 1, maxColumnSpan: 12, preferredHeights: ["medium"] as const, interactions: ["navigate"] as const, height: { min: 1, preferred: { compact: 1, small: 1, medium: 200, large: 300, full: 400 }, max: 400 } }, quality: { minimumComponentCount: 2, minimumCriticalComponentCount: 1, requiredRoles: ["surface"], requiredCriticalRoles: ["surface"], requiredCapabilityIds: ["layout.2"] }, compile: () => ({ components: [], deliveryGaps: [] }) }; value.register({ ...common, kind: "content.hero" }); value.register({ ...common, kind: "content.card-grid" }); return value; }
 
 function evaluate(overrides: Partial<Parameters<typeof evaluateModuleDelivery>[0]> = {}) {
   const ui = implementation();
   return evaluateModuleDelivery({
     blueprint: blueprint(), plan: plan(), implementation: ui,
     traces: [{ schema: "kf-module-trace/v1", projectKey: "kingclient.portal", entries: ui.pages[0]!.components.map((item) => ({ pageId: "home", moduleId: "hero", outputId: item.id })) }],
-    assetBindings: [], gaps: [], registry: registry(), assetsById: {}, trustedBlueprintModuleMapping: { hero: ["hero"] }, ...overrides,
+    assetBindings: [], gaps: [], registry: registry(), assetsById: {}, metadata: { schema: "kf-module-compilation-metadata/v1", projectKey: "kingclient.portal", moduleDefinitions: [], assets: [], blueprintMappings: [{ blueprintModuleId: "hero", pageId: "home", moduleId: "hero", interactionBindings: [] }], generatedSeeds: [] }, ...overrides,
   });
 }
 

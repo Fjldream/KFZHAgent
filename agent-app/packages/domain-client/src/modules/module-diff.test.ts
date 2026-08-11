@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { ModulePlan, UIComponentSpec, UIImplementationSpec } from "@kf/contracts";
-import { diffModulePlans } from "./module-diff.js";
+import type { ModuleCompilationMetadata, ModulePlan, UIComponentSpec, UIImplementationSpec } from "@kf/contracts";
+import { diffModulePlans as rawDiffModulePlans } from "./module-diff.js";
 
 const theme = { background: "#101827", surface: "#1E293B", primary: "#2563EB", accent: "#38BDF8", textPrimary: "#F8FAFC", textSecondary: "#94A3B8", fontFamily: "Inter", spacingUnit: 8, radiusScale: { small: 4, medium: 8, large: 16 } } as const;
 function plan(ids: string[]): ModulePlan { return { schema: "kf-module-plan/v1", projectKey: "kingclient.portal", theme, assets: [], operations: [], pages: [{ id: "home", title: "Home", mode: "vertical-flow", modules: ids.map((id, order) => ({ id, kind: "content.hero", templateVersion: "1.0.0", variant: "no-portrait", title: id, content: JSON.stringify({ title: id }), placement: { region: "main", order, columnSpan: 12, preferredHeight: "medium", alignment: "stretch", emphasis: "primary" }, interactions: [] })) }] }; }
 function implementation(ids: string[], changed = new Set<string>()): UIImplementationSpec { const components: UIComponentSpec[] = ids.map((id, index) => ({ id: `${id}/surface`, sourceModuleId: id, role: "surface", capabilityId: "layout.2", critical: true, geometry: { x: 48, y: 48 + index * 224 + (changed.has(id) ? 1 : 0), width: 1344, height: 200 }, properties: {}, style: { declarations: {}, states: {} } })); return { schema: "kf-ui-implementation/v1", theme, pages: [{ id: "home", width: 1440, height: 900, components }] }; }
+function metadata(value: ModulePlan, compilerFingerprint = "content-hero-compiler-v1"): ModuleCompilationMetadata { return { schema: "kf-module-compilation-metadata/v1", projectKey: value.projectKey, moduleDefinitions: value.pages.flatMap((page) => page.modules.map((module) => ({ pageId: page.id, moduleId: module.id, kind: module.kind, templateVersion: module.templateVersion, compilerFingerprint, layoutFingerprint: "content-hero-layout-v1" }))), assets: value.pages.flatMap((page) => page.modules.flatMap((module) => module.assetId === undefined ? [] : [{ pageId: page.id, moduleId: module.id, assetId: module.assetId, status: "resolved" as const, assetIdentity: `${module.assetId}|resolved` }])), blueprintMappings: [], generatedSeeds: [] }; }
+function diffModulePlans(input: Parameters<typeof rawDiffModulePlans>[0] | Record<string, unknown>) { const value = input as Parameters<typeof rawDiffModulePlans>[0]; return rawDiffModulePlans({ ...value, previousMetadata: value.previousMetadata ?? metadata(value.previousPlan), metadata: value.metadata ?? metadata(value.plan) }); }
 
 describe("diffModulePlans", () => {
   it("preserves unrelated implementation objects byte-for-byte for content-only revisions", () => {
@@ -35,16 +37,16 @@ describe("diffModulePlans", () => {
     const after = implementation(["hero"], new Set(["hero"]));
     const drift = diffModulePlans({
       previousPlan: plan(["hero"]), plan: plan(["hero"]), previousImplementation: before, implementation: after,
-      previousDefinitionIdentities: { "home\u0000hero": "content.hero@1.0.0:a" },
-      definitionIdentities: { "home\u0000hero": "content.hero@1.0.0:b" },
+      previousMetadata: metadata(plan(["hero"]), "content-hero-compiler-a"),
+      metadata: metadata(plan(["hero"]), "content-hero-compiler-b"),
     });
     expect(drift.changedModules).toEqual(["hero"]);
     expect(drift.unexpectedChanges).toEqual([]);
 
     const unchangedIdentity = diffModulePlans({
       previousPlan: plan(["hero"]), plan: plan(["hero"]), previousImplementation: before, implementation: after,
-      previousDefinitionIdentities: { "home\u0000hero": "content.hero@1.0.0:a" },
-      definitionIdentities: { "home\u0000hero": "content.hero@1.0.0:a" },
+      previousMetadata: metadata(plan(["hero"]), "content-hero-compiler-a"),
+      metadata: metadata(plan(["hero"]), "content-hero-compiler-a"),
     });
     expect(unchangedIdentity.unexpectedChanges).toContainEqual(expect.objectContaining({ reason: "UNTOUCHED_MODULE_IMPLEMENTATION_CHANGED" }));
   });
@@ -83,8 +85,8 @@ describe("diffModulePlans", () => {
     after.pages[0]!.components[0]!.content = "asset pending";
     const diff = diffModulePlans({
       previousPlan: previous, plan: structuredClone(previous), previousImplementation: implementation(["hero", "projects"]), implementation: after,
-      previousAssetsById: { portrait: { assetId: "portrait", status: "resolved", resolvedName: "Portrait" } },
-      assetsById: { portrait: { assetId: "portrait", status: "pending" } },
+      previousMetadata: { ...metadata(previous), assets: [{ pageId: "home", moduleId: "hero", assetId: "portrait", status: "resolved", assetIdentity: "portrait|resolved|Portrait" }] },
+      metadata: { ...metadata(previous), assets: [{ pageId: "home", moduleId: "hero", assetId: "portrait", status: "pending", assetIdentity: "portrait|pending|" }] },
     });
     expect(diff.changedModules).toEqual(["hero"]);
     expect(diff.unchangedModules).toEqual(["projects"]);
@@ -95,7 +97,7 @@ describe("diffModulePlans", () => {
     let reads = 0;
     const unsafe = plan(["hero"]);
     Object.defineProperty(unsafe, "pages", { enumerable: true, get: () => { reads += 1; return []; } });
-    expect(() => diffModulePlans({ previousPlan: unsafe, plan: plan(["hero"]), previousImplementation: implementation(["hero"]), implementation: implementation(["hero"]) }))
+    expect(() => rawDiffModulePlans({ previousPlan: unsafe, plan: plan(["hero"]), previousImplementation: implementation(["hero"]), implementation: implementation(["hero"]), previousMetadata: metadata(plan(["hero"])), metadata: metadata(plan(["hero"])) }))
       .toThrow("MODULE_DIFF_UNSAFE_INPUT");
     expect(reads).toBe(0);
   });

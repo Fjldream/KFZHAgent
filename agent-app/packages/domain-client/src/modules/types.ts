@@ -84,8 +84,9 @@ export interface ModuleDefinition {
   readonly contentSchema: z.ZodType<Record<string, unknown>>;
   readonly assetSlots: readonly AssetSlotDefinition[];
   readonly requiredKfCapabilities: readonly string[];
-  /** Immutable identity of the registered compiler implementation, if it differs from its source. */
-  readonly compilerIdentity?: string;
+  /** Explicit, versioned registry fingerprints persisted with every compilation. */
+  readonly compilerFingerprint?: string;
+  readonly layoutFingerprint?: string;
   readonly quality?: ModuleQualityContract;
   readonly layout: ModuleLayoutContract;
   compile(input: ModuleCompileInput): ModuleCompileOutput;

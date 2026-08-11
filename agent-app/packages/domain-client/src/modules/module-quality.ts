@@ -10,6 +10,7 @@ import {
   type ModuleDeliveryReport,
   type ModulePlan,
   type ModuleTrace,
+  type ModuleCompilationMetadata,
   type UIComponentSpec,
   type UIImplementationSpec,
 } from "@kf/contracts";
@@ -27,7 +28,7 @@ export interface EvaluateModuleDeliveryInput {
   readonly registry: ModuleRegistry;
   readonly assetsById: Readonly<Record<string, ResolvedAsset>>;
   /** Trusted conversion-boundary provenance; plan declarations cannot authorize coverage. */
-  readonly trustedBlueprintModuleMapping?: Readonly<Record<string, readonly string[]>>;
+  readonly metadata: ModuleCompilationMetadata;
 }
 
 export interface ModuleDeliveryEvaluation {
@@ -50,22 +51,27 @@ export function evaluateModuleDelivery(input: EvaluateModuleDeliveryInput): Modu
   const gaps: ModuleDeliveryGap[] = [...inherited];
   const planModules = plan.pages.flatMap((page) => page.modules.map((module) => ({ pageId: page.id, module })));
   const owner = planModules[0]!.module.id;
-  const trusted = input.trustedBlueprintModuleMapping;
+  const trusted = input.metadata.blueprintMappings;
   const blueprintToModules = new Map<string, string[]>();
-  if (trusted !== undefined) for (const [blueprintId, moduleIds] of Object.entries(trusted)) blueprintToModules.set(blueprintId, [...moduleIds]);
+  for (const mapping of trusted) blueprintToModules.set(mapping.blueprintModuleId, [mapping.moduleId]);
 
   for (const module of blueprint.modules) {
     const mapped = blueprintToModules.get(module.id) ?? [];
+    const mapping = trusted.find((entry) => entry.blueprintModuleId === module.id);
     if (mapped.length !== 1) gaps.push(gap(owner, `Map confirmed blueprint module “${module.id}” exactly once to a registered module.`, "BLUEPRINT_MODULE_UNMAPPED"));
+    if (mapping !== undefined) {
+      const candidate = planModules.find(({ module: planModule }) => planModule.id === mapping.moduleId)?.module;
+      if (candidate === undefined || (module.expectedKind !== undefined && candidate.kind !== module.expectedKind) || (mapping.expectedKind !== undefined && candidate.kind !== mapping.expectedKind)) gaps.push(gap(owner, `Keep blueprint module “${module.id}” mapped to its expected registered kind.`, "BLUEPRINT_KIND_MISMATCH"));
+    }
     if (module.interactions.length > 0 && !mapped.some((id) => planModules.some(({ module: candidate }) => candidate.id === id && candidate.interactions.length > 0))) gaps.push(gap(module.id, "Map confirmed blueprint interactions to registered native interactions.", "BLUEPRINT_INTERACTION_UNMAPPED"));
   }
   const mappedModuleIds = new Set([...blueprintToModules.values()].flat());
-  if (trusted === undefined) gaps.push(gap(owner, "Provide trusted blueprint-to-module provenance from the accepted blueprint conversion boundary.", "BLUEPRINT_PROVENANCE_MISSING"));
+  if (trusted.length === 0) gaps.push(gap(owner, "Provide accepted blueprint provenance metadata from the conversion boundary.", "BLUEPRINT_PROVENANCE_MISSING"));
   for (const { module } of planModules) {
     if (!mappedModuleIds.has(module.id)) gaps.push(gap(module.id, "Map this module through trusted blueprint provenance.", "MODULE_TRUSTED_PROVENANCE_MISSING"));
     const declared = [...(module.sourceBlueprintModuleIds ?? [])].sort();
     const expected = [...blueprintToModules.entries()].filter(([, ids]) => ids.includes(module.id)).map(([id]) => id).sort();
-    if (trusted !== undefined && JSON.stringify(declared) !== JSON.stringify(expected)) gaps.push(gap(module.id, "Keep ModulePlan provenance equal to the trusted blueprint conversion mapping.", "MODULE_PROVENANCE_MISMATCH"));
+    if (JSON.stringify(declared) !== JSON.stringify(expected)) gaps.push(gap(module.id, "Keep ModulePlan provenance equal to accepted blueprint conversion metadata.", "MODULE_PROVENANCE_MISMATCH"));
     if ((module.sourceBlueprintModuleIds ?? []).some((id) => !blueprint.modules.some((candidate) => candidate.id === id))) gaps.push(gap(module.id, "Use only IDs from the confirmed blueprint.", "MODULE_BLUEPRINT_REFERENCE_UNKNOWN"));
   }
 

@@ -1,4 +1,4 @@
-import type { ModulePlan, ModulePlanModule, ResolvedAsset, UIComponentSpec, UIImplementationSpec } from "@kf/contracts";
+import type { ModuleCompilationMetadata, ModulePlan, ModulePlanModule, ResolvedAsset, UIComponentSpec, UIImplementationSpec } from "@kf/contracts";
 import { isDeepStrictEqual } from "node:util";
 
 export interface UnexpectedModuleChange {
@@ -22,13 +22,9 @@ export interface DiffModulePlansInput {
   readonly plan: ModulePlan;
   readonly previousImplementation: UIImplementationSpec;
   readonly implementation: UIImplementationSpec;
-  readonly previousAssetsById?: Readonly<Record<string, ResolvedAsset>>;
   readonly assetsById?: Readonly<Record<string, ResolvedAsset>>;
-  /** Trusted registry compiler identities keyed by pageId + NUL + moduleId. */
-  readonly previousDefinitionIdentities?: Readonly<Record<string, string>>;
-  readonly definitionIdentities?: Readonly<Record<string, string>>;
-  /** Trusted generated seed entities may be intentionally removed during import normalization. */
-  readonly expectedLegacyRemovedIds?: readonly string[];
+  readonly previousMetadata: ModuleCompilationMetadata;
+  readonly metadata: ModuleCompilationMetadata;
 }
 
 /**
@@ -60,10 +56,14 @@ export function diffModulePlans(input: DiffModulePlansInput): ModulePlanDiff {
   }
   for (const [key, module] of previous) if (!current.has(key)) changed.add(module.id);
 
+  const previousDefinitions = new Map(input.previousMetadata.moduleDefinitions.map((entry) => [`${entry.pageId}\u0000${entry.moduleId}`, entry]));
+  const definitions = new Map(input.metadata.moduleDefinitions.map((entry) => [`${entry.pageId}\u0000${entry.moduleId}`, entry]));
   for (const [key, module] of current) {
-    const priorIdentity = input.previousDefinitionIdentities?.[key];
-    const identity = input.definitionIdentities?.[key];
-    if (priorIdentity !== undefined && identity !== undefined && priorIdentity !== identity) changed.add(module.id);
+    if (!previous.has(key)) continue;
+    const priorIdentity = previousDefinitions.get(key);
+    const identity = definitions.get(key);
+    if (priorIdentity === undefined || identity === undefined) throw new Error("MISSING_COMPILATION_METADATA_MODULE");
+    if (priorIdentity.compilerFingerprint !== identity.compilerFingerprint || priorIdentity.layoutFingerprint !== identity.layoutFingerprint) changed.add(module.id);
   }
 
   const previousGroups = pageComponentGroups(input.previousImplementation);
@@ -74,9 +74,15 @@ export function diffModulePlans(input: DiffModulePlansInput): ModulePlanDiff {
       if (after !== undefined && JSON.stringify(before.map((component) => component.style)) !== JSON.stringify(after.map((component) => component.style))) changed.add(moduleId);
     }
   }
-  if (input.previousAssetsById !== undefined || input.assetsById !== undefined) for (const [key, module] of current) {
+  const previousAssets = new Map(input.previousMetadata.assets.map((entry) => [`${entry.pageId}\u0000${entry.moduleId}`, entry]));
+  const assets = new Map(input.metadata.assets.map((entry) => [`${entry.pageId}\u0000${entry.moduleId}`, entry]));
+  for (const [key, module] of current) {
     const prior = previous.get(key);
-    if (prior?.assetId !== undefined && prior.assetId === module.assetId && !isDeepStrictEqual(input.previousAssetsById?.[module.assetId], input.assetsById?.[module.assetId])) changed.add(module.id);
+    if (prior?.assetId !== undefined && prior.assetId === module.assetId) {
+      const previousAsset = previousAssets.get(key); const asset = assets.get(key);
+      if (previousAsset === undefined || asset === undefined) throw new Error("MISSING_COMPILATION_METADATA_ASSET");
+      if (!isDeepStrictEqual(previousAsset, asset)) changed.add(module.id);
+    }
   }
 
   for (const id of changed) unchanged.delete(id);
@@ -86,7 +92,7 @@ export function diffModulePlans(input: DiffModulePlansInput): ModulePlanDiff {
   const unexpected = [
     ...unexpectedModuleImplementationChanges(input.previousImplementation, input.implementation, protectedModules),
     ...unexpectedLayoutFieldChanges(input.previousImplementation, input.implementation, new Set(layoutAffected)),
-    ...unexpectedLegacyImplementationChanges(input.previousImplementation, input.implementation, new Set(input.expectedLegacyRemovedIds ?? [])),
+    ...unexpectedLegacyImplementationChanges(input.previousImplementation, input.implementation, new Set(input.previousMetadata.generatedSeeds.map((seed) => seed.entityId))),
   ].sort(compareUnexpected);
 
   return Object.freeze({

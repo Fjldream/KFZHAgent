@@ -25,6 +25,8 @@ function definition(overrides: Partial<ModuleDefinition> = {}): ModuleDefinition
     contentSchema: z.object({ headline: z.string().min(1) }),
     assetSlots: [{ id: "image", required: true, allowedKinds: ["image"] }],
     requiredKfCapabilities: ["text", "image"],
+    compilerFingerprint: "test-hero-compiler-v1",
+    layoutFingerprint: "test-hero-layout-v1",
     layout,
     compile: () => ({ components: [], deliveryGaps: [] }),
     ...overrides,
