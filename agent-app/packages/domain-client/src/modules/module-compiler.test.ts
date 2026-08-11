@@ -95,13 +95,15 @@ const resolvedAssets: Readonly<Record<string, ResolvedAsset>> = {
 };
 
 function compile(inputPlan: ModulePlan, registry: ModuleRegistry, extra: Partial<Parameters<typeof compileModulePlan>[0]> = {}) {
-  return compileModulePlan({
+  const outcome = compileModulePlan({
     plan: inputPlan,
     registry,
     assetsById: resolvedAssets,
     validationContext: { availableKfCapabilities: ["text", "image"], approvedAuthorizationRefs: [] },
     ...extra,
   });
+  if (outcome.status !== "compiled") throw new Error("expected compiled outcome");
+  return outcome;
 }
 
 describe("compileModulePlan", () => {
@@ -243,6 +245,25 @@ describe("compileModulePlan", () => {
     const id = stableModuleComponentId(left, right);
     expect(id.length).toBeLessThanOrEqual(100);
     expect(id).not.toBe(stableModuleComponentId(`${left}a`, right));
+    expect(stableModuleComponentId("brand-css", "title")).toBe("brand-css/title");
+  });
+
+  it("returns a structured blocked outcome when no page can produce components", () => {
+    const onlyRequired = plan([module("hero", { assetId: "portrait" })]);
+    const outcome = compileModulePlan({
+      plan: onlyRequired,
+      registry: registryFor(definition({ assetSlots: [{ id: "image", required: true, allowedKinds: ["image"] }] })),
+      assetsById: { portrait: { assetId: "portrait", status: "unavailable" } },
+      validationContext: { availableKfCapabilities: ["text"], approvedAuthorizationRefs: [] },
+    });
+    expect(outcome).toEqual(expect.objectContaining({ status: "blocked", gaps: [expect.objectContaining({ severity: "blocking" })] }));
+  });
+
+  it("returns schema defaults after canonical parsing", () => {
+    const result = compile(plan([module("profile")]), registryFor(definition({
+      compile: () => ({ components: [{ ...component("title", "text"), critical: undefined as never }], deliveryGaps: [] }),
+    })));
+    expect(result.implementation.pages[0]!.components[0]!.critical).toBe(true);
   });
 
   it("rejects duplicate stable slots and local output outside the assigned module bounds", () => {

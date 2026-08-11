@@ -27,11 +27,21 @@ export interface ResolvedAssetBinding {
 }
 
 export interface ModuleCompilationResult {
+  readonly status: "compiled";
   readonly implementation: UIImplementationSpec;
   readonly traces: readonly ModuleTrace[];
   readonly assetBindings: readonly ResolvedAssetBinding[];
   readonly gaps: readonly ModuleDeliveryGap[];
 }
+
+export interface ModuleCompilationBlockedResult {
+  readonly status: "blocked";
+  readonly traces: readonly ModuleTrace[];
+  readonly assetBindings: readonly ResolvedAssetBinding[];
+  readonly gaps: readonly ModuleDeliveryGap[];
+}
+
+export type ModuleCompilationOutcome = ModuleCompilationResult | ModuleCompilationBlockedResult;
 
 export interface CompileModulePlanInput {
   readonly plan: ModulePlan;
@@ -54,7 +64,7 @@ const FORBIDDEN_TEXT = /<\/?script\b|javascript\s*:|data\s*:\s*text\s*\/\s*html|
 const GUID_VALUE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 const ABSOLUTE_PATH = /(?:^|\s)(?:[A-Za-z]:[\\/]|\\\\|\/)/;
 
-export function compileModulePlan(input: CompileModulePlanInput): ModuleCompilationResult {
+export function compileModulePlan(input: CompileModulePlanInput): ModuleCompilationOutcome {
   const parsedPlan = ModulePlanSchema.safeParse(input.plan);
   if (!parsedPlan.success) throw new Error(`INVALID_MODULE_PLAN: ${parsedPlan.error.issues[0]?.message ?? "invalid plan"}`);
   const plan = parsedPlan.data;
@@ -137,21 +147,46 @@ export function compileModulePlan(input: CompileModulePlanInput): ModuleCompilat
       }
     }
 
-    if (pageComponents.length === 0) {
-      throw new Error(`MODULE_COMPILATION_BLOCKED: ${page.id} has no compilable components`);
-    }
+    if (pageComponents.length === 0) continue;
     pages.push({ id: page.id, width: layout.width, height: layout.height, components: pageComponents });
   }
 
+  const finalGaps = finalizeGaps(gaps);
+  if (pages.length !== plan.pages.length) {
+    return Object.freeze({ status: "blocked", traces: Object.freeze(traces), assetBindings: Object.freeze(assetBindings), gaps: finalGaps });
+  }
   const implementation: UIImplementationSpec = { schema: "kf-ui-implementation/v1", theme: plan.theme, pages };
   const parsedImplementation = UIImplementationSpecSchema.safeParse(implementation);
   if (!parsedImplementation.success) throw new Error(`INVALID_COMPILED_UI_IMPLEMENTATION: ${parsedImplementation.error.issues[0]?.message ?? "invalid implementation"}`);
+  const canonicalImplementation = reuseCanonicalPriorComponents(parsedImplementation.data, plan, previousPlan, previousComponents);
   return Object.freeze({
-    implementation,
+    status: "compiled",
+    implementation: canonicalImplementation,
     traces: Object.freeze(traces),
     assetBindings: Object.freeze(assetBindings),
-    gaps: Object.freeze(gaps),
+    gaps: finalGaps,
   });
+}
+
+function reuseCanonicalPriorComponents(
+  implementation: UIImplementationSpec,
+  plan: ModulePlan,
+  previousPlan: ModulePlan | undefined,
+  previousComponents: ReadonlyMap<string, readonly UIComponentSpec[]>,
+): UIImplementationSpec {
+  if (previousPlan === undefined || stableJson(plan.theme) !== stableJson(previousPlan.theme)) return implementation;
+  for (const page of implementation.pages) {
+    for (let index = 0; index < page.components.length; index += 1) {
+      const component = page.components[index]!;
+      const moduleId = component.sourceModuleId;
+      if (moduleId === undefined) continue;
+      const instance = plan.pages.find((candidate) => candidate.id === page.id)?.modules.find((candidate) => candidate.id === moduleId);
+      if (instance === undefined || instance.assetId !== undefined || previousModuleIndex(previousPlan).get(`${page.id}\u0000${moduleId}`) !== stableJson(instance)) continue;
+      const prior = previousComponents.get(`${page.id}\u0000${moduleId}`)?.find((candidate) => candidate.id === component.id);
+      if (prior !== undefined && isDeepStrictEqual(prior, component)) page.components[index] = prior;
+    }
+  }
+  return implementation;
 }
 
 /** Shared deterministic order used for prevalidation, layout-aligned compilation and traces. */
@@ -248,14 +283,17 @@ function assertSafeComponent(component: UIComponentSpec, id: string): void {
 
 function hasForbiddenPayload(value: unknown): boolean {
   if (typeof value === "string") return FORBIDDEN_TEXT.test(value) || GUID_VALUE.test(value) || ABSOLUTE_PATH.test(value);
-  if (Array.isArray(value)) return value.some(hasForbiddenPayload);
+  if (Array.isArray(value)) return !isStrictArray(value) || value.some(hasForbiddenPayload);
   if (value === null || typeof value !== "object") return false;
   if (!isPlainObject(value)) return true;
   return Object.keys(value).some((key) => isDangerousKey(key) || hasForbiddenPayload(value[key]));
 }
 
 function isDangerousKey(key: string): boolean {
-  return key === "__proto__" || key === "prototype" || key === "constructor" || FORBIDDEN_PROPERTY_KEY.test(key);
+  if (key === "__proto__" || key === "prototype" || key === "constructor") return true;
+  const tokens = key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(/[^A-Za-z0-9]+/).filter(Boolean).map((part) => part.toLowerCase());
+  return tokens.some((token) => ["css", "native", "guid", "path", "storage", "key", "script", "styledata"].includes(token))
+    || FORBIDDEN_PROPERTY_KEY.test(key);
 }
 
 function isPlainObject(value: object): value is Record<string, unknown> {
@@ -265,15 +303,29 @@ function isPlainObject(value: object): value is Record<string, unknown> {
 
 function isPlainSafe(value: unknown): boolean {
   if (value === null || typeof value !== "object") return true;
-  if (Array.isArray(value)) return value.every(isPlainSafe);
-  if (!isPlainObject(value)) return false;
+  if (Array.isArray(value)) return isStrictArray(value) && value.every(isPlainSafe);
+  if (!isStrictPlainObject(value)) return false;
   return Object.keys(value).every((key) => !isDangerousKey(key) && isPlainSafe(value[key]));
 }
 
+function isStrictArray(value: unknown[]): boolean {
+  if (Object.getPrototypeOf(value) !== Array.prototype || Object.getOwnPropertySymbols(value).length > 0) return false;
+  return Reflect.ownKeys(value).every((key) => key === "length" || (typeof key === "string" && /^(0|[1-9][0-9]*)$/.test(key) && Number(key) < value.length));
+}
+
+function isStrictPlainObject(value: object): value is Record<string, unknown> {
+  if (!isPlainObject(value) || Object.getOwnPropertySymbols(value).length > 0) return false;
+  return Object.keys(value).every((key) => {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor !== undefined && descriptor.enumerable && "value" in descriptor;
+  });
+}
+
 function parseResolvedAssets(input: Readonly<Record<string, ResolvedAsset>>): Readonly<Record<string, ResolvedAsset>> {
-  if (!isPlainSafe(input) || hasForbiddenPayload(input)) throw new Error("INVALID_RESOLVED_ASSETS");
+  if (!isStrictPlainObject(input)) throw new Error("INVALID_RESOLVED_ASSETS");
   const output: Record<string, ResolvedAsset> = {};
   for (const key of Object.keys(input)) {
+    if (!isPlainSafe(input[key]) || hasForbiddenPayload(input[key])) throw new Error(`INVALID_RESOLVED_ASSET: ${key}`);
     const parsed = ResolvedAssetSchema.safeParse(input[key]);
     if (!parsed.success || parsed.data.assetId !== key) throw new Error(`INVALID_RESOLVED_ASSET: ${key}`);
     output[key] = parsed.data;
@@ -298,6 +350,30 @@ function parseCompilerGaps(instance: ModulePlanModule, values: readonly ModuleDe
     if (!parsed.success || parsed.data.moduleId !== instance.id) throw new Error(`INVALID_MODULE_DELIVERY_GAP: ${instance.id}`);
     return parsed.data;
   });
+}
+
+function finalizeGaps(values: readonly ModuleDeliveryGap[]): readonly ModuleDeliveryGap[] {
+  const unique = new Map<string, ModuleDeliveryGap>();
+  for (const value of values) {
+    const parsed = ModuleDeliveryGapSchema.parse(value);
+    if (parsed.status === "unresolved" && parsed.severity === "info") throw new Error(`INVALID_MODULE_DELIVERY_GAP: ${parsed.moduleId}`);
+    unique.set(stableJson(parsed), parsed);
+  }
+  const ordered = [...unique.values()].sort((left, right) => severityRank(right.severity) - severityRank(left.severity) || compareCodePoints(left.moduleId, right.moduleId) || compareCodePoints(left.requirement, right.requirement));
+  if (ordered.length <= 200) return Object.freeze(ordered);
+  const overflow = ordered.slice(199);
+  const summary = ModuleDeliveryGapSchema.parse({
+    moduleId: overflow[0]!.moduleId,
+    requirement: "Review additional module delivery gaps.",
+    severity: overflow.some((gap) => gap.severity === "blocking") ? "blocking" : "warning",
+    status: "unresolved",
+    reason: `MODULE_DELIVERY_GAP_OVERFLOW: ${overflow.length} additional gaps retained in compiler diagnostics.`,
+  });
+  return Object.freeze([...ordered.slice(0, 199), summary]);
+}
+
+function severityRank(severity: ModuleDeliveryGap["severity"]): number {
+  return severity === "blocking" ? 3 : severity === "warning" ? 2 : 1;
 }
 
 function validateModuleInstance(
