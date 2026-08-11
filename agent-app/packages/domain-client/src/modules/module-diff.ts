@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 export interface UnexpectedModuleChange {
   readonly moduleId: string;
   readonly pageId: string;
-  readonly reason: "UNTOUCHED_MODULE_IMPLEMENTATION_CHANGED" | "UNTOUCHED_MODULE_IMPLEMENTATION_MISSING" | "PRESERVED_LEGACY_IMPLEMENTATION_CHANGED";
+  readonly reason: "UNTOUCHED_MODULE_IMPLEMENTATION_CHANGED" | "UNTOUCHED_MODULE_IMPLEMENTATION_MISSING" | "LAYOUT_AFFECTED_MODULE_NON_GEOMETRY_CHANGED" | "PRESERVED_LEGACY_IMPLEMENTATION_CHANGED";
 }
 
 export interface ModulePlanDiff {
@@ -68,10 +68,13 @@ export function diffModulePlans(input: DiffModulePlansInput): ModulePlanDiff {
     if (prior?.assetId !== undefined && prior.assetId === module.assetId && !isDeepStrictEqual(input.previousAssetsById?.[module.assetId], input.assetsById?.[module.assetId])) changed.add(module.id);
   }
 
+  for (const id of changed) unchanged.delete(id);
+
   const layoutAffected = layoutAffectedModuleIds(input.previousPlan, input.plan);
   const protectedModules = new Set([...unchanged].filter((id) => !layoutAffected.includes(id)));
   const unexpected = [
     ...unexpectedModuleImplementationChanges(input.previousImplementation, input.implementation, protectedModules),
+    ...unexpectedLayoutFieldChanges(input.previousImplementation, input.implementation, new Set(layoutAffected)),
     ...unexpectedLegacyImplementationChanges(input.previousImplementation, input.implementation),
   ].sort(compareUnexpected);
 
@@ -81,6 +84,24 @@ export function diffModulePlans(input: DiffModulePlansInput): ModulePlanDiff {
     layoutAffectedModules: Object.freeze(layoutAffected),
     unexpectedChanges: Object.freeze(unexpected),
   });
+}
+
+function unexpectedLayoutFieldChanges(previous: UIImplementationSpec, current: UIImplementationSpec, affected: ReadonlySet<string>): UnexpectedModuleChange[] {
+  const output: UnexpectedModuleChange[] = [];
+  const before = pageComponentGroups(previous); const after = pageComponentGroups(current);
+  for (const [pageId, groups] of before) for (const [moduleId, oldComponents] of groups) {
+    if (!affected.has(moduleId)) continue;
+    const newComponents = after.get(pageId)?.get(moduleId);
+    if (newComponents === undefined || oldComponents.length !== newComponents.length || oldComponents.some((component, index) => !sameExceptGeometry(component, newComponents[index]!))) output.push(Object.freeze({ pageId, moduleId, reason: "LAYOUT_AFFECTED_MODULE_NON_GEOMETRY_CHANGED" }));
+  }
+  return output;
+}
+
+function sameExceptGeometry(left: UIComponentSpec, right: UIComponentSpec): boolean {
+  return left.id === right.id && left.role === right.role && left.sourceModuleId === right.sourceModuleId
+    && left.capabilityId === right.capabilityId && left.critical === right.critical
+    && left.fallbackCapabilityId === right.fallbackCapabilityId && left.content === right.content
+    && isDeepStrictEqual(left.properties, right.properties) && isDeepStrictEqual(left.style, right.style);
 }
 
 function indexModules(plan: ModulePlan): ReadonlyMap<string, ModulePlanModule> {

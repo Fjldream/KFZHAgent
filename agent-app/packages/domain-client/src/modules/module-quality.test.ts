@@ -53,7 +53,7 @@ function evaluate(overrides: Partial<Parameters<typeof evaluateModuleDelivery>[0
   return evaluateModuleDelivery({
     blueprint: blueprint(), plan: plan(), implementation: ui,
     traces: [{ schema: "kf-module-trace/v1", projectKey: "kingclient.portal", entries: [{ pageId: "home", moduleId: "hero", outputId: "hero/surface" }] }],
-    assetBindings: [], gaps: [], registry: registry(), assetsById: {}, ...overrides,
+    assetBindings: [], gaps: [], registry: registry(), assetsById: {}, trustedBlueprintModuleMapping: { hero: ["hero"] }, ...overrides,
   });
 }
 
@@ -61,7 +61,7 @@ describe("evaluateModuleDelivery", () => {
   it("blocks delivery when a confirmed blueprint module is absent from ModulePlan", () => {
     const report = evaluate({ blueprint: blueprint(["hero", "projects"]), plan: plan(["hero"]) }).report;
     expect(report.status).toBe("blocked");
-    expect(report.gaps).toContainEqual(expect.objectContaining({ moduleId: "projects", reason: "BLUEPRINT_MODULE_UNMAPPED", severity: "blocking" }));
+    expect(report.gaps).toContainEqual(expect.objectContaining({ moduleId: "hero", requirement: expect.stringContaining("projects"), reason: "BLUEPRINT_MODULE_UNMAPPED", severity: "blocking" }));
   });
 
   it.each([

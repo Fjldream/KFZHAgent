@@ -55,9 +55,11 @@ export interface CompileModulePlanInput {
   readonly plan: ModulePlan;
   /** Confirmed customer-effect blueprint. Omitted only by legacy callers. */
   readonly blueprint?: CustomerEffectBlueprint;
+  readonly trustedBlueprintModuleMapping?: Readonly<Record<string, readonly string[]>>;
   readonly registry: ModuleRegistry;
   /** Opaque IDs resolve to safe metadata only; paths and storage keys never enter this boundary. */
   readonly assetsById: Readonly<Record<string, ResolvedAsset>>;
+  readonly previousAssetsById?: Readonly<Record<string, ResolvedAsset>>;
   readonly previousPlan?: ModulePlan;
   readonly previousImplementation?: UIImplementationSpec;
   /** Existing editable entities are preserved when not module-owned. */
@@ -93,6 +95,7 @@ export function compileModulePlan(input: CompileModulePlanInput): ModuleCompilat
   const previousPlan = input.previousPlan === undefined ? undefined : ModulePlanSchema.parse(input.previousPlan);
   const previousImplementation = parsePreviousImplementation(input.previousImplementation);
   const assetsById = parseResolvedAssets(input.assetsById);
+  const previousAssetsById = input.previousAssetsById === undefined ? undefined : parseResolvedAssets(input.previousAssetsById);
   const validationContext = input.validationContext ?? EMPTY_VALIDATION_CONTEXT;
   const previousModules = previousModuleIndex(previousPlan);
   const previousComponents = previousComponentIndex(previousImplementation);
@@ -180,9 +183,9 @@ export function compileModulePlan(input: CompileModulePlanInput): ModuleCompilat
     : undefined;
   const parsedImplementation = implementation === undefined ? undefined : UIImplementationSpecSchema.safeParse(implementation);
   if (parsedImplementation !== undefined && !parsedImplementation.success) throw new Error(`INVALID_COMPILED_UI_IMPLEMENTATION: ${parsedImplementation.error.issues[0]?.message ?? "invalid implementation"}`);
-  const canonicalImplementation = parsedImplementation === undefined ? undefined : preserveLegacyComponents(reuseCanonicalPriorComponents(parsedImplementation.data, plan, previousPlan, previousComponents), previousImplementation, input.editableEntityIds);
+  const canonicalImplementation = parsedImplementation === undefined ? undefined : validatePreservedImplementation(preserveLegacyComponents(reuseCanonicalPriorComponents(parsedImplementation.data, plan, previousPlan, previousComponents), previousImplementation, input.editableEntityIds));
   const diff = canonicalImplementation !== undefined && previousPlan !== undefined && previousImplementation !== undefined
-    ? diffModulePlans({ previousPlan, plan, previousImplementation, implementation: canonicalImplementation })
+    ? diffModulePlans({ previousPlan, plan, previousImplementation, implementation: canonicalImplementation, ...(previousAssetsById === undefined ? {} : { previousAssetsById }), assetsById })
     : undefined;
   if (diff !== undefined && diff.unexpectedChanges.length > 0) throw new UnexpectedModuleChangeError(diff);
   const deliveryReport = input.blueprint === undefined ? undefined : evaluateModuleDelivery({
@@ -194,6 +197,7 @@ export function compileModulePlan(input: CompileModulePlanInput): ModuleCompilat
     gaps: finalGaps,
     registry: input.registry,
     assetsById,
+    ...(input.trustedBlueprintModuleMapping === undefined ? {} : { trustedBlueprintModuleMapping: input.trustedBlueprintModuleMapping }),
   }).report;
   if (canonicalImplementation === undefined || hasUnresolvedBlockingGap(finalGaps) || deliveryReport?.status === "blocked") {
     return Object.freeze({
@@ -242,6 +246,17 @@ function preserveLegacyComponents(
     for (const component of legacy) if (!ids.has(component.id)) page.components.push(component);
   }
   return { ...implementation, pages };
+}
+
+function validatePreservedImplementation(value: UIImplementationSpec): UIImplementationSpec {
+  const parsed = UIImplementationSpecSchema.safeParse(value);
+  if (!parsed.success) throw new Error("INVALID_PRESERVED_UI_IMPLEMENTATION");
+  const ids = new Set<string>();
+  for (const page of value.pages) for (const component of page.components) {
+    if (ids.has(component.id)) throw new Error(`DUPLICATE_PRESERVED_COMPONENT_ID: ${component.id}`);
+    ids.add(component.id);
+  }
+  return value;
 }
 
 function reuseCanonicalPriorComponents(
