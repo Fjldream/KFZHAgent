@@ -23,6 +23,10 @@ const WEBP_1X1 = Buffer.from(
   "UklGRiIAAABXRUJQVlA4IBYAAABwAQCdASoBAAEAAUAmJaQAA3AA/vuU",
   "base64",
 );
+const HEADER_ONLY_JPEG = Buffer.from("ffd8ffe00002ffc000080001000100ffd9", "hex");
+const STRUCTURALLY_SIZED_HEADER_ONLY_JPEG = Buffer.from("ffd8ffc0000b080001000101011100ffd9", "hex");
+const SOS_INDEX = JPEG_1X1.indexOf(Buffer.from([0xff, 0xda]));
+const INCOMPLETE_SOS_JPEG = JPEG_1X1.subarray(0, SOS_INDEX + 2 + JPEG_1X1.readUInt16BE(SOS_INDEX + 2));
 
 class MemoryStorage implements ArtifactStorage {
   readonly bytes = new Map<string, Buffer>();
@@ -181,6 +185,22 @@ describe("AssetService", () => {
       workspaceId: W_A,
       name: "truncated.png",
       stream: Readable.from([PNG_1X1.subarray(0, PNG_1X1.length - 4)]),
+    })).rejects.toThrow("ASSET_INVALID_CONTAINER");
+    expect(prisma.rows).toHaveLength(0);
+    expect(storage.bytes.size).toBe(0);
+  });
+
+  it.each([
+    ["header-only pseudo JPEG", HEADER_ONLY_JPEG],
+    ["structurally sized header-only JPEG", STRUCTURALLY_SIZED_HEADER_ONLY_JPEG],
+    ["incomplete SOS JPEG", INCOMPLETE_SOS_JPEG],
+  ])("rejects %s before database adoption", async (_label, bytes) => {
+    const { service: assets, prisma, storage } = service();
+    await expect(assets.upload({
+      tenantId: T_A,
+      workspaceId: W_A,
+      name: "invalid.jpg",
+      stream: Readable.from([bytes]),
     })).rejects.toThrow("ASSET_INVALID_CONTAINER");
     expect(prisma.rows).toHaveLength(0);
     expect(storage.bytes.size).toBe(0);

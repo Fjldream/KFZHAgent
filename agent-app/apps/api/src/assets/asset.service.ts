@@ -379,13 +379,15 @@ function isPngChunkType(type: Buffer): boolean {
 function isCompleteJpeg(bytes: Buffer): boolean {
   if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return false;
   let offset = 2;
-  let sawFrame = false;
+  let frameComponents: Set<number> | undefined;
+  let sawSos = false;
+  let sawEntropyScan = false;
   while (offset < bytes.length) {
     const markerStart = consumeJpegMarker(bytes, offset);
     if (markerStart === undefined) return false;
     const marker = bytes[markerStart + 1]!;
     offset = markerStart + 2;
-    if (marker === 0xd9) return sawFrame && offset === bytes.length;
+    if (marker === 0xd9) return frameComponents !== undefined && sawSos && sawEntropyScan && offset === bytes.length;
     if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
     if (offset + 2 > bytes.length) return false;
     const segmentLength = bytes.readUInt16BE(offset);
@@ -393,17 +395,23 @@ function isCompleteJpeg(bytes: Buffer): boolean {
     const dataStart = offset + 2;
     const dataEnd = offset + segmentLength;
     if (isJpegStartOfFrame(marker)) {
-      if (segmentLength < 8 || bytes.readUInt16BE(dataStart + 1) === 0 || bytes.readUInt16BE(dataStart + 3) === 0) return false;
-      sawFrame = true;
+      if (frameComponents !== undefined) return false;
+      frameComponents = validateJpegFrame(bytes.subarray(dataStart, dataEnd));
+      if (frameComponents === undefined) return false;
+    }
+    if (marker === 0xda && (frameComponents === undefined || !isValidJpegSos(bytes.subarray(dataStart, dataEnd), frameComponents))) {
+      return false;
     }
     offset = dataEnd;
     if (marker === 0xda) {
+      sawSos = true;
       const scanEnd = consumeJpegScan(bytes, offset);
       if (scanEnd === undefined) return false;
-      if (bytes[scanEnd] === 0xff && bytes[scanEnd + 1] === 0xd9) {
-        return sawFrame && scanEnd + 2 === bytes.length;
+      if (scanEnd.hasEntropy) sawEntropyScan = true;
+      if (bytes[scanEnd.offset] === 0xff && bytes[scanEnd.offset + 1] === 0xd9) {
+        return frameComponents !== undefined && sawSos && sawEntropyScan && scanEnd.offset + 2 === bytes.length;
       }
-      offset = scanEnd;
+      offset = scanEnd.offset;
     }
   }
   return false;
@@ -417,10 +425,51 @@ function consumeJpegMarker(bytes: Buffer, offset: number): number | undefined {
   return cursor - 1;
 }
 
-function consumeJpegScan(bytes: Buffer, offset: number): number | undefined {
+function validateJpegFrame(segment: Buffer): Set<number> | undefined {
+  // precision(1), height(2), width(2), component-count(1), component specs.
+  if (segment.length < 9 || segment.readUInt16BE(1) === 0 || segment.readUInt16BE(3) === 0) return undefined;
+  const count = segment[5]!;
+  if (count === 0 || count > 4 || segment.length !== 6 + count * 3) return undefined;
+  const components = new Set<number>();
+  for (let index = 0; index < count; index += 1) {
+    const offset = 6 + index * 3;
+    const id = segment[offset]!;
+    const sampling = segment[offset + 1]!;
+    const quantizationTable = segment[offset + 2]!;
+    if (id === 0 || components.has(id) || sampling === 0 || quantizationTable > 3) return undefined;
+    components.add(id);
+  }
+  return components;
+}
+
+function isValidJpegSos(segment: Buffer, frameComponents: ReadonlySet<number>): boolean {
+  // component-count(1), selector pairs, spectral start/end, approximation.
+  if (segment.length < 6) return false;
+  const count = segment[0]!;
+  if (count === 0 || count > frameComponents.size || segment.length !== 4 + count * 2) return false;
+  const selected = new Set<number>();
+  for (let index = 0; index < count; index += 1) {
+    const offset = 1 + index * 2;
+    const componentId = segment[offset]!;
+    const tableSelector = segment[offset + 1]!;
+    if (!frameComponents.has(componentId) || selected.has(componentId) || (tableSelector >> 4) > 3 || (tableSelector & 0x0f) > 3) {
+      return false;
+    }
+    selected.add(componentId);
+  }
+  // The remaining three bytes are spectral/approximation controls. Their
+  // presence is guaranteed by exact segment length; permissive values retain
+  // compatibility with existing progressive fixtures while component selector
+  // structure and actual entropy data remain mandatory.
+  return true;
+}
+
+function consumeJpegScan(bytes: Buffer, offset: number): { offset: number; hasEntropy: boolean } | undefined {
   let cursor = offset;
+  let hasEntropy = false;
   while (cursor < bytes.length) {
     if (bytes[cursor] !== 0xff) {
+      hasEntropy = true;
       cursor += 1;
       continue;
     }
@@ -428,11 +477,16 @@ function consumeJpegScan(bytes: Buffer, offset: number): number | undefined {
     while (bytes[marker] === 0xff) marker += 1;
     if (marker >= bytes.length) return undefined;
     const value = bytes[marker]!;
-    if (value === 0x00 || (value >= 0xd0 && value <= 0xd7)) {
+    if (value === 0x00) {
+      hasEntropy = true;
       cursor = marker + 1;
       continue;
     }
-    return marker - 1;
+    if (value >= 0xd0 && value <= 0xd7) {
+      cursor = marker + 1;
+      continue;
+    }
+    return { offset: marker - 1, hasEntropy };
   }
   return undefined;
 }

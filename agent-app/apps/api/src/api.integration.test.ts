@@ -55,6 +55,12 @@ const ASSET_WEBP_1X1 = Buffer.from(
   "UklGRiIAAABXRUJQVlA4IBYAAABwAQCdASoBAAEAAUAmJaQAA3AA/vuU",
   "base64",
 );
+const ASSET_HEADER_ONLY_JPEG = Buffer.from("ffd8ffe00002ffc000080001000100ffd9", "hex");
+const ASSET_JPEG_SOS_INDEX = ASSET_JPEG_1X1.indexOf(Buffer.from([0xff, 0xda]));
+const ASSET_INCOMPLETE_SOS_JPEG = ASSET_JPEG_1X1.subarray(
+  0,
+  ASSET_JPEG_SOS_INDEX + 2 + ASSET_JPEG_1X1.readUInt16BE(ASSET_JPEG_SOS_INDEX + 2),
+);
 
 let app: INestApplication;
 let server: ReturnType<INestApplication["getHttpServer"]>;
@@ -935,6 +941,25 @@ describe("api contract", () => {
         .set("Cookie", cookie)
         .set("Content-Type", "image/png")
         .send(name === "truncated.png" ? bytes : Buffer.concat([bytes, Buffer.from("<script>run()</script>")]))
+        .expect(422);
+      expect(response.body.message).toBe("ASSET_INVALID_CONTAINER");
+    }
+    expect(await prisma.workspaceAsset.count({ where: { tenantId: ws.body.tenantId, workspaceId: ws.body.id } })).toBe(0);
+  });
+
+  it("rejects header-only and incomplete-SOS JPEGs through the real asset endpoint", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createWorkspace(cookie, "Asset JPEG Validation WS");
+    for (const [name, bytes] of [
+      ["header-only.jpg", ASSET_HEADER_ONLY_JPEG],
+      ["incomplete-sos.jpg", ASSET_INCOMPLETE_SOS_JPEG],
+    ] as const) {
+      const response = await request(server)
+        .post(`/api/workspaces/${ws.body.id}/assets`)
+        .query({ name })
+        .set("Cookie", cookie)
+        .set("Content-Type", "image/jpeg")
+        .send(bytes)
         .expect(422);
       expect(response.body.message).toBe("ASSET_INVALID_CONTAINER");
     }
