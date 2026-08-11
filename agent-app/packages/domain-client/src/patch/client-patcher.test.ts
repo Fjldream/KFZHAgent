@@ -336,6 +336,15 @@ describe("client patcher (Task 7 brief Step 1)", () => {
     }]))).rejects.toThrow(/PATCH_CONFLICT: invalid button action: unknown page missing-page/);
   });
 
+  it.each(["/linkMng/linkList", "/linkMng~1linkList", "/linkMng/0"]) ("rejects raw or descendant linkMng update %s before persistence", async (path) => {
+    const base = await copyFixture("client-unknown-field");
+    await expect(applyClientPatch(base, plan([{
+      op: "update", entityType: "control", entityId: "button-guid-1",
+      changes: [{ path, value: { action: "navigatePage", script: "evil()" } }],
+    }]))).rejects.toThrow(/PATCH_CONFLICT/);
+    expect(await controlField(base, "button-guid-1", "linkMng")).toBeUndefined();
+  });
+
   it("nests static, EasyUI, and layout controls using parent-local coordinates", async () => {
     const base = await copyFixture("client-unknown-field");
     const candidate = await applyClientPatch(base, plan([

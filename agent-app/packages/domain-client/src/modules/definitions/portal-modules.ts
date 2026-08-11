@@ -51,12 +51,12 @@ function navigateAction(context: { instance: { interactions: readonly { type: st
 }
 
 const navigationTop = define({
-  kind: "navigation.top", category: "navigation", variants: ["default", "compact"], contentSchema: definitionSchema(z.object({ logo: text(80), items: items(text(80), 8) }).strict()), assetSlots: NO_ASSETS, requiredKfCapabilities: ["layout.2", "text", "navmenu"], layout: layout(["header"], ["navigate"]),
+  kind: "navigation.top", category: "navigation", variants: ["default", "compact"], contentSchema: definitionSchema(z.object({ logo: text(80), items: items(text(80), 8) }).strict()), assetSlots: NO_ASSETS, requiredKfCapabilities: ["layout.2", "text", "button"], layout: layout(["header"], ["navigate"]),
   compile: ({ context }) => {
     const content = context.content as { logo: string; items: string[] };
     const box = local(context, 160, 40); if (!box) return insufficient(context);
     const logoWidth = Math.min(220, Math.floor(box.width / 3));
-    return output([surface("surface", box), sectionTitle("logo", content.logo, { x: 8, y: 4, width: logoWidth, height: Math.min(28, box.height - 8) }, "surface"), Object.freeze({ id: "menu", role: "navigation-menu", capabilityId: "navmenu", critical: true, content: undefined, geometry: { x: logoWidth + 16, y: 0, width: box.width - logoWidth - 16, height: box.height }, properties: { mode: "horizontal", options: content.items.map((label, index) => ({ id: `nav-${index + 1}`, label })) , parentId: "surface" }, style: { role: "surface", declarations: {}, states: {} } })], interactionGaps(context, 0));
+    const menuX = logoWidth + 16; const menuWidth = box.width - menuX - 8; const itemWidth = Math.floor(menuWidth / content.items.length); if (itemWidth < 40) return insufficient(context); const components: UIComponentSpec[] = [surface("surface", box), sectionTitle("logo", content.logo, { x: 8, y: 4, width: logoWidth, height: Math.min(28, box.height - 8) }, "surface")]; content.items.forEach((label, index) => components.push(actionButton(`nav-${index + 1}`, label, { x: menuX + index * itemWidth, y: 4, width: index === content.items.length - 1 ? menuWidth - index * itemWidth : itemWidth - 4, height: box.height - 8 }, "surface", navigateAction(context, index)))); return output(components, interactionGaps(context, content.items.length));
   },
 });
 

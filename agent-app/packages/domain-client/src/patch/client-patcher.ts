@@ -822,6 +822,9 @@ async function applyUpdate(
     }
     const tokens = parseJsonPointer(change.path);
     const firstToken = tokens[0] as string;
+    if (firstToken === "linkMng" && !(isControlLocation(loc) && loc.controlType === "button" && change.path === "/linkMng")) {
+      throw new PatchConflictError("linkMng may only be updated through the exact reviewed button /linkMng action boundary");
+    }
     if (!allowed.has(firstToken)) {
       throw new PatchConflictError(
         `path "/${firstToken}" is not allowlisted for ${loc.kind}${
