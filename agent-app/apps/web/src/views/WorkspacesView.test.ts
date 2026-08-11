@@ -100,6 +100,23 @@ describe("WorkspacesView", () => {
     expect(pushMock).toHaveBeenCalledWith("/workspaces/ws-new");
   });
 
+  it("explains that a project name is required instead of silently disabling create", async () => {
+    listWorkspacesMock.mockResolvedValue([wsA]);
+    const wrapper = mount(WorkspacesView, { attachTo: document.body });
+    await flushPromises();
+
+    const button = wrapper.get('[data-testid="create-workspace"]');
+    expect(button.attributes("disabled")).toBeUndefined();
+    await button.trigger("click");
+    await flushPromises();
+
+    expect(createWorkspaceMock).not.toHaveBeenCalled();
+    expect(wrapper.get('[data-testid="create-workspace-error"]').text())
+      .toContain("请先输入方案名称");
+    expect(document.activeElement).toBe(wrapper.get('[data-testid="workspace-name"]').element);
+    wrapper.unmount();
+  });
+
   it("creates an upload workspace and navigates to /workspaces/{id}", async () => {
     listWorkspacesMock.mockResolvedValue([]);
     createWorkspaceMock.mockResolvedValue({ ...wsB, id: "ws-up", name: "导入方案" });

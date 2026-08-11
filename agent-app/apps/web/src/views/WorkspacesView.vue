@@ -19,6 +19,8 @@ const loading = ref(true);
 const error = ref<string | null>(null);
 const busy = ref(false);
 const newName = ref("");
+const nameInput = ref<HTMLInputElement | null>(null);
+const createError = ref<string | null>(null);
 const pageEl = ref<HTMLElement | null>(null);
 const query = ref("");
 
@@ -129,7 +131,13 @@ async function refresh(): Promise<void> {
 
 async function onCreate(): Promise<void> {
   const name = newName.value.trim();
-  if (name.length === 0 || busy.value) return;
+  if (busy.value) return;
+  if (name.length === 0) {
+    createError.value = "请先输入方案名称";
+    nameInput.value?.focus();
+    return;
+  }
+  createError.value = null;
   busy.value = true;
   try {
     const created = await api.createWorkspace({ name, mode: "new" });
@@ -147,7 +155,13 @@ function onEmptyCreate(): void {
 
 async function onCreateUpload(): Promise<void> {
   const name = newName.value.trim();
-  if (name.length === 0 || busy.value) return;
+  if (busy.value) return;
+  if (name.length === 0) {
+    createError.value = "请先输入方案名称";
+    nameInput.value?.focus();
+    return;
+  }
+  createError.value = null;
   busy.value = true;
   try {
     const created = await api.createWorkspace({ name, mode: "upload" });
@@ -225,20 +239,31 @@ onMounted(() => {
       <section class="create-card">
         <h2>开始一个新方案</h2>
         <input
+          ref="nameInput"
           v-model="newName"
           data-testid="workspace-name"
           type="text"
           placeholder="方案名称，例如 客户展示大屏"
+          :aria-invalid="createError !== null"
+          aria-describedby="create-workspace-error"
+          @input="createError = null"
         />
         <div class="entry-actions">
-          <button type="button" data-testid="create-workspace" :disabled="busy || newName.trim() === ''" @click="onCreate">
+          <button type="button" data-testid="create-workspace" :disabled="busy" @click="onCreate">
             新建工程
           </button>
-          <button type="button" data-testid="upload-workspace" :disabled="busy || newName.trim() === ''" @click="onCreateUpload">
+          <button type="button" data-testid="upload-workspace" :disabled="busy" @click="onCreateUpload">
             上传工程
           </button>
         </div>
         <p class="hint">新建工程从确定性初始设计开始；上传工程导入 KF 原生 .gz 客户端包（无损保留未知字段）。</p>
+        <p
+          v-if="createError"
+          id="create-workspace-error"
+          class="error"
+          data-testid="create-workspace-error"
+          role="alert"
+        >{{ createError }}</p>
         <p v-if="error" class="error" data-testid="workspace-error">{{ error }}</p>
       </section>
 
