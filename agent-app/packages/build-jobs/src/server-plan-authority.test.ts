@@ -2,12 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   SERVER_PLAN_RAW_LIMITS,
   canonicalChangePlanHash,
+  canonicalModuleCompilationHash,
   semanticPayloadHash,
   type ChangePlan,
 } from "@kf/contracts";
 import {
+  createHmacModuleArtifactAuthority,
   createHmacServerPlanAuthority,
   decodeServerPlanHmacKey,
+  readVerifiedAcceptedBlueprintArtifact,
+  readVerifiedModuleCompilationArtifact,
+  readVerifiedProjectCreationSeedArtifact,
 } from "./server-plan-authority.js";
 
 const keyA = Buffer.alloc(32, 0x41).toString("base64");
@@ -252,5 +257,94 @@ describe("HMAC server plan authority", () => {
       semanticOperations: [],
     });
     expect(authority.verify(structuredClone(envelope))).toEqual(envelope);
+  });
+});
+
+describe("HMAC module artifact authority", () => {
+  const artifactKeyA = decodeServerPlanHmacKey(keyA);
+  const artifactKeyB = decodeServerPlanHmacKey(keyB);
+  const hash = (value: unknown) => canonicalModuleCompilationHash(value);
+  const acceptedInput = {
+    schema: "kf-accepted-blueprint-artifact/v1" as const,
+    projectKey: "kingclient.portal",
+    revisionId: "revision-1",
+    blueprintHash: hash("blueprint"),
+    modules: [{
+      blueprintModuleId: "hero",
+      expectedKind: "content.hero",
+      expectedCategory: "content",
+      interactionRequirements: [{ type: "navigate" as const, actionKind: "navigate", target: "projects" }],
+    }],
+  };
+  const compilationMetadata = {
+    schema: "kf-module-compilation-metadata/v1" as const,
+    projectKey: "kingclient.portal",
+    moduleDefinitions: [], assets: [], blueprintMappings: [], generatedSeeds: [],
+  };
+  const compilationInput = {
+    schema: "kf-module-compilation-artifact/v1" as const,
+    projectKey: "kingclient.portal",
+    revisionId: "revision-1",
+    acceptedBlueprintHash: acceptedInput.blueprintHash,
+    planHash: hash("plan"),
+    implementationHash: hash("implementation"),
+    metadataHash: hash(compilationMetadata),
+    sourceModuleIds: ["hero"],
+    metadata: compilationMetadata,
+  };
+  const seedComponent = {
+    id: "Text1", role: "content", capabilityId: "text", critical: true,
+    content: "__KF_SEED_PLACEHOLDER__", geometry: { x: 0, y: 0, width: 100, height: 30 },
+    properties: {}, style: { declarations: {}, states: {} },
+  };
+
+  it("verifies persisted JSON into non-forgeable runtime brands", () => {
+    const authority = createHmacModuleArtifactAuthority(artifactKeyA);
+    const accepted = authority.signAcceptedBlueprint(acceptedInput);
+    const compilation = authority.signModuleCompilation(compilationInput);
+    const verifiedAccepted = authority.verifyAcceptedBlueprint(JSON.parse(JSON.stringify(accepted)), {
+      projectKey: accepted.projectKey, revisionId: accepted.revisionId, blueprintHash: accepted.blueprintHash,
+    });
+    const verifiedCompilation = authority.verifyModuleCompilation(JSON.parse(JSON.stringify(compilation)), {
+      projectKey: compilation.projectKey, revisionId: compilation.revisionId, planHash: compilation.planHash,
+      implementationHash: compilation.implementationHash,
+    });
+    expect(readVerifiedAcceptedBlueprintArtifact(verifiedAccepted)).toEqual(accepted);
+    expect(readVerifiedModuleCompilationArtifact(verifiedCompilation)).toEqual(compilation);
+    expect(() => readVerifiedAcceptedBlueprintArtifact(accepted as never)).toThrow("UNVERIFIED_ACCEPTED_BLUEPRINT_ARTIFACT");
+    expect(() => readVerifiedModuleCompilationArtifact(compilation as never)).toThrow("UNVERIFIED_MODULE_COMPILATION_ARTIFACT");
+  });
+
+  it.each([
+    ["wrong key", (authority: ReturnType<typeof createHmacModuleArtifactAuthority>, artifact: unknown) => authority.verifyAcceptedBlueprint(artifact)],
+    ["cross type replay", (authority: ReturnType<typeof createHmacModuleArtifactAuthority>, artifact: unknown) => authority.verifyModuleCompilation(artifact)],
+  ])("rejects %s", (_label, verify) => {
+    const signedArtifact = createHmacModuleArtifactAuthority(artifactKeyA).signAcceptedBlueprint(acceptedInput);
+    expect(() => verify(createHmacModuleArtifactAuthority(artifactKeyB), signedArtifact)).toThrow();
+  });
+
+  it("rejects tampering and every expected binding mismatch", () => {
+    const authority = createHmacModuleArtifactAuthority(artifactKeyA);
+    const signedArtifact = authority.signModuleCompilation(compilationInput);
+    const tampered = structuredClone(signedArtifact);
+    tampered.sourceModuleIds = ["other"];
+    expect(() => authority.verifyModuleCompilation(tampered)).toThrow(/SIGNATURE/);
+    for (const expected of [
+      { projectKey: "kingclient.other" }, { revisionId: "revision-2" },
+      { planHash: hash("other-plan") }, { implementationHash: hash("other-spec") },
+    ]) expect(() => authority.verifyModuleCompilation(signedArtifact, expected)).toThrow(/BINDING/);
+  });
+
+  it("signs project seeds from concrete components and verifies them after persistence", () => {
+    const authority = createHmacModuleArtifactAuthority(artifactKeyA);
+    const seed = authority.signProjectCreationSeeds({
+      projectKey: "kingclient.portal", revisionId: "revision-1",
+      seeds: [{ pageId: "home", component: seedComponent, generator: "new-project", projectCreationMarker: "project-create-001" }],
+    });
+    const verified = authority.verifyProjectCreationSeeds(JSON.parse(JSON.stringify(seed)), {
+      projectKey: "kingclient.portal", revisionId: "revision-1",
+    });
+    expect(readVerifiedProjectCreationSeedArtifact(verified)).toEqual(seed);
+    expect(seed.seeds[0]).toEqual(expect.objectContaining({ entityId: "Text1", componentHash: `sha256:${hash(seedComponent)}` }));
   });
 });

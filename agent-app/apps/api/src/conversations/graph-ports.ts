@@ -1,5 +1,6 @@
 import type {
   BuildJobPort,
+  AcceptedBlueprintConfirmationPort,
   UiImplementationCompilerPort,
   WorkspaceQueryPort,
 } from "@kf/agent-orchestrator";
@@ -14,12 +15,14 @@ import {
 } from "@kf/domain-client";
 import type { ArtifactStorage } from "@kf/artifact-storage";
 import type { ChangePlan } from "@kf/contracts";
+import type { ModuleArtifactAuthority } from "@kf/build-jobs";
 import type { Prisma } from "@prisma/client";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { BuildJobService } from "../build-jobs/build-job.service.js";
+import { signAcceptedBlueprintAtConfirmation } from "./server-plan-authority.js";
 
 /**
  * Real Prisma-backed ports for the solution graph (brief "Consumes" line).
@@ -35,11 +38,13 @@ export interface GraphPorts {
   changePlanRepository: ChangePlanRepository;
   buildJobPort: BuildJobPort;
   uiImplementationCompiler: UiImplementationCompilerPort;
+  acceptedBlueprintConfirmation: AcceptedBlueprintConfirmationPort;
 }
 
 export function createGraphPorts(
   prisma: PrismaService,
   storage: ArtifactStorage,
+  moduleArtifactAuthority?: ModuleArtifactAuthority,
 ): GraphPorts {
   const buildJobs = new BuildJobService(prisma);
 
@@ -197,7 +202,15 @@ export function createGraphPorts(
   };
 
   const uiImplementationCompiler: UiImplementationCompilerPort = {
-    compile({ workspaceId, spec, previousSpec, editableEntities }) {
+    compile({ workspaceId, spec, previousSpec, moduleCompilationArtifact, editableEntities }) {
+      // The legacy model-to-UI path may carry sourceModuleId only for coverage
+      // accounting. Without a verified compilation artifact those claims are
+      // deliberately erased before the security boundary; only the module
+      // coordinator can retain authoritative module ownership.
+      const compilableSpec = moduleCompilationArtifact === undefined ? withoutUnverifiedModuleSources(spec) : spec;
+      const compilablePrevious = previousSpec === undefined
+        ? undefined
+        : moduleCompilationArtifact === undefined ? withoutUnverifiedModuleSources(previousSpec) : previousSpec;
       const pageGuidById: Record<string, string> = Object.create(null) as Record<string, string>;
       const existingControlGuidByComponentId: Record<string, string> = Object.create(null) as Record<string, string>;
       const existingControlCapabilityIdByComponentId: Record<string, string> = Object.create(null) as Record<string, string>;
@@ -226,18 +239,30 @@ export function createGraphPorts(
           }
         }
       }
-      return Promise.resolve(compileUiImplementation(spec, {
+      return Promise.resolve(compileUiImplementation(compilableSpec, {
         workspaceId,
         pageGuidById,
         existingControlGuidByComponentId,
         existingControlCapabilityIdByComponentId,
         existingControlGeometryByComponentId,
-        ...(previousSpec !== undefined ? { previousImplementation: previousSpec } : {}),
+        ...(compilablePrevious !== undefined ? { previousImplementation: compilablePrevious } : {}),
+        ...(moduleCompilationArtifact !== undefined ? { moduleCompilationArtifact } : {}),
       }));
     },
   };
 
-  return { workspaceQuery, changePlanRepository, buildJobPort, uiImplementationCompiler };
+  const acceptedBlueprintConfirmation: AcceptedBlueprintConfirmationPort = {
+    confirm(input) {
+      if (moduleArtifactAuthority === undefined) throw new Error("MODULE_ARTIFACT_AUTHORITY_NOT_CONFIGURED");
+      return Promise.resolve(signAcceptedBlueprintAtConfirmation({ authority: moduleArtifactAuthority, ...input }));
+    },
+  };
+
+  return { workspaceQuery, changePlanRepository, buildJobPort, uiImplementationCompiler, acceptedBlueprintConfirmation };
+}
+
+function withoutUnverifiedModuleSources(spec: import("@kf/contracts").UIImplementationSpec): import("@kf/contracts").UIImplementationSpec {
+  return { ...spec, pages: spec.pages.map((page) => ({ ...page, components: page.components.map((component) => { const untrusted = { ...component }; Reflect.deleteProperty(untrusted, "sourceModuleId"); return untrusted; }) })) };
 }
 
 async function inspectBuiltClientEntities(

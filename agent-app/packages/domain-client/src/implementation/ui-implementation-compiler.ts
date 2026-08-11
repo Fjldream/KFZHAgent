@@ -1,5 +1,6 @@
 import {
   UIImplementationSpecSchema,
+  canonicalModuleCompilationHash,
   semanticPayloadHash,
   type CapabilityReport,
   type ChangeOperation,
@@ -9,6 +10,10 @@ import {
   type UIComponentSpec,
   type UIImplementationSpec,
 } from "@kf/contracts";
+import {
+  readVerifiedModuleCompilationArtifact,
+  type VerifiedModuleCompilationArtifact,
+} from "@kf/build-jobs";
 import { getControlCapability } from "../style/control-capability-registry.js";
 import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
 import { compileControlStyle, listStyleCompilationIssues } from "../style/style-engine.js";
@@ -19,7 +24,6 @@ import {
   validateGeneratedComponentProperties,
 } from "./component-properties.js";
 import { isDeepStrictEqual } from "node:util";
-import { trustedModuleSourceIdsFor } from "../modules/module-compiler.js";
 import { parseTableData } from "../modules/definitions/native-data-adapters.js";
 
 export interface ImplementationCompileContext {
@@ -30,8 +34,8 @@ export interface ImplementationCompileContext {
   existingControlGeometryByComponentId?: Readonly<Record<string, UIComponentSpec["geometry"]>>;
   /** Last confirmed model spec, used only to emit true semantic deltas. */
   previousImplementation?: UIImplementationSpec;
-  /** Must be the exact object returned by compileModulePlan; copied JSON is untrusted. */
-  trustedModuleImplementation?: UIImplementationSpec;
+  /** Runtime-branded server verification of the persisted current compilation artifact. */
+  moduleCompilationArtifact?: VerifiedModuleCompilationArtifact;
 }
 
 export interface UiImplementationCompileResult {
@@ -122,9 +126,19 @@ export function compileUiImplementation(
     throw new Error(`INVALID_UI_IMPLEMENTATION_SPEC: ${parsed.error.issues[0]?.message ?? "invalid spec"}`);
   }
   const spec = parsed.data;
-  const trustedSourceModuleIds = context.trustedModuleImplementation === input
-    ? trustedModuleSourceIdsFor(input) ?? []
-    : [];
+  const actualSourceModuleIds = sourceModuleIdsFor(spec);
+  const artifactHandle = optionalOwnDataField(context, "moduleCompilationArtifact", "INVALID_MODULE_COMPILATION_ARTIFACT");
+  let trustedSourceModuleIds: readonly string[] = [];
+  if (actualSourceModuleIds.length > 0) {
+    if (artifactHandle === undefined) throw new Error("VERIFIED_MODULE_COMPILATION_ARTIFACT_REQUIRED");
+    const artifact = readVerifiedModuleCompilationArtifact(artifactHandle);
+    if (artifact.implementationHash !== canonicalModuleCompilationHash(spec)) throw new Error("MODULE_IMPLEMENTATION_ARTIFACT_HASH_MISMATCH");
+    if (!isDeepStrictEqual(artifact.sourceModuleIds, actualSourceModuleIds)) throw new Error("MODULE_IMPLEMENTATION_ARTIFACT_SOURCE_MISMATCH");
+    trustedSourceModuleIds = artifact.sourceModuleIds;
+  } else if (artifactHandle !== undefined) {
+    const artifact = readVerifiedModuleCompilationArtifact(artifactHandle);
+    if (artifact.implementationHash !== canonicalModuleCompilationHash(spec) || artifact.sourceModuleIds.length !== 0) throw new Error("MODULE_IMPLEMENTATION_ARTIFACT_BINDING_MISMATCH");
+  }
   const operations: ChangeOperation[] = [];
   const report = createReportAccumulator();
   const previous = previousComponentIndex(context.previousImplementation);
@@ -171,6 +185,19 @@ export function compileUiImplementation(
     semanticOperations,
   };
 }
+
+function optionalOwnDataField(input: object, key: PropertyKey, code: string): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(input, key);
+  if (descriptor === undefined) return undefined;
+  if (!("value" in descriptor)) throw new Error(code);
+  return descriptor.value;
+}
+
+function sourceModuleIdsFor(spec: UIImplementationSpec): readonly string[] {
+  return Object.freeze([...new Set(spec.pages.flatMap((page) => page.components.flatMap((component) => component.sourceModuleId === undefined ? [] : [component.sourceModuleId])))].sort(compareCodePoints));
+}
+
+function compareCodePoints(left: string, right: string): number { return left < right ? -1 : left > right ? 1 : 0; }
 
 function semanticOperationsForActualPlan(
   plan: ChangePlan,

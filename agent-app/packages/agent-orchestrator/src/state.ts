@@ -1,6 +1,10 @@
 import { z } from "zod";
 import {
   CapabilityReportSchema,
+  AcceptedBlueprintArtifactSchema,
+  ModuleCompilationArtifactSchema,
+  ModuleDeliveryReportSchema,
+  ModulePlanSchema,
   pendingRequirementSchema,
   DesignPlanSchema,
   UIImplementationSpecSchema,
@@ -128,6 +132,13 @@ export const AgentGraphState = new StateSchema({
   /** Internal, model-authored implementation intent validated before deterministic compilation. */
   uiImplementation: UIImplementationSpecSchema.optional(),
   uiImplementationHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  /** Server-signed module artifacts are persisted as JSON; runtime brands are reconstructed after every checkpoint read. */
+  acceptedBlueprintArtifact: AcceptedBlueprintArtifactSchema.optional(),
+  modulePlan: ModulePlanSchema.optional(),
+  modulePlanHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  moduleCompilationArtifact: ModuleCompilationArtifactSchema.optional(),
+  moduleDeliveryReport: ModuleDeliveryReportSchema.optional(),
+  moduleRepairAttempt: z.number().int().min(0).max(1).optional(),
   capabilityReport: CapabilityReportSchema.optional(),
   stage: StageSchema,
   recentMessages: z.array(MessageSchema),

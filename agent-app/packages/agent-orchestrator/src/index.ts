@@ -38,7 +38,14 @@ export {
   type UiImplementationCompilerPort,
   type UiImplementationCompilerInput,
   type ServerPlanSignerPort,
+  type ModulePlanCompilerPort,
+  type AcceptedBlueprintConfirmationPort,
 } from "./ports.js";
+export {
+  ModuleCompilationCoordinator,
+  type CoordinateModuleCompilationInput,
+  type CoordinatedModuleCompilation,
+} from "./module-compilation-coordinator.js";
 export { compileSolutionGraph, ApprovalResumeRequiredError } from "./solution-graph.js";
 export { assessBlueprintRevision } from "./blueprint-quality.js";
 export {

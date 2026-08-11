@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { ModuleDeliveryGap, UIComponentSpec } from "@kf/contracts";
-import type { ModuleCompileInput, ModuleCompileOutput, ModuleDefinition, ModuleRuntimeEvidence } from "../types.js";
+import type { ModuleCompileInput, ModuleCompileOutput, ModuleDefinition, ModuleRequiredOutputContract, ModuleRuntimeEvidence } from "../types.js";
 import type { ModuleRegistry } from "../module-registry.js";
 import { actionButton, labeledValue, sectionTitle, surface, type LocalBounds } from "./shared-primitives.js";
 import { parseChartData } from "./native-data-adapters.js";
@@ -14,10 +14,10 @@ function layout(regions: readonly ModuleDefinition["layout"]["regions"][number][
   const height = (target: number) => Math.min(max, Math.max(min, target));
   return Object.freeze({ regions: Object.freeze([...regions]), minColumnSpan: 1, maxColumnSpan: 12, preferredHeights: Object.freeze(["compact", "small", "medium", "large", "full"] as const), interactions: Object.freeze([...interactions]), height: Object.freeze({ min, preferred: Object.freeze({ compact: min, small: height(180), medium: height(300), large: height(460), full: max }), max }) });
 }
-function qualityFor(kind: string): NonNullable<ModuleDefinition["quality"]> { const values: Record<string, NonNullable<ModuleDefinition["quality"]>> = {
-  "navigation.sidebar": { minimumComponentCount: 3, minimumCriticalComponentCount: 1, requiredRoles: ["surface"], requiredCriticalRoles: ["surface"], requiredCapabilityIds: ["layout.2"], interactionActionKinds: { navigate: "navigate" } },
-  "data.chart-panel": { minimumComponentCount: 2, minimumCriticalComponentCount: 1, requiredRoles: ["native-chart"], requiredCriticalRoles: ["native-chart"], requiredCapabilityIds: ["prototype.TrendChart"] },
-  "data.status-grid": { minimumComponentCount: 4, minimumCriticalComponentCount: 1, requiredRoles: ["surface", "status-tag"], requiredCriticalRoles: ["surface"], requiredCapabilityIds: ["layout.2", "tag"] },
+function qualityFor(kind: string): NonNullable<ModuleDefinition["quality"]> { const output = (outputId: string | undefined, role: string, capabilityId: string, extra: Partial<ModuleRequiredOutputContract> = {}): ModuleRequiredOutputContract => ({ ...(outputId === undefined ? {} : { outputId }), role, capabilityId, critical: true, ...extra }); const perVariant = (variants: readonly string[], outputs: readonly ModuleRequiredOutputContract[]) => Object.fromEntries(variants.map((variant) => [variant, outputs])); const surfaceOutput = output("surface", "surface", "layout.2"); const values: Record<string, NonNullable<ModuleDefinition["quality"]>> = {
+  "navigation.sidebar": { minimumComponentCount: 3, minimumCriticalComponentCount: 1, requiredRoles: ["surface"], requiredCriticalRoles: ["surface"], requiredCapabilityIds: ["layout.2"], variantRequiredOutputs: perVariant(["default", "collapsed"], [surfaceOutput, output("item-1-1", "action", "button", { actionType: "navigate" })]), interactionActionKinds: { navigate: "navigate" } },
+  "data.chart-panel": { minimumComponentCount: 2, minimumCriticalComponentCount: 1, requiredRoles: ["native-chart"], requiredCriticalRoles: ["native-chart"], requiredCapabilityIds: ["prototype.TrendChart"], variantRequiredOutputs: { line: [output("chart", "native-chart", "prototype.TrendChart")], bar: [output("chart", "native-chart", "prototype.BarChart")], pie: [output("chart", "native-chart", "prototype.PieChart")] } },
+  "data.status-grid": { minimumComponentCount: 4, minimumCriticalComponentCount: 1, requiredRoles: ["surface", "status-tag"], requiredCriticalRoles: ["surface"], requiredCapabilityIds: ["layout.2", "tag"], variantRequiredOutputs: perVariant(["default", "compact"], [surfaceOutput, output("status-1-tag", "status-tag", "tag")]) },
 }; return Object.freeze(values[kind]!); }
 
 function gap(id: string): ModuleCompileOutput { return { components: [], deliveryGaps: [{ moduleId: id, requirement: "Module local bounds", severity: "blocking", status: "unresolved", reason: "module-bounds-insufficient", alternatives: ["Increase module span or semantic height."] }] }; }

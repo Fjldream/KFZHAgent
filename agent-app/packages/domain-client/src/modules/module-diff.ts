@@ -92,7 +92,7 @@ export function diffModulePlans(input: DiffModulePlansInput): ModulePlanDiff {
   const unexpected = [
     ...unexpectedModuleImplementationChanges(input.previousImplementation, input.implementation, protectedModules),
     ...unexpectedLayoutFieldChanges(input.previousImplementation, input.implementation, new Set(layoutAffected)),
-    ...unexpectedLegacyImplementationChanges(input.previousImplementation, input.implementation, new Set(input.previousMetadata.generatedSeeds.map((seed) => seed.entityId))),
+    ...unexpectedLegacyImplementationChanges(input.previousImplementation, input.implementation),
   ].sort(compareUnexpected);
 
   return Object.freeze({
@@ -185,13 +185,12 @@ function unexpectedModuleImplementationChanges(
   return output;
 }
 
-function unexpectedLegacyImplementationChanges(previous: UIImplementationSpec, current: UIImplementationSpec, expectedRemovedIds: ReadonlySet<string>): UnexpectedModuleChange[] {
+function unexpectedLegacyImplementationChanges(previous: UIImplementationSpec, current: UIImplementationSpec): UnexpectedModuleChange[] {
   const output: UnexpectedModuleChange[] = [];
   const previousLegacy = legacyComponentGroups(previous);
   const currentLegacy = legacyComponentGroups(current);
   for (const [pageId, components] of previousLegacy) {
-    const retained = components.filter((component) => !expectedRemovedIds.has(component.id));
-    if (!byteIdentical(retained, currentLegacy.get(pageId) ?? [])) {
+    if (!byteIdentical(components, currentLegacy.get(pageId) ?? [])) {
       output.push(Object.freeze({ pageId, moduleId: "legacy", reason: "PRESERVED_LEGACY_IMPLEMENTATION_CHANGED" }));
     }
   }

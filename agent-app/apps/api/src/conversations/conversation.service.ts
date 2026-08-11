@@ -21,8 +21,8 @@ import { ARTIFACT_STORAGE } from "../artifacts/artifact-storage.js";
 import { PG_POOL, createCheckpointSaver } from "./checkpointer.js";
 import { createGraphPorts } from "./graph-ports.js";
 import { MODEL_PORT } from "./model-port.js";
-import { SERVER_PLAN_AUTHORITY } from "./server-plan-authority.js";
-import type { ServerPlanAuthority } from "@kf/build-jobs";
+import { MODULE_ARTIFACT_AUTHORITY, SERVER_PLAN_AUTHORITY } from "./server-plan-authority.js";
+import type { ModuleArtifactAuthority, ServerPlanAuthority } from "@kf/build-jobs";
 
 type CompiledGraph = ReturnType<typeof compileSolutionGraph>;
 
@@ -76,6 +76,7 @@ export class ConversationService {
     @Inject(PG_POOL) private readonly pool: pg.Pool,
     @Inject(ARTIFACT_STORAGE) private readonly artifactStorage: ArtifactStorage,
     @Inject(SERVER_PLAN_AUTHORITY) private readonly serverPlanAuthority: ServerPlanAuthority,
+    @Inject(MODULE_ARTIFACT_AUTHORITY) private readonly moduleArtifactAuthority: ModuleArtifactAuthority,
   ) {}
 
   async create(tenantId: string, workspaceId: string, title?: string): Promise<Conversation> {
@@ -366,7 +367,7 @@ export class ConversationService {
 
   private async getGraph(): Promise<CompiledGraph> {
     if (this.#graph === undefined) {
-      const ports = createGraphPorts(this.prisma, this.artifactStorage);
+      const ports = createGraphPorts(this.prisma, this.artifactStorage, this.moduleArtifactAuthority);
       const deps: SolutionGraphDeps = {
         modelPort: this.modelPort,
         workspaceQuery: ports.workspaceQuery,
@@ -374,6 +375,8 @@ export class ConversationService {
         buildJobPort: ports.buildJobPort,
         uiImplementationCompiler: ports.uiImplementationCompiler,
         serverPlanSigner: this.serverPlanAuthority,
+        moduleArtifactAuthority: this.moduleArtifactAuthority,
+        acceptedBlueprintConfirmation: ports.acceptedBlueprintConfirmation,
         isDomainSupported: (domain) => domain === "kingclient",
         defaultDomainKind: "kingclient",
       };

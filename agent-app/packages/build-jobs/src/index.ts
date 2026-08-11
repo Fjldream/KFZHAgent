@@ -11,6 +11,18 @@ export {
   decodeServerPlanHmacKey,
   type ServerPlanAuthority,
   type ServerPlanSignInput,
+  createHmacModuleArtifactAuthority,
+  readVerifiedAcceptedBlueprintArtifact,
+  readVerifiedModuleCompilationArtifact,
+  readVerifiedProjectCreationSeedArtifact,
+  type ModuleArtifactAuthority,
+  type VerifiedAcceptedBlueprintArtifact,
+  type VerifiedModuleCompilationArtifact,
+  type VerifiedProjectCreationSeedArtifact,
+  type AcceptedBlueprintArtifactExpectations,
+  type ModuleCompilationArtifactExpectations,
+  type ProjectCreationSeedArtifactExpectations,
+  type ProjectCreationSeedSignInput,
 } from "./server-plan-authority.js";
 export type {
   BuildExecutorDeps,

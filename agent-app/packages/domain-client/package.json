@@ -12,6 +12,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@kf/build-jobs": "workspace:*",
     "@kf/contracts": "workspace:*",
     "fflate": "^0.8.3",
     "uuid": "^14.0.1",

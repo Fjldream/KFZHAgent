@@ -1,14 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import type {
-  CustomerEffectBlueprint,
+  AcceptedBlueprintArtifact,
   ModuleDeliveryGap,
   ModulePlan,
+  ModulePlanModule,
   UIComponentSpec,
   UIImplementationSpec,
 } from "@kf/contracts";
 import { evaluateModuleDelivery } from "./module-quality.js";
 import { createDefaultModuleRegistry, ModuleRegistry } from "./module-registry.js";
+import { stableModuleComponentId } from "./stable-ids.js";
 
 const theme = {
   background: "#101827", surface: "#1E293B", primary: "#2563EB", accent: "#38BDF8",
@@ -16,13 +18,11 @@ const theme = {
   radiusScale: { small: 4, medium: 8, large: 16 },
 } as const;
 
-function blueprint(ids: string[] = ["hero"]): CustomerEffectBlueprint {
+function acceptedBlueprint(ids: string[] = ["hero"]): AcceptedBlueprintArtifact {
   return {
-    schema: "kf-design-plan/v2", displayName: "Portal", overview: { objective: "Show profile", audiences: ["Visitors"], scenarios: ["Browse"], valueProposition: "Clarity" },
-    informationArchitecture: { narrative: "Hero first", wireframe: "hero" },
-    modules: ids.map((id) => ({ id, name: id, purpose: "Present content", content: ["content"], sampleData: [], interactions: [], expectedKind: "content.hero", expectedCategory: "content", presentation: "Clear" })),
-    visualDirection: { tone: "Dark", colors: ["blue"], typography: "Modern", spacingAndSurfaces: "Comfortable" }, highlights: ["Clear"],
-    revisionNotes: { added: [], changed: [], retained: [] }, acceptanceCriteria: ["Works"], openQuestions: [],
+    schema: "kf-accepted-blueprint-artifact/v1", projectKey: "kingclient.portal", revisionId: "revision-test",
+    blueprintHash: "a".repeat(64), signature: "b".repeat(64),
+    modules: [...ids].sort().map((id) => ({ blueprintModuleId: id, expectedKind: "content.hero", expectedCategory: "content", interactionRequirements: [] })),
   };
 }
 
@@ -46,20 +46,49 @@ function component(moduleId = "hero", overrides: Partial<UIComponentSpec> = {}):
 function implementation(components: UIComponentSpec[] = [component(), component("hero", { id: "hero/title", role: "title", capabilityId: "text", critical: false })]): UIImplementationSpec {
   return { schema: "kf-ui-implementation/v1", theme, pages: [{ id: "home", width: 1440, height: 900, components }] };
 }
-function registry(): ModuleRegistry { const value = new ModuleRegistry(); const common = { version: "1.0.0", category: "content", maturity: "stable" as const, variants: ["no-portrait"], contentSchema: z.object({ title: z.string() }), assetSlots: [], requiredKfCapabilities: ["layout.2"], compilerFingerprint: "test-content-compiler-v1", layoutFingerprint: "test-content-layout-v1", layout: { regions: ["main"] as const, minColumnSpan: 1, maxColumnSpan: 12, preferredHeights: ["medium"] as const, interactions: ["navigate"] as const, height: { min: 1, preferred: { compact: 1, small: 1, medium: 200, large: 300, full: 400 }, max: 400 } }, quality: { minimumComponentCount: 2, minimumCriticalComponentCount: 1, requiredRoles: ["surface"], requiredCriticalRoles: ["surface"], requiredCapabilityIds: ["layout.2"] }, compile: () => ({ components: [], deliveryGaps: [] }) }; value.register({ ...common, kind: "content.hero" }); value.register({ ...common, kind: "content.card-grid" }); return value; }
+function registry(): ModuleRegistry { const value = new ModuleRegistry(); const common = { version: "1.0.0", category: "content", maturity: "stable" as const, variants: ["no-portrait"], contentSchema: z.object({ title: z.string() }), assetSlots: [], requiredKfCapabilities: ["layout.2"], compilerFingerprint: "test-content-compiler-v1", layoutFingerprint: "test-content-layout-v1", layout: { regions: ["main"] as const, minColumnSpan: 1, maxColumnSpan: 12, preferredHeights: ["medium"] as const, interactions: ["navigate"] as const, height: { min: 1, preferred: { compact: 1, small: 1, medium: 200, large: 300, full: 400 }, max: 400 } }, quality: { minimumComponentCount: 2, minimumCriticalComponentCount: 1, requiredRoles: ["surface"], requiredCriticalRoles: ["surface"], requiredCapabilityIds: ["layout.2"], variantRequiredOutputs: { "no-portrait": [{ outputId: "surface", role: "surface", capabilityId: "layout.2", critical: true }] } }, compile: () => ({ components: [], deliveryGaps: [] }) }; value.register({ ...common, kind: "content.hero" }); value.register({ ...common, kind: "content.card-grid" }); return value; }
 
 function evaluate(overrides: Partial<Parameters<typeof evaluateModuleDelivery>[0]> = {}) {
   const ui = implementation();
   return evaluateModuleDelivery({
-    blueprint: blueprint(), plan: plan(), implementation: ui,
+    acceptedBlueprint: acceptedBlueprint(), plan: plan(), implementation: ui,
     traces: [{ schema: "kf-module-trace/v1", projectKey: "kingclient.portal", entries: ui.pages[0]!.components.map((item) => ({ pageId: "home", moduleId: "hero", outputId: item.id })) }],
-    assetBindings: [], gaps: [], registry: registry(), assetsById: {}, metadata: { schema: "kf-module-compilation-metadata/v1", projectKey: "kingclient.portal", moduleDefinitions: [], assets: [], blueprintMappings: [{ blueprintModuleId: "hero", pageId: "home", moduleId: "hero", interactionBindings: [] }], generatedSeeds: [] }, ...overrides,
+    assetBindings: [], gaps: [], registry: registry(), assetsById: {}, metadata: { schema: "kf-module-compilation-metadata/v1", projectKey: "kingclient.portal", moduleDefinitions: [], assets: [], blueprintMappings: [{ blueprintModuleId: "hero", pageId: "home", moduleId: "hero", expectedKind: "content.hero", expectedCategory: "content", interactionBindings: [] }], generatedSeeds: [] }, ...overrides,
   });
+}
+
+function realInstance(kind: string, variant: string): ModulePlanModule {
+  const contentByKind: Record<string, Record<string, unknown>> = {
+    "navigation.top": { logo: "KF", items: ["Home"] },
+    "navigation.sidebar": { groups: [{ label: "Main", items: ["Home"] }] },
+    "content.hero": { title: "Profile", primaryAction: "Open" },
+    "metric.kpi-grid": { items: [{ label: "Availability", value: "99%" }] },
+    "content.card-grid": { items: [{ title: "Project", summary: "Summary", tag: "New", action: "Open" }] },
+    "content.timeline": { items: [{ title: "Started", detail: "Detail", date: "2026" }] },
+    "data.chart-panel": { chart: { kind: variant, labels: ["A"], series: [{ name: "Value", values: [1] }] } },
+    "data.status-grid": { items: [{ name: "Pump", severity: "online", detail: "Healthy" }] },
+    "data.table": { table: { columns: [{ key: "name", label: "Name" }], rows: [{ name: "Pump" }] } },
+    "data.detail": { fields: [{ label: "Name", value: "Pump", editable: true }] },
+    "interaction.tabs-filter": { tabs: ["All"], active: "All" },
+    "form.record-editor": { fields: [{ id: "name", label: "Name", placeholder: "Enter name" }], submitLabel: "Save" },
+    "action.toolbar": { actions: [{ label: "Open" }] },
+    "feedback.alert-list": { alerts: [{ title: "Alert", message: "Check", severity: "warning" }] },
+    "content.contact-footer": { contacts: [{ label: "Email", value: "a@b.com" }], copyright: "2026", action: "Open" },
+  };
+  const navigable = new Set(["navigation.top", "navigation.sidebar", "content.hero", "content.card-grid", "action.toolbar", "content.contact-footer"]);
+  const region = kind === "navigation.top" ? "header" : kind === "navigation.sidebar" ? "sidebar" : kind === "action.toolbar" ? "toolbar" : "main";
+  return {
+    id: "module", kind, templateVersion: "1.0.0", variant, title: "Module",
+    content: JSON.stringify(contentByKind[kind]), sourceBlueprintModuleIds: ["module"],
+    placement: { region, order: 0, columnSpan: 12, preferredHeight: "full", alignment: "stretch", emphasis: "primary" },
+    interactions: navigable.has(kind) ? [{ type: "navigate", pageId: "home" }] : [],
+    ...(kind === "content.hero" && variant !== "no-portrait" ? { assetId: "portrait" } : {}),
+  };
 }
 
 describe("evaluateModuleDelivery", () => {
   it("blocks delivery when a confirmed blueprint module is absent from ModulePlan", () => {
-    const report = evaluate({ blueprint: blueprint(["hero", "projects"]), plan: plan(["hero"]) }).report;
+    const report = evaluate({ acceptedBlueprint: acceptedBlueprint(["hero", "projects"]), plan: plan(["hero"]) }).report;
     expect(report.status).toBe("blocked");
     expect(report.gaps).toContainEqual(expect.objectContaining({ moduleId: "hero", requirement: expect.stringContaining("projects"), reason: "BLUEPRINT_MODULE_UNMAPPED", severity: "blocking" }));
   });
@@ -91,7 +120,7 @@ describe("evaluateModuleDelivery", () => {
     const overflow = component("hero", { geometry: { x: 1200, y: 0, width: 300, height: 240 } });
     const sibling = component("other", { geometry: { x: 1200, y: 10, width: 120, height: 200 } });
     const siblingPlan = plan(["hero", "other"]);
-    const report = evaluate({ blueprint: blueprint(["hero", "other"]), plan: siblingPlan, implementation: implementation([overflow, sibling]), traces: [
+    const report = evaluate({ acceptedBlueprint: acceptedBlueprint(["hero", "other"]), plan: siblingPlan, implementation: implementation([overflow, sibling]), traces: [
       { schema: "kf-module-trace/v1", projectKey: "kingclient.portal", entries: [{ pageId: "home", moduleId: "hero", outputId: "hero/surface" }] },
       { schema: "kf-module-trace/v1", projectKey: "kingclient.portal", entries: [{ pageId: "home", moduleId: "other", outputId: "other/surface" }] },
     ] });
@@ -123,37 +152,60 @@ describe("evaluateModuleDelivery", () => {
         ...plan([id]).pages[0]!.modules[0]!, id, placement: { ...plan([id]).pages[0]!.modules[0]!.placement, order }, sourceBlueprintModuleIds: [id],
       })),
     }));
-    const report = evaluate({ blueprint: blueprint(Array.from({ length: 12 }, (_, index) => `blueprint-${index}`)), plan: cappedPlan, implementation: undefined as never, traces: [] }).report;
+    const report = evaluate({ acceptedBlueprint: acceptedBlueprint(Array.from({ length: 12 }, (_, index) => `blueprint-${index}`)), plan: cappedPlan, implementation: undefined as never, traces: [] }).report;
     expect(report.status).toBe("blocked");
     expect(report.gaps).toHaveLength(250);
     expect(new Set(report.gaps.map((gap) => gap.moduleId))).toEqual(new Set(moduleIds));
   });
 
-  it("applies the exact V1 quality contracts as a table-driven deletion matrix", () => {
+  it("applies every real V1 variant contract to its legal compiler output and blocks required-output mutation", () => {
     const defaults = createDefaultModuleRegistry();
     const kinds = ["navigation.top", "navigation.sidebar", "content.hero", "metric.kpi-grid", "content.card-grid", "content.timeline", "data.chart-panel", "data.status-grid", "data.table", "data.detail", "interaction.tabs-filter", "form.record-editor", "action.toolbar", "feedback.alert-list", "content.contact-footer"];
     for (const kind of kinds) {
-      const definition = defaults.require(kind, "1.0.0"); const quality = definition.quality!;
-      const moduleId = "module";
-      const components: UIComponentSpec[] = [...quality.requiredRoles.map((role, index) => component(moduleId, { id: `${moduleId}/role-${index}`, role, capabilityId: quality.requiredCapabilityIds[index] ?? quality.requiredCapabilityIds[0]!, critical: quality.requiredCriticalRoles.includes(role) })), ...quality.requiredCapabilityIds.map((capability, index) => component(moduleId, { id: `${moduleId}/cap-${index}`, role: "contract-extra", capabilityId: capability, critical: false }))];
-      while (components.length < quality.minimumComponentCount) components.push(component(moduleId, { id: `${moduleId}/extra-${components.length}`, role: "contract-extra", capabilityId: "text", critical: false }));
-      if (components.filter((entry) => entry.critical).length < quality.minimumCriticalComponentCount) components[0]!.critical = true;
-      const modulePlan = plan([moduleId]); modulePlan.pages[0]!.modules[0] = { ...modulePlan.pages[0]!.modules[0]!, kind, templateVersion: "1.0.0", variant: definition.variants[0]!, content: "{}" };
-      const effect = blueprint([moduleId]); effect.modules[0] = { ...effect.modules[0]!, expectedKind: kind, expectedCategory: definition.category };
-      const metadata = { schema: "kf-module-compilation-metadata/v1" as const, projectKey: modulePlan.projectKey, moduleDefinitions: [], assets: [], blueprintMappings: [{ blueprintModuleId: moduleId, pageId: "home", moduleId, expectedKind: kind, expectedCategory: definition.category, interactionBindings: [] }], generatedSeeds: [] };
-      const evaluateMatrix = (current: UIComponentSpec[]) => evaluateModuleDelivery({ blueprint: effect, plan: modulePlan, implementation: implementation(current), traces: [{ schema: "kf-module-trace/v1", projectKey: modulePlan.projectKey, entries: current.map((entry) => ({ pageId: "home", moduleId, outputId: entry.id })) }], assetBindings: [], gaps: [], registry: defaults, assetsById: {}, metadata }).report;
-      expect(evaluateMatrix(components).status).toBe("ready");
-      for (const role of quality.requiredRoles) expect(evaluateMatrix(components.filter((entry) => entry.role !== role)).status).toBe("blocked");
-      for (const capability of quality.requiredCapabilityIds) expect(evaluateMatrix(components.map((entry) => entry.capabilityId === capability ? { ...entry, capabilityId: "text" } : entry)).status).toBe("blocked");
-      expect(evaluateMatrix(components.map((entry) => ({ ...entry, critical: false }))).status).toBe("blocked");
+      const definition = defaults.require(kind, "1.0.0");
+      for (const variant of definition.variants) {
+        const instance = realInstance(kind, variant);
+        const asset = instance.assetId === undefined ? undefined : { assetId: instance.assetId, status: "resolved" as const, resolvedName: `${instance.assetId}.png` };
+        const compiled = definition.compile({ context: { definition, instance, content: definition.contentSchema.parse(JSON.parse(instance.content!)), asset, validationContext: { availableKfCapabilities: definition.requiredKfCapabilities, approvedAuthorizationRefs: [] }, bounds: { x: 0, y: 0, width: 1200, height: definition.layout.height.max } } });
+        expect(Object.keys(definition.quality!.variantRequiredOutputs)).toContain(variant);
+        if (kind === "data.chart-panel") {
+          expect(compiled.components).toEqual([]);
+          expect(compiled.deliveryGaps).toContainEqual(expect.objectContaining({ severity: "blocking", reason: "kf36-static-chart-series-mapping-unverified" }));
+          continue;
+        }
+        expect(compiled.components.length, `${kind}/${variant} must have legal output`).toBeGreaterThan(0);
+        const components = compiled.components.map((entry) => ({ ...entry, id: stableModuleComponentId(instance.id, entry.id), sourceModuleId: instance.id, properties: { ...entry.properties, ...(typeof entry.properties.parentId === "string" ? { parentId: stableModuleComponentId(instance.id, entry.properties.parentId) } : {}) } }));
+        const modulePlan = plan([instance.id]); modulePlan.pages[0]!.modules[0] = instance; modulePlan.pages[0]!.modules[0].placement = { ...instance.placement, preferredHeight: "full" };
+        modulePlan.assets = instance.assetId === undefined ? [] : [{ id: instance.assetId, kind: "image", name: "Asset", mimeType: "image/png", description: "Asset" }];
+        const effect = acceptedBlueprint([instance.id]); effect.modules[0] = { ...effect.modules[0]!, expectedKind: kind, expectedCategory: definition.category };
+        const metadata = { schema: "kf-module-compilation-metadata/v1" as const, projectKey: modulePlan.projectKey, moduleDefinitions: [], assets: [], blueprintMappings: [{ blueprintModuleId: instance.id, pageId: "home", moduleId: instance.id, expectedKind: kind, expectedCategory: definition.category, interactionBindings: [] }], generatedSeeds: [] };
+        const evaluateMatrix = (current: UIComponentSpec[]) => evaluateModuleDelivery({ acceptedBlueprint: effect, plan: modulePlan, implementation: { schema: "kf-ui-implementation/v1", theme, pages: [{ id: "home", width: 1200, height: definition.layout.height.max, components: current }] }, traces: [{ schema: "kf-module-trace/v1", projectKey: modulePlan.projectKey, entries: current.map((entry) => ({ pageId: "home", moduleId: instance.id, outputId: entry.id })) }], assetBindings: instance.assetId === undefined ? [] : [{ moduleId: instance.id, assetId: instance.assetId }], gaps: compiled.deliveryGaps, registry: defaults, assetsById: instance.assetId === undefined ? {} : { [instance.assetId]: asset! }, metadata }).report;
+        expect(evaluateMatrix(components).status, `${kind}/${variant} golden`).not.toBe("blocked");
+        for (const required of definition.quality!.variantRequiredOutputs[variant]!) {
+          const without = components.filter((entry) => required.outputId === undefined ? entry.role !== required.role : entry.id !== stableModuleComponentId(instance.id, required.outputId));
+          expect(evaluateMatrix(without).status, `${kind}/${variant} delete ${required.outputId ?? required.role}`).toBe("blocked");
+          const replaced = components.map((entry) => (required.outputId === undefined ? entry.role === required.role : entry.id === stableModuleComponentId(instance.id, required.outputId)) ? { ...entry, capabilityId: entry.capabilityId === "text" ? "button" : "text" } : entry);
+          expect(evaluateMatrix(replaced).status, `${kind}/${variant} replace ${required.outputId ?? required.role}`).toBe("blocked");
+          const nonCritical = components.map((entry) => (required.outputId === undefined ? entry.role === required.role : entry.id === stableModuleComponentId(instance.id, required.outputId)) ? { ...entry, critical: false } : entry);
+          expect(evaluateMatrix(nonCritical).status, `${kind}/${variant} critical ${required.outputId ?? required.role}`).toBe("blocked");
+          if (required.assetSlotId !== undefined) {
+            const unbound = components.map((entry) => entry.id === stableModuleComponentId(instance.id, required.outputId!) ? { ...entry, properties: { ...entry.properties, src: "placeholder" } } : entry);
+            expect(evaluateMatrix(unbound).status, `${kind}/${variant} asset ${required.outputId}`).toBe("blocked");
+          }
+          if (required.actionType !== undefined && instance.interactions.some((interaction) => interaction.type === required.actionType)) {
+            const noAction = components.map((entry) => (required.outputId === undefined ? entry.role === required.role : entry.id === stableModuleComponentId(instance.id, required.outputId)) ? { ...entry, properties: Object.fromEntries(Object.entries(entry.properties).filter(([key]) => key !== "action")) } : entry);
+            expect(evaluateMatrix(noAction).status, `${kind}/${variant} action ${required.outputId ?? required.role}`).toBe("blocked");
+          }
+        }
+      }
     }
   });
 
   it("rejects descriptor surprises without invoking their getters", () => {
     let reads = 0;
-    const unsafe = blueprint() as unknown as Record<string, unknown>;
+    const unsafe = acceptedBlueprint() as unknown as Record<string, unknown>;
     Object.defineProperty(unsafe, "modules", { enumerable: true, get: () => { reads += 1; return []; } });
-    expect(() => evaluate({ blueprint: unsafe as CustomerEffectBlueprint })).toThrow("MODULE_DELIVERY_UNSAFE_INPUT");
+    expect(() => evaluate({ acceptedBlueprint: unsafe as AcceptedBlueprintArtifact })).toThrow("MODULE_DELIVERY_UNSAFE_INPUT");
     expect(reads).toBe(0);
   });
 });

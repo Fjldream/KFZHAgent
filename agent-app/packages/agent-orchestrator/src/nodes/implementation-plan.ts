@@ -25,6 +25,25 @@ export function createImplementationPlanNode(deps: SolutionGraphDeps) {
     if (deps.serverPlanSigner === undefined) {
       return { stage: "idle", lastErrorCode: "SERVER_PLAN_SIGNER_NOT_CONFIGURED" };
     }
+    let acceptedBlueprintArtifact = state.acceptedBlueprintArtifact;
+    const moduleReadyBlueprint = state.designPlan.schema === "kf-design-plan/v2"
+      && state.designPlan.modules.every((module) => module.expectedKind !== undefined)
+      ? state.designPlan
+      : undefined;
+    if (moduleReadyBlueprint !== undefined) {
+      if (deps.acceptedBlueprintConfirmation === undefined) {
+        return { stage: "idle", lastErrorCode: "ACCEPTED_BLUEPRINT_CONFIRMATION_NOT_CONFIGURED" };
+      }
+      try {
+        acceptedBlueprintArtifact = await deps.acceptedBlueprintConfirmation.confirm({
+          blueprint: moduleReadyBlueprint,
+          projectKey: deps.defaultProjectKey ?? deps.defaultDomainKind ?? "kingclient",
+          revisionId: state.currentRevisionId,
+        });
+      } catch (error) {
+        return { stage: "idle", lastErrorCode: `ACCEPTED_BLUEPRINT_CONFIRMATION_FAILED:${errorDetail(error)}` };
+      }
+    }
 
     const editableEntities = await deps.workspaceQuery.getRevisionEntities({
       tenantId: state.tenantId,
@@ -154,6 +173,7 @@ export function createImplementationPlanNode(deps: SolutionGraphDeps) {
       uiImplementation: candidate,
       uiImplementationHash: createHash("sha256").update(stableStringify(candidate)).digest("hex"),
       capabilityReport: compiled!.capabilityReport,
+      ...(acceptedBlueprintArtifact === undefined ? {} : { acceptedBlueprintArtifact }),
       changePlanId,
       planHash: hash,
       activeChangeRequestId: changeRequestId,

@@ -68,7 +68,19 @@ export interface ModuleQualityContract {
   readonly requiredRoles: readonly string[];
   readonly requiredCriticalRoles: readonly string[];
   readonly requiredCapabilityIds: readonly string[];
+  /** Exact compiler-owned output slots, selected per registered variant. */
+  readonly variantRequiredOutputs: Readonly<Record<string, readonly ModuleRequiredOutputContract[]>>;
   readonly interactionActionKinds?: Readonly<Partial<Record<ModuleInteraction["type"], string>>>;
+}
+
+export interface ModuleRequiredOutputContract {
+  /** Local compiler output id. Omit only for a dynamic, role-selected slot. */
+  readonly outputId?: string;
+  readonly role: string;
+  readonly capabilityId: string;
+  readonly critical: boolean;
+  readonly assetSlotId?: string;
+  readonly actionType?: ModuleInteraction["type"];
 }
 
 export interface ModuleDefinition {

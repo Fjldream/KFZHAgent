@@ -11,6 +11,7 @@ import { applyClientPatch } from "../../patch/client-patcher.js";
 import { deriveGuid } from "../../compile/guid-factory.js";
 import { inspectClientProject, kfObjectToControl } from "../../inspect/client-inspector.js";
 import { validateClientProject } from "../../validate/client-validator.js";
+import { acceptedArtifactForPlan, verifiedCompilationFor } from "../testing/module-artifact-test-helpers.js";
 
 const theme = { background: "#101827", surface: "#1E293B", primary: "#2563EB", accent: "#38BDF8", textPrimary: "#F8FAFC", textSecondary: "#94A3B8", fontFamily: "Inter", spacingUnit: 8, radiusScale: { small: 4, medium: 8, large: 16 } } as const;
 const fixturesRoot = join(fileURLToPath(new URL(".", import.meta.url)), "../../../../../tests/fixtures");
@@ -19,7 +20,7 @@ function records(input: unknown[]): Record<string, unknown>[] { return input.map
 function findControl(input: Record<string, unknown>[], name: string): Record<string, unknown> | undefined { for (const control of input) { const base = (control.baseProperty ?? control) as Record<string, unknown>; if (base.name === name || control.name === name) return control; const nested = Array.isArray(control.insiderObjects) ? findControl(records(control.insiderObjects), name) : undefined; if (nested) return nested; } return undefined; }
 
 function instance(kind: string, content: Record<string, unknown>, variant = "default"): ModulePlanModule {
-  return { id: "module", kind, templateVersion: "1.0.0", variant, title: "看板", content: JSON.stringify(content), placement: { region: kind === "navigation.sidebar" ? "sidebar" : "main", order: 0, columnSpan: 12, preferredHeight: "large", alignment: "stretch", emphasis: "primary" }, interactions: [] };
+  return { id: "module", kind, templateVersion: "1.0.0", variant, title: "看板", content: JSON.stringify(content), sourceBlueprintModuleIds: ["module"], placement: { region: kind === "navigation.sidebar" ? "sidebar" : "main", order: 0, columnSpan: 12, preferredHeight: "large", alignment: "stretch", emphasis: "primary" }, interactions: [] };
 }
 
 describe("dashboard modules", () => {
@@ -64,23 +65,23 @@ describe("dashboard modules", () => {
 
   it("runs the admin table golden flow through final KF JSON with real reviewed data/columns fields", async () => {
     const dashboardChart = instance("data.chart-panel", { chart: { kind: "line", title: "产量趋势", labels: ["08:00", "09:00"], series: [{ name: "产量", values: [12, 18] }] } }, "line");
-    dashboardChart.id = "dashboard-chart"; dashboardChart.placement = { ...dashboardChart.placement, columnSpan: 6, preferredHeight: "medium" };
+    dashboardChart.id = "dashboard-chart"; dashboardChart.sourceBlueprintModuleIds = [dashboardChart.id]; dashboardChart.placement = { ...dashboardChart.placement, columnSpan: 6, preferredHeight: "medium" };
     const dashboardStatus = instance("data.status-grid", { items: [{ name: "泵 A", severity: "warning", detail: "温度偏高" }] });
-    dashboardStatus.id = "dashboard-status"; dashboardStatus.placement = { ...dashboardStatus.placement, columnSpan: 6, preferredHeight: "medium" };
+    dashboardStatus.id = "dashboard-status"; dashboardStatus.sourceBlueprintModuleIds = [dashboardStatus.id]; dashboardStatus.placement = { ...dashboardStatus.placement, columnSpan: 6, preferredHeight: "medium" };
     const dashboard = { schema: "kf-module-plan/v1" as const, projectKey: "kingclient.dashboard", theme, assets: [], pages: [{ id: "Page1", title: "Dashboard", mode: "dashboard-grid" as const, modules: [dashboardChart, dashboardStatus] }], operations: [] };
-    const adminSidebar = instance("navigation.sidebar", { groups: [{ label: "管理", items: ["设备"] }] }); adminSidebar.id = "admin-sidebar"; adminSidebar.placement = { ...adminSidebar.placement, region: "sidebar", preferredHeight: "large" };
-    const adminToolbar = instance("action.toolbar", { actions: [{ label: "新增" }, { label: "导出" }] }); adminToolbar.id = "admin-toolbar"; adminToolbar.placement = { ...adminToolbar.placement, region: "toolbar", preferredHeight: "compact" };
-    const adminTable = instance("data.table", { table: { columns: [{ key: "name", label: "设备" }, { key: "temperature", label: "温度", align: "right" }], rows: [{ name: "泵 A", temperature: 42 }] } }); adminTable.id = "admin-table"; adminTable.placement = { ...adminTable.placement, preferredHeight: "small" };
+    const adminSidebar = instance("navigation.sidebar", { groups: [{ label: "管理", items: ["设备"] }] }); adminSidebar.id = "admin-sidebar"; adminSidebar.sourceBlueprintModuleIds = [adminSidebar.id]; adminSidebar.placement = { ...adminSidebar.placement, region: "sidebar", preferredHeight: "large" };
+    const adminToolbar = instance("action.toolbar", { actions: [{ label: "新增" }, { label: "导出" }] }); adminToolbar.id = "admin-toolbar"; adminToolbar.sourceBlueprintModuleIds = [adminToolbar.id]; adminToolbar.placement = { ...adminToolbar.placement, region: "toolbar", preferredHeight: "compact" };
+    const adminTable = instance("data.table", { table: { columns: [{ key: "name", label: "设备" }, { key: "temperature", label: "温度", align: "right" }], rows: [{ name: "泵 A", temperature: 42 }] } }); adminTable.id = "admin-table"; adminTable.sourceBlueprintModuleIds = [adminTable.id]; adminTable.placement = { ...adminTable.placement, preferredHeight: "small" };
     const admin = { schema: "kf-module-plan/v1" as const, projectKey: "kingclient.admin", theme, assets: [], pages: [{ id: "Page1", title: "Admin", mode: "admin-shell" as const, modules: [adminSidebar, adminToolbar, adminTable] }], operations: [] };
     const registry = createDefaultModuleRegistry();
     const context = { availableKfCapabilities: ["layout.2", "text", "button", "tag", "input", "easyui.1", "prototype.TrendChart", "prototype.BarChart", "prototype.PieChart"], approvedAuthorizationRefs: [] };
-    const blockedDashboard = compileModulePlan({ plan: dashboard, registry, assetsById: {}, validationContext: context });
+    const blockedDashboard = compileModulePlan({ plan: dashboard, acceptedBlueprintArtifact: acceptedArtifactForPlan(dashboard, registry), registry, assetsById: {}, validationContext: context });
     expect(blockedDashboard.status).toBe("blocked");
     expect(blockedDashboard.gaps).toContainEqual(expect.objectContaining({ moduleId: "dashboard-chart", severity: "blocking", reason: "kf36-static-chart-series-mapping-unverified" }));
     for (const [plan, expected] of [[admin, "admin-table/datagrid"]] as const) {
-      const compiled = compileModulePlan({ plan, registry, assetsById: {}, validationContext: context });
+      const compiled = compileModulePlan({ plan, acceptedBlueprintArtifact: acceptedArtifactForPlan(plan, registry), registry, assetsById: {}, validationContext: context });
       expect(compiled.status).toBe("compiled"); if (compiled.status !== "compiled") continue;
-      const changes = compileUiImplementation(compiled.implementation, { workspaceId: "module-golden", pageGuidById: { Page1: "page-guid-1" }, existingControlGuidByComponentId: {}, existingControlCapabilityIdByComponentId: {}, trustedModuleImplementation: compiled.implementation });
+      const changes = compileUiImplementation(compiled.implementation, { workspaceId: "module-golden", pageGuidById: { Page1: "page-guid-1" }, existingControlGuidByComponentId: {}, existingControlCapabilityIdByComponentId: {}, moduleCompilationArtifact: verifiedCompilationFor(compiled) });
       expect(changes.semanticOperations).toHaveLength(1);
       const base = await fixture();
       const persisted = JSON.parse(JSON.stringify(changes)) as typeof changes;
@@ -114,7 +115,7 @@ describe("dashboard modules", () => {
             : module),
         }],
       };
-      const revised = compileModulePlan({ plan: revisedAdmin, previousPlan: admin, previousImplementation: compiled.implementation, previousMetadata: structuredClone(compiled.metadata), registry, assetsById: {}, validationContext: context });
+      const revised = compileModulePlan({ plan: revisedAdmin, acceptedBlueprintArtifact: acceptedArtifactForPlan(revisedAdmin, registry), previousPlan: admin, previousImplementation: compiled.implementation, previousCompilationArtifact: verifiedCompilationFor(compiled), registry, assetsById: {}, validationContext: context });
       expect(revised.status).toBe("compiled"); if (revised.status !== "compiled") continue;
       const tableComponentId = "admin-table/datagrid";
       const existingComponents = compiled.implementation.pages.flatMap((page) => page.components);
@@ -141,9 +142,10 @@ describe("dashboard modules", () => {
       };
       const toolbarOnly = compileModulePlan({
         plan: toolbarOnlyAdmin,
+        acceptedBlueprintArtifact: acceptedArtifactForPlan(toolbarOnlyAdmin, registry),
         previousPlan: admin,
         previousImplementation: compiled.implementation,
-        previousMetadata: structuredClone(compiled.metadata),
+        previousCompilationArtifact: verifiedCompilationFor(compiled),
         registry,
         assetsById: {},
         validationContext: context,
@@ -157,7 +159,7 @@ describe("dashboard modules", () => {
         existingControlCapabilityIdByComponentId,
         existingControlGeometryByComponentId,
         previousImplementation: compiled.implementation,
-        trustedModuleImplementation: toolbarOnly.implementation,
+        moduleCompilationArtifact: verifiedCompilationFor(toolbarOnly),
       });
       expect(toolbarDelta.plan.operations.some((operation) => operation.op === "update"
         && operation.changes.some((change) => change.path === "/__kfModuleTableData"))).toBe(false);
@@ -170,7 +172,7 @@ describe("dashboard modules", () => {
         existingControlCapabilityIdByComponentId,
         existingControlGeometryByComponentId,
         previousImplementation: compiled.implementation,
-        trustedModuleImplementation: revised.implementation,
+        moduleCompilationArtifact: verifiedCompilationFor(revised),
       });
       expect(delta.plan.operations).toContainEqual(expect.objectContaining({
         op: "update",

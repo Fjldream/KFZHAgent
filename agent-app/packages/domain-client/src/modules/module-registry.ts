@@ -95,7 +95,7 @@ function freezeDefinition(definition: ModuleDefinition): ModuleDefinition {
     requiredKfCapabilities: freezeArray(definition.requiredKfCapabilities),
     ...(definition.compilerFingerprint === undefined ? {} : { compilerFingerprint: definition.compilerFingerprint }),
     ...(definition.layoutFingerprint === undefined ? {} : { layoutFingerprint: definition.layoutFingerprint }),
-    ...(definition.quality === undefined ? {} : { quality: Object.freeze({ minimumComponentCount: definition.quality.minimumComponentCount, minimumCriticalComponentCount: definition.quality.minimumCriticalComponentCount, requiredRoles: freezeArray(definition.quality.requiredRoles), requiredCriticalRoles: freezeArray(definition.quality.requiredCriticalRoles), requiredCapabilityIds: freezeArray(definition.quality.requiredCapabilityIds), ...(definition.quality.interactionActionKinds === undefined ? {} : { interactionActionKinds: Object.freeze({ ...definition.quality.interactionActionKinds }) }) }) }),
+    ...(definition.quality === undefined ? {} : { quality: Object.freeze({ minimumComponentCount: definition.quality.minimumComponentCount, minimumCriticalComponentCount: definition.quality.minimumCriticalComponentCount, requiredRoles: freezeArray(definition.quality.requiredRoles), requiredCriticalRoles: freezeArray(definition.quality.requiredCriticalRoles), requiredCapabilityIds: freezeArray(definition.quality.requiredCapabilityIds), variantRequiredOutputs: Object.freeze(Object.fromEntries(Object.entries(definition.quality.variantRequiredOutputs).map(([variant, outputs]) => [variant, freezeArray(outputs.map((output) => Object.freeze({ ...output })))]))), ...(definition.quality.interactionActionKinds === undefined ? {} : { interactionActionKinds: Object.freeze({ ...definition.quality.interactionActionKinds }) }) }) }),
     layout,
   });
 }
@@ -109,7 +109,7 @@ function assertDefinition(definition: ModuleDefinition): void {
     fail("MODULE_DEFINITION_INVALID", `${key} has invalid maturity`);
   }
   if (!definition.compilerFingerprint || !definition.layoutFingerprint || !/^[A-Za-z0-9._:-]{8,200}$/.test(definition.compilerFingerprint) || !/^[A-Za-z0-9._:-]{8,200}$/.test(definition.layoutFingerprint)) fail("MODULE_DEFINITION_INVALID", `${key} requires stable compiler and layout fingerprints`);
-  if (V1_EXACT_KINDS.has(definition.kind) && (definition.quality === undefined || definition.quality.minimumComponentCount < 2 || definition.quality.minimumCriticalComponentCount < 1 || definition.quality.requiredRoles.length < 1 || definition.quality.requiredCriticalRoles.length < 1 || definition.quality.requiredRoles.some((role) => !role) || definition.quality.requiredCriticalRoles.some((role) => !role) || definition.quality.requiredCapabilityIds.length < 1 || definition.quality.requiredCapabilityIds.some((capability) => !capability))) fail("MODULE_DEFINITION_INVALID", `${key} requires a complete quality contract`);
+  if (V1_EXACT_KINDS.has(definition.kind) && (definition.quality === undefined || definition.quality.minimumComponentCount < 2 || definition.quality.minimumCriticalComponentCount < 1 || definition.quality.requiredRoles.length < 1 || definition.quality.requiredCriticalRoles.length < 1 || definition.quality.requiredRoles.some((role) => !role) || definition.quality.requiredCriticalRoles.some((role) => !role) || definition.quality.requiredCapabilityIds.length < 1 || definition.quality.requiredCapabilityIds.some((capability) => !capability) || !sameStrings(Object.keys(definition.quality.variantRequiredOutputs), definition.variants) || Object.values(definition.quality.variantRequiredOutputs).some((outputs) => outputs.length === 0 || outputs.some((output) => !output.role || !output.capabilityId)))) fail("MODULE_DEFINITION_INVALID", `${key} requires a complete quality contract`);
   if (definition.variants.length === 0 || definition.variants.some((variant) => !variant)) {
     fail("MODULE_DEFINITION_INVALID", `${key} requires one or more variants`);
   }
@@ -158,6 +158,10 @@ function assertDefinition(definition: ModuleDefinition): void {
   ) {
     fail("MODULE_DEFINITION_INVALID", `${key} has invalid layout height bounds`);
   }
+}
+
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && [...left].sort().every((value, index) => value === [...right].sort()[index]);
 }
 
 function parseContent(instance: ModulePlanModule, key: string): Record<string, unknown> {

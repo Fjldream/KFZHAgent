@@ -130,7 +130,7 @@ function state(): AgentGraphStateValue {
   } as AgentGraphStateValue;
 }
 
-function bed(specs: UIImplementationSpec[], compileError?: Error) {
+function bed(specs: UIImplementationSpec[], compileError?: Error, depsOverride: Partial<SolutionGraphDeps> = {}) {
   const createUiImplementation = vi.fn().mockResolvedValue(specs[0]);
   const reviseUiImplementation = vi.fn().mockResolvedValue(specs[1] ?? specs[0]);
   const createChangePlan = vi.fn();
@@ -182,6 +182,7 @@ function bed(specs: UIImplementationSpec[], compileError?: Error) {
     uiImplementationCompiler,
     serverPlanSigner: TEST_SERVER_PLAN_SIGNER,
     isDomainSupported: () => true,
+    ...depsOverride,
   };
   return {
     node: createImplementationPlanNode(deps),
@@ -219,6 +220,25 @@ describe("implementation-plan node", () => {
       capabilityReport,
     });
     expect(result.uiImplementationHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("persists the API-confirmed accepted blueprint artifact for module-ready blueprints", async () => {
+    const strictBlueprint = structuredClone(blueprint);
+    strictBlueprint.modules[0]!.expectedKind = "content.card-grid";
+    strictBlueprint.modules[1]!.expectedKind = "content.timeline";
+    const artifact = {
+      schema: "kf-accepted-blueprint-artifact/v1" as const, projectKey: "kingclient", revisionId: "r1",
+      blueprintHash: "b".repeat(64), signature: "c".repeat(64),
+      modules: [
+        { blueprintModuleId: "products", expectedKind: "content.card-grid", expectedCategory: "content", interactionRequirements: [] },
+        { blueprintModuleId: "projects", expectedKind: "content.timeline", expectedCategory: "content", interactionRequirements: [] },
+      ],
+    };
+    const confirm = vi.fn().mockResolvedValue(artifact);
+    const fixture = bed([implementation()], undefined, { acceptedBlueprintConfirmation: { confirm }, defaultProjectKey: "kingclient" });
+    const result = await fixture.node({ ...state(), designPlan: strictBlueprint });
+    expect(confirm).toHaveBeenCalledWith({ blueprint: strictBlueprint, projectKey: "kingclient", revisionId: "r1" });
+    expect(result).toMatchObject({ stage: "approval", acceptedBlueprintArtifact: artifact });
   });
 
   it("repairs a missing blueprint module once before compilation", async () => {

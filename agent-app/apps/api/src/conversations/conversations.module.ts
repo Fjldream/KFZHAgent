@@ -9,6 +9,8 @@ import { DeepSeekModelPort } from "./deepseek-model.js";
 import { ArtifactsModule } from "../artifacts/artifacts.module.js";
 import {
   SERVER_PLAN_AUTHORITY,
+  MODULE_ARTIFACT_AUTHORITY,
+  createModuleArtifactAuthorityFromEnvironment,
   createServerPlanAuthorityFromEnvironment,
 } from "./server-plan-authority.js";
 
@@ -45,6 +47,7 @@ import {
     },
     { provide: PG_POOL, useFactory: createPgPool },
     { provide: SERVER_PLAN_AUTHORITY, useFactory: createServerPlanAuthorityFromEnvironment },
+    { provide: MODULE_ARTIFACT_AUTHORITY, useFactory: createModuleArtifactAuthorityFromEnvironment },
   ],
   exports: [ConversationService],
 })

@@ -1,4 +1,5 @@
-import type { EnqueueBuildInput } from "@kf/build-jobs";
+import type { EnqueueBuildInput, ModuleArtifactAuthority, VerifiedAcceptedBlueprintArtifact, VerifiedModuleCompilationArtifact } from "@kf/build-jobs";
+import type { ModuleCompilationOutcome } from "@kf/domain-client";
 import type { BuildJobStatus } from "@kf/build-jobs";
 import type {
   CapabilityReport,
@@ -6,6 +7,8 @@ import type {
   ServerPlanEnvelope,
   TrustedSemanticOperationInput,
   UIImplementationSpec,
+  AcceptedBlueprintArtifact,
+  CustomerEffectBlueprint,
 } from "@kf/contracts";
 import type { ModelPort } from "./model-port.js";
 import type { GraphMessage } from "./state.js";
@@ -164,6 +167,8 @@ export interface UiImplementationCompilerInput {
   spec: UIImplementationSpec;
   /** Last confirmed implementation, allowing the compiler to emit local deltas. */
   previousSpec?: UIImplementationSpec;
+  /** Verified current module compilation; required for every module-owned component. */
+  moduleCompilationArtifact?: VerifiedModuleCompilationArtifact;
   editableEntities: EditableEntity[];
 }
 
@@ -174,6 +179,26 @@ export interface UiImplementationCompilerPort {
     capabilityReport: CapabilityReport;
     semanticOperations?: readonly TrustedSemanticOperationInput[];
   }>;
+}
+
+/** Deterministic module compiler boundary. Registry/assets remain server-owned behind the port. */
+export interface ModulePlanCompilerPort {
+  compile(input: {
+    plan: import("@kf/contracts").ModulePlan;
+    acceptedBlueprintArtifact: VerifiedAcceptedBlueprintArtifact;
+    previousCompilationArtifact?: VerifiedModuleCompilationArtifact;
+    previousPlan?: import("@kf/contracts").ModulePlan;
+    previousImplementation?: UIImplementationSpec;
+  }): Promise<ModuleCompilationOutcome>;
+}
+
+/** API-owned confirmation boundary; model fields are inputs, never signing authority. */
+export interface AcceptedBlueprintConfirmationPort {
+  confirm(input: {
+    blueprint: CustomerEffectBlueprint;
+    projectKey: string;
+    revisionId: string;
+  }): Promise<AcceptedBlueprintArtifact>;
 }
 
 /** Server-only authority port. Implementations hold the HMAC key outside graph state. */
@@ -200,6 +225,11 @@ export interface SolutionGraphDeps {
   uiImplementationCompiler?: UiImplementationCompilerPort;
   /** Required before any internal semantic envelope may be persisted. */
   serverPlanSigner?: ServerPlanSignerPort;
+  /** Same server key as ServerPlanSigner, domain-separated by the artifact authority. */
+  moduleArtifactAuthority?: ModuleArtifactAuthority;
+  /** Reserved module-generation execution port; Task 10 can wire it without changing checkpoint state. */
+  modulePlanCompiler?: ModulePlanCompilerPort;
+  acceptedBlueprintConfirmation?: AcceptedBlueprintConfirmationPort;
   /** Domain support predicate (DomainRegistry-backed in production). */
   isDomainSupported: (domain: string) => boolean;
   /** Domain used when enqueueing a build (defaults to the KF client domain). */

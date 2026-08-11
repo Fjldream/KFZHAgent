@@ -87,10 +87,10 @@ const specFixture: UIImplementationSpec = {
 
 describe("compileUiImplementation", () => {
   it.each([
-    ["no source module", undefined, {}],
-    ["forged source module", "forged-module", {}],
-    ["empty semantic properties", "forged-module", { tableData: { columns: [], rows: [] } }],
-  ])("rejects untrusted configuration-only datagrid data (%s)", (_label, sourceModuleId, properties) => {
+    ["no source module", undefined, {}, /CONFIGURATION_ONLY_DATA/],
+    ["forged source module", "forged-module", {}, /VERIFIED_MODULE_COMPILATION_ARTIFACT_REQUIRED/],
+    ["empty semantic properties", "forged-module", { tableData: { columns: [], rows: [] } }, /VERIFIED_MODULE_COMPILATION_ARTIFACT_REQUIRED/],
+  ])("rejects untrusted configuration-only datagrid data (%s)", (_label, sourceModuleId, properties, error) => {
     const dataTable: UIImplementationSpec = {
       schema: "kf-ui-implementation/v1", theme,
       pages: [{ id: "overview", width: 1440, height: 900, components: [{
@@ -104,8 +104,7 @@ describe("compileUiImplementation", () => {
       ...context,
       existingControlGuidByComponentId: {},
       existingControlCapabilityIdByComponentId: {},
-      trustedModuleImplementation: dataTable,
-    })).toThrow(/CONFIGURATION_ONLY_DATA/);
+    })).toThrow(error);
   });
 
   it("creates new controls and styles existing controls in stable page and component order", () => {

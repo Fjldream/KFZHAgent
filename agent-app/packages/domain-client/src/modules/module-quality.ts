@@ -1,11 +1,11 @@
 import {
-  CustomerEffectBlueprintSchema,
+  AcceptedBlueprintArtifactSchema,
   ModuleDeliveryGapSchema,
   ModuleDeliveryReportSchema,
   ModulePlanSchema,
   ModuleTraceSchema,
   UIImplementationSpecSchema,
-  type CustomerEffectBlueprint,
+  type AcceptedBlueprintArtifact,
   type ModuleDeliveryGap,
   type ModuleDeliveryReport,
   type ModulePlan,
@@ -17,9 +17,10 @@ import {
 import type { ResolvedAssetBinding } from "./module-compiler.js";
 import type { ResolvedAsset } from "@kf/contracts";
 import type { ModuleRegistry } from "./module-registry.js";
+import { stableModuleComponentId } from "./stable-ids.js";
 
 export interface EvaluateModuleDeliveryInput {
-  readonly blueprint: CustomerEffectBlueprint;
+  readonly acceptedBlueprint: AcceptedBlueprintArtifact;
   readonly plan: ModulePlan;
   readonly implementation?: UIImplementationSpec;
   readonly traces: readonly ModuleTrace[];
@@ -42,8 +43,8 @@ const COMPLEX_MODULE_KINDS = new Set([
 const PLACEHOLDER_VALUES = new Set(["__KF_SEED_PLACEHOLDER__", "__KF_PLACEHOLDER_IMAGE__", "seed-placeholder-image"]);
 
 export function evaluateModuleDelivery(input: EvaluateModuleDeliveryInput): ModuleDeliveryEvaluation {
-  assertSafeJson({ blueprint: input.blueprint, plan: input.plan, implementation: input.implementation, traces: input.traces, assetBindings: input.assetBindings, gaps: input.gaps, assetsById: input.assetsById });
-  const blueprint = CustomerEffectBlueprintSchema.parse(input.blueprint);
+  assertSafeJson({ acceptedBlueprint: input.acceptedBlueprint, plan: input.plan, implementation: input.implementation, traces: input.traces, assetBindings: input.assetBindings, gaps: input.gaps, assetsById: input.assetsById, metadata: input.metadata });
+  const acceptedBlueprint = AcceptedBlueprintArtifactSchema.parse(input.acceptedBlueprint);
   const plan = ModulePlanSchema.parse(input.plan);
   const implementation = input.implementation === undefined ? undefined : UIImplementationSpecSchema.parse(input.implementation);
   const traces = input.traces.map((trace) => ModuleTraceSchema.parse(trace));
@@ -55,15 +56,17 @@ export function evaluateModuleDelivery(input: EvaluateModuleDeliveryInput): Modu
   const blueprintToModules = new Map<string, string[]>();
   for (const mapping of trusted) blueprintToModules.set(mapping.blueprintModuleId, [mapping.moduleId]);
 
-  for (const module of blueprint.modules) {
-    const mapped = blueprintToModules.get(module.id) ?? [];
-    const mapping = trusted.find((entry) => entry.blueprintModuleId === module.id);
-    if (mapped.length !== 1) gaps.push(gap(owner, `Map confirmed blueprint module “${module.id}” exactly once to a registered module.`, "BLUEPRINT_MODULE_UNMAPPED"));
+  for (const module of acceptedBlueprint.modules) {
+    const mapped = blueprintToModules.get(module.blueprintModuleId) ?? [];
+    const mapping = trusted.find((entry) => entry.blueprintModuleId === module.blueprintModuleId);
+    if (mapped.length !== 1) gaps.push(gap(owner, `Map confirmed blueprint module “${module.blueprintModuleId}” exactly once to a registered module.`, "BLUEPRINT_MODULE_UNMAPPED"));
     if (mapping !== undefined) {
       const candidate = planModules.find(({ module: planModule }) => planModule.id === mapping.moduleId)?.module;
-      if (candidate === undefined || (module.expectedKind !== undefined && candidate.kind !== module.expectedKind) || (mapping.expectedKind !== undefined && candidate.kind !== mapping.expectedKind)) gaps.push(gap(owner, `Keep blueprint module “${module.id}” mapped to its expected registered kind.`, "BLUEPRINT_KIND_MISMATCH"));
+      let definition;
+      try { definition = candidate === undefined ? undefined : input.registry.require(candidate.kind, candidate.templateVersion); } catch { definition = undefined; }
+      if (candidate === undefined || definition === undefined || candidate.kind !== module.expectedKind || definition.category !== module.expectedCategory || mapping.expectedKind !== module.expectedKind || mapping.expectedCategory !== module.expectedCategory) gaps.push(gap(owner, `Keep blueprint module “${module.blueprintModuleId}” mapped to its exact accepted registered kind/category.`, "BLUEPRINT_KIND_OR_CATEGORY_MISMATCH"));
     }
-    if (module.interactions.length > 0 && !mapped.some((id) => planModules.some(({ module: candidate }) => candidate.id === id && candidate.interactions.length > 0))) gaps.push(gap(module.id, "Map confirmed blueprint interactions to registered native interactions.", "BLUEPRINT_INTERACTION_UNMAPPED"));
+    if (module.interactionRequirements.length > 0 && !mapped.some((id) => planModules.some(({ module: candidate }) => candidate.id === id && candidate.interactions.length > 0))) gaps.push(gap(module.blueprintModuleId, "Map confirmed blueprint interactions to registered native interactions.", "BLUEPRINT_INTERACTION_UNMAPPED"));
   }
   const mappedModuleIds = new Set([...blueprintToModules.values()].flat());
   if (trusted.length === 0) gaps.push(gap(owner, "Provide accepted blueprint provenance metadata from the conversion boundary.", "BLUEPRINT_PROVENANCE_MISSING"));
@@ -72,14 +75,14 @@ export function evaluateModuleDelivery(input: EvaluateModuleDeliveryInput): Modu
     const declared = [...(module.sourceBlueprintModuleIds ?? [])].sort();
     const expected = [...blueprintToModules.entries()].filter(([, ids]) => ids.includes(module.id)).map(([id]) => id).sort();
     if (JSON.stringify(declared) !== JSON.stringify(expected)) gaps.push(gap(module.id, "Keep ModulePlan provenance equal to accepted blueprint conversion metadata.", "MODULE_PROVENANCE_MISMATCH"));
-    if ((module.sourceBlueprintModuleIds ?? []).some((id) => !blueprint.modules.some((candidate) => candidate.id === id))) gaps.push(gap(module.id, "Use only IDs from the confirmed blueprint.", "MODULE_BLUEPRINT_REFERENCE_UNKNOWN"));
+    if ((module.sourceBlueprintModuleIds ?? []).some((id) => !acceptedBlueprint.modules.some((candidate) => candidate.blueprintModuleId === id))) gaps.push(gap(module.id, "Use only IDs from the confirmed blueprint.", "MODULE_BLUEPRINT_REFERENCE_UNKNOWN"));
   }
 
   if (implementation === undefined) {
     for (const { module } of planModules) gaps.push(gap(module.id, "Compile required module controls.", "MODULE_IMPLEMENTATION_MISSING"));
   } else {
     inspectImplementation(plan, implementation, traces, input.assetBindings, input.registry, input.assetsById, gaps);
-    inspectBlueprintInteractionBindings(blueprint, input.metadata, implementation, gaps);
+    inspectBlueprintInteractionBindings(acceptedBlueprint, input.metadata, implementation, gaps);
   }
 
   const report = ModuleDeliveryReportSchema.parse({
@@ -91,12 +94,11 @@ export function evaluateModuleDelivery(input: EvaluateModuleDeliveryInput): Modu
   return Object.freeze({ report });
 }
 
-function inspectBlueprintInteractionBindings(blueprint: CustomerEffectBlueprint, metadata: ModuleCompilationMetadata, implementation: UIImplementationSpec, gaps: ModuleDeliveryGap[]): void {
+function inspectBlueprintInteractionBindings(blueprint: AcceptedBlueprintArtifact, metadata: ModuleCompilationMetadata, implementation: UIImplementationSpec, gaps: ModuleDeliveryGap[]): void {
   for (const requirementOwner of blueprint.modules) {
     const requirements = requirementOwner.interactionRequirements;
-    if (requirements === undefined) continue; // legacy text-only interactions have no machine-verifiable action requirement.
-    const mapping = metadata.blueprintMappings.find((entry) => entry.blueprintModuleId === requirementOwner.id);
-    if (mapping === undefined) { gaps.push(gap("blueprint", `Map all interaction requirements for “${requirementOwner.id}”.`, "BLUEPRINT_INTERACTION_UNMAPPED")); continue; }
+    const mapping = metadata.blueprintMappings.find((entry) => entry.blueprintModuleId === requirementOwner.blueprintModuleId);
+    if (mapping === undefined) { gaps.push(gap("blueprint", `Map all interaction requirements for “${requirementOwner.blueprintModuleId}”.`, "BLUEPRINT_INTERACTION_UNMAPPED")); continue; }
     const outputs = implementation.pages.find((page) => page.id === mapping.pageId)?.components.filter((component) => component.sourceModuleId === mapping.moduleId) ?? [];
     for (const requirement of requirements) {
       const binding = mapping.interactionBindings.find((entry) => entry.type === requirement.type && entry.actionKind === requirement.actionKind && entry.target === requirement.target);
@@ -145,9 +147,23 @@ function inspectImplementation(
     const components = componentsByModule.get(module.id) ?? [];
     let definition;
     try { definition = registry.require(module.kind, module.templateVersion); } catch { gaps.push(gap(module.id, "Use a registered module definition.", "MODULE_DEFINITION_UNREGISTERED")); continue; }
-    const quality = definition.quality ?? { minimumComponentCount: 1, minimumCriticalComponentCount: 1, requiredRoles: [], requiredCriticalRoles: [], requiredCapabilityIds: [] };
+    const quality = definition.quality ?? { minimumComponentCount: 1, minimumCriticalComponentCount: 1, requiredRoles: [], requiredCriticalRoles: [], requiredCapabilityIds: [], variantRequiredOutputs: {} };
     if (components.length < quality.minimumComponentCount || quality.requiredRoles.some((role) => !components.some((component) => component.role === role)) || quality.requiredCapabilityIds.some((capability) => !components.some((component) => component.capabilityId === capability))) gaps.push(gap(module.id, "Generate the module's required registered structure.", "MODULE_REQUIRED_STRUCTURE_MISSING"));
     if (components.filter((component) => component.critical).length < quality.minimumCriticalComponentCount || quality.requiredCriticalRoles.some((role) => !components.some((component) => component.critical && component.role === role))) gaps.push(gap(module.id, "Generate the module's required critical controls.", "CRITICAL_CONTROL_MISSING"));
+    for (const output of quality.variantRequiredOutputs[module.variant] ?? []) {
+      const component = output.outputId === undefined
+        ? components.find((candidate) => candidate.role === output.role)
+        : components.find((candidate) => candidate.id === stableModuleComponentId(module.id, output.outputId!));
+      if (component === undefined || component.role !== output.role || component.capabilityId !== output.capabilityId || component.critical !== output.critical) {
+        gaps.push(gap(module.id, `Generate required ${module.variant} output ${output.outputId ?? output.role}.`, "MODULE_REQUIRED_OUTPUT_MISSING"));
+        continue;
+      }
+      if (output.assetSlotId !== undefined && (module.assetId === undefined || assetsById[module.assetId]?.status !== "resolved" || component.properties.src !== "asset")) gaps.push(gap(module.id, `Bind required asset slot ${output.assetSlotId} to its native output.`, "MODULE_REQUIRED_ASSET_OUTPUT_MISSING"));
+      if (output.actionType !== undefined) {
+        const interactions = module.interactions.filter((interaction) => interaction.type === output.actionType);
+        if (interactions.length > 0 && !interactions.some((interaction) => hasInteraction(component, interaction))) gaps.push(gap(module.id, `Bind required ${output.actionType} action to ${output.outputId ?? output.role}.`, "MODULE_REQUIRED_ACTION_OUTPUT_MISSING"));
+      }
+    }
     if (components.some((component) => !traceKeys.has(`${page.id}\u0000${module.id}\u0000${component.id}`))) gaps.push(gap(module.id, "Emit an exact module trace for every generated control.", "MODULE_TRACE_MISSING"));
     if (module.assetId !== undefined && !assetBindings.some((binding) => binding.moduleId === module.id && binding.assetId === module.assetId)) {
       gaps.push(gap(module.id, "Bind the requested module asset into the delivery package.", "ASSET_BINDING_MISSING"));

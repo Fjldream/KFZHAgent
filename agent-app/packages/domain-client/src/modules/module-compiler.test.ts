@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import type { ModulePlan, ModulePlanModule, ResolvedAsset, UIComponentSpec } from "@kf/contracts";
 import { ModuleRegistry, type ModuleDefinition } from "./module-registry.js";
-import { compileModulePlan, createGeneratedSeedProvenance } from "./module-compiler.js";
+import { compileModulePlan } from "./module-compiler.js";
 import { stableModuleComponentId } from "./stable-ids.js";
+import { acceptedArtifactForPlan, verifiedCompilationFor } from "./testing/module-artifact-test-helpers.js";
 
 const theme = {
   background: "#101827",
@@ -34,6 +35,7 @@ function module(id: string, overrides: Partial<ModulePlanModule> = {}): ModulePl
       emphasis: "primary",
     },
     interactions: [],
+    sourceBlueprintModuleIds: [id],
     ...overrides,
   };
 }
@@ -97,8 +99,10 @@ const resolvedAssets: Readonly<Record<string, ResolvedAsset>> = {
 };
 
 function compile(inputPlan: ModulePlan, registry: ModuleRegistry, extra: Partial<Parameters<typeof compileModulePlan>[0]> = {}) {
+  const acceptedBlueprintArtifact = extra.acceptedBlueprintArtifact ?? acceptedArtifactForPlan(inputPlan, registry);
   const outcome = compileModulePlan({
     plan: inputPlan,
+    acceptedBlueprintArtifact,
     registry,
     assetsById: resolvedAssets,
     validationContext: { availableKfCapabilities: ["text", "image"], approvedAuthorizationRefs: [] },
@@ -130,9 +134,10 @@ describe("compileModulePlan", () => {
 
   it("returns a blocking gap and never calls a required-asset module with an unresolved asset", () => {
     let compiled = false;
-    const result = compileModulePlan({ plan: plan([module("summary"), module("hero", {
+    const inputPlan = plan([module("summary"), module("hero", {
       kind: "image-panel", assetId: "portrait", placement: { ...module("hero").placement, order: 1 },
-    })]), registry: registryFor(
+    })]);
+    const registry = registryFor(
       definition(),
       definition({
         kind: "image-panel",
@@ -140,7 +145,8 @@ describe("compileModulePlan", () => {
         requiredKfCapabilities: ["image"],
         compile: () => { compiled = true; return { components: [component("image", "image")], deliveryGaps: [] }; },
       }),
-    ),
+    );
+    const result = compileModulePlan({ plan: inputPlan, acceptedBlueprintArtifact: acceptedArtifactForPlan(inputPlan, registry), registry,
       assetsById: { portrait: { assetId: "portrait", status: "unavailable" } },
       validationContext: { availableKfCapabilities: ["text", "image"], approvedAuthorizationRefs: [] },
     });
@@ -151,12 +157,14 @@ describe("compileModulePlan", () => {
   });
 
   it("reports a missing required KF capability as a blocking delivery gap instead of fabricating a fallback", () => {
-    const result = compileModulePlan({ plan: plan([module("summary"), module("image", {
+    const inputPlan = plan([module("summary"), module("image", {
       kind: "image-panel", placement: { ...module("image").placement, order: 1 },
-    })]), registry: registryFor(
+    })]);
+    const registry = registryFor(
       definition(),
       definition({ kind: "image-panel", requiredKfCapabilities: ["image"] }),
-    ),
+    );
+    const result = compileModulePlan({ plan: inputPlan, acceptedBlueprintArtifact: acceptedArtifactForPlan(inputPlan, registry), registry,
       assetsById: {},
       validationContext: { availableKfCapabilities: ["text"], approvedAuthorizationRefs: [] },
     });
@@ -190,33 +198,25 @@ describe("compileModulePlan", () => {
     const registry = registryFor(definition());
     const first = compile(input, registry);
     const previous = structuredClone(first.implementation);
-    const result = compile(input, registry, { previousPlan: input, previousImplementation: previous, previousMetadata: structuredClone(first.metadata) });
+    const result = compile(input, registry, { previousPlan: input, previousImplementation: previous, previousCompilationArtifact: verifiedCompilationFor(first) });
 
     expect(result.implementation.pages[0]?.components[0]).toBe(previous.pages[0]?.components[0]);
   });
 
-  it("removes only internally-proven seeded controls and preserves a customer control with the same ID but different hash", () => {
+  it("preserves every legacy customer control during first module adoption", () => {
     const input = plan([module("profile")]);
     const registry = registryFor(definition());
-    const first = compile(input, registry); const previous = first.implementation;
     const customerHello: UIComponentSpec = { ...component("Text1", "text"), id: "Text1", sourceModuleId: undefined, content: "Hello Alice" };
-    previous.pages[0]!.components.push(customerHello);
-
-    const seededMetadata = structuredClone(first.metadata);
-    seededMetadata.generatedSeeds = [createGeneratedSeedProvenance("home", customerHello, "new-project", "project-create-001")];
-    const removed = compile(input, registry, { previousPlan: input, previousImplementation: previous, editableEntityIds: ["Text1"], previousMetadata: seededMetadata });
-    expect(removed.implementation.pages[0]!.components.some((item) => item.id === "Text1")).toBe(false);
-    const edited = { ...customerHello, content: "Hello Alice, customer edited" };
-    previous.pages[0]!.components.splice(previous.pages[0]!.components.findIndex((item) => item.id === "Text1"), 1, edited);
-    const preserved = compile(input, registry, { previousPlan: input, previousImplementation: previous, editableEntityIds: ["Text1"], previousMetadata: seededMetadata });
-    expect(preserved.implementation.pages[0]!.components.find((item) => item.id === "Text1")).toBe(edited);
+    const previous = { schema: "kf-ui-implementation/v1" as const, theme, pages: [{ id: "home", width: 1440, height: 900, components: [customerHello] }] };
+    const preserved = compile(input, registry, { previousImplementation: previous });
+    expect(preserved.implementation.pages[0]!.components.find((item) => item.id === "Text1")).toBe(customerHello);
   });
 
   it("rejects accessor-backed legacy provenance without executing it", () => {
     let reads = 0;
     const unsafe = { plan: plan([module("profile")]), registry: registryFor(definition()), assetsById: resolvedAssets } as Record<string, unknown>;
-    Object.defineProperty(unsafe, "previousMetadata", { enumerable: true, get: () => { reads += 1; return {}; } });
-    expect(() => compileModulePlan(unsafe as never)).toThrow("INVALID_PREVIOUS_COMPILATION_METADATA");
+    Object.defineProperty(unsafe, "acceptedBlueprintArtifact", { enumerable: true, get: () => { reads += 1; return {}; } });
+    expect(() => compileModulePlan(unsafe as never)).toThrow("INVALID_ACCEPTED_BLUEPRINT_ARTIFACT");
     expect(reads).toBe(0);
   });
 
@@ -225,17 +225,17 @@ describe("compileModulePlan", () => {
     const registry = registryFor(definition());
     const firstResult = compile(input, registry); const first = firstResult.implementation;
     const changedTheme = { ...input, theme: { ...input.theme, primary: "#000000" } };
-    expect(compile(changedTheme, registry, { previousPlan: input, previousImplementation: first, previousMetadata: firstResult.metadata }).implementation.pages[0]!.components[0])
+    expect(compile(changedTheme, registry, { previousPlan: input, previousImplementation: first, previousCompilationArtifact: verifiedCompilationFor(firstResult) }).implementation.pages[0]!.components[0])
       .not.toBe(first.pages[0]!.components[0]);
 
     const prefix = plan([module("prefix"), module("profile", { placement: { ...module("profile").placement, order: 1 } })]);
     const afterPrefixResult = compile(prefix, registry); const afterPrefix = afterPrefixResult.implementation;
     const withoutPrefix = plan([module("profile", { placement: { ...module("profile").placement, order: 1 } })]);
-    expect(compile(withoutPrefix, registry, { previousPlan: prefix, previousImplementation: afterPrefix, previousMetadata: afterPrefixResult.metadata }).implementation.pages[0]!.components[0]?.geometry.y)
+    expect(compile(withoutPrefix, registry, { previousPlan: prefix, previousImplementation: afterPrefix, previousCompilationArtifact: verifiedCompilationFor(afterPrefixResult) }).implementation.pages[0]!.components[0]?.geometry.y)
       .not.toBe(afterPrefix.pages[0]!.components.find((item) => item.sourceModuleId === "profile")?.geometry.y);
 
     const alteredRegistry = registryFor(definition({ compilerFingerprint: "test-panel-compiler-v2", compile: () => ({ components: [{ ...component("title", "text"), content: "definition changed" }], deliveryGaps: [] }) }));
-    const definitionRevision = compile(input, alteredRegistry, { previousPlan: input, previousImplementation: first, previousMetadata: firstResult.metadata });
+    const definitionRevision = compile(input, alteredRegistry, { previousPlan: input, previousImplementation: first, previousCompilationArtifact: verifiedCompilationFor(firstResult) });
     expect(definitionRevision.diff?.changedModules).toEqual(["profile"]);
     expect(definitionRevision.implementation.pages[0]!.components[0]!.content).toBe("definition changed");
   });
@@ -258,10 +258,13 @@ describe("compileModulePlan", () => {
     const optional = definition({ kind: "optional-image", assetSlots: [{ id: "image", required: false, allowedKinds: ["image"] }] });
     const required = definition({ kind: "required-image", assetSlots: [{ id: "image", required: true, allowedKinds: ["image"] }] });
     const optionalPlan = plan([module("summary"), module("optional", { kind: "optional-image", assetId: "portrait", placement: { ...module("optional").placement, order: 1 } })]);
-    expect(compile(optionalPlan, registryFor(definition(), optional), { assetsById: { portrait: { assetId: "portrait", status: "pending" } } }).gaps)
+    const optionalRegistry = registryFor(definition(), optional);
+    const optionalOutcome = compileModulePlan({ plan: optionalPlan, acceptedBlueprintArtifact: acceptedArtifactForPlan(optionalPlan, optionalRegistry), registry: optionalRegistry, assetsById: { portrait: { assetId: "portrait", status: "pending" } }, validationContext: { availableKfCapabilities: ["text"], approvedAuthorizationRefs: [] } });
+    expect(optionalOutcome.gaps)
       .toEqual([expect.objectContaining({ moduleId: "optional", severity: "warning" })]);
     const requiredPlan = plan([module("summary"), module("required", { kind: "required-image", assetId: "portrait", placement: { ...module("required").placement, order: 1 } })]);
-    const result = compileModulePlan({ plan: requiredPlan, registry: registryFor(definition(), required), assetsById: { portrait: { assetId: "portrait", status: "unavailable" } }, validationContext: { availableKfCapabilities: ["text"], approvedAuthorizationRefs: [] } });
+    const requiredRegistry = registryFor(definition(), required);
+    const result = compileModulePlan({ plan: requiredPlan, acceptedBlueprintArtifact: acceptedArtifactForPlan(requiredPlan, requiredRegistry), registry: requiredRegistry, assetsById: { portrait: { assetId: "portrait", status: "unavailable" } }, validationContext: { availableKfCapabilities: ["text"], approvedAuthorizationRefs: [] } });
     expect(result.gaps).toEqual([expect.objectContaining({ moduleId: "required", severity: "blocking" })]);
     expect(result.traces.flatMap((trace) => trace.entries)).toEqual([expect.objectContaining({ moduleId: "summary", outputId: "summary/title" })]);
     expect(result.status).toBe("blocked");
@@ -282,6 +285,7 @@ describe("compileModulePlan", () => {
     const onlyRequired = plan([module("hero", { assetId: "portrait" })]);
     const outcome = compileModulePlan({
       plan: onlyRequired,
+      acceptedBlueprintArtifact: acceptedArtifactForPlan(onlyRequired, registryFor(definition({ assetSlots: [{ id: "image", required: true, allowedKinds: ["image"] }] }))),
       registry: registryFor(definition({ assetSlots: [{ id: "image", required: true, allowedKinds: ["image"] }] })),
       assetsById: { portrait: { assetId: "portrait", status: "unavailable" } },
       validationContext: { availableKfCapabilities: ["text"], approvedAuthorizationRefs: [] },

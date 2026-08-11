@@ -10,6 +10,7 @@ import { compileUiImplementation } from "../../implementation/ui-implementation-
 import { applyClientPatch } from "../../patch/client-patcher.js";
 import { inspectClientProject } from "../../inspect/client-inspector.js";
 import { createPortalPlan } from "./fixtures/portal-plan.js";
+import { acceptedArtifactForPlan, verifiedCompilationFor } from "../testing/module-artifact-test-helpers.js";
 
 const theme = {
   background: "#101827", surface: "#1E293B", primary: "#2563EB", accent: "#38BDF8",
@@ -123,6 +124,7 @@ function module(kind: string, id = "module", content: Record<string, unknown> = 
     variant: "default",
     title: "Module title",
     content: JSON.stringify(content),
+    sourceBlueprintModuleIds: [id],
     placement: { region: "main", order: 0, columnSpan: 12, preferredHeight: "large", alignment: "stretch", emphasis: "primary" },
     interactions: [],
   };
@@ -135,7 +137,7 @@ function plan(modules: ModulePlanModule[]): ModulePlan {
       { id: "portrait", kind: "image", name: "Portrait", mimeType: "image/png", description: "Portrait" },
       { id: "project", kind: "image", name: "Project", mimeType: "image/png", description: "Project" },
     ],
-    pages: [{ id: "home", title: "Home", mode: "vertical-flow", modules }], operations: [],
+    pages: [{ id: "home", title: "Home", mode: "vertical-flow", modules: modules.map((item) => ({ ...item, sourceBlueprintModuleIds: [item.id] })) }], operations: [],
   };
 }
 
@@ -168,9 +170,11 @@ function twoTargetNavigationPlan(): ModulePlan {
 }
 
 function compile(input: ModulePlan) {
+  const registry = createDefaultModuleRegistry();
   return compileModulePlan({
     plan: input,
-    registry: createDefaultModuleRegistry(),
+    acceptedBlueprintArtifact: acceptedArtifactForPlan(input, registry),
+    registry,
     assetsById: assets,
     validationContext: { availableKfCapabilities: ["layout.2", "text", "richtext", "image", "button", "tag", "timeline", "tabs", "input", "navmenu"], approvedAuthorizationRefs: [] },
   });
@@ -287,7 +291,7 @@ describe("portal module definitions", () => {
     expect(result.implementation.pages[0]?.components).toContainEqual(expect.objectContaining({ capabilityId: "button", properties: { parentId: "contact/surface", action: { kind: "navigate", pageId: "home" } } }));
     const form = module("form.record-editor", "form", { fields: [{ id: "name", label: "Name", placeholder: "Your name" }], submitLabel: "Send" });
     form.interactions = [{ type: "submit", action: "send" }];
-    expect(() => compile(plan([form]))).toThrow("MODULE_LAYOUT_INVALID");
+    expect(() => compile(plan([form]))).toThrow("ACCEPTED_BLUEPRINT_INTERACTION_UNREGISTERED");
   });
 
   it("keeps modules beta without matching real KF runtime verification", () => {
@@ -301,9 +305,11 @@ describe("portal module definitions", () => {
     const hero = module("content.hero", "hero", { title: "Lin" });
     hero.variant = "no-portrait";
     const base = { ...plan([hero]), assets: [] };
-    const generic = compileModulePlan({ plan: base, registry: createDefaultModuleRegistry(), assetsById: {}, validationContext: { availableKfCapabilities: ["layout.2", "text", "image", "button"], approvedAuthorizationRefs: [], moduleRuntimeEvidence: [{ kind: "content.hero", version: "2.0.0", runtimeFamily: "KingFusion", runtimeVersion: "3.6", baselineId: "kf36-portal-v1", verifiedCapabilities: ["layout.2", "text", "image", "button"] }] } });
+    const registry = createDefaultModuleRegistry();
+    const acceptedBlueprintArtifact = acceptedArtifactForPlan(base, registry);
+    const generic = compileModulePlan({ plan: base, acceptedBlueprintArtifact, registry, assetsById: {}, validationContext: { availableKfCapabilities: ["layout.2", "text", "image", "button"], approvedAuthorizationRefs: [], moduleRuntimeEvidence: [{ kind: "content.hero", version: "2.0.0", runtimeFamily: "KingFusion", runtimeVersion: "3.6", baselineId: "kf36-portal-v1", verifiedCapabilities: ["layout.2", "text", "image", "button"] }] } });
     expect(generic.gaps).toContainEqual(expect.objectContaining({ moduleId: "hero", severity: "warning" }));
-    const accepted = compileModulePlan({ plan: base, registry: createDefaultModuleRegistry(), assetsById: {}, validationContext: { availableKfCapabilities: ["layout.2", "text", "image", "button"], approvedAuthorizationRefs: [], moduleRuntimeEvidence: [{ kind: "content.hero", version: "1.0.0", runtimeFamily: "KingFusion", runtimeVersion: "3.6", baselineId: "kf36-portal-v1", verifiedCapabilities: ["layout.2", "text", "image", "button"] }] } });
+    const accepted = compileModulePlan({ plan: base, acceptedBlueprintArtifact, registry, assetsById: {}, validationContext: { availableKfCapabilities: ["layout.2", "text", "image", "button"], approvedAuthorizationRefs: [], moduleRuntimeEvidence: [{ kind: "content.hero", version: "1.0.0", runtimeFamily: "KingFusion", runtimeVersion: "3.6", baselineId: "kf36-portal-v1", verifiedCapabilities: ["layout.2", "text", "image", "button"] }] } });
     expect(accepted.gaps.some((gap) => gap.moduleId === "hero" && gap.requirement.includes("Mature"))).toBe(false);
   });
 
@@ -329,6 +335,7 @@ describe("portal module definitions", () => {
     const change = compileUiImplementation(result.implementation, {
       workspaceId: "workspace", pageGuidById: { Page1: "page-guid-home" },
       existingControlGuidByComponentId: {}, existingControlCapabilityIdByComponentId: {},
+      moduleCompilationArtifact: verifiedCompilationFor(result),
     });
     expect(change.plan.operations.filter((operation) => operation.op === "create")).not.toHaveLength(0);
     expect(change.plan.operations).toContainEqual(expect.objectContaining({
@@ -342,7 +349,7 @@ describe("portal module definitions", () => {
   it("materializes the golden portal as nested KF controls with a resolved navigation link", async () => {
     const compiled = compile(createPortalPlan());
     if (compiled.status !== "compiled") throw new Error("expected compiled portal");
-    const change = compileUiImplementation(compiled.implementation, { workspaceId: "workspace", pageGuidById: { Page1: "page-guid-1" }, existingControlGuidByComponentId: {}, existingControlCapabilityIdByComponentId: {} });
+    const change = compileUiImplementation(compiled.implementation, { workspaceId: "workspace", pageGuidById: { Page1: "page-guid-1" }, existingControlGuidByComponentId: {}, existingControlCapabilityIdByComponentId: {}, moduleCompilationArtifact: verifiedCompilationFor(compiled) });
     const root = await fixture("client-unknown-field");
     const candidate = await applyClientPatch(root, change.plan);
     const inspection = await inspectClientProject(candidate.rootDir);
@@ -395,6 +402,7 @@ describe("portal module definitions", () => {
       pageGuidById: { Page1: "page-guid-1", Projects: "page-guid-projects", Contact: "page-guid-contact" },
       existingControlGuidByComponentId: {},
       existingControlCapabilityIdByComponentId: {},
+      moduleCompilationArtifact: verifiedCompilationFor(compiled),
     });
     const candidate = await applyClientPatch(await threePageFixture(), change.plan);
     const inspection = await inspectClientProject(candidate.rootDir);
@@ -435,6 +443,7 @@ describe("portal module definitions", () => {
       pageGuidById: { Page1: "page-guid-1", Projects: "page-guid-projects", Contact: "page-guid-contact" },
       existingControlGuidByComponentId: {},
       existingControlCapabilityIdByComponentId: {},
+      moduleCompilationArtifact: verifiedCompilationFor(compiled),
     });
     const candidate = await applyClientPatch(await threePageFixture(), change.plan);
     const page = JSON.parse(await readFile(join(candidate.rootDir, "1.0.0.1/project/page/Page1.json"), "utf8")) as Record<string, unknown>;
