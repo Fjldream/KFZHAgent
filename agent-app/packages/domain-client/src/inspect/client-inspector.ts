@@ -8,6 +8,7 @@ import {
   type ControlIR,
 } from "../ir/client-project-ir.js";
 import { EASYUI_PROTO_FIELDS, EASYUI_PROTO_TYPES } from "../ir/easyui-types.js";
+import { parseTableData } from "../modules/definitions/native-data-adapters.js";
 
 /**
  * KF 特殊节点集合：这些节点没有 uiModelType/uiExtendType/layoutType，
@@ -493,7 +494,7 @@ function collectControls(node: unknown, rawPath: string, out: RawControl[]): voi
   ) {
     // DateBox（proto 11）等 KMUIExtendBase 系控件：KF 序列化不带 objectType，
     // 只带 uiExtendType（参考工程 8 个 DateBox 均无 objectType 键）。
-    const proto = record["uiExtendType"] as number;
+    const proto = record["uiExtendType"];
     const guid = typeof record["guid"] === "string" ? (record["guid"]) : "";
     const name = typeof record["name"] === "string" ? (record["name"]) : "";
     const semanticId = name !== "" ? name : guid !== "" ? guid : `easyui-${out.length}`;
@@ -546,7 +547,7 @@ function collectControls(node: unknown, rawPath: string, out: RawControl[]): voi
       });
     } else if (typeof record["prototypeName"] === "string" && SPECIAL_PROTOTYPE_NAMES.has(record["prototypeName"])) {
       // KF 特殊节点（优先级在容器之后）：prototypeName 特判，无数字类型码。
-      const prototypeName = record["prototypeName"] as string;
+      const prototypeName = record["prototypeName"];
       const geometry = specialNodeGeometry(record, prototypeName);
       const guid = typeof record["guid"] === "string" ? (record["guid"]) : "";
       const name =
@@ -640,8 +641,8 @@ export function kfObjectToControl(node: unknown): KfObjectToIRResult {
 
 function easyuiToIR(node: Record<string, unknown>): KfObjectToIRResult {
   const proto = asNumber(node["uiExtendType"]);
-  const name = typeof node["name"] === "string" ? (node["name"] as string) : "";
-  const guid = typeof node["guid"] === "string" ? (node["guid"] as string) : "";
+  const name = typeof node["name"] === "string" ? node["name"] : "";
+  const guid = typeof node["guid"] === "string" ? node["guid"] : "";
   const id = name !== "" ? name : guid !== "" ? guid : `easyui-${proto}`;
   const ir: Record<string, unknown> = {
     id,
@@ -664,6 +665,10 @@ function easyuiToIR(node: Record<string, unknown>): KfObjectToIRResult {
     if (RESERVED_IR_FIELDS.has(field)) continue;
     if (node[field] !== undefined) ir[field] = node[field];
   }
+  if (proto === 1) {
+    const tableData = inspectReviewedTableData(node);
+    if (tableData !== undefined) ir["tableData"] = tableData;
+  }
   const parsed = EasyuiControlIR.safeParse(ir);
   if (!parsed.success) {
     return { control: null, unknownFields: [] };
@@ -671,20 +676,89 @@ function easyuiToIR(node: Record<string, unknown>): KfObjectToIRResult {
   return { control: parsed.data, unknownFields: [] };
 }
 
+function inspectReviewedTableData(node: Record<string, unknown>): ReturnType<typeof parseTableData> | undefined {
+  try {
+    const dataDescriptor = Object.getOwnPropertyDescriptor(node, "data");
+    const columnsDescriptor = Object.getOwnPropertyDescriptor(node, "columns");
+    const pageSizeDescriptor = Object.getOwnPropertyDescriptor(node, "pageSize");
+    if (dataDescriptor?.get !== undefined || dataDescriptor?.set !== undefined
+      || columnsDescriptor?.get !== undefined || columnsDescriptor?.set !== undefined
+      || pageSizeDescriptor?.get !== undefined || pageSizeDescriptor?.set !== undefined) return undefined;
+    const rows: unknown = dataDescriptor?.value;
+    const columnRows: unknown = columnsDescriptor?.value;
+    const pageSize: unknown = pageSizeDescriptor?.value ?? 20;
+    if (!Array.isArray(rows) || !Array.isArray(columnRows) || columnRows.length !== 1
+      || !Array.isArray(columnRows[0])) return undefined;
+    const columns = columnRows[0].map((raw: unknown) => {
+      if (!isPlainRecord(raw)) throw new Error("unsafe column");
+      const keys = Reflect.ownKeys(raw);
+      if (keys.some((key) => typeof key !== "string")
+        || keys.some((key) => !["field", "title", "width", "align"].includes(key as string))) {
+        throw new Error("unknown column field");
+      }
+      const field = ownDataValue(raw, "field");
+      const title = ownDataValue(raw, "title");
+      const align = ownDataValue(raw, "align") ?? "left";
+      if (typeof field !== "string" || typeof title !== "string"
+        || (align !== "left" && align !== "center" && align !== "right")) {
+        throw new Error("invalid column");
+      }
+      return { key: field, label: title, align };
+    });
+    const semanticRows = rows.map((raw: unknown) => {
+      if (!isPlainRecord(raw)) throw new Error("unsafe row");
+      const output: Record<string, string | number | boolean | null> = {};
+      for (const key of Reflect.ownKeys(raw)) {
+        if (typeof key !== "string" || /^(?:__proto__|prototype|constructor)$/i.test(key)) {
+          throw new Error("dangerous row field");
+        }
+        const value = ownDataValue(raw, key);
+        if (value !== null && typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
+          throw new Error("invalid row value");
+        }
+        output[key] = value;
+      }
+      return output;
+    });
+    return parseTableData({
+      columns,
+      rows: semanticRows,
+      pageSize,
+    });
+  } catch {
+    // Imported unknown/native structures remain losslessly available in raw,
+    // but are never projected into the reviewed semantic IR.
+    return undefined;
+  }
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    && Object.getPrototypeOf(value) === Object.prototype;
+}
+
+function ownDataValue(record: Record<string, unknown>, key: string): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(record, key);
+  if (descriptor === undefined || descriptor.get !== undefined || descriptor.set !== undefined) {
+    throw new Error("accessor field");
+  }
+  return descriptor.value;
+}
+
 function layoutToIR(node: Record<string, unknown>): KfObjectToIRResult {
   const layoutType = asNumber(node["layoutType"]);
   const baseProperty = asRecord(node["baseProperty"]);
   const name =
     typeof node["name"] === "string"
-      ? (node["name"] as string)
+      ? node["name"]
       : typeof baseProperty["name"] === "string"
-        ? (baseProperty["name"] as string)
+        ? baseProperty["name"]
         : "";
   const guid =
     typeof node["guid"] === "string"
-      ? (node["guid"] as string)
+      ? node["guid"]
       : typeof baseProperty["guid"] === "string"
-        ? (baseProperty["guid"] as string)
+        ? baseProperty["guid"]
         : "";
   const id = name !== "" ? name : guid !== "" ? guid : `layout-${layoutType}`;
   const ir: Record<string, unknown> = {
@@ -744,11 +818,11 @@ function prototypeToIR(node: Record<string, unknown>): KfObjectToIRResult {
   // 其次 KF GUID，最后按 prototypeName 兜底。
   const name =
     typeof node["name"] === "string" && node["name"] !== ""
-      ? (node["name"] as string)
+      ? node["name"]
       : typeof asRecord(node["pageProperty"])["name"] === "string"
         ? (asRecord(node["pageProperty"])["name"] as string)
         : "";
-  const guid = typeof node["guid"] === "string" ? (node["guid"] as string) : "";
+  const guid = typeof node["guid"] === "string" ? node["guid"] : "";
   const id = name !== "" ? name : guid !== "" ? guid : `prototype-${prototypeName}`;
   const ir: Record<string, unknown> = {
     ...node, // 其余字段（pageProperty / objects JSON 字符串 / areas / title /

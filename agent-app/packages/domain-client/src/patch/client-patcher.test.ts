@@ -91,6 +91,28 @@ async function setControlField(root: string, guid: string, field: string, value:
   await writeFile(join(projectRoot, "project", "page", "Page1.json"), JSON.stringify(page, null, 2));
 }
 
+async function addNativeDatagrid(root: string): Promise<string> {
+  const guid = "datagrid-guid-1";
+  const page = await pageFile(root);
+  const objects = page["objects"];
+  if (!Array.isArray(objects)) throw new Error("fixture page has no objects array");
+  objects.push({
+    name: "Datagrid1",
+    guid,
+    objectType: 3,
+    uiExtendType: 1,
+    leftTopPt: { x: 20, y: 20 },
+    width: 500,
+    height: 300,
+    data: [{ name: "泵 A" }],
+    columns: [[{ field: "name", title: "设备", width: "100%", align: "left" }]],
+    pageSize: 20,
+  });
+  const projectRoot = await resolveVersionDir(root);
+  await writeFile(join(projectRoot, "project", "page", "Page1.json"), JSON.stringify(page, null, 2));
+  return guid;
+}
+
 describe("client patcher (Task 7 brief Step 1)", () => {
   it.each(["/__proto__/polluted", "/prototype/polluted", "/constructor/polluted", "/safe/~1__proto__"])("rejects dangerous JSON Pointer segment %s without polluting Object.prototype", async (path) => {
     const base = await copyFixture("client-unknown-field");
@@ -139,6 +161,21 @@ describe("client patcher (Task 7 brief Step 1)", () => {
         tableData: { columns: [{ key: "name", label: "名称" }], rows: [{ name: "泵 A" }] },
       },
     }]))).rejects.toThrow(/trusted module compiler plan/i);
+  });
+
+  it.each([
+    "/data",
+    "/data/0/name",
+    "/columns",
+    "/columns/0/0/title",
+    "/insiderObjects/0/data",
+    "/parent/insiderObjects/0/data",
+  ])("rejects raw datagrid/container traversal update %s", async (path) => {
+    const base = await copyFixture("client-unknown-field");
+    const guid = await addNativeDatagrid(base);
+    await expect(applyClientPatch(base, plan([
+      updateOperation(guid, [{ path, value: [] }]),
+    ]))).rejects.toThrow(/allowlist|native container|datagrid/i);
   });
   it("applies structured style to an imported control without changing unknown fields", async () => {
     const base = await copyFixture("client-unknown-field");

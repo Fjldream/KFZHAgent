@@ -49,9 +49,10 @@ export function createKingClientDomainPack(options: {
       return { id: workspace.id, rootDir: workspace.rootDir, mode: "candidate" };
     },
 
-    async patch({ baseWorkspace, changePlan, expectedPlanHash, workRoot }) {
+    async patch({ baseWorkspace, changePlan, expectedPlanHash, semanticOperations, workRoot }) {
       const workspace = await applyClientPatch(baseWorkspace.rootDir, changePlan, {
         planHash: expectedPlanHash,
+        ...(semanticOperations === undefined ? {} : { semanticOperations }),
         ...(workRoot === undefined ? {} : { workRoot }),
       });
       return { id: workspace.id, rootDir: workspace.rootDir, mode: "candidate" };

@@ -1,6 +1,12 @@
 import type { EnqueueBuildInput } from "@kf/build-jobs";
 import type { BuildJobStatus } from "@kf/build-jobs";
-import type { CapabilityReport, ChangePlan, UIImplementationSpec } from "@kf/contracts";
+import type {
+  CapabilityReport,
+  ChangePlan,
+  ServerPlanEnvelope,
+  TrustedSemanticOperationInput,
+  UIImplementationSpec,
+} from "@kf/contracts";
 import type { ModelPort } from "./model-port.js";
 import type { GraphMessage } from "./state.js";
 
@@ -101,7 +107,8 @@ export interface SavePlanInput {
   workspaceId: string;
   changeRequestId: string;
   planHash: string;
-  plan: ChangePlan;
+  /** Model-safe plans or server-owned persisted envelopes; internal envelopes never reach the model. */
+  plan: ChangePlan | ServerPlanEnvelope;
 }
 
 export interface ChangePlanRepository {
@@ -165,6 +172,7 @@ export interface UiImplementationCompilerPort {
   compile(input: UiImplementationCompilerInput): Promise<{
     plan: ChangePlan;
     capabilityReport: CapabilityReport;
+    semanticOperations?: readonly TrustedSemanticOperationInput[];
   }>;
 }
 

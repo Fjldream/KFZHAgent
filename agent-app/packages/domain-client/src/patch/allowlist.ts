@@ -26,7 +26,7 @@
  *   `PROTOTYPE_GEOMETRY_ALIASES_BY_NAME` 在解析阶段映射。
  */
 
-import { EASYUI_ALL_FIELDS } from "../ir/easyui-types.js";
+import { EASYUI_ALL_FIELDS, EASYUI_PROTO_FIELDS } from "../ir/easyui-types.js";
 
 /** Fields every KF control may be patched on, regardless of type.
  * Note: `guid` is deliberately NOT here — a KF GUID identifies the entity
@@ -60,17 +60,10 @@ export const COMMON_CONTROL_ALLOWED_FIELDS: readonly string[] = [
   "securitySection",
   "resourceGroup",
   "resourceGroupMsg",
-  "prototypeName",
   "showUiExtendType",
   "customPropertyRecords",
   "isChangeFixedSize",
   "isChangeFont",
-  "region",
-  "baseProperty",
-  "insiderObjects",
-  "objects",
-  "children",
-  "layoutItems",
 ];
 
 /** Geometry alias: `x` -> `leftTopPt.x`, `y` -> `leftTopPt.y`. */
@@ -154,6 +147,17 @@ export const PROTOTYPE_ALLOWED_FIELDS: readonly string[] = [
   "picName",
   "picPath",
 ];
+
+/** Exact reviewed fields for each actual KF prototype discriminator. */
+export const PROTOTYPE_ALLOWED_FIELDS_BY_NAME: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  CustomCharts: ["pageProperty", "objects", "modlePrototype", "region", "bordershow"],
+  TrendChart: ["title", "areas", "chartComponentType", "trendMode", "refreshMode", "refreshFrequance", "boundRect", "relativePt", "absolutePt", "isEditLocked", "isEditVisible"],
+  BarChart: ["title", "areas", "chartComponentType", "trendMode", "refreshMode", "refreshFrequance", "boundRect", "relativePt", "absolutePt", "isEditLocked", "isEditVisible"],
+  PieChart: ["title", "areas", "chartComponentType", "trendMode", "refreshMode", "refreshFrequance", "boundRect", "relativePt", "absolutePt", "isEditLocked", "isEditVisible"],
+  XYChart: ["title", "areas", "chartComponentType", "trendMode", "refreshMode", "refreshFrequance", "boundRect", "relativePt", "absolutePt", "isEditLocked", "isEditVisible"],
+  AlarmWindow: ["alarmWindowType", "columns", "dateSource", "dateType", "timeType", "historyNumber", "list", "toolBar", "statusBar", "titleName", "titleFontSize", "titleFontColor", "titleTextAlign", "titleTextVertAlign", "backGroundColor", "alarmMsgColor", "alarmMsgBackColor", "alarmMsgFontSize", "ackAlarmColor", "ackAlarmBackColor", "ackAlarmFontSize", "resumeAlarmColor", "resumeAlarmBackColor", "resumeAlarmFontSize", "showAlarmTitle", "showToolBar", "showStatusBar", "showTree", "treeBackGround", "treeFontSize", "treeFontColor", "treeShowLine"],
+  EventWindow: ["columns", "dateSource", "dateType", "timeType", "historyNumber", "list", "toolBar", "statusBar", "titleName", "titleFontSize", "titleFontColor", "titleTextAlign", "titleTextVertAlign", "backGroundColor", "operationEventColor", "operationEventBckColor", "operationEventFontSize", "securityEventColor", "securityEventBckColor", "securityEventFontSize", "customEventColor", "customEventBckColor", "customEventFontSize", "showToolBar", "showStatusBar", "showTree", "treeBackGround", "treeFontSize", "treeFontColor", "treeShowLine"],
+});
 
 /** Control-specific fields per IR control type (mirrors the serialized layouts). */
 export const CONTROL_TYPE_ALLOWED_FIELDS: Readonly<Record<string, readonly string[]>> = {
@@ -281,6 +285,8 @@ export type AllowlistKind = "control" | "page" | "variable";
 export interface AllowlistLookup {
   kind: AllowlistKind;
   controlType?: string;
+  easyuiProto?: number;
+  prototypeName?: string;
 }
 
 /**
@@ -297,6 +303,16 @@ export function allowedFieldsFor(
       return VARIABLE_SET;
     case "control": {
       if (lookup.controlType === undefined) return COMMON_CONTROL_SET;
+      if (lookup.controlType === "easyui") {
+        const exact = lookup.easyuiProto === undefined ? undefined : EASYUI_PROTO_FIELDS[lookup.easyuiProto];
+        return new Set([...COMMON_CONTROL_SET, ...(exact ?? [])]);
+      }
+      if (lookup.controlType === "prototype") {
+        const exact = lookup.prototypeName === undefined
+          ? undefined
+          : PROTOTYPE_ALLOWED_FIELDS_BY_NAME[lookup.prototypeName];
+        return new Set([...COMMON_CONTROL_SET, ...(exact ?? [])]);
+      }
       const typeSet = TYPE_SETS.get(lookup.controlType);
       if (typeSet === undefined) return COMMON_CONTROL_SET;
       return new Set([...COMMON_CONTROL_SET, ...typeSet]);

@@ -9,8 +9,13 @@ import type {
   ValidationReport,
 } from "@kf/contracts";
 import {
+  canonicalChangePlanHash,
+  changePlanSchema,
   normalizeArtifactFileExtension,
   normalizeArtifactMediaType,
+  parseServerPlanEnvelope,
+  type ChangePlan,
+  type TrustedSemanticOperation,
 } from "@kf/contracts";
 import type { DomainRegistry } from "@kf/domain-registry";
 import { Prisma, type BuildJob, type PrismaClient } from "@prisma/client";
@@ -45,6 +50,45 @@ export interface BuildExecutorDeps {
   workRoot?: string;
   maxArtifactBytes?: number;
   leaseMs?: number;
+}
+
+export interface ResolvedStoredPlan {
+  plan: ChangePlan;
+  semanticOperations: readonly TrustedSemanticOperation[];
+}
+
+/**
+ * Worker trust boundary for persisted ChangePlan JSON. Legacy model-safe plans
+ * remain supported, but internal semantic adapters require a server envelope.
+ */
+export function resolveStoredPlan(
+  input: unknown,
+  expected: { expectedPlanHash: string; expectedRevisionId: string },
+): ResolvedStoredPlan {
+  const record = input !== null && typeof input === "object" && !Array.isArray(input)
+    ? input as Record<string, unknown>
+    : undefined;
+  if (record?.["schema"] === "kf-server-plan-envelope/v1") {
+    const envelope = parseServerPlanEnvelope(input, expected);
+    return { plan: envelope.plan, semanticOperations: envelope.semanticOperations };
+  }
+  const parsed = changePlanSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new Error(`stored change plan is invalid: ${parsed.error.issues[0]?.message ?? "schema mismatch"}`);
+  }
+  if (hasInternalSemanticPayload(parsed.data)) {
+    throw new Error("semantic native data requires a server envelope");
+  }
+  if (canonicalChangePlanHash(parsed.data) !== expected.expectedPlanHash) {
+    throw new Error("stored change plan hash does not match the build job");
+  }
+  return { plan: parsed.data, semanticOperations: [] };
+}
+
+function hasInternalSemanticPayload(plan: ChangePlan): boolean {
+  return plan.operations.some((operation) =>
+    (operation.op === "create" && Object.hasOwn(operation.properties, "tableData"))
+    || (operation.op === "update" && operation.changes.some((change) => change.path === "/__kfModuleTableData")));
 }
 
 /**
@@ -143,7 +187,7 @@ export class BuildExecutor {
         status: "SUCCEEDED",
         report,
         stored,
-        plan,
+        planInput: candidate.planInput,
         mode: candidate.mode,
         packaged,
       });
@@ -244,10 +288,14 @@ export class BuildExecutor {
   ): Promise<{
     baseWorkspace: DomainWorkspace;
     candidateWorkspace: DomainWorkspace;
-    planInput: unknown;
+    planInput: ChangePlan;
     mode: string;
   }> {
-    const planInput = plan.plan ?? {};
+    const resolved = resolveStoredPlan(plan.plan ?? {}, {
+      expectedPlanHash: job.planHash,
+      expectedRevisionId: job.baseRevisionId,
+    });
+    const planInput = resolved.plan;
     const workRoot =
       this.#deps.workRoot === undefined ? {} : { workRoot: this.#deps.workRoot };
     const domainProject = await this.#deps.prisma.domainProjectRevision.findFirst({
@@ -288,6 +336,7 @@ export class BuildExecutor {
         baseWorkspace,
         changePlan: planInput,
         expectedPlanHash: job.planHash,
+        semanticOperations: resolved.semanticOperations,
         ...workRoot,
       });
       return {
@@ -312,6 +361,7 @@ export class BuildExecutor {
       baseWorkspace,
       changePlan: planInput,
       expectedPlanHash: job.planHash,
+      semanticOperations: resolved.semanticOperations,
       ...workRoot,
     });
     return {
@@ -368,7 +418,7 @@ export class BuildExecutor {
       report?: ValidationReport;
       error?: unknown;
       stored?: StoredArtifact;
-      plan?: { plan: Prisma.JsonValue | null };
+      planInput?: ChangePlan;
       mode?: string;
       packaged?: PackagedDomainArtifact;
     },
@@ -399,7 +449,7 @@ export class BuildExecutor {
         result: {
           kind: "built",
           state: {
-            plan: opts.plan?.plan ?? null,
+            plan: opts.planInput ?? null,
             mode: opts.mode ?? "patch",
           },
           domainKind: job.domainKind,

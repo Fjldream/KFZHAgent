@@ -4,7 +4,6 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { inspectClientProject, kfControlToIR, kfObjectToControl } from "./client-inspector.js";
 import { ControlIR, EasyuiControlIR, LayoutContainerIR } from "../ir/client-project-ir.js";
 
@@ -131,6 +130,47 @@ describe("KF 容器对象识别（easyui / 布局）", () => {
     expect(control.pagination).toBe(false);
     expect(EasyuiControlIR.safeParse(control).success).toBe(true);
     expect(unknownFields).toEqual([]);
+  });
+
+  it("将 reviewed Datagrid data/columns 只读映射为严格 tableData", () => {
+    const { control } = kfObjectToControl({
+      name: "Datagrid1", guid: "grid-1", objectType: 3, uiExtendType: 1,
+      leftTopPt: { x: 0, y: 0 }, width: 600, height: 300, pageSize: 20,
+      data: [{ name: "泵 A", pressure: 0.8 }],
+      columns: [[
+        { field: "name", title: "设备", width: "50%", align: "left" },
+        { field: "pressure", title: "压力", width: "50%", align: "right" },
+      ]],
+    });
+    expect(control?.tableData).toEqual({
+      columns: [
+        { key: "name", label: "设备", align: "left" },
+        { key: "pressure", label: "压力", align: "right" },
+      ],
+      rows: [{ name: "泵 A", pressure: 0.8 }],
+      pageSize: 20,
+    });
+  });
+
+  it("对未知/危险 Datagrid native data 安全降级且不执行 getter", () => {
+    let reads = 0;
+    const accessor = {
+      name: "DatagridAccessor", guid: "grid-accessor", objectType: 3, uiExtendType: 1,
+      leftTopPt: { x: 0, y: 0 }, width: 600, height: 300,
+      columns: [[{ field: "name", title: "设备", width: "100%", align: "left" }]],
+    } as Record<string, unknown>;
+    Object.defineProperty(accessor, "data", { enumerable: true, get() { reads += 1; return [{ name: "泵 A" }]; } });
+    expect(kfObjectToControl(accessor).control?.tableData).toBeUndefined();
+    expect(reads).toBe(0);
+
+    const unknownColumn = {
+      name: "DatagridUnknown", guid: "grid-unknown", objectType: 3, uiExtendType: 1,
+      leftTopPt: { x: 0, y: 0 }, width: 600, height: 300,
+      data: [{ name: "泵 A" }],
+      columns: [[{ field: "name", title: "设备", width: "100%", align: "left", formatter: "unsafe" }]],
+    };
+    expect(kfObjectToControl(unknownColumn).control?.tableData).toBeUndefined();
+    expect((kfObjectToControl(unknownColumn).control as Record<string, unknown>)?.["columns"]).toBeUndefined();
   });
 
   it("识别单个布局容器：objectType=2 + layoutType，几何来自 baseProperty", () => {

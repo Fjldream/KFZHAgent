@@ -202,10 +202,14 @@ describe("implementation-plan node", () => {
     expect(fixture.createChangePlan).not.toHaveBeenCalled();
     expect(fixture.compile).toHaveBeenCalledTimes(1);
     expect(fixture.savePlan).toHaveBeenCalledWith(expect.objectContaining({
-      plan: expect.objectContaining({ operations: expect.arrayContaining([
-        expect.objectContaining({ entityId: "products-title" }),
-        expect.objectContaining({ entityId: "projects-title" }),
-      ]) }),
+      plan: expect.objectContaining({
+        schema: "kf-server-plan-envelope/v1",
+        revisionId: "r1",
+        plan: expect.objectContaining({ operations: expect.arrayContaining([
+          expect.objectContaining({ entityId: "products-title" }),
+          expect.objectContaining({ entityId: "projects-title" }),
+        ]) }),
+      }),
     }));
     expect(result).toMatchObject({
       stage: "approval",

@@ -2,6 +2,7 @@ export * from "./ids.js";
 export * from "./domain.js";
 export * from "./solution.js";
 export * from "./change-plan.js";
+export * from "./server-plan-envelope.js";
 export * from "./design-plan.js";
 export * from "./validation.js";
 export * from "./ui-style.js";

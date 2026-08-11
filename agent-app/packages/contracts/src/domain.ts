@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ValidationReport } from "./validation.js";
+import type { TrustedSemanticOperation } from "./server-plan-envelope.js";
 
 export type DomainKind = string;
 
@@ -45,6 +46,8 @@ export interface DomainPatchInput {
   baseWorkspace: DomainWorkspace;
   changePlan: unknown;
   expectedPlanHash: string;
+  /** Server-validated native adapter authorizations; never model-authored. */
+  semanticOperations?: readonly TrustedSemanticOperation[];
   workRoot?: string;
 }
 

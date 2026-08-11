@@ -340,6 +340,11 @@ describe("client patcher — KF 特殊节点（prototypeName 判别）", () => {
     expect(node["comment"]).toBe("新注释");
     expect(node["leftTopPt"]).toEqual({ x: 200, y: 34 });
     expect(node["width"]).toBe(900);
+
+    // `objects` is reviewed only for CustomCharts, never for TrendChart.
+    await expect(applyClientPatch(base, plan([
+      updateOperation("prototype-chart-guid", [{ path: "/objects", value: [] }]),
+    ]))).rejects.toThrow(patchConflict);
     // 未 patch 的字段保留。
     expect(node["height"]).toBe(271);
     expect(node["chartComponentType"]).toBe(5);

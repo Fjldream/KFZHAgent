@@ -1,5 +1,6 @@
 import {
   UIImplementationSpecSchema,
+  semanticPayloadHash,
   type CapabilityReport,
   type ChangeOperation,
   type ChangePlan,
@@ -20,7 +21,6 @@ import {
 import { isDeepStrictEqual } from "node:util";
 import { trustedModuleSourceIdsFor } from "../modules/module-compiler.js";
 import { parseTableData } from "../modules/definitions/native-data-adapters.js";
-import { stableStringify } from "../compile/client-compiler.js";
 
 export interface ImplementationCompileContext {
   workspaceId: string;
@@ -37,6 +37,8 @@ export interface ImplementationCompileContext {
 export interface UiImplementationCompileResult {
   plan: ChangePlan;
   capabilityReport: CapabilityReport;
+  /** Server port persists these separately from model-facing plan/spec JSON. */
+  semanticOperations: readonly { kind: "kf.table-data/v1"; entityId: string; capabilityId: "easyui.1"; sourceModuleId: string; payloadHash: string }[];
 }
 
 interface CapabilityIssue {
@@ -106,23 +108,6 @@ const CONFIGURATION_ONLY_NATIVE_CAPABILITIES = new Set([
   "easyui.1",
 ]);
 const EMPTY_STYLE: ComponentStyleSpec = Object.freeze({ declarations: {}, states: {} });
-const TRUSTED_TABLE_PLAN_TOKENS = new WeakMap<ChangePlan, readonly string[]>();
-
-export function semanticTableUpdateToken(entityId: string, value: unknown): string {
-  return `${entityId}\u0000${stableStringify(value)}`;
-}
-
-/**
- * The token is held out-of-band from JSON. It cannot be self-reported by a
- * model or reconstructed after plan serialization; the patcher only accepts
- * it when it receives this exact compiler-created ChangePlan object.
- */
-export function trustedTablePlanTokensFor(plan: unknown): readonly string[] {
-  return plan !== null && typeof plan === "object"
-    ? TRUSTED_TABLE_PLAN_TOKENS.get(plan as ChangePlan) ?? []
-    : [];
-}
-
 /**
  * Compiles a validated UI implementation spec into a deterministic, structured
  * ChangePlan. Styles remain structured intent: this layer compiles styles only
@@ -179,21 +164,19 @@ export function compileUiImplementation(
   }
 
   const plan: ChangePlan = { schema: "kf-change-plan/v1", workspaceId: context.workspaceId, operations };
-  const tableTokens = operations.flatMap((operation) => {
-    if (operation.op === "update") {
-      return operation.changes
-        .filter((change) => change.path === "/__kfModuleTableData")
-        .map((change) => semanticTableUpdateToken(operation.entityId, change.value));
-    }
-    if (operation.op === "create" && operation.properties["type"] === "easyui" && operation.properties["proto"] === 1 && operation.properties["tableData"] !== undefined) {
-      return [semanticTableUpdateToken(operation.entityId, operation.properties["tableData"])];
-    }
-    return [];
-  });
-  if (tableTokens.length > 0) TRUSTED_TABLE_PLAN_TOKENS.set(plan, Object.freeze(tableTokens));
+  const semanticOperations = spec.pages.flatMap((page) => page.components
+    .filter((component) => component.capabilityId === "easyui.1" && component.properties["tableData"] !== undefined && component.sourceModuleId !== undefined)
+    .map((component) => ({
+      kind: "kf.table-data/v1" as const,
+      entityId: context.existingControlGuidByComponentId[component.id] ?? component.id,
+      capabilityId: "easyui.1" as const,
+      sourceModuleId: component.sourceModuleId!,
+      payloadHash: semanticPayloadHash(component.properties["tableData"]),
+    })));
   return {
     plan,
     capabilityReport: finalizeReport(report),
+    semanticOperations,
   };
 }
 
@@ -353,7 +336,12 @@ function existingPropertyChanges(
   const validated = validateGeneratedComponentProperties(capabilityId, component.properties);
   const variant = capabilityVariant(capabilityId);
   if (variant === undefined) throw new Error(`UNSUPPORTED_CAPABILITY_VARIANT: ${capabilityId}`);
-  const allowed = allowedFieldsFor({ kind: "control", controlType: variant.type });
+  const allowed = allowedFieldsFor({
+    kind: "control",
+    controlType: variant.type,
+    ...(variant.proto === undefined ? {} : { easyuiProto: variant.proto }),
+    ...(variant.prototypeName === undefined ? {} : { prototypeName: variant.prototypeName }),
+  });
   const aliases = EXISTING_PROPERTY_ALIASES[variant.type] ?? {};
   const changes: Array<{ path: string; value: unknown }> = [];
   if (variant.type === "button"

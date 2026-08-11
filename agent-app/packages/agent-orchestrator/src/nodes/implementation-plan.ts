@@ -3,6 +3,7 @@ import type { ChangePlan, DesignPlan, UIImplementationSpec } from "@kf/contracts
 import { planHash, stableStringify } from "@kf/domain-client";
 import type { SolutionGraphDeps } from "../ports.js";
 import { GraphPlanSchema } from "../schemas/change-plan.js";
+import { createServerPlanEnvelope } from "../schemas/server-plan-envelope.js";
 import type { AgentGraphStateValue, AgentGraphUpdate } from "../state.js";
 
 const MAX_REJECTION_DETAIL = 500;
@@ -126,7 +127,11 @@ export function createImplementationPlanNode(deps: SolutionGraphDeps) {
       workspaceId: state.workspaceId,
       changeRequestId,
       planHash: hash,
-      plan,
+      plan: createServerPlanEnvelope({
+        plan,
+        revisionId: state.currentRevisionId,
+        semanticOperations: compiled!.semanticOperations ?? [],
+      }),
     });
 
     let diffArtifactId: string | undefined;

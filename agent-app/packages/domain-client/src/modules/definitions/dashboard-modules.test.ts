@@ -3,13 +3,13 @@ import { cp, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ModulePlanModule } from "@kf/contracts";
+import { createServerPlanEnvelope, type ModulePlanModule } from "@kf/contracts";
 import { createDefaultModuleRegistry } from "../module-registry.js";
 import { compileModulePlan } from "../module-compiler.js";
 import { compileUiImplementation } from "../../implementation/ui-implementation-compiler.js";
 import { applyClientPatch } from "../../patch/client-patcher.js";
 import { deriveGuid } from "../../compile/guid-factory.js";
-import { inspectClientProject } from "../../inspect/client-inspector.js";
+import { inspectClientProject, kfObjectToControl } from "../../inspect/client-inspector.js";
 import { validateClientProject } from "../../validate/client-validator.js";
 
 const theme = { background: "#101827", surface: "#1E293B", primary: "#2563EB", accent: "#38BDF8", textPrimary: "#F8FAFC", textSecondary: "#94A3B8", fontFamily: "Inter", spacingUnit: 8, radiusScale: { small: 4, medium: 8, large: 16 } } as const;
@@ -81,13 +81,28 @@ describe("dashboard modules", () => {
       expect(compiled.status).toBe("compiled"); if (compiled.status !== "compiled") continue;
       const changes = compileUiImplementation(compiled.implementation, { workspaceId: "module-golden", pageGuidById: { Page1: "page-guid-1" }, existingControlGuidByComponentId: {}, existingControlCapabilityIdByComponentId: {}, trustedModuleImplementation: compiled.implementation });
       const base = await fixture();
-      const candidate = await applyClientPatch(base, changes.plan);
+      const envelope = createServerPlanEnvelope({
+        plan: changes.plan,
+        revisionId: "revision-1",
+        semanticOperations: changes.semanticOperations,
+      });
+      const persisted = JSON.parse(JSON.stringify(envelope)) as typeof envelope;
+      const candidate = await applyClientPatch(base, persisted.plan, {
+        semanticOperations: persisted.semanticOperations,
+      });
       const inspection = await inspectClientProject(candidate.rootDir);
       expect(Object.values(inspection.index.controls).map((entry) => entry.id)).toContain(expected);
       expect((await validateClientProject(base, candidate, changes.plan)).status).toBe("pass");
       const page = JSON.parse(await readFile(join(candidate.rootDir, "1.0.0.1/project/page/Page1.json"), "utf8")) as Record<string, unknown>;
       const control = findControl(records(page.objects as unknown[]), expected);
       expect(control).toBeDefined();
+      expect(kfObjectToControl(control!).control).toMatchObject({
+        tableData: {
+          columns: [{ key: "name", label: "设备", align: "left" }, { key: "temperature", label: "温度", align: "right" }],
+          rows: [{ name: "泵 A", temperature: 42 }],
+          pageSize: 20,
+        },
+      });
       expect(JSON.stringify(control)).not.toMatch(/chartData|tableData|<script|javascript:/i);
       expect(control?.configureData).toBe("");
       expect(control?.data).toEqual([{ name: "泵 A", temperature: 42 }]);
@@ -132,13 +147,28 @@ describe("dashboard modules", () => {
         entityId: deriveGuid({ seed: "module-golden" }, tableComponentId),
         changes: expect.arrayContaining([expect.objectContaining({ path: "/__kfModuleTableData" })]),
       }));
-      const revisedCandidate = await applyClientPatch(candidate.rootDir, delta.plan);
+      const revisedEnvelope = createServerPlanEnvelope({
+        plan: delta.plan,
+        revisionId: "revision-2",
+        semanticOperations: delta.semanticOperations,
+      });
+      const revisedPersisted = JSON.parse(JSON.stringify(revisedEnvelope)) as typeof revisedEnvelope;
+      const revisedCandidate = await applyClientPatch(candidate.rootDir, revisedPersisted.plan, {
+        semanticOperations: revisedPersisted.semanticOperations,
+      });
       const revisedValidation = await validateClientProject(candidate.rootDir, revisedCandidate, delta.plan);
       expect(revisedValidation.status, revisedValidation.warnings.join("\n")).toBe("pass");
       const revisedPage = JSON.parse(await readFile(join(revisedCandidate.rootDir, "1.0.0.1/project/page/Page1.json"), "utf8")) as Record<string, unknown>;
       const revisedControl = findControl(records(revisedPage.objects as unknown[]), expected);
       expect(revisedControl?.data).toEqual([{ name: "泵 A", pressure: 0.8 }]);
       expect(revisedControl?.columns).toEqual([[{ field: "name", title: "设备名称", width: "50%", align: "left" }, { field: "pressure", title: "压力", width: "50%", align: "right" }]]);
+      expect(kfObjectToControl(revisedControl!).control).toMatchObject({
+        tableData: {
+          columns: [{ key: "name", label: "设备名称", align: "left" }, { key: "pressure", label: "压力", align: "right" }],
+          rows: [{ name: "泵 A", pressure: 0.8 }],
+          pageSize: 20,
+        },
+      });
     }
   });
 });

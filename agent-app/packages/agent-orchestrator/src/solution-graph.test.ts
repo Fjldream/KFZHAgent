@@ -7,6 +7,7 @@ import {
   type CapabilityReport,
   type CustomerEffectBlueprint,
   type DesignPlan,
+  type ServerPlanEnvelope,
   type SolutionIR,
   type UIImplementationSpec,
 } from "@kf/contracts";
@@ -78,7 +79,7 @@ interface StoredRequest {
 
 class FakeChangePlanRepository implements ChangePlanRepository {
   requests = new Map<string, StoredRequest>();
-  plans = new Map<string, { planHash: string; plan: ChangePlan }>();
+  plans = new Map<string, { planHash: string; plan: ChangePlan | ServerPlanEnvelope }>();
   statusCalls: { changeRequestId: string; status: string }[] = [];
 
   async findOpenChangeRequest({
@@ -94,7 +95,7 @@ class FakeChangePlanRepository implements ChangePlanRepository {
   async saveChangeRequest(input: { id: string; status: string }): Promise<void> {
     this.requests.set(input.id, { id: input.id, status: input.status });
   }
-  async savePlan(input: { id: string; planHash: string; plan: ChangePlan }): Promise<void> {
+  async savePlan(input: { id: string; planHash: string; plan: ChangePlan | ServerPlanEnvelope }): Promise<void> {
     this.plans.set(input.id, { planHash: input.planHash, plan: input.plan });
   }
   async loadPlanHash({ changePlanId }: { changePlanId: string }): Promise<string | undefined> {
@@ -581,7 +582,7 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     expect(bed.model.implementationCreateCalls).toHaveLength(1);
     expect(bed.model.createCalls).toHaveLength(0);
     const stored = [...bed.repo.plans.values()][0];
-    expect(stored?.plan.operations).toEqual(expect.arrayContaining([
+    expect((stored?.plan as { plan: ChangePlan }).plan.operations).toEqual(expect.arrayContaining([
       expect.objectContaining({ entityId: "main-title" }),
     ]));
   });
@@ -1252,7 +1253,10 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     // deterministic compiled plan, so approve → enqueue builds that plan.
     const stored = bed.repo.plans.get(`plan:${WORKSPACE_ID}:${payload.planHash}`);
     expect(stored).toBeDefined();
-    expect(payload.planHash).toBe(planHash(stored!.plan));
+    const envelope = stored!.plan as ServerPlanEnvelope;
+    expect(envelope.schema).toBe("kf-server-plan-envelope/v1");
+    expect(payload.planHash).toBe(planHash(envelope.plan));
+    expect(envelope.planHash).toBe(payload.planHash);
     // And it is the same hash persisted for the deterministic plan id.
     expect(bed.repo.plans.has(`plan:${WORKSPACE_ID}:${payload.planHash}`)).toBe(true);
   });

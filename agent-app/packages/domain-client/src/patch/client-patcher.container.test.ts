@@ -360,6 +360,12 @@ describe("client patcher — KF 容器对象（easyui / 布局）", () => {
         updateOperation("easyui-guid-1", [{ path: "/uiExtendType", value: 9 }]),
       ])),
     ).rejects.toThrow(patchConflict);
+    // `value` belongs to other EasyUI prototypes, not Datagrid(proto=1).
+    await expect(
+      applyClientPatch(base, plan([
+        updateOperation("easyui-guid-1", [{ path: "/value", value: "union-bypass" }]),
+      ])),
+    ).rejects.toThrow(patchConflict);
   });
 
   it("updates layout children/panels wholesale and maps geometry into baseProperty", async () => {

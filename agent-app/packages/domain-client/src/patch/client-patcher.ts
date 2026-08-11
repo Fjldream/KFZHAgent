@@ -5,9 +5,12 @@ import path from "node:path";
 import {
   ChangeEntityIdSchema,
   ComponentStyleSpecSchema,
+  canonicalChangePlanHash,
+  semanticPayloadHash,
   type ComponentStyleSpec,
   type FieldPatch,
   type ThemeSpec,
+  type TrustedSemanticOperation,
 } from "@kf/contracts";
 import { z } from "zod";
 import { inspectClientProject, type EntityIndex, type InspectResult } from "../inspect/client-inspector.js";
@@ -20,7 +23,6 @@ import { assertStyleCompilationAccepted, compileControlStyle } from "../style/st
 import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
 import { mergeManagedStyleData } from "../style/style-data-merge.js";
 import { validateCreateComponentProperties } from "../implementation/component-properties.js";
-import { semanticTableUpdateToken, trustedTablePlanTokensFor } from "../implementation/ui-implementation-compiler.js";
 import { parseTableData, toNativeTableProperties } from "../modules/definitions/native-data-adapters.js";
 import { controlGeometryIssues, MAX_CONTROL_GEOMETRY } from "../implementation/control-geometry.js";
 import { mergeControlTemplate, type TemplateJson } from "../templates/merge-template.js";
@@ -255,8 +257,7 @@ export function normalizeChangePlan(input: unknown): NormalizedPlan {
 
 /** Canonical SHA-256 of a plan (used as the planHash contract). */
 export function planHash(input: unknown): string {
-  const plan = normalizeChangePlan(input);
-  return createHash("sha256").update(stableStringify(plan)).digest("hex");
+  return canonicalChangePlanHash(input);
 }
 
 /** Canonical digest of a delete operation (digest = hash of op content). */
@@ -619,6 +620,21 @@ export interface ApplyPatchOptions {
   planHash?: string;
   /** Parent directory for the patcher's fresh worker-local candidate. */
   workRoot?: string;
+  /** Validated by the worker's durable server-envelope trust boundary. */
+  semanticOperations?: readonly TrustedSemanticOperation[];
+}
+
+function hasTrustedTableOperation(
+  operations: readonly TrustedSemanticOperation[],
+  entityId: string,
+  payload: unknown,
+): boolean {
+  const payloadHash = semanticPayloadHash(payload);
+  return operations.some((operation) =>
+    operation.kind === "kf.table-data/v1"
+    && operation.entityId === entityId
+    && operation.capabilityId === "easyui.1"
+    && operation.payloadHash === payloadHash);
 }
 
 function filePath(rootDir: string, versionDir: string, file: string): string {
@@ -801,16 +817,10 @@ async function applyUpdate(
   baseRoot: string,
   op: NormalizedOperation,
   workspaceId: string,
-  trustedTableUpdateTokens: readonly string[],
+  semanticOperations: readonly TrustedSemanticOperation[],
 ): Promise<void> {
   const loc = await locateEntity(baseRoot, inspection.index, versionDir, op.entityId, op.entityType);
   const { doc, root } = await entityRootOf(candidate, versionDir, loc);
-  const allowed = allowedFieldsFor({
-    kind: loc.kind,
-    ...(isControlLocation(loc) && loc.controlType !== undefined
-      ? { controlType: loc.controlType }
-      : {}),
-  });
   // KF 特殊节点：prototypeName 从候选节点读取（决定几何路径映射，
   // 例如 CustomCharts 几何在 pageProperty.pagePos/pageSize）。
   const prototypeName =
@@ -819,6 +829,18 @@ async function applyUpdate(
         ? root["prototypeName"]
         : undefined
       : undefined;
+  const easyuiProto = isControlLocation(loc) && loc.controlType === "easyui"
+    && typeof root["uiExtendType"] === "number" && Number.isInteger(root["uiExtendType"])
+    ? root["uiExtendType"]
+    : undefined;
+  const allowed = allowedFieldsFor({
+    kind: loc.kind,
+    ...(isControlLocation(loc) && loc.controlType !== undefined
+      ? { controlType: loc.controlType }
+      : {}),
+    ...(easyuiProto === undefined ? {} : { easyuiProto }),
+    ...(prototypeName === undefined ? {} : { prototypeName }),
+  });
   for (const change of op.changes) {
     if (change.path === "") {
       throw new PatchConflictError("update patch path must address a field, not the entity root");
@@ -826,7 +848,7 @@ async function applyUpdate(
     const tokens = parseJsonPointer(change.path);
     const firstToken = tokens[0] as string;
     if (change.path === "/__kfModuleTableData") {
-      if (!trustedTableUpdateTokens.includes(semanticTableUpdateToken(op.entityId, change.value))) {
+      if (!hasTrustedTableOperation(semanticOperations, op.entityId, change.value)) {
         throw new PatchConflictError("reviewed table data requires a trusted module compiler plan");
       }
       if (!(isControlLocation(loc) && loc.controlType === "easyui" && root["uiExtendType"] === 1)) {
@@ -841,6 +863,15 @@ async function applyUpdate(
         throw new PatchConflictError(`invalid reviewed datagrid data: ${error instanceof Error ? error.message : "unknown"}`, { cause: error });
       }
       continue;
+    }
+    if (isControlLocation(loc)
+      && (loc.controlType === "easyui" || loc.controlType === "layout" || loc.controlType === "prototype")
+      && tokens.length !== 1) {
+      throw new PatchConflictError("native container updates must address one exact reviewed top-level field");
+    }
+    if (loc.controlType === "easyui" && easyuiProto === 1
+      && (firstToken === "data" || firstToken === "columns")) {
+      throw new PatchConflictError("raw datagrid data/columns updates require the reviewed semantic adapter");
     }
     if (firstToken === "configureData") {
       throw new PatchConflictError("configureData is not an allowed generic update; use a reviewed semantic adapter");
@@ -1214,7 +1245,7 @@ async function applyCreate(
   baseRoot: string,
   op: NormalizedOperation,
   workspaceId: string,
-  trustedTablePlanTokens: readonly string[],
+  semanticOperations: readonly TrustedSemanticOperation[],
 ): Promise<void> {
   const build = { seed: workspaceId };
   switch (op.entityType) {
@@ -1261,7 +1292,7 @@ async function applyCreate(
           if (value !== undefined) pass[field] = value;
         }
         if (proto === 1 && properties["tableData"] !== undefined) {
-          if (!trustedTablePlanTokens.includes(semanticTableUpdateToken(op.entityId, properties["tableData"]))) {
+          if (!hasTrustedTableOperation(semanticOperations, op.entityId, properties["tableData"])) {
             throw new PatchConflictError("reviewed table data requires a trusted module compiler plan");
           }
           try {
@@ -1542,14 +1573,14 @@ export async function applyClientPatch(
   input: unknown,
   options?: ApplyPatchOptions,
 ): Promise<ClientWorkspace> {
-  const trustedTablePlanTokens = trustedTablePlanTokensFor(input);
-  const plan = normalizeChangePlan(input);
+  const semanticOperations = options?.semanticOperations ?? [];
   if (options?.planHash !== undefined) {
-    const actual = planHash(plan);
+    const actual = planHash(input);
     if (actual !== options.planHash) {
       throw new PatchConflictError(`planHash mismatch (expected ${options.planHash}, got ${actual})`);
     }
   }
+  const plan = normalizeChangePlan(input);
 
   const versionDir = await resolveVersionDirName(base);
   const inspection = await inspectClientProject(base);
@@ -1567,9 +1598,9 @@ export async function applyClientPatch(
 
   for (const op of plan.operations) {
     if (op.op === "create") {
-      await applyCreate(candidate, versionDir, inspection, base, op, plan.workspaceId, trustedTablePlanTokens);
+      await applyCreate(candidate, versionDir, inspection, base, op, plan.workspaceId, semanticOperations);
     } else if (op.op === "update") {
-      await applyUpdate(candidate, versionDir, inspection, base, op, plan.workspaceId, trustedTablePlanTokens);
+      await applyUpdate(candidate, versionDir, inspection, base, op, plan.workspaceId, semanticOperations);
     } else if (op.op === "applyStyle") {
       await applyStyle(candidate, versionDir, inspection, base, op);
     } else {

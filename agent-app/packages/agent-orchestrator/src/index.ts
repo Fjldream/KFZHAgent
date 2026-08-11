@@ -20,6 +20,7 @@ export {
 } from "./schemas/intent.js";
 export { ProjectDesignSchema, type ProjectDesign, type SolutionIR } from "./schemas/project-design.js";
 export { GraphPlanSchema, PlanSummarySchema, type GraphPlan, type PlanSummary } from "./schemas/change-plan.js";
+export { ServerPlanEnvelopeSchema, TrustedSemanticOperationSchema, type ServerPlanEnvelope } from "./schemas/server-plan-envelope.js";
 export {
   type ModelPort,
   type ModelPortContext,

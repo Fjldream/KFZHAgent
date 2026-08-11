@@ -307,6 +307,33 @@ export const StepsControlIR = BaseControlIR.extend({
 export const ContainerChildIR = z.record(z.string(), z.unknown());
 export type ContainerChildIR = z.infer<typeof ContainerChildIR>;
 
+const ReviewedTablePrimitiveSchema = z.union([
+  z.string().max(500),
+  z.number().finite().min(-1_000_000_000).max(1_000_000_000),
+  z.boolean(),
+  z.null(),
+]);
+export const ReviewedTableDataSchema = z.object({
+  columns: z.array(z.object({
+    key: z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/),
+    label: z.string().min(1).max(120),
+    align: z.enum(["left", "center", "right"]),
+  }).strict()).min(1).max(32),
+  rows: z.array(z.record(z.string(), ReviewedTablePrimitiveSchema)).min(1).max(500),
+  pageSize: z.number().int().min(1).max(500),
+}).strict().superRefine((value, ctx) => {
+  const columnKeys = value.columns.map((column) => column.key).sort();
+  if (new Set(columnKeys).size !== columnKeys.length) {
+    ctx.addIssue({ code: "custom", path: ["columns"], message: "duplicate column keys" });
+  }
+  value.rows.forEach((row, index) => {
+    const rowKeys = Object.keys(row).sort();
+    if (rowKeys.length !== columnKeys.length || rowKeys.some((key, keyIndex) => key !== columnKeys[keyIndex])) {
+      ctx.addIssue({ code: "custom", path: ["rows", index], message: "row keys must match reviewed columns" });
+    }
+  });
+});
+
 /**
  * easyui 控件（objectType=3）。几何在顶层 leftTopPt/width/height；
  * 数据/列走 `configureData` 脚本（easyui 模式），IR 只建模几何 + 核心字段。
@@ -318,6 +345,8 @@ export const EasyuiControlIR = BaseControlIR.extend({
   proto: z.number().int(),
   /** 冗余保留原始 proto 值（与 proto 相同，便于回写 KF 时对账）。 */
   uiExtendType: z.number().int().optional(),
+  /** Read-only semantic projection of reviewed native Datagrid data/columns. */
+  tableData: ReviewedTableDataSchema.optional(),
   // ── easyui 核心可选字段（EASYUI_PROTO_FIELDS 并集，排除 IR 保留名 type/proto/uiExtendType/几何；值类型宽松 unknown）──
   _validateOnCreate: z.unknown().optional(),
   accept: z.unknown().optional(),

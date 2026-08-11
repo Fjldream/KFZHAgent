@@ -8,6 +8,7 @@ import {
 } from "@nestjs/common";
 import { TenantGuard, type AuthenticatedRequest } from "../auth/tenant.guard.js";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { parseServerPlanEnvelope } from "@kf/contracts";
 
 /** 计划中涉及 linkMng（控件事件脚本）的变更，确认前必须单独可见（I5）。 */
 export interface ScriptChange {
@@ -21,6 +22,12 @@ function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+function publicChangePlan(storedPlan: unknown, expectedPlanHash: string): unknown {
+  const record = asRecord(storedPlan);
+  if (record["schema"] !== "kf-server-plan-envelope/v1") return storedPlan;
+  return parseServerPlanEnvelope(storedPlan, { expectedPlanHash }).plan;
 }
 
 function isScriptPath(path: unknown): path is string {
@@ -72,11 +79,14 @@ export class ChangePlanController {
     if (plan === null) {
       throw new NotFoundException();
     }
+    // Never expose server-owned semantic authorizations. A corrupt/tampered
+    // envelope must fail closed instead of being mistaken for a legacy plan.
+    const publicPlan = publicChangePlan(plan.plan, plan.planHash);
     return {
       id: plan.id,
       planHash: plan.planHash,
-      plan: plan.plan,
-      scriptChanges: scriptChangesOf(plan.plan),
+      plan: publicPlan,
+      scriptChanges: scriptChangesOf(publicPlan),
     };
   }
 }
