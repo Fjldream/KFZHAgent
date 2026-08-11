@@ -225,6 +225,48 @@ describe("solvePageLayout", () => {
     ]);
   });
 
+  it("reserves an undersized admin header slot before considering a later header sibling", () => {
+    const tooTall = definition({
+      kind: "tall-header",
+      layout: { ...definition().layout, height: { min: 80, preferred: { compact: 80, small: 80, medium: 80, large: 80, full: 80 }, max: 80 } },
+    });
+    const compact = definition({
+      kind: "compact-header",
+      layout: { ...definition().layout, height: { min: 30, preferred: { compact: 30, small: 30, medium: 30, large: 30, full: 30 }, max: 30 } },
+    });
+    const result = solvePageLayout({
+      id: "header-failure",
+      mode: "admin-shell",
+      modules: [
+        module("failed", 0, { kind: "tall-header", placement: { ...module("failed", 0).placement, region: "header" } }),
+        module("later", 1, { kind: "compact-header", placement: { ...module("later", 1).placement, region: "header" } }),
+      ],
+    }, registryFor(tooTall, compact));
+
+    expect(result.boundsByModuleId).toEqual({});
+    expect(result.issues).toEqual([
+      { code: "MODULE_TOO_SMALL", moduleId: "failed" },
+      { code: "LAYOUT_OVERFLOW", moduleId: "later" },
+    ]);
+  });
+
+  it("reserves a below-minimum span and wraps a later full-width sibling instead of backfilling", () => {
+    const wideOnly = definition({ kind: "wide-only", layout: { ...definition().layout, minColumnSpan: 6 } });
+    const anyWidth = definition({ kind: "any-width", layout: { ...definition().layout, minColumnSpan: 1 } });
+    const result = solvePageLayout({
+      id: "span-failure",
+      mode: "dashboard-grid",
+      modules: [
+        module("failed", 0, { kind: "wide-only", placement: { ...module("failed", 0).placement, columnSpan: 4, preferredHeight: "small" } }),
+        module("later", 1, { kind: "any-width", placement: { ...module("later", 1).placement, columnSpan: 12, preferredHeight: "small" } }),
+      ],
+    }, registryFor(wideOnly, anyWidth));
+
+    expect(result.boundsByModuleId.later).toEqual({ x: 48, y: 272, width: 1344, height: 200 });
+    expect(result.boundsByModuleId).not.toHaveProperty("failed");
+    expect(result.issues).toEqual([{ code: "MODULE_TOO_SMALL", moduleId: "failed" }]);
+  });
+
   it("anchors the unchanged fixed-layout prefix while recomputing its affected sibling", () => {
     const registry = registryFor(definition());
     const before = solvePageLayout({

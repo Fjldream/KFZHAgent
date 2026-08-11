@@ -181,22 +181,31 @@ function addFixedRegion(
       rowHeight = 0;
       slot = gridSlot(content, column, candidate.module.placement.columnSpan);
     }
-    if (requestedHeight === undefined || slot === undefined || candidate.module.placement.columnSpan < candidate.definition.layout.minColumnSpan) {
+    if (requestedHeight === undefined || slot === undefined) {
       issues.push(issue("MODULE_TOO_SMALL", candidate.module.id));
+      // Even an unplaceable request consumes a deterministic row footprint.
+      column = GRID_COLUMNS;
+      rowHeight = Math.max(rowHeight, requestedHeight ?? candidate.definition.layout.height.min);
       continue;
     }
     const height = region.chrome ? Math.min(requestedHeight, content.height) : requestedHeight;
+    const consumeSlot = (): void => {
+      column += candidate.module.placement.columnSpan;
+      rowHeight = Math.max(rowHeight, height);
+    };
+    if (candidate.module.placement.columnSpan < candidate.definition.layout.minColumnSpan) {
+      issues.push(issue("MODULE_TOO_SMALL", candidate.module.id));
+      consumeSlot();
+      continue;
+    }
     if (height < candidate.definition.layout.height.min) {
       issues.push(issue("MODULE_TOO_SMALL", candidate.module.id));
+      consumeSlot();
       continue;
     }
     const candidateBounds = alignedBounds(candidate, content, column, slot, y, height);
     // A rejected module still owns its requested slot. Later siblings must not
     // backfill it, otherwise a repair changes unrelated fixed-layout geometry.
-    const consumeSlot = (): void => {
-      column += candidate.module.placement.columnSpan;
-      rowHeight = Math.max(rowHeight, height);
-    };
     if (!candidate.validDefinitionRegion || candidateBounds === undefined) {
       issues.push(issue(!candidate.validDefinitionRegion ? "INVALID_REGION" : "MODULE_TOO_SMALL", candidate.module.id));
       consumeSlot();
