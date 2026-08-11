@@ -343,8 +343,8 @@ function assertDescriptorSafeJson(root: unknown, code: string, maxNodes = 20_000
 function forbiddenModuleKey(key: string): boolean {
   const normalized = key.normalize("NFKC").replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
   const compact = normalized.replace(/[^a-z0-9]/g, "");
-  if (["x", "y", "width", "height", "geometry", "css", "selector", "html", "script", "javascript", "path", "filepath", "storagekey", "native", "guid", "controlguid", "objecttype", "uimodeltype", "styledatanew", "baseproperty", "lefttoppt", "insiderobjects", "configuredata", "layouttype", "prototype"].includes(compact)) return true;
-  return compact.includes("storagekey") || compact.includes("filepath") || compact.includes("controlguid") || compact.includes("styledatanew") || compact.includes("objecttype") || compact.includes("uimodeltype") || compact.includes("configuredata");
+  if (["x", "y", "width", "height", "geometry", "controlgeometry", "css", "cssrules", "selector", "html", "script", "scriptbody", "javascript", "path", "pathvalue", "filepath", "storagekey", "native", "nativepayload", "guid", "controlguid", "objecttype", "uimodeltype", "styledatanew", "baseproperty", "lefttoppt", "insiderobjects", "configuredata", "layouttype", "prototype"].includes(compact)) return true;
+  return compact.includes("storagekey") || compact.includes("filepath") || compact.includes("pathvalue") || compact.includes("controlgeometry") || compact.includes("controlguid") || compact.includes("nativepayload") || compact.includes("scriptbody") || compact.includes("cssrules") || compact.includes("styledatanew") || compact.includes("objecttype") || compact.includes("uimodeltype") || compact.includes("configuredata");
 }
 
 /** Model reply has passed JSON.parse, but scan its JSON tree before schema parsing for disallowed implementation vocabulary. */
@@ -506,7 +506,8 @@ export function extractJson(content: string): unknown {
   const start = body.indexOf("{");
   const end = body.lastIndexOf("}");
   if (start === -1 || end === -1 || end <= start) {
-    throw new JsonExtractionError("NO_JSON_OBJECT", "no JSON object in model reply");
+    const beginsObject = start !== -1 && body.slice(start).trimStart().startsWith("{");
+    throw new JsonExtractionError(beginsObject ? "JSON_TRUNCATED" : "NO_JSON_OBJECT", "no JSON object in model reply");
   }
   try {
     return JSON.parse(body.slice(start, end + 1));

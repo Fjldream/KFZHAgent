@@ -633,12 +633,19 @@ describe("DeepSeekModelPort", () => {
     expect(prompt).toContain("禁止输出 geometry");
   });
 
+  it("overwrites model-authored top-level assets with the current server catalog snapshot", async () => {
+    const candidate = modulePlan({ assets: [{ id: "invented", kind: "image", name: "x", mimeType: "image/png", description: "x" }] });
+    const result = await makePort(candidate).createModulePlan(modulePlanningContext());
+    expect(result.assets).toEqual(modulePlanningContext().assetCatalog);
+  });
+
   it("rejects module output with forbidden implementation fields, unknown modules, beta modules, or unavailable assets", async () => {
     const candidates = [
       modulePlan({ pages: [{ ...modulePlan().pages[0], modules: [{ ...modulePlan().pages[0].modules[0], geometry: { x: 0 } }, modulePlan().pages[0].modules[1]] }]}),
       modulePlan({ pages: [{ ...modulePlan().pages[0], modules: [{ ...modulePlan().pages[0].modules[0], css: ".hero{}" }, modulePlan().pages[0].modules[1]] }]}),
       modulePlan({ pages: [{ ...modulePlan().pages[0], modules: [{ ...modulePlan().pages[0].modules[0], path: "/tmp/kf" }, modulePlan().pages[0].modules[1]] }]}),
       modulePlan({ pages: [{ ...modulePlan().pages[0], modules: [{ ...modulePlan().pages[0].modules[0], content: '{"storageKey":"assets/private"}' }, modulePlan().pages[0].modules[1]] }]}),
+      modulePlan({ pages: [{ ...modulePlan().pages[0], modules: [{ ...modulePlan().pages[0].modules[0], content: '{"nested":[{"ｃｏｎｔｒｏｌＧｅｏｍｅｔｒｙ":{"x":1}},{"nativePayload":true},{"scriptBody":"x"},{"cssRules":"x"},{"pathValue":"x"}]}' }, modulePlan().pages[0].modules[1]] }]}),
       modulePlan({ pages: [{ ...modulePlan().pages[0], modules: [{ ...modulePlan().pages[0].modules[0], objectType: 3 }, modulePlan().pages[0].modules[1]] }]}),
       modulePlan({ pages: [{ ...modulePlan().pages[0], modules: [{ ...modulePlan().pages[0].modules[0], kind: "data.table", variant: "default" }, modulePlan().pages[0].modules[1]] }]}),
       modulePlan({ pages: [{ ...modulePlan().pages[0], modules: [{ ...modulePlan().pages[0].modules[0], assetId: "not-uploaded" }, modulePlan().pages[0].modules[1]] }]}),
@@ -712,6 +719,18 @@ describe("DeepSeekModelPort", () => {
       .rejects.toThrow("requirement text exceeds prompt bound");
     expect(fetchImpl).not.toHaveBeenCalled();
     void candidate;
+  });
+
+  it("keeps the latest twenty recent messages in their original chronological order", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify(modulePlan()) } }] }),
+    });
+    const recentMessages = Array.from({ length: 22 }, (_, index) => ({ role: "user" as const, content: `turn-${index}` }));
+    await new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" })
+      .createModulePlan(modulePlanningContext({ recentMessages }));
+    const prompt = JSON.parse(fetchImpl.mock.calls[0][1].body).messages[1].content;
+    expect(prompt).not.toContain("turn-0");
+    expect(prompt.indexOf("turn-2")).toBeLessThan(prompt.indexOf("turn-21"));
   });
 
   it("requires the exact signed interaction identity and canonical order per mapped module", async () => {
@@ -831,6 +850,14 @@ describe("DeepSeekModelPort", () => {
     await expect(new DeepSeekModelPort({ apiKey: "test-key", fetch: semanticFetch, baseUrl: "https://mock.local" })
       .createModulePlan(modulePlanningContext())).rejects.toThrow(DeepSeekModelOutputError);
     expect(semanticFetch).toHaveBeenCalledTimes(1);
+
+    const forgedTextFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify({ ...modulePlan(), unexpected: "JSON_PARSE" }) } }] }),
+    });
+    await expect(new DeepSeekModelPort({ apiKey: "test-key", fetch: forgedTextFetch, baseUrl: "https://mock.local" })
+      .createModulePlan(modulePlanningContext())).rejects.toThrow(DeepSeekModelOutputError);
+    expect(forgedTextFetch).toHaveBeenCalledTimes(1);
   });
 
   it.each(["content.hero", "data.status-grid", "data.detail"])("fake mode plans and compiles stable %s without network", async (kind) => {
@@ -851,6 +878,15 @@ describe("DeepSeekModelPort", () => {
     context.modulePlanningCatalog = [];
     await expect(new DeterministicFakeModelPort().createModulePlan(context))
       .rejects.toThrow("no stable registry modules");
+  });
+
+  it("fake revision derives a truthful empty delta when the accepted final snapshot is unchanged", async () => {
+    const context = fakeCompileContext("content.hero");
+    const fake = new DeterministicFakeModelPort();
+    const first = await fake.createModulePlan(context);
+    const second = await fake.reviseModulePlan({ ...context, previousModulePlan: first });
+    expect(second.pages).toEqual(first.pages);
+    expect(second.operations).toEqual([]);
   });
 
   it("createUiImplementation converts every blueprint module into structured components", async () => {
