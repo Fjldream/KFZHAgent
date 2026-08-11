@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { ArtifactsModule } from "./artifacts/artifacts.module.js";
+import { AssetsModule } from "./assets/assets.module.js";
 import { AuditModule } from "./audit/audit.module.js";
 import { AuthModule } from "./auth/auth.module.js";
 import { BuildJobsModule } from "./build-jobs/build-jobs.module.js";
@@ -20,6 +21,7 @@ import { WorkspacesModule } from "./workspaces/workspaces.module.js";
     WorkspacesModule,
     RevisionsModule,
     ArtifactsModule,
+    AssetsModule,
     BuildJobsModule,
     ConversationsModule,
   ],

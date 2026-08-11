@@ -41,6 +41,10 @@ const PLATFORM = { tenant: "KF Platform", username: "root", password: "TempPass-
 const TENANT_A = { tenant: "Acme Corp", username: "alice", password: "TempPass-123" };
 const TENANT_A_MEMBER = { tenant: "Acme Corp", username: "carol", password: "CarolPass-123" };
 const TENANT_B = { tenant: "Globex", username: "bob", password: "TempPass-123" };
+const ASSET_PNG_1X1 = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLq7wAAAABJRU5ErkJggg==",
+  "base64",
+);
 
 let app: INestApplication;
 let server: ReturnType<INestApplication["getHttpServer"]>;
@@ -64,6 +68,7 @@ const TABLES = [
   "ChangeRequest",
   "Message",
   "Conversation",
+  "WorkspaceAsset",
   "SolutionWorkspace",
   "UserSession",
   "User",
@@ -834,6 +839,44 @@ describe("api contract", () => {
       .get(`/api/workspaces/${ws.body.id}`)
       .set("Cookie", cookie)
       .expect(404);
+  });
+
+  it("uploads byte-sniffed workspace assets without storage-key exposure and cleans them on deletion", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createWorkspace(cookie, "Asset Catalog WS");
+    const uploaded = await request(server)
+      .post(`/api/workspaces/${ws.body.id}/assets`)
+      .query({ name: "portrait.png" })
+      .set("Cookie", cookie)
+      .set("Content-Type", "text/html")
+      .send(ASSET_PNG_1X1)
+      .expect(201);
+
+    expect(uploaded.body).toMatchObject({
+      name: "portrait.png",
+      type: "image",
+      mediaType: "image/png",
+      width: 1,
+      height: 1,
+    });
+    expect(uploaded.body).not.toHaveProperty("storageKey");
+
+    const listed = await request(server)
+      .get(`/api/workspaces/${ws.body.id}/assets`)
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(listed.body).toEqual([expect.objectContaining({ id: uploaded.body.id })]);
+    expect(listed.body[0]).not.toHaveProperty("storageKey");
+
+    const persisted = await prisma.workspaceAsset.findFirstOrThrow({
+      where: { id: uploaded.body.id, tenantId: ws.body.tenantId, workspaceId: ws.body.id },
+    });
+    await request(server)
+      .delete(`/api/workspaces/${ws.body.id}`)
+      .set("Cookie", cookie)
+      .send({ confirm: true })
+      .expect(204);
+    await expect(storage.open(ws.body.tenantId, persisted.storageKey)).rejects.toThrow();
   });
 });
 

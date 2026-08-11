@@ -208,6 +208,27 @@ model Artifact {
   @@index([tenantId, buildJobId])
 }
 
+/// Tenant- and workspace-scoped logical assets. `storageKey` remains server
+/// private; it is never part of model context or the web catalog response.
+model WorkspaceAsset {
+  id          String   @id @default(uuid())
+  tenantId    String
+  workspaceId String
+  type        String
+  name        String
+  mediaType   String
+  storageKey  String
+  sha256      String
+  sizeBytes   Int
+  width       Int?
+  height      Int?
+  tags        Json
+  createdAt   DateTime @default(now())
+
+  @@unique([tenantId, workspaceId, sha256])
+  @@index([tenantId, workspaceId])
+}
+
 model ValidationReport {
   id           String   @id @default(uuid())
   tenantId     String

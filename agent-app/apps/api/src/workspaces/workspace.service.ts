@@ -347,6 +347,13 @@ export class WorkspaceService {
         })
       ).map((row) => row.id);
 
+      const workspaceAssets = await tx.workspaceAsset.findMany({
+        where: { tenantId, workspaceId },
+        select: { storageKey: true },
+      });
+      for (const asset of workspaceAssets) removedStorageKeys.push(asset.storageKey);
+      await tx.workspaceAsset.deleteMany({ where: { tenantId, workspaceId } });
+
       if (revisionIds.length > 0) {
         const domainRows = await tx.domainProjectRevision.findMany({
           where: { tenantId, solutionRevisionId: { in: revisionIds } },
