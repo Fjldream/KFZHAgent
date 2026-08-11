@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cp, mkdtemp, readFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,6 +27,45 @@ async function fixture(name: string): Promise<string> {
   const target = await mkdtemp(join(tmpdir(), "kf-portal-tree-"));
   await cp(join(fixturesRoot, name), target, { recursive: true });
   return target;
+}
+
+/**
+ * Builds an import-safe three-page KF workspace from the reviewed single-page
+ * fixture. The target-page entries mirror KF's page-manager and page-document
+ * contract, so navigation is resolved by semantic page id at compilation and
+ * by KF page GUID only when the patch is materialized.
+ */
+async function threePageFixture(): Promise<string> {
+  const root = await fixture("client-unknown-field");
+  const projectDir = join(root, "1.0.0.1/project");
+  const pageDir = join(projectDir, "page");
+  const source = JSON.parse(await readFile(join(pageDir, "Page1.json"), "utf8")) as Record<string, unknown>;
+  const manager = JSON.parse(await readFile(join(projectDir, "pageManager.json"), "utf8")) as Record<string, unknown>;
+  const pages = manager["Pages"];
+  if (!Array.isArray(pages) || pages.length !== 1) throw new Error("invalid single-page KF fixture");
+  const sourceEntry = record(pages[0]);
+  const sourceProperty = record(source["pageProperty"]);
+  sourceProperty["pageSize"] = { width: 1440, height: 900 };
+  sourceProperty["windowSize"] = { width: 1440, height: 900 };
+  source["pageViewWidth"] = 1440;
+  source["pageViewHeight"] = 900;
+  sourceEntry["width"] = 1440;
+  sourceEntry["height"] = 900;
+  sourceEntry["resolution"] = "1440 * 900";
+  await writeFile(join(pageDir, "Page1.json"), `${JSON.stringify(source, null, 2)}\n`, "utf8");
+
+  for (const [id, guid] of [["Projects", "page-guid-projects"], ["Contact", "page-guid-contact"]] as const) {
+    const page = structuredClone(source);
+    record(page["pageProperty"])["name"] = id;
+    page["guid"] = guid;
+    page["objects"] = [];
+    record(page["pagePrototype"])["name"] = id;
+    record(page["pagePrototype"])["guid"] = guid;
+    await writeFile(join(pageDir, `${id}.json`), `${JSON.stringify(page, null, 2)}\n`, "utf8");
+    pages.push({ ...sourceEntry, name: id, id: guid });
+  }
+  await writeFile(join(projectDir, "pageManager.json"), `${JSON.stringify(manager, null, 2)}\n`, "utf8");
+  return root;
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -97,6 +136,34 @@ function plan(modules: ModulePlanModule[]): ModulePlan {
       { id: "project", kind: "image", name: "Project", mimeType: "image/png", description: "Project" },
     ],
     pages: [{ id: "home", title: "Home", mode: "vertical-flow", modules }], operations: [],
+  };
+}
+
+function twoTargetNavigationPlan(): ModulePlan {
+  const navigation = module("navigation.top", "portal-navigation", {
+    logo: "KF",
+    items: ["Projects", "Contact"],
+  });
+  navigation.placement = { ...navigation.placement, region: "header", preferredHeight: "compact" };
+  navigation.interactions = [
+    { type: "navigate", pageId: "Projects" },
+    { type: "navigate", pageId: "Contact" },
+  ];
+  const targetModule = (id: string, title: string): ModulePlanModule => ({
+    ...module("content.hero", id, { title }),
+    variant: "no-portrait",
+  });
+  return {
+    schema: "kf-module-plan/v1",
+    projectKey: "kingclient.portal",
+    theme,
+    assets: [],
+    pages: [
+      { id: "Page1", title: "Home", mode: "vertical-flow", modules: [navigation] },
+      { id: "Projects", title: "Projects", mode: "vertical-flow", modules: [targetModule("projects-hero", "Projects")] },
+      { id: "Contact", title: "Contact", mode: "vertical-flow", modules: [targetModule("contact-hero", "Contact")] },
+    ],
+    operations: [],
   };
 }
 
@@ -307,5 +374,77 @@ describe("portal module definitions", () => {
     expect(primaryAction["linkMng"]).toEqual({ linkList: [{ action: "navigatePage", pageId: "page-guid-1" }] });
     expect(primaryAction["script"]).toBeUndefined();
     expect(Object.keys(record(primaryAction["linkMng"]))).toEqual(["linkList"]);
+  });
+
+  it("materializes ordered navigation.top targets as distinct reviewed KF page actions", async () => {
+    const compiled = compile(twoTargetNavigationPlan());
+    expect(compiled.status).toBe("compiled");
+    if (compiled.status !== "compiled") return;
+    const navigation = compiled.implementation.pages.find((page) => page.id === "Page1")?.components ?? [];
+    expect(navigation).toContainEqual(expect.objectContaining({
+      id: "portal-navigation/nav-1",
+      properties: { parentId: "portal-navigation/surface", action: { kind: "navigate", pageId: "Projects" } },
+    }));
+    expect(navigation).toContainEqual(expect.objectContaining({
+      id: "portal-navigation/nav-2",
+      properties: { parentId: "portal-navigation/surface", action: { kind: "navigate", pageId: "Contact" } },
+    }));
+
+    const change = compileUiImplementation(compiled.implementation, {
+      workspaceId: "workspace",
+      pageGuidById: { Page1: "page-guid-1", Projects: "page-guid-projects", Contact: "page-guid-contact" },
+      existingControlGuidByComponentId: {},
+      existingControlCapabilityIdByComponentId: {},
+    });
+    const candidate = await applyClientPatch(await threePageFixture(), change.plan);
+    const inspection = await inspectClientProject(candidate.rootDir);
+    expect(Object.values(inspection.index.pages).map((page) => page.id)).toEqual(expect.arrayContaining(["Page1", "Projects", "Contact"]));
+    expect(Object.values(inspection.index.controls).map((control) => control.id)).toEqual(expect.arrayContaining([
+      "portal-navigation/nav-1",
+      "portal-navigation/nav-2",
+    ]));
+
+    const page = JSON.parse(await readFile(join(candidate.rootDir, "1.0.0.1/project/page/Page1.json"), "utf8")) as Record<string, unknown>;
+    const sourceNavigation = (page["objects"] as unknown[]).map(record)
+      .find((entry) => controlName(entry) === "portal-navigation/surface");
+    if (sourceNavigation === undefined) throw new Error("missing navigation surface");
+    const projects = namedChild(sourceNavigation, "portal-navigation/nav-1");
+    const contact = namedChild(sourceNavigation, "portal-navigation/nav-2");
+    expect(controlName(projects)).not.toBe(controlName(contact));
+    expect(projects["linkMng"]).toEqual({ linkList: [{ action: "navigatePage", pageId: "page-guid-projects" }] });
+    expect(contact["linkMng"]).toEqual({ linkList: [{ action: "navigatePage", pageId: "page-guid-contact" }] });
+    for (const button of [projects, contact]) {
+      expect(button["script"]).toBeUndefined();
+      expect(Object.keys(record(button["linkMng"]))).toEqual(["linkList"]);
+    }
+  });
+
+  it("reports an unmatched navigation label and never reuses a sibling KF action", async () => {
+    const plan = twoTargetNavigationPlan();
+    plan.pages[0]!.modules[0]!.interactions = [{ type: "navigate", pageId: "Projects" }];
+    const compiled = compile(plan);
+    expect(compiled.status).toBe("compiled");
+    expect(compiled.gaps).toContainEqual(expect.objectContaining({
+      moduleId: "portal-navigation",
+      severity: "warning",
+      reason: "navigate-interaction-mismatch",
+    }));
+    if (compiled.status !== "compiled") return;
+    const change = compileUiImplementation(compiled.implementation, {
+      workspaceId: "workspace",
+      pageGuidById: { Page1: "page-guid-1", Projects: "page-guid-projects", Contact: "page-guid-contact" },
+      existingControlGuidByComponentId: {},
+      existingControlCapabilityIdByComponentId: {},
+    });
+    const candidate = await applyClientPatch(await threePageFixture(), change.plan);
+    const page = JSON.parse(await readFile(join(candidate.rootDir, "1.0.0.1/project/page/Page1.json"), "utf8")) as Record<string, unknown>;
+    const sourceNavigation = (page["objects"] as unknown[]).map(record)
+      .find((entry) => controlName(entry) === "portal-navigation/surface");
+    if (sourceNavigation === undefined) throw new Error("missing navigation surface");
+    expect(namedChild(sourceNavigation, "portal-navigation/nav-1")["linkMng"])
+      .toEqual({ linkList: [{ action: "navigatePage", pageId: "page-guid-projects" }] });
+    const unmatched = namedChild(sourceNavigation, "portal-navigation/nav-2");
+    expect(unmatched["linkMng"]).toEqual({ linkList: [] });
+    expect(unmatched["script"]).toBeUndefined();
   });
 });
