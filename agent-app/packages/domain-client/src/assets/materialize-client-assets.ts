@@ -27,6 +27,7 @@ export async function materializeClientAssets(input: {
     afterStageBeforePublish?: () => Promise<void>;
     afterPublishBeforeRewrite?: () => Promise<void>;
     unlinkStage?: (stagedPath: string) => Promise<void>;
+    afterTargetLinked?: (targetPath: string, index: number) => Promise<void>;
     afterTargetPublished?: (targetPath: string, index: number) => Promise<void>;
     unlinkPublished?: (targetPath: string, dev: number | bigint, ino: number | bigint) => Promise<void>;
     writeStage?: (handle: FileHandle, bytes: Uint8Array) => Promise<void>;
@@ -94,6 +95,7 @@ export async function materializeClientAssets(input: {
     ...(beforePublish === undefined ? {} : { beforePublish }),
     ...(afterStageBeforePublish === undefined ? {} : { afterStageBeforePublish }),
     ...(input.hooks?.unlinkStage === undefined ? {} : { unlinkStage: input.hooks.unlinkStage }),
+    ...(input.hooks?.afterTargetLinked === undefined ? {} : { afterTargetLinked: input.hooks.afterTargetLinked }),
     ...(input.hooks?.afterTargetPublished === undefined ? {} : { afterTargetPublished: input.hooks.afterTargetPublished }),
     ...(input.hooks?.unlinkPublished === undefined ? {} : { unlinkPublished: input.hooks.unlinkPublished }),
     ...(input.hooks?.writeStage === undefined ? {} : { writeStage: input.hooks.writeStage }),
@@ -260,6 +262,7 @@ async function publishAssets(input: {
   beforePublish?: () => Promise<void>;
   afterStageBeforePublish?: () => Promise<void>;
   unlinkStage?: (stagedPath: string) => Promise<void>;
+  afterTargetLinked?: (targetPath: string, index: number) => Promise<void>;
   afterTargetPublished?: (targetPath: string, index: number) => Promise<void>;
   unlinkPublished?: (targetPath: string, dev: number | bigint, ino: number | bigint) => Promise<void>;
   writeStage?: (handle: FileHandle, bytes: Uint8Array) => Promise<void>;
@@ -343,6 +346,12 @@ async function publishAssets(input: {
         // Rollback ownership begins immediately after the successful link.
         // Keep the stable staged link until the page rewrite transaction commits.
         target.created = true;
+        // link(2) guarantees the target names the staged inode. Freeze that
+        // ownership synchronously before any hook, open, or other await can
+        // move the pathname; openPublishedFile subsequently only verifies it.
+        target.targetDev = target.stageDev;
+        target.targetIno = target.stageIno;
+        await input.afterTargetLinked?.(target.target, index);
       } catch (error) {
         if (!hasCode(error, "EEXIST")) throw error;
       }
@@ -517,8 +526,12 @@ async function openPublishedFile(target: PublishedAsset): Promise<FileHandle> {
     if (target.created && (stat.dev !== target.stageDev || stat.ino !== target.stageIno)) {
       throw new Error(`published asset lost its staging identity: ${target.target}`);
     }
-    target.targetDev = stat.dev;
-    target.targetIno = stat.ino;
+    if (target.targetDev !== undefined && target.targetDev !== stat.dev
+      || target.targetIno !== undefined && target.targetIno !== stat.ino) {
+      throw new Error(`published asset differs from its frozen identity: ${target.target}`);
+    }
+    target.targetDev ??= stat.dev;
+    target.targetIno ??= stat.ino;
     return handle;
   } catch (error) {
     await handle.close();

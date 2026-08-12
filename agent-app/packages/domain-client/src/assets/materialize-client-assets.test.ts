@@ -272,8 +272,35 @@ describe("materializeClientAssets", () => {
         await mkdir(staticRoot);
       } },
     })).rejects.toThrow(/ancestor|changed|identity|race/i);
-    const escaped = await readFile(path.join(movedStaticRoot, TARGET)).catch(() => undefined);
+    const escaped = await readFile(path.join(movedStaticRoot, "agent-assets", path.basename(TARGET))).catch(() => undefined);
     expect(escaped).not.toEqual(BYTES);
+    expect((await readdir(candidateParent)).filter((entry) => entry.startsWith(".kf-agent-assets-stage-"))).toEqual([]);
+  });
+
+  it("scrubs the retained inode when the target moves after link but before open", async () => {
+    const candidateParent = await mkdtemp(path.join(tmpdir(), "kf-link-open-owner-"));
+    const candidate = await createKingClientDomainPack({ nativeAccepted: true }).compile({
+      projectIr: ir,
+      buildSeed: "workspace-assets",
+      workRoot: candidateParent,
+    });
+    const staticRoot = path.join(candidate.rootDir, "1.0.0.1", "static");
+    const movedStaticRoot = path.join(candidateParent, `${path.basename(candidate.rootDir)}-linked-static`);
+    const call = materializeClientAssets as (input: Parameters<typeof materializeClientAssets>[0] & {
+      hooks: { afterTargetLinked: (targetPath: string, index: number) => Promise<void> };
+    }) => Promise<void>;
+
+    await expect(call({
+      workspaceRoot: candidate.rootDir,
+      plan: plan(),
+      assets: [asset()],
+      hooks: { afterTargetLinked: async () => {
+        await rename(staticRoot, movedStaticRoot);
+        await mkdir(staticRoot);
+        throw new Error("simulated failure before target open");
+      } },
+    })).rejects.toThrow(/target open|rollback|ownership/i);
+    expect(await readFile(path.join(movedStaticRoot, "agent-assets", path.basename(TARGET))).catch(() => undefined)).not.toEqual(BYTES);
     expect((await readdir(candidateParent)).filter((entry) => entry.startsWith(".kf-agent-assets-stage-"))).toEqual([]);
   });
 
