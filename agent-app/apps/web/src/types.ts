@@ -115,10 +115,13 @@ export interface PersistedModuleDelivery {
   workspaceId: string;
   conversationId: string;
   buildJobId: string | null;
-  modulePlanHash: string;
+  modulePlanHash: string | null;
   artifactId: string | null;
   revisionId: string | null;
-  result: ModuleDeliveryResult;
+  result: ModuleDeliveryResult | null;
+  buildJob: BuildJob | null;
+  artifact: ({ buildJobId: string } & Pick<ArtifactRow, "id" | "kind" | "sizeBytes" | "sha256">) | null;
+  revision: Pick<Revision, "id" | "revisionNumber" | "kind"> & { parentRevisionId: string | null } | null;
 }
 
 export interface Revision {
@@ -128,7 +131,7 @@ export interface Revision {
   createdAt: string;
 }
 
-export type BuildJobStatus = "QUEUED" | "RUNNING" | "VALIDATING" | "SUCCEEDED" | "FAILED";
+export type BuildJobStatus = "QUEUED" | "RUNNING" | "VALIDATING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
 
 export interface BuildJob {
   id: string;
@@ -137,6 +140,7 @@ export interface BuildJob {
   planHash: string;
   baseRevisionId: string;
   changePlanId: string;
+  projectKey?: string;
 }
 
 export interface ArtifactRow {

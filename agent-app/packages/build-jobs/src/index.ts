@@ -6,6 +6,7 @@ export {
   BuildJobLeaseError,
 } from "./build-job.service.js";
 export { BuildExecutor, BuildWorkerCrash } from "./job-executor.js";
+export { graphBuildIdempotencyKey, buildJobBelongsToConversation } from "./build-idempotency.js";
 export {
   createHmacServerPlanAuthority,
   decodeServerPlanHmacKey,

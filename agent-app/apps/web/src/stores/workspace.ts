@@ -137,7 +137,7 @@ async function refreshDelivery(
     || delivery.buildJobId !== jobId
   ) return;
   applyModuleDeliveryResult(delivery.result);
-  if (delivery.result.status === "blocked") {
+  if (delivery.result?.status === "blocked") {
     state.previewArtifactId = undefined;
     state.artifacts = [];
   }
@@ -164,7 +164,7 @@ async function pollBuildJob(
       const job = await api.getBuildJob(jobId);
       if (!isCurrent()) return job.status;
       state.buildJobStatus = job.status;
-      if (job.status === "SUCCEEDED" || job.status === "FAILED") {
+      if (job.status === "SUCCEEDED" || job.status === "FAILED" || job.status === "CANCELLED") {
         // 终态统一加载最新校验报告：SUCCEEDED/FAILED 后端均返回 report
         // （FAILED 为 fail report，spec §7 明文缺口修复）。报告加载失败不
         // 影响 job 状态判断；此时置空以覆盖旧报告，避免残留误导。
@@ -249,26 +249,27 @@ async function load(workspaceId: string): Promise<void> {
     }
     await refreshMessages(state.conversationId, isCurrentLoad);
     if (!isCurrentLoad()) return;
+    const conversationId = state.conversationId;
     const expectedBuildPollGeneration = buildPollGeneration;
-    const latestBuild = await api.getLatestBuildJob(workspaceId);
+    const delivery = conversationId === null ? null : await api.getConversationDelivery(conversationId);
     if (!isCurrentLoad() || buildPollGeneration !== expectedBuildPollGeneration) return;
-    if (latestBuild !== null) {
-      state.buildJobId = latestBuild.id;
-      state.buildJobStatus = latestBuild.status;
-      if (latestBuild.status === "SUCCEEDED" || latestBuild.status === "FAILED") {
-        await pollBuildJob(latestBuild.id, latestBuild.status, workspaceId);
-      } else {
-        // Do not block page loading while a durable worker job is still active.
-        void pollBuildJob(latestBuild.id, latestBuild.status, workspaceId).catch((error: unknown) => {
-          state.error = errorMessage(error);
-        });
-      }
-    } else if (state.conversationId !== null) {
-      const conversationId = state.conversationId;
-      const delivery = await api.getConversationDelivery(conversationId);
-      if (!isCurrentLoad()) return;
-      if (delivery !== null && delivery.workspaceId === workspaceId && delivery.conversationId === conversationId) {
-        applyModuleDeliveryResult(delivery.result);
+    if (delivery !== null && delivery.workspaceId === workspaceId && delivery.conversationId === conversationId) {
+      applyModuleDeliveryResult(delivery.result);
+      const boundBuild = delivery.buildJob ?? null;
+      if (boundBuild !== null && boundBuild.workspaceId === workspaceId && boundBuild.id === delivery.buildJobId) {
+        state.buildJobId = boundBuild.id;
+        state.buildJobStatus = boundBuild.status;
+        if (boundBuild.status === "SUCCEEDED" || boundBuild.status === "FAILED" || boundBuild.status === "CANCELLED") {
+          await pollBuildJob(boundBuild.id, boundBuild.status, workspaceId, conversationId);
+        } else {
+          // Do not block page loading while a durable worker job is still active.
+          void pollBuildJob(boundBuild.id, boundBuild.status, workspaceId, conversationId).catch((error: unknown) => {
+            if (isCurrentLoad()) state.error = errorMessage(error);
+          });
+        }
+      } else if (delivery.result?.status === "blocked") {
+        state.previewArtifactId = undefined;
+        state.artifacts = [];
       }
     }
   } catch (error) {
@@ -333,8 +334,7 @@ async function sendMessage(content: string): Promise<void> {
   try {
     const done = await streamMessageTurn(conversationId, content, (data) => {
       if (!isCurrentTurn()) return;
-      // 节点级流式：state 帧的键是节点名，值含 stage 等字段。
-      // 用节点名映射阶段提示，让用户感知 LLM 回合进度。
+      // 服务端仅发送固定 progressCode，不暴露图状态或技术计划。
       const hint = phaseHintForNode(data);
       if (hint !== null) state.phaseHint = hint;
     });
@@ -375,11 +375,8 @@ const NODE_HINTS: Record<string, string> = {
 /** 从 state 帧提取阶段提示；非节点帧或未知节点返回 null。 */
 function phaseHintForNode(data: unknown): string | null {
   if (typeof data !== "object" || data === null) return null;
-  const keys = Object.keys(data);
-  for (const key of keys) {
-    if (key in NODE_HINTS) return NODE_HINTS[key] ?? null;
-  }
-  return null;
+  const code = (data as Record<string, unknown>)["progressCode"];
+  return typeof code === "string" ? NODE_HINTS[code] ?? null : null;
 }
 
 /** 将 done 快照路由到审批 / 构建 / 错误等 UI 状态。 */

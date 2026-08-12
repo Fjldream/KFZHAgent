@@ -80,6 +80,7 @@ describe("workspace store load() 会话绑定", () => {
       artifactId: "art-warning",
       revisionId: "rev-warning",
       result: deliveryResult("ready_with_warnings", "warning survives refresh"),
+      buildJob: { id: "job-warning", workspaceId: "ws-1", status: "SUCCEEDED" },
     });
     api.getLatestBuildJob.mockResolvedValue({ id: "job-warning", status: "SUCCEEDED" });
     api.getBuildJob.mockResolvedValue({ id: "job-warning", status: "SUCCEEDED" });
@@ -89,6 +90,7 @@ describe("workspace store load() 会话绑定", () => {
     const store = useWorkspace();
     await store.load("ws-1");
 
+    expect(api.getConversationDelivery).toHaveBeenCalledWith("conv-a");
     expect(api.getConversationDelivery).toHaveBeenCalledWith("conv-a", "job-warning");
     expect(store.state.moduleDeliveryResult?.status).toBe("ready_with_warnings");
     expect(store.state.moduleDeliveryResult?.gaps[0]?.reason).toBe("warning survives refresh");
@@ -104,6 +106,7 @@ describe("workspace store load() 会话绑定", () => {
       artifactId: null,
       revisionId: null,
       result: deliveryResult("blocked", "blocked survives refresh"),
+      buildJob: { id: "job-blocked", workspaceId: "ws-1", status: "FAILED" },
     });
     api.getLatestBuildJob.mockResolvedValue({ id: "job-blocked", status: "FAILED" });
     api.getBuildJob.mockResolvedValue({ id: "job-blocked", status: "FAILED" });
@@ -192,7 +195,11 @@ describe("workspace store load() 会话绑定", () => {
   it("restores the latest successful build artifacts and preview when reopening a workspace", async () => {
     api.listConversations.mockResolvedValue([convA]);
     api.listMessages.mockResolvedValue([]);
-    api.getLatestBuildJob.mockResolvedValue({ id: "job-restored", status: "SUCCEEDED" });
+    api.getConversationDelivery.mockResolvedValue({
+      conversationId: "conv-a", workspaceId: "ws-1", buildJobId: "job-restored",
+      artifactId: "art-restored", revisionId: "rev-restored", result: null,
+      buildJob: { id: "job-restored", workspaceId: "ws-1", status: "SUCCEEDED" },
+    });
     api.getBuildJob.mockResolvedValue({ id: "job-restored", status: "SUCCEEDED" });
     api.listBuildArtifacts.mockResolvedValue([
       { id: "art-restored", kind: "client-package" },
@@ -202,11 +209,35 @@ describe("workspace store load() 会话绑定", () => {
     const store = useWorkspace();
     await store.load("ws-1");
 
-    expect(api.getLatestBuildJob).toHaveBeenCalledWith("ws-1");
+    expect(api.getLatestBuildJob).not.toHaveBeenCalled();
+    expect(api.getConversationDelivery).toHaveBeenCalledWith("conv-a");
     expect(store.state.buildJobId).toBe("job-restored");
     expect(store.state.buildJobStatus).toBe("SUCCEEDED");
     expect(store.state.previewArtifactId).toBe("art-restored");
     expect(store.state.validationReport).toEqual({ outcome: "pass" });
+  });
+
+  it("restores only the selected conversation's bound build when another conversation has the workspace-latest job", async () => {
+    api.listConversations.mockResolvedValue([convB, convA]);
+    api.listMessages.mockResolvedValue([]);
+    api.getLatestBuildJob.mockResolvedValue({ id: "job-from-conv-a", workspaceId: "ws-1", status: "SUCCEEDED" });
+    api.getConversationDelivery.mockImplementation(async (conversationId) => ({
+      conversationId, workspaceId: "ws-1", buildJobId: "job-from-conv-b",
+      artifactId: "art-from-conv-b", revisionId: "rev-from-conv-b", result: deliveryResult("ready_with_warnings", "selected conversation"),
+      buildJob: { id: "job-from-conv-b", workspaceId: "ws-1", status: "SUCCEEDED" },
+    }));
+    api.getBuildJob.mockResolvedValue({ id: "job-from-conv-b", workspaceId: "ws-1", status: "SUCCEEDED" });
+    api.listBuildArtifacts.mockResolvedValue([{ id: "art-from-conv-b", kind: "client-package" }]);
+    api.getBuildJobReport.mockResolvedValue({ outcome: "pass" });
+
+    const store = useWorkspace();
+    await store.load("ws-1");
+
+    expect(api.getConversationDelivery).toHaveBeenCalledWith("conv-b");
+    expect(api.getLatestBuildJob).not.toHaveBeenCalled();
+    expect(store.state.buildJobId).toBe("job-from-conv-b");
+    expect(store.state.previewArtifactId).toBe("art-from-conv-b");
+    expect(store.state.moduleDeliveryResult?.gaps[0]?.reason).toBe("selected conversation");
   });
 
   it("does not let a restored active build overwrite a different workspace after navigation", async () => {
@@ -222,9 +253,9 @@ describe("workspace store load() 会话绑定", () => {
     }));
     api.listConversations.mockResolvedValue([convA]);
     api.listMessages.mockResolvedValue([]);
-    api.getLatestBuildJob
-      .mockResolvedValueOnce({ id: "job-a", status: "VALIDATING" })
-      .mockResolvedValueOnce(null);
+    api.getConversationDelivery.mockImplementation(async (conversationId) => conversationId === "conv-a" && store.state.workspaceId === "ws-a"
+      ? { conversationId, workspaceId: "ws-a", buildJobId: "job-a", artifactId: null, revisionId: null, result: null, buildJob: { id: "job-a", workspaceId: "ws-a", status: "VALIDATING" } }
+      : null);
     api.getBuildJob.mockReturnValue(oldBuild);
     api.listBuildArtifacts.mockResolvedValue([{ id: "art-a", kind: "client-package" }]);
     api.getBuildJobReport.mockResolvedValue({ outcome: "pass" });
@@ -249,19 +280,16 @@ describe("workspace store load() 会话绑定", () => {
     api.getWorkspace.mockImplementation(async (id) => ({ id, name: id, mode: "new", currentRevisionId: null }));
     api.listConversations.mockImplementation(async (id) => [{ id: `conv-${id}`, title: id }]);
     api.listMessages.mockResolvedValue([]);
-    api.getLatestBuildJob.mockImplementation(async (id) => id === "ws-a"
-      ? { id: "job-a", status: "SUCCEEDED" }
-      : { id: "job-b", status: "SUCCEEDED" });
     api.getBuildJob.mockImplementation(async (id) => ({ id, status: "SUCCEEDED" }));
     api.listBuildArtifacts.mockImplementation(async (id) => [{ id: `art-${id}`, kind: "client-package" }]);
     api.getBuildJobReport.mockResolvedValue({ outcome: "pass" });
     api.getConversationDelivery.mockImplementation(async (conversationId) => conversationId === "conv-ws-a"
       ? oldDelivery
-      : ({ conversationId, workspaceId: "ws-b", buildJobId: "job-b", artifactId: "art-job-b", revisionId: "rev-b", result: deliveryResult("ready", "current") }));
+      : ({ conversationId, workspaceId: "ws-b", buildJobId: "job-b", artifactId: "art-job-b", revisionId: "rev-b", result: deliveryResult("ready", "current"), buildJob: { id: "job-b", workspaceId: "ws-b", status: "SUCCEEDED" } }));
 
     const store = useWorkspace();
     const loadA = store.load("ws-a");
-    await vi.waitFor(() => expect(api.getConversationDelivery).toHaveBeenCalledWith("conv-ws-a", "job-a"));
+    await vi.waitFor(() => expect(api.getConversationDelivery).toHaveBeenCalledWith("conv-ws-a"));
     await store.load("ws-b");
     resolveOldDelivery({ conversationId: "conv-ws-a", workspaceId: "ws-a", buildJobId: "job-a", artifactId: "art-job-a", revisionId: "rev-a", result: deliveryResult("blocked", "stale") });
     await loadA;
@@ -309,12 +337,12 @@ describe("workspace store load() 会话绑定", () => {
       { id: `conv-${id}`, title: `${id} 对话` },
     ]);
     api.listMessages.mockResolvedValue([]);
-    api.getLatestBuildJob.mockImplementation(async (id) => {
-      if (id === "ws-a") {
+    api.getConversationDelivery.mockImplementation(async (conversationId) => {
+      if (conversationId === "conv-ws-a") {
         markLatestARequested();
         return latestA;
       }
-      return { id: "job-b", status: "SUCCEEDED" };
+      return { conversationId, workspaceId: "ws-b", buildJobId: "job-b", artifactId: "art-b", revisionId: "rev-b", result: null, buildJob: { id: "job-b", workspaceId: "ws-b", status: "SUCCEEDED" } };
     });
     api.getBuildJob.mockImplementation(async (id) => ({ id, status: "SUCCEEDED" }));
     api.listBuildArtifacts.mockImplementation(async (id) => [
@@ -328,7 +356,7 @@ describe("workspace store load() 会话绑定", () => {
     await store.load("ws-b");
     expect(store.state.previewArtifactId).toBe("art-b");
 
-    resolveLatestA({ id: "job-a", status: "SUCCEEDED" });
+    resolveLatestA({ conversationId: "conv-ws-a", workspaceId: "ws-a", buildJobId: "job-a", artifactId: "art-a", revisionId: "rev-a", result: null, buildJob: { id: "job-a", workspaceId: "ws-a", status: "SUCCEEDED" } });
     await loadingA;
 
     expect(store.state.workspaceId).toBe("ws-b");

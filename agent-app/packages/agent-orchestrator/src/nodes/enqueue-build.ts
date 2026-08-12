@@ -1,4 +1,5 @@
 import { projectKeySchema } from "@kf/contracts";
+import { graphBuildIdempotencyKey } from "@kf/build-jobs";
 import type { AgentGraphStateValue, AgentGraphUpdate } from "../state.js";
 import type { SolutionGraphDeps } from "../ports.js";
 
@@ -44,10 +45,13 @@ export function createEnqueueBuildNode(deps: SolutionGraphDeps) {
       // idempotency key, and the enqueue payload. This keeps spaced replays
       // bound to the exact same job as their already-normalized form.
       const projectKey = projectKeySchema.parse(deps.defaultProjectKey ?? domainKind);
-      const legacyDefaultProject = domainKind === "kingclient" && projectKey === "kingclient";
-      const idempotencyKey = legacyDefaultProject
-        ? `${state.conversationId}:${state.changePlanId}:${state.planHash}`
-        : `${state.conversationId}:${projectKey}:${state.changePlanId}:${state.planHash}`;
+      const idempotencyKey = graphBuildIdempotencyKey({
+        conversationId: state.conversationId,
+        projectKey,
+        domainKind,
+        changePlanId: state.changePlanId,
+        planHash: state.planHash,
+      });
       const job = await deps.buildJobPort.enqueue({
         tenantId: state.tenantId,
         workspaceId: state.workspaceId,

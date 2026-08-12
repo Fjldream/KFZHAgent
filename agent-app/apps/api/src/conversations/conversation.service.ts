@@ -200,7 +200,7 @@ export class ConversationService {
     config: Record<string, unknown>,
   ): AsyncGenerator<SseEvent> {
     for await (const chunk of stream) {
-      yield { event: "state", data: chunk };
+      yield { event: "state", data: customerProgressFrame(chunk) };
     }
     const final = (await graph.getState(config)) as unknown as StateSnapshotLike;
     yield { event: "done", data: finalStateData(final, this.moduleArtifactAuthority) };
@@ -458,32 +458,83 @@ function isTechnicalAssistantPayload(content: string): boolean {
 }
 
 function jsonCandidates(content: string): string[] {
-  const trimmed = content.trim();
-  const output = [trimmed];
-  const fence = /^```(?:json)?\s*\n([\s\S]*?)\n```$/i.exec(trimmed);
-  if (fence?.[1] !== undefined) output.push(fence[1].trim());
-  for (const opener of ["{", "["]) {
-    const index = trimmed.indexOf(opener);
-    if (index > 0) output.push(trimmed.slice(index));
+  const bounded = content.slice(0, 50_000).trim();
+  const output = new Set<string>([bounded]);
+  for (const match of bounded.matchAll(/```(?:json)?\s*\n([\s\S]*?)\n```/gi)) {
+    if (match[1] !== undefined) output.add(match[1].trim());
   }
-  return output;
+  for (const candidate of balancedJsonValues(bounded, 16)) output.add(candidate);
+  return [...output];
 }
 
 function isTechnicalJson(value: unknown): boolean {
   if (value === null || typeof value !== "object") return false;
-  const pending: object[] = [value];
+  const pending: Array<{ value: object; depth: number }> = [{ value, depth: 0 }];
   const seen = new Set<object>();
-  while (pending.length > 0) {
-    const current = pending.pop()!;
+  let visited = 0;
+  while (pending.length > 0 && visited < 1_000) {
+    const { value: current, depth } = pending.pop()!;
     if (seen.has(current)) continue;
     seen.add(current);
+    visited += 1;
     const record = current as Record<string, unknown>;
     const schema = record["schema"];
-    if (schema === "kf-module-plan/v1" || schema === "kf-change-plan/v1" || schema === "kf-module-compilation-artifact/v1" || schema === "kf-module-compilation-metadata/v1") return true;
+    if (schema === "kf-module-plan/v1" || schema === "kf-change-plan/v1" || schema === "kf-ui-implementation/v1" || schema === "kf-accepted-blueprint-artifact/v1" || schema === "kf-server-plan-envelope/v1" || schema === "kf-module-compilation-artifact/v1" || schema === "kf-module-compilation-metadata/v1") return true;
     if (typeof record["signature"] === "string" && (record["metadata"] !== undefined || record["semanticOperations"] !== undefined || record["plan"] !== undefined)) return true;
-    for (const nested of Object.values(record)) if (nested !== null && typeof nested === "object") pending.push(nested);
+    if (depth >= 20) continue;
+    for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(current))) {
+      if (!("value" in descriptor)) continue;
+      const nested = descriptor.value as unknown;
+      if (nested !== null && typeof nested === "object") pending.push({ value: nested, depth: depth + 1 });
+    }
   }
   return false;
+}
+
+function balancedJsonValues(input: string, limit: number): string[] {
+  const output: string[] = [];
+  for (let start = 0; start < input.length && output.length < limit; start += 1) {
+    const first = input[start];
+    if (first !== "{" && first !== "[") continue;
+    const stack = [first];
+    let inString = false;
+    let escaped = false;
+    for (let index = start + 1; index < input.length; index += 1) {
+      const char = input[index]!;
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (char === "\\") escaped = true;
+        else if (char === '"') inString = false;
+        continue;
+      }
+      if (char === '"') { inString = true; continue; }
+      if (char === "{" || char === "[") {
+        if (stack.length >= 64) break;
+        stack.push(char);
+      } else if (char === "}" || char === "]") {
+        const opener = stack.pop();
+        if ((char === "}" && opener !== "{") || (char === "]" && opener !== "[")) break;
+        if (stack.length === 0) {
+          output.push(input.slice(start, index + 1));
+          break;
+        }
+      }
+    }
+  }
+  return output;
+}
+
+const CUSTOMER_PROGRESS_CODES = new Set([
+  "load-context", "classify-intent", "design-plan", "implementation-plan", "module-plan",
+  "clarify", "plan-change", "enqueue-build", "build", "validate", "preview-review",
+]);
+
+function customerProgressFrame(chunk: unknown): { progressCode: string } {
+  if (chunk !== null && typeof chunk === "object") {
+    const code = Object.keys(chunk).find((key) => CUSTOMER_PROGRESS_CODES.has(key));
+    if (code !== undefined) return { progressCode: code };
+  }
+  return { progressCode: "working" };
 }
 
 function apiError(code: string, message: string): { error: { code: string; message: string } } {

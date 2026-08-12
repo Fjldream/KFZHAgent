@@ -34,6 +34,7 @@ import { PasswordService } from "./auth/password.service.js";
 import { TenantsService } from "./tenants/tenants.service.js";
 import { ARTIFACT_STORAGE } from "./artifacts/artifact-storage.js";
 import { MODEL_PORT } from "./conversations/model-port.js";
+import { DeterministicFakeModelPort } from "./conversations/fake-model.js";
 import { AssetService } from "./assets/asset.service.js";
 import { ConversationService, finalStateData } from "./conversations/conversation.service.js";
 import { WorkspaceService } from "./workspaces/workspace.service.js";
@@ -162,6 +163,7 @@ const CHECKPOINT_TABLES = [
 
 /** Deterministic fake model: the API's ModelPort injection point (Task 11). */
 class FakeModelPort {
+  moduleDelegate = new DeterministicFakeModelPort();
   intents = [];
   requestedDomains = ["kingclient"];
   blueprintModuleIds = ["main"];
@@ -200,7 +202,7 @@ class FakeModelPort {
         purpose: `展示 ${id} 信息`,
         content: [`${id} 标题`, `${id} 说明`],
         sampleData: [{ label: id, value: `${id} 示例` }],
-        interactions: ["查看详情"],
+        interactions: this.mappedBlueprint ? [] : ["查看详情"],
         ...(this.mappedBlueprint ? {
           expectedKind: "content.hero",
           expectedCategory: "content",
@@ -230,6 +232,12 @@ class FakeModelPort {
       dependencies: [],
       pendingRequirements: [],
     };
+  }
+  createModulePlan(input) {
+    return this.moduleDelegate.createModulePlan(input);
+  }
+  reviseModulePlan(input) {
+    return this.moduleDelegate.reviseModulePlan(input);
   }
   async createUiImplementation(input) {
     this.createCalls.push(input);
@@ -672,8 +680,8 @@ describe("api contract", () => {
     const events = parseSse(res.text);
     const stateFrames = events.filter((event) => event.event === "state");
     expect(stateFrames.length).toBeGreaterThanOrEqual(3);
-    const nodeNames = stateFrames.map((frame) => Object.keys(frame.data as object));
-    expect(nodeNames.flat()).toEqual(
+    const progressCodes = stateFrames.map((frame) => (frame.data as { progressCode: string }).progressCode);
+    expect(progressCodes).toEqual(
       expect.arrayContaining(["load-context", "classify-intent", "design-plan"]),
     );
 
@@ -1436,7 +1444,7 @@ describe("hardening fixes", () => {
 // ---------------------------------------------------------------------------
 
 describe("task 12 api surface", () => {
-  function signedDeliveryState({ operations = [], repairAttempt = 1, modules = ["footer", "hero"], revisionId = "revision-1" } = {}) {
+  function signedDeliveryState({ operations = [], repairAttempt = 1, modules = ["footer", "hero"], revisionId = "revision-1", projectKey = "kingclient" } = {}) {
     const planModules = modules.map((id, order) => ({
       id,
       kind: id === "footer" ? "content.contact-footer" : "content.hero",
@@ -1449,24 +1457,24 @@ describe("task 12 api surface", () => {
     }));
     const plan = {
       schema: "kf-module-plan/v1",
-      projectKey: "kingclient",
+      projectKey,
       theme: { background: "#ffffff", surface: "#f8fafc", primary: "#2563eb", accent: "#0ea5e9", textPrimary: "#0f172a", textSecondary: "#475569", fontFamily: "Arial", spacingUnit: 8, radiusScale: { small: 4, medium: 8, large: 16 } },
       assets: [], pages: [{ id: "home", title: "Home", mode: "vertical-flow", modules: planModules }], operations,
     };
     const metadata = {
-      schema: "kf-module-compilation-metadata/v1", projectKey: "kingclient",
+      schema: "kf-module-compilation-metadata/v1", projectKey,
       moduleDefinitions: planModules.map((module) => ({ pageId: "home", moduleId: module.id, kind: module.kind, templateVersion: module.templateVersion, compilerFingerprint: `${module.id}-compiler-v1`, layoutFingerprint: `${module.id}-layout-v1` })),
       assets: [], blueprintMappings: [],
     };
     const modulePlanHash = canonicalModuleCompilationHash(plan);
     const artifact = moduleArtifactAuthority.signModuleCompilation({
-      schema: "kf-module-compilation-artifact/v1", projectKey: "kingclient", revisionId,
+      schema: "kf-module-compilation-artifact/v1", projectKey, revisionId,
       acceptedBlueprintHash: "a".repeat(64), planHash: modulePlanHash, implementationHash: "b".repeat(64),
       metadataHash: canonicalModuleCompilationHash(metadata), sourceModuleIds: [...modules].sort(), metadata,
     });
     return {
       modulePlanHash, modulePlan: plan, moduleCompilationArtifact: artifact,
-      moduleDeliveryReport: { schema: "kf-module-delivery/v1", projectKey: "kingclient", status: "ready", gaps: [] },
+      moduleDeliveryReport: { schema: "kf-module-delivery/v1", projectKey, status: "ready", gaps: [] },
       moduleRepairAttempt: repairAttempt, currentRevisionId: revisionId, uiImplementationHash: "b".repeat(64),
     };
   }
@@ -1486,6 +1494,97 @@ describe("task 12 api surface", () => {
     expect(done.data.interrupt).toBeUndefined();
     expect(done.data.stage).not.toBe("approval");
     expect(JSON.stringify(done.data)).not.toMatch(/kf-module-plan|kf-change-plan|semanticOperations|signature/);
+    const stateFrames = parseSse(confirmed.text).filter((event) => event.event === "state");
+    expect(stateFrames.length).toBeGreaterThan(0);
+    expect(stateFrames.every((frame) => {
+      const value = frame.data as Record<string, unknown>;
+      return Object.keys(value).length === 1 && typeof value.progressCode === "string";
+    })).toBe(true);
+    expect(JSON.stringify(stateFrames)).not.toMatch(/kf-module-plan|kf-change-plan|kf-ui-implementation|signature|metadata|semanticOperations|moduleCompilationArtifact|uiImplementation/);
+  });
+
+  it("keeps the signed base revision authoritative after a real module build advances the workspace revision", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createWorkspace(cookie, "Real module lifecycle WS");
+    const conv = await createConversation(cookie, ws.body.id, "Real module lifecycle");
+    fakeModel.queueIntent("NEW_REQUIREMENT");
+    await sendMessage(cookie, conv.body.id, "生成个人门户").expect(200);
+    fakeModel.queueIntent("CONFIRM_DESIGN");
+    const confirmed = doneEvent((await sendMessage(cookie, conv.body.id, "确认效果蓝图").expect(200)).text);
+    await resume(cookie, conv.body.id, { action: "approve", planHash: confirmed.data.interrupt?.planHash }).expect(200);
+    const queued = await prisma.buildJob.findFirstOrThrow({ where: { workspaceId: ws.body.id }, orderBy: { createdAt: "desc" } });
+    const tenantId = await tenantIdOf(TENANT_A.tenant);
+    const graph = await app.get(ConversationService)["getGraph"]();
+    await graph.updateState({ configurable: { thread_id: conv.body.id } }, {
+      ...signedDeliveryState({ revisionId: queued.baseRevisionId }), tenantId,
+      workspaceId: ws.body.id, conversationId: conv.body.id, buildJobId: queued.id,
+      changePlanId: queued.changePlanId, planHash: queued.planHash, currentRevisionId: queued.baseRevisionId,
+    });
+    const built = await runNextBuild("task12-real-module-build");
+    expect(built.status).toBe("SUCCEEDED");
+
+    fakeModel.queueIntent("CONFIRM_BUILD");
+    const landed = doneEvent((await sendMessage(cookie, conv.body.id, "确认落地").expect(200)).text);
+    expect(landed.data.stage).toBe("done");
+    const workspace = await request(server).get(`/api/workspaces/${ws.body.id}`).set("Cookie", cookie).expect(200);
+    expect(workspace.body.currentRevisionId).not.toBe(built.baseRevisionId);
+
+    const recovered = await request(server).get(`/api/conversations/${conv.body.id}/delivery`).set("Cookie", cookie).expect(200);
+    expect(recovered.body).toMatchObject({
+      conversationId: conv.body.id,
+      buildJobId: queued.id,
+      artifactId: expect.any(String),
+      revisionId: workspace.body.currentRevisionId,
+      buildJob: { id: queued.id, status: "SUCCEEDED" },
+      artifact: { id: expect.any(String), buildJobId: queued.id, kind: "client-package" },
+      revision: { id: workspace.body.currentRevisionId },
+      result: { status: expect.stringMatching(/^ready/) },
+    });
+    await request(server).get(`/api/artifacts/${recovered.body.artifactId}/preview`).set("Cookie", cookie).expect(200);
+    await request(server).post(`/api/artifacts/${recovered.body.artifactId}/download-token`).set("Cookie", cookie).expect(200);
+  });
+
+  it("preserves exact compiler-blocked gaps without a module plan or compilation artifact", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createWorkspace(cookie, "Compiler blocked WS");
+    const conv = await createConversation(cookie, ws.body.id, "Compiler blocked");
+    const tenantId = await tenantIdOf(TENANT_A.tenant);
+    const accepted = moduleArtifactAuthority.signAcceptedBlueprint({
+      schema: "kf-accepted-blueprint-artifact/v1",
+      projectKey: "kingclient",
+      revisionId: ws.body.currentRevisionId,
+      blueprintHash: "f".repeat(64),
+      modules: [{ blueprintModuleId: "hero", expectedKind: "content.hero", expectedCategory: "content", interactionRequirements: [] }],
+    });
+    const graph = await app.get(ConversationService)["getGraph"]();
+    await graph.updateState({ configurable: { thread_id: conv.body.id } }, {
+      tenantId, workspaceId: ws.body.id, conversationId: conv.body.id,
+      currentRevisionId: ws.body.currentRevisionId,
+      acceptedBlueprintArtifact: accepted,
+      moduleDeliveryReport: {
+        schema: "kf-module-delivery/v1", projectKey: "kingclient", status: "blocked",
+        gaps: [{ moduleId: "hero", requirement: "提供头像资源", severity: "blocking", status: "unresolved", reason: "缺少已批准头像", alternatives: ["上传头像"] }],
+      },
+      moduleRepairAttempt: 2,
+    });
+
+    const response = await request(server).get(`/api/conversations/${conv.body.id}/delivery`).set("Cookie", cookie).expect(200);
+    expect(response.body).toMatchObject({
+      buildJobId: null, artifactId: null, revisionId: null,
+      result: {
+        status: "blocked", repairCount: 2, implementedModules: [],
+        gaps: [{ moduleId: "hero", requirement: "提供头像资源", reason: "缺少已批准头像", alternatives: ["上传头像"] }],
+      },
+    });
+
+    await graph.updateState({ configurable: { thread_id: conv.body.id } }, {
+      acceptedBlueprintArtifact: { ...accepted, signature: "0".repeat(64) },
+    });
+    const tampered = await request(server).get(`/api/conversations/${conv.body.id}/delivery`).set("Cookie", cookie).expect(200);
+    expect(tampered.body).toMatchObject({
+      artifactId: null, revisionId: null,
+      result: { status: "blocked", gaps: [{ moduleId: "delivery", reason: "交付快照校验失败" }] },
+    });
   });
 
   it("projects only bounded customer delivery fields from the technical graph state", () => {
@@ -1583,13 +1682,18 @@ describe("task 12 api surface", () => {
       '```json\n{"schema":"kf-module-plan/v1","pages":[]}\n```',
       '内部结果如下：\n{"schema":"kf-change-plan/v1","operations":[],"signature":"secret"}',
       '{"metadata":{"schema":"kf-module-compilation-metadata/v1"},"signature":"secret"}',
+      '前置 {不是 JSON} 干扰，然后 {"schema":"kf-module-plan/v1","title":"brace } in string","pages":[]} 后置说明',
+      '代码示例：```ts\nconst value = { normal: true };\n```',
+      '{"kind":"customer-summary","metadata":{"label":"普通 JSON"}}',
     ];
     for (const content of contents) await prisma.message.create({ data: { tenantId, conversationId: conv.body.id, role: "assistant", content } });
     await prisma.message.create({ data: { tenantId, conversationId: conv.body.id, role: "user", content: "请解释 signature 这个普通英文词" } });
 
     const response = await request(server).get(`/api/conversations/${conv.body.id}/messages`).set("Cookie", cookie).expect(200);
-    expect(response.body.slice(0, 3).every((row) => !/kf-module-plan|kf-change-plan|secret|signature/.test(row.content))).toBe(true);
-    expect(response.body[3].content).toBe("请解释 signature 这个普通英文词");
+    expect(response.body.slice(0, 4).every((row) => !/kf-module-plan|kf-change-plan|secret|signature/.test(row.content))).toBe(true);
+    expect(response.body[4].content).toContain("const value");
+    expect(response.body[5].content).toContain("customer-summary");
+    expect(response.body[6].content).toBe("请解释 signature 这个普通英文词");
   });
 
   it("fails closed at direct preview and download-token routes for a non-deliverable module build", async () => {
@@ -1635,11 +1739,15 @@ describe("task 12 api surface", () => {
       changePlanId: "persisted-module-plan", planHash: buildPlanHash, domainKind: "kingclient",
       idempotencyKey: `${conv.body.id}:persisted-module-plan:${buildPlanHash}`, status: "SUCCEEDED",
     } });
-    const artifact = await prisma.artifact.create({ data: { tenantId, buildJobId: job.id, kind: "client-package", storageKey: "persisted-artifact" } });
+    const artifact = await prisma.artifact.create({ data: { tenantId, buildJobId: job.id, kind: "client-package", storageKey: "persisted-artifact", sha256: "c".repeat(64) } });
     const latestRevision = await prisma.solutionRevision.findFirstOrThrow({ where: { workspaceId: ws.body.id }, orderBy: { revisionNumber: "desc" } });
     const revision = await prisma.solutionRevision.create({ data: {
       tenantId, workspaceId: ws.body.id, changePlanId: job.changePlanId, revisionNumber: latestRevision.revisionNumber + 1,
       kind: "build", parentRevisionId: job.baseRevisionId, state: {},
+    } });
+    await prisma.domainProjectRevision.create({ data: {
+      tenantId, solutionRevisionId: revision.id, projectKey: "kingclient", domainKind: "kingclient",
+      kind: "client-package", packageUrl: artifact.storageKey, packageHash: artifact.sha256,
     } });
     const values = signedDeliveryState({ revisionId: job.baseRevisionId });
     values.moduleDeliveryReport = {
@@ -1671,6 +1779,59 @@ describe("task 12 api surface", () => {
       .get(`/api/conversations/${conv.body.id}/delivery?buildJobId=${job.id}`)
       .set("Cookie", cookie).expect(200);
     expect(blocked.body).toMatchObject({ artifactId: null, revisionId: null, result: { status: "blocked" } });
+  });
+
+  it("accepts the canonical conversation and non-default projectKey build identity without weakening artifact gates", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createWorkspace(cookie, "Project-key delivery WS");
+    const conv = await createConversation(cookie, ws.body.id, "Project-key delivery");
+    const tenantId = await tenantIdOf(TENANT_A.tenant);
+    const projectKey = "kingclient.portal";
+    const planHash = "9".repeat(64);
+    const changePlanId = "portal-change";
+    const job = await prisma.buildJob.create({ data: {
+      tenantId, workspaceId: ws.body.id, baseRevisionId: ws.body.currentRevisionId,
+      changePlanId, planHash, projectKey, domainKind: "kingclient",
+      idempotencyKey: `${conv.body.id}:${projectKey}:${changePlanId}:${planHash}`, status: "SUCCEEDED",
+    } });
+    const artifact = await prisma.artifact.create({ data: {
+      tenantId, buildJobId: job.id, kind: "client-package", storageKey: "portal-package", sha256: "8".repeat(64),
+    } });
+    const latest = await prisma.solutionRevision.findFirstOrThrow({ where: { tenantId, workspaceId: ws.body.id }, orderBy: { revisionNumber: "desc" } });
+    const revision = await prisma.solutionRevision.create({ data: {
+      tenantId, workspaceId: ws.body.id, changePlanId, revisionNumber: latest.revisionNumber + 1,
+      kind: "built", parentRevisionId: job.baseRevisionId, state: {},
+    } });
+    await prisma.domainProjectRevision.create({ data: {
+      tenantId, solutionRevisionId: revision.id, projectKey, domainKind: "kingclient", kind: "client-package",
+      packageUrl: artifact.storageKey, packageHash: artifact.sha256,
+    } });
+    const graph = await app.get(ConversationService)["getGraph"]();
+    await graph.updateState({ configurable: { thread_id: conv.body.id } }, {
+      ...signedDeliveryState({ revisionId: job.baseRevisionId, projectKey }), tenantId,
+      workspaceId: ws.body.id, conversationId: conv.body.id, buildJobId: job.id,
+      changePlanId, planHash, currentRevisionId: job.baseRevisionId,
+    });
+
+    const recovered = await request(server).get(`/api/conversations/${conv.body.id}/delivery`).set("Cookie", cookie).expect(200);
+    expect(recovered.body).toMatchObject({ buildJobId: job.id, artifactId: artifact.id, revisionId: revision.id, result: { projectKey, status: "ready" } });
+    await request(server).post(`/api/artifacts/${artifact.id}/download-token`).set("Cookie", cookie).expect(200);
+  });
+
+  it("recovers a conversation-bound legacy build envelope without inventing module delivery state", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createWorkspace(cookie, "Legacy recovery WS");
+    const conv = await createConversation(cookie, ws.body.id, "Legacy recovery");
+    const planHash = await planRequirement(cookie, conv.body.id);
+    await resume(cookie, conv.body.id, { action: "approve", planHash }).expect(200);
+    const built = await runNextBuild("task12-legacy-recovery");
+    expect(built.status).toBe("SUCCEEDED");
+
+    const recovered = await request(server).get(`/api/conversations/${conv.body.id}/delivery`).set("Cookie", cookie).expect(200);
+    expect(recovered.body).toMatchObject({
+      conversationId: conv.body.id, buildJobId: built.id, artifactId: expect.any(String), revisionId: expect.any(String),
+      result: null, buildJob: { id: built.id, status: "SUCCEEDED" }, artifact: { buildJobId: built.id, kind: "client-package" },
+    });
   });
 
   it("compiles every confirmed blueprint module instead of persisting a Text1-only plan", async () => {
