@@ -4,6 +4,7 @@ import { Readable } from "node:stream";
 import {
   semanticPayloadHash,
   type ChangePlan,
+  type ChangePlanAssetBinding,
   type TrustedSemanticOperationInput,
 } from "@kf/contracts";
 import { resolveBuildAssets, resolveStoredPlan } from "./job-executor.js";
@@ -79,6 +80,17 @@ describe("resolveBuildAssets", () => {
     sha256,
     sizeBytes: bytes.byteLength,
   };
+  const binding: ChangePlanAssetBinding = {
+    assetId: modelAssetId,
+    workspaceAssetId: internalId,
+    entityId: "hero/portrait",
+    controlId: "hero/portrait",
+    capabilityId: "image" as const,
+    targetPath: `static/agent-assets/${sha256}.png`,
+    mediaType: "image/png",
+    sha256,
+    sizeBytes: bytes.byteLength,
+  };
 
   function dependencies(rows = [row], body = bytes) {
     return {
@@ -101,7 +113,7 @@ describe("resolveBuildAssets", () => {
   it("reverses the public id only inside tenant/workspace scope and verifies exact bytes", async () => {
     await expect(resolveBuildAssets({
       ...dependencies(), tenantId: "tenant-a", workspaceId: "workspace-a",
-      bindings: [{ assetId: modelAssetId, entityId: "hero/portrait" }],
+      bindings: [binding],
     })).resolves.toEqual([{
       assetId: modelAssetId,
       targetPath: `static/agent-assets/${sha256}.png`,
@@ -121,15 +133,40 @@ describe("resolveBuildAssets", () => {
       ...value.deps,
       tenantId: value.tenantId,
       workspaceId: value.workspaceId,
-      bindings: [{ assetId: modelAssetId, entityId: "hero/portrait" }],
+      bindings: [binding],
     })).rejects.toThrow(expected);
   });
 
   it("rejects aggregate asset bytes above the worker bound", async () => {
     await expect(resolveBuildAssets({
       ...dependencies(), tenantId: "tenant-a", workspaceId: "workspace-a",
-      bindings: [{ assetId: modelAssetId, entityId: "hero/portrait" }],
+      bindings: [binding],
       maxAggregateBytes: bytes.byteLength - 1,
     })).rejects.toThrow(/aggregate|size/i);
+  });
+
+  it("rejects a database row whose metadata was replaced with a different internally consistent blob", async () => {
+    const replacementBytes = Buffer.from("replacement approved-looking bytes");
+    const replacementSha = createHash("sha256").update(replacementBytes).digest("hex");
+    const replacement = { ...row, sha256: replacementSha, sizeBytes: replacementBytes.byteLength };
+    await expect(resolveBuildAssets({
+      ...dependencies([replacement], replacementBytes),
+      tenantId: "tenant-a",
+      workspaceId: "workspace-a",
+      bindings: [binding],
+    })).rejects.toThrow(/signed|metadata|binding/i);
+  });
+
+  it.each([
+    ["internal identity", { workspaceAssetId: "00000000-0000-4000-8000-000000000002" }],
+    ["target path", { targetPath: `static/agent-assets/${"2".repeat(64)}.png` }],
+    ["media type", { mediaType: "image/webp" }],
+    ["checksum", { sha256: "2".repeat(64) }],
+    ["size", { sizeBytes: bytes.byteLength + 1 }],
+  ])("rejects tampered signed %s", async (_label, changes) => {
+    await expect(resolveBuildAssets({
+      ...dependencies(), tenantId: "tenant-a", workspaceId: "workspace-a",
+      bindings: [{ ...binding, ...changes } as ChangePlanAssetBinding],
+    })).rejects.toThrow(/signed|metadata|binding|target/i);
   });
 });

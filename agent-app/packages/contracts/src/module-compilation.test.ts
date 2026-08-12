@@ -20,6 +20,22 @@ describe("ModuleCompilationMetadataSchema", () => {
     expect(ModuleCompilationMetadataSchema.parse(metadata)).toEqual(metadata);
   });
 
+  it("retains server-approved immutable asset facts in signed compilation metadata", () => {
+    const sha256 = "1".repeat(64);
+    const approvedAsset = {
+      workspaceAssetId: "00000000-0000-4000-8000-000000000001",
+      targetPath: `static/agent-assets/${sha256}.png`,
+      mediaType: "image/png",
+      sha256,
+      sizeBytes: 128,
+    };
+    const input = {
+      ...metadata,
+      assets: [{ ...metadata.assets[0], assetId: "asset-00000000000040008000000000000001", approvedAsset }],
+    };
+    expect(ModuleCompilationMetadataSchema.parse(input).assets[0]).toMatchObject({ approvedAsset });
+  });
+
   it("rejects duplicate module ownership and undeclared fields", () => {
     expect(ModuleCompilationMetadataSchema.safeParse({ ...metadata, moduleDefinitions: [...metadata.moduleDefinitions, { ...metadata.moduleDefinitions[0] }] }).success).toBe(false);
     expect(ModuleCompilationMetadataSchema.safeParse({ ...metadata, nativePath: "/tmp/kf" }).success).toBe(false);

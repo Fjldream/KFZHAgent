@@ -16,9 +16,17 @@ import { canonicalChangePlanHash } from "./server-plan-envelope.js";
  */
 
 describe("change plan schema", () => {
+  const sha256 = "1".repeat(64);
   const assetBinding = {
     assetId: "asset-00000000000040008000000000000001",
+    workspaceAssetId: "00000000-0000-4000-8000-000000000001",
     entityId: "hero/portrait",
+    controlId: "hero/portrait",
+    capabilityId: "image",
+    targetPath: `static/agent-assets/${sha256}.png`,
+    mediaType: "image/png",
+    sha256,
+    sizeBytes: 128,
   };
 
   it("keeps compiler-owned asset bindings only in the internal plan contract", () => {
@@ -50,6 +58,18 @@ describe("change plan schema", () => {
       workspaceId: "w-1",
       operations: [],
       assetBindings: [assetBinding, { ...assetBinding, assetId: "asset-00000000000040008000000000000002" }],
+    }).success).toBe(false);
+  });
+
+  it("rejects legacy id-only bindings so they must be replanned with signed facts", () => {
+    expect(internalChangePlanSchema.safeParse({
+      schema: "kf-change-plan/v1",
+      workspaceId: "w-1",
+      operations: [],
+      assetBindings: [{
+        assetId: assetBinding.assetId,
+        entityId: assetBinding.entityId,
+      }],
     }).success).toBe(false);
   });
 

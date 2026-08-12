@@ -34,6 +34,8 @@ const plan: ChangePlan = {
   }],
 };
 const assetId = "asset-00000000000040008000000000000001";
+const workspaceAssetId = "00000000-0000-4000-8000-000000000001";
+const assetSha = "1".repeat(64);
 
 function signedAssets() {
   const assetPlan: InternalChangePlan = {
@@ -45,7 +47,17 @@ function signedAssets() {
       entityId: "portrait-guid",
       properties: { type: "image", src: `static/agent-assets/pending-${assetId}` },
     }],
-    assetBindings: [{ assetId, entityId: "portrait-guid" }],
+    assetBindings: [{
+      assetId,
+      workspaceAssetId,
+      entityId: "portrait-guid",
+      controlId: "portrait-guid",
+      capabilityId: "image",
+      targetPath: `static/agent-assets/${assetSha}.png`,
+      mediaType: "image/png",
+      sha256: assetSha,
+      sizeBytes: 42,
+    }],
   };
   return createHmacServerPlanAuthority(decodeServerPlanHmacKey(keyA)).sign({
     plan: assetPlan,
@@ -126,15 +138,37 @@ describe("HMAC server plan authority", () => {
     expect(createHmacServerPlanAuthority(decodeServerPlanHmacKey(keyA)).verify(roundTripped))
       .toEqual(envelope);
 
-    for (const field of ["assetId", "entityId"] as const) {
+    const mutations: Array<(binding: NonNullable<typeof envelope.plan.assetBindings>[number]) => void> = [
+      (binding) => { binding.entityId = "different-guid"; },
+      (binding) => { binding.controlId = "different-control"; },
+      (binding) => { binding.sizeBytes += 1; },
+      (binding) => {
+        binding.assetId = "asset-00000000000040008000000000000002";
+        binding.workspaceAssetId = "00000000-0000-4000-8000-000000000002";
+      },
+      (binding) => {
+        binding.mediaType = "image/jpeg";
+        binding.targetPath = `static/agent-assets/${binding.sha256}.jpg`;
+      },
+      (binding) => {
+        binding.sha256 = "2".repeat(64);
+        binding.targetPath = `static/agent-assets/${binding.sha256}.png`;
+      },
+    ];
+    for (const mutate of mutations) {
       const tampered = structuredClone(envelope);
-      tampered.plan.assetBindings![0]![field] = field === "assetId"
-        ? "asset-00000000000040008000000000000002"
-        : "different-guid";
+      mutate(tampered.plan.assetBindings![0]!);
       tampered.planHash = canonicalChangePlanHash(tampered.plan);
       expect(() => createHmacServerPlanAuthority(decodeServerPlanHmacKey(keyA)).verify(tampered))
         .toThrow(/signature/i);
     }
+
+    const invalidCapability = structuredClone(envelope) as unknown as {
+      plan: { assetBindings: Array<{ capabilityId: string }> };
+    };
+    invalidCapability.plan.assetBindings[0]!.capabilityId = "text";
+    expect(() => createHmacServerPlanAuthority(decodeServerPlanHmacKey(keyA)).verify(invalidCapability))
+      .toThrow(/schema|invalid/i);
   });
 
   it("accepts a semantically identical persisted object whose JSON keys were reordered", () => {

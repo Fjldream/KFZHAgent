@@ -32,12 +32,17 @@ describe("conversation graph workspace query", () => {
     const assetId = "asset-00000000000040008000000000000001";
     const assets = {
       list: vi.fn(),
-      resolveMany: vi.fn().mockResolvedValue([{
+      resolveMany: vi.fn().mockRejectedValue(new Error("catalog-only resolver must not authorize compilation")),
+      resolveManyForCompilation: vi.fn().mockResolvedValue([{
         id: assetId,
+        workspaceAssetId: "00000000-0000-4000-8000-000000000001",
         kind: "image",
         name: "portrait.png",
         mimeType: "image/png",
         description: "Uploaded workspace image",
+        sha256: "1".repeat(64),
+        sizeBytes: 128,
+        targetPath: `static/agent-assets/${"1".repeat(64)}.png`,
       }]),
     };
     const authority = createHmacModuleArtifactAuthority(Buffer.alloc(32, 0x67));
@@ -101,14 +106,24 @@ describe("conversation graph workspace query", () => {
       },
     });
 
-    expect(assets.resolveMany).toHaveBeenCalledWith({
+    expect(assets.resolveManyForCompilation).toHaveBeenCalledWith({
       tenantId: "tenant-a",
       workspaceId: "workspace-a",
       assetIds: [assetId],
     });
     expect(result.status).toBe("compiled");
     if (result.status === "compiled") {
-      expect(result.metadata.assets).toContainEqual(expect.objectContaining({ assetId, status: "resolved" }));
+      expect(result.metadata.assets).toContainEqual(expect.objectContaining({
+        assetId,
+        status: "resolved",
+        approvedAsset: {
+          workspaceAssetId: "00000000-0000-4000-8000-000000000001",
+          targetPath: `static/agent-assets/${"1".repeat(64)}.png`,
+          mediaType: "image/png",
+          sha256: "1".repeat(64),
+          sizeBytes: 128,
+        },
+      }));
     }
   });
 

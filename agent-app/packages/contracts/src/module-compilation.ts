@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { projectKeySchema } from "./solution.js";
 import { canonicalServerHash } from "./server-plan-envelope.js";
+import { ApprovedAssetFactsSchema } from "./asset.js";
 
 const id = z.string().trim().min(1).max(100).regex(/^[A-Za-z][A-Za-z0-9_-]*$/);
 const kind = z.string().trim().min(1).max(100).regex(/^[A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z][A-Za-z0-9_-]*)*$/);
@@ -23,6 +24,7 @@ const ModuleAssetMetadataSchema = z.object({
   status: z.enum(["resolved", "unavailable", "pending"]),
   /** Opaque canonical identity; never a path, storage key, secret, or native payload. */
   assetIdentity: text,
+  approvedAsset: ApprovedAssetFactsSchema.optional(),
 }).strict();
 
 const ModuleBlueprintMappingSchema = z.object({

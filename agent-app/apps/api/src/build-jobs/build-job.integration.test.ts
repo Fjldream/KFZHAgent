@@ -425,13 +425,13 @@ async function expectCommittedSourceBlobRetained(tenantId, workspaceId) {
     ?.currentRevisionId).toBe(revision.id);
 }
 
-async function runToSuccess({ tenantId, workspaceId, baseRevisionId, changePlanId, planHashValue, hooks }) {
+async function runToSuccess({ tenantId, workspaceId, baseRevisionId, changePlanId, planHashValue, hooks, workRoot }) {
   const input = seedInput({ tenantId, workspaceId, baseRevisionId, changePlanId, planHashValue });
   const queued = await jobs.enqueue(input);
   const now = new Date();
   const leased = await jobs.leaseNext("test-worker", now);
   expect(leased?.id).toBe(queued.id);
-  const executor = new BuildExecutor({ prisma, storage, registry, hooks });
+  const executor = new BuildExecutor({ prisma, storage, registry, hooks, workRoot });
   const done = await executor.execute(leased);
   expect(done.status).toBe("SUCCEEDED");
   return { input, queued, done };
@@ -863,13 +863,16 @@ describe("full build chain", () => {
         changes: [{ path: "/text", value: "Patched" }],
       },
     ]);
+    const workRoot = await mkdtemp(path.join(tmpdir(), "kf-import-build-cleanup-"));
     const built = await runToSuccess({
       tenantId: tenant.id,
       workspaceId: workspace.id,
       baseRevisionId: sourceRevision.revision.id,
       changePlanId: plan.id,
       planHashValue: hash,
+      workRoot,
     });
+    expect(await readdir(workRoot)).toEqual([]);
 
     const artifact = await prisma.artifact.findFirst({
       where: { buildJobId: built.queued.id },

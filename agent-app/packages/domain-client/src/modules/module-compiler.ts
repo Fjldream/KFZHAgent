@@ -10,6 +10,7 @@ import {
   ModulePlanSchema,
   ModuleTraceSchema,
   ResolvedAssetSchema,
+  ApprovedAssetFactsSchema,
   UIImplementationSpecSchema,
   type ModuleDeliveryGap,
   type ModuleCompilationMetadata,
@@ -17,6 +18,7 @@ import {
   type ModulePlanModule,
   type ModuleTrace,
   type ResolvedAsset,
+  type ApprovedAssetFacts,
   type UIComponentSpec,
   type UIImplementationSpec,
 } from "@kf/contracts";
@@ -75,6 +77,8 @@ export interface CompileModulePlanInput {
   readonly registry: ModuleRegistry;
   /** Opaque IDs resolve to safe metadata only; paths and storage keys never enter this boundary. */
   readonly assetsById: Readonly<Record<string, ResolvedAsset>>;
+  /** Server-scoped integrity facts, never model-authored or exposed in the planning catalog. */
+  readonly approvedAssetsById?: Readonly<Record<string, ApprovedAssetFacts>>;
   /** Required only when both previousPlan and previousImplementation form a module revision. */
   readonly previousCompilationArtifact?: VerifiedModuleCompilationArtifact;
   readonly previousPlan?: ModulePlan;
@@ -178,6 +182,7 @@ export function compileModulePlan(input: CompileModulePlanInput): ModuleCompilat
   const previousPlan = input.previousPlan === undefined ? undefined : ModulePlanSchema.parse(input.previousPlan);
   const previousImplementation = parsePreviousImplementation(input.previousImplementation);
   const assetsById = parseResolvedAssets(input.assetsById);
+  const approvedAssetsById = parseApprovedAssets(input.approvedAssetsById ?? {});
   const validationContext = input.validationContext ?? EMPTY_VALIDATION_CONTEXT;
   const previousMetadata = verifiedPreviousMetadata(previousArtifactHandle as VerifiedModuleCompilationArtifact | undefined, plan.projectKey, previousPlan, previousImplementation);
   const previousModules = previousModuleIndex(previousPlan);
@@ -268,7 +273,7 @@ export function compileModulePlan(input: CompileModulePlanInput): ModuleCompilat
   if (parsedImplementation !== undefined && !parsedImplementation.success) throw new Error(`INVALID_COMPILED_UI_IMPLEMENTATION: ${parsedImplementation.error.issues[0]?.message ?? "invalid implementation"}`);
   const canonicalImplementation = parsedImplementation === undefined ? undefined : validatePreservedImplementation(preserveLegacyComponents(reuseCanonicalPriorComponents(parsedImplementation.data, plan, previousPlan, previousComponents), previousImplementation));
   const finalGaps = finalizeGaps(gaps);
-  const metadata = buildCompilationMetadata(plan, input.registry, assetsById, canonicalImplementation, acceptedBlueprint);
+  const metadata = buildCompilationMetadata(plan, input.registry, assetsById, approvedAssetsById, canonicalImplementation, acceptedBlueprint);
   const diff = canonicalImplementation !== undefined && previousPlan !== undefined && previousImplementation !== undefined
     ? diffModulePlans({ previousPlan, plan, previousImplementation, implementation: canonicalImplementation, assetsById, previousMetadata: previousMetadata!, metadata })
     : undefined;
@@ -365,6 +370,7 @@ function buildCompilationMetadata(
   plan: ModulePlan,
   registry: ModuleRegistry,
   assetsById: Readonly<Record<string, ResolvedAsset>>,
+  approvedAssetsById: Readonly<Record<string, ApprovedAssetFacts>>,
   implementation: UIImplementationSpec | undefined,
   acceptedBlueprint: AcceptedBlueprintArtifact,
 ): ModuleCompilationMetadata {
@@ -375,13 +381,33 @@ function buildCompilationMetadata(
   const assets = plan.pages.flatMap((page) => page.modules.flatMap((module) => {
     if (module.assetId === undefined) return [];
     const asset = assetsById[module.assetId] ?? { assetId: module.assetId, status: "unavailable" as const };
-    return [{ pageId: page.id, moduleId: module.id, assetId: module.assetId, status: asset.status, assetIdentity: `${asset.assetId}|${asset.status}|${asset.resolvedName ?? ""}` }];
+    return [{
+      pageId: page.id,
+      moduleId: module.id,
+      assetId: module.assetId,
+      status: asset.status,
+      assetIdentity: `${asset.assetId}|${asset.status}|${asset.resolvedName ?? ""}`,
+      ...(approvedAssetsById[module.assetId] === undefined ? {} : { approvedAsset: approvedAssetsById[module.assetId] }),
+    }];
   }));
   const blueprintMappings = deriveBlueprintMappings(acceptedBlueprint, plan, implementation, registry);
   return {
     schema: "kf-module-compilation-metadata/v1", projectKey: plan.projectKey,
     moduleDefinitions, assets, blueprintMappings,
   };
+}
+
+function parseApprovedAssets(input: Readonly<Record<string, ApprovedAssetFacts>>): Readonly<Record<string, ApprovedAssetFacts>> {
+  const entries = strictObjectEntries(input);
+  if (entries === undefined) throw new Error("INVALID_APPROVED_ASSETS");
+  const output: Record<string, ApprovedAssetFacts> = {};
+  for (const [key, value] of entries) {
+    if (!isPlainData(value)) throw new Error(`INVALID_APPROVED_ASSET: ${key}`);
+    const parsed = ApprovedAssetFactsSchema.safeParse(value);
+    if (!parsed.success) throw new Error(`INVALID_APPROVED_ASSET: ${key}`);
+    output[key] = parsed.data;
+  }
+  return Object.freeze(output);
 }
 
 function deriveBlueprintMappings(accepted: AcceptedBlueprintArtifact, plan: ModulePlan, implementation: UIImplementationSpec | undefined, registry: ModuleRegistry): ModuleCompilationMetadata["blueprintMappings"] {

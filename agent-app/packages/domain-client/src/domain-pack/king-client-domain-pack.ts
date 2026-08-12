@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { DomainPack } from "@kf/contracts";
@@ -31,8 +31,13 @@ export function createKingClientDomainPack(options: {
 
     async importPackage({ bytes, workRoot }) {
       const destination = await mkdtemp(path.join(workRoot ?? tmpdir(), "kf-client-base-"));
-      const rootDir = await importNativeClientPackage(Buffer.from(bytes), destination);
-      return { id: "imported-client", rootDir, mode: "base" };
+      try {
+        const rootDir = await importNativeClientPackage(Buffer.from(bytes), destination);
+        return { id: "imported-client", rootDir, mode: "base", cleanupRoot: destination };
+      } catch (error) {
+        await rm(destination, { recursive: true, force: true });
+        throw error;
+      }
     },
 
     async inspect({ workspace }) {

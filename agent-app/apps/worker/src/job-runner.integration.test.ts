@@ -9,7 +9,9 @@ process.env.DATABASE_URL =
 import { mkdtemp, readdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { Readable } from "node:stream";
 import { LocalArtifactStorage, type ArtifactStorage, type StoredArtifact } from "@kf/artifact-storage";
+import { workspaceAssetIdToModelId } from "@kf/contracts";
 import {
   BuildExecutor,
   BuildJobService,
@@ -156,6 +158,82 @@ function enqueueInput({ tenant, workspace, revision, plan, hash }: Seeded) {
     domainKind: "kingclient",
     idempotencyKey: `worker-idem-${Date.now()}-${counter}`,
   };
+}
+
+async function seedSignedAssetBuild() {
+  const seeded = await seedNewWorkspace({
+    ...INITIAL_IR,
+    pages: [{
+      ...INITIAL_IR.pages[0]!,
+      controls: [{
+        id: "Portrait", type: "image", x: 40, y: 40, width: 160, height: 160, src: "asset",
+      }] as unknown as typeof INITIAL_IR.pages[0]["controls"],
+    }],
+  });
+  const bytes = Buffer.from("approved worker asset bytes");
+  const stored = await storage.put({
+    tenantId: seeded.tenant.id,
+    kind: "workspace-asset",
+    stream: Readable.from([bytes]),
+    maxBytes: 1024,
+  });
+  const row = await prisma.workspaceAsset.create({
+    data: {
+      tenantId: seeded.tenant.id,
+      workspaceId: seeded.workspace.id,
+      type: "image",
+      name: "portrait.png",
+      mediaType: "image/png",
+      storageKey: stored.artifactId,
+      sha256: stored.sha256,
+      sizeBytes: stored.size,
+      width: 1,
+      height: 1,
+      tags: [],
+    },
+  });
+  const assetId = workspaceAssetIdToModelId(row.id);
+  const targetPath = `static/agent-assets/${stored.sha256}.png`;
+  const portraitGuid = deriveGuid({ seed: seeded.workspace.id }, "Portrait");
+  const authority = createHmacServerPlanAuthority(Buffer.alloc(32, 0x62));
+  const internalPlan = {
+    schema: "kf-change-plan/v1" as const,
+    workspaceId: seeded.workspace.id,
+    operations: [{
+      op: "update" as const,
+      entityType: "control",
+      entityId: portraitGuid,
+      changes: [{ path: "/src", value: `static/agent-assets/pending-${assetId}` }],
+    }],
+    assetBindings: [{
+      assetId,
+      workspaceAssetId: row.id,
+      entityId: portraitGuid,
+      controlId: "Portrait",
+      capabilityId: "image" as const,
+      targetPath,
+      mediaType: "image/png" as const,
+      sha256: stored.sha256,
+      sizeBytes: stored.size,
+    }],
+  };
+  const envelope = authority.sign({ plan: internalPlan, revisionId: seeded.revision.id, semanticOperations: [] });
+  await prisma.changePlan.update({
+    where: { id: seeded.plan.id },
+    data: { planHash: envelope.planHash, plan: envelope as Prisma.InputJsonValue },
+  });
+  return { seeded: { ...seeded, hash: envelope.planHash }, authority, row, bytes, targetPath };
+}
+
+async function expectAssetBuildNotAdvanced(input: Awaited<ReturnType<typeof seedSignedAssetBuild>>): Promise<void> {
+  const queued = await jobs.enqueue(enqueueInput(input.seeded));
+  const leased = await jobs.leaseNext(`asset-tamper-${++counter}`, new Date());
+  const executor = new BuildExecutor({ prisma, storage, registry, serverPlanVerifier: input.authority });
+  expect((await executor.execute(leased!)).status).toBe("FAILED");
+  expect(await prisma.solutionRevision.count({ where: { workspaceId: input.seeded.workspace.id } })).toBe(1);
+  expect(await prisma.artifact.count({ where: { buildJobId: queued.id } })).toBe(0);
+  expect((await prisma.solutionWorkspace.findUnique({ where: { id: input.seeded.workspace.id } }))?.currentRevisionId)
+    .toBe(input.seeded.revision.id);
 }
 
 class TrackingStorage implements ArtifactStorage {
@@ -386,15 +464,65 @@ describe("job runner", () => {
     expect(report!.details).toHaveProperty("error");
   });
 
+  it("removes executor-owned workspaces after a successful package is durably adopted", async () => {
+    const seeded = await seedNewWorkspace();
+    await jobs.enqueue(enqueueInput(seeded));
+    const leased = await jobs.leaseNext("success-workspace-cleanup", new Date());
+    const workRoot = await mkdtemp(path.join(tmpdir(), "kf-worker-success-root-"));
+    const executor = new BuildExecutor({ prisma, storage, registry, workRoot });
+
+    expect((await executor.execute(leased!)).status).toBe("SUCCEEDED");
+    expect(await readdir(workRoot)).toEqual([]);
+  });
+
+  it("removes executor-owned workspaces when validation rejects the candidate", async () => {
+    const seeded = await seedNewWorkspace();
+    await jobs.enqueue(enqueueInput(seeded));
+    const leased = await jobs.leaseNext("failed-workspace-cleanup", new Date());
+    const workRoot = await mkdtemp(path.join(tmpdir(), "kf-worker-failure-root-"));
+    const real = clientPack();
+    const rejectingRegistry = new DomainRegistry();
+    rejectingRegistry.register({
+      ...real,
+      validate: async () => ({
+        status: "fail" as const,
+        warnings: ["forced validation failure"],
+        checks: {
+          packageStructure: "pass" as const,
+          jsonSchema: "pass" as const,
+          references: "pass" as const,
+          businessRules: "fail" as const,
+          changeScope: "pass" as const,
+          roundTrip: "pass" as const,
+        },
+      }),
+    });
+    const executor = new BuildExecutor({ prisma, storage, registry: rejectingRegistry, workRoot });
+
+    expect((await executor.execute(leased!)).status).toBe("FAILED");
+    expect(await readdir(workRoot)).toEqual([]);
+  });
+
   it("fails a signed build with a deleted asset without advancing the workspace revision", async () => {
     const seeded = await seedNewWorkspace();
     const authority = createHmacServerPlanAuthority(Buffer.alloc(32, 0x61));
     const missingAssetId = "asset-00000000000040008000000000000001";
+    const missingAssetSha = "1".repeat(64);
     const internalPlan = {
       schema: "kf-change-plan/v1" as const,
       workspaceId: seeded.workspace.id,
       operations: [],
-      assetBindings: [{ assetId: missingAssetId, entityId: "missing-image" }],
+      assetBindings: [{
+        assetId: missingAssetId,
+        workspaceAssetId: "00000000-0000-4000-8000-000000000001",
+        entityId: "missing-image",
+        controlId: "missing-image",
+        capabilityId: "image" as const,
+        targetPath: `static/agent-assets/${missingAssetSha}.png`,
+        mediaType: "image/png" as const,
+        sha256: missingAssetSha,
+        sizeBytes: 1,
+      }],
     };
     const envelope = authority.sign({
       plan: internalPlan,
@@ -423,6 +551,55 @@ describe("job runner", () => {
       .toEqual(expect.objectContaining({
         error: expect.objectContaining({ message: expect.stringMatching(/asset.*missing|missing.*asset/i) }),
       }));
+  });
+
+  it("materializes a fully signed workspace asset through the production worker", async () => {
+    const input = await seedSignedAssetBuild();
+    const queued = await jobs.enqueue(enqueueInput(input.seeded));
+    const leased = await jobs.leaseNext("signed-asset-worker", new Date());
+    const executor = new BuildExecutor({ prisma, storage, registry, serverPlanVerifier: input.authority });
+
+    expect((await executor.execute(leased!)).status).toBe("SUCCEEDED");
+    expect(await prisma.solutionRevision.count({ where: { workspaceId: input.seeded.workspace.id } })).toBe(2);
+    expect(await prisma.artifact.count({ where: { buildJobId: queued.id } })).toBe(1);
+    const artifact = await prisma.artifact.findFirstOrThrow({ where: { buildJobId: queued.id } });
+    const packageBytes = await collect(await storage.open(input.seeded.tenant.id, artifact.storageKey));
+    const unpacked = await importNativeClientPackage(packageBytes, await mkdtemp(path.join(tmpdir(), "kf-worker-asset-check-")));
+    const versionDir = await resolveVersionDirName(unpacked);
+    expect(await readFile(path.join(unpacked, versionDir, input.targetPath))).toEqual(input.bytes);
+  });
+
+  it("fails closed if signed workspace asset metadata is replaced after confirmation", async () => {
+    const input = await seedSignedAssetBuild();
+    const replacement = Buffer.from("replacement internally consistent bytes");
+    const stored = await storage.put({
+      tenantId: input.seeded.tenant.id,
+      kind: "workspace-asset",
+      stream: Readable.from([replacement]),
+      maxBytes: 1024,
+    });
+    await prisma.workspaceAsset.update({
+      where: { id: input.row.id },
+      data: { storageKey: stored.artifactId, sha256: stored.sha256, sizeBytes: stored.size },
+    });
+
+    await expectAssetBuildNotAdvanced(input);
+  });
+
+  it("fails closed if the private blob is replaced behind unchanged signed metadata", async () => {
+    const input = await seedSignedAssetBuild();
+    const stored = await storage.put({
+      tenantId: input.seeded.tenant.id,
+      kind: "workspace-asset",
+      stream: Readable.from([Buffer.from("tampered blob")]),
+      maxBytes: 1024,
+    });
+    await prisma.workspaceAsset.update({
+      where: { id: input.row.id },
+      data: { storageKey: stored.artifactId },
+    });
+
+    await expectAssetBuildNotAdvanced(input);
   });
 
   it("deletes the stored blob when a stale completion does not adopt it", async () => {

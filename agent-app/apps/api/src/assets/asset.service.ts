@@ -30,6 +30,14 @@ export type WorkspaceAssetCatalogItem = {
   createdAt: Date;
 };
 
+export type WorkspaceAssetCompilationItem = Omit<AssetRecord, "mimeType"> & {
+  mimeType: WorkspaceAssetCatalogItem["mediaType"];
+  workspaceAssetId: string;
+  targetPath: string;
+  sha256: string;
+  sizeBytes: number;
+};
+
 export class MissingWorkspaceAssetsError extends NotFoundException {
   readonly missingAssetIds: string[];
 
@@ -151,6 +159,43 @@ export class AssetService {
     const missingAssetIds = orderedIds.filter((id) => !byId.has(id));
     if (missingAssetIds.length > 0) throw new MissingWorkspaceAssetsError(missingAssetIds);
     return orderedIds.map((id) => byId.get(id)!);
+  }
+
+  /** Server-only immutable facts used to authorize a signed module compilation. */
+  async resolveManyForCompilation(input: {
+    tenantId: string;
+    workspaceId: string;
+    assetIds: readonly string[];
+  }): Promise<WorkspaceAssetCompilationItem[]> {
+    await this.requireWorkspace(input.tenantId, input.workspaceId);
+    const orderedIds = uniqueStable(input.assetIds);
+    if (orderedIds.length === 0) return [];
+    const internalIds = new Map<string, string>();
+    const invalid: string[] = [];
+    for (const id of orderedIds) {
+      try { internalIds.set(id, fromModelAssetId(id)); } catch { invalid.push(id); }
+    }
+    if (invalid.length > 0) throw new MissingWorkspaceAssetsError(invalid);
+    const rows = await this.prisma.workspaceAsset.findMany({
+      where: { tenantId: input.tenantId, workspaceId: input.workspaceId, id: { in: [...internalIds.values()] } },
+    });
+    const byId = new Map(rows.map((row) => [toModelAssetId(row.id), row]));
+    const missingAssetIds = orderedIds.filter((id) => !byId.has(id));
+    if (missingAssetIds.length > 0) throw new MissingWorkspaceAssetsError(missingAssetIds);
+    return orderedIds.map((id) => {
+      const row = byId.get(id)!;
+      if (!isAllowedMediaType(row.mediaType)) throw new Error("invalid persisted workspace asset metadata");
+      const record = toAssetRecord(row);
+      const extension = row.mediaType === "image/png" ? "png" : row.mediaType === "image/jpeg" ? "jpg" : "webp";
+      return {
+        ...record,
+        mimeType: row.mediaType,
+        workspaceAssetId: row.id,
+        targetPath: `static/agent-assets/${row.sha256}.${extension}`,
+        sha256: row.sha256,
+        sizeBytes: row.sizeBytes,
+      };
+    });
   }
 
   private async requireWorkspace(tenantId: string, workspaceId: string): Promise<void> {

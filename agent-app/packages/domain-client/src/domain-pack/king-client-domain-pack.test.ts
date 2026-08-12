@@ -55,6 +55,11 @@ describe("KingClient domain pack", () => {
 
     expect(path.relative(workRoot, base.rootDir)).not.toMatch(/^\.\.(?:\/|$)/);
     expect(path.relative(workRoot, candidate.rootDir)).not.toMatch(/^\.\.(?:\/|$)/);
+
+    const artifact = await pack.package({ workspace: candidate });
+    const imported = await pack.importPackage({ bytes: artifact.bytes, workRoot });
+    expect(imported.cleanupRoot).toMatch(new RegExp(`^${workRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/kf-client-base-`));
+    expect(path.relative(imported.cleanupRoot, imported.rootDir)).not.toMatch(/^\.\.(?:\/|$)/);
   });
 
   it("compiles, patches, validates, and packages through DomainPack", async () => {

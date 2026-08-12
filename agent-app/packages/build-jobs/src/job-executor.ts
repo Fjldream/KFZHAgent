@@ -24,6 +24,9 @@ import type { DomainRegistry } from "@kf/domain-registry";
 import { Prisma, type BuildJob, type PrismaClient } from "@prisma/client";
 import { Readable } from "node:stream";
 import { createHash } from "node:crypto";
+import { rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { BuildJobService } from "./build-job.service.js";
 import {
   resolveRevisionProjectIr,
@@ -133,10 +136,15 @@ export async function resolveBuildAssets(input: {
   maxAggregateBytes?: number;
 }): Promise<DomainAssetInput[]> {
   if (input.bindings.length === 0) return [];
-  const orderedAssetIds = [...new Set(input.bindings.map((binding) => binding.assetId))];
+  const bindingByAssetId = new Map(input.bindings.map((binding) => [binding.assetId, binding]));
+  const orderedAssetIds = [...bindingByAssetId.keys()];
   const internalIds = orderedAssetIds.map((assetId) => {
-    try { return modelAssetIdToWorkspaceAssetId(assetId); }
+    const binding = bindingByAssetId.get(assetId)!;
+    let reversed: string;
+    try { reversed = modelAssetIdToWorkspaceAssetId(assetId); }
     catch { throw new Error(`workspace asset missing or outside scope: ${assetId}`); }
+    if (reversed !== binding.workspaceAssetId) throw new Error(`signed asset identity mismatch: ${assetId}`);
+    return binding.workspaceAssetId;
   });
   const rows = await input.prisma.workspaceAsset.findMany({
     where: {
@@ -157,19 +165,29 @@ export async function resolveBuildAssets(input: {
   const output: DomainAssetInput[] = [];
   for (const [index, assetId] of orderedAssetIds.entries()) {
     const row = byInternalId.get(internalIds[index]!)!;
+    const binding = bindingByAssetId.get(assetId)!;
     const extension = mediaTypeExtension(row.mediaType);
     if (row.type !== "image" || extension === undefined || !ASSET_SHA256.test(row.sha256)
       || !Number.isSafeInteger(row.sizeBytes) || row.sizeBytes < 1 || row.sizeBytes > MAX_SINGLE_ASSET_BYTES) {
       throw new Error(`invalid persisted workspace asset metadata: ${assetId}`);
     }
-    aggregate += row.sizeBytes;
+    const signedExtension = mediaTypeExtension(binding.mediaType);
+    const signedTarget = signedExtension === undefined ? "" : `static/agent-assets/${binding.sha256}.${signedExtension}`;
+    if (row.id !== binding.workspaceAssetId
+      || row.mediaType !== binding.mediaType
+      || row.sha256 !== binding.sha256
+      || row.sizeBytes !== binding.sizeBytes
+      || binding.targetPath !== signedTarget) {
+      throw new Error(`signed workspace asset metadata mismatch: ${assetId}`);
+    }
+    aggregate += binding.sizeBytes;
     if (aggregate > maxAggregate) throw new Error("workspace asset aggregate size exceeds build limit");
-    const bytes = await readVerifiedAssetStream(input.storage, input.tenantId, row.storageKey, row.sizeBytes, row.sha256, assetId);
+    const bytes = await readVerifiedAssetStream(input.storage, input.tenantId, row.storageKey, binding.sizeBytes, binding.sha256, assetId);
     output.push({
       assetId,
-      targetPath: `static/agent-assets/${row.sha256}.${extension}`,
-      mediaType: row.mediaType,
-      sha256: row.sha256,
+      targetPath: binding.targetPath,
+      mediaType: binding.mediaType,
+      sha256: binding.sha256,
       bytes,
     });
   }
@@ -207,6 +225,22 @@ async function readVerifiedAssetStream(
   return Buffer.concat(chunks, size);
 }
 
+const OWNED_WORKSPACE_NAME = /^kf-client-(?:base|build|candidate)-[A-Za-z0-9_-]+$/;
+
+/**
+ * Domain packs return fresh disposable workspaces. Only remove exact roots
+ * with the reviewed mkdtemp prefixes and the expected worker parent; cleanup
+ * is compensating work and must never replace the durable build outcome.
+ */
+async function cleanupWorkspaceRoots(roots: readonly string[], workRoot?: string): Promise<void> {
+  const expectedParent = path.resolve(workRoot ?? tmpdir());
+  const unique = new Set(roots.map((root) => path.resolve(root)));
+  await Promise.all([...unique].map(async (root) => {
+    if (path.dirname(root) !== expectedParent || !OWNED_WORKSPACE_NAME.test(path.basename(root))) return;
+    await rm(root, { recursive: true, force: true }).catch(() => {});
+  }));
+}
+
 /**
  * Executes a leased build job end to end:
  *
@@ -234,6 +268,7 @@ export class BuildExecutor {
 
     const heartbeat = this.startLeaseHeartbeat(job);
     let storedArtifact: StoredArtifact | undefined;
+    const ownedWorkspaceRoots: string[] = [];
     try {
       // Resolve the domain capabilities (throws for unknown/unsupported kinds).
       const pack = this.#deps.registry.require(job.domainKind);
@@ -269,6 +304,10 @@ export class BuildExecutor {
       }
 
       const candidate = await this.buildCandidate(job, baseRevision, plan, pack);
+      ownedWorkspaceRoots.push(
+        candidate.baseWorkspace.cleanupRoot ?? candidate.baseWorkspace.rootDir,
+        candidate.candidateWorkspace.cleanupRoot ?? candidate.candidateWorkspace.rootDir,
+      );
       await this.markValidating(job);
 
       const report = await pack.validate({
@@ -324,6 +363,8 @@ export class BuildExecutor {
         // the original execution/completion error for diagnostics.
         throw error;
       }
+    } finally {
+      await cleanupWorkspaceRoots(ownedWorkspaceRoots, this.#deps.workRoot);
     }
   }
 
@@ -457,6 +498,39 @@ export class BuildExecutor {
       // upload/modify flow (planHash-verified); the compiled tree becomes the
       // verification base and the patched tree the candidate, so
       // verifyChangeScope can prove nothing outside the approved plan moved.
+      try {
+        const candidateWorkspace = await pack.patch({
+          baseWorkspace,
+          changePlan: planInput,
+          expectedPlanHash: job.planHash,
+          semanticOperations: resolved.semanticOperations,
+          assets,
+          ...workRoot,
+        });
+        return {
+          baseWorkspace,
+          candidateWorkspace,
+          planInput,
+          assets,
+          mode: "compile",
+        };
+      } catch (error) {
+        await cleanupWorkspaceRoots([baseWorkspace.cleanupRoot ?? baseWorkspace.rootDir], this.#deps.workRoot);
+        throw error;
+      }
+    }
+
+    // Upload/modify flow: fetch the base package, unpack it, and apply the
+    // confirmed change plan to a fresh candidate copy.
+    if (domainProject.packageUrl === null) {
+      throw new Error(`base revision ${baseRevision.id} has no package`);
+    }
+    const packageBytes = await this.readBasePackage(job.tenantId, domainProject.packageUrl);
+    const baseWorkspace = await pack.importPackage({
+      bytes: packageBytes,
+      ...workRoot,
+    });
+    try {
       const candidateWorkspace = await pack.patch({
         baseWorkspace,
         changePlan: planInput,
@@ -470,35 +544,12 @@ export class BuildExecutor {
         candidateWorkspace,
         planInput,
         assets,
-        mode: "compile",
+        mode: "patch",
       };
+    } catch (error) {
+      await cleanupWorkspaceRoots([baseWorkspace.cleanupRoot ?? baseWorkspace.rootDir], this.#deps.workRoot);
+      throw error;
     }
-
-    // Upload/modify flow: fetch the base package, unpack it, and apply the
-    // confirmed change plan to a fresh candidate copy.
-    if (domainProject.packageUrl === null) {
-      throw new Error(`base revision ${baseRevision.id} has no package`);
-    }
-    const packageBytes = await this.readBasePackage(job.tenantId, domainProject.packageUrl);
-    const baseWorkspace = await pack.importPackage({
-      bytes: packageBytes,
-      ...workRoot,
-    });
-    const candidateWorkspace = await pack.patch({
-      baseWorkspace,
-      changePlan: planInput,
-      expectedPlanHash: job.planHash,
-      semanticOperations: resolved.semanticOperations,
-      assets,
-      ...workRoot,
-    });
-    return {
-      baseWorkspace,
-      candidateWorkspace,
-      planInput,
-      assets,
-      mode: "patch",
-    };
   }
 
   private async readBasePackage(tenantId: string, artifactId: string): Promise<Uint8Array> {

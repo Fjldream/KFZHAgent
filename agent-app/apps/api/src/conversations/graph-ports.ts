@@ -52,7 +52,7 @@ export function createGraphPorts(
   prisma: PrismaService,
   storage: ArtifactStorage,
   moduleArtifactAuthority?: ModuleArtifactAuthority,
-  assetService?: Pick<AssetService, "list" | "resolveMany">,
+  assetService?: Pick<AssetService, "list" | "resolveManyForCompilation">,
 ): GraphPorts {
   const buildJobs = new BuildJobService(prisma);
   const moduleRegistry = createDefaultModuleRegistry();
@@ -286,18 +286,30 @@ export function createGraphPorts(
     },
     async compile(input) {
       if (assetService === undefined) throw new Error("ASSET_SERVICE_NOT_CONFIGURED");
-      const catalogAssets = await assetService.resolveMany({
+      const catalogAssets = await assetService.resolveManyForCompilation({
         tenantId: input.tenantId,
         workspaceId: input.workspaceId,
         assetIds: input.plan.assets.map((asset) => asset.id),
       });
       const definitions = input.plan.pages.flatMap((page) => page.modules.map((module) => moduleRegistry.require(module.kind, module.templateVersion)));
       const availableKfCapabilities = [...new Set(definitions.flatMap((definition) => [...definition.requiredKfCapabilities]))].sort();
-      const assetsById = Object.fromEntries(catalogAssets.map((asset) => [asset.id, { assetId: asset.id, status: "resolved" as const, resolvedName: asset.name }]));
+      const assetsById = Object.fromEntries(catalogAssets.map((asset) => [asset.id, {
+        assetId: asset.id,
+        status: "resolved" as const,
+        resolvedName: asset.name,
+      }]));
+      const approvedAssetsById = Object.fromEntries(catalogAssets.map((asset) => [asset.id, {
+          workspaceAssetId: asset.workspaceAssetId,
+          targetPath: asset.targetPath,
+          mediaType: asset.mimeType,
+          sha256: asset.sha256,
+          sizeBytes: asset.sizeBytes,
+      }]));
       return compileModulePlan({
         ...input,
         registry: moduleRegistry,
         assetsById,
+        approvedAssetsById,
         validationContext: { availableKfCapabilities, approvedAuthorizationRefs: [] },
       });
     },

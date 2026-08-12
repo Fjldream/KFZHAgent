@@ -1784,28 +1784,33 @@ export async function applyClientPatch(
   const candidate = await mkdtemp(
     path.join(options?.workRoot ?? tmpdir(), "kf-client-candidate-"),
   );
-  await cp(base, candidate, { recursive: true });
+  try {
+    await cp(base, candidate, { recursive: true });
 
-  for (const op of plan.operations) {
-    if (op.op === "create") {
-      await applyCreate(candidate, versionDir, inspection, base, op, plan.workspaceId, semanticOperations);
-    } else if (op.op === "update") {
-      await applyUpdate(candidate, versionDir, inspection, base, op, plan.workspaceId, semanticOperations);
-    } else if (op.op === "applyStyle") {
-      await applyStyle(candidate, versionDir, inspection, base, op);
-    } else {
-      await applyDelete(candidate, versionDir, inspection, base, op);
+    for (const op of plan.operations) {
+      if (op.op === "create") {
+        await applyCreate(candidate, versionDir, inspection, base, op, plan.workspaceId, semanticOperations);
+      } else if (op.op === "update") {
+        await applyUpdate(candidate, versionDir, inspection, base, op, plan.workspaceId, semanticOperations);
+      } else if (op.op === "applyStyle") {
+        await applyStyle(candidate, versionDir, inspection, base, op);
+      } else {
+        await applyDelete(candidate, versionDir, inspection, base, op);
+      }
     }
+
+    await growPagesToFitControls(candidate, versionDir, inspection, pagesNeedingBoundsCheck);
+    await materializeClientAssets({
+      workspaceRoot: candidate,
+      plan: input,
+      assets: options?.assets ?? [],
+    });
+
+    return { id: plan.workspaceId, rootDir: candidate, mode: "candidate", path: candidate };
+  } catch (error) {
+    await rm(candidate, { recursive: true, force: true });
+    throw error;
   }
-
-  await growPagesToFitControls(candidate, versionDir, inspection, pagesNeedingBoundsCheck);
-  await materializeClientAssets({
-    workspaceRoot: candidate,
-    plan: input,
-    assets: options?.assets ?? [],
-  });
-
-  return { id: plan.workspaceId, rootDir: candidate, mode: "candidate", path: candidate };
 }
 
 export type { EntityIndex };

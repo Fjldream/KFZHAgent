@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ComponentStyleSpecSchema } from "./ui-style.js";
+import { modelAssetIdToWorkspaceAssetId } from "./asset.js";
 
 /**
  * A JSON-pointer style field patch applied to a target entity.
@@ -85,12 +86,30 @@ export const changePlanSchema = z.object({
 export type ChangePlan = z.infer<typeof changePlanSchema>;
 
 const ModelAssetIdSchema = z.string().regex(/^asset-[0-9a-f]{32}$/);
+const WorkspaceAssetIdSchema = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+const AssetSha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
+const AssetMediaTypeSchema = z.enum(["image/png", "image/jpeg", "image/webp"]);
 
 /** Server/compiler-owned binding from one native image entity to a catalog asset. */
 export const ChangePlanAssetBindingSchema = z.object({
   assetId: ModelAssetIdSchema,
+  workspaceAssetId: WorkspaceAssetIdSchema,
   entityId: ChangeEntityIdSchema,
-}).strict();
+  controlId: ChangeEntityIdSchema,
+  capabilityId: z.literal("image"),
+  targetPath: z.string().regex(/^static\/agent-assets\/[0-9a-f]{64}\.(?:png|jpg|webp)$/),
+  mediaType: AssetMediaTypeSchema,
+  sha256: AssetSha256Schema,
+  sizeBytes: z.number().int().positive().max(50 * 1024 * 1024),
+}).strict().superRefine((binding, ctx) => {
+  if (modelAssetIdToWorkspaceAssetId(binding.assetId) !== binding.workspaceAssetId) {
+    ctx.addIssue({ code: "custom", path: ["workspaceAssetId"], message: "asset alias identity mismatch" });
+  }
+  const extension = binding.mediaType === "image/png" ? "png" : binding.mediaType === "image/jpeg" ? "jpg" : "webp";
+  if (binding.targetPath !== `static/agent-assets/${binding.sha256}.${extension}`) {
+    ctx.addIssue({ code: "custom", path: ["targetPath"], message: "asset target does not match signed media and checksum" });
+  }
+});
 export type ChangePlanAssetBinding = z.infer<typeof ChangePlanAssetBindingSchema>;
 
 /**
@@ -105,6 +124,7 @@ export const internalChangePlanSchema = z.object({
   assetBindings: z.array(ChangePlanAssetBindingSchema).max(500).optional(),
 }).strict().superRefine((plan, ctx) => {
   const entities = new Set<string>();
+  const assetFacts = new Map<string, string>();
   for (const [index, binding] of (plan.assetBindings ?? []).entries()) {
     if (entities.has(binding.entityId)) {
       ctx.addIssue({
@@ -114,6 +134,18 @@ export const internalChangePlanSchema = z.object({
       });
     }
     entities.add(binding.entityId);
+    const facts = JSON.stringify({
+      workspaceAssetId: binding.workspaceAssetId,
+      targetPath: binding.targetPath,
+      mediaType: binding.mediaType,
+      sha256: binding.sha256,
+      sizeBytes: binding.sizeBytes,
+    });
+    const previous = assetFacts.get(binding.assetId);
+    if (previous !== undefined && previous !== facts) {
+      ctx.addIssue({ code: "custom", path: ["assetBindings", index], message: "inconsistent signed facts for asset" });
+    }
+    assetFacts.set(binding.assetId, facts);
   }
 });
 export type InternalChangePlan = z.infer<typeof internalChangePlanSchema>;

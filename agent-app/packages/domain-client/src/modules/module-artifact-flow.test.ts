@@ -78,6 +78,14 @@ function compileFirst(inputPlan = plan(), revisionId = "revision-1") {
 describe("signed module compilation flow", () => {
   it("derives internal image bindings only from a verified module compilation artifact", () => {
     const assetId = "asset-00000000000040008000000000000001";
+    const sha256 = "1".repeat(64);
+    const approvedAsset = {
+      workspaceAssetId: "00000000-0000-4000-8000-000000000001",
+      targetPath: `static/agent-assets/${sha256}.png`,
+      mediaType: "image/png" as const,
+      sha256,
+      sizeBytes: 128,
+    };
     const spec: UIImplementationSpec = {
       schema: "kf-ui-implementation/v1",
       theme,
@@ -96,7 +104,7 @@ describe("signed module compilation flow", () => {
       schema: "kf-module-compilation-metadata/v1" as const,
       projectKey: "kingclient.portal",
       moduleDefinitions: [{ pageId: "home", moduleId: "hero", kind: "content.hero", templateVersion: "1.0.0", compilerFingerprint: "hero-compiler-v1", layoutFingerprint: "hero-layout-v1" }],
-      assets: [{ pageId: "home", moduleId: "hero", assetId, status: "resolved" as const, assetIdentity: `${assetId}|resolved|Portrait` }],
+      assets: [{ pageId: "home", moduleId: "hero", assetId, status: "resolved" as const, assetIdentity: `${assetId}|resolved|Portrait`, approvedAsset }],
       blueprintMappings: [],
     };
     const signed = authority.signModuleCompilation({
@@ -119,7 +127,13 @@ describe("signed module compilation flow", () => {
       moduleCompilationArtifact: verified,
     });
 
-    expect(compiled.plan.assetBindings).toEqual([{ assetId, entityId: "hero/portrait" }]);
+    expect(compiled.plan.assetBindings).toEqual([{
+      assetId,
+      ...approvedAsset,
+      entityId: "hero/portrait",
+      controlId: "hero/portrait",
+      capabilityId: "image",
+    }]);
     expect(compiled.plan.operations[0]).toMatchObject({
       op: "create",
       entityId: "hero/portrait",

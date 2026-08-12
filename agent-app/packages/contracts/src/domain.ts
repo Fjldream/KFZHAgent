@@ -25,6 +25,8 @@ export interface DomainWorkspace {
   id: string;
   rootDir: string;
   mode: "base" | "candidate";
+  /** Exact disposable root owned by the DomainPack when rootDir is nested. */
+  cleanupRoot?: string;
 }
 
 export interface DomainImportInput {

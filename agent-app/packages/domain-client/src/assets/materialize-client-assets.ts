@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { mkdir, open, lstat, readFile, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { link, mkdir, mkdtemp, open, lstat, realpath, rm, unlink, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 import {
   internalChangePlanSchema,
@@ -20,6 +21,11 @@ export async function materializeClientAssets(input: {
   plan: unknown;
   assets: readonly DomainAssetInput[];
   maxAggregateBytes?: number;
+  /** Deterministic race injection used only by filesystem security tests. */
+  hooks?: {
+    beforePublish?: () => Promise<void>;
+    afterPublishBeforeRewrite?: () => Promise<void>;
+  };
 }): Promise<void> {
   // Asset materialization is an internal extension of the long-lived patch API.
   // Preserve legacy callers that have neither approved bytes nor an own binding
@@ -59,39 +65,65 @@ export async function materializeClientAssets(input: {
   for (const assetId of byAssetId.keys()) {
     if (!referenced.has(assetId)) throw new Error(`unreferenced build asset: ${assetId}`);
   }
+  for (const binding of bindings) {
+    const asset = byAssetId.get(binding.assetId)!;
+    if (binding.targetPath !== asset.targetPath
+      || binding.mediaType !== asset.mediaType
+      || binding.sha256 !== asset.sha256
+      || binding.sizeBytes !== asset.bytes.byteLength) {
+      throw new Error(`signed asset binding does not match verified bytes: ${binding.assetId}`);
+    }
+  }
 
-  const versionDir = await resolveVersionDirName(input.workspaceRoot);
-  const versionRoot = versionDir === "." ? input.workspaceRoot : path.join(input.workspaceRoot, versionDir);
-  await assertSafeDirectory(versionRoot, "workspace version root");
+  const workspaceRoot = await realpath(input.workspaceRoot);
+  const versionDir = await resolveVersionDirName(workspaceRoot);
+  const versionRoot = versionDir === "." ? workspaceRoot : path.join(workspaceRoot, versionDir);
   const inspection = await inspectClientProject(input.workspaceRoot);
   const rewrites = bindings.map((binding) => resolveBoundImage(binding, parsed.data.workspaceId, inspection, byAssetId.get(binding.assetId)!));
-
-  for (const asset of input.assets) {
-    const target = path.join(versionRoot, ...asset.targetPath.split("/"));
-    await ensureSafeAncestors(versionRoot, path.dirname(target));
-    await writeExclusiveOrVerify(target, asset.bytes, asset.sha256);
-  }
-
-  const pages = new Map<string, { file: string; doc: Record<string, unknown> }>();
-  for (const rewrite of rewrites) {
-    let page = pages.get(rewrite.file);
-    if (page === undefined) {
-      const file = path.join(versionRoot, ...rewrite.file.split("/"));
-      page = { file, doc: JSON.parse(await readFile(file, "utf8")) as Record<string, unknown> };
-      pages.set(rewrite.file, page);
+  const beforePublish = input.hooks?.beforePublish;
+  const published = await publishAssets({
+    workspaceRoot,
+    versionRoot,
+    assets: input.assets,
+    ...(beforePublish === undefined ? {} : { beforePublish }),
+  });
+  const pages = new Map<string, PageRewriteFile>();
+  try {
+    await input.hooks?.afterPublishBeforeRewrite?.();
+    for (const rewrite of rewrites) {
+      let page = pages.get(rewrite.file);
+      if (page === undefined) {
+        page = await openPageRewriteFile(versionRoot, rewrite.file);
+        pages.set(rewrite.file, page);
+      }
+      const control = findControl(page.doc, rewrite.guid);
+      if (control === undefined) throw new Error(`bound image disappeared before materialization: ${rewrite.binding.entityId}`);
+      const current = control["src"];
+      if (current !== "asset"
+        && current !== `static/agent-assets/pending-${rewrite.binding.assetId}`
+        && current !== rewrite.targetPath) {
+        throw new Error(`bound image has an unauthorized source: ${rewrite.binding.entityId}`);
+      }
+      control["src"] = rewrite.targetPath;
     }
-    const control = findControl(page.doc, rewrite.guid);
-    if (control === undefined) throw new Error(`bound image disappeared before materialization: ${rewrite.binding.entityId}`);
-    const current = control["src"];
-    if (current !== "asset"
-      && current !== `static/agent-assets/pending-${rewrite.binding.assetId}`
-      && current !== rewrite.targetPath) {
-      throw new Error(`bound image has an unauthorized source: ${rewrite.binding.entityId}`);
+    for (const page of pages.values()) {
+      await assertPageRewriteFileUnchanged(page);
+      const bytes = Buffer.from(stableStringify(page.doc), "utf8");
+      await page.handle.truncate(0);
+      let offset = 0;
+      while (offset < bytes.byteLength) {
+        const result = await page.handle.write(bytes, offset, bytes.byteLength - offset, offset);
+        if (result.bytesWritten < 1) throw new Error(`page rewrite made no progress: ${page.file}`);
+        offset += result.bytesWritten;
+      }
+      await page.handle.sync();
+      await assertPageRewriteFileUnchanged(page);
     }
-    control["src"] = rewrite.targetPath;
-  }
-  for (const page of pages.values()) {
-    await writeFile(page.file, stableStringify(page.doc), { encoding: "utf8", flag: "w" });
+  } catch (error) {
+    await Promise.all(published.map((file) => unlink(file).catch(() => {})));
+    throw error;
+  } finally {
+    await Promise.all([...pages.values()].map((page) => closePageRewriteFile(page)));
   }
 }
 
@@ -119,42 +151,178 @@ function validatedTarget(asset: DomainAssetInput): string {
   return asset.targetPath;
 }
 
-async function assertSafeDirectory(target: string, label: string): Promise<void> {
+type DirectorySnapshot = { path: string; handle: FileHandle; dev: number | bigint; ino: number | bigint };
+type PageRewriteFile = {
+  file: string;
+  handle: FileHandle;
+  dev: number | bigint;
+  ino: number | bigint;
+  ancestors: DirectorySnapshot[];
+  doc: Record<string, unknown>;
+};
+
+async function openPageRewriteFile(versionRoot: string, relativeFile: string): Promise<PageRewriteFile> {
+  const segments = relativeFile.split("/");
+  if (segments.length < 2 || segments.some((segment) => segment === "" || segment === "." || segment === ".." || segment.includes("\\"))) {
+    throw new Error(`invalid page rewrite path: ${relativeFile}`);
+  }
+  const ancestors: DirectorySnapshot[] = [];
+  let handle: FileHandle | undefined;
+  try {
+    let current = versionRoot;
+    ancestors.push(await openCanonicalDirectory(current, "page version root"));
+    for (const segment of segments.slice(0, -1)) {
+      current = path.join(current, segment);
+      ancestors.push(await openCanonicalDirectory(current, "page ancestor"));
+    }
+    const file = path.join(current, segments.at(-1)!);
+    const entry = await lstat(file);
+    if (entry.isSymbolicLink()) throw new Error(`page file must not be a symlink: ${relativeFile}`);
+    if (!entry.isFile() || entry.nlink !== 1) throw new Error(`page file must be one regular file: ${relativeFile}`);
+    await assertCanonicalPath(file, "page file");
+    handle = await open(file, constants.O_RDWR | constants.O_NOFOLLOW);
+    const stat = await handle.stat();
+    if (!stat.isFile() || stat.nlink !== 1 || stat.dev !== entry.dev || stat.ino !== entry.ino) {
+      throw new Error(`page file identity changed while opening: ${relativeFile}`);
+    }
+    const doc = JSON.parse(await handle.readFile("utf8")) as Record<string, unknown>;
+    return { file, handle, dev: stat.dev, ino: stat.ino, ancestors, doc };
+  } catch (error) {
+    await handle?.close().catch(() => {});
+    await Promise.all(ancestors.map((ancestor) => ancestor.handle.close().catch(() => {})));
+    throw error;
+  }
+}
+
+async function assertPageRewriteFileUnchanged(page: PageRewriteFile): Promise<void> {
+  for (const ancestor of page.ancestors) await assertDirectoryUnchanged(ancestor);
+  const pathStat = await lstat(page.file);
+  const handleStat = await page.handle.stat();
+  if (pathStat.isSymbolicLink() || !pathStat.isFile() || pathStat.nlink !== 1
+    || pathStat.dev !== page.dev || pathStat.ino !== page.ino
+    || handleStat.dev !== page.dev || handleStat.ino !== page.ino) {
+    throw new Error(`page file identity changed during rewrite: ${page.file}`);
+  }
+}
+
+async function closePageRewriteFile(page: PageRewriteFile): Promise<void> {
+  await page.handle.close().catch(() => {});
+  await Promise.all(page.ancestors.map((ancestor) => ancestor.handle.close().catch(() => {})));
+}
+
+async function publishAssets(input: {
+  workspaceRoot: string;
+  versionRoot: string;
+  assets: readonly DomainAssetInput[];
+  beforePublish?: () => Promise<void>;
+}): Promise<string[]> {
+  // Node does not expose openat(2)/renameat(2) with a retained directory fd.
+  // The strongest portable boundary available here is therefore: canonical
+  // no-follow directory handles + dev/ino snapshots before/after publication,
+  // a private exclusive staging directory, fsync, and exclusive hard-link
+  // publication followed by an O_NOFOLLOW identity/hash verification.
+  const directories: DirectorySnapshot[] = [];
+  const published: string[] = [];
+  let stagingRoot: string | undefined;
+  try {
+    directories.push(await openCanonicalDirectory(input.workspaceRoot, "workspace root"));
+    directories.push(await openCanonicalDirectory(input.versionRoot, "workspace version root"));
+    const staticRoot = path.join(input.versionRoot, "static");
+    await mkdirExact(staticRoot);
+    directories.push(await openCanonicalDirectory(staticRoot, "static asset root"));
+    const assetRoot = path.join(staticRoot, "agent-assets");
+    await mkdirExact(assetRoot);
+    directories.push(await openCanonicalDirectory(assetRoot, "agent asset root"));
+
+    stagingRoot = await mkdtemp(path.join(staticRoot, ".agent-assets-stage-"));
+    directories.push(await openCanonicalDirectory(stagingRoot, "asset staging root"));
+    for (const asset of input.assets) {
+      const name = path.basename(asset.targetPath);
+      const staged = path.join(stagingRoot, name);
+      const handle = await open(staged, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o644);
+      try {
+        await handle.writeFile(asset.bytes);
+        await handle.sync();
+        const stat = await handle.stat();
+        if (!stat.isFile() || stat.nlink !== 1 || stat.size !== asset.bytes.byteLength) throw new Error(`unsafe staged asset file: ${name}`);
+      } finally { await handle.close(); }
+      await assertCanonicalPath(staged, `staged asset ${name}`);
+    }
+
+    await input.beforePublish?.();
+    for (const directory of directories) await assertDirectoryUnchanged(directory);
+    for (const asset of input.assets) {
+      const name = path.basename(asset.targetPath);
+      const staged = path.join(stagingRoot, name);
+      const target = path.join(assetRoot, name);
+      try {
+        await link(staged, target);
+        await unlink(staged);
+        published.push(target);
+      } catch (error) {
+        if (!hasCode(error, "EEXIST")) throw error;
+      }
+      await verifyPublishedFile(target, asset.bytes, asset.sha256);
+    }
+    for (const directory of directories.slice(0, 4)) await assertDirectoryUnchanged(directory);
+    return published;
+  } catch (error) {
+    await Promise.all(published.map((file) => unlink(file).catch(() => {})));
+    throw error;
+  } finally {
+    await Promise.all(directories.map((directory) => directory.handle.close().catch(() => {})));
+    if (stagingRoot !== undefined) await rm(stagingRoot, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function mkdirExact(target: string): Promise<void> {
+  try { await mkdir(target, { mode: 0o755 }); }
+  catch (error) { if (!hasCode(error, "EEXIST")) throw error; }
+}
+
+async function openCanonicalDirectory(target: string, label: string): Promise<DirectorySnapshot> {
   const entry = await lstat(target);
   if (entry.isSymbolicLink()) throw new Error(`${label} must not be a symlink`);
-  if (!entry.isDirectory()) throw new Error(`${label} must be a directory`);
+  if (!entry.isDirectory()) throw new Error(`${label} must be a real directory`);
+  await assertCanonicalPath(target, label);
+  const handle = await open(target, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  const stat = await handle.stat();
+  if (!stat.isDirectory()) { await handle.close(); throw new Error(`${label} must be a directory`); }
+  return { path: target, handle, dev: stat.dev, ino: stat.ino };
 }
 
-async function ensureSafeAncestors(root: string, targetDir: string): Promise<void> {
-  const relative = path.relative(root, targetDir);
-  if (relative === "" || relative === ".") return;
-  if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("asset target path escapes workspace");
-  let current = root;
-  for (const segment of relative.split(path.sep)) {
-    if (segment === "" || segment === "." || segment === "..") throw new Error("invalid asset target path segment");
-    current = path.join(current, segment);
-    try {
-      await mkdir(current, { mode: 0o755 });
-    } catch (error) {
-      if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error;
-    }
-    await assertSafeDirectory(current, `asset ancestor ${segment}`);
+async function assertCanonicalPath(target: string, label: string): Promise<void> {
+  const canonical = await realpath(target);
+  if (canonical !== path.resolve(target)) throw new Error(`${label} has a non-canonical case alias or realpath`);
+}
+
+async function assertDirectoryUnchanged(snapshot: DirectorySnapshot): Promise<void> {
+  await assertCanonicalPath(snapshot.path, "asset ancestor");
+  const pathStat = await lstat(snapshot.path);
+  const handleStat = await snapshot.handle.stat();
+  if (pathStat.isSymbolicLink() || !pathStat.isDirectory()
+    || pathStat.dev !== snapshot.dev || pathStat.ino !== snapshot.ino
+    || handleStat.dev !== snapshot.dev || handleStat.ino !== snapshot.ino) {
+    throw new Error(`asset ancestor identity changed during publish: ${snapshot.path}`);
   }
 }
 
-async function writeExclusiveOrVerify(target: string, bytes: Uint8Array, sha256: string): Promise<void> {
+async function verifyPublishedFile(target: string, bytes: Uint8Array, sha256: string): Promise<void> {
+  await assertCanonicalPath(target, "published asset");
+  const handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
-    const handle = await open(target, "wx", 0o644);
-    try { await handle.writeFile(bytes); }
-    finally { await handle.close(); }
-  } catch (error) {
-    if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error;
-    const entry = await lstat(target);
-    if (entry.isSymbolicLink() || !entry.isFile()) throw new Error(`asset target collision: ${target}`);
-    const existing = await readFile(target);
+    const stat = await handle.stat();
+    if (!stat.isFile() || stat.nlink !== 1) throw new Error(`asset target hard-link or special-file collision: ${target}`);
+    const existing = await handle.readFile();
     const actual = createHash("sha256").update(existing).digest("hex");
     if (actual !== sha256 || existing.byteLength !== bytes.byteLength) throw new Error(`asset target checksum collision: ${target}`);
-  }
+    const pathStat = await lstat(target);
+    if (pathStat.dev !== stat.dev || pathStat.ino !== stat.ino) throw new Error(`asset target identity changed: ${target}`);
+  } finally { await handle.close(); }
+}
+
+function hasCode(error: unknown, code: string): boolean {
+  return error instanceof Error && "code" in error && error.code === code;
 }
 
 function resolveBoundImage(
@@ -168,7 +336,10 @@ function resolveBoundImage(
   const derived = inspection.index.controls[derivedGuid];
   const control = direct ?? derived;
   if (control === undefined) throw new Error(`asset binding target image is missing: ${binding.entityId}`);
-  if (control.type !== "image" && control.capabilityId !== "image") {
+  if (control.id !== binding.controlId) {
+    throw new Error(`asset binding control identity mismatch: ${binding.entityId}`);
+  }
+  if (control.type !== "image" || control.capabilityId !== binding.capabilityId) {
     throw new Error(`asset binding target is not an image: ${binding.entityId}`);
   }
   const page = inspection.index.pages[control.pageGuid];

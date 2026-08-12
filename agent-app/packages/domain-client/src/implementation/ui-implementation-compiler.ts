@@ -3,6 +3,7 @@ import {
   canonicalModuleCompilationHash,
   semanticPayloadHash,
   type CapabilityReport,
+  type ApprovedAssetFacts,
   type ChangeOperation,
   type ChangePlan,
   type ChangePlanAssetBinding,
@@ -131,7 +132,7 @@ export function compileUiImplementation(
   const actualSourceModuleIds = sourceModuleIdsFor(spec);
   const artifactHandle = optionalOwnDataField(context, "moduleCompilationArtifact", "INVALID_MODULE_COMPILATION_ARTIFACT");
   let trustedSourceModuleIds: readonly string[] = [];
-  const trustedAssetByModule = new Map<string, string>();
+  const trustedAssetByModule = new Map<string, { assetId: string; approvedAsset: ApprovedAssetFacts }>();
   if (actualSourceModuleIds.length > 0) {
     if (artifactHandle === undefined) throw new Error("VERIFIED_MODULE_COMPILATION_ARTIFACT_REQUIRED");
     const artifact = readVerifiedModuleCompilationArtifact(artifactHandle);
@@ -140,7 +141,8 @@ export function compileUiImplementation(
     trustedSourceModuleIds = artifact.sourceModuleIds;
     for (const asset of artifact.metadata.assets) {
       if (asset.status !== "resolved") continue;
-      trustedAssetByModule.set(`${asset.pageId}\u0000${asset.moduleId}`, asset.assetId);
+      if (asset.approvedAsset === undefined) continue;
+      trustedAssetByModule.set(`${asset.pageId}\u0000${asset.moduleId}`, { assetId: asset.assetId, approvedAsset: asset.approvedAsset });
     }
   } else if (artifactHandle !== undefined) {
     const artifact = readVerifiedModuleCompilationArtifact(artifactHandle);
@@ -173,9 +175,10 @@ export function compileUiImplementation(
       }
       seenComponentIds.add(component.id);
       assertGeometryInPage(component, page);
-      const assetId = component.sourceModuleId === undefined
+      const trustedAsset = component.sourceModuleId === undefined
         ? undefined
         : trustedAssetByModule.get(`${page.id}\u0000${component.sourceModuleId}`);
+      const assetId = trustedAsset?.assetId;
       const compiledComponent = moduleAssetComponent(component, assetId);
       operations.push(...compileComponent(
         compiledComponent,
@@ -192,7 +195,13 @@ export function compileUiImplementation(
           component.id,
           "INVALID_EXISTING_CONTROL_GUID",
         );
-        assetBindings.push({ assetId, entityId: existingGuid ?? component.id });
+        assetBindings.push({
+          assetId,
+          ...trustedAsset!.approvedAsset,
+          entityId: existingGuid ?? component.id,
+          controlId: component.id,
+          capabilityId: "image",
+        });
       }
     }
   }
