@@ -168,6 +168,7 @@ class FakeModelPort {
   requestedDomains = ["kingclient"];
   blueprintModuleIds = ["main"];
   mappedBlueprint = false;
+  classificationError = undefined;
   layoutModuleId = undefined;
   createCalls = [];
   reviseCalls = [];
@@ -177,6 +178,7 @@ class FakeModelPort {
   }
   async classifyIntent(input) {
     void input;
+    if (this.classificationError !== undefined) throw new Error(String(this.classificationError));
     const intent = this.intents.shift() ?? "QUESTION";
     return {
       intent,
@@ -412,6 +414,7 @@ beforeEach(async () => {
   fakeModel.intents = [];
   fakeModel.blueprintModuleIds = ["main"];
   fakeModel.mappedBlueprint = false;
+  fakeModel.classificationError = undefined;
   fakeModel.layoutModuleId = undefined;
   fakeModel.createCalls = [];
   fakeModel.reviseCalls = [];
@@ -1554,16 +1557,17 @@ describe("task 12 api surface", () => {
       projectKey: "kingclient",
       revisionId: ws.body.currentRevisionId,
       blueprintHash: "f".repeat(64),
-      modules: [{ blueprintModuleId: "hero", expectedKind: "content.hero", expectedCategory: "content", interactionRequirements: [] }],
+      modules: [{ blueprintModuleId: "source-panel", expectedKind: "content.hero", expectedCategory: "content", interactionRequirements: [] }],
     });
     const graph = await app.get(ConversationService)["getGraph"]();
     await graph.updateState({ configurable: { thread_id: conv.body.id } }, {
       tenantId, workspaceId: ws.body.id, conversationId: conv.body.id,
       currentRevisionId: ws.body.currentRevisionId,
       acceptedBlueprintArtifact: accepted,
+      moduleDeliveryOwnerMappings: [{ blueprintModuleId: "source-panel", moduleId: "panel" }],
       moduleDeliveryReport: {
         schema: "kf-module-delivery/v1", projectKey: "kingclient", status: "blocked",
-        gaps: [{ moduleId: "hero", requirement: "提供头像资源", severity: "blocking", status: "unresolved", reason: "缺少已批准头像", alternatives: ["上传头像"] }],
+        gaps: [{ moduleId: "panel", requirement: "提供头像资源", severity: "blocking", status: "unresolved", reason: "缺少已批准头像", alternatives: ["上传头像"] }],
       },
       moduleRepairAttempt: 2,
     });
@@ -1573,7 +1577,7 @@ describe("task 12 api surface", () => {
       buildJobId: null, artifactId: null, revisionId: null,
       result: {
         status: "blocked", repairCount: 2, implementedModules: [],
-        gaps: [{ moduleId: "hero", requirement: "提供头像资源", reason: "缺少已批准头像", alternatives: ["上传头像"] }],
+        gaps: [{ moduleId: "panel", requirement: "提供头像资源", reason: "缺少已批准头像", alternatives: ["上传头像"] }],
       },
     });
 
@@ -1585,6 +1589,33 @@ describe("task 12 api surface", () => {
       artifactId: null, revisionId: null,
       result: { status: "blocked", gaps: [{ moduleId: "delivery", reason: "交付快照校验失败" }] },
     });
+
+    await graph.updateState({ configurable: { thread_id: conv.body.id } }, {
+      acceptedBlueprintArtifact: accepted,
+      moduleDeliveryReport: {
+        schema: "kf-module-delivery/v1", projectKey: "kingclient", status: "blocked",
+        gaps: [{ moduleId: "unknown-owner", requirement: "未知缺口", severity: "blocking", status: "unresolved", reason: "未知 owner" }],
+      },
+    });
+    const unknown = await request(server).get(`/api/conversations/${conv.body.id}/delivery`).set("Cookie", cookie).expect(200);
+    expect(unknown.body).toMatchObject({
+      result: { status: "blocked", gaps: [{ moduleId: "delivery", reason: "交付快照校验失败" }] },
+    });
+  });
+
+  it("emits only a fixed customer-safe SSE error when an upstream model error contains technical JSON", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createWorkspace(cookie, "Safe SSE error WS");
+    const conv = await createConversation(cookie, ws.body.id, "Safe SSE error");
+    fakeModel.classificationError = new Error('DeepSeek 502 {"schema":"kf-module-plan/v1","signature":"secret","metadata":{"prompt":"raw"}}');
+
+    const response = await sendMessage(cookie, conv.body.id, "触发上游错误").expect(200);
+    const frames = parseSse(response.text);
+    expect(frames.at(-1)).toEqual({
+      event: "error",
+      data: { code: "CONVERSATION_FAILED", message: "对话处理失败，请重试" },
+    });
+    expect(JSON.stringify(frames)).not.toMatch(/DeepSeek|kf-module-plan|signature|secret|metadata|prompt|raw|502/);
   });
 
   it("projects only bounded customer delivery fields from the technical graph state", () => {
@@ -1619,6 +1650,28 @@ describe("task 12 api surface", () => {
       },
     });
     expect(JSON.stringify(data)).not.toMatch(/kf-module-plan|secretModelPrompt|must-not-leak|signature/);
+  });
+
+  it("rejects accessor-backed blocked owner mappings before schema projection", () => {
+    const accepted = moduleArtifactAuthority.signAcceptedBlueprint({
+      schema: "kf-accepted-blueprint-artifact/v1", projectKey: "kingclient", revisionId: "revision-1",
+      blueprintHash: "7".repeat(64), modules: [{ blueprintModuleId: "source-panel", expectedKind: "content.hero", expectedCategory: "content", interactionRequirements: [] }],
+    });
+    const mappings = [];
+    Object.defineProperty(mappings, "0", {
+      enumerable: true,
+      get: () => ({ blueprintModuleId: "source-panel", moduleId: "panel" }),
+    });
+    Object.defineProperty(mappings, "length", { value: 1, writable: true });
+    const result = finalStateData({ values: {
+      currentRevisionId: "revision-1", acceptedBlueprintArtifact: accepted,
+      moduleDeliveryOwnerMappings: mappings, moduleRepairAttempt: 1,
+      moduleDeliveryReport: {
+        schema: "kf-module-delivery/v1", projectKey: "kingclient", status: "blocked",
+        gaps: [{ moduleId: "panel", requirement: "完成模块", severity: "blocking", status: "unresolved", reason: "测试" }],
+      },
+    }, tasks: [] }, moduleArtifactAuthority).moduleDeliveryResult;
+    expect(result).toBeUndefined();
   });
 
   it("does not claim a ready delivery from an invalid technical module snapshot", () => {

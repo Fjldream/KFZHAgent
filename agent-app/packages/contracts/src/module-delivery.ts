@@ -62,6 +62,22 @@ export const ModuleDeliveryGapSchema = z
   })
   .strict();
 
+export const ModuleDeliveryOwnerMappingSchema = z.object({
+  blueprintModuleId: z.string().trim().min(1).max(100),
+  moduleId: stableIdSchema,
+}).strict();
+
+export const ModuleDeliveryOwnerMappingsSchema = z.array(ModuleDeliveryOwnerMappingSchema).max(250).superRefine((mappings, ctx) => {
+  const blueprintIds = new Set<string>();
+  mappings.forEach((mapping, index) => {
+    if (blueprintIds.has(mapping.blueprintModuleId)) ctx.addIssue({ code: "custom", path: [index, "blueprintModuleId"], message: "duplicate blueprint owner" });
+    blueprintIds.add(mapping.blueprintModuleId);
+  });
+});
+
+/** Explicit solution-scoped owner for gaps that cannot belong to one mapped module. */
+export const MODULE_DELIVERY_AGGREGATE_OWNER = "blueprint" as const;
+
 export const ModuleDeliveryReportSchema = z
   .object({
     schema: z.literal("kf-module-delivery/v1"),
@@ -92,3 +108,4 @@ export const ModuleDeliveryReportSchema = z
 export type ModuleTrace = z.infer<typeof ModuleTraceSchema>;
 export type ModuleDeliveryGap = z.infer<typeof ModuleDeliveryGapSchema>;
 export type ModuleDeliveryReport = z.infer<typeof ModuleDeliveryReportSchema>;
+export type ModuleDeliveryOwnerMapping = z.infer<typeof ModuleDeliveryOwnerMappingSchema>;

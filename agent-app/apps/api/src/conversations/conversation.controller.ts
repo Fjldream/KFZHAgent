@@ -131,11 +131,11 @@ export class ConversationController {
         res.write(`data: ${JSON.stringify(next.value.data ?? null)}\n\n`);
         flushIfSupported(res);
       }
-    } catch (error) {
+    } catch {
       res.write(
         `event: error\ndata: ${JSON.stringify({
-          code: "GRAPH_ERROR",
-          message: error instanceof Error ? error.message : String(error),
+          code: "CONVERSATION_FAILED",
+          message: "对话处理失败，请重试",
         })}\n\n`,
       );
     } finally {

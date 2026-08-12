@@ -161,4 +161,18 @@ describe("AgentGraphState v2", () => {
     await expect(AgentGraphState.validateInput({ ...base, stage: "idle", moduleRepairAttempt: 4 })).rejects.toThrow();
     await expect(AgentGraphState.validateInput({ ...base, stage: "idle", buildAuthorization: "model-approved" })).rejects.toThrow();
   });
+
+  it("persists only bounded unique blocked delivery owner mappings", async () => {
+    const mapping = { blueprintModuleId: "source-panel", moduleId: "panel" };
+    await expect(AgentGraphState.validateInput({
+      ...base, stage: "idle", moduleDeliveryOwnerMappings: [mapping],
+    })).resolves.toBeDefined();
+    await expect(AgentGraphState.validateInput({
+      ...base, stage: "idle", moduleDeliveryOwnerMappings: [mapping, mapping],
+    })).rejects.toThrow();
+    await expect(AgentGraphState.validateInput({
+      ...base, stage: "idle",
+      moduleDeliveryOwnerMappings: Array.from({ length: 251 }, (_, index) => ({ blueprintModuleId: `source-${index}`, moduleId: `module-${index}` })),
+    })).rejects.toThrow();
+  });
 });

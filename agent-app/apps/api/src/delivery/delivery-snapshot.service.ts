@@ -5,6 +5,8 @@ import { buildJobBelongsToConversation, readVerifiedAcceptedBlueprintArtifact, r
 import {
   canonicalModuleCompilationHash,
   ModuleDeliveryReportSchema,
+  ModuleDeliveryOwnerMappingsSchema,
+  MODULE_DELIVERY_AGGREGATE_OWNER,
   ModulePlanSchema,
 } from "@kf/contracts";
 import type { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
@@ -147,8 +149,13 @@ export function projectModuleDeliveryResult(values: Record<string, unknown>, aut
       if (revisionId === undefined) return undefined;
       const accepted = readVerifiedAcceptedBlueprintArtifact(authority.verifyAcceptedBlueprint(values["acceptedBlueprintArtifact"], { projectKey: report.data.projectKey, revisionId }));
       if (accepted.projectKey !== report.data.projectKey) return undefined;
+      const rawMappings = values["moduleDeliveryOwnerMappings"];
+      if (!isDescriptorSafeJson(rawMappings, 1_000)) return undefined;
+      const mappings = ModuleDeliveryOwnerMappingsSchema.parse(rawMappings);
       const acceptedModuleIds = new Set(accepted.modules.map((module) => module.blueprintModuleId));
-      if (report.data.gaps.some((gap) => !acceptedModuleIds.has(gap.moduleId))) return undefined;
+      if (mappings.length === 0 || mappings.some((mapping) => !acceptedModuleIds.has(mapping.blueprintModuleId))) return undefined;
+      const trustedOwners = new Set([MODULE_DELIVERY_AGGREGATE_OWNER, ...mappings.flatMap((mapping) => [mapping.blueprintModuleId, mapping.moduleId])]);
+      if (report.data.gaps.some((gap) => !trustedOwners.has(gap.moduleId))) return undefined;
       return {
         projectKey: report.data.projectKey,
         status: "blocked",
@@ -243,3 +250,25 @@ function compareModule(left: { pageId: string; moduleId: string }, right: { page
   return left.pageId < right.pageId ? -1 : left.pageId > right.pageId ? 1 : left.moduleId < right.moduleId ? -1 : left.moduleId > right.moduleId ? 1 : 0;
 }
 function isHash(value: unknown): value is string { return typeof value === "string" && /^[0-9a-f]{64}$/.test(value); }
+
+function isDescriptorSafeJson(root: unknown, maxNodes: number): boolean {
+  if (root === null || typeof root !== "object") return false;
+  const pending: object[] = [root];
+  const seen = new Set<object>();
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    if (seen.has(current)) return false;
+    seen.add(current);
+    if (seen.size > maxNodes) return false;
+    const prototype = Reflect.getPrototypeOf(current);
+    if (prototype !== Object.prototype && prototype !== Array.prototype && prototype !== null) return false;
+    const descriptors = Object.getOwnPropertyDescriptors(current);
+    for (const [key, descriptor] of Object.entries(descriptors)) {
+      if (Array.isArray(current) && key === "length") continue;
+      if (!("value" in descriptor) || descriptor.enumerable !== true) return false;
+      const value = descriptor.value as unknown;
+      if (value !== null && typeof value === "object") pending.push(value);
+    }
+  }
+  return true;
+}

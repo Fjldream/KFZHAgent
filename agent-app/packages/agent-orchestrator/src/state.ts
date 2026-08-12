@@ -4,6 +4,7 @@ import {
   AcceptedBlueprintArtifactSchema,
   ModuleCompilationArtifactSchema,
   ModuleDeliveryReportSchema,
+  ModuleDeliveryOwnerMappingsSchema,
   ModulePlanSchema,
   pendingRequirementSchema,
   DesignPlanSchema,
@@ -138,6 +139,7 @@ export const AgentGraphState = new StateSchema({
   modulePlanHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
   moduleCompilationArtifact: ModuleCompilationArtifactSchema.optional(),
   moduleDeliveryReport: ModuleDeliveryReportSchema.optional(),
+  moduleDeliveryOwnerMappings: ModuleDeliveryOwnerMappingsSchema.optional(),
   moduleRepairAttempt: z.number().int().min(0).max(3).optional(),
   /** Server-routed proof of why the current ChangePlan may enter the build queue. */
   buildAuthorization: z.enum([

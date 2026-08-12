@@ -263,6 +263,9 @@ describe("module planning node", () => {
     expect(testBed.compileCalls).toBe(4);
     expect(testBed.model.reviseCalls).toHaveLength(3);
     expect(testBed.plans.size).toBe(0);
+    expect(result.moduleDeliveryOwnerMappings).toEqual([
+      { blueprintModuleId: "source-panel", moduleId: "panel" },
+    ]);
   });
 
   it("asks the user for a missing critical asset without hallucinating or repairing", async () => {
@@ -272,6 +275,9 @@ describe("module planning node", () => {
     expect(result.lastErrorCode).toMatch(/^MODULE_ASSET_REQUIRED:/);
     expect(testBed.model.reviseCalls).toHaveLength(0);
     expect(testBed.messages.at(-1)).toContain("资源");
+    expect(result.moduleDeliveryOwnerMappings).toEqual([
+      { blueprintModuleId: "source-panel", moduleId: "panel" },
+    ]);
   });
 
   it("returns an actionable capability block before calling the model when no stable module is available", async () => {

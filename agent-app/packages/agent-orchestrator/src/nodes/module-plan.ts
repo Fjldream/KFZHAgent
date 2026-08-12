@@ -2,6 +2,7 @@ import {
   AcceptedBlueprintArtifactSchema,
   AssetRecordSchema,
   ModulePlanSchema,
+  ModuleDeliveryOwnerMappingsSchema,
   canonicalModuleCompilationHash,
   internalChangePlanSchema,
   type AssetRecord,
@@ -193,11 +194,13 @@ export function createModulePlanNode(deps: SolutionGraphDeps) {
       }
 
       const reasons = rejectionReasons(coordinated.outcome.gaps);
+      const moduleDeliveryOwnerMappings = deliveryOwnerMappings(candidate);
       if (hasMissingUserAsset(coordinated.outcome.gaps)) {
         await appendQuestion(deps, state, `生成工程还缺少客户资源：${reasons.join("；")}。请上传或选择对应图片/图标后，我会从当前蓝图继续生成。`);
         return {
           acceptedBlueprintArtifact,
           moduleDeliveryReport: coordinated.outcome.deliveryReport,
+          moduleDeliveryOwnerMappings,
           moduleRepairAttempt: repairAttempt,
           stage: waitingStage(state),
           lastErrorCode: `MODULE_ASSET_REQUIRED:${reasons.join(";").slice(0, MAX_ERROR_DETAIL)}`,
@@ -209,6 +212,7 @@ export function createModulePlanNode(deps: SolutionGraphDeps) {
         return {
           acceptedBlueprintArtifact,
           moduleDeliveryReport: coordinated.outcome.deliveryReport,
+          moduleDeliveryOwnerMappings,
           moduleRepairAttempt: MAX_REPAIR_CALLS,
           stage: "idle",
           lastErrorCode: `MODULE_PLAN_REPAIR_EXHAUSTED:${reasons.join(";").slice(0, MAX_ERROR_DETAIL)}`,
@@ -230,6 +234,13 @@ export function createModulePlanNode(deps: SolutionGraphDeps) {
       }
     }
   };
+}
+
+function deliveryOwnerMappings(plan: ModulePlan): Array<{ blueprintModuleId: string; moduleId: string }> {
+  const mappings = plan.pages.flatMap((page) => page.modules.flatMap((module) =>
+    (module.sourceBlueprintModuleIds ?? []).map((blueprintModuleId) => ({ blueprintModuleId, moduleId: module.id })),
+  ));
+  return ModuleDeliveryOwnerMappingsSchema.parse(mappings);
 }
 
 async function persistSuccessfulCompilation(input: {
