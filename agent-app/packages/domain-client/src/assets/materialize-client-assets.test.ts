@@ -216,6 +216,43 @@ describe("materializeClientAssets", () => {
     await expect(readFile(path.join(swappedStaticRoot, TARGET))).rejects.toThrow();
   });
 
+  it("cleans independently staged bytes when static moves outside the candidate after staging", async () => {
+    const candidateParent = await mkdtemp(path.join(tmpdir(), "kf-independent-stage-owner-"));
+    const candidate = await createKingClientDomainPack({ nativeAccepted: true }).compile({
+      projectIr: ir,
+      buildSeed: "workspace-assets",
+      workRoot: candidateParent,
+    });
+    const versionRoot = path.join(candidate.rootDir, "1.0.0.1");
+    const staticRoot = path.join(versionRoot, "static");
+    const movedStaticRoot = path.join(candidateParent, `${path.basename(candidate.rootDir)}-moved-static`);
+    let observedStageAfterMove: string | undefined;
+    const call = materializeClientAssets as (input: Parameters<typeof materializeClientAssets>[0] & {
+      hooks: { afterStageBeforePublish: () => Promise<void> };
+    }) => Promise<void>;
+
+    await expect(call({
+      workspaceRoot: candidate.rootDir,
+      plan: plan(),
+      assets: [asset()],
+      hooks: { afterStageBeforePublish: async () => {
+        const parentStage = (await readdir(candidateParent)).find((entry) => entry.startsWith(".kf-agent-assets-stage-"));
+        const staticStage = (await readdir(staticRoot)).find((entry) => entry.startsWith(".agent-assets-stage-"));
+        await rename(staticRoot, movedStaticRoot);
+        await mkdir(staticRoot);
+        observedStageAfterMove = parentStage === undefined
+          ? staticStage === undefined ? undefined : path.join(movedStaticRoot, staticStage)
+          : path.join(candidateParent, parentStage);
+      } },
+    })).rejects.toThrow(/ancestor|changed|identity|race/i);
+    expect(observedStageAfterMove).toBeDefined();
+    await expect(lstat(observedStageAfterMove!)).rejects.toThrow();
+    expect((await readdir(candidateParent)).filter((entry) => entry.startsWith(".kf-agent-assets-stage-"))).toEqual([]);
+    expect((await readdir(movedStaticRoot)).filter((entry) => entry.includes("stage"))).toEqual([]);
+    await expect(readFile(path.join(staticRoot, TARGET))).rejects.toThrow();
+    await expect(readFile(path.join(movedStaticRoot, TARGET))).rejects.toThrow();
+  });
+
   it("rejects a page symlink swap after asset publication without overwriting the external file", async () => {
     const candidate = await workspace();
     const pageFile = path.join(candidate.rootDir, "1.0.0.1", "project", "page", "Home.json");

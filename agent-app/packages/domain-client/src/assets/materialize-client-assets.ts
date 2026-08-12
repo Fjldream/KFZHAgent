@@ -24,6 +24,7 @@ export async function materializeClientAssets(input: {
   /** Deterministic race injection used only by filesystem security tests. */
   hooks?: {
     beforePublish?: () => Promise<void>;
+    afterStageBeforePublish?: () => Promise<void>;
     afterPublishBeforeRewrite?: () => Promise<void>;
   };
 }): Promise<void> {
@@ -81,11 +82,13 @@ export async function materializeClientAssets(input: {
   const inspection = await inspectClientProject(input.workspaceRoot);
   const rewrites = bindings.map((binding) => resolveBoundImage(binding, parsed.data.workspaceId, inspection, byAssetId.get(binding.assetId)!));
   const beforePublish = input.hooks?.beforePublish;
+  const afterStageBeforePublish = input.hooks?.afterStageBeforePublish;
   const published = await publishAssets({
     workspaceRoot,
     versionRoot,
     assets: input.assets,
     ...(beforePublish === undefined ? {} : { beforePublish }),
+    ...(afterStageBeforePublish === undefined ? {} : { afterStageBeforePublish }),
   });
   const pages = new Map<string, PageRewriteFile>();
   try {
@@ -215,6 +218,7 @@ async function publishAssets(input: {
   versionRoot: string;
   assets: readonly DomainAssetInput[];
   beforePublish?: () => Promise<void>;
+  afterStageBeforePublish?: () => Promise<void>;
 }): Promise<string[]> {
   // Node does not expose openat(2)/renameat(2) with a retained directory fd.
   // The strongest portable boundary available here is therefore: canonical
@@ -224,6 +228,7 @@ async function publishAssets(input: {
   const directories: DirectorySnapshot[] = [];
   const published: string[] = [];
   let stagingRoot: string | undefined;
+  let persistentDirectoryCount = 0;
   try {
     directories.push(await openCanonicalDirectory(input.workspaceRoot, "workspace root"));
     directories.push(await openCanonicalDirectory(input.versionRoot, "workspace version root"));
@@ -232,7 +237,15 @@ async function publishAssets(input: {
     directories.push(await openCanonicalDirectory(staticRoot, "static asset root"));
     const assetRoot = path.join(staticRoot, "agent-assets");
     await mkdirExact(assetRoot);
-    directories.push(await openCanonicalDirectory(assetRoot, "agent asset root"));
+    const assetDirectory = await openCanonicalDirectory(assetRoot, "agent asset root");
+    directories.push(assetDirectory);
+    const stagingParent = path.dirname(input.workspaceRoot);
+    const stagingParentDirectory = await openCanonicalDirectory(stagingParent, "asset staging parent");
+    directories.push(stagingParentDirectory);
+    persistentDirectoryCount = directories.length;
+    if (stagingParentDirectory.dev !== assetDirectory.dev) {
+      throw new Error("asset staging and target must share a filesystem");
+    }
 
     // The deterministic race boundary must run before approved bytes exist on
     // disk. If any retained ancestor moved, fail without creating a staging
@@ -240,7 +253,10 @@ async function publishAssets(input: {
     await input.beforePublish?.();
     for (const directory of directories) await assertDirectoryUnchanged(directory);
 
-    stagingRoot = await mkdtemp(path.join(staticRoot, ".agent-assets-stage-"));
+    // Stage in an independently owned sibling of the disposable candidate.
+    // A static/candidate subtree rename cannot move this cleanup pathname, and
+    // the device check above preserves atomic hard-link publication semantics.
+    stagingRoot = await mkdtemp(path.join(stagingParent, ".kf-agent-assets-stage-"));
     directories.push(await openCanonicalDirectory(stagingRoot, "asset staging root"));
     for (const asset of input.assets) {
       const name = path.basename(asset.targetPath);
@@ -255,6 +271,7 @@ async function publishAssets(input: {
       await assertCanonicalPath(staged, `staged asset ${name}`);
     }
 
+    await input.afterStageBeforePublish?.();
     for (const directory of directories) await assertDirectoryUnchanged(directory);
     for (const asset of input.assets) {
       const name = path.basename(asset.targetPath);
@@ -269,7 +286,7 @@ async function publishAssets(input: {
       }
       await verifyPublishedFile(target, asset.bytes, asset.sha256);
     }
-    for (const directory of directories.slice(0, 4)) await assertDirectoryUnchanged(directory);
+    for (const directory of directories.slice(0, persistentDirectoryCount)) await assertDirectoryUnchanged(directory);
     return published;
   } catch (error) {
     await Promise.all(published.map((file) => unlink(file).catch(() => {})));
