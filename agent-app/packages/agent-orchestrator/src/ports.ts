@@ -78,6 +78,11 @@ export interface WorkspaceQueryPort {
     tenantId: string;
     workspaceId: string;
   }): Promise<string | undefined>;
+  /** Server-owned workspace origin used only for safe workflow routing. */
+  getWorkspaceMode?(input: {
+    tenantId: string;
+    workspaceId: string;
+  }): Promise<"new" | "upload" | undefined>;
   /** Bounded, model-safe summary of a revision (never the full JSON). */
   getRevisionSummary(input: {
     tenantId: string;

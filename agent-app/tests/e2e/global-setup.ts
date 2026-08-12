@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { E2E_DB_URL } from "./helpers/config";
+import { API_BASE, API_PORT, E2E_DB_URL, WEB_BASE, WEB_PORT } from "./helpers/config";
 
 /**
  * Playwright globalSetup：准备 kf_agent_e2e 数据库、启动 api + worker + web
@@ -19,7 +19,7 @@ const BASE_ENV: Record<string, string> = {
   ...process.env,
   DATABASE_URL: E2E_DB_URL,
   ARTIFACT_STORAGE_ROOT: ARTIFACT_ROOT,
-  CORS_ORIGINS: "http://localhost:5173",
+  CORS_ORIGINS: WEB_BASE,
   MODEL_PORT_MODE: "fake",
   // 本地 http 环境：Node 侧 APIRequestContext 不会把 Secure cookie 发到
   // http 目标；浏览器端仍受 HttpOnly + SameSite=strict 保护。
@@ -103,6 +103,7 @@ export default async function globalSetup(): Promise<{ pids: number[] }> {
         "tests/e2e/vite.e2e.config.ts",
         "apps/api/src/main.ts",
       ],
+      env: { PORT: API_PORT },
     }),
     spawnProc({
       label: "worker",
@@ -120,8 +121,8 @@ export default async function globalSetup(): Promise<{ pids: number[] }> {
     spawnProc({
       label: "web",
       command: "pnpm",
-      args: ["--filter", "web", "exec", "vite", "--host", "localhost", "--port", "5173", "--strictPort"],
-      env: { VITE_API_BASE: "http://localhost:3000" },
+      args: ["--filter", "web", "exec", "vite", "--host", "localhost", "--port", WEB_PORT, "--strictPort"],
+      env: { VITE_API_BASE: API_BASE },
     }),
   ];
 
@@ -129,8 +130,8 @@ export default async function globalSetup(): Promise<{ pids: number[] }> {
   await writeFile(PID_FILE, JSON.stringify({ pids }, null, 2), "utf8");
 
   try {
-    await waitForHttp("http://localhost:3000/api/me", 90_000);
-    await waitForHttp("http://localhost:5173", 90_000);
+    await waitForHttp(`${API_BASE}/api/me`, 90_000);
+    await waitForHttp(WEB_BASE, 90_000);
   } catch (error) {
     for (const pid of pids) {
       try {

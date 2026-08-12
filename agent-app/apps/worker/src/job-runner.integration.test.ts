@@ -6,12 +6,13 @@
 process.env.DATABASE_URL =
   process.env.TEST_DATABASE_URL ?? "postgresql://postgres@127.0.0.1:5432/kf_agent_test";
 
-import { mkdtemp, readdir, readFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { LocalArtifactStorage, type ArtifactStorage, type StoredArtifact } from "@kf/artifact-storage";
-import { workspaceAssetIdToModelId } from "@kf/contracts";
+import { ModulePlanSchema, workspaceAssetIdToModelId, type ModulePlan } from "@kf/contracts";
 import {
   BuildExecutor,
   BuildJobService,
@@ -20,16 +21,26 @@ import {
 } from "@kf/build-jobs";
 import {
   compileUiImplementation,
+  compileModulePlan,
+  createDefaultModuleRegistry,
   createKingClientDomainPack,
   deriveGuid,
   importNativeClientPackage,
+  inspectClientProject,
+  packageNativeClientProject,
+  applyClientPatch,
   planHash,
   resolveVersionDirName,
+  validateClientProject,
 } from "@kf/domain-client";
 import { DomainRegistry } from "@kf/domain-registry";
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { JobRunner } from "./job-runner.js";
+import {
+  acceptedArtifactForPlan,
+  verifiedCompilationFor,
+} from "../../../packages/domain-client/src/modules/testing/module-artifact-test-helpers.js";
 
 let prisma: PrismaClient;
 let jobs: BuildJobService;
@@ -75,6 +86,52 @@ beforeEach(async () => {
 
 function clientPack() {
   return createKingClientDomainPack({ nativeAccepted: true });
+}
+
+const GOLDEN_CAPABILITIES = [
+  "layout.2", "text", "button", "image", "tabs", "input", "tag", "easyui.1",
+  "prototype.TrendChart", "prototype.BarChart", "prototype.PieChart",
+] as const;
+
+async function readGoldenPlan(name: string): Promise<ModulePlan> {
+  const url = new URL(`../../../tests/fixtures/module-plans/${name}.json`, import.meta.url);
+  return ModulePlanSchema.parse(JSON.parse(await readFile(url, "utf8")) as unknown);
+}
+
+async function goldenBaseWorkspace(): Promise<string> {
+  const root = await mkdtemp(path.join(tmpdir(), "kf-module-golden-base-"));
+  await cp(new URL("../../../tests/fixtures/client-unknown-field/", import.meta.url), root, { recursive: true });
+  return root;
+}
+
+async function buildGoldenPackage(name: string) {
+  const plan = await readGoldenPlan(name);
+  const registry = createDefaultModuleRegistry();
+  const assetBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+  const sha256 = createHash("sha256").update(assetBytes).digest("hex");
+  const approvedAssetsById = Object.fromEntries(plan.assets.map((asset) => [asset.id, {
+    workspaceAssetId: "00000000-0000-4000-8000-000000000001",
+    targetPath: `static/agent-assets/${sha256}.png`, mediaType: "image/png" as const, sha256, sizeBytes: assetBytes.byteLength,
+  }]));
+  const assetsById = Object.fromEntries(plan.assets.map((asset) => [asset.id, { assetId: asset.id, status: "resolved" as const, resolvedName: asset.name }]));
+  const compiled = compileModulePlan({
+    plan, acceptedBlueprintArtifact: acceptedArtifactForPlan(plan, registry), registry, assetsById, approvedAssetsById,
+    validationContext: { availableKfCapabilities: GOLDEN_CAPABILITIES, approvedAuthorizationRefs: [] },
+  });
+  if (compiled.status !== "compiled") return { plan, compiled };
+  const implementation = compileUiImplementation(compiled.implementation, {
+    workspaceId: "00000000-0000-4000-8000-000000000013", pageGuidById: { Page1: "page-guid-1" },
+    existingControlGuidByComponentId: {}, existingControlCapabilityIdByComponentId: {},
+    moduleCompilationArtifact: verifiedCompilationFor(compiled),
+  });
+  const base = await goldenBaseWorkspace();
+  const domainAssets = plan.assets.map((asset) => ({
+    assetId: asset.id, targetPath: `static/agent-assets/${sha256}.png`, mediaType: "image/png", sha256, bytes: assetBytes,
+  }));
+  const candidate = await applyClientPatch(base, implementation.plan, { semanticOperations: implementation.semanticOperations, assets: domainAssets });
+  const validation = await validateClientProject(base, candidate, implementation.plan, { assetTargetPaths: domainAssets.map((asset) => asset.targetPath) });
+  const bytes = await packageNativeClientProject(candidate.rootDir);
+  return { plan, compiled, implementation, candidate, validation, bytes };
 }
 
 const INITIAL_IR = {
@@ -280,6 +337,39 @@ async function advanceWorkspacePastBase(seeded: Seeded): Promise<void> {
 }
 
 describe("job runner", () => {
+  it.each(["personal-portal", "admin-console"])("packages the %s golden into a native round-trip artifact", async (name) => {
+    const built = await buildGoldenPackage(name);
+    expect(built.compiled.status).toBe("compiled");
+    if (built.compiled.status !== "compiled" || !("bytes" in built)) return;
+    expect(built.validation).toBeDefined();
+    if (built.validation === undefined) return;
+    expect(built.validation.status, built.validation.warnings.join("\n")).toBe("pass");
+    expect(built.bytes.byteLength).toBeGreaterThan(0);
+    const evidenceRoot = process.env.KF_GOLDEN_OUTPUT_DIR;
+    if (evidenceRoot !== undefined) {
+      await mkdir(evidenceRoot, { recursive: true });
+      await writeFile(path.join(evidenceRoot, `${name}.gz`), built.bytes);
+    }
+    const unpacked = await importNativeClientPackage(built.bytes, await mkdtemp(path.join(tmpdir(), `kf-${name}-roundtrip-`)));
+    const inspection = await inspectClientProject(unpacked);
+    const controls = Object.values(inspection.index.controls);
+    for (const module of built.plan.pages.flatMap((page) => page.modules)) {
+      expect(controls.some((control) => control.id.startsWith(`${module.id}/`)), `missing ${module.id}`).toBe(true);
+    }
+    for (const asset of built.plan.assets) {
+      expect(built.compiled.assetBindings).toContainEqual(expect.objectContaining({ assetId: asset.id }));
+    }
+  });
+
+  it("refuses to package the dashboard chart golden until its exact native series mapping is verified", async () => {
+    const built = await buildGoldenPackage("industrial-dashboard");
+    expect(built.compiled.status).toBe("blocked");
+    expect(built.compiled.gaps).toContainEqual(expect.objectContaining({
+      moduleId: "dashboard-chart", severity: "blocking", reason: "kf36-static-chart-series-mapping-unverified",
+    }));
+    expect("bytes" in built).toBe(false);
+  });
+
   it("builds a complete multi-module implementation into the native client package", async () => {
     const seeded = await seedNewWorkspace();
     const moduleIds = ["brand", "overview", "skills", "experience", "projects", "about", "contact"];

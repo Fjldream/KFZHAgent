@@ -136,16 +136,19 @@ export function routeAfterClassify(state: AgentGraphStateValue, deps?: SolutionG
 
 function useModuleWorkflow(state: AgentGraphStateValue, deps: SolutionGraphDeps | undefined): boolean {
   if (state.designPlan?.schema !== "kf-design-plan/v2") return false;
-  // Only an acceptance-ready v2 blueprint has server-confirmable module
-  // facts. Older v2 checkpoints created before expectedKind was introduced
-  // remain compatibility inputs until the user reconfirms an adopted mapping.
-  if (!state.designPlan.modules.every((module) => module.expectedKind !== undefined)) return false;
+  // Uploaded native projects remain on the lossless patch workflow until an
+  // explicit future adoption step creates a server-owned ModulePlan.
+  if (state.workspaceMode === "upload" && state.modulePlan === undefined) return false;
+  if (state.moduleWorkflowRequested !== true
+    && !state.designPlan.modules.every((module) => module.expectedKind !== undefined)) return false;
   // A checkpoint with an old UI implementation but no ModulePlan belongs to
   // the compatibility path (notably imported, not-yet-adopted controls).
   if (state.modulePlan === undefined && state.uiImplementation !== undefined) return false;
   // Old deployments/test harnesses without the module execution ports stay on
   // compatibility code. Production composition wires this complete set and
-  // therefore every new v2 confirmation enters module planning.
+  // therefore every new v2 confirmation enters module planning. An unmapped
+  // v2 blueprint must fail closed inside module planning; it must never fall
+  // back to the legacy model-authored per-control workflow.
   return deps?.modulePlanCompiler !== undefined
     && deps.assetCatalog !== undefined
     && deps.moduleArtifactAuthority !== undefined

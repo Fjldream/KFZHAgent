@@ -35,6 +35,17 @@ export function createModulePlanNode(deps: SolutionGraphDeps) {
     if (state.designPlan?.schema !== "kf-design-plan/v2" || state.designPlanHash === undefined) {
       return fail("MODULE_BLUEPRINT_NOT_CONFIRMED", state);
     }
+    if (deps.modulePlanCompiler === undefined) return fail("MODULE_COMPILER_NOT_CONFIGURED", state);
+    let planningCatalog;
+    try {
+      planningCatalog = validatePlanningCatalog(await deps.modulePlanCompiler.listPlanningCatalog());
+    } catch (error) {
+      return fail(`MODULE_CONTEXT_LOAD_FAILED:${errorDetail(error)}`, state);
+    }
+    if (planningCatalog.length === 0) {
+      await appendQuestion(deps, state, "当前还没有通过真实 KF 运行态验收的稳定模块，暂时不能自动生成工程。请先完成模块验收并将对应版本提升为稳定状态。");
+      return { stage: waitingStage(state), lastErrorCode: "MODULE_STABLE_CATALOG_EMPTY", moduleRepairAttempt: 0, buildAuthorization: undefined, resumeAction: undefined };
+    }
     const unmappedBlueprintModules = state.designPlan.modules.filter((module) => module.expectedKind === undefined).map((module) => module.id).sort(compareCodePoints);
     if (unmappedBlueprintModules.length > 0) {
       await appendQuestion(deps, state, `当前效果蓝图还没有绑定可实施的 KF 模块：${unmappedBlueprintModules.join("、")}。请先补充模块映射后再确认生成，不会降级为旧的逐控件计划。`);
@@ -43,7 +54,6 @@ export function createModulePlanNode(deps: SolutionGraphDeps) {
     if (state.currentRevisionId === undefined) return fail("MODULE_BASE_REVISION_REQUIRED", state);
     if (deps.acceptedBlueprintConfirmation === undefined) return fail("ACCEPTED_BLUEPRINT_CONFIRMATION_NOT_CONFIGURED", state);
     if (deps.moduleArtifactAuthority === undefined) return fail("MODULE_ARTIFACT_AUTHORITY_NOT_CONFIGURED", state);
-    if (deps.modulePlanCompiler === undefined) return fail("MODULE_COMPILER_NOT_CONFIGURED", state);
     if (deps.assetCatalog === undefined) return fail("ASSET_CATALOG_NOT_CONFIGURED", state);
     if (deps.uiImplementationCompiler === undefined) return fail("IMPLEMENTATION_COMPILER_NOT_CONFIGURED", state);
     if (deps.serverPlanSigner === undefined) return fail("SERVER_PLAN_SIGNER_NOT_CONFIGURED", state);
@@ -74,21 +84,11 @@ export function createModulePlanNode(deps: SolutionGraphDeps) {
     }
     const acceptedFacts = readVerifiedAcceptedBlueprintArtifact(accepted);
 
-    let planningCatalog;
     let assets: readonly AssetRecord[];
     try {
-      const [rawCatalog, rawAssets] = await Promise.all([
-        deps.modulePlanCompiler.listPlanningCatalog(),
-        deps.assetCatalog.list({ tenantId: state.tenantId, workspaceId: state.workspaceId }),
-      ]);
-      planningCatalog = validatePlanningCatalog(rawCatalog);
-      assets = AssetRecordSchema.array().max(100).parse(rawAssets);
+      assets = AssetRecordSchema.array().max(100).parse(await deps.assetCatalog.list({ tenantId: state.tenantId, workspaceId: state.workspaceId }));
     } catch (error) {
       return fail(`MODULE_CONTEXT_LOAD_FAILED:${errorDetail(error)}`, state);
-    }
-    if (planningCatalog.length === 0) {
-      await appendQuestion(deps, state, "当前还没有通过真实 KF 运行态验收的稳定模块，暂时不能自动生成工程。请先完成模块验收并将对应版本提升为稳定状态。");
-      return { stage: waitingStage(state), lastErrorCode: "MODULE_STABLE_CATALOG_EMPTY", moduleRepairAttempt: 0, buildAuthorization: undefined, resumeAction: undefined };
     }
     const stableKinds = new Set(planningCatalog.map((entry) => entry.kind));
     const unavailableKinds = [...new Set(acceptedFacts.modules.map((entry) => entry.expectedKind).filter((kind) => !stableKinds.has(kind)))].sort(compareCodePoints);

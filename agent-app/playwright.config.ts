@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { WEB_BASE } from "./tests/e2e/helpers/config";
 
 /**
  * E2E 配置（Task 12）。本地运行：
@@ -19,7 +20,7 @@ export default defineConfig({
   fullyParallel: false,
   reporter: [["list"]],
   use: {
-    baseURL: "http://localhost:5173",
+    baseURL: WEB_BASE,
     channel: "chrome",
     headless: true,
     trace: "retain-on-failure",

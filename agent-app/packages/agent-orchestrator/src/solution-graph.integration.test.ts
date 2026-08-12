@@ -9,16 +9,28 @@ import { Command } from "@langchain/langgraph";
 import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
 import { BuildJobService } from "@kf/build-jobs";
 import {
+  ModulePlanSchema,
   solutionId,
   type ChangePlan,
   type CustomerEffectBlueprint,
   type DesignPlan,
+  type ModulePlan,
   type SolutionIR,
+  type UIComponentSpec,
   type UIImplementationSpec,
 } from "@kf/contracts";
 import { PrismaClient, Prisma } from "@prisma/client";
+import { readFile } from "node:fs/promises";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import pg from "pg";
+import {
+  compileModulePlan,
+  createDefaultModuleRegistry,
+} from "@kf/domain-client";
+import {
+  acceptedArtifactForPlan,
+  verifiedCompilationFor,
+} from "../../domain-client/src/modules/testing/module-artifact-test-helpers.js";
 import type {
   BuildJobPort,
   ChangePlanRepository,
@@ -63,6 +75,119 @@ beforeAll(async () => {
       process.env.TEST_DATABASE_URL ?? "postgresql://postgres@127.0.0.1:5432/kf_agent_test",
   });
   await new PostgresSaver(pool).setup();
+});
+
+const GOLDEN_CAPABILITIES = [
+  "layout.2", "text", "button", "image", "tabs", "input", "tag", "easyui.1",
+  "prototype.TrendChart", "prototype.BarChart", "prototype.PieChart",
+] as const;
+
+async function readGoldenPlan(name: string): Promise<ModulePlan> {
+  const url = new URL(`../../../tests/fixtures/module-plans/${name}.json`, import.meta.url);
+  return ModulePlanSchema.parse(JSON.parse(await readFile(url, "utf8")) as unknown);
+}
+
+function resolvedAssets(plan: ModulePlan) {
+  return Object.fromEntries(plan.assets.map((asset) => [asset.id, {
+    assetId: asset.id,
+    status: "resolved" as const,
+    resolvedName: asset.name,
+  }]));
+}
+
+function assertGoldenGeometry(pages: readonly { width: number; height: number; components: readonly UIComponentSpec[] }[]) {
+  for (const page of pages) {
+    for (const component of page.components) {
+      const box = component.geometry;
+      expect(box.x, component.id).toBeGreaterThanOrEqual(0);
+      expect(box.y, component.id).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width, component.id).toBeLessThanOrEqual(page.width);
+      expect(box.y + box.height, component.id).toBeLessThanOrEqual(page.height);
+    }
+  }
+}
+
+describe("module generation V1 golden fixtures", () => {
+  it.each([
+    ["personal-portal", "ready_with_warnings"],
+    ["admin-console", "ready_with_warnings"],
+  ] as const)("compiles %s with exact blueprint coverage, native structures, and beta maturity evidence", async (name, expectedDelivery) => {
+    const plan = await readGoldenPlan(name);
+    const registry = createDefaultModuleRegistry();
+    const result = compileModulePlan({
+      plan,
+      acceptedBlueprintArtifact: acceptedArtifactForPlan(plan, registry),
+      registry,
+      assetsById: resolvedAssets(plan),
+      validationContext: { availableKfCapabilities: GOLDEN_CAPABILITIES, approvedAuthorizationRefs: [] },
+    });
+    expect(result.status).toBe("compiled");
+    if (result.status !== "compiled") return;
+    expect(result.deliveryReport?.status).toBe(expectedDelivery);
+    expect(result.deliveryReport?.gaps.filter((gap) => /registered as beta/.test(gap.reason)).map((gap) => gap.moduleId).sort())
+      .toEqual(plan.pages.flatMap((page) => page.modules.map((module) => module.id)).sort());
+    expect(result.metadata.blueprintMappings).toHaveLength(plan.pages.flatMap((page) => page.modules).length);
+    expect(new Set(result.metadata.blueprintMappings.map((mapping) => mapping.blueprintModuleId)).size)
+      .toBe(plan.pages.flatMap((page) => page.modules).length);
+    assertGoldenGeometry(result.implementation.pages);
+
+    const complexKinds = new Set(["metric.kpi-grid", "content.card-grid", "interaction.tabs-filter", "data.table", "feedback.alert-list"]);
+    for (const module of plan.pages.flatMap((page) => page.modules).filter((module) => complexKinds.has(module.kind))) {
+      const controls = result.implementation.pages.flatMap((page) => page.components).filter((component) => component.sourceModuleId === module.id);
+      expect(controls.length, `${module.id} collapsed`).toBeGreaterThan(1);
+      expect(controls.every((control) => control.capabilityId === "text"), `${module.id} collapsed to text`).toBe(false);
+    }
+    for (const asset of plan.assets) expect(result.assetBindings).toContainEqual(expect.objectContaining({ assetId: asset.id }));
+  });
+
+  it("keeps the industrial chart golden blocked on its exact unverified KF 3.6 static-series gap", async () => {
+    const plan = await readGoldenPlan("industrial-dashboard");
+    const registry = createDefaultModuleRegistry();
+    const result = compileModulePlan({
+      plan,
+      acceptedBlueprintArtifact: acceptedArtifactForPlan(plan, registry),
+      registry,
+      assetsById: {},
+      validationContext: { availableKfCapabilities: GOLDEN_CAPABILITIES, approvedAuthorizationRefs: [] },
+    });
+    expect(result.status).toBe("blocked");
+    expect(result.deliveryReport?.status).toBe("blocked");
+    expect(result.gaps).toContainEqual(expect.objectContaining({ moduleId: "dashboard-chart", severity: "blocking", reason: "kf36-static-chart-series-mapping-unverified" }));
+    expect(result.implementation).toBeDefined();
+    if (result.implementation !== undefined) assertGoldenGeometry(result.implementation.pages);
+    const statusControls = result.implementation?.pages.flatMap((page) => page.components).filter((component) => component.sourceModuleId === "dashboard-status") ?? [];
+    expect(statusControls.length).toBeGreaterThan(1);
+    expect(statusControls.some((component) => component.capabilityId === "tag")).toBe(true);
+  });
+
+  it("rebuilds only one portal module without unexpected implementation drift", async () => {
+    const plan = await readGoldenPlan("personal-portal");
+    const registry = createDefaultModuleRegistry();
+    const context = { availableKfCapabilities: GOLDEN_CAPABILITIES, approvedAuthorizationRefs: [] };
+    const before = compileModulePlan({ plan, acceptedBlueprintArtifact: acceptedArtifactForPlan(plan, registry), registry, assetsById: resolvedAssets(plan), validationContext: context });
+    expect(before.status).toBe("compiled");
+    if (before.status !== "compiled") return;
+    const revisedContent = JSON.stringify({ items: [{ label: "Experience", value: "6 years", trend: "Growing" }, { label: "Projects", value: "40+" }, { label: "Clients", value: "12" }] });
+    const revised: ModulePlan = {
+      ...plan,
+      pages: plan.pages.map((page) => ({ ...page, modules: page.modules.map((module) => module.id === "portal-kpis" ? { ...module, content: revisedContent } : module) })),
+      operations: [{ op: "update", pageId: "Page1", moduleId: "portal-kpis", changes: { content: revisedContent } }],
+    };
+    const after = compileModulePlan({
+      plan: revised,
+      acceptedBlueprintArtifact: acceptedArtifactForPlan(revised, registry),
+      previousPlan: plan,
+      previousImplementation: before.implementation,
+      previousCompilationArtifact: verifiedCompilationFor(before),
+      registry,
+      assetsById: resolvedAssets(revised),
+      validationContext: context,
+    });
+    expect(after.status).toBe("compiled");
+    if (after.status !== "compiled") return;
+    expect(after.diff?.changedModules).toEqual(["portal-kpis"]);
+    expect(after.diff?.unexpectedChanges).toEqual([]);
+  });
 });
 
 afterAll(async () => {

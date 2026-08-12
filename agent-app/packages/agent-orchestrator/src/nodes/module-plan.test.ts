@@ -208,6 +208,7 @@ describe("module planning node", () => {
     const implementation = compiledOutcome(modulePlan());
     if (implementation.status !== "compiled") throw new Error("fixture");
     expect(routeAfterClassify(state({ uiImplementation: implementation.implementation, modulePlan: undefined }), deps)).toBe("implementation-plan");
+    expect(routeAfterClassify(state({ workspaceMode: "upload", modulePlan: undefined }), deps)).toBe("implementation-plan");
   });
 
   it("blocks an unmapped v2 blueprint instead of falling back to technical approval", async () => {
@@ -217,9 +218,24 @@ describe("module planning node", () => {
       Reflect.deleteProperty(copy, "expectedKind");
       return copy;
     }) };
+    expect(routeAfterClassify(state({ designPlan: unmapped, moduleWorkflowRequested: true }), testBed.deps)).toBe("module-plan");
     const result = await createModulePlanNode(testBed.deps)(state({ designPlan: unmapped }));
     expect(result.lastErrorCode).toBe("MODULE_BLUEPRINT_MAPPING_REQUIRED:source-panel");
     expect(result.stage).toBe("design-review");
+    expect(testBed.model.createCalls).toHaveLength(0);
+  });
+
+  it("reports the empty stable catalog before asking an unmapped real-model blueprint for a mapping", async () => {
+    const testBed = bed([compiledOutcome(modulePlan())]);
+    testBed.deps.modulePlanCompiler = { ...testBed.deps.modulePlanCompiler!, listPlanningCatalog: async () => [] };
+    const unmapped = { ...blueprint, modules: blueprint.modules.map((module) => {
+      const copy = { ...module };
+      Reflect.deleteProperty(copy, "expectedKind");
+      return copy;
+    }) };
+    expect(routeAfterClassify(state({ designPlan: unmapped, moduleWorkflowRequested: true }), testBed.deps)).toBe("module-plan");
+    const result = await createModulePlanNode(testBed.deps)(state({ designPlan: unmapped }));
+    expect(result).toMatchObject({ stage: "design-review", lastErrorCode: "MODULE_STABLE_CATALOG_EMPTY" });
     expect(testBed.model.createCalls).toHaveLength(0);
   });
 

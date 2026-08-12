@@ -1,0 +1,48 @@
+{
+  "schema": "kf-module-plan/v1",
+  "projectKey": "kingclient.dashboard",
+  "theme": {
+    "background": "#08111f",
+    "surface": "#111827",
+    "primary": "#2563eb",
+    "accent": "#22d3ee",
+    "textPrimary": "#f8fafc",
+    "textSecondary": "#94a3b8",
+    "fontFamily": "Arial",
+    "spacingUnit": 8,
+    "radiusScale": { "small": 4, "medium": 8, "large": 16 }
+  },
+  "assets": [],
+  "pages": [
+    {
+      "id": "Page1",
+      "title": "Industrial dashboard",
+      "mode": "dashboard-grid",
+      "modules": [
+        {
+          "id": "dashboard-chart",
+          "kind": "data.chart-panel",
+          "templateVersion": "1.0.0",
+          "variant": "line",
+          "title": "Production trend",
+          "content": "{\"chart\":{\"kind\":\"line\",\"title\":\"Production trend\",\"labels\":[\"08:00\",\"09:00\",\"10:00\"],\"series\":[{\"name\":\"Output\",\"values\":[120,132,128]}]}}",
+          "sourceBlueprintModuleIds": ["dashboard-chart"],
+          "placement": { "region": "main", "order": 0, "columnSpan": 8, "preferredHeight": "medium", "alignment": "stretch", "emphasis": "primary" },
+          "interactions": []
+        },
+        {
+          "id": "dashboard-status",
+          "kind": "data.status-grid",
+          "templateVersion": "1.0.0",
+          "variant": "default",
+          "title": "Device status",
+          "content": "{\"items\":[{\"name\":\"Pump A\",\"severity\":\"online\",\"detail\":\"Running\"},{\"name\":\"Pump B\",\"severity\":\"warning\",\"detail\":\"High temperature\"},{\"name\":\"Valve C\",\"severity\":\"offline\",\"detail\":\"Maintenance\"}]}",
+          "sourceBlueprintModuleIds": ["dashboard-status"],
+          "placement": { "region": "main", "order": 1, "columnSpan": 4, "preferredHeight": "medium", "alignment": "stretch", "emphasis": "secondary" },
+          "interactions": []
+        }
+      ]
+    }
+  ],
+  "operations": []
+}

@@ -69,7 +69,8 @@ async function jsonFetch(path: string, init: RequestInit = {}): Promise<Response
 
 async function jsonResponse<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await jsonFetch(path, init);
-  return (await res.json()) as T;
+  const text = await res.text();
+  return (text.length === 0 ? null : JSON.parse(text)) as T;
 }
 
 export const api = {

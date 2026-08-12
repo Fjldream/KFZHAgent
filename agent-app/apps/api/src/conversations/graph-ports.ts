@@ -90,6 +90,13 @@ export function createGraphPorts(
       });
       return workspace?.currentRevisionId ?? undefined;
     },
+    async getWorkspaceMode({ tenantId, workspaceId }) {
+      const workspace = await prisma.solutionWorkspace.findFirst({
+        where: { id: workspaceId, tenantId },
+        select: { mode: true },
+      });
+      return workspace?.mode === "upload" ? "upload" : workspace?.mode === "new" ? "new" : undefined;
+    },
     async getRevisionSummary({ tenantId, revisionId }) {
       const revision = await prisma.solutionRevision.findFirst({
         where: { id: revisionId, tenantId },

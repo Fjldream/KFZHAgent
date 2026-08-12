@@ -1,0 +1,101 @@
+{
+  "schema": "kf-module-plan/v1",
+  "projectKey": "kingclient.portal",
+  "theme": {
+    "background": "#0f172a",
+    "surface": "#111827",
+    "primary": "#2563eb",
+    "accent": "#38bdf8",
+    "textPrimary": "#f8fafc",
+    "textSecondary": "#cbd5e1",
+    "fontFamily": "Arial",
+    "spacingUnit": 8,
+    "radiusScale": { "small": 4, "medium": 8, "large": 16 }
+  },
+  "assets": [
+    {
+      "id": "asset-00000000000040008000000000000001",
+      "kind": "image",
+      "name": "Profile portrait",
+      "mimeType": "image/png",
+      "description": "Approved profile portrait"
+    }
+  ],
+  "pages": [
+    {
+      "id": "Page1",
+      "title": "Personal portal",
+      "mode": "vertical-flow",
+      "modules": [
+        {
+          "id": "portal-navigation",
+          "kind": "navigation.top",
+          "templateVersion": "1.0.0",
+          "variant": "default",
+          "title": "Navigation",
+          "content": "{\"logo\":\"Lin Xiaoming\",\"items\":[\"Home\"]}",
+          "sourceBlueprintModuleIds": ["portal-navigation"],
+          "placement": { "region": "header", "order": 0, "columnSpan": 12, "preferredHeight": "compact", "alignment": "stretch", "emphasis": "primary" },
+          "interactions": [{ "type": "navigate", "pageId": "Page1" }]
+        },
+        {
+          "id": "portal-hero",
+          "kind": "content.hero",
+          "templateVersion": "1.0.0",
+          "variant": "portrait-right",
+          "title": "Profile",
+          "content": "{\"title\":\"Lin Xiaoming\",\"subtitle\":\"Full-stack designer and developer\",\"description\":\"Building reliable products with KingFusion\",\"primaryAction\":\"View work\"}",
+          "sourceBlueprintModuleIds": ["portal-hero"],
+          "placement": { "region": "main", "order": 1, "columnSpan": 12, "preferredHeight": "large", "alignment": "stretch", "emphasis": "primary" },
+          "interactions": [{ "type": "navigate", "pageId": "Page1" }],
+          "assetId": "asset-00000000000040008000000000000001"
+        },
+        {
+          "id": "portal-kpis",
+          "kind": "metric.kpi-grid",
+          "templateVersion": "1.0.0",
+          "variant": "default",
+          "title": "Highlights",
+          "content": "{\"items\":[{\"label\":\"Experience\",\"value\":\"5 years\",\"trend\":\"Growing\"},{\"label\":\"Projects\",\"value\":\"40+\"},{\"label\":\"Clients\",\"value\":\"12\"}]}",
+          "sourceBlueprintModuleIds": ["portal-kpis"],
+          "placement": { "region": "main", "order": 2, "columnSpan": 12, "preferredHeight": "medium", "alignment": "stretch", "emphasis": "secondary" },
+          "interactions": []
+        },
+        {
+          "id": "portal-projects",
+          "kind": "content.card-grid",
+          "templateVersion": "1.0.0",
+          "variant": "portfolio",
+          "title": "Selected work",
+          "content": "{\"items\":[{\"title\":\"Operations portal\",\"summary\":\"Unified production workflows\",\"tag\":\"Web\",\"action\":\"Open\"},{\"title\":\"Mobile inspection\",\"summary\":\"Field inspection experience\",\"tag\":\"Mobile\"}]}",
+          "sourceBlueprintModuleIds": ["portal-projects"],
+          "placement": { "region": "main", "order": 3, "columnSpan": 12, "preferredHeight": "full", "alignment": "stretch", "emphasis": "primary" },
+          "interactions": [{ "type": "navigate", "pageId": "Page1" }]
+        },
+        {
+          "id": "portal-tabs",
+          "kind": "interaction.tabs-filter",
+          "templateVersion": "1.0.0",
+          "variant": "default",
+          "title": "Project filter",
+          "content": "{\"tabs\":[\"All\",\"Web\",\"Mobile\"],\"active\":\"All\"}",
+          "sourceBlueprintModuleIds": ["portal-tabs"],
+          "placement": { "region": "main", "order": 4, "columnSpan": 12, "preferredHeight": "compact", "alignment": "stretch", "emphasis": "subtle" },
+          "interactions": []
+        },
+        {
+          "id": "portal-contact",
+          "kind": "form.record-editor",
+          "templateVersion": "1.0.0",
+          "variant": "contact",
+          "title": "Contact me",
+          "content": "{\"fields\":[{\"id\":\"name\",\"label\":\"Name\",\"placeholder\":\"Your name\"},{\"id\":\"message\",\"label\":\"Message\",\"placeholder\":\"How can we work together?\"}],\"submitLabel\":\"Send\"}",
+          "sourceBlueprintModuleIds": ["portal-contact"],
+          "placement": { "region": "main", "order": 5, "columnSpan": 12, "preferredHeight": "medium", "alignment": "stretch", "emphasis": "secondary" },
+          "interactions": []
+        }
+      ]
+    }
+  ],
+  "operations": []
+}

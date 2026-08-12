@@ -26,6 +26,9 @@ import { assertDescriptorSafeJson, deriveExactModulePlanOperations, prepareModul
 export class DeterministicFakeModelPort implements ModelPort {
   classifyIntent(input: ModelPortContext): Promise<ClassifyIntentResult> {
     const text = input.requirementText ?? "";
+    if (/确认.*(?:效果)?蓝图|确认效果/.test(text)) {
+      return Promise.resolve({ intent: "CONFIRM_DESIGN", requestedDomains: ["kingclient"] });
+    }
     if (/新建|创建|生成|设计/.test(text)) {
       return Promise.resolve({ intent: "NEW_REQUIREMENT", requestedDomains: ["kingclient"] });
     }
@@ -39,8 +42,8 @@ export class DeterministicFakeModelPort implements ModelPort {
     });
   }
 
-  createDesignPlan(_input: ModelPortContext): Promise<DesignPlan> {
-    void _input;
+  createDesignPlan(input: ModelPortContext): Promise<DesignPlan> {
+    const moduleFlow = /模块化|模块生成/.test(input.requirementText ?? "");
     return Promise.resolve({
       schema: "kf-design-plan/v2",
       displayName: "确定性客户效果方案",
@@ -57,7 +60,12 @@ export class DeterministicFakeModelPort implements ModelPort {
         purpose: "展示工程主要信息",
         content: ["主标题", "业务说明", "关键指标"],
         sampleData: [{ label: "主标题", value: "KingFusion 智能方案" }],
-        interactions: ["点击按钮查看详情"],
+        interactions: moduleFlow ? [] : ["点击按钮查看详情"],
+        ...(moduleFlow ? {
+          expectedKind: "content.hero" as const,
+          expectedCategory: "content",
+          interactionRequirements: [],
+        } : {}),
         presentation: "重点信息卡片",
       }],
       visualDirection: {

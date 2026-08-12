@@ -1,0 +1,81 @@
+{
+  "schema": "kf-module-plan/v1",
+  "projectKey": "kingclient.admin",
+  "theme": {
+    "background": "#f8fafc",
+    "surface": "#ffffff",
+    "primary": "#2563eb",
+    "accent": "#f59e0b",
+    "textPrimary": "#0f172a",
+    "textSecondary": "#64748b",
+    "fontFamily": "Arial",
+    "spacingUnit": 8,
+    "radiusScale": { "small": 4, "medium": 8, "large": 16 }
+  },
+  "assets": [],
+  "pages": [
+    {
+      "id": "Page1",
+      "title": "Device administration",
+      "mode": "admin-shell",
+      "modules": [
+        {
+          "id": "admin-sidebar",
+          "kind": "navigation.sidebar",
+          "templateVersion": "1.0.0",
+          "variant": "default",
+          "title": "Navigation",
+          "content": "{\"groups\":[{\"label\":\"Operations\",\"items\":[\"Devices\"]}]}",
+          "sourceBlueprintModuleIds": ["admin-sidebar"],
+          "placement": { "region": "sidebar", "order": 0, "columnSpan": 12, "preferredHeight": "large", "alignment": "stretch", "emphasis": "primary" },
+          "interactions": [{ "type": "navigate", "pageId": "Page1" }]
+        },
+        {
+          "id": "admin-toolbar",
+          "kind": "action.toolbar",
+          "templateVersion": "1.0.0",
+          "variant": "default",
+          "title": "Actions",
+          "content": "{\"actions\":[{\"label\":\"Add device\"}]}",
+          "sourceBlueprintModuleIds": ["admin-toolbar"],
+          "placement": { "region": "toolbar", "order": 0, "columnSpan": 12, "preferredHeight": "compact", "alignment": "stretch", "emphasis": "primary" },
+          "interactions": [{ "type": "navigate", "pageId": "Page1" }]
+        },
+        {
+          "id": "admin-table",
+          "kind": "data.table",
+          "templateVersion": "1.0.0",
+          "variant": "default",
+          "title": "Devices",
+          "content": "{\"table\":{\"columns\":[{\"key\":\"name\",\"label\":\"Device\"},{\"key\":\"temperature\",\"label\":\"Temperature\",\"align\":\"right\"}],\"rows\":[{\"name\":\"Pump A\",\"temperature\":42},{\"name\":\"Pump B\",\"temperature\":51}],\"pageSize\":20}}",
+          "sourceBlueprintModuleIds": ["admin-table"],
+          "placement": { "region": "main", "order": 0, "columnSpan": 8, "preferredHeight": "medium", "alignment": "stretch", "emphasis": "primary" },
+          "interactions": []
+        },
+        {
+          "id": "admin-alerts",
+          "kind": "feedback.alert-list",
+          "templateVersion": "1.0.0",
+          "variant": "compact",
+          "title": "Alerts",
+          "content": "{\"alerts\":[{\"title\":\"High temperature\",\"message\":\"Pump B exceeded 50 C\",\"severity\":\"warning\"},{\"title\":\"Inspection due\",\"message\":\"Valve C requires inspection\",\"severity\":\"info\"}]}",
+          "sourceBlueprintModuleIds": ["admin-alerts"],
+          "placement": { "region": "main", "order": 1, "columnSpan": 4, "preferredHeight": "small", "alignment": "stretch", "emphasis": "secondary" },
+          "interactions": []
+        },
+        {
+          "id": "admin-status",
+          "kind": "data.status-grid",
+          "templateVersion": "1.0.0",
+          "variant": "compact",
+          "title": "Device status",
+          "content": "{\"items\":[{\"name\":\"Pump A\",\"severity\":\"online\",\"detail\":\"42 C\"},{\"name\":\"Pump B\",\"severity\":\"warning\",\"detail\":\"51 C\"}]}",
+          "sourceBlueprintModuleIds": ["admin-status"],
+          "placement": { "region": "main", "order": 2, "columnSpan": 12, "preferredHeight": "small", "alignment": "stretch", "emphasis": "secondary" },
+          "interactions": []
+        }
+      ]
+    }
+  ],
+  "operations": []
+}
