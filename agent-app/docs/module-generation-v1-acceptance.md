@@ -21,8 +21,8 @@ Generated packages are evidence artifacts outside the repository:
 
 | Golden | Path | SHA-256 | Result |
 | --- | --- | --- | --- |
-| Personal portal | `/tmp/kf-module-generation-v1-acceptance/personal-portal.gz` | `7f166d6046dc025e7835b0c320e545178dbac3a1fdd6daf88303d6d45a39d125` | Agent validation/round-trip pass; native KF pending |
-| Admin console | `/tmp/kf-module-generation-v1-acceptance/admin-console.gz` | `384af4f6c2a899c252e6c1230461d2d4272d944be2012ca52a3e0ef982f6e142` | Agent validation/round-trip pass; native KF pending |
+| Personal portal | `/tmp/kf-module-generation-v1-acceptance/personal-portal.gz` | `7f166d6046dc025e7835b0c320e545178dbac3a1fdd6daf88303d6d45a39d125` | Agent validation/round-trip and native development-system import/readback/publish pass; runtime start blocked |
+| Admin console | `/tmp/kf-module-generation-v1-acceptance/admin-console.gz` | `384af4f6c2a899c252e6c1230461d2d4272d944be2012ca52a3e0ef982f6e142` | Agent validation/round-trip and native development-system import/readback/publish pass; runtime start blocked |
 | Industrial dashboard | not emitted | n/a | blocked on exact chart-series mapping gap |
 
 ## Real DeepSeek smoke
@@ -31,12 +31,20 @@ API, worker, and Web were started on isolated local ports with a real DeepSeek k
 
 ## Native KF acceptance
 
-Chrome contained existing KF pages, but the current authenticated state could not be verified: claiming/opening the server tab timed out three times before DOM or screenshot evidence was available. No safe environment/ignored-secret KF credential source existed, and a historical plaintext credential found in repository documentation was not used. Consequently:
+After the initial blocked run, the operator explicitly supplied a KF account for this acceptance. The credential value was used only for the live login and was not written to the repository, evidence files, or this report. The acceptance used the same APIs as the KF development and operations frontends and produced the following verified results on `192.168.3.32`:
 
-- no package was uploaded through the native KF development UI;
-- no runtime navigation, tabs, form, table, chart, or status interaction was claimed;
-- no KF screenshot exists for this Task;
-- no module definition was promoted.
+- both generated packages were imported into the native development system;
+- their resulting project IDs were `82f5a270-961d-11f1-8d55-dd6d09cce4d4` (personal portal) and `8c469550-961d-11f1-8d55-dd6d09cce4d4` (admin console);
+- Page1 was read back as native KF JSON at 1380×720 and 1280×720 respectively;
+- the portal readback contained the approved packaged image at `static/agent-assets/431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460.png`, navigation, hero, KPI, cards, tabs, form inputs, and submit action;
+- the admin readback contained native Datagrid table data, alerts/status, sidebar, and toolbar controls;
+- both projects were published successfully and appeared in the operations center's published-project catalog;
+- isolated APP records on ports 13435 and 13436 were created and deployed without touching the existing 3434/3435 services;
+- start commands were accepted, but neither port opened and both APPs remained stopped;
+- the operations node reported `nodeAuthStatus=false`, and its authorization endpoint returned “该节点未开通节点授权”; the pre-existing runtime also reported that demo mode had expired;
+- the two isolated APP records were then deleted, and ports 13435/13436 were confirmed closed. Existing applications were not stopped, redeployed, or modified.
+
+This is valid native development-system and deployment-package evidence, but it is not native runtime interaction evidence. Navigation, tabs, form submission, table interaction, and runtime image loading therefore remain unclaimed. No screenshot is presented as runtime acceptance and no module definition was promoted.
 
 ## Exact maturity decisions
 
@@ -64,4 +72,4 @@ Prisma generate/validate/deploy/status passed on Node 20 and an isolated clone. 
 
 E2E destructive reset is guarded before any Prisma import, connection, seed, or `TRUNCATE`. The pure guard requires PostgreSQL, a loopback host, a database name beginning `kf_agent_e2e_`, and the explicit test-only `KF_E2E_ALLOW_DESTRUCTIVE_RESET=1` sentinel. Global setup and the directly runnable seed both enforce it; failures omit the URL and credentials. Guard tests are 13/13 and the protected E2E remains 2/2.
 
-Credential audit found no new secret in changed files. A pre-existing plaintext KF server credential remains in `docs/kf-control-acceptance.md`; its value is intentionally omitted here. Generated packages, screenshots, cookies, environment files, and secrets are not committed.
+Credential audit found no new secret in changed files. A pre-existing plaintext KF server credential remains in `docs/kf-control-acceptance.md`; its value is intentionally omitted here. The operator-supplied acceptance credential and all temporary access tokens were excluded from the repository and removed after use. Generated packages, screenshots, cookies, environment files, and secrets are not committed.
