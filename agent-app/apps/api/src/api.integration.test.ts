@@ -169,6 +169,7 @@ class FakeModelPort {
   blueprintModuleIds = ["main"];
   mappedBlueprint = false;
   classificationError = undefined;
+  classificationInputs = [];
   layoutModuleId = undefined;
   createCalls = [];
   reviseCalls = [];
@@ -177,7 +178,7 @@ class FakeModelPort {
     this.intents.push(...intents);
   }
   async classifyIntent(input) {
-    void input;
+    this.classificationInputs.push(input);
     if (this.classificationError !== undefined) throw new Error(String(this.classificationError));
     const intent = this.intents.shift() ?? "QUESTION";
     return {
@@ -415,6 +416,7 @@ beforeEach(async () => {
   fakeModel.blueprintModuleIds = ["main"];
   fakeModel.mappedBlueprint = false;
   fakeModel.classificationError = undefined;
+  fakeModel.classificationInputs = [];
   fakeModel.layoutModuleId = undefined;
   fakeModel.createCalls = [];
   fakeModel.reviseCalls = [];
@@ -585,6 +587,39 @@ async function tenantIdOf(tenantName: string): Promise<string> {
 // ---------------------------------------------------------------------------
 
 describe("api contract", () => {
+  it("loads the newly persisted user turn inside the latest twenty-message model window", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createWorkspace(cookie, "Recent message window");
+    const conv = await createConversation(cookie, ws.body.id, "Recent messages");
+    const tenantId = await tenantIdOf(TENANT_A.tenant);
+    await prisma.message.createMany({
+      data: Array.from({ length: 24 }, (_, index) => ({
+        id: `history-${String(index + 1).padStart(2, "0")}`,
+        tenantId,
+        conversationId: conv.body.id,
+        role: index % 2 === 0 ? "user" : "assistant",
+        content: `history-${String(index + 1).padStart(2, "0")}`,
+        createdAt: new Date(Date.UTC(2020, 0, 1, 0, 0, index)),
+      })),
+    });
+    fakeModel.queueIntent("QUESTION");
+
+    await sendMessage(cookie, conv.body.id, "current-turn-25").expect(200);
+
+    const recent = fakeModel.classificationInputs.at(-1)?.recentMessages;
+    expect(recent).toHaveLength(20);
+    expect(recent.map((message) => message.content)).toEqual([
+      "history-06", "history-07", "history-08", "history-09", "history-10",
+      "history-11", "history-12", "history-13", "history-14", "history-15",
+      "history-16", "history-17", "history-18", "history-19", "history-20",
+      "history-21", "history-22", "history-23", "history-24", "current-turn-25",
+    ]);
+    expect(recent.some((message) => message.content === "history-01")).toBe(false);
+    await expect(prisma.message.findFirst({
+      where: { tenantId, conversationId: conv.body.id, content: "current-turn-25" },
+    })).resolves.not.toBeNull();
+  });
+
   it("assigns workflow ownership on the server when creating workspaces", async () => {
     const cookie = await login(TENANT_A_MEMBER);
     const generated = await createWorkspace(cookie, "Server-owned module workflow", "module-v1");
@@ -1333,6 +1368,35 @@ describe("audit events", () => {
 // ---------------------------------------------------------------------------
 
 describe("hardening fixes", () => {
+  it("returns a fixed REST error when graph resume fails with internal details", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createUploadWorkspace(cookie, "Safe graph resume error");
+    await uploadPackage(cookie, ws.body.id, await makePackage()).expect(201);
+    const conv = await createConversation(cookie, ws.body.id, "Safe graph error");
+    const planHash = await planRequirement(cookie, conv.body.id);
+    const absolutePath = "/private/var/kf-agent/customer/workspace.kcp";
+    const signature = "signature-5ad19df3c0f34819";
+    const secret = "KF_SECRET_SENTINEL_9e30bd";
+    const technicalPlan = JSON.stringify({ schema: "kf-module-plan/v1", signature, secret });
+    const graph = await app.get(ConversationService)["getGraph"]();
+    const originalStream = graph.stream.bind(graph);
+    graph.stream = async () => { throw new Error(`COMPILER_BUG ${absolutePath} ${technicalPlan}`); };
+    let response;
+    try {
+      response = await resume(cookie, conv.body.id, { action: "revise", planHash }).expect(409);
+    } finally {
+      graph.stream = originalStream;
+    }
+
+    expect(response.body).toEqual({
+      error: { code: "GRAPH_ERROR", message: "对话处理失败，请重试" },
+    });
+    const serialized = JSON.stringify(response.body);
+    for (const sentinel of [absolutePath, technicalPlan, signature, secret, "COMPILER_BUG"]) {
+      expect(serialized).not.toContain(sentinel);
+    }
+  });
+
   it("rejects a repeated resume and never duplicates audit events (I1)", async () => {
     const cookie = await login(TENANT_A_MEMBER);
     const ws = await createUploadWorkspace(cookie, "Replay WS");

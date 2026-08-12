@@ -224,7 +224,7 @@ describe("module planning node", () => {
     }) };
     expect(routeAfterClassify(state({ designPlan: unmapped, generationWorkflow: "module-v1" }), testBed.deps)).toBe("module-plan");
     const result = await createModulePlanNode(testBed.deps)(state({ designPlan: unmapped }));
-    expect(result.lastErrorCode).toBe("MODULE_BLUEPRINT_MAPPING_REQUIRED:source-panel");
+    expect(result.lastErrorCode).toBe("MODULE_BLUEPRINT_MAPPING_REQUIRED");
     expect(result.stage).toBe("design-review");
     expect(testBed.model.createCalls).toHaveLength(0);
   });
@@ -279,10 +279,17 @@ describe("module planning node", () => {
     const testBed = bed([blockedOutcome("BLUEPRINT_MODULE_MISSING")]);
     const result = await createModulePlanNode(testBed.deps)(state());
     expect(result).toMatchObject({ stage: "idle", moduleRepairAttempt: 3 });
-    expect(result.lastErrorCode).toMatch(/^MODULE_PLAN_REPAIR_EXHAUSTED:/);
+    expect(result.lastErrorCode).toBe("MODULE_PLAN_REPAIR_EXHAUSTED");
     expect(testBed.compileCalls).toBe(4);
     expect(testBed.model.reviseCalls).toHaveLength(3);
     expect(testBed.plans.size).toBe(0);
+    expect(result.moduleDeliveryReport?.gaps).toEqual([
+      expect.objectContaining({
+        moduleId: "panel",
+        requirement: "valid module coverage",
+        reason: "BLUEPRINT_MODULE_MISSING",
+      }),
+    ]);
     expect(result.moduleDeliveryOwnerMappings).toEqual([
       { blueprintModuleId: "source-panel", moduleId: "panel" },
     ]);
@@ -292,9 +299,16 @@ describe("module planning node", () => {
     const testBed = bed([blockedOutcome("MODULE_ASSET_NOT_FOUND", "portrait asset")]);
     const result = await createModulePlanNode(testBed.deps)(state());
     expect(result).toMatchObject({ stage: "design-review", moduleRepairAttempt: 0 });
-    expect(result.lastErrorCode).toMatch(/^MODULE_ASSET_REQUIRED:/);
+    expect(result.lastErrorCode).toBe("MODULE_ASSET_REQUIRED");
     expect(testBed.model.reviseCalls).toHaveLength(0);
     expect(testBed.messages.at(-1)).toContain("资源");
+    expect(result.moduleDeliveryReport?.gaps).toEqual([
+      expect.objectContaining({
+        moduleId: "panel",
+        requirement: "portrait asset",
+        reason: "MODULE_ASSET_NOT_FOUND",
+      }),
+    ]);
     expect(result.moduleDeliveryOwnerMappings).toEqual([
       { blueprintModuleId: "source-panel", moduleId: "panel" },
     ]);
@@ -310,17 +324,29 @@ describe("module planning node", () => {
     expect(testBed.messages.at(-1)).toContain("稳定模块");
   });
 
-  it("bounds deterministic compiler failures and never persists or builds them", async () => {
+  it("keeps internal compiler errors out of graph state and assistant messages", async () => {
     const testBed = bed([compiledOutcome(modulePlan())]);
+    const absolutePath = "/private/var/kf-agent/customer/workspace.kcp";
+    const signature = "signature-5ad19df3c0f34819";
+    const secret = "KF_SECRET_SENTINEL_9e30bd";
+    const technicalPlan = JSON.stringify({ ...modulePlan(), signature, secret });
+    const unsafeDetail = `COMPILER_BUG ${absolutePath} ${technicalPlan}`;
     testBed.deps.modulePlanCompiler = {
       ...testBed.deps.modulePlanCompiler!,
-      compile: async () => { throw new Error(`COMPILER_BUG:${"x".repeat(2_000)}`); },
+      compile: async () => { throw new Error(unsafeDetail); },
     };
     const first = await createModulePlanNode(testBed.deps)(state());
     const second = await createModulePlanNode(testBed.deps)(state());
-    expect(first.lastErrorCode).toBe(second.lastErrorCode);
-    expect(first.lastErrorCode?.startsWith("MODULE_COMPILATION_FAILED:COMPILER_BUG:")).toBe(true);
-    expect(first.lastErrorCode!.length).toBeLessThanOrEqual(520);
+    expect(first.lastErrorCode).toBe("MODULE_COMPILATION_FAILED");
+    expect(second.lastErrorCode).toBe("MODULE_COMPILATION_FAILED");
+    expect(testBed.messages).toEqual([
+      "工程模块编译未能完成。当前效果蓝图已保留，请稍后重试。",
+      "工程模块编译未能完成。当前效果蓝图已保留，请稍后重试。",
+    ]);
+    const clientVisible = JSON.stringify({ first, second, messages: testBed.messages });
+    for (const sentinel of [absolutePath, technicalPlan, signature, secret, "COMPILER_BUG"]) {
+      expect(clientVisible).not.toContain(sentinel);
+    }
     expect(testBed.plans.size).toBe(0);
     expect(testBed.model.reviseCalls).toHaveLength(0);
   });
@@ -363,7 +389,7 @@ describe("module planning node", () => {
       uiImplementation: previousCompiled.implementation,
       uiImplementationHash: canonicalModuleCompilationHash(previousCompiled.implementation),
     }));
-    expect(result.lastErrorCode).toBe("MODULE_REVISION_CHECKPOINT_HASH_MISMATCH");
+    expect(result.lastErrorCode).toBe("MODULE_PLANNING_FAILED");
     expect(testBed.model.reviseCalls).toHaveLength(0);
   });
 });

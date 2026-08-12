@@ -19,9 +19,20 @@ import type { SolutionGraphDeps } from "../ports.js";
 import type { AgentGraphStateValue, AgentGraphUpdate } from "../state.js";
 
 const MAX_REPAIR_CALLS = 3;
-const MAX_ERROR_DETAIL = 480;
 const MAX_REJECTION_REASONS = 20;
 const MAX_REJECTION_REASON_LENGTH = 300;
+
+const MODULE_PUBLIC_FAILURES = {
+  MODULE_STABLE_CATALOG_EMPTY: "当前还没有通过真实 KF 运行态验收的稳定模块，暂时不能自动生成工程。请先完成模块验收并将对应版本提升为稳定状态。",
+  MODULE_BLUEPRINT_MAPPING_REQUIRED: "当前效果蓝图还没有绑定可实施的 KF 模块。请先补充模块映射后再确认生成，不会降级为旧的逐控件计划。",
+  MODULE_STABLE_CAPABILITY_UNAVAILABLE: "当前蓝图需要的模块尚未通过稳定验收。请更换为已支持方案，或先完成相应模块的 KF 运行态验收。",
+  MODULE_ASSET_REQUIRED: "生成工程还缺少客户资源。请上传或选择对应图片、图标后，我会从当前蓝图继续生成。",
+  MODULE_PLAN_REPAIR_EXHAUSTED: "当前蓝图仍存在无法自动完成的 KF 模块交付缺口。请查看交付结果并调整蓝图或补齐能力后重试。",
+  MODULE_PLANNING_FAILED: "工程模块规划未能完成。当前效果蓝图已保留，请稍后重试。",
+  MODULE_COMPILATION_FAILED: "工程模块编译未能完成。当前效果蓝图已保留，请稍后重试。",
+} as const;
+
+type ModulePublicFailureCode = keyof typeof MODULE_PUBLIC_FAILURES;
 
 /**
  * Converts a confirmed v2 blueprint into a stable ModulePlan, compiles it
@@ -33,30 +44,28 @@ const MAX_REJECTION_REASON_LENGTH = 300;
 export function createModulePlanNode(deps: SolutionGraphDeps) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
     if (state.designPlan?.schema !== "kf-design-plan/v2" || state.designPlanHash === undefined) {
-      return fail("MODULE_BLUEPRINT_NOT_CONFIRMED", state);
+      return fail(deps, state, "MODULE_PLANNING_FAILED");
     }
-    if (deps.modulePlanCompiler === undefined) return fail("MODULE_COMPILER_NOT_CONFIGURED", state);
+    if (deps.modulePlanCompiler === undefined) return fail(deps, state, "MODULE_PLANNING_FAILED");
     let planningCatalog;
     try {
       planningCatalog = validatePlanningCatalog(await deps.modulePlanCompiler.listPlanningCatalog());
-    } catch (error) {
-      return fail(`MODULE_CONTEXT_LOAD_FAILED:${errorDetail(error)}`, state);
+    } catch {
+      return fail(deps, state, "MODULE_PLANNING_FAILED");
     }
     if (planningCatalog.length === 0) {
-      await appendQuestion(deps, state, "当前还没有通过真实 KF 运行态验收的稳定模块，暂时不能自动生成工程。请先完成模块验收并将对应版本提升为稳定状态。");
-      return { stage: waitingStage(state), lastErrorCode: "MODULE_STABLE_CATALOG_EMPTY", moduleRepairAttempt: 0, buildAuthorization: undefined, resumeAction: undefined };
+      return fail(deps, state, "MODULE_STABLE_CATALOG_EMPTY", 0, waitingStage(state));
     }
     const unmappedBlueprintModules = state.designPlan.modules.filter((module) => module.expectedKind === undefined).map((module) => module.id).sort(compareCodePoints);
     if (unmappedBlueprintModules.length > 0) {
-      await appendQuestion(deps, state, `当前效果蓝图还没有绑定可实施的 KF 模块：${unmappedBlueprintModules.join("、")}。请先补充模块映射后再确认生成，不会降级为旧的逐控件计划。`);
-      return { stage: waitingStage(state), lastErrorCode: `MODULE_BLUEPRINT_MAPPING_REQUIRED:${unmappedBlueprintModules.join(",").slice(0, MAX_ERROR_DETAIL)}`, moduleRepairAttempt: 0, buildAuthorization: undefined, resumeAction: undefined };
+      return fail(deps, state, "MODULE_BLUEPRINT_MAPPING_REQUIRED", 0, waitingStage(state));
     }
-    if (state.currentRevisionId === undefined) return fail("MODULE_BASE_REVISION_REQUIRED", state);
-    if (deps.acceptedBlueprintConfirmation === undefined) return fail("ACCEPTED_BLUEPRINT_CONFIRMATION_NOT_CONFIGURED", state);
-    if (deps.moduleArtifactAuthority === undefined) return fail("MODULE_ARTIFACT_AUTHORITY_NOT_CONFIGURED", state);
-    if (deps.assetCatalog === undefined) return fail("ASSET_CATALOG_NOT_CONFIGURED", state);
-    if (deps.uiImplementationCompiler === undefined) return fail("IMPLEMENTATION_COMPILER_NOT_CONFIGURED", state);
-    if (deps.serverPlanSigner === undefined) return fail("SERVER_PLAN_SIGNER_NOT_CONFIGURED", state);
+    if (state.currentRevisionId === undefined) return fail(deps, state, "MODULE_PLANNING_FAILED");
+    if (deps.acceptedBlueprintConfirmation === undefined) return fail(deps, state, "MODULE_PLANNING_FAILED");
+    if (deps.moduleArtifactAuthority === undefined) return fail(deps, state, "MODULE_PLANNING_FAILED");
+    if (deps.assetCatalog === undefined) return fail(deps, state, "MODULE_PLANNING_FAILED");
+    if (deps.uiImplementationCompiler === undefined) return fail(deps, state, "MODULE_PLANNING_FAILED");
+    if (deps.serverPlanSigner === undefined) return fail(deps, state, "MODULE_PLANNING_FAILED");
 
     const projectKey = deps.defaultProjectKey ?? deps.defaultDomainKind ?? "kingclient";
     let acceptedBlueprintArtifact;
@@ -68,8 +77,8 @@ export function createModulePlanNode(deps: SolutionGraphDeps) {
           revisionId: state.currentRevisionId,
         }),
       );
-    } catch (error) {
-      return fail(`ACCEPTED_BLUEPRINT_CONFIRMATION_FAILED:${errorDetail(error)}`, state);
+    } catch {
+      return fail(deps, state, "MODULE_PLANNING_FAILED");
     }
 
     let accepted;
@@ -79,36 +88,34 @@ export function createModulePlanNode(deps: SolutionGraphDeps) {
         revisionId: state.currentRevisionId,
         blueprintHash: canonicalModuleCompilationHash(state.designPlan),
       });
-    } catch (error) {
-      return fail(`ACCEPTED_BLUEPRINT_VERIFICATION_FAILED:${errorDetail(error)}`, state);
+    } catch {
+      return fail(deps, state, "MODULE_PLANNING_FAILED");
     }
     const acceptedFacts = readVerifiedAcceptedBlueprintArtifact(accepted);
 
     let assets: readonly AssetRecord[];
     try {
       assets = AssetRecordSchema.array().max(100).parse(await deps.assetCatalog.list({ tenantId: state.tenantId, workspaceId: state.workspaceId }));
-    } catch (error) {
-      return fail(`MODULE_CONTEXT_LOAD_FAILED:${errorDetail(error)}`, state);
+    } catch {
+      return fail(deps, state, "MODULE_PLANNING_FAILED");
     }
     const stableKinds = new Set(planningCatalog.map((entry) => entry.kind));
     const unavailableKinds = [...new Set(acceptedFacts.modules.map((entry) => entry.expectedKind).filter((kind) => !stableKinds.has(kind)))].sort(compareCodePoints);
     if (unavailableKinds.length > 0) {
-      const detail = unavailableKinds.join(",").slice(0, MAX_ERROR_DETAIL);
-      await appendQuestion(deps, state, `当前蓝图需要的模块尚未通过稳定验收：${unavailableKinds.join("、")}。请更换为已支持方案，或先完成这些模块的 KF 运行态验收。`);
-      return { stage: waitingStage(state), lastErrorCode: `MODULE_STABLE_CAPABILITY_UNAVAILABLE:${detail}`, moduleRepairAttempt: 0, buildAuthorization: undefined, resumeAction: undefined };
+      return fail(deps, state, "MODULE_STABLE_CAPABILITY_UNAVAILABLE", 0, waitingStage(state));
     }
 
     const hasPriorPlan = state.modulePlan !== undefined;
     const hasPriorImplementation = state.uiImplementation !== undefined;
     const hasPriorArtifact = state.moduleCompilationArtifact !== undefined;
     if (hasPriorPlan !== hasPriorImplementation || hasPriorPlan !== hasPriorArtifact) {
-      return fail("MODULE_REVISION_CHECKPOINT_INCOMPLETE", state);
+      return fail(deps, state, "MODULE_PLANNING_FAILED");
     }
     if (state.modulePlan !== undefined && (
       state.modulePlanHash !== canonicalModuleCompilationHash(state.modulePlan)
       || state.uiImplementationHash !== canonicalModuleCompilationHash(state.uiImplementation)
     )) {
-      return fail("MODULE_REVISION_CHECKPOINT_HASH_MISMATCH", state);
+      return fail(deps, state, "MODULE_PLANNING_FAILED");
     }
     const editableEntities = await deps.workspaceQuery.getRevisionEntities({
       tenantId: state.tenantId,
@@ -140,8 +147,8 @@ export function createModulePlanNode(deps: SolutionGraphDeps) {
         : await deps.modelPort.reviseModulePlan(baseContext);
       candidate = parseAndPreservePlan(raw, assets, state.modulePlan, state.modulePlan, new Set(acceptedFacts.modules.map((entry) => entry.blueprintModuleId)));
       assertPlanUsesStableCatalog(candidate, planningCatalog);
-    } catch (error) {
-      return fail(`MODULE_PLAN_INVALID:${errorDetail(error)}`, state);
+    } catch {
+      return fail(deps, state, "MODULE_PLANNING_FAILED");
     }
 
     const coordinator = new ModuleCompilationCoordinator(
@@ -166,17 +173,17 @@ export function createModulePlanNode(deps: SolutionGraphDeps) {
           ...(state.uiImplementation === undefined ? {} : { previousImplementation: state.uiImplementation }),
           ...(state.moduleCompilationArtifact === undefined ? {} : { previousCompilationArtifact: state.moduleCompilationArtifact }),
         });
-      } catch (error) {
-        return fail(`MODULE_COMPILATION_FAILED:${errorDetail(error)}`, state, repairAttempt);
+      } catch {
+        return fail(deps, state, "MODULE_COMPILATION_FAILED", repairAttempt);
       }
 
       if (coordinated.status === "compiled") {
         if (coordinated.outcome.deliveryReport === undefined || coordinated.outcome.deliveryReport.status === "blocked") {
-          return fail("MODULE_DELIVERY_REPORT_MISSING", state, repairAttempt);
+          return fail(deps, state, "MODULE_COMPILATION_FAILED", repairAttempt);
         }
         const parsedPlan = internalChangePlanSchema.safeParse(coordinated.uiCompilation.plan);
         if (!parsedPlan.success || parsedPlan.data.operations.length === 0) {
-          return fail("MODULE_CHANGE_PLAN_INVALID", state, repairAttempt);
+          return fail(deps, state, "MODULE_COMPILATION_FAILED", repairAttempt);
         }
         return persistSuccessfulCompilation({
           deps,
@@ -196,26 +203,27 @@ export function createModulePlanNode(deps: SolutionGraphDeps) {
       const reasons = rejectionReasons(coordinated.outcome.gaps);
       const moduleDeliveryOwnerMappings = deliveryOwnerMappings(candidate);
       if (hasMissingUserAsset(coordinated.outcome.gaps)) {
-        await appendQuestion(deps, state, `生成工程还缺少客户资源：${reasons.join("；")}。请上传或选择对应图片/图标后，我会从当前蓝图继续生成。`);
+        await appendPublicFailureMessage(deps, state, "MODULE_ASSET_REQUIRED");
         return {
           acceptedBlueprintArtifact,
           moduleDeliveryReport: coordinated.outcome.deliveryReport,
           moduleDeliveryOwnerMappings,
           moduleRepairAttempt: repairAttempt,
           stage: waitingStage(state),
-          lastErrorCode: `MODULE_ASSET_REQUIRED:${reasons.join(";").slice(0, MAX_ERROR_DETAIL)}`,
+          lastErrorCode: "MODULE_ASSET_REQUIRED",
           buildAuthorization: undefined,
           resumeAction: undefined,
         };
       }
       if (repairAttempt >= MAX_REPAIR_CALLS) {
+        await appendPublicFailureMessage(deps, state, "MODULE_PLAN_REPAIR_EXHAUSTED");
         return {
           acceptedBlueprintArtifact,
           moduleDeliveryReport: coordinated.outcome.deliveryReport,
           moduleDeliveryOwnerMappings,
           moduleRepairAttempt: MAX_REPAIR_CALLS,
           stage: "idle",
-          lastErrorCode: `MODULE_PLAN_REPAIR_EXHAUSTED:${reasons.join(";").slice(0, MAX_ERROR_DETAIL)}`,
+          lastErrorCode: "MODULE_PLAN_REPAIR_EXHAUSTED",
           buildAuthorization: undefined,
           resumeAction: undefined,
         };
@@ -229,8 +237,8 @@ export function createModulePlanNode(deps: SolutionGraphDeps) {
         });
         candidate = parseAndPreservePlan(raw, assets, candidate, state.modulePlan, new Set(acceptedFacts.modules.map((entry) => entry.blueprintModuleId)));
         assertPlanUsesStableCatalog(candidate, planningCatalog);
-      } catch (error) {
-        return fail(`MODULE_PLAN_REPAIR_FAILED:${errorDetail(error)}`, state, repairAttempt);
+      } catch {
+        return fail(deps, state, "MODULE_PLANNING_FAILED", repairAttempt);
       }
     }
   };
@@ -458,13 +466,23 @@ function waitingStage(state: AgentGraphStateValue): "preview-review" | "design-r
   return state.stage === "preview-review" ? "preview-review" : "design-review";
 }
 
-function fail(code: string, _state: AgentGraphStateValue, repairAttempt = 0): AgentGraphUpdate {
-  return { stage: "idle", lastErrorCode: code.slice(0, MAX_ERROR_DETAIL + 40), moduleRepairAttempt: repairAttempt, buildAuthorization: undefined, resumeAction: undefined };
+async function fail(
+  deps: SolutionGraphDeps,
+  state: AgentGraphStateValue,
+  code: ModulePublicFailureCode,
+  repairAttempt = 0,
+  stage: "idle" | "preview-review" | "design-review" = "idle",
+): Promise<AgentGraphUpdate> {
+  await appendPublicFailureMessage(deps, state, code);
+  return { stage, lastErrorCode: code, moduleRepairAttempt: repairAttempt, buildAuthorization: undefined, resumeAction: undefined };
 }
 
-function errorDetail(error: unknown): string {
-  const raw = error instanceof Error ? error.message : String(error);
-  return [...raw].map((character) => character.charCodeAt(0) < 0x20 ? " " : character).join("").slice(0, MAX_ERROR_DETAIL);
+async function appendPublicFailureMessage(
+  deps: SolutionGraphDeps,
+  state: AgentGraphStateValue,
+  code: ModulePublicFailureCode,
+): Promise<void> {
+  await appendQuestion(deps, state, MODULE_PUBLIC_FAILURES[code]);
 }
 
 async function appendQuestion(deps: SolutionGraphDeps, state: AgentGraphStateValue, content: string): Promise<void> {

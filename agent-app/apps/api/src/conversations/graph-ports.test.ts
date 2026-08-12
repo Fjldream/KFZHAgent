@@ -6,6 +6,44 @@ import { createHmacModuleArtifactAuthority } from "@kf/build-jobs";
 import { createGraphPorts } from "./graph-ports.js";
 
 describe("conversation graph workspace query", () => {
+  it("returns the latest twenty persisted messages in stable chronological order", async () => {
+    const sameTimestamp = new Date("2026-08-12T05:00:24.000Z");
+    const rows = Array.from({ length: 25 }, (_, index) => ({
+      id: `message-${String(index + 1).padStart(2, "0")}`,
+      role: index % 2 === 0 ? "user" : "assistant",
+      content: `turn-${String(index + 1).padStart(2, "0")}`,
+      createdAt: index >= 23 ? sameTimestamp : new Date(Date.UTC(2026, 7, 12, 5, 0, index)),
+    }));
+    const findMany = vi.fn().mockImplementation(({ orderBy, take }) => {
+      const directions = orderBy.map((entry) => Object.values(entry)[0]);
+      const sorted = [...rows].sort((left, right) =>
+        right.createdAt.getTime() - left.createdAt.getTime() || right.id.localeCompare(left.id),
+      );
+      return Promise.resolve(directions.every((direction) => direction === "desc") ? sorted.slice(0, take) : [...rows].slice(0, take));
+    });
+    const ports = createGraphPorts({ message: { findMany } }, {} as never);
+
+    const messages = await ports.workspaceQuery.listRecentMessages({
+      tenantId: "tenant-1",
+      conversationId: "conversation-1",
+      limit: 25,
+    });
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: { tenantId: "tenant-1", conversationId: "conversation-1" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: 20,
+    });
+    expect(messages.map((message) => message.content)).toEqual([
+      "turn-06", "turn-07", "turn-08", "turn-09", "turn-10",
+      "turn-11", "turn-12", "turn-13", "turn-14", "turn-15",
+      "turn-16", "turn-17", "turn-18", "turn-19", "turn-20",
+      "turn-21", "turn-22", "turn-23", "turn-24", "turn-25",
+    ]);
+    expect(messages.at(-1)?.content).toBe("turn-25");
+    expect(messages.some((message) => message.content === "turn-01")).toBe(false);
+  });
+
   it("keeps beta modules out of the production planning catalog", async () => {
     const ports = createGraphPorts({} as never, {} as never);
     await expect(ports.modulePlanCompiler.listPlanningCatalog()).resolves.toEqual([]);

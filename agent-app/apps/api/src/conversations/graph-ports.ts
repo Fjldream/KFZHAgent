@@ -61,10 +61,10 @@ export function createGraphPorts(
     async listRecentMessages({ tenantId, conversationId, limit }) {
       const rows = await prisma.message.findMany({
         where: { tenantId, conversationId },
-        orderBy: { createdAt: "asc" },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: Math.min(limit, RECENT_MESSAGE_LIMIT),
       });
-      return rows.map((row) => ({
+      return rows.reverse().map((row) => ({
         role: row.role as "user" | "assistant",
         content: row.content,
       }));

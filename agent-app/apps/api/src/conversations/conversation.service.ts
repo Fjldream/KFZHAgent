@@ -55,6 +55,35 @@ interface ApprovalInterruptLike {
 }
 
 const DEFAULT_CONVERSATION_TITLE = "New conversation";
+const CUSTOMER_ERROR_CODES = new Set([
+  "ACCEPTED_BLUEPRINT_CONFIRMATION_FAILED",
+  "ACCEPTED_BLUEPRINT_CONFIRMATION_NOT_CONFIGURED",
+  "BUILD_FAILED",
+  "BUILD_PREVIEW_NOT_AVAILABLE",
+  "BUILD_REQUIRES_APPROVAL",
+  "DESIGN_NOT_CONFIRMED",
+  "DESIGN_REVISION_NOT_APPLIED",
+  "ENQUEUE_FAILED",
+  "IMPLEMENTATION_BASE_REVISION_REQUIRED",
+  "IMPLEMENTATION_COMPILER_NOT_CONFIGURED",
+  "INCOMPLETE_PLAN",
+  "INITIAL_DESIGN_CREATED",
+  "INVALID_MODEL_OUTPUT",
+  "INVALID_RESUME_ACTION",
+  "MODULE_ASSET_REQUIRED",
+  "MODULE_BLUEPRINT_MAPPING_REQUIRED",
+  "MODULE_COMPILATION_FAILED",
+  "MODULE_PLAN_REPAIR_EXHAUSTED",
+  "MODULE_PLANNING_FAILED",
+  "MODULE_STABLE_CAPABILITY_UNAVAILABLE",
+  "MODULE_STABLE_CATALOG_EMPTY",
+  "NO_PLAN_AVAILABLE",
+  "PLAN_HASH_MISMATCH",
+  "ROLLBACK_NOT_SUPPORTED",
+  "SERVER_PLAN_SIGNER_NOT_CONFIGURED",
+  "UI_IMPLEMENTATION_INVALID",
+  "UNSUPPORTED_DOMAIN",
+]);
 
 /**
  * Conversation workflow service. Exposes the LangGraph solution workflow
@@ -278,9 +307,9 @@ export class ConversationService {
             // Drain the run; the final checkpoint holds the outcome.
           }
           final = (await graph.getState(config)) as unknown as StateSnapshotLike;
-        } catch (error) {
+        } catch {
           throw new ConflictException(
-            apiError("GRAPH_ERROR", error instanceof Error ? error.message : String(error)),
+            apiError("GRAPH_ERROR", "对话处理失败，请重试"),
           );
         }
         const values = final.values;
@@ -428,7 +457,7 @@ export function finalStateData(final: StateSnapshotLike, authority: ModuleArtifa
   return {
     stage: values.stage ?? null,
     intent: values.intent ?? null,
-    lastErrorCode: values.lastErrorCode ?? null,
+    lastErrorCode: customerErrorCode(values.lastErrorCode),
     buildJobId: values.buildJobId ?? null,
     workspaceId: values.workspaceId ?? null,
     conversationId: values.conversationId ?? null,
@@ -446,6 +475,13 @@ export function finalStateData(final: StateSnapshotLike, authority: ModuleArtifa
 
 function isHash(input: unknown): input is string {
   return typeof input === "string" && /^[0-9a-f]{64}$/.test(input);
+}
+
+function customerErrorCode(input: unknown): string | null {
+  if (typeof input !== "string") return null;
+  const separator = input.indexOf(":");
+  const code = separator === -1 ? input : input.slice(0, separator);
+  return CUSTOMER_ERROR_CODES.has(code) ? code : "CONVERSATION_FAILED";
 }
 
 function isTechnicalAssistantPayload(content: string): boolean {
