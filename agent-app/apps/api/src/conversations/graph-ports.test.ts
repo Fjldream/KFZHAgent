@@ -44,9 +44,25 @@ describe("conversation graph workspace query", () => {
     expect(messages.some((message) => message.content === "turn-01")).toBe(false);
   });
 
-  it("keeps beta modules out of the production planning catalog", async () => {
+  it("exposes only exact modules accepted by the native KF runtime", async () => {
     const ports = createGraphPorts({} as never, {} as never);
-    await expect(ports.modulePlanCompiler.listPlanningCatalog()).resolves.toEqual([]);
+    const catalog = await ports.modulePlanCompiler.listPlanningCatalog();
+
+    expect(catalog.map((entry) => `${entry.kind}@${entry.version}`)).toEqual([
+      "content.hero@1.0.0",
+      "data.status-grid@1.0.0",
+      "data.table@1.0.0",
+      "feedback.alert-list@1.0.0",
+      "navigation.top@1.0.0",
+    ]);
+    expect(catalog.map((entry) => entry.kind)).not.toEqual(expect.arrayContaining([
+      "action.toolbar",
+      "data.chart-panel",
+      "form.record-editor",
+      "interaction.tabs-filter",
+      "metric.kpi-grid",
+      "navigation.sidebar",
+    ]));
   });
 
   it("lists only tenant/workspace-scoped model-safe asset metadata", async () => {

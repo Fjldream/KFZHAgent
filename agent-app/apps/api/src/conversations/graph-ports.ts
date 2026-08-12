@@ -28,6 +28,7 @@ import { PrismaService } from "../prisma/prisma.service.js";
 import { BuildJobService } from "../build-jobs/build-job.service.js";
 import { signAcceptedBlueprintAtConfirmation } from "./server-plan-authority.js";
 import type { AssetService } from "../assets/asset.service.js";
+import { REVIEWED_KF36_MODULE_RUNTIME_EVIDENCE } from "./module-runtime-evidence.js";
 
 /**
  * Real Prisma-backed ports for the solution graph (brief "Consumes" line).
@@ -55,7 +56,7 @@ export function createGraphPorts(
   assetService?: Pick<AssetService, "list" | "resolveManyForCompilation">,
 ): GraphPorts {
   const buildJobs = new BuildJobService(prisma);
-  const moduleRegistry = createDefaultModuleRegistry();
+  const moduleRegistry = createDefaultModuleRegistry(REVIEWED_KF36_MODULE_RUNTIME_EVIDENCE);
 
   const workspaceQuery: WorkspaceQueryPort = {
     async listRecentMessages({ tenantId, conversationId, limit }) {

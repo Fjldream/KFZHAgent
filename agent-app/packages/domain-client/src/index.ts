@@ -32,6 +32,7 @@ export * from "./domain-pack/king-client-domain-pack.js";
 export * from "./assets/materialize-client-assets.js";
 export * from "./modules/module-registry.js";
 export * from "./modules/module-compiler.js";
+export type { ModuleRuntimeEvidence } from "./modules/types.js";
 export * from "./modules/module-quality.js";
 export * from "./modules/module-diff.js";
 export * from "./modules/stable-ids.js";

@@ -4,7 +4,7 @@ Date: 2026-08-12
 
 Runtime target: KingFusion 3.6 SP4
 
-Release conclusion: **not eligible for stable module promotion**. Automatic generation is fail-closed until native KF runtime evidence is completed.
+Release conclusion: **five exact module definitions are eligible for stable promotion** after native KF runtime isolation. All other definitions remain beta; chart generation remains fail-closed.
 
 ## Automated acceptance
 
@@ -21,8 +21,8 @@ Generated packages are evidence artifacts outside the repository:
 
 | Golden | Path | SHA-256 | Result |
 | --- | --- | --- | --- |
-| Personal portal | `/tmp/kf-module-generation-v1-acceptance/personal-portal.gz` | `7f166d6046dc025e7835b0c320e545178dbac3a1fdd6daf88303d6d45a39d125` | Agent validation/round-trip and native development-system import/readback/publish pass; runtime start blocked |
-| Admin console | `/tmp/kf-module-generation-v1-acceptance/admin-console.gz` | `384af4f6c2a899c252e6c1230461d2d4272d944be2012ca52a3e0ef982f6e142` | Agent validation/round-trip and native development-system import/readback/publish pass; runtime start blocked |
+| Personal portal | `/tmp/kf-module-generation-v1-acceptance/personal-portal.gz` | `7f166d6046dc025e7835b0c320e545178dbac3a1fdd6daf88303d6d45a39d125` | Agent validation/round-trip and native import/readback/publish pass; isolated runtime bisection accepted navigation and hero only |
+| Admin console | `/tmp/kf-module-generation-v1-acceptance/admin-console.gz` | `384af4f6c2a899c252e6c1230461d2d4272d944be2012ca52a3e0ef982f6e142` | Agent validation/round-trip and native import/readback/publish pass; isolated runtime bisection accepted table, alerts, and status only |
 | Industrial dashboard | not emitted | n/a | blocked on exact chart-series mapping gap |
 
 ## Real DeepSeek smoke
@@ -31,7 +31,7 @@ API, worker, and Web were started on isolated local ports with a real DeepSeek k
 
 ## Native KF acceptance
 
-After the initial blocked run, the operator explicitly supplied a KF account for this acceptance. The credential value was used only for the live login and was not written to the repository, evidence files, or this report. The acceptance used the same APIs as the KF development and operations frontends and produced the following verified results on `192.168.3.32`:
+After the initial blocked run, the operator explicitly supplied a KF account and confirmed that the unlicensed/demo runtime is allowed to execute applications. The credential value was used only for the live login and was not written to the repository, evidence files, or this report. The acceptance used the same APIs as the KF development and operations frontends and produced the following verified results on `192.168.3.32`:
 
 - both generated packages were imported into the native development system;
 - their resulting project IDs were `82f5a270-961d-11f1-8d55-dd6d09cce4d4` (personal portal) and `8c469550-961d-11f1-8d55-dd6d09cce4d4` (admin console);
@@ -40,17 +40,27 @@ After the initial blocked run, the operator explicitly supplied a KF account for
 - the admin readback contained native Datagrid table data, alerts/status, sidebar, and toolbar controls;
 - both projects were published successfully and appeared in the operations center's published-project catalog;
 - isolated APP records on ports 13435 and 13436 were created and deployed without touching the existing 3434/3435 services;
-- start commands were accepted, but neither port opened and both APPs remained stopped;
-- the operations node reported `nodeAuthStatus=false`, and its authorization endpoint returned “该节点未开通节点授权”; the pre-existing runtime also reported that demo mode had expired;
-- the two isolated APP records were then deleted, and ports 13435/13436 were confirmed closed. Existing applications were not stopped, redeployed, or modified.
+- the first full portal/admin processes exited even though deployment/start commands succeeded; the node authorization flag was therefore not treated as the root cause after the operator clarification;
+- a known native baseline opened port 3437 on the same node, proving the unlicensed/demo runtime can execute;
+- every candidate module was then packaged with that baseline and started in isolation. `navigation.top`, `content.hero`, `data.table`, `feedback.alert-list`, and `data.status-grid` opened their assigned TCP ports and exposed the expected native Page1 JSON; KPI, card grid, tabs, contact/form, sidebar, and toolbar candidates did not survive runtime start and remain beta;
+- two combined acceptance applications were created without modifying existing applications: `PortalStable` on port 3451 contains navigation and hero; `AdminStable` on port 3452 contains table, alerts, and status. Both report `running` and return HTTP 200 from the KF runtime entrance;
+- native readback confirms the expected KF control types, module ownership, text/table data, image source binding, and navigation action configuration. Browser automation against the heavy KF runtime timed out, so this evidence does not claim screenshot fidelity or an executed click/form interaction.
 
-This is valid native development-system and deployment-package evidence, but it is not native runtime interaction evidence. Navigation, tabs, form submission, table interaction, and runtime image loading therefore remain unclaimed. No screenshot is presented as runtime acceptance and no module definition was promoted.
+The promotion is deliberately exact: passing one KF capability does not promote any other definition that happens to reuse it.
 
 ## Exact maturity decisions
 
-All exact `@1.0.0` definitions remain `beta`: `navigation.top`, `navigation.sidebar`, `content.hero`, `metric.kpi-grid`, `content.card-grid`, `content.timeline`, `interaction.tabs-filter`, `form.record-editor`, `content.contact-footer`, `data.chart-panel`, `data.status-grid`, `data.table`, `data.detail`, `action.toolbar`, and `feedback.alert-list`.
+The following exact definitions are promoted to `stable` through reviewed runtime evidence:
 
-`data.chart-panel@1.0.0` additionally retains the blocking gap `kf36-static-chart-series-mapping-unverified`. Static Trend/Bar/Pie fields were not guessed. The remaining modules have strong automated compile/package evidence, but that is not a substitute for native KF runtime evidence.
+- `navigation.top@1.0.0`
+- `content.hero@1.0.0`
+- `data.status-grid@1.0.0`
+- `data.table@1.0.0`
+- `feedback.alert-list@1.0.0`
+
+The following exact definitions remain `beta`: `navigation.sidebar`, `metric.kpi-grid`, `content.card-grid`, `content.timeline`, `interaction.tabs-filter`, `form.record-editor`, `content.contact-footer`, `data.chart-panel`, `data.detail`, and `action.toolbar`.
+
+`data.chart-panel@1.0.0` additionally retains the blocking gap `kf36-static-chart-series-mapping-unverified`. Static Trend/Bar/Pie fields were not guessed. The other beta modules have strong automated compile/package evidence, but either failed the native runtime isolation or have not yet supplied the required exact runtime interaction evidence.
 
 ## Commands and release checks
 
