@@ -9,6 +9,7 @@ import ContextPanel from "../components/ContextPanel.vue";
 import ConversationPanel from "../components/ConversationPanel.vue";
 import PreviewBar from "../components/PreviewBar.vue";
 import ApprovalSheet from "../components/ApprovalSheet.vue";
+import ModuleDeliveryReport from "../components/ModuleDeliveryReport.vue";
 import type { SolutionTreeNode } from "../types";
 
 /**
@@ -52,6 +53,7 @@ const activeWorkspaceId = computed<string | undefined>(() => {
 const hasWorkspace = computed(() => activeWorkspaceId.value !== undefined);
 
 const artifact = computed(() => {
+  if (workspace.state.moduleDeliveryResult?.status === "blocked") return undefined;
   const items = workspace.state.artifacts;
   return items.find((item) => item.kind === "client-package") ?? items[0];
 });
@@ -76,11 +78,13 @@ watch(
   () => [
     workspace.state.previewArtifactId,
     workspace.state.pendingApproval?.previewArtifactId,
+    workspace.state.moduleDeliveryResult?.status,
   ],
-  async ([builtArtifactId, pendingArtifactId]) => {
+  async ([builtArtifactId, pendingArtifactId, deliveryStatus]) => {
     if (previewUrl.value !== undefined) {
       previewUrl.value = undefined;
     }
+    if (deliveryStatus === "blocked") return;
     const artifactId = builtArtifactId ?? pendingArtifactId;
     if (artifactId === undefined || artifactId === "") return;
     try {
@@ -207,6 +211,10 @@ async function onUploadFile(file: File): Promise<void> {
       <section class="conversation-col">
         <ConversationPanel :messages="workspace.state.messages" :streaming="workspace.state.streaming" :busy="workspace.state.resuming" :phase-hint="workspace.state.phaseHint" @send="onSend" />
         <p v-if="workspace.state.error" class="error" data-testid="shell-error">{{ workspace.state.error }}</p>
+        <ModuleDeliveryReport
+          v-if="workspace.state.moduleDeliveryResult !== null"
+          :result="workspace.state.moduleDeliveryResult"
+        />
       </section>
       <ContextPanel
         :stage="stage"

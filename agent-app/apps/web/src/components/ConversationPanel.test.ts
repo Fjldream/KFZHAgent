@@ -297,4 +297,18 @@ describe("ConversationPanel enriched rendering", () => {
     expect(wrapper.html()).not.toContain("<b>计划已生成</b>");
     expect(wrapper.text()).toContain("&lt;b&gt;计划已生成&lt;/b&gt;");
   });
+
+  it("never renders technical ModulePlan or ChangePlan JSON as conversation content", () => {
+    const technical = JSON.stringify({
+      schema: "kf-module-plan/v1",
+      operations: [{ op: "add", moduleId: "internal-hero" }],
+      changePlan: { schema: "kf-change-plan/v1", signature: "server-secret" },
+    });
+    const wrapper = mount(ConversationPanel, {
+      props: { messages: [{ role: "assistant", content: technical }] },
+    });
+
+    expect(wrapper.text()).toContain("工程正在按已确认的效果蓝图生成");
+    expect(wrapper.text()).not.toMatch(/kf-module-plan|kf-change-plan|internal-hero|server-secret/);
+  });
 });

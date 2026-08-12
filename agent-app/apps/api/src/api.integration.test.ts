@@ -34,6 +34,7 @@ import { TenantsService } from "./tenants/tenants.service.js";
 import { ARTIFACT_STORAGE } from "./artifacts/artifact-storage.js";
 import { MODEL_PORT } from "./conversations/model-port.js";
 import { AssetService } from "./assets/asset.service.js";
+import { finalStateData } from "./conversations/conversation.service.js";
 import { WorkspaceService } from "./workspaces/workspace.service.js";
 import { SERVER_PLAN_AUTHORITY } from "./conversations/server-plan-authority.js";
 
@@ -162,6 +163,7 @@ class FakeModelPort {
   intents = [];
   requestedDomains = ["kingclient"];
   blueprintModuleIds = ["main"];
+  mappedBlueprint = false;
   layoutModuleId = undefined;
   createCalls = [];
   reviseCalls = [];
@@ -197,6 +199,11 @@ class FakeModelPort {
         content: [`${id} 标题`, `${id} 说明`],
         sampleData: [{ label: id, value: `${id} 示例` }],
         interactions: ["查看详情"],
+        ...(this.mappedBlueprint ? {
+          expectedKind: "content.hero",
+          expectedCategory: "content",
+          interactionRequirements: [],
+        } : {}),
         presentation: "重点卡片",
       })),
       visualDirection: {
@@ -393,6 +400,7 @@ beforeEach(async () => {
   await seedDatabase();
   fakeModel.intents = [];
   fakeModel.blueprintModuleIds = ["main"];
+  fakeModel.mappedBlueprint = false;
   fakeModel.layoutModuleId = undefined;
   fakeModel.createCalls = [];
   fakeModel.reviseCalls = [];
@@ -1425,6 +1433,129 @@ describe("hardening fixes", () => {
 // ---------------------------------------------------------------------------
 
 describe("task 12 api surface", () => {
+  it("never exposes a technical plan approval for a confirmed mapped v2 blueprint", async () => {
+    fakeModel.mappedBlueprint = true;
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createWorkspace(cookie, "Mapped Blueprint WS");
+    const conv = await createConversation(cookie, ws.body.id, "Mapped Blueprint");
+
+    fakeModel.queueIntent("NEW_REQUIREMENT");
+    await sendMessage(cookie, conv.body.id, "生成模块化个人门户").expect(200);
+    fakeModel.queueIntent("CONFIRM_DESIGN");
+    const confirmed = await sendMessage(cookie, conv.body.id, "确认效果蓝图").expect(200);
+    const done = doneEvent(confirmed.text);
+
+    expect(done.data.interrupt).toBeUndefined();
+    expect(done.data.stage).not.toBe("approval");
+    expect(JSON.stringify(done.data)).not.toMatch(/kf-module-plan|kf-change-plan|semanticOperations|signature/);
+  });
+
+  it("projects only bounded customer delivery fields from the technical graph state", () => {
+    const data = finalStateData({
+      values: {
+        stage: "building",
+        modulePlanHash: "1".repeat(64),
+        moduleDeliveryReport: {
+          schema: "kf-module-delivery/v1",
+          projectKey: "kingclient",
+          status: "ready_with_warnings",
+          gaps: [{
+            moduleId: "hero",
+            requirement: "使用轻量阴影",
+            severity: "warning",
+            status: "unresolved",
+            reason: "运行时仅支持基础阴影",
+          }],
+        },
+        moduleRepairAttempt: 2,
+        modulePlan: {
+          schema: "kf-module-plan/v1",
+          projectKey: "kingclient",
+          theme: {
+            background: "#ffffff",
+            surface: "#f8fafc",
+            primary: "#2563eb",
+            accent: "#0ea5e9",
+            textPrimary: "#0f172a",
+            textSecondary: "#475569",
+            fontFamily: "Arial",
+            spacingUnit: 8,
+            radiusScale: { small: 4, medium: 8, large: 16 },
+          },
+          assets: [],
+          pages: [{
+            id: "home",
+            title: "Home",
+            mode: "vertical-flow",
+            modules: [
+              {
+                id: "hero", kind: "content.hero", templateVersion: "1.0.0", variant: "no-portrait", title: "Hero",
+                sourceBlueprintModuleIds: ["hero"], interactions: [],
+                placement: { region: "main", order: 0, columnSpan: 12, preferredHeight: "medium", alignment: "stretch", emphasis: "primary" },
+              },
+              {
+                id: "footer", kind: "content.contact-footer", templateVersion: "1.0.0", variant: "default", title: "Footer",
+                sourceBlueprintModuleIds: ["footer"], interactions: [],
+                placement: { region: "footer", order: 1, columnSpan: 12, preferredHeight: "medium", alignment: "stretch", emphasis: "secondary" },
+              },
+            ],
+          }],
+          operations: [{ op: "update", pageId: "home", moduleId: "hero", changes: {} }],
+        },
+        secretModelPrompt: "must-not-leak",
+        moduleCompilationArtifact: {
+          signature: "must-not-leak",
+          metadata: {
+            schema: "kf-module-compilation-metadata/v1",
+            projectKey: "kingclient",
+            moduleDefinitions: [
+              { pageId: "home", moduleId: "hero", kind: "content.hero", templateVersion: "1.0.0", compilerFingerprint: "hero-compiler-v1", layoutFingerprint: "hero-layout-v1" },
+              { pageId: "home", moduleId: "footer", kind: "content.contact-footer", templateVersion: "1.0.0", compilerFingerprint: "footer-compiler-v1", layoutFingerprint: "footer-layout-v1" },
+            ],
+            assets: [],
+            blueprintMappings: [],
+          },
+        },
+      },
+      tasks: [],
+    });
+
+    expect(data).toMatchObject({
+      modulePlanHash: "1".repeat(64),
+      moduleDeliveryResult: {
+        projectKey: "kingclient",
+        status: "ready_with_warnings",
+        repairCount: 2,
+        implementedModules: [
+          { pageId: "home", moduleId: "hero", kind: "content.hero" },
+          { pageId: "home", moduleId: "footer", kind: "content.contact-footer" },
+        ],
+        revisionDiff: { changedModules: ["hero"], preservedModules: ["footer"] },
+      },
+    });
+    expect(JSON.stringify(data)).not.toMatch(/kf-module-plan|secretModelPrompt|must-not-leak|signature/);
+  });
+
+  it("does not claim a ready delivery from an invalid technical module snapshot", () => {
+    const data = finalStateData({
+      values: {
+        modulePlanHash: "2".repeat(64),
+        moduleDeliveryReport: {
+          schema: "kf-module-delivery/v1",
+          projectKey: "kingclient",
+          status: "ready",
+          gaps: [],
+        },
+        modulePlan: { schema: "kf-module-plan/v1", leaked: "internal" },
+        moduleCompilationArtifact: { metadata: { moduleDefinitions: [] } },
+      },
+      tasks: [],
+    });
+
+    expect(data.moduleDeliveryResult).toBeUndefined();
+    expect(JSON.stringify(data)).not.toContain("internal");
+  });
+
   it("compiles every confirmed blueprint module instead of persisting a Text1-only plan", async () => {
     const moduleIds = ["brand", "overview", "skills", "experience", "projects", "about", "contact"];
     fakeModel.blueprintModuleIds = moduleIds;

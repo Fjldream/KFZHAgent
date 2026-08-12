@@ -83,7 +83,31 @@ export interface SseDonePayload {
   planHash?: string | null;
   changePlanId?: string | null;
   changeRequestId?: string | null;
+  modulePlanHash?: string | null;
   interrupt?: ApprovalInterrupt | null;
+  /** Customer-safe projection of module compilation. Technical plans never cross this boundary. */
+  moduleDeliveryResult?: ModuleDeliveryResult | null;
+}
+
+export type ModuleDeliveryStatus = "ready" | "ready_with_warnings" | "blocked";
+
+export interface ModuleDeliveryGap {
+  moduleId: string;
+  requirement: string;
+  severity: "info" | "warning" | "blocking";
+  status: "unresolved" | "mitigated" | "accepted";
+  reason: string;
+  alternatives?: string[];
+}
+
+export interface ModuleDeliveryResult {
+  modulePlanHash?: string;
+  projectKey: string;
+  status: ModuleDeliveryStatus;
+  gaps: ModuleDeliveryGap[];
+  implementedModules: Array<{ pageId: string; moduleId: string; kind: string }>;
+  repairCount: number;
+  revisionDiff: { changedModules: string[]; preservedModules: string[] };
 }
 
 export interface Revision {

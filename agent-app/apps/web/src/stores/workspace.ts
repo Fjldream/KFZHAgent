@@ -7,6 +7,7 @@ import type {
   BuildJobStatus,
   ChangePlanDisplay,
   ChatMessage,
+  ModuleDeliveryResult,
   Revision,
   ScriptChange,
   SseDonePayload,
@@ -58,6 +59,7 @@ export interface WorkspaceState {
   validationReport: ValidationReport | null;
   revisions: Revision[];
   currentRevisionId: string | null;
+  moduleDeliveryResult: ModuleDeliveryResult | null;
 }
 
 const state: WorkspaceState = reactive({
@@ -79,6 +81,7 @@ const state: WorkspaceState = reactive({
   validationReport: null,
   revisions: [],
   currentRevisionId: null,
+  moduleDeliveryResult: null,
 });
 
 /** Monotonic fence: a newer load/build poll makes all older async responses stale. */
@@ -194,6 +197,7 @@ async function load(workspaceId: string): Promise<void> {
   state.artifacts = [];
   state.previewArtifactId = undefined;
   state.validationReport = null;
+  state.moduleDeliveryResult = null;
   state.workspaceId = workspaceId;
   try {
     const workspace = await api.getWorkspace(workspaceId);
@@ -345,6 +349,7 @@ function phaseHintForNode(data: unknown): string | null {
 /** 将 done 快照路由到审批 / 构建 / 错误等 UI 状态。 */
 function applyDone(done: SseDonePayload, expectedWorkspaceId = state.workspaceId): void {
   if (state.workspaceId !== expectedWorkspaceId) return;
+  applyModuleDeliveryResult(done.moduleDeliveryResult);
   if (typeof done.lastErrorCode === "string" && done.lastErrorCode.length > 0) {
     state.error = workflowErrorMessage(done.lastErrorCode);
     return;
@@ -416,6 +421,7 @@ async function resumeApproval(action: "approve" | "revise" | "cancel"): Promise<
   try {
     const result = await api.resume(conversationId, { action, planHash: pending.planHash });
     if (!isCurrentResume()) return;
+    applyModuleDeliveryResult(result["moduleDeliveryResult"]);
     state.pendingApproval = null;
     const jobId = typeof result.buildJobId === "string" ? result.buildJobId : undefined;
     const interrupt = result.interrupt as ApprovalInterrupt | null | undefined;
@@ -457,6 +463,11 @@ async function deleteWorkspace(): Promise<void> {
 
 /** 触发浏览器下载（两段式 token → 授权端点流式字节）。 */
 async function downloadArtifact(artifactId: string): Promise<void> {
+  if (state.moduleDeliveryResult?.status === "blocked") {
+    const error = new Error("交付被阻断，解决缺失能力或资源后才能导出工程");
+    state.error = error.message;
+    throw error;
+  }
   const { token } = await api.createDownloadToken(artifactId);
   const url = api.downloadUrl(token);
   const anchor = document.createElement("a");
@@ -465,6 +476,84 @@ async function downloadArtifact(artifactId: string): Promise<void> {
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
+}
+
+function applyModuleDeliveryResult(input: unknown): void {
+  if (input === null || input === undefined) return;
+  if (!isModuleDeliveryResult(input)) return;
+  state.moduleDeliveryResult = {
+    ...(input.modulePlanHash === undefined ? {} : { modulePlanHash: input.modulePlanHash }),
+    projectKey: input.projectKey,
+    status: input.status,
+    gaps: input.gaps.map((gap) => ({
+      moduleId: gap.moduleId,
+      requirement: gap.requirement,
+      severity: gap.severity,
+      status: gap.status,
+      reason: gap.reason,
+      ...(gap.alternatives === undefined ? {} : { alternatives: [...gap.alternatives] }),
+    })),
+    implementedModules: input.implementedModules.map((module) => ({
+      pageId: module.pageId,
+      moduleId: module.moduleId,
+      kind: module.kind,
+    })),
+    repairCount: input.repairCount,
+    revisionDiff: {
+      changedModules: [...input.revisionDiff.changedModules],
+      preservedModules: [...input.revisionDiff.preservedModules],
+    },
+  };
+}
+
+function isModuleDeliveryResult(input: unknown): input is ModuleDeliveryResult {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) return false;
+  const value = input as Record<string, unknown>;
+  if (typeof value["projectKey"] !== "string" || value["projectKey"].length === 0) return false;
+  if (value["status"] !== "ready" && value["status"] !== "ready_with_warnings" && value["status"] !== "blocked") return false;
+  if (!Array.isArray(value["gaps"]) || value["gaps"].length > 250 || !value["gaps"].every(isDeliveryGap)) return false;
+  if (!Array.isArray(value["implementedModules"]) || value["implementedModules"].length > 250 || !value["implementedModules"].every(isImplementedModule)) return false;
+  if (typeof value["repairCount"] !== "number" || !Number.isInteger(value["repairCount"]) || value["repairCount"] < 0 || value["repairCount"] > 3) return false;
+  const diff = value["revisionDiff"];
+  if (typeof diff !== "object" || diff === null || Array.isArray(diff)) return false;
+  const revisionDiff = diff as Record<string, unknown>;
+  if (!isModuleIdList(revisionDiff["changedModules"]) || !isModuleIdList(revisionDiff["preservedModules"])) return false;
+  if (value["modulePlanHash"] !== undefined && (typeof value["modulePlanHash"] !== "string" || !/^[0-9a-f]{64}$/.test(value["modulePlanHash"]))) return false;
+  return true;
+}
+
+function isDeliveryGap(input: unknown): boolean {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) return false;
+  const gap = input as Record<string, unknown>;
+  if (!isBoundedText(gap["moduleId"], 100) || !isBoundedText(gap["requirement"], 1_000) || !isBoundedText(gap["reason"], 1_000)) return false;
+  if (gap["severity"] !== "info" && gap["severity"] !== "warning" && gap["severity"] !== "blocking") return false;
+  if (gap["status"] !== "unresolved" && gap["status"] !== "mitigated" && gap["status"] !== "accepted") return false;
+  return gap["alternatives"] === undefined
+    || (Array.isArray(gap["alternatives"]) && gap["alternatives"].length <= 10 && gap["alternatives"].every((item) => isBoundedText(item, 1_000)));
+}
+
+function isImplementedModule(input: unknown): boolean {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) return false;
+  const module = input as Record<string, unknown>;
+  return isStableId(module["pageId"])
+    && isStableId(module["moduleId"])
+    && isModuleKind(module["kind"]);
+}
+
+function isModuleIdList(input: unknown): input is string[] {
+  return Array.isArray(input) && input.length <= 250 && input.every((item) => isBoundedText(item, 100));
+}
+
+function isBoundedText(input: unknown, max: number): input is string {
+  return typeof input === "string" && input.trim().length > 0 && input.length <= max;
+}
+
+function isStableId(input: unknown): input is string {
+  return isBoundedText(input, 100) && /^[A-Za-z][A-Za-z0-9_-]*$/.test(input);
+}
+
+function isModuleKind(input: unknown): input is string {
+  return isBoundedText(input, 100) && /^[A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z][A-Za-z0-9_-]*)*$/.test(input);
 }
 
 /** 预览 iframe 直接加载渲染端点（服务端把 ClientProjectIR 渲染为 HTML）。 */

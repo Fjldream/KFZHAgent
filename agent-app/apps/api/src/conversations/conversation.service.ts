@@ -23,6 +23,11 @@ import { createGraphPorts } from "./graph-ports.js";
 import { MODEL_PORT } from "./model-port.js";
 import { MODULE_ARTIFACT_AUTHORITY, SERVER_PLAN_AUTHORITY } from "./server-plan-authority.js";
 import type { ModuleArtifactAuthority, ServerPlanAuthority } from "@kf/build-jobs";
+import {
+  ModuleCompilationMetadataSchema,
+  ModuleDeliveryReportSchema,
+  ModulePlanSchema,
+} from "@kf/contracts";
 import { AssetService } from "../assets/asset.service.js";
 
 type CompiledGraph = ReturnType<typeof compileSolutionGraph>;
@@ -411,9 +416,11 @@ function extractInterrupt(snapshot: StateSnapshotLike): ApprovalInterruptLike | 
   return undefined;
 }
 
-function finalStateData(final: StateSnapshotLike): Record<string, unknown> {
+export function finalStateData(final: StateSnapshotLike): Record<string, unknown> {
   const values = final.values;
   const interrupt = extractInterrupt(final);
+  const moduleDeliveryResult = projectModuleDeliveryResult(values);
+  const modulePlanHash = isHash(values.modulePlanHash) ? values.modulePlanHash : null;
   return {
     stage: values.stage ?? null,
     intent: values.intent ?? null,
@@ -427,8 +434,83 @@ function finalStateData(final: StateSnapshotLike): Record<string, unknown> {
     designPlanHash: values.designPlanHash ?? null,
     designRevision: values.designRevision ?? null,
     clarificationCount: values.clarificationCount ?? null,
+    modulePlanHash,
+    ...(moduleDeliveryResult === undefined ? {} : { moduleDeliveryResult }),
     ...(interrupt !== undefined ? { interrupt } : {}),
   };
+}
+
+function projectModuleDeliveryResult(values: Record<string, unknown>): Record<string, unknown> | undefined {
+  const parsedReport = ModuleDeliveryReportSchema.safeParse(values.moduleDeliveryReport);
+  if (!parsedReport.success) return undefined;
+
+  const parsedPlan = ModulePlanSchema.safeParse(values.modulePlan);
+  const implementedModules = extractImplementedModules(values);
+  if (parsedReport.data.status !== "blocked" && (!parsedPlan.success || implementedModules.length === 0)) {
+    return undefined;
+  }
+  const planModules = parsedPlan.success
+    ? parsedPlan.data.pages.flatMap((page) => page.modules.map((module) => ({ pageId: page.id, moduleId: module.id, kind: module.kind })))
+    : [];
+  const changed = new Set(parsedPlan.success ? extractChangedModuleIds(parsedPlan.data.operations) : []);
+  const preserved = planModules.map((module) => module.moduleId).filter((moduleId) => !changed.has(moduleId));
+  const repairAttempt = values.moduleRepairAttempt;
+  const repairCount = typeof repairAttempt === "number"
+    && Number.isInteger(repairAttempt)
+    && repairAttempt >= 0
+    && repairAttempt <= 3
+    ? repairAttempt
+    : 0;
+  return {
+    ...(isHash(values.modulePlanHash) ? { modulePlanHash: values.modulePlanHash } : {}),
+    projectKey: parsedReport.data.projectKey,
+    status: parsedReport.data.status,
+    gaps: parsedReport.data.gaps,
+    implementedModules: implementedModules.length > 0 ? implementedModules : planModules,
+    repairCount,
+    revisionDiff: {
+      changedModules: [...changed].slice(0, 250),
+      preservedModules: preserved.slice(0, 250),
+    },
+  };
+}
+
+function extractImplementedModules(values: Record<string, unknown>): Array<{ pageId: string; moduleId: string; kind: string }> {
+  const artifact = asRecord(values.moduleCompilationArtifact);
+  const parsed = ModuleCompilationMetadataSchema.safeParse(artifact?.metadata);
+  if (!parsed.success) return [];
+  return parsed.data.moduleDefinitions.map((entry) => ({
+    pageId: entry.pageId,
+    moduleId: entry.moduleId,
+    kind: entry.kind,
+  }));
+}
+
+function extractChangedModuleIds(operations: ReadonlyArray<{ op: string; module?: { id: string }; moduleId?: string }>): string[] {
+  const output: string[] = [];
+  const seen = new Set<string>();
+  for (const operation of operations) {
+    const moduleId = operation.op === "add" ? operation.module?.id : operation.moduleId;
+    if (isSafeId(moduleId) && !seen.has(moduleId)) {
+      seen.add(moduleId);
+      output.push(moduleId);
+    }
+  }
+  return output;
+}
+
+function asRecord(input: unknown): Record<string, unknown> | undefined {
+  return typeof input === "object" && input !== null && !Array.isArray(input)
+    ? input as Record<string, unknown>
+    : undefined;
+}
+
+function isHash(input: unknown): input is string {
+  return typeof input === "string" && /^[0-9a-f]{64}$/.test(input);
+}
+
+function isSafeId(input: unknown): input is string {
+  return typeof input === "string" && /^[A-Za-z][A-Za-z0-9_-]{0,99}$/.test(input);
 }
 
 function apiError(code: string, message: string): { error: { code: string; message: string } } {

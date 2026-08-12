@@ -184,7 +184,16 @@ function displayContent(message: RenderedMessage): string {
   if (message.content.startsWith("KF_BLUEPRINT_MESSAGE/1\n")) {
     return "这份效果蓝图暂时无法显示，请重新生成。";
   }
+  if (message.role === "assistant" && containsTechnicalPlan(message.content)) {
+    return "工程正在按已确认的效果蓝图生成，技术实施细节由系统自动校验。";
+  }
   return message.role === "assistant" ? escapeModelText(message.content) : message.content;
+}
+
+function containsTechnicalPlan(content: string): boolean {
+  const trimmed = content.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return false;
+  return /"schema"\s*:\s*"kf-(?:module-plan|change-plan)\/v\d+"/.test(trimmed);
 }
 
 /** 流式进行中且最后一条为助手消息时显示打字机光标（仅纯文本气泡适用）。 */
