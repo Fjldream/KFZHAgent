@@ -1,6 +1,5 @@
 import type { ChangePlan, DesignPlan, ModulePlan, UIImplementationSpec } from "@kf/contracts";
 import { ModulePlanSchema, solutionId } from "@kf/contracts";
-import { deriveGuid } from "@kf/domain-client";
 import type {
   ClassifyIntentResult,
   ModelPort,
@@ -173,14 +172,28 @@ export class DeterministicFakeModelPort implements ModelPort {
   createChangePlan(input: ModelPortContext): Promise<ChangePlan> {
     // new 流程：编译后的控件 GUID 由 build seed（=workspaceId）确定性派生，
     // 因此 fake model 用同一 seed 计算 entityId，change-scope 才能定位实体。
-    const textGuid = deriveGuid({ seed: input.workspaceId }, "Text1");
+    const existingText = input.editableEntities?.find((entity) => entity.kind === "control" && entity.name === "Text1");
+    const page = input.editableEntities?.find((entity) => entity.kind === "page");
+    if (existingText === undefined) {
+      if (page === undefined) return Promise.reject(new Error("fake model requires an editable page"));
+      return Promise.resolve({
+        schema: "kf-change-plan/v1",
+        workspaceId: input.workspaceId,
+        operations: [{
+          op: "create",
+          entityId: "Text1",
+          entityType: "control",
+          properties: { pageId: page.guid, type: "text", x: 40, y: 40, width: 320, height: 48, text: "由 KF Solution Agent 生成" },
+        }],
+      });
+    }
     return Promise.resolve({
       schema: "kf-change-plan/v1",
       workspaceId: input.workspaceId,
       operations: [
         {
           op: "update",
-          entityId: textGuid,
+          entityId: existingText.guid,
           entityType: "text",
           changes: [{ path: "/text", value: "由 KF Solution Agent 生成" }],
         },
@@ -208,14 +221,28 @@ export class DeterministicFakeModelPort implements ModelPort {
     }
     // new 流程（或 new 流程的 revise）：修改初始 Text1 控件。
     // value 与 createChangePlan 不同，保证 revise 产生新的 planHash。
-    const textGuid = deriveGuid({ seed: input.workspaceId }, "Text1");
+    const existingText = input.editableEntities?.find((entity) => entity.kind === "control" && entity.name === "Text1");
+    const page = input.editableEntities?.find((entity) => entity.kind === "page");
+    if (existingText === undefined) {
+      if (page === undefined) return Promise.reject(new Error("fake model requires an editable page"));
+      return Promise.resolve({
+        schema: "kf-change-plan/v1",
+        workspaceId: input.workspaceId,
+        operations: [{
+          op: "create",
+          entityId: "Text1",
+          entityType: "control",
+          properties: { pageId: page.guid, type: "text", x: 40, y: 40, width: 320, height: 48, text: "由 KF Solution Agent 修订生成" },
+        }],
+      });
+    }
     return Promise.resolve({
       schema: "kf-change-plan/v1",
       workspaceId: input.workspaceId,
       operations: [
         {
           op: "update",
-          entityId: textGuid,
+          entityId: existingText.guid,
           entityType: "text",
           changes: [{ path: "/text", value: "由 KF Solution Agent 修订生成" }],
         },

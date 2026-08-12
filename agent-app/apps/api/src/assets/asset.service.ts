@@ -191,7 +191,7 @@ export class AssetService {
         ...record,
         mimeType: row.mediaType,
         workspaceAssetId: row.id,
-        targetPath: `static/agent-assets/${row.sha256}.${extension}`,
+        targetPath: `project/res/images/${row.sha256}.${extension}`,
         sha256: row.sha256,
         sizeBytes: row.sizeBytes,
       };

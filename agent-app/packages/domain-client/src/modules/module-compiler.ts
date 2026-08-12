@@ -766,21 +766,27 @@ function validateModuleInstance(
     return registry.validateInstance({ instance, assets: plan.assets, context });
   } catch (error) {
     const message = error instanceof Error ? error.message : "MODULE_VALIDATION_FAILED";
-    if (!isBlockingCapabilityError(message)) throw error;
+    if (!isRepairableModuleValidationError(message)) throw error;
+    const invalidContent = message.startsWith("MODULE_CONTENT_INVALID:");
     gaps.push(Object.freeze({
       moduleId: instance.id,
-      requirement: `Provide the KF capability required by ${instance.kind}.`,
+      requirement: invalidContent
+        ? `Provide content matching the registered schema for ${instance.kind}.`
+        : `Provide the KF capability required by ${instance.kind}.`,
       severity: "blocking",
       status: "unresolved",
       reason: message,
-      alternatives: ["Select a registered native module variant or enable the required reviewed capability."],
+      alternatives: invalidContent
+        ? ["Regenerate this module using the Registry content example and required fields."]
+        : ["Select a registered native module variant or enable the required reviewed capability."],
     }));
     return undefined;
   }
 }
 
-function isBlockingCapabilityError(message: string): boolean {
-  return message.startsWith("MODULE_KF_CAPABILITY_MISSING:")
+function isRepairableModuleValidationError(message: string): boolean {
+  return message.startsWith("MODULE_CONTENT_INVALID:")
+    || message.startsWith("MODULE_KF_CAPABILITY_MISSING:")
     || message.startsWith("MODULE_WEBCONTAINER_DISALLOWED:")
     || message.startsWith("MODULE_WEBCONTAINER_UNAUTHORIZED:");
 }

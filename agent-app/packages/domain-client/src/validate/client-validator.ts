@@ -185,12 +185,8 @@ async function checkReferences(candidate: string): Promise<CheckOutcome> {
   for (const [pageGuid, tree] of Object.entries(rawPages)) {
     walkControls(tree, `page ${pageGuid}`, (control, where) => {
       const src = control["src"];
-      if (typeof src !== "string" || !src.startsWith("static/agent-assets/")) return;
-      if (!/^static\/agent-assets\/[0-9a-f]{64}\.(?:png|jpg|webp)$/.test(src)) {
-        issues.push(`${where}: invalid agent asset reference "${src}"`);
-        return;
-      }
-      if (!existsSync(path.join(versionRoot, ...src.split("/")))) {
+      if (typeof src !== "string" || !/^[0-9a-f]{64}\.(?:png|jpg|webp)$/.test(src)) return;
+      if (!existsSync(path.join(versionRoot, "project", "res", "images", src))) {
         issues.push(`${where}: missing agent asset resource "${src}"`);
       }
     });
@@ -324,6 +320,18 @@ async function checkBusinessRules(
       for (const rawLink of links) {
         const link = asRecord(rawLink);
         const action = link["action"];
+        // ElementUI controls persist disabled native event slots (for example
+        // Image Load/Error) in the same link list. They are inert metadata,
+        // not executable restricted actions.
+        const nativeImageEvent =
+          action === undefined
+          && link["enable"] === false
+          && link["script"] === ""
+          && ((link["linkId"] === 200001 && link["name"] === "Load")
+            || (link["linkId"] === 200002 && link["name"] === "Error"));
+        if (nativeImageEvent) {
+          continue;
+        }
         if (typeof action !== "string") {
           issues.push(`control "${String(name)}" has a link without an action`);
           continue;

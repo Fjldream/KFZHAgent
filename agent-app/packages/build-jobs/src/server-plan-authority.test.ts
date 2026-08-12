@@ -53,7 +53,7 @@ function signedAssets() {
       entityId: "portrait-guid",
       controlId: "portrait-guid",
       capabilityId: "image",
-      targetPath: `static/agent-assets/${assetSha}.png`,
+      targetPath: `project/res/images/${assetSha}.png`,
       mediaType: "image/png",
       sha256: assetSha,
       sizeBytes: 42,
@@ -148,11 +148,11 @@ describe("HMAC server plan authority", () => {
       },
       (binding) => {
         binding.mediaType = "image/jpeg";
-        binding.targetPath = `static/agent-assets/${binding.sha256}.jpg`;
+        binding.targetPath = `project/res/images/${binding.sha256}.jpg`;
       },
       (binding) => {
         binding.sha256 = "2".repeat(64);
-        binding.targetPath = `static/agent-assets/${binding.sha256}.png`;
+        binding.targetPath = `project/res/images/${binding.sha256}.png`;
       },
     ];
     for (const mutate of mutations) {

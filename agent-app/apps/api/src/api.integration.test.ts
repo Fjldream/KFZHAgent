@@ -637,6 +637,8 @@ describe("api contract", () => {
       .send({ name: "Client cannot select workflow", generationWorkflow: "legacy" })
       .expect(201)
       .expect(({ body }) => expect(body.generationWorkflow).toBe("module-v1"));
+    const initial = await prisma.solutionRevision.findFirstOrThrow({ where: { workspaceId: generated.body.id } });
+    expect(initial.state).toMatchObject({ pages: [{ name: "Page1", controls: [] }] });
   });
 
   it("creates an upload workspace and uploads a source package", async () => {

@@ -40,9 +40,7 @@ export const DEFAULT_INITIAL_IR = {
       name: "Page1",
       width: 1440,
       height: 900,
-      controls: [
-        { id: "Text1", type: "text", x: 40, y: 40, width: 120, height: 30, text: "Hello" },
-      ],
+      controls: [],
     },
   ],
   variables: [],

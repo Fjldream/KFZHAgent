@@ -24,7 +24,7 @@ describe("ModuleCompilationMetadataSchema", () => {
     const sha256 = "1".repeat(64);
     const approvedAsset = {
       workspaceAssetId: "00000000-0000-4000-8000-000000000001",
-      targetPath: `static/agent-assets/${sha256}.png`,
+      targetPath: `project/res/images/${sha256}.png`,
       mediaType: "image/png",
       sha256,
       sizeBytes: 128,

@@ -23,7 +23,7 @@ describe("change plan schema", () => {
     entityId: "hero/portrait",
     controlId: "hero/portrait",
     capabilityId: "image",
-    targetPath: `static/agent-assets/${sha256}.png`,
+    targetPath: `project/res/images/${sha256}.png`,
     mediaType: "image/png",
     sha256,
     sizeBytes: 128,

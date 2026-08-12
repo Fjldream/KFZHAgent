@@ -35,7 +35,7 @@ const assets: Readonly<Record<string, ResolvedAsset>> = {
 const portalAssetInputs = [PORTAL_PORTRAIT_ASSET_ID, PORTAL_PROJECT_ASSET_ID].map((assetId): DomainAssetInput => {
   const bytes = Buffer.from(`approved bytes for ${assetId}`);
   const sha256 = createHash("sha256").update(bytes).digest("hex");
-  return { assetId, bytes, sha256, mediaType: "image/png", targetPath: `static/agent-assets/${sha256}.png` };
+  return { assetId, bytes, sha256, mediaType: "image/png", targetPath: `project/res/images/${sha256}.png` };
 });
 const approvedAssetsById: Readonly<Record<string, ApprovedAssetFacts>> = Object.fromEntries(
   portalAssetInputs.map((asset): [string, ApprovedAssetFacts] => [asset.assetId, {
@@ -105,39 +105,6 @@ function controlName(control: Record<string, unknown>): string {
   const name = base["name"] ?? control["name"];
   if (typeof name !== "string") throw new Error("control does not have a name");
   return name;
-}
-
-function childrenOf(control: Record<string, unknown>): Record<string, unknown>[] {
-  const children = control["insiderObjects"];
-  return Array.isArray(children) ? children.map(record) : [];
-}
-
-function namedChild(control: Record<string, unknown>, name: string): Record<string, unknown> {
-  const child = childrenOf(control).find((entry) => controlName(entry) === name);
-  if (child === undefined) throw new Error(`missing nested child ${name}`);
-  return child;
-}
-
-function geometryOf(control: Record<string, unknown>): { x: number; y: number; width: number; height: number } {
-  const base = record(control["baseProperty"] ?? {});
-  const point = record(base["leftTopPt"] ?? control["leftTopPt"] ?? {});
-  const x = point["x"];
-  const y = point["y"];
-  const width = base["width"] ?? control["width"];
-  const height = base["height"] ?? control["height"];
-  if (![x, y, width, height].every((value) => typeof value === "number")) {
-    throw new Error(`invalid geometry for ${controlName(control)}`);
-  }
-  return { x: x as number, y: y as number, width: width as number, height: height as number };
-}
-
-function expectInsideParent(child: Record<string, unknown>, parent: Record<string, unknown>): void {
-  const box = geometryOf(child);
-  const parentBox = geometryOf(parent);
-  expect(box.x).toBeGreaterThanOrEqual(0);
-  expect(box.y).toBeGreaterThanOrEqual(0);
-  expect(box.x + box.width).toBeLessThanOrEqual(parentBox.width);
-  expect(box.y + box.height).toBeLessThanOrEqual(parentBox.height);
 }
 
 function module(kind: string, id = "module", content: Record<string, unknown> = {}): ModulePlanModule {
@@ -303,7 +270,14 @@ describe("portal module definitions", () => {
     const cards = module("content.card-grid", "cards", {
       items: Array.from({ length: 13 }, (_, index) => ({ title: `Card ${index}`, summary: "Summary", tag: "Tag" })),
     });
-    expect(() => compile(plan([cards]))).toThrow("MODULE_CONTENT_INVALID");
+    const outcome = compile(plan([cards]));
+    expect(outcome.status).toBe("blocked");
+    expect(outcome.gaps).toContainEqual(expect.objectContaining({
+      moduleId: "cards",
+      reason: "MODULE_CONTENT_INVALID: content.card-grid@1.0.0",
+      severity: "blocking",
+      status: "unresolved",
+    }));
   });
 
   it("emits a real native navigate action and rejects unsupported submit/filter interactions", () => {
@@ -353,7 +327,7 @@ describe("portal module definitions", () => {
     expect(result.gaps).toContainEqual(expect.objectContaining({ moduleId: "portal-portfolio", reason: "per-item-assets-unsupported" }));
   });
 
-  it("takes the golden portal through the real UI implementation compiler with contained native controls", () => {
+  it("flattens generated module children to page-absolute native controls so KF layouts cannot reflow them", () => {
     const result = compile(createPortalPlan());
     expect(result.status).toBe("compiled");
     if (result.status !== "compiled") return;
@@ -367,11 +341,16 @@ describe("portal module definitions", () => {
       op: "create", entityType: "control", properties: expect.objectContaining({ pageId: "page-guid-home" }),
     }));
     expect(change.plan.operations).toContainEqual(expect.objectContaining({
-      op: "create", entityId: "portal-hero/primary-action", properties: expect.objectContaining({ parentId: "portal-hero/surface", action: { kind: "navigate", pageId: "Page1" } }),
+      op: "create", entityId: "portal-hero/primary-action", properties: expect.objectContaining({ action: { kind: "navigate", pageId: "Page1" } }),
     }));
+    const heroAction = change.plan.operations.find((operation) => operation.op === "create" && operation.entityId === "portal-hero/primary-action");
+    const heroActionSpec = result.implementation.pages[0]!.components.find((component) => component.id === "portal-hero/primary-action")!;
+    expect(heroAction?.op === "create" ? heroAction.properties : undefined).toMatchObject(heroActionSpec.geometry);
+    const moduleCreates = change.plan.operations.filter((operation): operation is Extract<typeof operation, { op: "create" }> => operation.op === "create" && operation.entityType === "control");
+    expect(moduleCreates.every((operation) => operation.properties["parentId"] === undefined)).toBe(true);
   });
 
-  it("materializes the golden portal as nested KF controls with a resolved navigation link", async () => {
+  it("materializes the golden portal as page-absolute KF controls with a resolved navigation link", async () => {
     const compiled = compile(createPortalPlan());
     if (compiled.status !== "compiled") throw new Error("expected compiled portal");
     const change = compileUiImplementation(compiled.implementation, { workspaceId: "workspace", pageGuidById: { Page1: "page-guid-1" }, existingControlGuidByComponentId: {}, existingControlCapabilityIdByComponentId: {}, moduleCompilationArtifact: verifiedCompilationFor(compiled) });
@@ -389,23 +368,13 @@ describe("portal module definitions", () => {
     ]));
     const page = JSON.parse(await readFile(join(candidate.rootDir, "1.0.0.1/project/page/Page1.json"), "utf8")) as Record<string, unknown>;
     const pageObjects = (page["objects"] as unknown[]).map(record);
-    const portfolio = pageObjects.find((entry) => controlName(entry) === "portal-portfolio/surface");
-    if (portfolio === undefined) throw new Error("missing portfolio surface");
-    const card = namedChild(portfolio, "portal-portfolio/card-1-surface");
-    const title = namedChild(card, "portal-portfolio/card-1-title");
-    const image = namedChild(card, "portal-portfolio/card-1-image");
-    const action = namedChild(card, "portal-portfolio/card-1-action");
-    expectInsideParent(card, portfolio);
-    expectInsideParent(title, card);
-    expectInsideParent(image, card);
-    expectInsideParent(action, card);
-
-    const hero = pageObjects.find((entry) => controlName(entry) === "portal-hero/surface");
-    if (hero === undefined) throw new Error("missing hero surface");
-    const primaryAction = namedChild(hero, "portal-hero/primary-action");
+    const primaryAction = pageObjects.find((entry) => controlName(entry) === "portal-hero/primary-action");
+    if (primaryAction === undefined) throw new Error("missing hero action");
     expect(primaryAction["linkMng"]).toEqual({ linkList: [{ action: "navigatePage", pageId: "page-guid-1" }] });
     expect(primaryAction["script"]).toBeUndefined();
     expect(Object.keys(record(primaryAction["linkMng"]))).toEqual(["linkList"]);
+    expect(pageObjects.find((entry) => controlName(entry) === "portal-portfolio/card-1-title")).toBeDefined();
+    expect(pageObjects.find((entry) => controlName(entry) === "portal-portfolio/card-1-image")).toBeDefined();
   });
 
   it("materializes ordered navigation.top targets as distinct reviewed KF page actions", async () => {
@@ -438,11 +407,10 @@ describe("portal module definitions", () => {
     ]));
 
     const page = JSON.parse(await readFile(join(candidate.rootDir, "1.0.0.1/project/page/Page1.json"), "utf8")) as Record<string, unknown>;
-    const sourceNavigation = (page["objects"] as unknown[]).map(record)
-      .find((entry) => controlName(entry) === "portal-navigation/surface");
-    if (sourceNavigation === undefined) throw new Error("missing navigation surface");
-    const projects = namedChild(sourceNavigation, "portal-navigation/nav-1");
-    const contact = namedChild(sourceNavigation, "portal-navigation/nav-2");
+    const controls = (page["objects"] as unknown[]).map(record);
+    const projects = controls.find((entry) => controlName(entry) === "portal-navigation/nav-1");
+    const contact = controls.find((entry) => controlName(entry) === "portal-navigation/nav-2");
+    if (projects === undefined || contact === undefined) throw new Error("missing flattened navigation controls");
     expect(controlName(projects)).not.toBe(controlName(contact));
     expect(projects["linkMng"]).toEqual({ linkList: [{ action: "navigatePage", pageId: "page-guid-projects" }] });
     expect(contact["linkMng"]).toEqual({ linkList: [{ action: "navigatePage", pageId: "page-guid-contact" }] });
@@ -501,12 +469,13 @@ describe("portal module definitions", () => {
     });
     const candidate = await applyClientPatch(await threePageFixture(), change.plan);
     const page = JSON.parse(await readFile(join(candidate.rootDir, "1.0.0.1/project/page/Page1.json"), "utf8")) as Record<string, unknown>;
-    const sourceNavigation = (page["objects"] as unknown[]).map(record)
-      .find((entry) => controlName(entry) === "portal-navigation/surface");
-    if (sourceNavigation === undefined) throw new Error("missing navigation surface");
-    expect(namedChild(sourceNavigation, "portal-navigation/nav-1")["linkMng"])
+    const controls = (page["objects"] as unknown[]).map(record);
+    const matched = controls.find((entry) => controlName(entry) === "portal-navigation/nav-1");
+    if (matched === undefined) throw new Error("missing flattened navigation control nav-1");
+    expect(matched["linkMng"])
       .toEqual({ linkList: [{ action: "navigatePage", pageId: "page-guid-projects" }] });
-    const unmatched = namedChild(sourceNavigation, "portal-navigation/nav-2");
+    const unmatched = controls.find((entry) => controlName(entry) === "portal-navigation/nav-2");
+    if (unmatched === undefined) throw new Error("missing flattened navigation control nav-2");
     expect(unmatched["linkMng"]).toEqual({ linkList: [] });
     expect(unmatched["script"]).toBeUndefined();
   });

@@ -96,7 +96,7 @@ describe("conversation graph workspace query", () => {
         description: "Uploaded workspace image",
         sha256: "1".repeat(64),
         sizeBytes: 128,
-        targetPath: `static/agent-assets/${"1".repeat(64)}.png`,
+        targetPath: `project/res/images/${"1".repeat(64)}.png`,
       }]),
     };
     const authority = createHmacModuleArtifactAuthority(Buffer.alloc(32, 0x67));
@@ -172,7 +172,7 @@ describe("conversation graph workspace query", () => {
         status: "resolved",
         approvedAsset: {
           workspaceAssetId: "00000000-0000-4000-8000-000000000001",
-          targetPath: `static/agent-assets/${"1".repeat(64)}.png`,
+          targetPath: `project/res/images/${"1".repeat(64)}.png`,
           mediaType: "image/png",
           sha256: "1".repeat(64),
           sizeBytes: 128,

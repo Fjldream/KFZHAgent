@@ -225,6 +225,30 @@ describe("compileUiImplementation", () => {
     expect(result.plan.operations).toEqual([]);
   });
 
+  it("preserves parentId for non-module controls", () => {
+    const nested: UIImplementationSpec = {
+      ...specFixture,
+      pages: [{
+        ...specFixture.pages[0]!,
+        components: [{
+          ...specFixture.pages[0]!.components[1]!,
+          id: "NestedButton",
+          properties: { parentId: "HandAuthoredLayout" },
+        }],
+      }],
+    };
+    const result = compileUiImplementation(nested, {
+      ...context,
+      existingControlGuidByComponentId: {},
+      existingControlCapabilityIdByComponentId: {},
+    });
+    expect(result.plan.operations).toContainEqual(expect.objectContaining({
+      op: "create",
+      entityId: "NestedButton",
+      properties: expect.objectContaining({ parentId: "HandAuthoredLayout" }),
+    }));
+  });
+
   it("maps a changed checkbox value to reviewed KF native fields", () => {
     const previous: UIImplementationSpec = {
       ...specFixture,

@@ -19,7 +19,7 @@ import {
 const BYTES = Buffer.from("exact approved image bytes");
 const SHA = createHash("sha256").update(BYTES).digest("hex");
 const ASSET_ID = "asset-00000000000040008000000000000001";
-const TARGET = `static/agent-assets/${SHA}.png`;
+const TARGET = `project/res/images/${SHA}.png`;
 
 const ir = {
   schema: "kf-client-project-ir/v1" as const,
@@ -94,7 +94,10 @@ describe("materializeClientAssets", () => {
     const portraitGuid = deriveGuid({ seed: "workspace-assets" }, "hero/portrait");
     const rawPage = inspected.raw.pages[Object.keys(inspected.raw.pages)[0]!] as { objects: unknown[] };
     expect(rawPage.objects)
-      .toEqual(expect.arrayContaining([expect.objectContaining({ guid: portraitGuid, src: TARGET })]));
+      .toEqual(expect.arrayContaining([expect.objectContaining({
+        guid: portraitGuid,
+        src: path.basename(TARGET),
+      })]));
 
     const packaged = await packageNativeClientProject(candidate.rootDir);
     const destination = await mkdtemp(path.join(tmpdir(), "kf-asset-roundtrip-"));
@@ -116,7 +119,7 @@ describe("materializeClientAssets", () => {
     ["missing input", [], /missing/i],
     ["checksum mismatch", [asset({ sha256: "0".repeat(64) })], /checksum|sha|target/i],
     ["declared size mismatch", [asset({ bytes: Buffer.concat([BYTES, Buffer.from("x")]) })], /checksum|sha/i],
-    ["traversal target", [asset({ targetPath: "static/agent-assets/../escape.png" })], /path|target/i],
+    ["traversal target", [asset({ targetPath: "project/res/images/../escape.png" })], /path|target/i],
   ])("rejects %s", async (_label, assets, expected) => {
     const candidate = await workspace();
     await expect(materializeClientAssets({ workspaceRoot: candidate.rootDir, plan: plan(), assets })).rejects.toThrow(expected);
@@ -145,12 +148,12 @@ describe("materializeClientAssets", () => {
       maxAggregateBytes: BYTES.byteLength - 1,
     })).rejects.toThrow(/aggregate|size/i);
 
-    const agentAssets = path.join(candidate.rootDir, "1.0.0.1", "static", "agent-assets");
-    await rm(agentAssets, { recursive: true, force: true });
-    await mkdir(path.dirname(agentAssets), { recursive: true });
+    const imageAssets = path.join(candidate.rootDir, "1.0.0.1", "project", "res", "images");
+    await rm(imageAssets, { recursive: true, force: true });
+    await mkdir(path.dirname(imageAssets), { recursive: true });
     const outside = await mkdtemp(path.join(tmpdir(), "kf-asset-outside-"));
-    await symlink(outside, agentAssets);
-    expect((await lstat(agentAssets)).isSymbolicLink()).toBe(true);
+    await symlink(outside, imageAssets);
+    expect((await lstat(imageAssets)).isSymbolicLink()).toBe(true);
     await expect(materializeClientAssets({ workspaceRoot: candidate.rootDir, plan: plan(), assets: [asset()] }))
       .rejects.toThrow(/symlink/i);
   });
@@ -196,9 +199,9 @@ describe("materializeClientAssets", () => {
   it("detects a swapped static ancestor before publishing staged bytes", async () => {
     const candidate = await workspace();
     const versionRoot = path.join(candidate.rootDir, "1.0.0.1");
-    const staticRoot = path.join(versionRoot, "static");
-    const swappedStaticRoot = `${staticRoot}-swapped`;
-    await mkdir(staticRoot, { recursive: true });
+    const resourceRoot = path.join(versionRoot, "project", "res");
+    const swappedResourceRoot = `${resourceRoot}-swapped`;
+    await mkdir(resourceRoot, { recursive: true });
     const call = materializeClientAssets as (input: Parameters<typeof materializeClientAssets>[0] & {
       hooks: { beforePublish: () => Promise<void> };
     }) => Promise<void>;
@@ -207,13 +210,13 @@ describe("materializeClientAssets", () => {
       plan: plan(),
       assets: [asset()],
       hooks: { beforePublish: async () => {
-        await rename(staticRoot, swappedStaticRoot);
-        await mkdir(staticRoot);
+        await rename(resourceRoot, swappedResourceRoot);
+        await mkdir(resourceRoot);
       } },
     })).rejects.toThrow(/ancestor|changed|identity|race/i);
-    await expect(readFile(path.join(staticRoot, TARGET))).rejects.toThrow();
-    expect((await readdir(swappedStaticRoot)).filter((entry) => entry.startsWith(".agent-assets-stage-"))).toEqual([]);
-    await expect(readFile(path.join(swappedStaticRoot, TARGET))).rejects.toThrow();
+    await expect(readFile(path.join(versionRoot, TARGET))).rejects.toThrow();
+    expect((await readdir(swappedResourceRoot)).filter((entry) => entry.startsWith(".agent-assets-stage-"))).toEqual([]);
+    await expect(readFile(path.join(swappedResourceRoot, "images", path.basename(TARGET)))).rejects.toThrow();
   });
 
   it("cleans independently staged bytes when static moves outside the candidate after staging", async () => {
@@ -224,8 +227,8 @@ describe("materializeClientAssets", () => {
       workRoot: candidateParent,
     });
     const versionRoot = path.join(candidate.rootDir, "1.0.0.1");
-    const staticRoot = path.join(versionRoot, "static");
-    const movedStaticRoot = path.join(candidateParent, `${path.basename(candidate.rootDir)}-moved-static`);
+    const resourceRoot = path.join(versionRoot, "project", "res");
+    const movedResourceRoot = path.join(candidateParent, `${path.basename(candidate.rootDir)}-moved-static`);
     let observedStageAfterMove: string | undefined;
     const call = materializeClientAssets as (input: Parameters<typeof materializeClientAssets>[0] & {
       hooks: { afterStageBeforePublish: () => Promise<void> };
@@ -237,20 +240,20 @@ describe("materializeClientAssets", () => {
       assets: [asset()],
       hooks: { afterStageBeforePublish: async () => {
         const parentStage = (await readdir(candidateParent)).find((entry) => entry.startsWith(".kf-agent-assets-stage-"));
-        const staticStage = (await readdir(staticRoot)).find((entry) => entry.startsWith(".agent-assets-stage-"));
-        await rename(staticRoot, movedStaticRoot);
-        await mkdir(staticRoot);
+        const resourceStage = (await readdir(resourceRoot)).find((entry) => entry.startsWith(".agent-assets-stage-"));
+        await rename(resourceRoot, movedResourceRoot);
+        await mkdir(resourceRoot);
         observedStageAfterMove = parentStage === undefined
-          ? staticStage === undefined ? undefined : path.join(movedStaticRoot, staticStage)
+          ? resourceStage === undefined ? undefined : path.join(movedResourceRoot, resourceStage)
           : path.join(candidateParent, parentStage);
       } },
     })).rejects.toThrow(/ancestor|changed|identity|race/i);
     expect(observedStageAfterMove).toBeDefined();
     await expect(lstat(observedStageAfterMove!)).rejects.toThrow();
     expect((await readdir(candidateParent)).filter((entry) => entry.startsWith(".kf-agent-assets-stage-"))).toEqual([]);
-    expect((await readdir(movedStaticRoot)).filter((entry) => entry.includes("stage"))).toEqual([]);
-    await expect(readFile(path.join(staticRoot, TARGET))).rejects.toThrow();
-    await expect(readFile(path.join(movedStaticRoot, TARGET))).rejects.toThrow();
+    expect((await readdir(movedResourceRoot)).filter((entry) => entry.includes("stage"))).toEqual([]);
+    await expect(readFile(path.join(versionRoot, TARGET))).rejects.toThrow();
+    await expect(readFile(path.join(movedResourceRoot, "images", path.basename(TARGET)))).rejects.toThrow();
   });
 
   it("rolls back approved bytes when static moves outside the candidate after target publication", async () => {
@@ -260,19 +263,19 @@ describe("materializeClientAssets", () => {
       buildSeed: "workspace-assets",
       workRoot: candidateParent,
     });
-    const staticRoot = path.join(candidate.rootDir, "1.0.0.1", "static");
-    const movedStaticRoot = path.join(candidateParent, `${path.basename(candidate.rootDir)}-published-static`);
+    const resourceRoot = path.join(candidate.rootDir, "1.0.0.1", "project", "res");
+    const movedResourceRoot = path.join(candidateParent, `${path.basename(candidate.rootDir)}-published-static`);
 
     await expect(materializeClientAssets({
       workspaceRoot: candidate.rootDir,
       plan: plan(),
       assets: [asset()],
       hooks: { afterPublishBeforeRewrite: async () => {
-        await rename(staticRoot, movedStaticRoot);
-        await mkdir(staticRoot);
+        await rename(resourceRoot, movedResourceRoot);
+        await mkdir(resourceRoot);
       } },
     })).rejects.toThrow(/ancestor|changed|identity|race/i);
-    const escaped = await readFile(path.join(movedStaticRoot, "agent-assets", path.basename(TARGET))).catch(() => undefined);
+    const escaped = await readFile(path.join(movedResourceRoot, "images", path.basename(TARGET))).catch(() => undefined);
     expect(escaped).not.toEqual(BYTES);
     expect((await readdir(candidateParent)).filter((entry) => entry.startsWith(".kf-agent-assets-stage-"))).toEqual([]);
   });
@@ -284,8 +287,8 @@ describe("materializeClientAssets", () => {
       buildSeed: "workspace-assets",
       workRoot: candidateParent,
     });
-    const staticRoot = path.join(candidate.rootDir, "1.0.0.1", "static");
-    const movedStaticRoot = path.join(candidateParent, `${path.basename(candidate.rootDir)}-linked-static`);
+    const resourceRoot = path.join(candidate.rootDir, "1.0.0.1", "project", "res");
+    const movedResourceRoot = path.join(candidateParent, `${path.basename(candidate.rootDir)}-linked-static`);
     const call = materializeClientAssets as (input: Parameters<typeof materializeClientAssets>[0] & {
       hooks: { afterTargetLinked: (targetPath: string, index: number) => Promise<void> };
     }) => Promise<void>;
@@ -295,12 +298,12 @@ describe("materializeClientAssets", () => {
       plan: plan(),
       assets: [asset()],
       hooks: { afterTargetLinked: async () => {
-        await rename(staticRoot, movedStaticRoot);
-        await mkdir(staticRoot);
+        await rename(resourceRoot, movedResourceRoot);
+        await mkdir(resourceRoot);
         throw new Error("simulated failure before target open");
       } },
     })).rejects.toThrow(/target open|rollback|ownership/i);
-    expect(await readFile(path.join(movedStaticRoot, "agent-assets", path.basename(TARGET))).catch(() => undefined)).not.toEqual(BYTES);
+    expect(await readFile(path.join(movedResourceRoot, "images", path.basename(TARGET))).catch(() => undefined)).not.toEqual(BYTES);
     expect((await readdir(candidateParent)).filter((entry) => entry.startsWith(".kf-agent-assets-stage-"))).toEqual([]);
   });
 
@@ -328,7 +331,7 @@ describe("materializeClientAssets", () => {
   it("scrubs every published inode when one target rollback unlink fails", async () => {
     const secondBytes = Buffer.from("second exact approved image bytes");
     const secondSha = createHash("sha256").update(secondBytes).digest("hex");
-    const secondTarget = `static/agent-assets/${secondSha}.png`;
+    const secondTarget = `project/res/images/${secondSha}.png`;
     const secondId = "asset-00000000000040008000000000000002";
     const secondControl = {
       ...ir.pages[0]!.controls[0]!,
@@ -383,7 +386,7 @@ describe("materializeClientAssets", () => {
   it("scrubs every published inode when setup and the first rollback unlink fail", async () => {
     const secondBytes = Buffer.from("setup failure second approved image bytes");
     const secondSha = createHash("sha256").update(secondBytes).digest("hex");
-    const secondTarget = `static/agent-assets/${secondSha}.png`;
+    const secondTarget = `project/res/images/${secondSha}.png`;
     const secondId = "asset-00000000000040008000000000000002";
     const twoAssetCandidate = await createKingClientDomainPack({ nativeAccepted: true }).compile({
       projectIr: {
@@ -485,13 +488,14 @@ describe("materializeClientAssets", () => {
     expect(await readFile(externalPage)).toEqual(original);
   });
 
-  it("rejects a case-aliased agent-assets directory when the filesystem aliases case", async () => {
+  it("rejects a case-aliased images directory when the filesystem aliases case", async () => {
     const candidate = await workspace();
-    const staticRoot = path.join(candidate.rootDir, "1.0.0.1", "static");
-    await mkdir(path.join(staticRoot, "Agent-Assets"), { recursive: true });
+    const resourceRoot = path.join(candidate.rootDir, "1.0.0.1", "project", "res");
+    await rm(path.join(resourceRoot, "images"), { recursive: true, force: true });
+    await mkdir(path.join(resourceRoot, "Images"), { recursive: true });
     let aliasesCase = false;
     try {
-      aliasesCase = (await realpath(path.join(staticRoot, "agent-assets"))) !== path.join(staticRoot, "agent-assets");
+      aliasesCase = (await realpath(path.join(resourceRoot, "images"))) !== path.join(resourceRoot, "images");
     } catch { /* case-sensitive filesystem: no alias exists */ }
     if (!aliasesCase) return;
     await expect(materializeClientAssets({ workspaceRoot: candidate.rootDir, plan: plan(), assets: [asset()] }))
@@ -504,12 +508,17 @@ describe("materializeClientAssets", () => {
     const missingPlan = {
       schema: "kf-change-plan/v1" as const,
       workspaceId: "workspace-assets",
-      operations: [{ op: "update" as const, entityId: portraitGuid, entityType: "control", changes: [{ path: "/src", value: TARGET }] }],
+      operations: [{
+        op: "update" as const,
+        entityId: portraitGuid,
+        entityType: "control",
+        changes: [{ path: "/src", value: path.basename(TARGET) }],
+      }],
     };
     const pack = createKingClientDomainPack({ nativeAccepted: true });
     const candidate = await pack.patch({ baseWorkspace: base, changePlan: missingPlan, expectedPlanHash: planHash(missingPlan) });
     const report = await validateClientProject(base.rootDir, candidate.rootDir, missingPlan, { skipRoundTrip: false });
     expect(report.status).toBe("fail");
-    expect(JSON.stringify(report)).toMatch(/agent-assets|resource/i);
+    expect(JSON.stringify(report)).toMatch(/images|resource/i);
   });
 });

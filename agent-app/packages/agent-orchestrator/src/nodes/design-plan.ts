@@ -30,12 +30,20 @@ export function createDesignPlanNode(deps: SolutionGraphDeps) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
     const revising = state.revising === true || state.intent === "REVISE_DESIGN";
     let modulePlanningCatalog;
+    let editableEntities = (state as { editableEntities?: import("../ports.js").EditableEntity[] }).editableEntities;
     if (state.generationWorkflow === "module-v1" && state.workspaceMode !== "upload") {
       if (deps.modulePlanCompiler === undefined) {
         return { stage: "idle", lastErrorCode: "MODULE_PLANNING_FAILED" };
       }
       try {
         modulePlanningCatalog = await deps.modulePlanCompiler.listPlanningCatalog();
+        if (state.currentRevisionId !== undefined) {
+          editableEntities = await deps.workspaceQuery.getRevisionEntities({
+            tenantId: state.tenantId,
+            workspaceId: state.workspaceId,
+            revisionId: state.currentRevisionId,
+          });
+        }
       } catch {
         return { stage: "idle", lastErrorCode: "MODULE_PLANNING_FAILED" };
       }
@@ -52,9 +60,7 @@ export function createDesignPlanNode(deps: SolutionGraphDeps) {
       ...(modulePlanningCatalog === undefined ? {} : { modulePlanningCatalog }),
       // editableEntities may not be materialised on state yet; the context
       // field stays optional so a future wiring can feed it through.
-      editableEntities: (state as { editableEntities?: unknown }).editableEntities as
-        | import("../ports.js").EditableEntity[]
-        | undefined,
+      editableEntities,
     };
     let rawPlan: unknown;
     let modelCallFailed = false;

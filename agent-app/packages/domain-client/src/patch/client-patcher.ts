@@ -17,7 +17,7 @@ import { z } from "zod";
 import { inspectClientProject, type EntityIndex, type InspectResult } from "../inspect/client-inspector.js";
 import { stableStringify, type ClientWorkspace } from "../compile/client-compiler.js";
 import { deriveGuid } from "../compile/guid-factory.js";
-import { compileAction, ensureChildGuids } from "../compile/control-compiler.js";
+import { compileAction, ensureChildGuids, normalizeNativeSizePolicy } from "../compile/control-compiler.js";
 import type { RestrictedAction } from "../ir/client-project-ir.js";
 import { RestrictedAction as RestrictedActionSchema } from "../ir/client-project-ir.schema.js";
 import { assertStyleCompilationAccepted, compileControlStyle } from "../style/style-engine.js";
@@ -1623,7 +1623,9 @@ async function applyCreate(
           const value = properties[key];
           if (value !== undefined) (overrides as Record<string, unknown>)[key] = value;
         }
-        const control = mergeControlTemplate(mergeControlTemplate(BASE_FIELDS, template), overrides);
+        const control = normalizeNativeSizePolicy(
+          mergeControlTemplate(mergeControlTemplate(BASE_FIELDS, template), overrides),
+        );
         if (type === "button" && properties["action"] !== undefined) {
           const action = properties["action"] as RestrictedAction;
           try {

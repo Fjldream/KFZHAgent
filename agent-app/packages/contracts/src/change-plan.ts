@@ -97,7 +97,7 @@ export const ChangePlanAssetBindingSchema = z.object({
   entityId: ChangeEntityIdSchema,
   controlId: ChangeEntityIdSchema,
   capabilityId: z.literal("image"),
-  targetPath: z.string().regex(/^static\/agent-assets\/[0-9a-f]{64}\.(?:png|jpg|webp)$/),
+  targetPath: z.string().regex(/^project\/res\/images\/[0-9a-f]{64}\.(?:png|jpg|webp)$/),
   mediaType: AssetMediaTypeSchema,
   sha256: AssetSha256Schema,
   sizeBytes: z.number().int().positive().max(50 * 1024 * 1024),
@@ -106,7 +106,7 @@ export const ChangePlanAssetBindingSchema = z.object({
     ctx.addIssue({ code: "custom", path: ["workspaceAssetId"], message: "asset alias identity mismatch" });
   }
   const extension = binding.mediaType === "image/png" ? "png" : binding.mediaType === "image/jpeg" ? "jpg" : "webp";
-  if (binding.targetPath !== `static/agent-assets/${binding.sha256}.${extension}`) {
+  if (binding.targetPath !== `project/res/images/${binding.sha256}.${extension}`) {
     ctx.addIssue({ code: "custom", path: ["targetPath"], message: "asset target does not match signed media and checksum" });
   }
 });

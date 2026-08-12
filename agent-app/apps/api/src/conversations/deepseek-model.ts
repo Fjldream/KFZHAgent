@@ -29,6 +29,30 @@ import type {
 } from "@kf/agent-orchestrator";
 import { ClassifyIntentResultSchema } from "@kf/agent-orchestrator";
 
+function bindSingleKfPageNavigation(
+  blueprint: CustomerEffectBlueprint,
+  editableEntities: readonly EditableEntity[] | undefined,
+): CustomerEffectBlueprint {
+  const pageIds = [...new Set((editableEntities ?? [])
+    .filter((entity) => entity.kind === "page")
+    .map((entity) => entity.name))];
+  if (pageIds.length !== 1) return blueprint;
+  const pageId = pageIds[0]!;
+  return {
+    ...blueprint,
+    modules: blueprint.modules.map((module) => ({
+      ...module,
+      ...(module.interactionRequirements === undefined
+        ? {}
+        : {
+            interactionRequirements: module.interactionRequirements.map((requirement) =>
+              requirement.type === "navigate" ? { ...requirement, target: pageId } : requirement,
+            ),
+          }),
+    })),
+  };
+}
+
 /**
  * DeepSeek-backed ModelPort (OpenAI-compatible chat completions).
  *
@@ -1032,6 +1056,9 @@ export class DeepSeekModelPort implements ModelPort {
       recentConversation.length > 0 ? recentConversation : "（无）",
     ];
     if (input.modulePlanningCatalog !== undefined) {
+      const existingPageIds = [...new Set((input.editableEntities ?? [])
+        .filter((entity) => entity.kind === "page")
+        .map((entity) => entity.name))].sort(codePointCompare);
       const catalog = input.modulePlanningCatalog.map((entry) => ({
         exactDefinition: `${entry.kind}@${entry.version}`,
         kind: entry.kind,
@@ -1045,7 +1072,8 @@ export class DeepSeekModelPort implements ModelPort {
         JSON.stringify(catalog),
         "当前是 module-v1 工作流。modules 中每一项都必须增加 expectedKind、expectedCategory、interactionRequirements；expectedKind 只填写目录的 kind 值（例如 content.hero），不得把 @version 写进 expectedKind；版本由服务器按 exactDefinition 校验。",
         "只创建客户明确要求且能由稳定目录实现的模块，不得创建目录以外的模块，也不得用一个稳定模块冒充不相符的业务模块。若需求超出目录，在 openQuestions 中明确说明能力缺口，不要添加无法实施的模块。",
-        "expectedCategory 只写 kind 第一个点号之前的类别；interactionRequirements 仅为客户明确要求且目录 interactions 支持的机器交互，否则写空数组。服务器会在确认边界重新校正这些字段，模型声明本身不构成授权。",
+        "expectedCategory 只写 kind 第一个点号之前的类别；interactionRequirements 仅为客户明确要求且目录 interactions 支持的机器交互，否则写空数组。interactionRequirements 的每一项必须是对象 {\"type\":\"navigate\",\"actionKind\":\"导航\",\"target\":\"home\"}，不得输出字符串数组；type 只能是 navigate、scroll、open-modal、submit、filter、toggle。interactions 与 interactionRequirements 必须逐项对应；不允许在 interactions 中写“纯展示”“无额外交互”“模拟提示”等说明文字，纯展示模块必须把这两个字段都写成空数组。服务器会在确认边界重新校正这些字段，模型声明本身不构成授权。",
+        ...(existingPageIds.length === 0 ? [] : [`navigate 的 target 必须逐字使用现有 KF 页面 ID： ${JSON.stringify(existingPageIds)}`]),
       );
     }
     if (revising) {
@@ -1075,7 +1103,7 @@ export class DeepSeekModelPort implements ModelPort {
           .join("; ")}`,
       );
     }
-    return parsed.data;
+    return bindSingleKfPageNavigation(parsed.data, input.editableEntities);
   }
 
   async createProjectDesign(input: ModelPortContext): Promise<ProjectDesign> {
@@ -1269,6 +1297,14 @@ export class DeepSeekModelPort implements ModelPort {
       previousPlanForPrompt = previous.data;
     }
     const existingPageIds = [...new Set((input.editableEntities ?? []).filter((entity) => entity.kind === "page").map((entity) => entity.name))].sort(codePointCompare);
+    const assetFreeVariantRules = assets.length === 0
+      ? catalog.flatMap((entry) => {
+          const assetVariants = new Set(entry.slots.flatMap((slot) => slot.requiredForVariants ?? []));
+          if (assetVariants.size === 0) return [];
+          const assetFreeVariants = entry.variants.filter((variant) => !assetVariants.has(variant));
+          return [`服务器资产目录为空：${entry.kind} 只能选择无需资源的 ${assetFreeVariants.join("、") || "（无可用变体）"}，不得选择 ${[...assetVariants].join(" 或 ")}，且不得输出 assetId。`];
+        })
+      : [];
     const prompt = [
       "把已经确认的客户效果蓝图转换成完整 ModulePlan，而不是 UIImplementationSpec、ChangePlan 或 KF JSON。",
       "输出 schema 固定为 kf-module-plan/v1，顶层只包含 schema、projectKey、theme、assets、pages、operations；不得输出 revisionId、blueprintHash 或任何其它顶层字段。顶层 assets 由服务器强制替换为当前目录快照，模型不得决定它；模块只能在 assetId 中引用目录中的 id，绝不写路径、URL、storageKey 或文件名替代 ID。",
@@ -1278,11 +1314,13 @@ export class DeepSeekModelPort implements ModelPort {
       "每个 module 必须包含 id、kind、templateVersion、variant、title、content、sourceBlueprintModuleIds、placement、interactions；即使 title 与蓝图 name 相同也不能省略。",
       "每个 module 只能使用稳定目录中逐字一致的 kind、version(templateVersion) 和 variant；beta、unsupported 或未列出的条目一律不可用。",
       "每个 module 的 content 必须是严格 JSON 字符串，字段与嵌套结构严格仿照该 kind 的服务器 contentExample，只替换客户文案或示例数据；不得新增、改名或省略必填字段。",
+      "contentExample 中的所有字符串字段都必须保留为非空字符串；如果业务内容为空，仍需生成简短、客户可读的非空文案。MODULE_CONTENT_INVALID 表示 content 没有严格匹配该示例结构，修订时必须只修正对应模块的 content。",
       'placement 必须完整包含 region、order、columnSpan、preferredHeight、alignment、emphasis；emphasis 只能是 "primary"、"secondary" 或 "subtle"。V1 模块规划时 alignment 必须使用 "stretch"，视觉上的居中由模块编译器内部排版完成；禁止输出 geometry、x、y、width、height 或任何 CSS。',
       '若门禁 reason 是 module-bounds-insufficient，必须保持该模块 alignment="stretch"，把 columnSpan 调到目录允许的 maxColumnSpan，并选择不低于 medium 的 preferredHeight；不得只改文案后原样重试。',
       "每个已确认蓝图模块 ID 必须且只能出现一次 sourceBlueprintModuleIds；其 module.kind 必须逐字匹配服务器已确认的 expectedKind。不要新增、删除或改写这些来源 ID。",
       "内容只能写 title 与 JSON 字符串 content；theme 只能使用 ModulePlan 的结构化 theme 字段。禁止原生 KF 字段、objectType、uiModelType、styleDataNew、脚本、HTML、JavaScript、CSS、文件路径与存储键。",
-      "交互只能使用登记模块允许的 ModulePlan 交互类型，并匹配已确认蓝图交互要求。",
+      "交互只能使用登记模块允许的 ModulePlan 交互类型，并匹配已确认蓝图交互要求。交互字段映射必须严格遵守：navigate 必须输出 {\"type\":\"navigate\",\"pageId\":\"<signed target>\"}；scroll/open-modal 使用 moduleId；submit 必须输出 {\"type\":\"submit\",\"action\":\"<signed target>\"}；filter 使用 field；toggle 使用 target。ModulePlan interactions 中绝不输出 actionKind，也不输出通用 target 代替 pageId/moduleId/action/field。",
+      "navigation.top 的 items 数量必须与该模块签名的 navigate 要求数量完全一致：没有 navigate 要求时不得使用 navigation.top；只有一个 navigate 要求时 items 只能有一个对应标签。纯展示的页脚应在蓝图阶段使用 feedback.alert-list 或其它无交互稳定模块，不得借 navigation.top 冒充。",
       revising
         ? "这是完整修订：pages 必须保留所有上一版模块；没有显式 operations 目标的旧模块必须逐字保持不变。不得把遗漏当作删除。"
         : "这是首次完整规划：所有已确认蓝图模块都必须落到 pages.modules。",
@@ -1292,6 +1330,7 @@ export class DeepSeekModelPort implements ModelPort {
       catalog.map((entry) => `${entry.kind}@${entry.version} variants=${entry.variants.join(",")} layout=${JSON.stringify(entry.layout)} interactions=${entry.interactions.join(",") || "none"} assetSlots=${JSON.stringify(entry.slots)} contentExample=${JSON.stringify(entry.contentExample ?? {})}`).join("\n"),
       "服务器资产目录（只能按 id 引用；assets 顶层必须逐条原样回显）：",
       JSON.stringify(assets),
+      ...assetFreeVariantRules,
       "最近会话上下文：",
       recentConversation || "（无）",
       recentTruncated ? "[recentMessages truncated=true]" : "[recentMessages truncated=false]",
@@ -1316,7 +1355,7 @@ export class DeepSeekModelPort implements ModelPort {
     if (!parsed.success) {
       throwModulePlanError(`failed zod gate: ${parsed.error.issues.slice(0, 3).map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")}`);
     }
-    const plan = parsed.data;
+    let plan = parsed.data;
     if (!revising && plan.operations.length !== 0) throwModulePlanError("create ModulePlan operations must be empty");
     if (plan.projectKey !== accepted.projectKey) throwModulePlanError("projectKey differs from accepted artifact");
     const catalog = this.planningCatalog(input);
@@ -1334,8 +1373,10 @@ export class DeepSeekModelPort implements ModelPort {
         plan,
         new Set(accepted.modules.map((module) => module.blueprintModuleId)),
       );
-      const actualOperations = [...plan.operations].sort((left, right) => codePointCompare(operationSortKey(left), operationSortKey(right)));
-      if (!stableEqual(actualOperations, expectedOperations)) throwModulePlanError("operations do not exactly describe the revision delta");
+      // `pages` is the authoritative revision snapshot. Operations are a
+      // deterministic server-derived audit trail, not a second model-authored
+      // source of truth that can drift from the snapshot.
+      plan = ModulePlanSchema.parse({ ...plan, operations: expectedOperations });
     }
     const seenBlueprintIds = new Set<string>();
     const existingPageIds = new Set((input.editableEntities ?? []).filter((entity) => entity.kind === "page").map((entity) => entity.name));

@@ -16,6 +16,37 @@ const ctx: CompileContext = {
 };
 
 describe("control compiler — structured styles", () => {
+  it("emits the two disabled native image event slots required by KF runtime", () => {
+    const out = compileControl(build, {
+      id: "Portrait",
+      type: "image",
+      x: 10,
+      y: 20,
+      width: 200,
+      height: 160,
+      src: "portrait.png",
+    }, ctx);
+    expect(out["linkMng"]).toEqual({ linkList: [
+      { linkId: 200001, enable: false, script: "", name: "Load" },
+      { linkId: 200002, enable: false, script: "", name: "Error" },
+    ] });
+  });
+
+  it("serializes legacy KF controls with the flat size policy shape consumed at runtime", () => {
+    const out = compileControl(build, {
+      id: "RuntimeLabel",
+      type: "text",
+      x: 16,
+      y: 24,
+      width: 320,
+      height: 48,
+      text: "Visible in KF",
+    }, ctx);
+
+    expect(out["sizePolicy"]).toEqual([3, 3, 0, 0]);
+    expect(out["fixedSize"]).toEqual([40, 30]);
+  });
+
   it("compiles the same StyleSpec for a new IR button", () => {
     const out = compileControl(build, {
       id: "StyledButton",
@@ -206,11 +237,41 @@ describe("control compiler — layout containers (objectType=2)", () => {
       leftTopPt: { x: 0, y: 12 },
       width: 300,
       height: 127.8,
+      styleData: "",
+      styleDataNew: "",
+      comment: "",
+      lock: false,
+      visible: true,
+      memberAccess: true,
     });
     // 布局不合并 control 级 base-fields（comment/lock/visible 等在 baseProperty 内）
     expect("comment" in out).toBe(false);
     expect(out["version"]).toBe("2.0.0.1");
     expect(out["sizePolicy"]).toEqual([3, 3, 0, 0]);
+  });
+
+  it("stores reviewed layout styles in baseProperty so the KF runtime renders them", () => {
+    const layout = {
+      id: "StyledHorizontalLayout",
+      type: "layout",
+      x: 20,
+      y: 30,
+      width: 480,
+      height: 240,
+      layoutType: 2,
+      style: {
+        declarations: { backgroundColor: "#111827", borderRadius: 8, padding: 16 },
+        states: {},
+      },
+    } as unknown as ControlIR;
+
+    const out = compileControl(build, layout, ctx);
+    const baseProperty = out["baseProperty"] as Record<string, unknown>;
+    expect(baseProperty["backgroundColor"]).toBe("#111827");
+    expect(baseProperty["styleDataNew"]).toContain("border-radius:8px");
+    expect(baseProperty["styleDataNew"]).toContain("padding:16px");
+    expect(out["backgroundColor"]).toBeUndefined();
+    expect(out["styleDataNew"]).toBeUndefined();
   });
 
   it("carries nested children verbatim into insiderObjects and panels into dPanelsOption", () => {
@@ -547,11 +608,8 @@ describe.skipIf(!existsSync(REF_DIR))("golden alignment with the reference proje
     expect(out["objectType"]).toBe(ref.objectType);
     expect(out["layoutType"]).toBe(ref.layoutType);
     expect(out["baseProperty"]).toEqual({
-      name: ref.baseProperty.name,
+      ...ref.baseProperty,
       guid: expect.stringMatching(/^k?[0-9a-f-]+$/),
-      leftTopPt: ref.baseProperty.leftTopPt,
-      width: ref.baseProperty.width,
-      height: ref.baseProperty.height,
     });
     // Generative compilation owns nested identities and derives the child GUID;
     // every non-identity byte remains aligned with the reference input.

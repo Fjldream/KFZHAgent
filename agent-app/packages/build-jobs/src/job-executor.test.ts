@@ -86,7 +86,7 @@ describe("resolveBuildAssets", () => {
     entityId: "hero/portrait",
     controlId: "hero/portrait",
     capabilityId: "image" as const,
-    targetPath: `static/agent-assets/${sha256}.png`,
+    targetPath: `project/res/images/${sha256}.png`,
     mediaType: "image/png",
     sha256,
     sizeBytes: bytes.byteLength,
@@ -116,7 +116,7 @@ describe("resolveBuildAssets", () => {
       bindings: [binding],
     })).resolves.toEqual([{
       assetId: modelAssetId,
-      targetPath: `static/agent-assets/${sha256}.png`,
+      targetPath: `project/res/images/${sha256}.png`,
       mediaType: "image/png",
       sha256,
       bytes,
@@ -159,7 +159,7 @@ describe("resolveBuildAssets", () => {
 
   it.each([
     ["internal identity", { workspaceAssetId: "00000000-0000-4000-8000-000000000002" }],
-    ["target path", { targetPath: `static/agent-assets/${"2".repeat(64)}.png` }],
+    ["target path", { targetPath: `project/res/images/${"2".repeat(64)}.png` }],
     ["media type", { mediaType: "image/webp" }],
     ["checksum", { sha256: "2".repeat(64) }],
     ["size", { sizeBytes: bytes.byteLength + 1 }],

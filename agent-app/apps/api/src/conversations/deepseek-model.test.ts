@@ -617,6 +617,7 @@ describe("DeepSeekModelPort", () => {
         slots: [],
         interactions: [],
       }],
+      editableEntities: [{ kind: "page", name: "Page1", type: "page", guid: "page-guid" }],
     });
 
     const prompt = JSON.parse(fetchImpl.mock.calls[0]![1]!.body as string).messages[1].content as string;
@@ -624,7 +625,40 @@ describe("DeepSeekModelPort", () => {
     expect(prompt).toContain("expectedKind");
     expect(prompt).toContain("不得把 @version 写进 expectedKind");
     expect(prompt).toContain("不得创建目录以外的模块");
+    expect(prompt).toContain('interactionRequirements 的每一项必须是对象 {"type":"navigate","actionKind":"导航","target":"home"}');
+    expect(prompt).toContain("不得输出字符串数组");
+    expect(prompt).toContain("interactions 与 interactionRequirements 必须逐项对应");
+    expect(prompt).toContain("纯展示模块必须把这两个字段都写成空数组");
+    expect(prompt).toContain('navigate 的 target 必须逐字使用现有 KF 页面 ID： ["Page1"]');
     expect(prompt).not.toContain("content.timeline@1.0.0");
+  });
+
+  it("binds a single-page blueprint navigation target to the server-owned KF page identity", async () => {
+    const plan = detailedBlueprint({
+      modules: [{
+        id: "nav",
+        name: "顶部导航",
+        purpose: "返回首页",
+        content: ["首页"],
+        sampleData: [{ label: "导航", value: "首页" }],
+        interactions: ["返回首页"],
+        expectedKind: "navigation.top",
+        expectedCategory: "navigation",
+        interactionRequirements: [{ type: "navigate", actionKind: "导航", target: "home" }],
+        presentation: "顶部导航",
+      }],
+    });
+    const port = makePort(plan);
+    const result = await port.createDesignPlan({
+      tenantId: "t", userId: "u", workspaceId: "w", conversationId: "c", recentMessages: [],
+      requirementText: "生成导航",
+      modulePlanningCatalog: [{ kind: "navigation.top", version: "1.0.0", maturity: "stable", variants: ["default"], slots: [], interactions: ["navigate"] }],
+      editableEntities: [{ kind: "page", name: "Page1", type: "page", guid: "page-guid" }],
+    });
+
+    expect(result.schema).toBe("kf-design-plan/v2");
+    if (result.schema !== "kf-design-plan/v2") throw new Error("expected v2 blueprint");
+    expect(result.modules[0]?.interactionRequirements).toEqual([{ type: "navigate", actionKind: "导航", target: "Page1" }]);
   });
 
   it("spells out the complete strict ModulePlan theme contract", async () => {
@@ -647,6 +681,34 @@ describe("DeepSeekModelPort", () => {
     expect(prompt).toContain('alignment 必须使用 "stretch"');
     expect(prompt).toContain("module-bounds-insufficient");
     expect(prompt).toContain("不得输出 revisionId");
+    expect(prompt).toContain('navigate 必须输出 {"type":"navigate","pageId":"<signed target>"}');
+    expect(prompt).toContain('submit 必须输出 {"type":"submit","action":"<signed target>"}');
+  });
+
+  it("forces asset-free planning to choose only variants without required asset slots", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify(modulePlan()) } }] }),
+    });
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+
+    await port.createModulePlan(modulePlanningContext({
+      assetCatalog: [],
+      modulePlanningCatalog: [{
+        kind: "content.hero",
+        version: "1.0.0",
+        maturity: "stable",
+        variants: ["portrait-left", "portrait-right", "no-portrait"],
+        slots: [{ id: "portrait", required: false, requiredForVariants: ["portrait-left", "portrait-right"], allowedKinds: ["image"] }],
+        interactions: [],
+        layout: { regions: ["main"], minColumnSpan: 6, maxColumnSpan: 12, preferredHeights: ["large"] },
+      }, modulePlanningContext().modulePlanningCatalog[1]],
+    }));
+
+    const prompt = JSON.parse(fetchImpl.mock.calls[0]![1]!.body as string).messages[1].content as string;
+    expect(prompt).toContain("服务器资产目录为空");
+    expect(prompt).toContain("content.hero 只能选择无需资源的 no-portrait");
+    expect(prompt).toContain("不得选择 portrait-left 或 portrait-right");
   });
 
   it("binds module planning to server-owned existing page identities", async () => {
@@ -718,6 +780,29 @@ describe("DeepSeekModelPort", () => {
     const prompt = JSON.parse(fetchImpl.mock.calls[0]![1]!.body as string).messages[1].content as string;
     expect(prompt).toContain('contentExample={"description":"可信实时数据","subtitle":"连接数据、现场与决策","title":"工业智能平台"}');
     expect(prompt).toContain("content 必须是严格 JSON 字符串");
+    expect(prompt).toContain("MODULE_CONTENT_INVALID");
+    expect(prompt).toContain("所有字符串字段都必须保留为非空字符串");
+    expect(prompt).toContain("navigation.top 的 items 数量必须与该模块签名的 navigate 要求数量完全一致");
+  });
+
+  it("keeps stable registry content examples in the runtime planning prompt", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify(modulePlan()) } }] }),
+    });
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+    const context = modulePlanningContext();
+    const stableStatus = createDefaultModuleRegistry([{
+      kind: "data.status-grid", version: "1.0.0", runtimeFamily: "KingFusion", runtimeVersion: "3.6",
+      baselineId: "kf36-dashboard-admin-v1", verifiedCapabilities: ["layout.2", "text", "tag"],
+    }]).listForPlanning()[0]!;
+
+    await port.createModulePlan({ ...context, modulePlanningCatalog: [...context.modulePlanningCatalog, stableStatus] });
+
+    const prompt = JSON.parse(fetchImpl.mock.calls[0]![1]!.body as string).messages[1].content as string;
+    expect(prompt).toContain('data.status-grid@1.0.0');
+    expect(prompt).toContain('"severity":"online"');
+    expect(prompt).toContain('data.status-grid@1.0.0 variants=compact,default');
   });
 
   it("createDesignPlan rejects output that fails the zod gate", async () => {
@@ -1071,14 +1156,16 @@ describe("DeepSeekModelPort", () => {
       modules: [{ ...previous.pages[0].modules[0], title: "偷改标题" }, previous.pages[0].modules[1]],
     }] });
     await expect(makePort(silentChange).reviseModulePlan(modulePlanningContext({ previousModulePlan: previous })))
-      .rejects.toThrow("operations do not exactly describe");
+      .resolves.toMatchObject({ operations: [{ op: "update", moduleId: "productsHero", changes: { title: "偷改标题" } }] });
 
     const resizeMasksTitle = modulePlan({
       pages: [{ ...previous.pages[0], modules: [{ ...previous.pages[0].modules[0], title: "不该被 resize 掩盖" }, previous.pages[0].modules[1]] }],
       operations: [{ op: "resize", pageId: "home", moduleId: "productsHero", columnSpan: 12, preferredHeight: "large" }],
     });
     await expect(makePort(resizeMasksTitle).reviseModulePlan(modulePlanningContext({ previousModulePlan: previous })))
-      .rejects.toThrow("operations do not exactly describe");
+      .resolves.toMatchObject({
+        operations: [{ op: "update", moduleId: "productsHero", changes: { title: "不该被 resize 掩盖" } }],
+      });
   });
 
   it("derives detached composite revision payloads", () => {

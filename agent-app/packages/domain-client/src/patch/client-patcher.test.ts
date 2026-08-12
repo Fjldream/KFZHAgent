@@ -582,6 +582,8 @@ describe("client patcher (Task 7 brief Step 1)", () => {
     expect(inner["internalVertex"]).toEqual({ left: 40, top: 40 });
     expect(text["leftTopPt"]).toEqual({ x: 30, y: 30 });
     expect(text["internalVertex"]).toEqual({ left: 30, top: 30 });
+    expect(text["sizePolicy"]).toEqual([3, 3, 0, 0]);
+    expect(text["fixedSize"]).toEqual([40, 30]);
     expect(easyui["leftTopPt"]).toEqual({ x: 40, y: 70 });
     expect(easyui["internalVertex"]).toEqual({ left: 40, top: 70 });
 

@@ -269,16 +269,24 @@ async function seedWorkspace(mode = "new") {
 
 async function seedPlan(tenantId, workspaceId, operations = undefined) {
   // A confirmed plan must change at least one entity (validator business rule);
-  // the default touches the initial Text control (located by its derived KF
-  // GUID, seed = workspaceId) so both compile and patch flows validate.
+  // new workspaces deliberately start with an empty Page1, so the default
+  // creates the first text control instead of relying on a seeded Hello node.
   const ops =
     operations === undefined
       ? [
           {
-            op: "update",
-            entityId: deriveGuid({ seed: workspaceId }, "Text1"),
-            entityType: "text",
-            changes: [{ path: "/text", value: "Hello" }],
+            op: "create",
+            entityId: "Text1",
+            entityType: "control",
+            properties: {
+              pageId: `k${deriveGuid({ seed: workspaceId }, "Page1")}`,
+              type: "text",
+              x: 40,
+              y: 40,
+              width: 120,
+              height: 30,
+              text: "Hello",
+            },
           },
         ]
       : operations;
@@ -573,9 +581,7 @@ describe("revision immutability", () => {
           name: "Page1",
           width: 1440,
           height: 900,
-          controls: [
-            { id: "Text1", type: "text", x: 40, y: 40, width: 120, height: 30, text: "Hello" },
-          ],
+          controls: [],
         },
       ],
     };

@@ -6,7 +6,7 @@
 process.env.DATABASE_URL =
   process.env.TEST_DATABASE_URL ?? "postgresql://postgres@127.0.0.1:5432/kf_agent_test";
 
-import { cp, mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -22,6 +22,7 @@ import {
 import {
   compileUiImplementation,
   compileModulePlan,
+  compileClientProject,
   createDefaultModuleRegistry,
   createKingClientDomainPack,
   deriveGuid,
@@ -92,6 +93,8 @@ const GOLDEN_CAPABILITIES = [
   "layout.2", "text", "button", "image", "tabs", "input", "tag", "easyui.1",
   "prototype.TrendChart", "prototype.BarChart", "prototype.PieChart",
 ] as const;
+const GOLDEN_RUNTIME_BASE_SEED = "kf-module-golden-runtime-base";
+const GOLDEN_RUNTIME_PAGE_GUID = `k${deriveGuid({ seed: GOLDEN_RUNTIME_BASE_SEED }, "Page1")}`;
 
 async function readGoldenPlan(name: string): Promise<ModulePlan> {
   const url = new URL(`../../../tests/fixtures/module-plans/${name}.json`, import.meta.url);
@@ -99,9 +102,19 @@ async function readGoldenPlan(name: string): Promise<ModulePlan> {
 }
 
 async function goldenBaseWorkspace(): Promise<string> {
-  const root = await mkdtemp(path.join(tmpdir(), "kf-module-golden-base-"));
-  await cp(new URL("../../../tests/fixtures/client-unknown-field/", import.meta.url), root, { recursive: true });
-  return root;
+  const irUrl = new URL("../../../tests/fixtures/client-ir/minimal.json", import.meta.url);
+  const ir = JSON.parse(await readFile(irUrl, "utf8")) as Parameters<typeof compileClientProject>[0];
+  const blankIr: Parameters<typeof compileClientProject>[0] = {
+    ...ir,
+    name: "Generated module project",
+    pages: ir.pages.map((page) => ({ ...page, controls: [] })),
+  };
+  const compiled = await compileClientProject(
+    blankIr,
+    { seed: GOLDEN_RUNTIME_BASE_SEED },
+    { workRoot: await mkdtemp(path.join(tmpdir(), "kf-module-golden-base-")) },
+  );
+  return compiled.rootDir;
 }
 
 async function buildGoldenPackage(name: string) {
@@ -111,17 +124,17 @@ async function buildGoldenPackage(name: string) {
   const sha256 = createHash("sha256").update(assetBytes).digest("hex");
   const approvedAssetsById = Object.fromEntries(plan.assets.map((asset) => [asset.id, {
     workspaceAssetId: "00000000-0000-4000-8000-000000000001",
-    targetPath: `static/agent-assets/${sha256}.png`, mediaType: "image/png" as const, sha256, sizeBytes: assetBytes.byteLength,
+    targetPath: `project/res/images/${sha256}.png`, mediaType: "image/png" as const, sha256, sizeBytes: assetBytes.byteLength,
   }]));
   const assetsById = Object.fromEntries(plan.assets.map((asset) => [asset.id, { assetId: asset.id, status: "resolved" as const, resolvedName: asset.name }]));
   const compiled = compileModulePlan({
     plan, acceptedBlueprintArtifact: acceptedArtifactForPlan(plan, registry), registry, assetsById, approvedAssetsById,
     validationContext: { availableKfCapabilities: GOLDEN_CAPABILITIES, approvedAuthorizationRefs: [] },
   });
-  const assetTargetPath = `static/agent-assets/${sha256}.png`;
+  const assetTargetPath = `project/res/images/${sha256}.png`;
   if (compiled.status !== "compiled") return { plan, compiled, assetBytes, assetTargetPath, sha256 };
   const implementation = compileUiImplementation(compiled.implementation, {
-    workspaceId: "00000000-0000-4000-8000-000000000013", pageGuidById: { Page1: "page-guid-1" },
+    workspaceId: "00000000-0000-4000-8000-000000000013", pageGuidById: { Page1: GOLDEN_RUNTIME_PAGE_GUID },
     existingControlGuidByComponentId: {}, existingControlCapabilityIdByComponentId: {},
     moduleCompilationArtifact: verifiedCompilationFor(compiled),
   });
@@ -258,7 +271,7 @@ async function seedSignedAssetBuild() {
     },
   });
   const assetId = workspaceAssetIdToModelId(row.id);
-  const targetPath = `static/agent-assets/${stored.sha256}.png`;
+  const targetPath = `project/res/images/${stored.sha256}.png`;
   const portraitGuid = deriveGuid({ seed: seeded.workspace.id }, "Portrait");
   const authority = createHmacServerPlanAuthority(Buffer.alloc(32, 0x62));
   const internalPlan = {
@@ -360,7 +373,13 @@ describe("job runner", () => {
     }
     const unpacked = await importNativeClientPackage(built.bytes, await mkdtemp(path.join(tmpdir(), `kf-${name}-roundtrip-`)));
     const inspection = await inspectClientProject(unpacked);
+    const versionDir = await resolveVersionDirName(unpacked);
+    await expect(readFile(path.join(unpacked, versionDir, "project", "authManager.json"), "utf8"))
+      .resolves.toContain('"currentAuth": 1');
+    await expect(readFile(path.join(unpacked, versionDir, "project", "config", "loginConfig.json"), "utf8"))
+      .resolves.toContain('"config"');
     const controls = Object.values(inspection.index.controls);
+    expect(controls.some((control) => ["Text1", "Button1", "Input1"].includes(control.id))).toBe(false);
     for (const module of built.plan.pages.flatMap((page) => page.modules)) {
       expect(controls.some((control) => control.id.startsWith(`${module.id}/`)), `missing ${module.id}`).toBe(true);
     }
@@ -368,11 +387,11 @@ describe("job runner", () => {
       expect(built.compiled.assetBindings).toContainEqual(expect.objectContaining({ assetId: asset.id }));
     }
     if (name === "personal-portal") {
-      const versionDir = await resolveVersionDirName(unpacked);
       const materialized = await readFile(path.join(unpacked, versionDir, built.assetTargetPath));
       expect(materialized).toEqual(built.assetBytes);
       expect(createHash("sha256").update(materialized).digest("hex")).toBe(built.sha256);
-      expect(containsDirectProperty(inspection.raw.pages, "src", built.assetTargetPath)).toBe(true);
+      expect(containsDirectProperty(inspection.raw.pages, "src", built.assetTargetPath)).toBe(false);
+      expect(containsDirectProperty(inspection.raw.pages, "src", path.basename(built.assetTargetPath))).toBe(true);
     }
   });
 
@@ -623,7 +642,7 @@ describe("job runner", () => {
         entityId: "missing-image",
         controlId: "missing-image",
         capabilityId: "image" as const,
-        targetPath: `static/agent-assets/${missingAssetSha}.png`,
+        targetPath: `project/res/images/${missingAssetSha}.png`,
         mediaType: "image/png" as const,
         sha256: missingAssetSha,
         sizeBytes: 1,

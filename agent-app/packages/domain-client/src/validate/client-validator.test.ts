@@ -80,6 +80,20 @@ async function writeVariables(root: Root, doc: VariablesFixture): Promise<void> 
 }
 
 describe("client validator (Task 7 brief Step 2)", () => {
+  it("accepts disabled native image Load/Error event slots as inert metadata", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const page = await readPage(base);
+    page.objects[0]!["linkMng"] = { linkList: [
+      { linkId: 200001, enable: false, script: "", name: "Load" },
+      { linkId: 200002, enable: false, script: "", name: "Error" },
+    ] };
+    await writePage(base, page);
+    const report = await validateClientProject(base, base, plan([]));
+    expect(report.warnings).toEqual([
+      "[businessRules] change plan contains no operations (a confirmed plan must change at least one entity)",
+    ]);
+  });
+
   it("passes a legal field-level update", async () => {
     const base = await copyFixture("client-unknown-field");
     const candidate = await applyClientPatch(base, happyPlan());

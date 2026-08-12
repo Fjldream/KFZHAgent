@@ -63,7 +63,10 @@ const revisedDesignPlan: CustomerEffectBlueprint = {
 
 function makeDesignDeps() {
   const modelPort = { createDesignPlan: vi.fn().mockResolvedValue(designPlan) };
-  const workspaceQuery = { appendMessage: vi.fn().mockResolvedValue(undefined) };
+  const workspaceQuery = {
+    appendMessage: vi.fn().mockResolvedValue(undefined),
+    getRevisionEntities: vi.fn().mockResolvedValue([{ kind: "page", name: "Page1", type: "page", guid: "page-guid" }]),
+  };
   const modulePlanCompiler = {
     listPlanningCatalog: vi.fn().mockResolvedValue([
       {
@@ -125,18 +128,20 @@ describe("design-plan node", () => {
   });
 
   it("supplies only the stable planning catalog when a server-owned module workflow creates the blueprint", async () => {
-    const { deps, modelPort, modulePlanCompiler } = makeDesignDeps();
+    const { deps, modelPort, modulePlanCompiler, workspaceQuery } = makeDesignDeps();
     const node = createDesignPlanNode(deps);
 
-    await node(baseState({ generationWorkflow: "module-v1" }) as never);
+    await node(baseState({ generationWorkflow: "module-v1", currentRevisionId: "revision-1" }) as never);
 
     expect(modulePlanCompiler.listPlanningCatalog).toHaveBeenCalledTimes(1);
     expect(modelPort.createDesignPlan).toHaveBeenCalledWith(
       expect.objectContaining({
         modulePlanningCatalog: [expect.objectContaining({ kind: "content.hero", maturity: "stable" })],
+        editableEntities: [{ kind: "page", name: "Page1", type: "page", guid: "page-guid" }],
       }),
       { revising: false },
     );
+    expect(workspaceQuery.getRevisionEntities).toHaveBeenCalledWith({ tenantId: "t1", workspaceId: "w1", revisionId: "revision-1" });
   });
 
   it("does not expose the module catalog to legacy workflow blueprints", async () => {

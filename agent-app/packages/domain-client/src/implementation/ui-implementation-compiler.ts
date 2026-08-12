@@ -616,7 +616,13 @@ function createProperties(
     if (!allowed.has(key)) {
       throw new Error(`UNSUPPORTED_COMPONENT_PROPERTY: ${component.id}.${key} for ${capabilityId}`);
     }
-    properties[key] = value;
+    // Module geometry is already resolved into page coordinates by the
+    // module compiler. Persisting its semantic parentId would place the
+    // control inside a KF horizontal/vertical layout, whose runtime then
+    // performs a second, destructive reflow. Keep parentId in the signed
+    // implementation spec for quality/provenance, but materialize generated
+    // module controls as page-absolute native siblings.
+    if (key !== "parentId" || component.sourceModuleId === undefined) properties[key] = value;
   }
   if (component.content !== undefined) {
     if (!CONTENT_CAPABILITIES.has(capabilityId)) {

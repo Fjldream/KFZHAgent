@@ -29,6 +29,20 @@ describe("easyui 控件渲染（按 EASYUI_PROTO_TYPES 分派）", () => {
     expect(html).toContain("暂无数据");
   });
 
+  it("datagrid 渲染 KF 原生嵌套列定义与真实数据行", () => {
+    const datagrid = {
+      id: "DatagridRows", type: "easyui", proto: 1,
+      x: 10, y: 10, width: 600, height: 300,
+      columns: [[{ title: "项目", field: "name" }, { title: "结果", field: "result" }]],
+      data: [{ name: "监控大屏", result: "运行稳定" }],
+    } as unknown as PageIR["controls"][number];
+    const html = renderPagePreview(pageWith([datagrid]));
+    expect(html).toContain("<th>项目</th>");
+    expect(html).toContain("<td>监控大屏</td>");
+    expect(html).toContain("<td>运行稳定</td>");
+    expect(html).not.toContain("暂无数据");
+  });
+
   it("linkbutton 渲染成按钮组", () => {
     const html = renderPagePreview(
       pageWith([

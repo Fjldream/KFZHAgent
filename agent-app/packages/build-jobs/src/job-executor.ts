@@ -172,7 +172,7 @@ export async function resolveBuildAssets(input: {
       throw new Error(`invalid persisted workspace asset metadata: ${assetId}`);
     }
     const signedExtension = mediaTypeExtension(binding.mediaType);
-    const signedTarget = signedExtension === undefined ? "" : `static/agent-assets/${binding.sha256}.${signedExtension}`;
+    const signedTarget = signedExtension === undefined ? "" : `project/res/images/${binding.sha256}.${signedExtension}`;
     if (row.id !== binding.workspaceAssetId
       || row.mediaType !== binding.mediaType
       || row.sha256 !== binding.sha256

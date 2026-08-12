@@ -183,9 +183,9 @@ function renderControl(control: ControlIR, options?: RenderOptions): string {
     case "easyui":
       return renderEasyuiControl(control, base);
     case "layout":
-      return renderLayoutContainer(control as LayoutContainerIR, options);
+      return renderLayoutContainer(control, options);
     case "prototype":
-      return renderSpecialNode(control as SpecialNodeIR, base);
+      return renderSpecialNode(control, base);
   }
   return base;
 }
@@ -319,7 +319,8 @@ function easyuiColumnTitle(col: unknown): string {
 }
 
 function renderEasyuiDatagrid(control: EasyuiControlIR): string {
-  const columns = Array.isArray(control.columns) ? control.columns : [];
+  const rawColumns = Array.isArray(control.columns) ? control.columns : [];
+  const columns = rawColumns.length === 1 && Array.isArray(rawColumns[0]) ? rawColumns[0] : rawColumns;
   const colNames = columns.length > 0 ? columns.map(easyuiColumnTitle) : ["列1", "列2", "列3"];
   const showHeader = control.showHeader !== false;
   const striped = control.striped === true;
@@ -329,7 +330,27 @@ function renderEasyuiDatagrid(control: EasyuiControlIR): string {
     ? `<thead><tr>${rownumbers ? '<th class="kf-easyui-rownumber">#</th>' : ""}${headerCells}</tr></thead>`
     : "";
   const colSpan = colNames.length + (rownumbers ? 1 : 0);
-  return `<table class="kf-easyui-table${striped ? " kf-easyui-striped" : ""}">${header}<tbody><tr class="kf-easyui-empty"><td colspan="${colSpan}">暂无数据</td></tr></tbody></table>`;
+  const fields = columns.map((column) => column && typeof column === "object" && !Array.isArray(column)
+    ? (column as Record<string, unknown>)["field"]
+    : undefined);
+  const nativeData = (control as EasyuiControlIR & { data?: unknown }).data;
+  const rows: unknown[] = Array.isArray(nativeData) ? nativeData : [];
+  const body = rows.length === 0
+    ? `<tr class="kf-easyui-empty"><td colspan="${colSpan}">暂无数据</td></tr>`
+    : rows.map((row, rowIndex) => {
+        const record = row !== null && typeof row === "object" && !Array.isArray(row) ? row as Record<string, unknown> : {};
+        const cells = fields.map((field) => {
+          const value = typeof field === "string" ? record[field] : undefined;
+          const text = typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+            ? String(value)
+            : value === null || value === undefined
+              ? ""
+              : JSON.stringify(value);
+          return `<td>${escapeHtml(text)}</td>`;
+        }).join("");
+        return `<tr>${rownumbers ? `<td class="kf-easyui-rownumber">${rowIndex + 1}</td>` : ""}${cells}</tr>`;
+      }).join("");
+  return `<table class="kf-easyui-table${striped ? " kf-easyui-striped" : ""}">${header}<tbody>${body}</tbody></table>`;
 }
 
 function renderEasyuiLinkbutton(control: EasyuiControlIR): string {
@@ -518,7 +539,7 @@ function childRegion(rec: Record<string, unknown>): string {
 /** docking：按 children 的 region 字段（回退到 panels 的 region 顺序）分派四边区域。 */
 function renderLayoutDocking(children: ContainerChildIR[], panels?: ContainerChildIR[]): string {
   const regionFallbacks = (panels ?? [])
-    .map((p) => (p && typeof p === "object" ? (p as Record<string, unknown>)["region"] : undefined))
+    .map((p) => (p && typeof p === "object" ? p["region"] : undefined))
     .filter((r): r is string => typeof r === "string" && isDockingRegion(r));
   let fallbackIndex = 0;
   const regions = children.map((c) => {

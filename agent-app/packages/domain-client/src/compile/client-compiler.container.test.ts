@@ -145,6 +145,12 @@ describe("client compiler validation — layout containers", () => {
       leftTopPt: { x: 0, y: 12 },
       width: 300,
       height: 127.8,
+      styleData: "",
+      styleDataNew: "",
+      comment: "",
+      lock: false,
+      visible: true,
+      memberAccess: true,
     });
     // 布局子对象自动补 guid（KF 要求 insiderObjects 子对象有 guid）
     expect(layout!["insiderObjects"]).toEqual([

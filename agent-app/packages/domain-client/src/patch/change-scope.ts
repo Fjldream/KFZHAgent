@@ -648,7 +648,7 @@ export async function verifyChangeScope(
 ): Promise<ScopeVerifyResult> {
   const scope = await computeChangeScope(baseRoot, plan);
   for (const targetPath of options?.assetTargetPaths ?? []) {
-    if (!/^static\/agent-assets\/[0-9a-f]{64}\.(?:png|jpg|webp)$/.test(targetPath)) {
+    if (!/^project\/res\/images\/[0-9a-f]{64}\.(?:png|jpg|webp)$/.test(targetPath)) {
       throw new Error(`invalid asset scope path: ${targetPath}`);
     }
     scope.touchedFiles.add(relFile(targetPath, scope.versionDir));

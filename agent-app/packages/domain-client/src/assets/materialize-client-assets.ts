@@ -14,7 +14,7 @@ import { resolveVersionDirName } from "../patch/change-scope.js";
 
 const DEFAULT_MAX_AGGREGATE_BYTES = 100 * 1024 * 1024;
 const SHA256 = /^[0-9a-f]{64}$/;
-const TARGET = /^static\/agent-assets\/([0-9a-f]{64})\.(png|jpg|webp)$/;
+const TARGET = /^project\/res\/images\/([0-9a-f]{64})\.(png|jpg|webp)$/;
 
 export async function materializeClientAssets(input: {
   workspaceRoot: string;
@@ -114,10 +114,11 @@ export async function materializeClientAssets(input: {
       const current = control["src"];
       if (current !== "asset"
         && current !== `static/agent-assets/pending-${rewrite.binding.assetId}`
-        && current !== rewrite.targetPath) {
+        && current !== rewrite.targetPath
+        && current !== rewrite.runtimeSrc) {
         throw new Error(`bound image has an unauthorized source: ${rewrite.binding.entityId}`);
       }
-      control["src"] = rewrite.targetPath;
+      control["src"] = rewrite.runtimeSrc;
     }
     for (const page of pages.values()) {
       await assertPageRewriteFileUnchanged(page);
@@ -281,10 +282,12 @@ async function publishAssets(input: {
   try {
     directories.push(await openCanonicalDirectory(input.workspaceRoot, "workspace root"));
     directories.push(await openCanonicalDirectory(input.versionRoot, "workspace version root"));
-    const staticRoot = path.join(input.versionRoot, "static");
-    await mkdirExact(staticRoot);
-    directories.push(await openCanonicalDirectory(staticRoot, "static asset root"));
-    const assetRoot = path.join(staticRoot, "agent-assets");
+    const projectRoot = path.join(input.versionRoot, "project");
+    directories.push(await openCanonicalDirectory(projectRoot, "project root"));
+    const resourceRoot = path.join(projectRoot, "res");
+    await mkdirExact(resourceRoot);
+    directories.push(await openCanonicalDirectory(resourceRoot, "project resource root"));
+    const assetRoot = path.join(resourceRoot, "images");
     await mkdirExact(assetRoot);
     const assetDirectory = await openCanonicalDirectory(assetRoot, "agent asset root");
     directories.push(assetDirectory);
@@ -595,7 +598,7 @@ function resolveBoundImage(
   workspaceId: string,
   inspection: Awaited<ReturnType<typeof inspectClientProject>>,
   asset: DomainAssetInput,
-): { binding: ChangePlanAssetBinding; guid: string; file: string; targetPath: string } {
+): { binding: ChangePlanAssetBinding; guid: string; file: string; targetPath: string; runtimeSrc: string } {
   const direct = inspection.index.controls[binding.entityId];
   const derivedGuid = deriveGuid({ seed: workspaceId }, binding.entityId);
   const derived = inspection.index.controls[derivedGuid];
@@ -609,7 +612,16 @@ function resolveBoundImage(
   }
   const page = inspection.index.pages[control.pageGuid];
   if (page === undefined) throw new Error(`asset binding page is missing: ${binding.entityId}`);
-  return { binding, guid: control.guid, file: page.file, targetPath: asset.targetPath };
+  return {
+    binding,
+    guid: control.guid,
+    file: page.file,
+    targetPath: asset.targetPath,
+    // KF's native Image control persists only the project-image filename.
+    // At runtime setPicName() expands it through the current project's image
+    // endpoint; persisting that URL directly renders the error placeholder.
+    runtimeSrc: path.basename(asset.targetPath),
+  };
 }
 
 function findControl(root: unknown, guid: string): Record<string, unknown> | undefined {

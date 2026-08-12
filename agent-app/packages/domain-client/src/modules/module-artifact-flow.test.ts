@@ -81,7 +81,7 @@ describe("signed module compilation flow", () => {
     const sha256 = "1".repeat(64);
     const approvedAsset = {
       workspaceAssetId: "00000000-0000-4000-8000-000000000001",
-      targetPath: `static/agent-assets/${sha256}.png`,
+      targetPath: `project/res/images/${sha256}.png`,
       mediaType: "image/png" as const,
       sha256,
       sizeBytes: 128,
@@ -153,6 +153,21 @@ describe("signed module compilation flow", () => {
       blueprint: blueprint({ interactions: ["点击进入详情"], interactionRequirements: [] }),
       projectKey: "kingclient.portal", revisionId: "revision-1", registry: registry(),
     })).toThrow("ACCEPTED_BLUEPRINT_INTERACTIONS_NEED_RECONFIRM");
+  });
+
+  it("reports model-authored invalid module content as a repairable delivery gap", () => {
+    const invalid = plan();
+    invalid.pages[0]!.modules[0]!.content = JSON.stringify({ value: "not-a-label" });
+
+    const outcome = compileFirst(invalid);
+
+    expect(outcome.status).toBe("blocked");
+    expect(outcome.gaps).toContainEqual(expect.objectContaining({
+      moduleId: "panel",
+      severity: "blocking",
+      status: "unresolved",
+      reason: "MODULE_CONTENT_INVALID: test-panel@1.0.0",
+    }));
   });
 
   it("survives JSON persistence and authorizes only the exact compiled implementation", () => {

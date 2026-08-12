@@ -1,5 +1,11 @@
 {
   "uiModelType": 41,
+  "linkMng": {
+    "linkList": [
+      { "linkId": 200001, "enable": false, "script": "", "name": "Load" },
+      { "linkId": 200002, "enable": false, "script": "", "name": "Error" }
+    ]
+  },
   "src": "static/images/images/image1.png",
   "fit": "fill",
   "alt": "",

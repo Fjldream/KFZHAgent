@@ -311,7 +311,33 @@ export function compileControl(
     const merged = mergeControlTemplate(BASE_FIELDS, template);
     compiled = mergeControlTemplate(merged, applySchemaOverrides(build, control, ctx));
   }
-  return applyControlStyle(compiled, control);
+  return applyControlStyle(normalizeNativeSizePolicy(compiled), control);
+}
+
+// KF 3.6 has two incompatible size-policy readers. Legacy KMUIModel controls
+// deserialize a flat `sizePolicy` array plus a sibling `fixedSize`, whereas
+// ElementUI controls deserialize the newer object envelope. Keeping the
+// template author's object shape for a legacy label makes the horizontal and
+// vertical layout engines read `undefined` policies and collapse it to 0x0.
+const LEGACY_FLAT_SIZE_POLICY_MODELS = new Set([0, 1, 6, 7, 8, 12, 13, 14, 42, 43]);
+
+export function normalizeNativeSizePolicy(compiled: TemplateJson): TemplateJson {
+  const uiModelType = compiled["uiModelType"];
+  const envelope = compiled["sizePolicy"];
+  if (
+    typeof uiModelType !== "number"
+    || !LEGACY_FLAT_SIZE_POLICY_MODELS.has(uiModelType)
+    || envelope === null
+    || typeof envelope !== "object"
+    || Array.isArray(envelope)
+  ) return compiled;
+  const policy = envelope as TemplateJson;
+  if (!Array.isArray(policy["sizePolicy"]) || !Array.isArray(policy["fixedSize"])) return compiled;
+  return {
+    ...compiled,
+    sizePolicy: structuredClone(policy["sizePolicy"]),
+    fixedSize: structuredClone(policy["fixedSize"]),
+  };
 }
 
 const DIRECT_IR_STYLE_THEME: ThemeSpec = Object.freeze({
@@ -357,6 +383,23 @@ function applyControlStyle(compiled: TemplateJson, control: ControlIR): Template
     assertStyleCompilationAccepted(capabilityIdForControl(control), result);
   } catch (error) {
     throw new ModelOutputInvalidError(styleEngineErrorMessage(error), { cause: error });
+  }
+  if (control.type === "layout") {
+    const baseProperty = compiled["baseProperty"];
+    if (baseProperty === null || typeof baseProperty !== "object" || Array.isArray(baseProperty)) {
+      throw new ModelOutputInvalidError("compiled layout is missing baseProperty");
+    }
+    return {
+      ...compiled,
+      baseProperty: {
+        ...(baseProperty as TemplateJson),
+        ...result.nativeFields,
+        styleDataNew: mergeManagedStyleData(
+          (baseProperty as TemplateJson)["styleDataNew"],
+          result.styleDataNew,
+        ),
+      },
+    };
   }
   return {
     ...compiled,
@@ -542,6 +585,12 @@ function compileLayoutControl(build: BuildSeed, control: ControlIR): TemplateJso
       leftTopPt: { x: layout.x, y: layout.y },
       width: layout.width,
       height: layout.height,
+      styleData: "",
+      styleDataNew: "",
+      comment: "",
+      lock: false,
+      visible: true,
+      memberAccess: true,
     },
   };
   if (layout.children !== undefined) {

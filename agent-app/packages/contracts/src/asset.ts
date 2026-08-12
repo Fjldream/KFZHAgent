@@ -32,13 +32,13 @@ export const AssetRecordSchema = z
 /** A non-sensitive result of resolving a registered asset for a module. */
 export const ApprovedAssetFactsSchema = z.object({
   workspaceAssetId: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/),
-  targetPath: z.string().regex(/^static\/agent-assets\/[0-9a-f]{64}\.(?:png|jpg|webp)$/),
+  targetPath: z.string().regex(/^project\/res\/images\/[0-9a-f]{64}\.(?:png|jpg|webp)$/),
   mediaType: z.enum(["image/png", "image/jpeg", "image/webp"]),
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
   sizeBytes: z.number().int().positive().max(50 * 1024 * 1024),
 }).strict().superRefine((facts, ctx) => {
   const extension = facts.mediaType === "image/png" ? "png" : facts.mediaType === "image/jpeg" ? "jpg" : "webp";
-  if (facts.targetPath !== `static/agent-assets/${facts.sha256}.${extension}`) {
+  if (facts.targetPath !== `project/res/images/${facts.sha256}.${extension}`) {
     ctx.addIssue({ code: "custom", path: ["targetPath"], message: "asset target does not match media and checksum" });
   }
 });
