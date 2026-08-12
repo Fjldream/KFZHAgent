@@ -234,6 +234,12 @@ async function publishAssets(input: {
     await mkdirExact(assetRoot);
     directories.push(await openCanonicalDirectory(assetRoot, "agent asset root"));
 
+    // The deterministic race boundary must run before approved bytes exist on
+    // disk. If any retained ancestor moved, fail without creating a staging
+    // directory whose original pathname could now refer to a replacement tree.
+    await input.beforePublish?.();
+    for (const directory of directories) await assertDirectoryUnchanged(directory);
+
     stagingRoot = await mkdtemp(path.join(staticRoot, ".agent-assets-stage-"));
     directories.push(await openCanonicalDirectory(stagingRoot, "asset staging root"));
     for (const asset of input.assets) {
@@ -249,7 +255,6 @@ async function publishAssets(input: {
       await assertCanonicalPath(staged, `staged asset ${name}`);
     }
 
-    await input.beforePublish?.();
     for (const directory of directories) await assertDirectoryUnchanged(directory);
     for (const asset of input.assets) {
       const name = path.basename(asset.targetPath);

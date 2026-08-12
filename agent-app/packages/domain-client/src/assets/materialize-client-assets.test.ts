@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { link, lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { link, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -197,6 +197,7 @@ describe("materializeClientAssets", () => {
     const candidate = await workspace();
     const versionRoot = path.join(candidate.rootDir, "1.0.0.1");
     const staticRoot = path.join(versionRoot, "static");
+    const swappedStaticRoot = `${staticRoot}-swapped`;
     await mkdir(staticRoot, { recursive: true });
     const call = materializeClientAssets as (input: Parameters<typeof materializeClientAssets>[0] & {
       hooks: { beforePublish: () => Promise<void> };
@@ -206,11 +207,13 @@ describe("materializeClientAssets", () => {
       plan: plan(),
       assets: [asset()],
       hooks: { beforePublish: async () => {
-        await rename(staticRoot, `${staticRoot}-swapped`);
+        await rename(staticRoot, swappedStaticRoot);
         await mkdir(staticRoot);
       } },
     })).rejects.toThrow(/ancestor|changed|identity|race/i);
     await expect(readFile(path.join(staticRoot, TARGET))).rejects.toThrow();
+    expect((await readdir(swappedStaticRoot)).filter((entry) => entry.startsWith(".agent-assets-stage-"))).toEqual([]);
+    await expect(readFile(path.join(swappedStaticRoot, TARGET))).rejects.toThrow();
   });
 
   it("rejects a page symlink swap after asset publication without overwriting the external file", async () => {
