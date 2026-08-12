@@ -7,6 +7,7 @@ import {
 import { createHash, randomBytes } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { ARTIFACT_STORAGE } from "./artifact-storage.js";
+import { DeliverySnapshotService } from "../delivery/delivery-snapshot.service.js";
 
 const DOWNLOAD_TOKEN_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -21,6 +22,7 @@ export class DownloadTokenService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(ARTIFACT_STORAGE) private readonly storage: ArtifactStorage,
+    private readonly deliverySnapshots: DeliverySnapshotService,
   ) {}
 
   async createToken(input: {
@@ -36,6 +38,7 @@ export class DownloadTokenService {
     fileName: string;
   }> {
     const artifact = await this.resolveArtifact(input.tenantId, input.artifactId);
+    await this.deliverySnapshots.assertArtifactDeliverable(input.tenantId, input.artifactId);
     const token = randomBytes(32).toString("base64url");
     const expiresAt = new Date(Date.now() + DOWNLOAD_TOKEN_TTL_MS);
     await this.prisma.downloadToken.create({
@@ -84,6 +87,7 @@ export class DownloadTokenService {
       throw new UnauthorizedException("download token does not match the active session");
     }
     const artifact = await this.resolveArtifact(input.tenantId, row.artifactId);
+    await this.deliverySnapshots.assertArtifactDeliverable(input.tenantId, row.artifactId);
 
     // Atomic single-use claim: only one consumer can flip usedAt.
     const claimed = await this.prisma.downloadToken.updateMany({

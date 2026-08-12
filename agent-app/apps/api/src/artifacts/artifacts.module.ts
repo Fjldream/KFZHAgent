@@ -4,8 +4,10 @@ import { ArtifactController } from "./artifact.controller.js";
 import { ArtifactService } from "./artifact.service.js";
 import { DownloadTokenService } from "./download-token.service.js";
 import { PreviewService } from "./preview.service.js";
+import { DeliveryModule } from "../delivery/delivery.module.js";
 
 @Module({
+  imports: [DeliveryModule],
   controllers: [ArtifactController],
   providers: [
     ArtifactService,

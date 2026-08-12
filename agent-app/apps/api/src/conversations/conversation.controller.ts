@@ -79,6 +79,15 @@ export class ConversationController {
     }
   }
 
+  @Get(":id/delivery")
+  async getDelivery(
+    @Param("id") id: string,
+    @Query("buildJobId") buildJobId: string | undefined,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<import("../delivery/delivery-snapshot.service.js").PersistedDeliverySnapshot | null> {
+    return this.conversations.getDelivery(req.principal.tenantId, id, buildJobId);
+  }
+
   /**
    * SSE message turn. Returns text/event-stream; graph state updates are
    * pushed as `state` events and the final snapshot as a `done` event. When

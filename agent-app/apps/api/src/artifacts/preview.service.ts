@@ -8,6 +8,7 @@ import type { ArtifactStorage } from "@kf/artifact-storage";
 import { renderKfProject } from "@kf/preview-renderer";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { ARTIFACT_STORAGE } from "./artifact-storage.js";
+import { DeliverySnapshotService } from "../delivery/delivery-snapshot.service.js";
 
 /**
  * Renders a built artifact's client project as a static HTML preview.
@@ -22,6 +23,7 @@ export class PreviewService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(ARTIFACT_STORAGE) private readonly storage: ArtifactStorage,
+    private readonly deliverySnapshots: DeliverySnapshotService,
   ) {}
 
   async render(tenantId: string, artifactId: string): Promise<string> {
@@ -30,6 +32,7 @@ export class PreviewService {
       where: { id: artifactId, tenantId },
     });
     if (row === null) throw new NotFoundException("artifact not found");
+    await this.deliverySnapshots.assertArtifactDeliverable(tenantId, row.id);
     const stream = await this.storage.open(tenantId, row.storageKey).catch(() => {
       throw new NotFoundException("artifact not found");
     });

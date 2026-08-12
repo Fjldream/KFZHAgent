@@ -122,10 +122,32 @@ async function refreshRevisions(
   state.currentRevisionId = workspace.currentRevisionId ?? null;
 }
 
+async function refreshDelivery(
+  conversationId: string | null,
+  jobId: string,
+  expectedWorkspaceId: string | null,
+  isStillCurrent: () => boolean,
+): Promise<void> {
+  if (conversationId === null) return;
+  const delivery = await api.getConversationDelivery(conversationId, jobId);
+  if (!isStillCurrent() || delivery === null) return;
+  if (
+    delivery.workspaceId !== expectedWorkspaceId
+    || delivery.conversationId !== conversationId
+    || delivery.buildJobId !== jobId
+  ) return;
+  applyModuleDeliveryResult(delivery.result);
+  if (delivery.result.status === "blocked") {
+    state.previewArtifactId = undefined;
+    state.artifacts = [];
+  }
+}
+
 async function pollBuildJob(
   jobId: string,
   initialStatus: BuildJobStatus = "QUEUED",
   expectedWorkspaceId = state.workspaceId,
+  expectedConversationId = state.conversationId,
 ): Promise<BuildJobStatus> {
   if (state.workspaceId !== expectedWorkspaceId) return initialStatus;
   const generation = ++buildPollGeneration;
@@ -133,6 +155,7 @@ async function pollBuildJob(
   const isCurrent = (): boolean =>
     generation === buildPollGeneration &&
     state.workspaceId === workspaceId &&
+    state.conversationId === expectedConversationId &&
     state.buildJobId === jobId;
   state.buildJobId = jobId;
   state.buildJobStatus = initialStatus;
@@ -153,6 +176,10 @@ async function pollBuildJob(
           if (clientPackage !== undefined) {
             state.previewArtifactId = clientPackage.id;
           }
+        } else if (state.moduleDeliveryResult !== null) {
+          state.previewArtifactId = undefined;
+          state.artifacts = [];
+          state.moduleDeliveryResult = failClosedDelivery(state.moduleDeliveryResult, "工程构建失败");
         }
         try {
           const report = await api.getBuildJobReport(jobId);
@@ -162,6 +189,8 @@ async function pollBuildJob(
           if (!isCurrent()) return job.status;
           state.validationReport = null;
         }
+        await refreshDelivery(expectedConversationId, jobId, workspaceId, isCurrent);
+        if (!isCurrent()) return job.status;
         await refreshRevisions(workspaceId, isCurrent);
         return job.status;
       }
@@ -233,6 +262,13 @@ async function load(workspaceId: string): Promise<void> {
         void pollBuildJob(latestBuild.id, latestBuild.status, workspaceId).catch((error: unknown) => {
           state.error = errorMessage(error);
         });
+      }
+    } else if (state.conversationId !== null) {
+      const conversationId = state.conversationId;
+      const delivery = await api.getConversationDelivery(conversationId);
+      if (!isCurrentLoad()) return;
+      if (delivery !== null && delivery.workspaceId === workspaceId && delivery.conversationId === conversationId) {
+        applyModuleDeliveryResult(delivery.result);
       }
     }
   } catch (error) {
@@ -503,6 +539,20 @@ function applyModuleDeliveryResult(input: unknown): void {
       changedModules: [...input.revisionDiff.changedModules],
       preservedModules: [...input.revisionDiff.preservedModules],
     },
+  };
+}
+
+function failClosedDelivery(base: ModuleDeliveryResult, reason: string): ModuleDeliveryResult {
+  return {
+    ...base,
+    status: "blocked",
+    gaps: [{
+      moduleId: "delivery",
+      requirement: "完成可信工程交付",
+      severity: "blocking",
+      status: "unresolved",
+      reason,
+    }],
   };
 }
 

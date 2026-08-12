@@ -110,6 +110,17 @@ export interface ModuleDeliveryResult {
   revisionDiff: { changedModules: string[]; preservedModules: string[] };
 }
 
+export interface PersistedModuleDelivery {
+  tenantId: string;
+  workspaceId: string;
+  conversationId: string;
+  buildJobId: string | null;
+  modulePlanHash: string;
+  artifactId: string | null;
+  revisionId: string | null;
+  result: ModuleDeliveryResult;
+}
+
 export interface Revision {
   id: string;
   revisionNumber: number;

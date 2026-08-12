@@ -63,13 +63,13 @@ describe("PreviewService (unit)", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
     const storage = { open } as unknown as ArtifactStorage;
-    return new PreviewService(prisma, storage);
+    return new PreviewService(prisma, storage, { assertArtifactDeliverable: async () => {} } as never);
   }
 
   it("throws 404 when the artifact row is missing", async () => {
     const prisma = { artifact: { findFirst: async () => null } } as never;
     const storage = { open: async () => Readable.from([]) } as unknown as ArtifactStorage;
-    const service = new PreviewService(prisma, storage);
+    const service = new PreviewService(prisma, storage, { assertArtifactDeliverable: async () => {} } as never);
     await expect(service.render(TENANT, ARTIFACT_ID)).rejects.toThrow(NotFoundException);
   });
 

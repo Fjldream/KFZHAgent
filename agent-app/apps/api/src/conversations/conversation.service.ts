@@ -23,12 +23,8 @@ import { createGraphPorts } from "./graph-ports.js";
 import { MODEL_PORT } from "./model-port.js";
 import { MODULE_ARTIFACT_AUTHORITY, SERVER_PLAN_AUTHORITY } from "./server-plan-authority.js";
 import type { ModuleArtifactAuthority, ServerPlanAuthority } from "@kf/build-jobs";
-import {
-  ModuleCompilationMetadataSchema,
-  ModuleDeliveryReportSchema,
-  ModulePlanSchema,
-} from "@kf/contracts";
 import { AssetService } from "../assets/asset.service.js";
+import { DeliverySnapshotService, projectModuleDeliveryResult } from "../delivery/delivery-snapshot.service.js";
 
 type CompiledGraph = ReturnType<typeof compileSolutionGraph>;
 
@@ -84,6 +80,7 @@ export class ConversationService {
     @Inject(SERVER_PLAN_AUTHORITY) private readonly serverPlanAuthority: ServerPlanAuthority,
     @Inject(MODULE_ARTIFACT_AUTHORITY) private readonly moduleArtifactAuthority: ModuleArtifactAuthority,
     private readonly assetService: AssetService,
+    private readonly deliverySnapshots: DeliverySnapshotService,
   ) {}
 
   async create(tenantId: string, workspaceId: string, title?: string): Promise<Conversation> {
@@ -128,10 +125,17 @@ export class ConversationService {
 
   async listMessages(tenantId: string, conversationId: string): Promise<Message[]> {
     await this.get(tenantId, conversationId);
-    return this.prisma.message.findMany({
+    const rows = await this.prisma.message.findMany({
       where: { tenantId, conversationId },
       orderBy: { createdAt: "asc" },
     });
+    return rows.map((row) => row.role === "assistant" && isTechnicalAssistantPayload(row.content)
+      ? { ...row, content: "工程正在按已确认的效果蓝图生成，技术实施细节由系统自动校验。" }
+      : row);
+  }
+
+  async getDelivery(tenantId: string, conversationId: string, expectedBuildJobId?: string): Promise<import("../delivery/delivery-snapshot.service.js").PersistedDeliverySnapshot | null> {
+    return this.deliverySnapshots.getForConversation(tenantId, conversationId, expectedBuildJobId);
   }
 
   /**
@@ -199,7 +203,7 @@ export class ConversationService {
       yield { event: "state", data: chunk };
     }
     const final = (await graph.getState(config)) as unknown as StateSnapshotLike;
-    yield { event: "done", data: finalStateData(final) };
+    yield { event: "done", data: finalStateData(final, this.moduleArtifactAuthority) };
   }
 
   /**
@@ -416,10 +420,10 @@ function extractInterrupt(snapshot: StateSnapshotLike): ApprovalInterruptLike | 
   return undefined;
 }
 
-export function finalStateData(final: StateSnapshotLike): Record<string, unknown> {
+export function finalStateData(final: StateSnapshotLike, authority: ModuleArtifactAuthority): Record<string, unknown> {
   const values = final.values;
   const interrupt = extractInterrupt(final);
-  const moduleDeliveryResult = projectModuleDeliveryResult(values);
+  const moduleDeliveryResult = projectModuleDeliveryResult(values, authority);
   const modulePlanHash = isHash(values.modulePlanHash) ? values.modulePlanHash : null;
   return {
     stage: values.stage ?? null,
@@ -440,77 +444,46 @@ export function finalStateData(final: StateSnapshotLike): Record<string, unknown
   };
 }
 
-function projectModuleDeliveryResult(values: Record<string, unknown>): Record<string, unknown> | undefined {
-  const parsedReport = ModuleDeliveryReportSchema.safeParse(values.moduleDeliveryReport);
-  if (!parsedReport.success) return undefined;
-
-  const parsedPlan = ModulePlanSchema.safeParse(values.modulePlan);
-  const implementedModules = extractImplementedModules(values);
-  if (parsedReport.data.status !== "blocked" && (!parsedPlan.success || implementedModules.length === 0)) {
-    return undefined;
-  }
-  const planModules = parsedPlan.success
-    ? parsedPlan.data.pages.flatMap((page) => page.modules.map((module) => ({ pageId: page.id, moduleId: module.id, kind: module.kind })))
-    : [];
-  const changed = new Set(parsedPlan.success ? extractChangedModuleIds(parsedPlan.data.operations) : []);
-  const preserved = planModules.map((module) => module.moduleId).filter((moduleId) => !changed.has(moduleId));
-  const repairAttempt = values.moduleRepairAttempt;
-  const repairCount = typeof repairAttempt === "number"
-    && Number.isInteger(repairAttempt)
-    && repairAttempt >= 0
-    && repairAttempt <= 3
-    ? repairAttempt
-    : 0;
-  return {
-    ...(isHash(values.modulePlanHash) ? { modulePlanHash: values.modulePlanHash } : {}),
-    projectKey: parsedReport.data.projectKey,
-    status: parsedReport.data.status,
-    gaps: parsedReport.data.gaps,
-    implementedModules: implementedModules.length > 0 ? implementedModules : planModules,
-    repairCount,
-    revisionDiff: {
-      changedModules: [...changed].slice(0, 250),
-      preservedModules: preserved.slice(0, 250),
-    },
-  };
-}
-
-function extractImplementedModules(values: Record<string, unknown>): Array<{ pageId: string; moduleId: string; kind: string }> {
-  const artifact = asRecord(values.moduleCompilationArtifact);
-  const parsed = ModuleCompilationMetadataSchema.safeParse(artifact?.metadata);
-  if (!parsed.success) return [];
-  return parsed.data.moduleDefinitions.map((entry) => ({
-    pageId: entry.pageId,
-    moduleId: entry.moduleId,
-    kind: entry.kind,
-  }));
-}
-
-function extractChangedModuleIds(operations: ReadonlyArray<{ op: string; module?: { id: string }; moduleId?: string }>): string[] {
-  const output: string[] = [];
-  const seen = new Set<string>();
-  for (const operation of operations) {
-    const moduleId = operation.op === "add" ? operation.module?.id : operation.moduleId;
-    if (isSafeId(moduleId) && !seen.has(moduleId)) {
-      seen.add(moduleId);
-      output.push(moduleId);
-    }
-  }
-  return output;
-}
-
-function asRecord(input: unknown): Record<string, unknown> | undefined {
-  return typeof input === "object" && input !== null && !Array.isArray(input)
-    ? input as Record<string, unknown>
-    : undefined;
-}
-
 function isHash(input: unknown): input is string {
   return typeof input === "string" && /^[0-9a-f]{64}$/.test(input);
 }
 
-function isSafeId(input: unknown): input is string {
-  return typeof input === "string" && /^[A-Za-z][A-Za-z0-9_-]{0,99}$/.test(input);
+function isTechnicalAssistantPayload(content: string): boolean {
+  for (const candidate of jsonCandidates(content)) {
+    try {
+      if (isTechnicalJson(JSON.parse(candidate))) return true;
+    } catch { /* prose or incomplete JSON remains normal customer content */ }
+  }
+  return false;
+}
+
+function jsonCandidates(content: string): string[] {
+  const trimmed = content.trim();
+  const output = [trimmed];
+  const fence = /^```(?:json)?\s*\n([\s\S]*?)\n```$/i.exec(trimmed);
+  if (fence?.[1] !== undefined) output.push(fence[1].trim());
+  for (const opener of ["{", "["]) {
+    const index = trimmed.indexOf(opener);
+    if (index > 0) output.push(trimmed.slice(index));
+  }
+  return output;
+}
+
+function isTechnicalJson(value: unknown): boolean {
+  if (value === null || typeof value !== "object") return false;
+  const pending: object[] = [value];
+  const seen = new Set<object>();
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    if (seen.has(current)) continue;
+    seen.add(current);
+    const record = current as Record<string, unknown>;
+    const schema = record["schema"];
+    if (schema === "kf-module-plan/v1" || schema === "kf-change-plan/v1" || schema === "kf-module-compilation-artifact/v1" || schema === "kf-module-compilation-metadata/v1") return true;
+    if (typeof record["signature"] === "string" && (record["metadata"] !== undefined || record["semanticOperations"] !== undefined || record["plan"] !== undefined)) return true;
+    for (const nested of Object.values(record)) if (nested !== null && typeof nested === "object") pending.push(nested);
+  }
+  return false;
 }
 
 function apiError(code: string, message: string): { error: { code: string; message: string } } {

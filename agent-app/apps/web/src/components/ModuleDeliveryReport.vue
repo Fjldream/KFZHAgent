@@ -12,7 +12,11 @@ const statusLabel = computed(() => {
   }
 });
 
-const unresolved = computed(() => props.result.gaps.filter((gap) => gap.status === "unresolved"));
+const gapStatusLabel = (status: "unresolved" | "mitigated" | "accepted"): string => ({
+  unresolved: "待解决",
+  mitigated: "已缓解",
+  accepted: "已接受",
+})[status];
 </script>
 
 <template>
@@ -35,12 +39,13 @@ const unresolved = computed(() => props.result.gaps.filter((gap) => gap.status =
           <span>{{ module.kind }}</span>
         </li>
       </ul>
+      <p v-if="result.implementedModules.length === 0" class="empty-state" data-testid="implemented-modules-empty">尚无可交付模块</p>
     </section>
 
-    <section v-if="unresolved.length > 0" class="report-section gaps" data-testid="unsupported-requirements">
+    <section v-if="result.gaps.length > 0" class="report-section gaps" data-testid="unsupported-requirements">
       <h3>{{ result.status === "blocked" ? "需要解决" : "交付提示" }}</h3>
-      <article v-for="gap in unresolved" :key="`${gap.moduleId}/${gap.requirement}`" class="gap">
-        <strong>{{ gap.requirement }}</strong>
+      <article v-for="gap in result.gaps" :key="`${gap.moduleId}/${gap.requirement}`" class="gap" :data-status="gap.status">
+        <div class="gap-title"><strong>{{ gap.requirement }}</strong><span>{{ gapStatusLabel(gap.status) }}</span></div>
         <p>{{ gap.reason }}</p>
         <p v-if="gap.alternatives?.length" class="alternatives">可选方案：{{ gap.alternatives.join("；") }}</p>
       </article>
@@ -73,7 +78,11 @@ h2 { margin: 0; font-size: 1rem; }
 .module-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.35rem; margin: 0; padding: 0; list-style: none; }
 .module-list li { display: flex; flex-direction: column; min-width: 0; padding: 0.4rem 0.5rem; border-radius: 8px; background: rgba(15, 23, 42, 0.04); font-size: 0.75rem; }
 .module-list span { overflow: hidden; color: var(--color-text-secondary); text-overflow: ellipsis; white-space: nowrap; }
+.empty-state { margin: 0; color: var(--color-text-secondary); font-size: 0.76rem; }
 .gap { margin-top: 0.45rem; padding: 0.55rem; border-radius: 8px; background: rgba(245, 158, 11, 0.09); font-size: 0.76rem; }
+.gap[data-status="mitigated"], .gap[data-status="accepted"] { background: rgba(34, 197, 94, 0.08); }
+.gap-title { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.gap-title span { color: var(--color-text-secondary); font-size: 0.68rem; white-space: nowrap; }
 .gap p { margin: 0.2rem 0 0; color: var(--color-text-secondary); }
 .alternatives { font-size: 0.72rem; }
 .revision-diff { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }

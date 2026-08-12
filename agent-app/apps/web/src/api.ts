@@ -163,6 +163,12 @@ export const api = {
       `/api/conversations/${conversationId}/messages`,
     );
   },
+  async getConversationDelivery(conversationId: string, buildJobId?: string): Promise<import("./types").PersistedModuleDelivery | null> {
+    const query = buildJobId === undefined ? "" : `?buildJobId=${encodeURIComponent(buildJobId)}`;
+    return jsonResponse<import("./types").PersistedModuleDelivery | null>(
+      `/api/conversations/${encodeURIComponent(conversationId)}/delivery${query}`,
+    );
+  },
   async resume(conversationId: string, input: { action: "approve" | "revise" | "cancel"; planHash: string }): Promise<Record<string, unknown>> {
     return jsonResponse<Record<string, unknown>>(`/api/conversations/${conversationId}/resume`, {
       method: "POST",

@@ -12,6 +12,7 @@ import { Test } from "@nestjs/testing";
 import cookieParser from "cookie-parser";
 import type { ArtifactStorage, StoredArtifact } from "@kf/artifact-storage";
 import { BuildExecutor, BuildJobService } from "@kf/build-jobs";
+import { canonicalModuleCompilationHash } from "@kf/contracts";
 import { decodeBlueprintMessage } from "@kf/agent-orchestrator";
 import {
   createKingClientDomainPack,
@@ -34,9 +35,9 @@ import { TenantsService } from "./tenants/tenants.service.js";
 import { ARTIFACT_STORAGE } from "./artifacts/artifact-storage.js";
 import { MODEL_PORT } from "./conversations/model-port.js";
 import { AssetService } from "./assets/asset.service.js";
-import { finalStateData } from "./conversations/conversation.service.js";
+import { ConversationService, finalStateData } from "./conversations/conversation.service.js";
 import { WorkspaceService } from "./workspaces/workspace.service.js";
-import { SERVER_PLAN_AUTHORITY } from "./conversations/server-plan-authority.js";
+import { MODULE_ARTIFACT_AUTHORITY, SERVER_PLAN_AUTHORITY } from "./conversations/server-plan-authority.js";
 
 const unknownFieldClientDir = fileURLToPath(
   new URL("../../../tests/fixtures/client-unknown-field", import.meta.url),
@@ -96,6 +97,7 @@ let tenants: TenantsService;
 let passwords: PasswordService;
 let fakeModel: FakeModelPort;
 let storage: ArtifactStorage;
+let moduleArtifactAuthority;
 let storageRoot: string;
 let counter = 0;
 
@@ -340,6 +342,7 @@ beforeAll(async () => {
   passwords = moduleRef.get(PasswordService);
   fakeModel = moduleRef.get(MODEL_PORT);
   storage = moduleRef.get(ARTIFACT_STORAGE);
+  moduleArtifactAuthority = moduleRef.get(MODULE_ARTIFACT_AUTHORITY);
 });
 
 afterAll(async () => {
@@ -1433,6 +1436,41 @@ describe("hardening fixes", () => {
 // ---------------------------------------------------------------------------
 
 describe("task 12 api surface", () => {
+  function signedDeliveryState({ operations = [], repairAttempt = 1, modules = ["footer", "hero"], revisionId = "revision-1" } = {}) {
+    const planModules = modules.map((id, order) => ({
+      id,
+      kind: id === "footer" ? "content.contact-footer" : "content.hero",
+      templateVersion: "1.0.0",
+      variant: "default",
+      title: id,
+      sourceBlueprintModuleIds: [id],
+      interactions: [],
+      placement: { region: id === "footer" ? "footer" : "main", order, columnSpan: 12, preferredHeight: "medium", alignment: "stretch", emphasis: id === "hero" ? "primary" : "secondary" },
+    }));
+    const plan = {
+      schema: "kf-module-plan/v1",
+      projectKey: "kingclient",
+      theme: { background: "#ffffff", surface: "#f8fafc", primary: "#2563eb", accent: "#0ea5e9", textPrimary: "#0f172a", textSecondary: "#475569", fontFamily: "Arial", spacingUnit: 8, radiusScale: { small: 4, medium: 8, large: 16 } },
+      assets: [], pages: [{ id: "home", title: "Home", mode: "vertical-flow", modules: planModules }], operations,
+    };
+    const metadata = {
+      schema: "kf-module-compilation-metadata/v1", projectKey: "kingclient",
+      moduleDefinitions: planModules.map((module) => ({ pageId: "home", moduleId: module.id, kind: module.kind, templateVersion: module.templateVersion, compilerFingerprint: `${module.id}-compiler-v1`, layoutFingerprint: `${module.id}-layout-v1` })),
+      assets: [], blueprintMappings: [],
+    };
+    const modulePlanHash = canonicalModuleCompilationHash(plan);
+    const artifact = moduleArtifactAuthority.signModuleCompilation({
+      schema: "kf-module-compilation-artifact/v1", projectKey: "kingclient", revisionId,
+      acceptedBlueprintHash: "a".repeat(64), planHash: modulePlanHash, implementationHash: "b".repeat(64),
+      metadataHash: canonicalModuleCompilationHash(metadata), sourceModuleIds: [...modules].sort(), metadata,
+    });
+    return {
+      modulePlanHash, modulePlan: plan, moduleCompilationArtifact: artifact,
+      moduleDeliveryReport: { schema: "kf-module-delivery/v1", projectKey: "kingclient", status: "ready", gaps: [] },
+      moduleRepairAttempt: repairAttempt, currentRevisionId: revisionId, uiImplementationHash: "b".repeat(64),
+    };
+  }
+
   it("never exposes a technical plan approval for a confirmed mapped v2 blueprint", async () => {
     fakeModel.mappedBlueprint = true;
     const cookie = await login(TENANT_A_MEMBER);
@@ -1451,85 +1489,33 @@ describe("task 12 api surface", () => {
   });
 
   it("projects only bounded customer delivery fields from the technical graph state", () => {
+    const values = signedDeliveryState({
+      operations: [{ op: "update", pageId: "home", moduleId: "hero", changes: {} }],
+      repairAttempt: 2,
+    });
+    values.moduleDeliveryReport = {
+      schema: "kf-module-delivery/v1", projectKey: "kingclient", status: "ready_with_warnings",
+      gaps: [{ moduleId: "hero", requirement: "使用轻量阴影", severity: "warning", status: "unresolved", reason: "运行时仅支持基础阴影" }],
+    };
     const data = finalStateData({
       values: {
+        ...values,
         stage: "building",
-        modulePlanHash: "1".repeat(64),
-        moduleDeliveryReport: {
-          schema: "kf-module-delivery/v1",
-          projectKey: "kingclient",
-          status: "ready_with_warnings",
-          gaps: [{
-            moduleId: "hero",
-            requirement: "使用轻量阴影",
-            severity: "warning",
-            status: "unresolved",
-            reason: "运行时仅支持基础阴影",
-          }],
-        },
-        moduleRepairAttempt: 2,
-        modulePlan: {
-          schema: "kf-module-plan/v1",
-          projectKey: "kingclient",
-          theme: {
-            background: "#ffffff",
-            surface: "#f8fafc",
-            primary: "#2563eb",
-            accent: "#0ea5e9",
-            textPrimary: "#0f172a",
-            textSecondary: "#475569",
-            fontFamily: "Arial",
-            spacingUnit: 8,
-            radiusScale: { small: 4, medium: 8, large: 16 },
-          },
-          assets: [],
-          pages: [{
-            id: "home",
-            title: "Home",
-            mode: "vertical-flow",
-            modules: [
-              {
-                id: "hero", kind: "content.hero", templateVersion: "1.0.0", variant: "no-portrait", title: "Hero",
-                sourceBlueprintModuleIds: ["hero"], interactions: [],
-                placement: { region: "main", order: 0, columnSpan: 12, preferredHeight: "medium", alignment: "stretch", emphasis: "primary" },
-              },
-              {
-                id: "footer", kind: "content.contact-footer", templateVersion: "1.0.0", variant: "default", title: "Footer",
-                sourceBlueprintModuleIds: ["footer"], interactions: [],
-                placement: { region: "footer", order: 1, columnSpan: 12, preferredHeight: "medium", alignment: "stretch", emphasis: "secondary" },
-              },
-            ],
-          }],
-          operations: [{ op: "update", pageId: "home", moduleId: "hero", changes: {} }],
-        },
         secretModelPrompt: "must-not-leak",
-        moduleCompilationArtifact: {
-          signature: "must-not-leak",
-          metadata: {
-            schema: "kf-module-compilation-metadata/v1",
-            projectKey: "kingclient",
-            moduleDefinitions: [
-              { pageId: "home", moduleId: "hero", kind: "content.hero", templateVersion: "1.0.0", compilerFingerprint: "hero-compiler-v1", layoutFingerprint: "hero-layout-v1" },
-              { pageId: "home", moduleId: "footer", kind: "content.contact-footer", templateVersion: "1.0.0", compilerFingerprint: "footer-compiler-v1", layoutFingerprint: "footer-layout-v1" },
-            ],
-            assets: [],
-            blueprintMappings: [],
-          },
-        },
       },
       tasks: [],
-    });
+    }, moduleArtifactAuthority);
 
     expect(data).toMatchObject({
-      modulePlanHash: "1".repeat(64),
+      modulePlanHash: values.modulePlanHash,
       moduleDeliveryResult: {
         projectKey: "kingclient",
         status: "ready_with_warnings",
         repairCount: 2,
-        implementedModules: [
-          { pageId: "home", moduleId: "hero", kind: "content.hero" },
+        implementedModules: expect.arrayContaining([
           { pageId: "home", moduleId: "footer", kind: "content.contact-footer" },
-        ],
+          { pageId: "home", moduleId: "hero", kind: "content.hero" },
+        ]),
         revisionDiff: { changedModules: ["hero"], preservedModules: ["footer"] },
       },
     });
@@ -1550,10 +1536,141 @@ describe("task 12 api surface", () => {
         moduleCompilationArtifact: { metadata: { moduleDefinitions: [] } },
       },
       tasks: [],
-    });
+    }, moduleArtifactAuthority);
 
     expect(data.moduleDeliveryResult).toBeUndefined();
     expect(JSON.stringify(data)).not.toContain("internal");
+  });
+
+  it("rejects stale or tampered signed module artifacts and repair attempts outside the contract", () => {
+    const valid = signedDeliveryState();
+    const tampered = { ...valid.moduleCompilationArtifact, signature: "0".repeat(64) };
+    expect(finalStateData({ values: { ...valid, moduleCompilationArtifact: tampered }, tasks: [] }, moduleArtifactAuthority).moduleDeliveryResult).toBeUndefined();
+    expect(finalStateData({ values: { ...valid, currentRevisionId: "revision-stale" }, tasks: [] }, moduleArtifactAuthority).moduleDeliveryResult).toBeUndefined();
+    expect(finalStateData({ values: { ...valid, moduleRepairAttempt: 4 }, tasks: [] }, moduleArtifactAuthority).moduleDeliveryResult).toBeUndefined();
+  });
+
+  it("treats an initial operations-empty module plan as entirely changed", () => {
+    const values = signedDeliveryState({ operations: [] });
+    const result = finalStateData({ values, tasks: [] }, moduleArtifactAuthority).moduleDeliveryResult;
+    expect(result.revisionDiff).toEqual({ changedModules: ["footer", "hero"], preservedModules: [] });
+  });
+
+  it("projects exact add, remove, changed, and unchanged revision modules", () => {
+    const added = {
+      id: "contact", kind: "content.hero", templateVersion: "1.0.0", variant: "default", title: "contact",
+      sourceBlueprintModuleIds: ["contact"], interactions: [],
+      placement: { region: "main", order: 0, columnSpan: 12, preferredHeight: "medium", alignment: "stretch", emphasis: "secondary" },
+    };
+    const values = signedDeliveryState({
+      modules: ["contact", "footer", "hero"],
+      operations: [
+        { op: "add", pageId: "home", module: added },
+        { op: "update", pageId: "home", moduleId: "hero", changes: { title: "hero" } },
+        { op: "remove", pageId: "home", moduleId: "oldModule" },
+      ],
+    });
+    const result = finalStateData({ values, tasks: [] }, moduleArtifactAuthority).moduleDeliveryResult;
+    expect(result.revisionDiff).toEqual({ changedModules: ["contact", "hero", "oldModule"], preservedModules: ["footer"] });
+  });
+
+  it("filters historical assistant technical JSON variants at the API boundary without altering user prose", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createWorkspace(cookie, "Message filter WS");
+    const conv = await createConversation(cookie, ws.body.id, "Message filter");
+    const tenantId = await tenantIdOf(TENANT_A.tenant);
+    const contents = [
+      '```json\n{"schema":"kf-module-plan/v1","pages":[]}\n```',
+      '内部结果如下：\n{"schema":"kf-change-plan/v1","operations":[],"signature":"secret"}',
+      '{"metadata":{"schema":"kf-module-compilation-metadata/v1"},"signature":"secret"}',
+    ];
+    for (const content of contents) await prisma.message.create({ data: { tenantId, conversationId: conv.body.id, role: "assistant", content } });
+    await prisma.message.create({ data: { tenantId, conversationId: conv.body.id, role: "user", content: "请解释 signature 这个普通英文词" } });
+
+    const response = await request(server).get(`/api/conversations/${conv.body.id}/messages`).set("Cookie", cookie).expect(200);
+    expect(response.body.slice(0, 3).every((row) => !/kf-module-plan|kf-change-plan|secret|signature/.test(row.content))).toBe(true);
+    expect(response.body[3].content).toBe("请解释 signature 这个普通英文词");
+  });
+
+  it("fails closed at direct preview and download-token routes for a non-deliverable module build", async () => {
+    fakeModel.mappedBlueprint = true;
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createWorkspace(cookie, "Blocked artifact gate WS");
+    const conv = await createConversation(cookie, ws.body.id, "Blocked artifact gate");
+    fakeModel.queueIntent("NEW_REQUIREMENT");
+    await sendMessage(cookie, conv.body.id, "生成模块门户").expect(200);
+    fakeModel.queueIntent("CONFIRM_DESIGN");
+    await sendMessage(cookie, conv.body.id, "确认效果蓝图").expect(200);
+    const tenantId = await tenantIdOf(TENANT_A.tenant);
+    const planHash = "d".repeat(64);
+    const persistedJob = await prisma.buildJob.create({ data: {
+      tenantId, workspaceId: ws.body.id, baseRevisionId: ws.body.currentRevisionId,
+      changePlanId: "manual-module-plan", planHash, domainKind: "kingclient",
+      idempotencyKey: `${conv.body.id}:manual-module-plan:${planHash}`, status: "FAILED",
+    } });
+    const graph = await app.get(ConversationService)["getGraph"]();
+    await graph.updateState(
+      { configurable: { thread_id: conv.body.id } },
+      {
+        ...signedDeliveryState(), tenantId, workspaceId: ws.body.id, conversationId: conv.body.id,
+        buildJobId: persistedJob.id, changePlanId: persistedJob.changePlanId, planHash: persistedJob.planHash,
+        currentRevisionId: persistedJob.baseRevisionId,
+      },
+    );
+    const stored = await storage.put({ tenantId, kind: "client-package", stream: Readable.from([Buffer.from("not-renderable")]), maxBytes: 1024 });
+    const artifact = await prisma.artifact.create({ data: { tenantId, buildJobId: persistedJob.id, kind: "client-package", storageKey: stored.artifactId, sizeBytes: stored.sizeBytes, sha256: stored.sha256 } });
+
+    await request(server).post(`/api/artifacts/${artifact.id}/download-token`).set("Cookie", cookie).expect(409);
+    await request(server).get(`/api/artifacts/${artifact.id}/preview`).set("Cookie", cookie).expect(409);
+  });
+
+  it("restores a tenant/workspace/job-bound warning snapshot and becomes blocked after build failure", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createWorkspace(cookie, "Persisted delivery WS");
+    const conv = await createConversation(cookie, ws.body.id, "Persisted delivery");
+    const tenantId = await tenantIdOf(TENANT_A.tenant);
+    const buildPlanHash = "e".repeat(64);
+    const job = await prisma.buildJob.create({ data: {
+      tenantId, workspaceId: ws.body.id, baseRevisionId: ws.body.currentRevisionId,
+      changePlanId: "persisted-module-plan", planHash: buildPlanHash, domainKind: "kingclient",
+      idempotencyKey: `${conv.body.id}:persisted-module-plan:${buildPlanHash}`, status: "SUCCEEDED",
+    } });
+    const artifact = await prisma.artifact.create({ data: { tenantId, buildJobId: job.id, kind: "client-package", storageKey: "persisted-artifact" } });
+    const latestRevision = await prisma.solutionRevision.findFirstOrThrow({ where: { workspaceId: ws.body.id }, orderBy: { revisionNumber: "desc" } });
+    const revision = await prisma.solutionRevision.create({ data: {
+      tenantId, workspaceId: ws.body.id, changePlanId: job.changePlanId, revisionNumber: latestRevision.revisionNumber + 1,
+      kind: "build", parentRevisionId: job.baseRevisionId, state: {},
+    } });
+    const values = signedDeliveryState({ revisionId: job.baseRevisionId });
+    values.moduleDeliveryReport = {
+      schema: "kf-module-delivery/v1", projectKey: "kingclient", status: "ready_with_warnings",
+      gaps: [{ moduleId: "hero", requirement: "保留轻微差异", severity: "warning", status: "unresolved", reason: "警告应在刷新后持续可见" }],
+    };
+    const graph = await app.get(ConversationService)["getGraph"]();
+    await graph.updateState({ configurable: { thread_id: conv.body.id } }, {
+      ...values, tenantId, workspaceId: ws.body.id, conversationId: conv.body.id, buildJobId: job.id,
+      changePlanId: job.changePlanId, planHash: job.planHash, currentRevisionId: job.baseRevisionId,
+    });
+
+    const restored = await request(server)
+      .get(`/api/conversations/${conv.body.id}/delivery?buildJobId=${job.id}`)
+      .set("Cookie", cookie).expect(200);
+    expect(restored.body).toMatchObject({
+      tenantId, workspaceId: ws.body.id, conversationId: conv.body.id, buildJobId: job.id,
+      artifactId: artifact.id, revisionId: revision.id,
+      result: { status: "ready_with_warnings", gaps: [{ reason: "警告应在刷新后持续可见" }] },
+    });
+    const staleArtifact = await prisma.artifact.create({ data: {
+      tenantId, buildJobId: job.id, kind: "client-package", storageKey: "stale-artifact", createdAt: new Date(0),
+    } });
+    await request(server).post(`/api/artifacts/${artifact.id}/download-token`).set("Cookie", cookie).expect(200);
+    await request(server).post(`/api/artifacts/${staleArtifact.id}/download-token`).set("Cookie", cookie).expect(409);
+
+    await prisma.buildJob.update({ where: { id: job.id }, data: { status: "FAILED" } });
+    const blocked = await request(server)
+      .get(`/api/conversations/${conv.body.id}/delivery?buildJobId=${job.id}`)
+      .set("Cookie", cookie).expect(200);
+    expect(blocked.body).toMatchObject({ artifactId: null, revisionId: null, result: { status: "blocked" } });
   });
 
   it("compiles every confirmed blueprint module instead of persisting a Text1-only plan", async () => {

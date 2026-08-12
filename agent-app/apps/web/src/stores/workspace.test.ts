@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({
   listConversations: vi.fn(),
   createConversation: vi.fn(),
   listMessages: vi.fn(),
+  getConversationDelivery: vi.fn(),
   createDownloadToken: vi.fn(),
   downloadUrl: vi.fn(),
   previewUrl: vi.fn(),
@@ -36,6 +37,7 @@ beforeEach(() => {
   api.listConversations.mockReset();
   api.createConversation.mockReset();
   api.listMessages.mockReset();
+  api.getConversationDelivery.mockReset();
   api.createDownloadToken.mockReset();
   api.downloadUrl.mockReset();
   api.previewUrl.mockReset();
@@ -49,6 +51,7 @@ beforeEach(() => {
   api.getWorkspace.mockResolvedValue(ws);
   api.listRevisions.mockResolvedValue([]);
   api.getLatestBuildJob.mockResolvedValue(null);
+  api.getConversationDelivery.mockResolvedValue(null);
   api.downloadUrl.mockReturnValue("/api/artifacts/download/download-token");
 });
 
@@ -65,6 +68,52 @@ describe("workspace store load() 会话绑定", () => {
     expect(store.state.conversationId).toBe("conv-b");
     expect(store.state.messages).toHaveLength(1);
     expect(store.state.messages[0].content).toBe("旧消息");
+  });
+
+  it("restores a persisted warning delivery snapshot when reopening", async () => {
+    api.listConversations.mockResolvedValue([convA]);
+    api.listMessages.mockResolvedValue([]);
+    api.getConversationDelivery.mockResolvedValue({
+      conversationId: "conv-a",
+      workspaceId: "ws-1",
+      buildJobId: "job-warning",
+      artifactId: "art-warning",
+      revisionId: "rev-warning",
+      result: deliveryResult("ready_with_warnings", "warning survives refresh"),
+    });
+    api.getLatestBuildJob.mockResolvedValue({ id: "job-warning", status: "SUCCEEDED" });
+    api.getBuildJob.mockResolvedValue({ id: "job-warning", status: "SUCCEEDED" });
+    api.listBuildArtifacts.mockResolvedValue([{ id: "art-warning", kind: "client-package" }]);
+    api.getBuildJobReport.mockResolvedValue({ outcome: "pass" });
+
+    const store = useWorkspace();
+    await store.load("ws-1");
+
+    expect(api.getConversationDelivery).toHaveBeenCalledWith("conv-a", "job-warning");
+    expect(store.state.moduleDeliveryResult?.status).toBe("ready_with_warnings");
+    expect(store.state.moduleDeliveryResult?.gaps[0]?.reason).toBe("warning survives refresh");
+  });
+
+  it("keeps a persisted blocked snapshot unavailable after refresh", async () => {
+    api.listConversations.mockResolvedValue([convA]);
+    api.listMessages.mockResolvedValue([]);
+    api.getConversationDelivery.mockResolvedValue({
+      conversationId: "conv-a",
+      workspaceId: "ws-1",
+      buildJobId: "job-blocked",
+      artifactId: null,
+      revisionId: null,
+      result: deliveryResult("blocked", "blocked survives refresh"),
+    });
+    api.getLatestBuildJob.mockResolvedValue({ id: "job-blocked", status: "FAILED" });
+    api.getBuildJob.mockResolvedValue({ id: "job-blocked", status: "FAILED" });
+    api.getBuildJobReport.mockResolvedValue({ outcome: "fail" });
+
+    const store = useWorkspace();
+    await store.load("ws-1");
+
+    expect(store.state.moduleDeliveryResult?.status).toBe("blocked");
+    await expect(store.downloadArtifact("art-stale")).rejects.toThrow("交付被阻断");
   });
 
   it("无历史会话时新建会话", async () => {
@@ -192,6 +241,53 @@ describe("workspace store load() 会话绑定", () => {
     expect(store.state.buildJobId).toBeNull();
     expect(store.state.previewArtifactId).toBeUndefined();
     expect(api.listBuildArtifacts).not.toHaveBeenCalled();
+  });
+
+  it("does not let an old build delivery refresh overwrite the new workspace", async () => {
+    let resolveOldDelivery: (value: unknown) => void = () => {};
+    const oldDelivery = new Promise((resolve) => { resolveOldDelivery = resolve; });
+    api.getWorkspace.mockImplementation(async (id) => ({ id, name: id, mode: "new", currentRevisionId: null }));
+    api.listConversations.mockImplementation(async (id) => [{ id: `conv-${id}`, title: id }]);
+    api.listMessages.mockResolvedValue([]);
+    api.getLatestBuildJob.mockImplementation(async (id) => id === "ws-a"
+      ? { id: "job-a", status: "SUCCEEDED" }
+      : { id: "job-b", status: "SUCCEEDED" });
+    api.getBuildJob.mockImplementation(async (id) => ({ id, status: "SUCCEEDED" }));
+    api.listBuildArtifacts.mockImplementation(async (id) => [{ id: `art-${id}`, kind: "client-package" }]);
+    api.getBuildJobReport.mockResolvedValue({ outcome: "pass" });
+    api.getConversationDelivery.mockImplementation(async (conversationId) => conversationId === "conv-ws-a"
+      ? oldDelivery
+      : ({ conversationId, workspaceId: "ws-b", buildJobId: "job-b", artifactId: "art-job-b", revisionId: "rev-b", result: deliveryResult("ready", "current") }));
+
+    const store = useWorkspace();
+    const loadA = store.load("ws-a");
+    await vi.waitFor(() => expect(api.getConversationDelivery).toHaveBeenCalledWith("conv-ws-a", "job-a"));
+    await store.load("ws-b");
+    resolveOldDelivery({ conversationId: "conv-ws-a", workspaceId: "ws-a", buildJobId: "job-a", artifactId: "art-job-a", revisionId: "rev-a", result: deliveryResult("blocked", "stale") });
+    await loadA;
+
+    expect(store.state.workspaceId).toBe("ws-b");
+    expect(store.state.moduleDeliveryResult?.status).toBe("ready");
+  });
+
+  it("replaces a ready result with fail-closed blocked when the expected build fails", async () => {
+    api.listConversations.mockResolvedValue([convA]);
+    api.listMessages.mockResolvedValue([]);
+    streamMessageTurn.mockResolvedValue({ buildJobId: "job-failed", moduleDeliveryResult: deliveryResult("ready", "") });
+    api.getBuildJob.mockResolvedValue({ id: "job-failed", status: "FAILED" });
+    api.getBuildJobReport.mockResolvedValue({ outcome: "fail" });
+    api.getConversationDelivery.mockResolvedValue({
+      conversationId: "conv-a", workspaceId: "ws-1", buildJobId: "job-failed", artifactId: null, revisionId: null,
+      result: deliveryResult("blocked", "工程构建失败"),
+    });
+
+    const store = useWorkspace();
+    await store.load("ws-1");
+    await store.sendMessage("确认效果蓝图");
+
+    expect(store.state.buildJobStatus).toBe("FAILED");
+    expect(store.state.moduleDeliveryResult?.status).toBe("blocked");
+    expect(store.state.previewArtifactId).toBeUndefined();
   });
 
   it("ignores an older overlapping workspace load that finishes after the current workspace", async () => {

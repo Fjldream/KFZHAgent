@@ -2,21 +2,15 @@ import { Module } from "@nestjs/common";
 import { ChangePlanController } from "./change-plan.controller.js";
 import { ConversationController } from "./conversation.controller.js";
 import { ConversationService } from "./conversation.service.js";
-import { PG_POOL, createPgPool } from "./checkpointer.js";
 import { DEFAULT_MODEL_PORT, MODEL_PORT } from "./model-port.js";
 import { DeterministicFakeModelPort } from "./fake-model.js";
 import { DeepSeekModelPort } from "./deepseek-model.js";
 import { ArtifactsModule } from "../artifacts/artifacts.module.js";
 import { AssetsModule } from "../assets/assets.module.js";
-import {
-  SERVER_PLAN_AUTHORITY,
-  MODULE_ARTIFACT_AUTHORITY,
-  createModuleArtifactAuthorityFromEnvironment,
-  createServerPlanAuthorityFromEnvironment,
-} from "./server-plan-authority.js";
+import { DeliveryModule } from "../delivery/delivery.module.js";
 
 @Module({
-  imports: [ArtifactsModule, AssetsModule],
+  imports: [ArtifactsModule, AssetsModule, DeliveryModule],
   controllers: [ConversationController, ChangePlanController],
   providers: [
     ConversationService,
@@ -46,9 +40,6 @@ import {
           : DEFAULT_MODEL_PORT;
       },
     },
-    { provide: PG_POOL, useFactory: createPgPool },
-    { provide: SERVER_PLAN_AUTHORITY, useFactory: createServerPlanAuthorityFromEnvironment },
-    { provide: MODULE_ARTIFACT_AUTHORITY, useFactory: createModuleArtifactAuthorityFromEnvironment },
   ],
   exports: [ConversationService],
 })

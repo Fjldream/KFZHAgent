@@ -58,4 +58,33 @@ describe("ModuleDeliveryReport", () => {
     expect(wrapper.get('[data-testid="unsupported-requirements"]').text()).toContain("提供可用的个人头像资源");
     expect(wrapper.text()).toContain("缺少已批准的图片资源");
   });
+
+  it("shows unresolved, mitigated, and accepted gaps with explicit customer statuses", () => {
+    const wrapper = mount(ModuleDeliveryReport, {
+      props: {
+        result: {
+          ...result,
+          gaps: [
+            result.gaps[0]!,
+            { moduleId: "contact", requirement: "回退方案", severity: "warning" as const, status: "mitigated" as const, reason: "已使用原生控件替代" },
+            { moduleId: "footer", requirement: "已接受差异", severity: "info" as const, status: "accepted" as const, reason: "用户接受当前差异" },
+          ],
+        },
+      },
+    });
+
+    expect(wrapper.text()).toContain("待解决");
+    expect(wrapper.text()).toContain("已缓解");
+    expect(wrapper.text()).toContain("已接受");
+    expect(wrapper.text()).toContain("已使用原生控件替代");
+    expect(wrapper.text()).toContain("用户接受当前差异");
+  });
+
+  it("shows a clear empty state when a blocked result has no implemented modules", () => {
+    const wrapper = mount(ModuleDeliveryReport, {
+      props: { result: { ...result, status: "blocked" as const, implementedModules: [] } },
+    });
+
+    expect(wrapper.get('[data-testid="implemented-modules-empty"]').text()).toContain("尚无可交付模块");
+  });
 });
