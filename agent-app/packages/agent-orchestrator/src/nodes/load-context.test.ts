@@ -7,6 +7,7 @@ function makeDeps(status: "QUEUED" | "SUCCEEDED") {
       listRecentMessages: vi.fn().mockResolvedValue([]),
       getConversationSummary: vi.fn().mockResolvedValue(undefined),
       getCurrentRevisionId: vi.fn().mockResolvedValue("rev-2"),
+      getWorkspaceRouting: vi.fn().mockResolvedValue({ mode: "new", generationWorkflow: "module-v1" }),
       getRevisionSummary: vi.fn().mockResolvedValue("latest revision"),
       setConversationSummary: vi.fn().mockResolvedValue(undefined),
     },
@@ -30,6 +31,18 @@ function state(overrides: Record<string, unknown> = {}) {
 }
 
 describe("load-context build lifecycle", () => {
+  it("loads the server-owned workflow discriminator with a tenant-scoped workspace lookup", async () => {
+    const deps = makeDeps("QUEUED");
+
+    const update = await createLoadContextNode(deps as never)(state() as never);
+
+    expect(update).toMatchObject({ workspaceMode: "new", generationWorkflow: "module-v1" });
+    expect(deps.workspaceQuery.getWorkspaceRouting).toHaveBeenCalledWith({
+      tenantId: "tenant-1",
+      workspaceId: "workspace-1",
+    });
+  });
+
   it("enters preview review only when the active building job succeeds", async () => {
     const deps = makeDeps("SUCCEEDED");
 

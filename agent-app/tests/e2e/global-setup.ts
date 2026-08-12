@@ -21,6 +21,9 @@ const BASE_ENV: Record<string, string> = {
   ARTIFACT_STORAGE_ROOT: ARTIFACT_ROOT,
   CORS_ORIGINS: WEB_BASE,
   MODEL_PORT_MODE: "fake",
+  // Deterministic test-only signing authority shared by the isolated API and
+  // worker. Never inherit a developer/production secret into E2E evidence.
+  KF_SERVER_PLAN_HMAC_KEY_BASE64: Buffer.alloc(32, 0x45).toString("base64"),
   // 本地 http 环境：Node 侧 APIRequestContext 不会把 Secure cookie 发到
   // http 目标；浏览器端仍受 HttpOnly + SameSite=strict 保护。
   COOKIE_SECURE: "false",

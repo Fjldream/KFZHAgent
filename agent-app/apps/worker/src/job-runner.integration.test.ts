@@ -118,7 +118,8 @@ async function buildGoldenPackage(name: string) {
     plan, acceptedBlueprintArtifact: acceptedArtifactForPlan(plan, registry), registry, assetsById, approvedAssetsById,
     validationContext: { availableKfCapabilities: GOLDEN_CAPABILITIES, approvedAuthorizationRefs: [] },
   });
-  if (compiled.status !== "compiled") return { plan, compiled };
+  const assetTargetPath = `static/agent-assets/${sha256}.png`;
+  if (compiled.status !== "compiled") return { plan, compiled, assetBytes, assetTargetPath, sha256 };
   const implementation = compileUiImplementation(compiled.implementation, {
     workspaceId: "00000000-0000-4000-8000-000000000013", pageGuidById: { Page1: "page-guid-1" },
     existingControlGuidByComponentId: {}, existingControlCapabilityIdByComponentId: {},
@@ -126,12 +127,19 @@ async function buildGoldenPackage(name: string) {
   });
   const base = await goldenBaseWorkspace();
   const domainAssets = plan.assets.map((asset) => ({
-    assetId: asset.id, targetPath: `static/agent-assets/${sha256}.png`, mediaType: "image/png", sha256, bytes: assetBytes,
+    assetId: asset.id, targetPath: assetTargetPath, mediaType: "image/png", sha256, bytes: assetBytes,
   }));
   const candidate = await applyClientPatch(base, implementation.plan, { semanticOperations: implementation.semanticOperations, assets: domainAssets });
   const validation = await validateClientProject(base, candidate, implementation.plan, { assetTargetPaths: domainAssets.map((asset) => asset.targetPath) });
   const bytes = await packageNativeClientProject(candidate.rootDir);
-  return { plan, compiled, implementation, candidate, validation, bytes };
+  return { plan, compiled, implementation, candidate, validation, bytes, assetBytes, assetTargetPath, sha256 };
+}
+
+function containsDirectProperty(value: unknown, key: string, expected: unknown): boolean {
+  if (Array.isArray(value)) return value.some((entry) => containsDirectProperty(entry, key, expected));
+  if (value === null || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  return record[key] === expected || Object.values(record).some((entry) => containsDirectProperty(entry, key, expected));
 }
 
 const INITIAL_IR = {
@@ -358,6 +366,13 @@ describe("job runner", () => {
     }
     for (const asset of built.plan.assets) {
       expect(built.compiled.assetBindings).toContainEqual(expect.objectContaining({ assetId: asset.id }));
+    }
+    if (name === "personal-portal") {
+      const versionDir = await resolveVersionDirName(unpacked);
+      const materialized = await readFile(path.join(unpacked, versionDir, built.assetTargetPath));
+      expect(materialized).toEqual(built.assetBytes);
+      expect(createHash("sha256").update(materialized).digest("hex")).toBe(built.sha256);
+      expect(containsDirectProperty(inspection.raw.pages, "src", built.assetTargetPath)).toBe(true);
     }
   });
 

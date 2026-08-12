@@ -445,12 +445,19 @@ async function login(
   return cookie;
 }
 
-async function createWorkspace(cookie: string, name: string) {
-  return request(server)
+async function createWorkspace(cookie: string, name: string, generationWorkflow: "legacy" | "module-v1" = "legacy") {
+  const response = await request(server)
     .post("/api/workspaces")
     .set("Cookie", cookie)
     .send({ name })
     .expect(201);
+  // Most historical cases in this suite model workspaces created before the
+  // module-v1 rollout. Persist that server state explicitly; product creation
+  // tests opt in to module-v1 and exercise the real default unchanged.
+  if (generationWorkflow === "legacy") {
+    await prisma.solutionWorkspace.update({ where: { id: response.body.id }, data: { generationWorkflow: "legacy" } });
+  }
+  return response;
 }
 
 async function createUploadWorkspace(cookie: string, name: string) {
@@ -578,10 +585,30 @@ async function tenantIdOf(tenantName: string): Promise<string> {
 // ---------------------------------------------------------------------------
 
 describe("api contract", () => {
+  it("assigns workflow ownership on the server when creating workspaces", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const generated = await createWorkspace(cookie, "Server-owned module workflow", "module-v1");
+    const imported = await createUploadWorkspace(cookie, "Server-owned legacy workflow");
+
+    expect(generated.body).toMatchObject({ mode: "new", generationWorkflow: "module-v1" });
+    expect(imported.body).toMatchObject({ mode: "upload", generationWorkflow: "legacy" });
+    await expect(prisma.solutionWorkspace.findUniqueOrThrow({ where: { id: generated.body.id } }))
+      .resolves.toMatchObject({ generationWorkflow: "module-v1" });
+    await expect(prisma.solutionWorkspace.findUniqueOrThrow({ where: { id: imported.body.id } }))
+      .resolves.toMatchObject({ generationWorkflow: "legacy" });
+    await request(server)
+      .post("/api/workspaces")
+      .set("Cookie", cookie)
+      .send({ name: "Client cannot select workflow", generationWorkflow: "legacy" })
+      .expect(201)
+      .expect(({ body }) => expect(body.generationWorkflow).toBe("module-v1"));
+  });
+
   it("creates an upload workspace and uploads a source package", async () => {
     const cookie = await login(TENANT_A_MEMBER);
     const ws = await createUploadWorkspace(cookie, "Import Workspace");
     expect(ws.body.mode).toBe("upload");
+    expect(ws.body.generationWorkflow).toBe("legacy");
     expect(ws.body.currentRevisionId).toBeNull();
 
     const pkg = await makePackage();
@@ -1485,7 +1512,7 @@ describe("task 12 api surface", () => {
   it("never exposes a technical plan approval for a confirmed mapped v2 blueprint", async () => {
     fakeModel.mappedBlueprint = true;
     const cookie = await login(TENANT_A_MEMBER);
-    const ws = await createWorkspace(cookie, "Mapped Blueprint WS");
+    const ws = await createWorkspace(cookie, "Mapped Blueprint WS", "module-v1");
     const conv = await createConversation(cookie, ws.body.id, "Mapped Blueprint");
 
     fakeModel.queueIntent("NEW_REQUIREMENT");
@@ -1510,7 +1537,7 @@ describe("task 12 api surface", () => {
     fakeModel.mappedBlueprint = true;
     fakeModel.blueprintModuleIds = ["main"];
     const cookie = await login(TENANT_A_MEMBER);
-    const ws = await createWorkspace(cookie, "Task13 automatic module build");
+    const ws = await createWorkspace(cookie, "Task13 automatic module build", "module-v1");
     const conv = await createConversation(cookie, ws.body.id, "Task13 automatic module build");
 
     fakeModel.queueIntent("NEW_REQUIREMENT");

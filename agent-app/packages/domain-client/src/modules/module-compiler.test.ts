@@ -145,6 +145,7 @@ describe("compileModulePlan", () => {
       compile: ({ context }) => ({
         components: [{ ...component("title", "text"), role: "title" }, ...context.instance.interactions.map((interaction, index) => ({
           ...component(`action-${index + 1}`, "button"), critical: false, role: "action",
+          geometry: { x: 20 + index * 220, y: 80, width: 200, height: 32 },
           properties: { action: interaction.type === "navigate"
             ? { kind: "navigate", pageId: interaction.pageId }
             : interaction.type === "scroll" || interaction.type === "open-modal"

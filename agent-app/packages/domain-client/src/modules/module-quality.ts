@@ -245,6 +245,7 @@ function deriveRequiredOutputs(
 }
 
 function inspectPageGeometry(pageId: string, width: number, height: number, components: readonly UIComponentSpec[], gaps: ModuleDeliveryGap[]): void {
+  const byId = new Map(components.map((component) => [component.id, component]));
   for (const component of components) {
     const { x, y, width: componentWidth, height: componentHeight } = component.geometry;
     if (x < 0 || y < 0 || x + componentWidth > width || y + componentHeight > height) gaps.push(gap(component.sourceModuleId ?? component.id, `Keep ${component.id} inside the page canvas.`, "GEOMETRY_OVERFLOW"));
@@ -252,13 +253,24 @@ function inspectPageGeometry(pageId: string, width: number, height: number, comp
   for (let leftIndex = 0; leftIndex < components.length; leftIndex += 1) for (let rightIndex = leftIndex + 1; rightIndex < components.length; rightIndex += 1) {
     const left = components[leftIndex]!;
     const right = components[rightIndex]!;
-    if (!left.critical || !right.critical || left.sourceModuleId === right.sourceModuleId || parentRelated(left, right) || !overlaps(left, right)) continue;
+    if (parentRelated(left, right, byId) || !overlaps(left, right)) continue;
     gaps.push(gap(left.sourceModuleId ?? left.id, `Resolve the critical overlap between ${left.id} and ${right.id} on ${pageId}.`, "CRITICAL_COMPONENT_OVERLAP"));
   }
 }
 
-function parentRelated(left: UIComponentSpec, right: UIComponentSpec): boolean {
-  return left.properties.parentId === right.id || right.properties.parentId === left.id || (typeof left.properties.parentId === "string" && left.properties.parentId === right.properties.parentId);
+function parentRelated(left: UIComponentSpec, right: UIComponentSpec, byId: ReadonlyMap<string, UIComponentSpec>): boolean {
+  return isAncestor(left.id, right, byId) || isAncestor(right.id, left, byId);
+}
+
+function isAncestor(ancestorId: string, child: UIComponentSpec, byId: ReadonlyMap<string, UIComponentSpec>): boolean {
+  const visited = new Set<string>();
+  let parentId = child.properties.parentId;
+  while (typeof parentId === "string" && !visited.has(parentId)) {
+    if (parentId === ancestorId) return true;
+    visited.add(parentId);
+    parentId = byId.get(parentId)?.properties.parentId;
+  }
+  return false;
 }
 
 function overlaps(left: UIComponentSpec, right: UIComponentSpec): boolean {

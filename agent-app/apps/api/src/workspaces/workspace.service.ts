@@ -106,7 +106,13 @@ export class WorkspaceService {
     try {
       return await this.prisma.$transaction(async (tx) => {
         const workspace = await tx.solutionWorkspace.create({
-          data: { tenantId: input.tenantId, name, description, mode },
+          data: {
+            tenantId: input.tenantId,
+            name,
+            description,
+            mode,
+            generationWorkflow: mode === "new" ? "module-v1" : "legacy",
+          },
         });
         if (mode !== "new") {
           return { workspace };

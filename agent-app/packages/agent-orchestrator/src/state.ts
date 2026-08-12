@@ -98,7 +98,7 @@ export const AgentGraphState = new StateSchema({
   conversationId: z.string().min(1),
   currentRevisionId: z.string().optional(),
   workspaceMode: z.enum(["new", "upload"]).optional(),
-  moduleWorkflowRequested: z.boolean().optional(),
+  generationWorkflow: z.enum(["legacy", "module-v1"]).optional(),
   activeChangeRequestId: z.string().optional(),
   changePlanId: z.string().optional(),
   planHash: z.string().optional(),

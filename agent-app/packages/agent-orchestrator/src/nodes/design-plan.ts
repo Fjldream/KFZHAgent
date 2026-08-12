@@ -113,9 +113,6 @@ export function createDesignPlanNode(deps: SolutionGraphDeps) {
     });
     return {
       designPlan: plan,
-      moduleWorkflowRequested: state.moduleWorkflowRequested === true
-        || /模块化|模块生成/.test(modelInput.requirementText ?? "")
-        || plan.modules.every((module) => module.expectedKind !== undefined),
       designPlanHash: hash,
       designRevision: revision,
       stage: "design-review",

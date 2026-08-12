@@ -104,6 +104,28 @@ function assertGoldenGeometry(pages: readonly { width: number; height: number; c
       expect(box.x + box.width, component.id).toBeLessThanOrEqual(page.width);
       expect(box.y + box.height, component.id).toBeLessThanOrEqual(page.height);
     }
+    const byId = new Map(page.components.map((component) => [component.id, component]));
+    const isAncestor = (ancestorId: string, component: UIComponentSpec): boolean => {
+      const visited = new Set<string>();
+      let parentId = component.properties.parentId;
+      while (typeof parentId === "string" && !visited.has(parentId)) {
+        if (parentId === ancestorId) return true;
+        visited.add(parentId);
+        parentId = byId.get(parentId)?.properties.parentId;
+      }
+      return false;
+    };
+    for (let leftIndex = 0; leftIndex < page.components.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < page.components.length; rightIndex += 1) {
+        const left = page.components[leftIndex]!;
+        const right = page.components[rightIndex]!;
+        if (isAncestor(left.id, right) || isAncestor(right.id, left)) continue;
+        const a = left.geometry;
+        const b = right.geometry;
+        const overlap = a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+        expect(overlap, `${left.id} overlaps ${right.id}`).toBe(false);
+      }
+    }
   }
 }
 
@@ -131,13 +153,32 @@ describe("module generation V1 golden fixtures", () => {
       .toBe(plan.pages.flatMap((page) => page.modules).length);
     assertGoldenGeometry(result.implementation.pages);
 
-    const complexKinds = new Set(["metric.kpi-grid", "content.card-grid", "interaction.tabs-filter", "data.table", "feedback.alert-list"]);
-    for (const module of plan.pages.flatMap((page) => page.modules).filter((module) => complexKinds.has(module.kind))) {
+    for (const module of plan.pages.flatMap((page) => page.modules)) {
+      const quality = registry.require(module.kind, module.templateVersion).quality;
+      expect(quality, `${module.id} missing quality contract`).toBeDefined();
       const controls = result.implementation.pages.flatMap((page) => page.components).filter((component) => component.sourceModuleId === module.id);
-      expect(controls.length, `${module.id} collapsed`).toBeGreaterThan(1);
-      expect(controls.every((control) => control.capabilityId === "text"), `${module.id} collapsed to text`).toBe(false);
+      expect(controls.length, `${module.id} required controls`).toBeGreaterThanOrEqual(quality!.minimumComponentCount);
+      expect(controls.filter((control) => control.critical).length, `${module.id} required critical controls`).toBeGreaterThanOrEqual(quality!.minimumCriticalComponentCount);
+      for (const capability of quality!.requiredCapabilityIds) {
+        expect(controls.some((control) => control.capabilityId === capability), `${module.id} missing ${capability}`).toBe(true);
+      }
     }
     for (const asset of plan.assets) expect(result.assetBindings).toContainEqual(expect.objectContaining({ assetId: asset.id }));
+
+    const repeated = compileModulePlan({
+      plan,
+      acceptedBlueprintArtifact: acceptedArtifactForPlan(plan, registry),
+      previousPlan: plan,
+      previousImplementation: result.implementation,
+      previousCompilationArtifact: verifiedCompilationFor(result),
+      registry,
+      assetsById: resolvedAssets(plan),
+      validationContext: { availableKfCapabilities: GOLDEN_CAPABILITIES, approvedAuthorizationRefs: [] },
+    });
+    expect(repeated.status).toBe("compiled");
+    if (repeated.status !== "compiled") return;
+    expect(repeated.implementation).toEqual(result.implementation);
+    expect(repeated.diff?.unexpectedChanges).toEqual([]);
   });
 
   it("keeps the industrial chart golden blocked on its exact unverified KF 3.6 static-series gap", async () => {
@@ -153,10 +194,15 @@ describe("module generation V1 golden fixtures", () => {
     expect(result.status).toBe("blocked");
     expect(result.deliveryReport?.status).toBe("blocked");
     expect(result.gaps).toContainEqual(expect.objectContaining({ moduleId: "dashboard-chart", severity: "blocking", reason: "kf36-static-chart-series-mapping-unverified" }));
+    const blocking = result.gaps.filter((gap) => gap.severity === "blocking");
+    expect(blocking.length).toBeGreaterThan(0);
+    expect(blocking.every((gap) => gap.moduleId === "dashboard-chart")).toBe(true);
     expect(result.implementation).toBeDefined();
     if (result.implementation !== undefined) assertGoldenGeometry(result.implementation.pages);
     const statusControls = result.implementation?.pages.flatMap((page) => page.components).filter((component) => component.sourceModuleId === "dashboard-status") ?? [];
-    expect(statusControls.length).toBeGreaterThan(1);
+    const statusQuality = registry.require("data.status-grid", "1.0.0").quality!;
+    expect(statusControls.length).toBeGreaterThanOrEqual(statusQuality.minimumComponentCount);
+    for (const capability of statusQuality.requiredCapabilityIds) expect(statusControls.some((component) => component.capabilityId === capability)).toBe(true);
     expect(statusControls.some((component) => component.capabilityId === "tag")).toBe(true);
   });
 

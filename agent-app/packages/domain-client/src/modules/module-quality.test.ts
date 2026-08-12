@@ -43,7 +43,7 @@ function component(moduleId = "hero", overrides: Partial<UIComponentSpec> = {}):
   };
 }
 
-function implementation(components: UIComponentSpec[] = [component(), component("hero", { id: "hero/title", role: "title", capabilityId: "text", critical: false })]): UIImplementationSpec {
+function implementation(components: UIComponentSpec[] = [component(), component("hero", { id: "hero/title", role: "title", capabilityId: "text", critical: false, geometry: { x: 20, y: 20, width: 200, height: 32 }, properties: { parentId: "hero/surface" } })]): UIImplementationSpec {
   return { schema: "kf-ui-implementation/v1", theme, pages: [{ id: "home", width: 1440, height: 900, components }] };
 }
 function registry(): ModuleRegistry { const value = new ModuleRegistry(); const common = { version: "1.0.0", category: "content", maturity: "stable" as const, variants: ["no-portrait"], contentSchema: z.object({ title: z.string() }), assetSlots: [], requiredKfCapabilities: ["layout.2"], compilerFingerprint: "test-content-compiler-v1", layoutFingerprint: "test-content-layout-v1", layout: { regions: ["main"] as const, minColumnSpan: 1, maxColumnSpan: 12, preferredHeights: ["medium"] as const, interactions: ["navigate"] as const, height: { min: 1, preferred: { compact: 1, small: 1, medium: 200, large: 300, full: 400 }, max: 400 } }, quality: { minimumComponentCount: 2, minimumCriticalComponentCount: 1, requiredRoles: ["surface"], requiredCriticalRoles: ["surface"], requiredCapabilityIds: ["layout.2"], variantRequiredOutputs: { "no-portrait": [{ outputId: "surface", role: "surface", capabilityId: "layout.2", critical: true }] }, deriveRequiredOutputs: () => [{ outputId: "surface", role: "surface", capabilityId: "layout.2", critical: true }] }, compile: () => ({ components: [], deliveryGaps: [] }) }; value.register({ ...common, kind: "content.hero" }); value.register({ ...common, kind: "content.card-grid" }); return value; }
@@ -145,6 +145,13 @@ describe("evaluateModuleDelivery", () => {
     ] });
     expect(report.report.status).toBe("blocked");
     expect(report.report.gaps.map((gap) => gap.reason)).toEqual(expect.arrayContaining(["GEOMETRY_OVERFLOW", "CRITICAL_COMPONENT_OVERLAP"]));
+
+    const parent = component("hero");
+    const left = component("hero", { id: "hero/left", role: "title", capabilityId: "text", geometry: { x: 20, y: 20, width: 200, height: 80 }, properties: { parentId: parent.id } });
+    const right = component("hero", { id: "hero/right", role: "description", capabilityId: "text", geometry: { x: 100, y: 40, width: 200, height: 80 }, properties: { parentId: parent.id } });
+    const sameModule = evaluate({ implementation: implementation([parent, left, right]) });
+    expect(sameModule.report.gaps).toContainEqual(expect.objectContaining({ reason: "CRITICAL_COMPONENT_OVERLAP" }));
+    expect(sameModule.report.gaps.filter((gap) => gap.reason === "CRITICAL_COMPONENT_OVERLAP")).toHaveLength(1);
   });
 
   it("blocks silent fallback and a complex module collapsed to a single text control", () => {

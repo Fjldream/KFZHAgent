@@ -139,6 +139,7 @@ function state(overrides: Partial<AgentGraphStateValue> = {}): AgentGraphStateVa
   return {
     tenantId: "tenant", userId: "user", workspaceId: "workspace", conversationId: "conversation",
     currentRevisionId: "revision-1", designPlan: blueprint, designPlanHash: "d".repeat(64),
+    workspaceMode: "new", generationWorkflow: "module-v1",
     intent: "CONFIRM_DESIGN", stage: "design-review", recentMessages: [{ role: "user", content: "确认" }],
     ...overrides,
   } as AgentGraphStateValue;
@@ -204,11 +205,14 @@ describe("module planning node", () => {
   it("keeps legacy v1 and imported unadopted UI implementations on the technical approval path", () => {
     const legacy: DesignPlan = { schema: "kf-design-plan/v1", displayName: "Legacy", summary: "Summary", layoutConcept: "Layout", styleDirection: "Style", sections: [{ id: "main", label: "Main", controls: [{ type: "text", text: "Hello" }] }], signature: "sig" };
     const deps = bed([compiledOutcome(modulePlan())]).deps;
-    expect(routeAfterClassify(state({ designPlan: legacy, intent: "CONFIRM_DESIGN" }), deps)).toBe("plan-change");
+    expect(routeAfterClassify(state({ designPlan: legacy, intent: "CONFIRM_DESIGN", generationWorkflow: "legacy" }), deps)).toBe("plan-change");
     const implementation = compiledOutcome(modulePlan());
     if (implementation.status !== "compiled") throw new Error("fixture");
-    expect(routeAfterClassify(state({ uiImplementation: implementation.implementation, modulePlan: undefined }), deps)).toBe("implementation-plan");
-    expect(routeAfterClassify(state({ workspaceMode: "upload", modulePlan: undefined }), deps)).toBe("implementation-plan");
+    expect(routeAfterClassify(state({ uiImplementation: implementation.implementation, modulePlan: undefined, generationWorkflow: "legacy" }), deps)).toBe("implementation-plan");
+    expect(routeAfterClassify(state({ workspaceMode: "upload", generationWorkflow: "legacy", modulePlan: undefined }), deps)).toBe("implementation-plan");
+    for (const content of ["不要使用模块化或模块生成", "这个模块的标题需要修改"] as const) {
+      expect(routeAfterClassify(state({ designPlan: blueprint, generationWorkflow: "legacy", recentMessages: [{ role: "user", content }] }), deps)).toBe("implementation-plan");
+    }
   });
 
   it("blocks an unmapped v2 blueprint instead of falling back to technical approval", async () => {
@@ -218,7 +222,7 @@ describe("module planning node", () => {
       Reflect.deleteProperty(copy, "expectedKind");
       return copy;
     }) };
-    expect(routeAfterClassify(state({ designPlan: unmapped, moduleWorkflowRequested: true }), testBed.deps)).toBe("module-plan");
+    expect(routeAfterClassify(state({ designPlan: unmapped, generationWorkflow: "module-v1" }), testBed.deps)).toBe("module-plan");
     const result = await createModulePlanNode(testBed.deps)(state({ designPlan: unmapped }));
     expect(result.lastErrorCode).toBe("MODULE_BLUEPRINT_MAPPING_REQUIRED:source-panel");
     expect(result.stage).toBe("design-review");
@@ -233,7 +237,7 @@ describe("module planning node", () => {
       Reflect.deleteProperty(copy, "expectedKind");
       return copy;
     }) };
-    expect(routeAfterClassify(state({ designPlan: unmapped, moduleWorkflowRequested: true }), testBed.deps)).toBe("module-plan");
+    expect(routeAfterClassify(state({ designPlan: unmapped, generationWorkflow: "module-v1" }), testBed.deps)).toBe("module-plan");
     const result = await createModulePlanNode(testBed.deps)(state({ designPlan: unmapped }));
     expect(result).toMatchObject({ stage: "design-review", lastErrorCode: "MODULE_STABLE_CATALOG_EMPTY" });
     expect(testBed.model.createCalls).toHaveLength(0);

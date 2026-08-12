@@ -69,8 +69,13 @@ async function jsonFetch(path: string, init: RequestInit = {}): Promise<Response
 
 async function jsonResponse<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await jsonFetch(path, init);
+  return (await res.json()) as T;
+}
+
+async function nullableJsonResponse<T>(path: string, init: RequestInit = {}): Promise<T | null> {
+  const res = await jsonFetch(path, init);
   const text = await res.text();
-  return (text.length === 0 ? null : JSON.parse(text)) as T;
+  return text.length === 0 ? null : JSON.parse(text) as T;
 }
 
 export const api = {
@@ -166,7 +171,7 @@ export const api = {
   },
   async getConversationDelivery(conversationId: string, buildJobId?: string): Promise<import("./types").PersistedModuleDelivery | null> {
     const query = buildJobId === undefined ? "" : `?buildJobId=${encodeURIComponent(buildJobId)}`;
-    return jsonResponse<import("./types").PersistedModuleDelivery | null>(
+    return nullableJsonResponse<import("./types").PersistedModuleDelivery>(
       `/api/conversations/${encodeURIComponent(conversationId)}/delivery${query}`,
     );
   },

@@ -11,20 +11,25 @@ Automated golden, API, worker, Web, imported-project, and root serial gates pass
 3. API module path: new Task 13 test RED with `buildJobId=null`. The expected release behavior was corrected to the exact fail-closed assertion `MODULE_STABLE_CATALOG_EMPTY`; 54/54 integration tests pass and full API is 227/227.
 4. Real DeepSeek confirmation exposed legacy fallback `UI_IMPLEMENTATION_INVALID:UNSUPPORTED_COMPONENT_CONTENT: navLinks for tabs`. Production routing now persists an explicit module-workflow marker and routes unmapped V2 module requests to module planning. Stable-catalog absence is checked before mapping; `module-plan.test.ts` is 14/14.
 5. E2E first exposed non-canonical test HMAC setup, occupied fixed ports, HTTP-200 empty delivery JSON parsing, and missing imported-workspace routing identity. E2E now supports isolated ports, Web accepts a nullable empty delivery body, and server-owned workspace mode preserves imported-package legacy patching. Final Task 13 E2E is 2/2.
+6. Review P1 RED: workflow selection was temporarily sticky and derived from user/model text. GREEN: `SolutionWorkspace.generationWorkflow` is server-owned and tenant-scoped; migration default/backfill is `legacy`; creation explicitly assigns new=`module-v1`, upload=`legacy`; routing contains no keyword regex. Negated and ordinary module wording remain legacy, while an unmapped V2 in a server-owned module-v1 workspace stays on the module path and stops at the stable-empty gate.
+7. Review Web P2 RED: the generic JSON helper silently returned `null` for every empty success response. GREEN: only delivery uses `nullableJsonResponse`; delivery empty resolves `null`, while login/workspace/build empty responses reject. Web is 124/124.
+8. Review Golden P2 RED: same-module sibling overlap was exempted. Tightening it exposed four real portal card title/summary-to-image overlaps; the compiler now reserves the image column, and the gate blocks all non-ancestor overlaps. Portal/admin deterministic recompilation has `unexpectedChanges=[]`; dashboard status expands while all blocking owners remain the chart. Worker round-trip verifies portal asset path, bytes, hash, and image `src`.
 
 ## Verification counts
 
 - contracts: 81
 - domain-client: 565
-- agent-orchestrator: 118
+- agent-orchestrator: 119
 - build-jobs: 61
 - API: 227
 - worker: 29
-- Web: 120
+- Web: 124
 - Task 13 E2E: 2
-- root serial: 95 files / 1272 tests, 64.49 seconds
+- fresh root serial review run: API integration slice 55/55 and exit 0; the current Vitest environment printed no trustworthy final root-wide count
 
-All affected typechecks pass. `git diff --check` passes. Full workspace lint is blocked only by three pre-existing `@typescript-eslint/no-unnecessary-type-assertion` findings in unchanged `packages/preview-renderer/src/renderer.ts`; changed scopes pass lint.
+All 11 package typechecks pass. `git diff --check` passes. Full workspace lint is blocked only by three pre-existing `@typescript-eslint/no-unnecessary-type-assertion` findings in unchanged `packages/preview-renderer/src/renderer.ts`; changed scopes pass lint.
+
+Prisma Node 20 evidence: generate and validate pass; an isolated pre-migration clone reports only `20260812123000_module_generation_workflow` pending; deploy and final status pass. A row created before deploy reads `generationWorkflow=legacy` after deploy. `migrate diff --exit-code` reports the pre-existing `DomainProjectRevision` index-name discrepancy and no workflow-column discrepancy.
 
 ## DeepSeek and native runtime evidence
 

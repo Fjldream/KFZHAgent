@@ -90,12 +90,16 @@ export function createGraphPorts(
       });
       return workspace?.currentRevisionId ?? undefined;
     },
-    async getWorkspaceMode({ tenantId, workspaceId }) {
+    async getWorkspaceRouting({ tenantId, workspaceId }) {
       const workspace = await prisma.solutionWorkspace.findFirst({
         where: { id: workspaceId, tenantId },
-        select: { mode: true },
+        select: { mode: true, generationWorkflow: true },
       });
-      return workspace?.mode === "upload" ? "upload" : workspace?.mode === "new" ? "new" : undefined;
+      if (workspace === null) return undefined;
+      return {
+        mode: workspace.mode === "upload" ? "upload" : "new",
+        generationWorkflow: workspace.generationWorkflow === "module-v1" ? "module-v1" : "legacy",
+      };
     },
     async getRevisionSummary({ tenantId, revisionId }) {
       const revision = await prisma.solutionRevision.findFirst({

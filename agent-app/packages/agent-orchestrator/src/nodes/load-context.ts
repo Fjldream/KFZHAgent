@@ -29,7 +29,7 @@ export function createLoadContextNode(deps: SolutionGraphDeps) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
     const { tenantId, workspaceId, conversationId } = state;
 
-    const [messages, storedSummary, workspaceRevisionId, workspaceMode] = await Promise.all([
+    const [messages, storedSummary, workspaceRevisionId, workspaceRouting] = await Promise.all([
       deps.workspaceQuery.listRecentMessages({
         tenantId,
         conversationId,
@@ -37,7 +37,7 @@ export function createLoadContextNode(deps: SolutionGraphDeps) {
       }),
       deps.workspaceQuery.getConversationSummary({ tenantId, conversationId }),
       deps.workspaceQuery.getCurrentRevisionId({ tenantId, workspaceId }),
-      deps.workspaceQuery.getWorkspaceMode?.({ tenantId, workspaceId }),
+      deps.workspaceQuery.getWorkspaceRouting?.({ tenantId, workspaceId }),
     ]);
 
     const baseRevisionId = state.currentRevisionId ?? workspaceRevisionId;
@@ -78,7 +78,8 @@ export function createLoadContextNode(deps: SolutionGraphDeps) {
       recentMessages: messages,
       conversationSummary: nextSummary,
       currentRevisionId: refreshedRevisionId,
-      workspaceMode,
+      workspaceMode: workspaceRouting?.mode,
+      generationWorkflow: workspaceRouting?.generationWorkflow,
       revisionSummary,
       stage,
       lastErrorCode,

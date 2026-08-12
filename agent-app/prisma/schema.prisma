@@ -71,6 +71,7 @@ model SolutionWorkspace {
   name              String
   description       String?
   mode              String   @default("new") // "new" (generative) | "upload" (imported source)
+  generationWorkflow String  @default("legacy") // "legacy" | "module-v1"; server-owned, never model/user-authored
   currentRevisionId String? // advanced only after validation passes
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt

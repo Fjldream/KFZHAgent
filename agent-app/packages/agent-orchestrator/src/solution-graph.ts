@@ -138,9 +138,9 @@ function useModuleWorkflow(state: AgentGraphStateValue, deps: SolutionGraphDeps 
   if (state.designPlan?.schema !== "kf-design-plan/v2") return false;
   // Uploaded native projects remain on the lossless patch workflow until an
   // explicit future adoption step creates a server-owned ModulePlan.
-  if (state.workspaceMode === "upload" && state.modulePlan === undefined) return false;
-  if (state.moduleWorkflowRequested !== true
-    && !state.designPlan.modules.every((module) => module.expectedKind !== undefined)) return false;
+  if (state.modulePlan !== undefined || state.acceptedBlueprintArtifact !== undefined) return true;
+  if (state.workspaceMode === "upload") return false;
+  if (state.generationWorkflow !== "module-v1") return false;
   // A checkpoint with an old UI implementation but no ModulePlan belongs to
   // the compatibility path (notably imported, not-yet-adopted controls).
   if (state.modulePlan === undefined && state.uiImplementation !== undefined) return false;
