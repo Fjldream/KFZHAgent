@@ -2,7 +2,15 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { API_BASE, API_PORT, E2E_DB_URL, WEB_BASE, WEB_PORT } from "./helpers/config";
+import { API_BASE, API_PORT, E2E_DB_URL, WEB_BASE, WEB_PORT } from "./helpers/config.js";
+import { assertE2eDestructiveResetAllowed } from "./helpers/destructive-reset.js";
+
+// Guard before any API/Prisma module is imported, spawned, connected, seeded,
+// or allowed to issue TRUNCATE. The seed repeats this guard independently.
+assertE2eDestructiveResetAllowed({
+  databaseUrl: E2E_DB_URL,
+  allowDestructiveReset: process.env.KF_E2E_ALLOW_DESTRUCTIVE_RESET,
+});
 
 /**
  * Playwright globalSetup：准备 kf_agent_e2e 数据库、启动 api + worker + web
@@ -24,6 +32,7 @@ const BASE_ENV: Record<string, string> = {
   // Deterministic test-only signing authority shared by the isolated API and
   // worker. Never inherit a developer/production secret into E2E evidence.
   KF_SERVER_PLAN_HMAC_KEY_BASE64: Buffer.alloc(32, 0x45).toString("base64"),
+  KF_E2E_ALLOW_DESTRUCTIVE_RESET: "1",
   // 本地 http 环境：Node 侧 APIRequestContext 不会把 Secure cookie 发到
   // http 目标；浏览器端仍受 HttpOnly + SameSite=strict 保护。
   COOKIE_SECURE: "false",

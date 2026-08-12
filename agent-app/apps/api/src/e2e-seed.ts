@@ -1,5 +1,11 @@
-import * as argon2 from "argon2";
-import { PrismaClient } from "@prisma/client";
+import { loadAfterE2eDestructiveResetGuard } from "../../../tests/e2e/helpers/destructive-reset.js";
+
+const RESET_ENVIRONMENT = {
+  databaseUrl: process.env.DATABASE_URL,
+  allowDestructiveReset: process.env.KF_E2E_ALLOW_DESTRUCTIVE_RESET,
+};
+
+type PrismaClient = import("@prisma/client").PrismaClient;
 
 /**
  * E2E 数据库种子（Task 12）：清空 kf_agent_e2e 业务表并创建两个租户，
@@ -47,6 +53,12 @@ async function truncate(prisma: PrismaClient, table: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  // This file is also runnable directly. The shared loader guarantees the
+  // guard completes before argon2/Prisma loading, connection, seed, or reset.
+  const [argon2, { PrismaClient }] = await loadAfterE2eDestructiveResetGuard(
+    RESET_ENVIRONMENT,
+    async () => Promise.all([import("argon2"), import("@prisma/client")]),
+  );
   const prisma = new PrismaClient();
   try {
     for (const table of BUSINESS_TABLES) {

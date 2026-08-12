@@ -11,11 +11,11 @@ Release conclusion: **not eligible for stable module promotion**. Automatic gene
 - Golden fixtures: personal portal, industrial dashboard, and admin console.
 - Orchestrator: 14 files / 119 tests passed. Golden coverage checks every fixture module against its Registry quality contract, rejects overflow and sibling/inter-module overlap while allowing ancestor containment, and verifies deterministic portal/admin recompilation with `unexpectedChanges=[]`. Dashboard status expands while its chart remains blocked on the exact native-series gap.
 - Worker: 4 files / 29 tests passed. Portal/admin packages round-trip; portal evidence also verifies the unpacked asset target path, exact bytes, SHA-256, and native image `src`. Dashboard is deliberately not emitted.
-- API root-serial slice: `api.integration.test.ts` 55/55 passed, including server-owned workflow creation semantics.
+- API aggregate: 228 tests. The focused review run visibly completed `api.integration.test.ts` 55/55, including server-owned workflow creation semantics.
 - Domain client: 36 files / 565 tests passed. The stronger geometry gate exposed and fixed four real card text-to-image overlaps rather than exempting same-module siblings.
 - Web: 10 files / 124 tests passed. Generic JSON responses reject empty success bodies; only conversation delivery has an explicit nullable contract.
 - Task 13 browser E2E: 2/2 passed. New module generation shows the exact stable-catalog block with no preview/download. Imported-package modification completes upload, blueprint confirmation, approval, build, export, byte-preservation, and unknown-field preservation.
-- Fresh root serial was invoked once after review fixes. Captured output completed the API integration slice at 55/55 and returned exit 0, but the current Vitest environment did not print a trustworthy final root-wide count; package-level gates above and E2E are the review counts.
+- Fresh root serial was invoked once after review fixes. Captured output completed the API integration slice at 55/55 and returned exit 0, but the current Vitest environment did not print a trustworthy final root-wide count; package-level gates above and E2E are the review counts. A prior independent fresh run at Task 13 commit `7a0fe5a` produced 95 files / 1272 tests, but that historical count is not presented as the current review run.
 
 Generated packages are evidence artifacts outside the repository:
 
@@ -61,5 +61,7 @@ git diff --check
 ```
 
 Prisma generate/validate/deploy/status passed on Node 20 and an isolated clone. A row inserted before the migration read back exactly `legacy` afterwards. Migration diff reports only the pre-existing `DomainProjectRevision` index-name discrepancy. All affected package tests and all 11 package typechecks passed. Workspace lint has a pre-existing baseline failure in `packages/preview-renderer/src/renderer.ts` (three `no-unnecessary-type-assertion` findings); the file was not changed by Task 13 and all changed scopes lint clean.
+
+E2E destructive reset is guarded before any Prisma import, connection, seed, or `TRUNCATE`. The pure guard requires PostgreSQL, a loopback host, a database name beginning `kf_agent_e2e_`, and the explicit test-only `KF_E2E_ALLOW_DESTRUCTIVE_RESET=1` sentinel. Global setup and the directly runnable seed both enforce it; failures omit the URL and credentials. Guard tests are 13/13 and the protected E2E remains 2/2.
 
 Credential audit found no new secret in changed files. A pre-existing plaintext KF server credential remains in `docs/kf-control-acceptance.md`; its value is intentionally omitted here. Generated packages, screenshots, cookies, environment files, and secrets are not committed.

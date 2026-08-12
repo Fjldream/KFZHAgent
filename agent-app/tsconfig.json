@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler"
+  },
+  "include": [
+    "playwright.config.ts",
+    "tests/e2e/global-setup.ts",
+    "tests/e2e/helpers/config.ts",
+    "tests/e2e/helpers/destructive-reset.ts",
+    "tests/e2e/helpers/destructive-reset.test.ts"
+  ]
+}
