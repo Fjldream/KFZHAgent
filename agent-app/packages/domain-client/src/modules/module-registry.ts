@@ -35,6 +35,23 @@ export type {
 const MATURITIES = new Set(["stable", "beta", "unsupported"]);
 const V1_EXACT_KINDS = new Set(["navigation.top", "navigation.sidebar", "content.hero", "metric.kpi-grid", "content.card-grid", "content.timeline", "data.chart-panel", "data.status-grid", "data.table", "data.detail", "interaction.tabs-filter", "form.record-editor", "action.toolbar", "feedback.alert-list", "content.contact-footer"]);
 const NATIVE_ONLY_FALLBACK_POLICY: ModuleFallbackPolicy = Object.freeze({ mode: "native-only" });
+const BUILTIN_PLANNING_CONTENT_EXAMPLES: Readonly<Record<string, Readonly<Record<string, unknown>>>> = Object.freeze({
+  "navigation.top": Object.freeze({ logo: "KingFusion", items: Object.freeze(["首页", "能力中心"]) }),
+  "navigation.sidebar": Object.freeze({ groups: Object.freeze([Object.freeze({ label: "运营中心", items: Object.freeze(["运行概览", "告警中心"]) })]) }),
+  "content.hero": Object.freeze({ title: "工业智能平台", subtitle: "连接数据、现场与决策", description: "以可信实时数据支撑生产运营。" }),
+  "metric.kpi-grid": Object.freeze({ items: Object.freeze([Object.freeze({ label: "设备在线率", value: "98.6%", trend: "+1.2%" })]) }),
+  "content.card-grid": Object.freeze({ items: Object.freeze([Object.freeze({ title: "实时监控", summary: "统一查看关键运行状态。", tag: "稳定运行" })]) }),
+  "content.timeline": Object.freeze({ items: Object.freeze([Object.freeze({ title: "平台上线", detail: "完成生产环境部署。", date: "2026-08" })]) }),
+  "data.chart-panel": Object.freeze({ chart: Object.freeze({ kind: "line", title: "产量趋势", labels: Object.freeze(["周一", "周二"]), series: Object.freeze([Object.freeze({ name: "产量", values: Object.freeze([120, 138]) })]) }) }),
+  "data.status-grid": Object.freeze({ items: Object.freeze([Object.freeze({ name: "主生产线", severity: "online", detail: "运行正常" })]) }),
+  "data.table": Object.freeze({ table: Object.freeze({ columns: Object.freeze([Object.freeze({ key: "name", label: "名称", align: "left" }), Object.freeze({ key: "status", label: "状态", align: "center" })]), rows: Object.freeze([Object.freeze({ name: "主生产线", status: "运行中" })]), pageSize: 20 }) }),
+  "data.detail": Object.freeze({ fields: Object.freeze([Object.freeze({ label: "设备名称", value: "主生产线" }), Object.freeze({ label: "运行状态", value: "正常" })]) }),
+  "interaction.tabs-filter": Object.freeze({ tabs: Object.freeze(["全部", "运行中"]), active: "全部" }),
+  "form.record-editor": Object.freeze({ fields: Object.freeze([Object.freeze({ id: "contactName", label: "联系人", placeholder: "请输入联系人" })]), submitLabel: "保存" }),
+  "action.toolbar": Object.freeze({ actions: Object.freeze([Object.freeze({ label: "新建" }), Object.freeze({ label: "刷新" })]) }),
+  "feedback.alert-list": Object.freeze({ alerts: Object.freeze([Object.freeze({ title: "温度预警", message: "一号设备温度接近阈值。", severity: "warning" })]) }),
+  "content.contact-footer": Object.freeze({ contacts: Object.freeze([Object.freeze({ label: "服务电话", value: "400-000-0000" })]), copyright: "© 2026 KingFusion" }),
+});
 
 function definitionKey(kind: string, version: string): string {
   return `${kind}@${version}`;
@@ -61,6 +78,12 @@ function freezeFallbackPolicy(policy: ModuleFallbackPolicy): ModuleFallbackPolic
   return policy.mode === "native-only"
     ? Object.freeze({ mode: "native-only" })
     : Object.freeze({ mode: "allow-webcontainer", authorizationRef: policy.authorizationRef });
+}
+
+function freezeJson(value: unknown): unknown {
+  if (Array.isArray(value)) return Object.freeze(value.map(freezeJson));
+  if (value !== null && typeof value === "object") return Object.freeze(Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, freezeJson(entry)])));
+  return value;
 }
 
 function freezeHeightContract(height: ModuleDefinition["layout"]["height"]): ModuleDefinition["layout"]["height"] {
@@ -91,6 +114,7 @@ function freezeDefinition(definition: ModuleDefinition): ModuleDefinition {
     ...(definition.runtimeEvidenceTarget === undefined ? {} : { runtimeEvidenceTarget: Object.freeze({ ...definition.runtimeEvidenceTarget }) }),
     fallbackPolicy: freezeFallbackPolicy(fallbackPolicyOf(definition)),
     variants: freezeArray(definition.variants),
+    ...(definition.planningContentExample === undefined ? {} : { planningContentExample: freezeJson(definition.planningContentExample) as Readonly<Record<string, unknown>> }),
     assetSlots: freezeArray(definition.assetSlots.map(freezeSlot)),
     requiredKfCapabilities: freezeArray(definition.requiredKfCapabilities),
     ...(definition.compilerFingerprint === undefined ? {} : { compilerFingerprint: definition.compilerFingerprint }),
@@ -109,6 +133,8 @@ function assertDefinition(definition: ModuleDefinition): void {
     fail("MODULE_DEFINITION_INVALID", `${key} has invalid maturity`);
   }
   if (!definition.compilerFingerprint || !definition.layoutFingerprint || !/^[A-Za-z0-9._:-]{8,200}$/.test(definition.compilerFingerprint) || !/^[A-Za-z0-9._:-]{8,200}$/.test(definition.layoutFingerprint)) fail("MODULE_DEFINITION_INVALID", `${key} requires stable compiler and layout fingerprints`);
+  const planningExample = definition.planningContentExample ?? BUILTIN_PLANNING_CONTENT_EXAMPLES[definition.kind];
+  if (definition.runtimeEvidenceTarget !== undefined && V1_EXACT_KINDS.has(definition.kind) && (planningExample === undefined || !definition.contentSchema.safeParse(planningExample).success)) fail("MODULE_DEFINITION_INVALID", `${key} requires a schema-valid planning content example`);
   if (V1_EXACT_KINDS.has(definition.kind) && (definition.quality === undefined || definition.quality.minimumComponentCount < 2 || definition.quality.minimumCriticalComponentCount < 1 || definition.quality.requiredRoles.length < 1 || definition.quality.requiredCriticalRoles.length < 1 || definition.quality.requiredRoles.some((role) => !role) || definition.quality.requiredCriticalRoles.some((role) => !role) || definition.quality.requiredCapabilityIds.length < 1 || definition.quality.requiredCapabilityIds.some((capability) => !capability) || !sameStrings(Object.keys(definition.quality.variantRequiredOutputs), definition.variants) || Object.values(definition.quality.variantRequiredOutputs).some((outputs) => outputs.length === 0 || outputs.some((output) => !output.role || !output.capabilityId)) || definition.quality.deriveRequiredOutputs === undefined)) fail("MODULE_DEFINITION_INVALID", `${key} requires a complete quality contract`);
   if (definition.variants.length === 0 || definition.variants.some((variant) => !variant)) {
     fail("MODULE_DEFINITION_INVALID", `${key} requires one or more variants`);
@@ -216,6 +242,8 @@ function assertLayout(instance: ModulePlanModule, definition: ModuleDefinition, 
 }
 
 function planningSummary(definition: ModuleDefinition): ModulePlanningSummary {
+  const contentExample = definition.planningContentExample ?? BUILTIN_PLANNING_CONTENT_EXAMPLES[definition.kind];
+  if (contentExample !== undefined && !definition.contentSchema.safeParse(contentExample).success) fail("MODULE_DEFINITION_INVALID", `${definitionKey(definition.kind, definition.version)} has an invalid planning content example`);
   return Object.freeze({
     kind: definition.kind,
     version: definition.version,
@@ -223,6 +251,7 @@ function planningSummary(definition: ModuleDefinition): ModulePlanningSummary {
     variants: freezeArray(definition.variants),
     slots: freezeArray(definition.assetSlots.map(freezeSlot)),
     interactions: freezeArray(definition.layout.interactions),
+    ...(contentExample === undefined ? {} : { contentExample: freezeJson(contentExample) as Readonly<Record<string, unknown>> }),
     layout: Object.freeze({
       regions: freezeArray(definition.layout.regions),
       minColumnSpan: definition.layout.minColumnSpan,

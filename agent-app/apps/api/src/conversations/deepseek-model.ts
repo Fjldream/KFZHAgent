@@ -151,12 +151,14 @@ function parsePlanningSummary(value: unknown): {
   readonly kind: string; readonly version: string; readonly maturity: "stable" | "beta" | "unsupported";
   readonly variants: readonly string[]; readonly slots: readonly { readonly id: string; readonly required: boolean; readonly requiredForVariants?: readonly string[]; readonly allowedKinds: readonly ("image" | "icon" | "document" | "media" | "data")[] }[];
   readonly interactions: readonly ("navigate" | "scroll" | "open-modal" | "submit" | "filter" | "toggle")[];
+  readonly contentExample?: Readonly<Record<string, unknown>>;
   readonly layout: { readonly regions: readonly ("header" | "main" | "sidebar" | "footer" | "toolbar")[]; readonly minColumnSpan: number; readonly maxColumnSpan: number; readonly preferredHeights: readonly ("compact" | "small" | "medium" | "large" | "full")[] };
 } {
   if (value === null || typeof value !== "object" || Array.isArray(value)) throwModulePlanError("planning catalog failed schema validation");
   const record = value as Record<string, unknown>;
-  const allowed = new Set(["kind", "version", "maturity", "variants", "slots", "interactions", "layout"]);
-  if (Object.keys(record).length !== allowed.size || Object.keys(record).some((key) => !allowed.has(key))) throwModulePlanError("planning catalog failed schema validation");
+  const allowed = new Set(["kind", "version", "maturity", "variants", "slots", "interactions", "contentExample", "layout"]);
+  const required = ["kind", "version", "maturity", "variants", "slots", "interactions", "layout"];
+  if (Object.keys(record).some((key) => !allowed.has(key)) || required.some((key) => !Object.hasOwn(record, key))) throwModulePlanError("planning catalog failed schema validation");
   const boundedText = (raw: unknown, expression: RegExp): string => typeof raw === "string" && raw.trim() === raw && raw.length > 0 && raw.length <= 100 && expression.test(raw)
     ? raw : throwModulePlanError("planning catalog failed schema validation");
   const boundedStrings = (raw: unknown, min: number, max: number, allowedValues?: ReadonlySet<string>): string[] => {
@@ -188,7 +190,12 @@ function parsePlanningSummary(value: unknown): {
   const minColumnSpan = integer(layout.minColumnSpan);
   const maxColumnSpan = integer(layout.maxColumnSpan);
   if (minColumnSpan > maxColumnSpan) throwModulePlanError("planning catalog failed schema validation");
-  return { kind, version, maturity: record.maturity as "stable" | "beta" | "unsupported", variants, slots, interactions: boundedStrings(record.interactions, 0, 12, PLANNING_INTERACTIONS) as ("navigate" | "scroll" | "open-modal" | "submit" | "filter" | "toggle")[], layout: { regions: boundedStrings(layout.regions, 1, 5, PLANNING_REGIONS) as ("header" | "main" | "sidebar" | "footer" | "toolbar")[], minColumnSpan, maxColumnSpan, preferredHeights: boundedStrings(layout.preferredHeights, 1, 5, PLANNING_HEIGHTS) as ("compact" | "small" | "medium" | "large" | "full")[] } };
+  let contentExample: Readonly<Record<string, unknown>> | undefined;
+  if (record.contentExample !== undefined) {
+    if (record.contentExample === null || typeof record.contentExample !== "object" || Array.isArray(record.contentExample) || new TextEncoder().encode(canonicalJson(record.contentExample)).byteLength > 8_000) throwModulePlanError("planning catalog failed schema validation");
+    contentExample = detachedCanonical(record.contentExample as Record<string, unknown>);
+  }
+  return { kind, version, maturity: record.maturity as "stable" | "beta" | "unsupported", variants, slots, interactions: boundedStrings(record.interactions, 0, 12, PLANNING_INTERACTIONS) as ("navigate" | "scroll" | "open-modal" | "submit" | "filter" | "toggle")[], ...(contentExample === undefined ? {} : { contentExample }), layout: { regions: boundedStrings(layout.regions, 1, 5, PLANNING_REGIONS) as ("header" | "main" | "sidebar" | "footer" | "toolbar")[], minColumnSpan, maxColumnSpan, preferredHeights: boundedStrings(layout.preferredHeights, 1, 5, PLANNING_HEIGHTS) as ("compact" | "small" | "medium" | "large" | "full")[] } };
 }
 
 function codePointCompare(left: string, right: string): number {
@@ -516,6 +523,7 @@ export function prepareModulePlanningInputs(input: ModelPortContext): {
       variants: [...entry.variants].sort(codePointCompare),
       slots: entry.slots.map((slot) => ({ id: slot.id, required: slot.required, ...(slot.requiredForVariants === undefined ? {} : { requiredForVariants: [...slot.requiredForVariants].sort(codePointCompare) }), allowedKinds: [...slot.allowedKinds].sort(codePointCompare) })),
       interactions: [...entry.interactions].sort(codePointCompare),
+      ...(entry.contentExample === undefined ? {} : { contentExample: entry.contentExample }),
       layout: { regions: [...entry.layout.regions].sort(codePointCompare), minColumnSpan: entry.layout.minColumnSpan, maxColumnSpan: entry.layout.maxColumnSpan, preferredHeights: [...entry.layout.preferredHeights].sort(codePointCompare) },
     }))
     .sort((left, right) => codePointCompare(`${left.kind}@${left.version}`, `${right.kind}@${right.version}`));
@@ -1023,6 +1031,23 @@ export class DeepSeekModelPort implements ModelPort {
       "最近会话上下文：",
       recentConversation.length > 0 ? recentConversation : "（无）",
     ];
+    if (input.modulePlanningCatalog !== undefined) {
+      const catalog = input.modulePlanningCatalog.map((entry) => ({
+        exactDefinition: `${entry.kind}@${entry.version}`,
+        kind: entry.kind,
+        version: entry.version,
+        variants: entry.variants,
+        slots: entry.slots,
+        interactions: entry.interactions,
+      }));
+      lines.push(
+        "这是服务器提供的、已经通过 KF 运行态验收的稳定模块目录：",
+        JSON.stringify(catalog),
+        "当前是 module-v1 工作流。modules 中每一项都必须增加 expectedKind、expectedCategory、interactionRequirements；expectedKind 只填写目录的 kind 值（例如 content.hero），不得把 @version 写进 expectedKind；版本由服务器按 exactDefinition 校验。",
+        "只创建客户明确要求且能由稳定目录实现的模块，不得创建目录以外的模块，也不得用一个稳定模块冒充不相符的业务模块。若需求超出目录，在 openQuestions 中明确说明能力缺口，不要添加无法实施的模块。",
+        "expectedCategory 只写 kind 第一个点号之前的类别；interactionRequirements 仅为客户明确要求且目录 interactions 支持的机器交互，否则写空数组。服务器会在确认边界重新校正这些字段，模型声明本身不构成授权。",
+      );
+    }
     if (revising) {
       lines.push(
         "客户修改意见：" + (input.requirementText ?? ""),
@@ -1243,11 +1268,18 @@ export class DeepSeekModelPort implements ModelPort {
       if (!previous.success) throwModulePlanError("previous ModulePlan failed schema validation");
       previousPlanForPrompt = previous.data;
     }
+    const existingPageIds = [...new Set((input.editableEntities ?? []).filter((entity) => entity.kind === "page").map((entity) => entity.name))].sort(codePointCompare);
     const prompt = [
       "把已经确认的客户效果蓝图转换成完整 ModulePlan，而不是 UIImplementationSpec、ChangePlan 或 KF JSON。",
-      "输出 schema 固定为 kf-module-plan/v1，包含 projectKey、theme、assets、pages、operations。顶层 assets 由服务器强制替换为当前目录快照，模型不得决定它；模块只能在 assetId 中引用目录中的 id，绝不写路径、URL、storageKey 或文件名替代 ID。",
+      "输出 schema 固定为 kf-module-plan/v1，顶层只包含 schema、projectKey、theme、assets、pages、operations；不得输出 revisionId、blueprintHash 或任何其它顶层字段。顶层 assets 由服务器强制替换为当前目录快照，模型不得决定它；模块只能在 assetId 中引用目录中的 id，绝不写路径、URL、storageKey 或文件名替代 ID。",
+      'theme 必须完整输出这 10 个字段，一个都不能省略：{"background":"#0f172a","surface":"#111827","primary":"#2563eb","accent":"#38bdf8","textPrimary":"#f8fafc","textSecondary":"#cbd5e1","fontFamily":"Arial","spacingUnit":8,"radiusScale":{"small":4,"medium":8,"large":16}}。颜色可按客户视觉方向调整，但字段名、spacingUnit 数值和 radiusScale 的 small/medium/large 完整结构必须保留。',
+      '每个 page 必须包含 id、title、mode、modules，例如 {"id":"home","title":"主页","mode":"vertical-flow","modules":[]}；mode 只能是 "vertical-flow"、"dashboard-grid" 或 "admin-shell"，普通内容页优先使用 "vertical-flow"。',
+      ...(existingPageIds.length === 0 ? [] : [`现有 KF 页面 ID（pages[].id 只能逐字使用这些值）：${JSON.stringify(existingPageIds)}`]),
+      "每个 module 必须包含 id、kind、templateVersion、variant、title、content、sourceBlueprintModuleIds、placement、interactions；即使 title 与蓝图 name 相同也不能省略。",
       "每个 module 只能使用稳定目录中逐字一致的 kind、version(templateVersion) 和 variant；beta、unsupported 或未列出的条目一律不可用。",
-      "placement 只能表达 region、order、columnSpan、preferredHeight、alignment、emphasis；禁止输出 geometry、x、y、width、height 或任何 CSS。",
+      "每个 module 的 content 必须是严格 JSON 字符串，字段与嵌套结构严格仿照该 kind 的服务器 contentExample，只替换客户文案或示例数据；不得新增、改名或省略必填字段。",
+      'placement 必须完整包含 region、order、columnSpan、preferredHeight、alignment、emphasis；emphasis 只能是 "primary"、"secondary" 或 "subtle"。V1 模块规划时 alignment 必须使用 "stretch"，视觉上的居中由模块编译器内部排版完成；禁止输出 geometry、x、y、width、height 或任何 CSS。',
+      '若门禁 reason 是 module-bounds-insufficient，必须保持该模块 alignment="stretch"，把 columnSpan 调到目录允许的 maxColumnSpan，并选择不低于 medium 的 preferredHeight；不得只改文案后原样重试。',
       "每个已确认蓝图模块 ID 必须且只能出现一次 sourceBlueprintModuleIds；其 module.kind 必须逐字匹配服务器已确认的 expectedKind。不要新增、删除或改写这些来源 ID。",
       "内容只能写 title 与 JSON 字符串 content；theme 只能使用 ModulePlan 的结构化 theme 字段。禁止原生 KF 字段、objectType、uiModelType、styleDataNew、脚本、HTML、JavaScript、CSS、文件路径与存储键。",
       "交互只能使用登记模块允许的 ModulePlan 交互类型，并匹配已确认蓝图交互要求。",
@@ -1257,7 +1289,7 @@ export class DeepSeekModelPort implements ModelPort {
       "已确认且服务器签名的蓝图事实（模型不得改变其中 expectedKind/category/interactionRequirements）：",
       JSON.stringify({ projectKey: accepted.projectKey, revisionId: accepted.revisionId, modules: confirmedModules }),
       "生产稳定模块目录（来自 Registry.listForPlanning()）：",
-      catalog.map((entry) => `${entry.kind}@${entry.version} variants=${entry.variants.join(",")} layout=${JSON.stringify(entry.layout)} interactions=${entry.interactions.join(",") || "none"} assetSlots=${JSON.stringify(entry.slots)}`).join("\n"),
+      catalog.map((entry) => `${entry.kind}@${entry.version} variants=${entry.variants.join(",")} layout=${JSON.stringify(entry.layout)} interactions=${entry.interactions.join(",") || "none"} assetSlots=${JSON.stringify(entry.slots)} contentExample=${JSON.stringify(entry.contentExample ?? {})}`).join("\n"),
       "服务器资产目录（只能按 id 引用；assets 顶层必须逐条原样回显）：",
       JSON.stringify(assets),
       "最近会话上下文：",
@@ -1306,7 +1338,9 @@ export class DeepSeekModelPort implements ModelPort {
       if (!stableEqual(actualOperations, expectedOperations)) throwModulePlanError("operations do not exactly describe the revision delta");
     }
     const seenBlueprintIds = new Set<string>();
+    const existingPageIds = new Set((input.editableEntities ?? []).filter((entity) => entity.kind === "page").map((entity) => entity.name));
     for (const page of plan.pages) {
+      if (existingPageIds.size > 0 && !existingPageIds.has(page.id)) throwModulePlanError(`uses unknown KF page: ${page.id}`);
       for (const module of page.modules) {
         if (/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(module.id)) {
           throwModulePlanError(`module ID must be semantic and stable: ${module.id}`);

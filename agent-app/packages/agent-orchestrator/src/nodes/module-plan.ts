@@ -137,6 +137,7 @@ export function createModulePlanNode(deps: SolutionGraphDeps) {
       acceptedBlueprintArtifact: accepted,
       modulePlanningCatalog: planningCatalog,
       assetCatalog: assets,
+      editableEntities,
       ...(state.modulePlan === undefined ? {} : { previousModulePlan: state.modulePlan }),
     };
 

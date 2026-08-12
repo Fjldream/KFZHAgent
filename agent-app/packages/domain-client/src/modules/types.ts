@@ -101,6 +101,8 @@ export interface ModuleDefinition {
   /** Omitted policies normalize to native-only when registered. */
   readonly fallbackPolicy?: ModuleFallbackPolicy;
   readonly contentSchema: z.ZodType<Record<string, unknown>>;
+  /** Server-owned, schema-valid example used to constrain semantic model planning. */
+  readonly planningContentExample?: Readonly<Record<string, unknown>>;
   readonly assetSlots: readonly AssetSlotDefinition[];
   readonly requiredKfCapabilities: readonly string[];
   /** Explicit, versioned registry fingerprints persisted with every compilation. */
@@ -148,6 +150,7 @@ export interface ModulePlanningSummary {
   readonly variants: readonly string[];
   readonly slots: readonly AssetSlotDefinition[];
   readonly interactions: readonly ModuleInteraction["type"][];
+  readonly contentExample?: Readonly<Record<string, unknown>>;
   readonly layout: Readonly<{
     regions: readonly ModulePlacement["region"][];
     minColumnSpan: number;

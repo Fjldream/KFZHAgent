@@ -9,10 +9,10 @@ Release conclusion: **five exact module definitions are eligible for stable prom
 ## Automated acceptance
 
 - Golden fixtures: personal portal, industrial dashboard, and admin console.
-- Orchestrator: 14 files / 119 tests passed. Golden coverage checks every fixture module against its Registry quality contract, rejects overflow and sibling/inter-module overlap while allowing ancestor containment, and verifies deterministic portal/admin recompilation with `unexpectedChanges=[]`. Dashboard status expands while its chart remains blocked on the exact native-series gap.
+- Orchestrator: 14 files / 121 tests passed. Golden coverage checks every fixture module against its Registry quality contract, rejects overflow and sibling/inter-module overlap while allowing ancestor containment, and verifies deterministic portal/admin recompilation with `unexpectedChanges=[]`. Dashboard status expands while its chart remains blocked on the exact native-series gap.
 - Worker: 4 files / 29 tests passed. Portal/admin packages round-trip; portal evidence also verifies the unpacked asset target path, exact bytes, SHA-256, and native image `src`. Dashboard is deliberately not emitted.
-- API aggregate: 228 tests. The focused review run visibly completed `api.integration.test.ts` 55/55, including server-owned workflow creation semantics.
-- Domain client: 36 files / 565 tests passed. The stronger geometry gate exposed and fixed four real card text-to-image overlaps rather than exempting same-module siblings.
+- API aggregate: 236 tests across 11 files. `api.integration.test.ts` completed 57/57, including automatic stable-module generation after evidence promotion and server-owned workflow creation semantics.
+- Domain client: 36 files / 566 tests passed. The stronger geometry gate exposed and fixed four real card text-to-image overlaps rather than exempting same-module siblings.
 - Web: 10 files / 124 tests passed. Generic JSON responses reject empty success bodies; only conversation delivery has an explicit nullable contract.
 - Task 13 browser E2E: 2/2 passed. New module generation shows the exact stable-catalog block with no preview/download. Imported-package modification completes upload, blueprint confirmation, approval, build, export, byte-preservation, and unknown-field preservation.
 - Fresh root serial was invoked once after review fixes. Captured output completed the API integration slice at 55/55 and returned exit 0, but the current Vitest environment did not print a trustworthy final root-wide count; package-level gates above and E2E are the review counts. A prior independent fresh run at Task 13 commit `7a0fe5a` produced 95 files / 1272 tests, but that historical count is not presented as the current review run.
@@ -25,9 +25,19 @@ Generated packages are evidence artifacts outside the repository:
 | Admin console | `/tmp/kf-module-generation-v1-acceptance/admin-console.gz` | `384af4f6c2a899c252e6c1230461d2d4272d944be2012ca52a3e0ef982f6e142` | Agent validation/round-trip and native import/readback/publish pass; isolated runtime bisection accepted table, alerts, and status only |
 | Industrial dashboard | not emitted | n/a | blocked on exact chart-series mapping gap |
 
-## Real DeepSeek smoke
+## Real DeepSeek end-to-end acceptance
 
-API, worker, and Web were started on isolated local ports with a real DeepSeek key supplied from an ignored local environment file. No key value was printed or stored. The first model request persisted a V2 customer blueprint and reached `design-review`. The confirmation initially exposed a legacy fallback error (`UNSUPPORTED_COMPONENT_CONTENT: navLinks for tabs`). Review removed the temporary text/model-derived workflow inference entirely. `SolutionWorkspace.generationWorkflow` is now a server-owned, tenant-scoped discriminator: migration backfills existing rows to `legacy`, new workspaces are explicitly `module-v1`, and uploads are explicitly `legacy`. Routing reads only this field, workspace mode, and accepted artifacts/module plans; negated or ordinary user wording cannot change it. New module-v1 generation now fails closed at `MODULE_STABLE_CATALOG_EMPTY` rather than falling back or consuming beta modules.
+API, worker, and Web were started with the real DeepSeek model and a key supplied from an ignored local environment file. No key value was printed or stored. The initial smoke exposed the expected empty-catalog boundary and several real integration defects. The final implementation closes those boundaries by passing the server-owned stable catalog into design planning, exposing strict Registry-owned content examples to module planning, requiring the complete theme contract, and binding page IDs to the server-observed KF project.
+
+The final real-model run completed the full path without a repair round:
+
+- customer request → V2 blueprint → confirmation → strict ModulePlan → UI implementation → signed build → worker packaging;
+- workspace `61239639-606f-4728-b95a-f52de9588438`, conversation `9db1a081-82a3-48c2-b7e1-7dce68a36ee8`, build job `90794129-d115-48c7-b7d1-11758d8c5e08`;
+- artifact `c800d1a6-9ca4-4439-94a7-436ec569f7cb`, SHA-256 `5bd63656fb28a42972ff1d45db0e36ca061ead0707ed3ab376536839996898e6`, 14,025 bytes;
+- delivery status `ready`, zero gaps, repair count `0`; preview and download-token endpoints both returned HTTP 200;
+- DeepSeek selected `content.hero@1.0.0` / `no-portrait` and generated native KF controls for `李明`, `工业互联网产品负责人`, and the supplied industrial-internet profile copy.
+
+The workflow identity remains server-owned. `SolutionWorkspace.generationWorkflow` is a tenant-scoped discriminator: migration backfills existing rows to `legacy`, new workspaces are explicitly `module-v1`, and uploads are explicitly `legacy`. Routing reads only this field, workspace mode, and accepted artifacts/module plans; user wording cannot silently change it.
 
 ## Native KF acceptance
 
@@ -44,6 +54,8 @@ After the initial blocked run, the operator explicitly supplied a KF account and
 - a known native baseline opened port 3437 on the same node, proving the unlicensed/demo runtime can execute;
 - every candidate module was then packaged with that baseline and started in isolation. `navigation.top`, `content.hero`, `data.table`, `feedback.alert-list`, and `data.status-grid` opened their assigned TCP ports and exposed the expected native Page1 JSON; KPI, card grid, tabs, contact/form, sidebar, and toolbar candidates did not survive runtime start and remain beta;
 - two combined acceptance applications were created without modifying existing applications: `PortalStable` on port 3451 contains navigation and hero; `AdminStable` on port 3452 contains table, alerts, and status. Both report `running` and return HTTP 200 from the KF runtime entrance;
+- the final real-DeepSeek artifact was then uploaded through KF's native `uploadLocalProject` endpoint, imported as the independent project `DeepSeekHeroFinal`, read back through KF as Page1 with the original Text1 plus the `hero-intro/surface` layout and its three generated child labels, published, and exported again as a valid KF archive (export SHA-256 `3832a74b66d3019a22f322a2a6d9d52a873b248f01f22885fd93ca8b3dd45a22`);
+- `DeepSeekHeroFinal` was deployed and started as an isolated KF application on port 3453. Operations reports `appDeployStatus=1`, `appStatus=running`, and the native runtime entrance returns HTTP 200. This does not modify the existing 3451/3452 acceptance applications;
 - native readback confirms the expected KF control types, module ownership, text/table data, image source binding, and navigation action configuration. Browser automation against the heavy KF runtime timed out, so this evidence does not claim screenshot fidelity or an executed click/form interaction.
 
 The promotion is deliberately exact: passing one KF capability does not promote any other definition that happens to reuse it.

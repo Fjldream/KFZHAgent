@@ -262,6 +262,22 @@ describe("versioned module registry", () => {
     expect(registry.listForPlanning()[0]!.variants).toEqual(["default", "compact"]);
   });
 
+  it("publishes schema-validated content examples for every built-in module", () => {
+    const registry = createDefaultModuleRegistry();
+
+    for (const summary of registry.listForInternalPlanning().filter((entry) => entry.kind.includes("."))) {
+      expect(summary.contentExample).toBeDefined();
+      expect(registry.require(summary.kind, summary.version).contentSchema.safeParse(summary.contentExample).success).toBe(true);
+      expect(Object.isFrozen(summary.contentExample)).toBe(true);
+    }
+
+    expect(registry.listForInternalPlanning().find((entry) => entry.kind === "content.hero")?.contentExample).toEqual({
+      title: "工业智能平台",
+      subtitle: "连接数据、现场与决策",
+      description: "以可信实时数据支撑生产运营。",
+    });
+  });
+
   it("registers every V1 module with a frozen non-surface quality contract", () => {
     const registry = createDefaultModuleRegistry();
     const kinds = ["navigation.top", "navigation.sidebar", "content.hero", "metric.kpi-grid", "content.card-grid", "content.timeline", "data.chart-panel", "data.status-grid", "data.table", "data.detail", "interaction.tabs-filter", "form.record-editor", "action.toolbar", "feedback.alert-list", "content.contact-footer"];

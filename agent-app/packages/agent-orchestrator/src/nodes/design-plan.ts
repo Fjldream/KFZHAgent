@@ -29,6 +29,17 @@ import { encodeBlueprintMessage } from "../blueprint-message.js";
 export function createDesignPlanNode(deps: SolutionGraphDeps) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
     const revising = state.revising === true || state.intent === "REVISE_DESIGN";
+    let modulePlanningCatalog;
+    if (state.generationWorkflow === "module-v1" && state.workspaceMode !== "upload") {
+      if (deps.modulePlanCompiler === undefined) {
+        return { stage: "idle", lastErrorCode: "MODULE_PLANNING_FAILED" };
+      }
+      try {
+        modulePlanningCatalog = await deps.modulePlanCompiler.listPlanningCatalog();
+      } catch {
+        return { stage: "idle", lastErrorCode: "MODULE_PLANNING_FAILED" };
+      }
+    }
     const modelInput = {
       tenantId: state.tenantId,
       userId: state.userId,
@@ -38,6 +49,7 @@ export function createDesignPlanNode(deps: SolutionGraphDeps) {
       requirementText: latestUserMessage(state),
       revisionSummary: state.revisionSummary,
       designPlan: state.designPlan,
+      ...(modulePlanningCatalog === undefined ? {} : { modulePlanningCatalog }),
       // editableEntities may not be materialised on state yet; the context
       // field stays optional so a future wiring can feed it through.
       editableEntities: (state as { editableEntities?: unknown }).editableEntities as

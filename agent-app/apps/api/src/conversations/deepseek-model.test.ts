@@ -581,6 +581,145 @@ describe("DeepSeekModelPort", () => {
     expect(body.max_tokens).toBe(8000);
   });
 
+  it("requires module-v1 blueprints to use only exact stable catalog kinds", async () => {
+    const plan = detailedBlueprint({
+      modules: [{
+        id: "hero",
+        name: "核心介绍",
+        purpose: "介绍个人定位",
+        content: ["姓名", "职业定位"],
+        sampleData: [{ label: "姓名", value: "李明" }],
+        interactions: [],
+        expectedKind: "content.hero",
+        expectedCategory: "content",
+        interactionRequirements: [],
+        presentation: "首屏重点介绍",
+      }],
+    });
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify(plan) } }] }),
+    });
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+
+    await port.createDesignPlan({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [],
+      requirementText: "只生成核心介绍",
+      modulePlanningCatalog: [{
+        kind: "content.hero",
+        version: "1.0.0",
+        maturity: "stable",
+        variants: ["no-portrait"],
+        slots: [],
+        interactions: [],
+      }],
+    });
+
+    const prompt = JSON.parse(fetchImpl.mock.calls[0]![1]!.body as string).messages[1].content as string;
+    expect(prompt).toContain("content.hero@1.0.0");
+    expect(prompt).toContain("expectedKind");
+    expect(prompt).toContain("不得把 @version 写进 expectedKind");
+    expect(prompt).toContain("不得创建目录以外的模块");
+    expect(prompt).not.toContain("content.timeline@1.0.0");
+  });
+
+  it("spells out the complete strict ModulePlan theme contract", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify(modulePlan()) } }] }),
+    });
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+
+    await port.createModulePlan(modulePlanningContext());
+
+    const prompt = JSON.parse(fetchImpl.mock.calls[0]![1]!.body as string).messages[1].content as string;
+    expect(prompt).toContain('"background":"#0f172a"');
+    expect(prompt).toContain('"radiusScale":{"small":4,"medium":8,"large":16}');
+    expect(prompt).toContain("这 10 个字段，一个都不能省略");
+    expect(prompt).toContain('"mode":"vertical-flow"');
+    expect(prompt).toContain("每个 page 必须包含 id、title、mode、modules");
+    expect(prompt).toContain("每个 module 必须包含 id、kind、templateVersion、variant、title");
+    expect(prompt).toContain('emphasis 只能是 "primary"、"secondary" 或 "subtle"');
+    expect(prompt).toContain('alignment 必须使用 "stretch"');
+    expect(prompt).toContain("module-bounds-insufficient");
+    expect(prompt).toContain("不得输出 revisionId");
+  });
+
+  it("binds module planning to server-owned existing page identities", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify(modulePlan()) } }] }),
+    });
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+
+    await port.createModulePlan(modulePlanningContext({
+      editableEntities: [{ kind: "page", name: "home", type: "page", guid: "page-guid-home" }],
+    }));
+    const prompt = JSON.parse(fetchImpl.mock.calls[0]![1]!.body as string).messages[1].content as string;
+    expect(prompt).toContain('现有 KF 页面 ID（pages[].id 只能逐字使用这些值）：["home"]');
+
+    await expect(port.createModulePlan(modulePlanningContext({
+      editableEntities: [{ kind: "page", name: "Page1", type: "page", guid: "page-guid-page1" }],
+    }))).rejects.toThrow(/unknown KF page/i);
+  });
+
+  it("includes server-owned content examples in the strict ModulePlan prompt", async () => {
+    const oneHeroPlan = modulePlan({
+      pages: [{
+        ...modulePlan().pages[0],
+        modules: [modulePlan().pages[0].modules[0]],
+      }],
+    });
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify(oneHeroPlan) } }] }),
+    });
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+
+    await port.createModulePlan(modulePlanningContext({
+      modulePlanningCatalog: [{
+        kind: "content.hero",
+        version: "1.0.0",
+        maturity: "stable",
+        variants: ["no-portrait"],
+        slots: [],
+        interactions: [],
+        contentExample: { title: "工业智能平台", subtitle: "连接数据、现场与决策", description: "可信实时数据" },
+        layout: { regions: ["main"], minColumnSpan: 6, maxColumnSpan: 12, preferredHeights: ["large"] },
+      }],
+      confirmedBlueprint: detailedBlueprint({
+        modules: [{
+          id: "products", name: "我的产品", purpose: "展示产品能力", content: ["产品定位"],
+          sampleData: [{ label: "产品", value: "KingFusion" }], interactions: [], expectedKind: "content.hero",
+          expectedCategory: "content", interactionRequirements: [], presentation: "首屏介绍",
+        }],
+      }),
+      acceptedBlueprintArtifact: (() => {
+        const blueprint = detailedBlueprint({
+          modules: [{
+            id: "products", name: "我的产品", purpose: "展示产品能力", content: ["产品定位"],
+            sampleData: [{ label: "产品", value: "KingFusion" }], interactions: [], expectedKind: "content.hero",
+            expectedCategory: "content", interactionRequirements: [], presentation: "首屏介绍",
+          }],
+        });
+        const authority = createHmacModuleArtifactAuthority(new Uint8Array(32).fill(7));
+        return authority.verifyAcceptedBlueprint(authority.signAcceptedBlueprint({
+          schema: "kf-accepted-blueprint-artifact/v1", projectKey: "kingclient.portal", revisionId: "revision-1",
+          blueprintHash: canonicalModuleCompilationHash(blueprint),
+          modules: [{ blueprintModuleId: "products", expectedKind: "content.hero", expectedCategory: "content", interactionRequirements: [] }],
+        }));
+      })(),
+    }));
+
+    const prompt = JSON.parse(fetchImpl.mock.calls[0]![1]!.body as string).messages[1].content as string;
+    expect(prompt).toContain('contentExample={"description":"可信实时数据","subtitle":"连接数据、现场与决策","title":"工业智能平台"}');
+    expect(prompt).toContain("content 必须是严格 JSON 字符串");
+  });
+
   it("createDesignPlan rejects output that fails the zod gate", async () => {
     const port = makePort({
       schema: "kf-design-plan/v1",

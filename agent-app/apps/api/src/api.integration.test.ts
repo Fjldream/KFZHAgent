@@ -1597,7 +1597,7 @@ describe("task 12 api surface", () => {
     expect(JSON.stringify(stateFrames)).not.toMatch(/kf-module-plan|kf-change-plan|kf-ui-implementation|signature|metadata|semanticOperations|moduleCompilationArtifact|uiImplementation/);
   });
 
-  it("keeps automatic module generation fail-closed until a stable KF module is promoted", async () => {
+  it("automatically builds a confirmed module blueprint after exact KF evidence is promoted", async () => {
     fakeModel.mappedBlueprint = true;
     fakeModel.blueprintModuleIds = ["main"];
     const cookie = await login(TENANT_A_MEMBER);
@@ -1612,12 +1612,10 @@ describe("task 12 api surface", () => {
     fakeModel.queueIntent("CONFIRM_DESIGN");
     const confirmed = doneEvent((await sendMessage(cookie, conv.body.id, "确认效果蓝图").expect(200)).text);
     expect(confirmed.data.interrupt).toBeUndefined();
-    expect(confirmed.data).toMatchObject({
-      stage: "design-review",
-      buildJobId: null,
-      lastErrorCode: "MODULE_STABLE_CATALOG_EMPTY",
-    });
-    expect(await prisma.buildJob.count({ where: { workspaceId: ws.body.id } })).toBe(0);
+    expect(confirmed.data.stage).not.toBe("design-review");
+    expect(confirmed.data.lastErrorCode).toBeNull();
+    expect(confirmed.data.buildJobId).toEqual(expect.any(String));
+    expect(await prisma.buildJob.count({ where: { workspaceId: ws.body.id } })).toBe(1);
   });
 
   it("keeps the signed base revision authoritative after a real module build advances the workspace revision", async () => {

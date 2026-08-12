@@ -64,9 +64,22 @@ const revisedDesignPlan: CustomerEffectBlueprint = {
 function makeDesignDeps() {
   const modelPort = { createDesignPlan: vi.fn().mockResolvedValue(designPlan) };
   const workspaceQuery = { appendMessage: vi.fn().mockResolvedValue(undefined) };
+  const modulePlanCompiler = {
+    listPlanningCatalog: vi.fn().mockResolvedValue([
+      {
+        kind: "content.hero",
+        version: "1.0.0",
+        maturity: "stable",
+        variants: ["no-portrait"],
+        slots: [],
+        interactions: [],
+      },
+    ]),
+  };
   return {
-    deps: { modelPort, workspaceQuery } as never,
+    deps: { modelPort, workspaceQuery, modulePlanCompiler } as never,
     modelPort,
+    modulePlanCompiler,
     workspaceQuery,
   };
 }
@@ -109,6 +122,34 @@ describe("design-plan node", () => {
     const message = workspaceQuery.appendMessage.mock.calls[0]?.[0];
     expect(message).toEqual(expect.objectContaining({ tenantId: "t1", conversationId: "c1", role: "assistant" }));
     expect(decodeBlueprintMessage(message?.content as string)).toEqual({ blueprint: designPlan, revision: 1 });
+  });
+
+  it("supplies only the stable planning catalog when a server-owned module workflow creates the blueprint", async () => {
+    const { deps, modelPort, modulePlanCompiler } = makeDesignDeps();
+    const node = createDesignPlanNode(deps);
+
+    await node(baseState({ generationWorkflow: "module-v1" }) as never);
+
+    expect(modulePlanCompiler.listPlanningCatalog).toHaveBeenCalledTimes(1);
+    expect(modelPort.createDesignPlan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        modulePlanningCatalog: [expect.objectContaining({ kind: "content.hero", maturity: "stable" })],
+      }),
+      { revising: false },
+    );
+  });
+
+  it("does not expose the module catalog to legacy workflow blueprints", async () => {
+    const { deps, modelPort, modulePlanCompiler } = makeDesignDeps();
+    const node = createDesignPlanNode(deps);
+
+    await node(baseState({ generationWorkflow: "legacy" }) as never);
+
+    expect(modulePlanCompiler.listPlanningCatalog).not.toHaveBeenCalled();
+    expect(modelPort.createDesignPlan).toHaveBeenCalledWith(
+      expect.not.objectContaining({ modulePlanningCatalog: expect.anything() }),
+      { revising: false },
+    );
   });
 
   it("encodes the complete first customer blueprint instead of a shallow control list", async () => {
