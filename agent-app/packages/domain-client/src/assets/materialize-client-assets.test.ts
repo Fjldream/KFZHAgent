@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { link, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { link, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile, type FileHandle } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -251,6 +251,188 @@ describe("materializeClientAssets", () => {
     expect((await readdir(movedStaticRoot)).filter((entry) => entry.includes("stage"))).toEqual([]);
     await expect(readFile(path.join(staticRoot, TARGET))).rejects.toThrow();
     await expect(readFile(path.join(movedStaticRoot, TARGET))).rejects.toThrow();
+  });
+
+  it("rolls back approved bytes when static moves outside the candidate after target publication", async () => {
+    const candidateParent = await mkdtemp(path.join(tmpdir(), "kf-post-publish-owner-"));
+    const candidate = await createKingClientDomainPack({ nativeAccepted: true }).compile({
+      projectIr: ir,
+      buildSeed: "workspace-assets",
+      workRoot: candidateParent,
+    });
+    const staticRoot = path.join(candidate.rootDir, "1.0.0.1", "static");
+    const movedStaticRoot = path.join(candidateParent, `${path.basename(candidate.rootDir)}-published-static`);
+
+    await expect(materializeClientAssets({
+      workspaceRoot: candidate.rootDir,
+      plan: plan(),
+      assets: [asset()],
+      hooks: { afterPublishBeforeRewrite: async () => {
+        await rename(staticRoot, movedStaticRoot);
+        await mkdir(staticRoot);
+      } },
+    })).rejects.toThrow(/ancestor|changed|identity|race/i);
+    const escaped = await readFile(path.join(movedStaticRoot, TARGET)).catch(() => undefined);
+    expect(escaped).not.toEqual(BYTES);
+    expect((await readdir(candidateParent)).filter((entry) => entry.startsWith(".kf-agent-assets-stage-"))).toEqual([]);
+  });
+
+  it("rolls back the target and stable stage when staged-link cleanup fails", async () => {
+    const candidateParent = await mkdtemp(path.join(tmpdir(), "kf-unlink-rollback-owner-"));
+    const candidate = await createKingClientDomainPack({ nativeAccepted: true }).compile({
+      projectIr: ir,
+      buildSeed: "workspace-assets",
+      workRoot: candidateParent,
+    });
+    const call = materializeClientAssets as (input: Parameters<typeof materializeClientAssets>[0] & {
+      hooks: { unlinkStage: (stagedPath: string) => Promise<void> };
+    }) => Promise<void>;
+
+    await expect(call({
+      workspaceRoot: candidate.rootDir,
+      plan: plan(),
+      assets: [asset()],
+      hooks: { unlinkStage: async () => { throw new Error("simulated stage unlink failure"); } },
+    })).rejects.toThrow(/unlink failure/i);
+    await expect(readFile(path.join(candidate.rootDir, "1.0.0.1", TARGET))).rejects.toThrow();
+    expect((await readdir(candidateParent)).filter((entry) => entry.startsWith(".kf-agent-assets-stage-"))).toEqual([]);
+  });
+
+  it("scrubs every published inode when one target rollback unlink fails", async () => {
+    const secondBytes = Buffer.from("second exact approved image bytes");
+    const secondSha = createHash("sha256").update(secondBytes).digest("hex");
+    const secondTarget = `static/agent-assets/${secondSha}.png`;
+    const secondId = "asset-00000000000040008000000000000002";
+    const secondControl = {
+      ...ir.pages[0]!.controls[0]!,
+      id: "hero/second-portrait",
+      x: 220,
+    };
+    const twoAssetIr = {
+      ...ir,
+      pages: [{ ...ir.pages[0]!, controls: [...ir.pages[0]!.controls, secondControl] }],
+    };
+    const twoAssetCandidate = await createKingClientDomainPack({ nativeAccepted: true }).compile({
+      projectIr: twoAssetIr,
+      buildSeed: "workspace-assets",
+    });
+    const twoAssetPlan: InternalChangePlan = {
+      ...plan(),
+      assetBindings: [binding(), binding({
+        assetId: secondId,
+        workspaceAssetId: "00000000-0000-4000-8000-000000000002",
+        entityId: "hero/second-portrait",
+        controlId: "hero/second-portrait",
+        targetPath: secondTarget,
+        sha256: secondSha,
+        sizeBytes: secondBytes.byteLength,
+      })],
+    };
+    let unlinkCalls = 0;
+    const call = materializeClientAssets as (input: Parameters<typeof materializeClientAssets>[0] & {
+      hooks: { unlinkStage: (stagedPath: string) => Promise<void> };
+    }) => Promise<void>;
+
+    await expect(call({
+      workspaceRoot: twoAssetCandidate.rootDir,
+      plan: twoAssetPlan,
+      assets: [asset(), asset({
+        assetId: secondId,
+        targetPath: secondTarget,
+        sha256: secondSha,
+        bytes: secondBytes,
+      })],
+      hooks: { unlinkStage: async (stagedPath) => {
+        unlinkCalls += 1;
+        if (unlinkCalls === 2) throw new Error("simulated partial unlink failure");
+        await (await import("node:fs/promises")).unlink(stagedPath);
+      } },
+    })).rejects.toThrow(/unlink failure/i);
+    const versionRoot = path.join(twoAssetCandidate.rootDir, "1.0.0.1");
+    expect(await readFile(path.join(versionRoot, TARGET)).catch(() => undefined)).not.toEqual(BYTES);
+    expect(await readFile(path.join(versionRoot, secondTarget)).catch(() => undefined)).not.toEqual(secondBytes);
+  });
+
+  it("scrubs every published inode when setup and the first rollback unlink fail", async () => {
+    const secondBytes = Buffer.from("setup failure second approved image bytes");
+    const secondSha = createHash("sha256").update(secondBytes).digest("hex");
+    const secondTarget = `static/agent-assets/${secondSha}.png`;
+    const secondId = "asset-00000000000040008000000000000002";
+    const twoAssetCandidate = await createKingClientDomainPack({ nativeAccepted: true }).compile({
+      projectIr: {
+        ...ir,
+        pages: [{
+          ...ir.pages[0]!,
+          controls: [...ir.pages[0]!.controls, { ...ir.pages[0]!.controls[0]!, id: "hero/second-portrait", x: 220 }],
+        }],
+      },
+      buildSeed: "workspace-assets",
+    });
+    const twoAssetPlan: InternalChangePlan = {
+      ...plan(),
+      assetBindings: [binding(), binding({
+        assetId: secondId,
+        workspaceAssetId: "00000000-0000-4000-8000-000000000002",
+        entityId: "hero/second-portrait",
+        controlId: "hero/second-portrait",
+        targetPath: secondTarget,
+        sha256: secondSha,
+        sizeBytes: secondBytes.byteLength,
+      })],
+    };
+    let unlinkCalls = 0;
+    const call = materializeClientAssets as (input: Parameters<typeof materializeClientAssets>[0] & {
+      hooks: {
+        afterTargetPublished: (targetPath: string, index: number) => Promise<void>;
+        unlinkPublished: (targetPath: string, dev: number | bigint, ino: number | bigint) => Promise<void>;
+      };
+    }) => Promise<void>;
+
+    await expect(call({
+      workspaceRoot: twoAssetCandidate.rootDir,
+      plan: twoAssetPlan,
+      assets: [asset(), asset({ assetId: secondId, targetPath: secondTarget, sha256: secondSha, bytes: secondBytes })],
+      hooks: {
+        afterTargetPublished: async (_targetPath, index) => {
+          if (index === 1) throw new Error("simulated post-link setup failure");
+        },
+        unlinkPublished: async (targetPath, dev, ino) => {
+          unlinkCalls += 1;
+          if (unlinkCalls === 1) throw new Error("simulated first rollback unlink failure");
+          const stat = await lstat(targetPath);
+          if (!stat.isSymbolicLink() && stat.dev === dev && stat.ino === ino) {
+            await (await import("node:fs/promises")).unlink(targetPath);
+          }
+        },
+      },
+    })).rejects.toThrow(/setup|rollback|unlink/i);
+    const versionRoot = path.join(twoAssetCandidate.rootDir, "1.0.0.1");
+    expect(await readFile(path.join(versionRoot, TARGET)).catch(() => undefined)).not.toEqual(BYTES);
+    expect(await readFile(path.join(versionRoot, secondTarget)).catch(() => undefined)).not.toEqual(secondBytes);
+  });
+
+  it("removes partially written bytes when stage writing fails", async () => {
+    const candidateParent = await mkdtemp(path.join(tmpdir(), "kf-partial-stage-owner-"));
+    const candidate = await createKingClientDomainPack({ nativeAccepted: true }).compile({
+      projectIr: ir,
+      buildSeed: "workspace-assets",
+      workRoot: candidateParent,
+    });
+    const call = materializeClientAssets as (input: Parameters<typeof materializeClientAssets>[0] & {
+      hooks: { writeStage: (handle: FileHandle, bytes: Uint8Array) => Promise<void> };
+    }) => Promise<void>;
+
+    await expect(call({
+      workspaceRoot: candidate.rootDir,
+      plan: plan(),
+      assets: [asset()],
+      hooks: { writeStage: async (handle, bytes) => {
+        await handle.write(bytes, 0, Math.max(1, Math.floor(bytes.byteLength / 2)), 0);
+        throw new Error("simulated partial stage write failure");
+      } },
+    })).rejects.toThrow(/partial stage write/i);
+    expect((await readdir(candidateParent)).filter((entry) => entry.startsWith(".kf-agent-assets-stage-"))).toEqual([]);
+    await expect(readFile(path.join(candidate.rootDir, "1.0.0.1", TARGET))).rejects.toThrow();
   });
 
   it("rejects a page symlink swap after asset publication without overwriting the external file", async () => {

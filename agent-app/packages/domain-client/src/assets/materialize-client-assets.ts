@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { link, mkdir, mkdtemp, open, lstat, realpath, rm, unlink, type FileHandle } from "node:fs/promises";
+import { link, mkdir, mkdtemp, open, lstat, realpath, rmdir, unlink, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 import {
   internalChangePlanSchema,
@@ -26,6 +26,10 @@ export async function materializeClientAssets(input: {
     beforePublish?: () => Promise<void>;
     afterStageBeforePublish?: () => Promise<void>;
     afterPublishBeforeRewrite?: () => Promise<void>;
+    unlinkStage?: (stagedPath: string) => Promise<void>;
+    afterTargetPublished?: (targetPath: string, index: number) => Promise<void>;
+    unlinkPublished?: (targetPath: string, dev: number | bigint, ino: number | bigint) => Promise<void>;
+    writeStage?: (handle: FileHandle, bytes: Uint8Array) => Promise<void>;
   };
 }): Promise<void> {
   // Asset materialization is an internal extension of the long-lived patch API.
@@ -83,12 +87,16 @@ export async function materializeClientAssets(input: {
   const rewrites = bindings.map((binding) => resolveBoundImage(binding, parsed.data.workspaceId, inspection, byAssetId.get(binding.assetId)!));
   const beforePublish = input.hooks?.beforePublish;
   const afterStageBeforePublish = input.hooks?.afterStageBeforePublish;
-  const published = await publishAssets({
+  const publication = await publishAssets({
     workspaceRoot,
     versionRoot,
     assets: input.assets,
     ...(beforePublish === undefined ? {} : { beforePublish }),
     ...(afterStageBeforePublish === undefined ? {} : { afterStageBeforePublish }),
+    ...(input.hooks?.unlinkStage === undefined ? {} : { unlinkStage: input.hooks.unlinkStage }),
+    ...(input.hooks?.afterTargetPublished === undefined ? {} : { afterTargetPublished: input.hooks.afterTargetPublished }),
+    ...(input.hooks?.unlinkPublished === undefined ? {} : { unlinkPublished: input.hooks.unlinkPublished }),
+    ...(input.hooks?.writeStage === undefined ? {} : { writeStage: input.hooks.writeStage }),
   });
   const pages = new Map<string, PageRewriteFile>();
   try {
@@ -112,20 +120,20 @@ export async function materializeClientAssets(input: {
     for (const page of pages.values()) {
       await assertPageRewriteFileUnchanged(page);
       const bytes = Buffer.from(stableStringify(page.doc), "utf8");
-      await page.handle.truncate(0);
-      let offset = 0;
-      while (offset < bytes.byteLength) {
-        const result = await page.handle.write(bytes, offset, bytes.byteLength - offset, offset);
-        if (result.bytesWritten < 1) throw new Error(`page rewrite made no progress: ${page.file}`);
-        offset += result.bytesWritten;
-      }
-      await page.handle.sync();
+      page.modified = true;
+      await writePinnedFile(page.handle, bytes, `page rewrite ${page.file}`);
       await assertPageRewriteFileUnchanged(page);
     }
+    await publication.commit();
   } catch (error) {
-    await Promise.all(published.map((file) => unlink(file).catch(() => {})));
+    await Promise.all([...pages.values()].map(async (page) => {
+      if (!page.modified) return;
+      await writePinnedFile(page.handle, page.originalBytes, `page rollback ${page.file}`).catch(() => {});
+    }));
+    await publication.rollback();
     throw error;
   } finally {
+    await publication.close();
     await Promise.all([...pages.values()].map((page) => closePageRewriteFile(page)));
   }
 }
@@ -161,7 +169,27 @@ type PageRewriteFile = {
   dev: number | bigint;
   ino: number | bigint;
   ancestors: DirectorySnapshot[];
+  originalBytes: Buffer;
+  modified: boolean;
   doc: Record<string, unknown>;
+};
+type PublishedAsset = {
+  bytes: Uint8Array;
+  sha256: string;
+  target: string;
+  staged: string;
+  stageHandle: FileHandle;
+  targetHandle?: FileHandle;
+  stageDev: number | bigint;
+  stageIno: number | bigint;
+  targetDev?: number | bigint;
+  targetIno?: number | bigint;
+  created: boolean;
+};
+type AssetPublication = {
+  commit(): Promise<void>;
+  rollback(): Promise<void>;
+  close(): Promise<void>;
 };
 
 async function openPageRewriteFile(versionRoot: string, relativeFile: string): Promise<PageRewriteFile> {
@@ -188,13 +216,25 @@ async function openPageRewriteFile(versionRoot: string, relativeFile: string): P
     if (!stat.isFile() || stat.nlink !== 1 || stat.dev !== entry.dev || stat.ino !== entry.ino) {
       throw new Error(`page file identity changed while opening: ${relativeFile}`);
     }
-    const doc = JSON.parse(await handle.readFile("utf8")) as Record<string, unknown>;
-    return { file, handle, dev: stat.dev, ino: stat.ino, ancestors, doc };
+    const originalBytes = await handle.readFile();
+    const doc = JSON.parse(originalBytes.toString("utf8")) as Record<string, unknown>;
+    return { file, handle, dev: stat.dev, ino: stat.ino, ancestors, originalBytes, modified: false, doc };
   } catch (error) {
     await handle?.close().catch(() => {});
     await Promise.all(ancestors.map((ancestor) => ancestor.handle.close().catch(() => {})));
     throw error;
   }
+}
+
+async function writePinnedFile(handle: FileHandle, bytes: Uint8Array, label: string): Promise<void> {
+  await handle.truncate(0);
+  let offset = 0;
+  while (offset < bytes.byteLength) {
+    const result = await handle.write(bytes, offset, bytes.byteLength - offset, offset);
+    if (result.bytesWritten < 1) throw new Error(`${label} made no progress`);
+    offset += result.bytesWritten;
+  }
+  await handle.sync();
 }
 
 async function assertPageRewriteFileUnchanged(page: PageRewriteFile): Promise<void> {
@@ -219,16 +259,22 @@ async function publishAssets(input: {
   assets: readonly DomainAssetInput[];
   beforePublish?: () => Promise<void>;
   afterStageBeforePublish?: () => Promise<void>;
-}): Promise<string[]> {
+  unlinkStage?: (stagedPath: string) => Promise<void>;
+  afterTargetPublished?: (targetPath: string, index: number) => Promise<void>;
+  unlinkPublished?: (targetPath: string, dev: number | bigint, ino: number | bigint) => Promise<void>;
+  writeStage?: (handle: FileHandle, bytes: Uint8Array) => Promise<void>;
+}): Promise<AssetPublication> {
   // Node does not expose openat(2)/renameat(2) with a retained directory fd.
   // The strongest portable boundary available here is therefore: canonical
   // no-follow directory handles + dev/ino snapshots before/after publication,
   // a private exclusive staging directory, fsync, and exclusive hard-link
   // publication followed by an O_NOFOLLOW identity/hash verification.
   const directories: DirectorySnapshot[] = [];
-  const published: string[] = [];
+  const targets: PublishedAsset[] = [];
   let stagingRoot: string | undefined;
+  let stagingDirectory: DirectorySnapshot | undefined;
   let persistentDirectoryCount = 0;
+  let ownershipTransferred = false;
   try {
     directories.push(await openCanonicalDirectory(input.workspaceRoot, "workspace root"));
     directories.push(await openCanonicalDirectory(input.versionRoot, "workspace version root"));
@@ -257,44 +303,165 @@ async function publishAssets(input: {
     // A static/candidate subtree rename cannot move this cleanup pathname, and
     // the device check above preserves atomic hard-link publication semantics.
     stagingRoot = await mkdtemp(path.join(stagingParent, ".kf-agent-assets-stage-"));
-    directories.push(await openCanonicalDirectory(stagingRoot, "asset staging root"));
+    stagingDirectory = await openCanonicalDirectory(stagingRoot, "asset staging root");
+    directories.push(stagingDirectory);
     for (const asset of input.assets) {
       const name = path.basename(asset.targetPath);
       const staged = path.join(stagingRoot, name);
-      const handle = await open(staged, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o644);
-      try {
-        await handle.writeFile(asset.bytes);
-        await handle.sync();
-        const stat = await handle.stat();
-        if (!stat.isFile() || stat.nlink !== 1 || stat.size !== asset.bytes.byteLength) throw new Error(`unsafe staged asset file: ${name}`);
-      } finally { await handle.close(); }
+      const handle = await open(staged, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | constants.O_NOFOLLOW, 0o644);
+      const stat = await handle.stat();
+      if (!stat.isFile() || stat.nlink !== 1 || stat.size !== 0) throw new Error(`unsafe new staged asset file: ${name}`);
+      const tracked: PublishedAsset = {
+        bytes: asset.bytes,
+        sha256: asset.sha256,
+        target: path.join(assetRoot, name),
+        staged,
+        stageHandle: handle,
+        stageDev: stat.dev,
+        stageIno: stat.ino,
+        created: false,
+      };
+      // Register ownership immediately after O_EXCL open/fstat. Any partial
+      // write, fsync, or canonical-check failure is then covered by the common
+      // two-phase setup rollback and inode-owned staging cleanup.
+      targets.push(tracked);
+      await (input.writeStage ?? writeStageBytes)(handle, asset.bytes);
+      await handle.sync();
+      const writtenStat = await handle.stat();
+      if (!writtenStat.isFile() || writtenStat.dev !== tracked.stageDev || writtenStat.ino !== tracked.stageIno
+        || writtenStat.nlink !== 1 || writtenStat.size !== asset.bytes.byteLength) {
+        throw new Error(`unsafe staged asset file: ${name}`);
+      }
       await assertCanonicalPath(staged, `staged asset ${name}`);
     }
 
     await input.afterStageBeforePublish?.();
     for (const directory of directories) await assertDirectoryUnchanged(directory);
-    for (const asset of input.assets) {
-      const name = path.basename(asset.targetPath);
-      const staged = path.join(stagingRoot, name);
-      const target = path.join(assetRoot, name);
+    for (const [index, target] of targets.entries()) {
       try {
-        await link(staged, target);
-        await unlink(staged);
-        published.push(target);
+        await link(target.staged, target.target);
+        // Rollback ownership begins immediately after the successful link.
+        // Keep the stable staged link until the page rewrite transaction commits.
+        target.created = true;
       } catch (error) {
         if (!hasCode(error, "EEXIST")) throw error;
       }
-      await verifyPublishedFile(target, asset.bytes, asset.sha256);
+      target.targetHandle = await openPublishedFile(target);
+      await input.afterTargetPublished?.(target.target, index);
     }
     for (const directory of directories.slice(0, persistentDirectoryCount)) await assertDirectoryUnchanged(directory);
-    return published;
+    let finalized = false;
+    const publication: AssetPublication = {
+      async commit() {
+        if (finalized) return;
+        for (const directory of directories.slice(0, persistentDirectoryCount)) await assertDirectoryUnchanged(directory);
+        for (const target of targets) await assertPublishedFileUnchanged(target, "before-stage-unlink");
+        for (const directory of directories.slice(0, persistentDirectoryCount)) await assertDirectoryUnchanged(directory);
+        for (const target of targets) await assertPublishedFileUnchanged(target, "before-stage-unlink");
+        for (const target of targets) await (input.unlinkStage ?? unlink)(target.staged);
+        for (const directory of directories.slice(0, persistentDirectoryCount)) await assertDirectoryUnchanged(directory);
+        for (const target of targets) await assertPublishedFileUnchanged(target, "committed");
+        finalized = true;
+      },
+      async rollback() {
+        if (finalized) return;
+        const errors = await scrubAndUnlinkPublishedTargets(targets, input.unlinkPublished ?? unlinkIfOwned);
+        finalized = true;
+        if (errors.length > 0) throw new AggregateError(errors, "approved asset rollback was incomplete");
+      },
+      async close() {
+        await Promise.all(targets.flatMap((target) => [
+          target.stageHandle.close().catch(() => {}),
+          target.targetHandle?.close().catch(() => {}) ?? Promise.resolve(),
+        ]));
+        await Promise.all(directories.map((directory) => directory.handle.close().catch(() => {})));
+        if (stagingRoot !== undefined && stagingDirectory !== undefined) {
+          await cleanupOwnedStagingRoot(stagingRoot, stagingDirectory, targets).catch(() => {});
+        }
+      },
+    };
+    ownershipTransferred = true;
+    return publication;
   } catch (error) {
-    await Promise.all(published.map((file) => unlink(file).catch(() => {})));
+    const rollbackErrors = await scrubAndUnlinkPublishedTargets(targets, input.unlinkPublished ?? unlinkIfOwned);
+    if (rollbackErrors.length > 0) {
+      throw new AggregateError([error, ...rollbackErrors], "asset publication setup and rollback failed");
+    }
     throw error;
   } finally {
-    await Promise.all(directories.map((directory) => directory.handle.close().catch(() => {})));
-    if (stagingRoot !== undefined) await rm(stagingRoot, { recursive: true, force: true }).catch(() => {});
+    // On success ownership transfers to AssetPublication and remains live
+    // through page rewrite. On setup failure close and clean locally.
+    if (!ownershipTransferred) {
+      await Promise.all(targets.flatMap((target) => [
+        target.stageHandle.close().catch(() => {}),
+        target.targetHandle?.close().catch(() => {}) ?? Promise.resolve(),
+      ]));
+      await Promise.all(directories.map((directory) => directory.handle.close().catch(() => {})));
+      if (stagingRoot !== undefined && stagingDirectory !== undefined) {
+        await cleanupOwnedStagingRoot(stagingRoot, stagingDirectory, targets).catch(() => {});
+      }
+    }
   }
+}
+
+async function writeStageBytes(handle: FileHandle, bytes: Uint8Array): Promise<void> {
+  await handle.writeFile(bytes);
+}
+
+async function scrubAndUnlinkPublishedTargets(
+  targets: readonly PublishedAsset[],
+  unlinkOwned: (targetPath: string, dev: number | bigint, ino: number | bigint) => Promise<void>,
+): Promise<unknown[]> {
+  const errors: unknown[] = [];
+  // Scrub every retained staged inode before attempting any pathname cleanup.
+  // A failure unlinking one target must never leave approved bytes in another.
+  for (const target of targets) {
+    try {
+      const stageStat = await target.stageHandle.stat();
+      if (!stageStat.isFile() || stageStat.dev !== target.stageDev || stageStat.ino !== target.stageIno
+        || (target.created && (target.targetDev !== target.stageDev || target.targetIno !== target.stageIno))) {
+        throw new Error(`lost rollback ownership of published asset: ${target.target}`);
+      }
+      await target.stageHandle.truncate(0);
+      await target.stageHandle.sync();
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  for (const target of targets) {
+    if (!target.created) continue;
+    try {
+      await unlinkOwned(target.target, target.targetDev ?? target.stageDev, target.targetIno ?? target.stageIno);
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  return errors;
+}
+
+async function cleanupOwnedStagingRoot(
+  stagingRoot: string,
+  stagingDirectory: DirectorySnapshot,
+  targets: readonly PublishedAsset[],
+): Promise<void> {
+  // Only remove the known files when their inode still matches our retained
+  // stage. Never recursively remove a pathname that another process may have
+  // replaced while the transaction was running.
+  const errors: unknown[] = [];
+  for (const target of targets) {
+    try { await unlinkIfOwned(target.staged, target.stageDev, target.stageIno); }
+    catch (error) { errors.push(error); }
+  }
+  try {
+    const stat = await lstat(stagingRoot);
+    if (!stat.isSymbolicLink() && stat.isDirectory()
+      && stat.dev === stagingDirectory.dev && stat.ino === stagingDirectory.ino) {
+      await rmdir(stagingRoot);
+    }
+  } catch (error) {
+    if (!hasCode(error, "ENOENT")) errors.push(error);
+  }
+  if (errors.length > 0) throw new AggregateError(errors, "owned asset staging cleanup was incomplete");
 }
 
 async function mkdirExact(target: string): Promise<void> {
@@ -329,18 +496,81 @@ async function assertDirectoryUnchanged(snapshot: DirectorySnapshot): Promise<vo
   }
 }
 
-async function verifyPublishedFile(target: string, bytes: Uint8Array, sha256: string): Promise<void> {
-  await assertCanonicalPath(target, "published asset");
-  const handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+async function openPublishedFile(target: PublishedAsset): Promise<FileHandle> {
+  await assertCanonicalPath(target.target, "published asset");
+  const handle = await open(target.target, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const stat = await handle.stat();
-    if (!stat.isFile() || stat.nlink !== 1) throw new Error(`asset target hard-link or special-file collision: ${target}`);
+    const expectedLinks = target.created ? 2 : 1;
+    if (!stat.isFile() || stat.nlink !== expectedLinks) {
+      throw new Error(`asset target hard-link or special-file collision: ${target.target}`);
+    }
     const existing = await handle.readFile();
     const actual = createHash("sha256").update(existing).digest("hex");
-    if (actual !== sha256 || existing.byteLength !== bytes.byteLength) throw new Error(`asset target checksum collision: ${target}`);
-    const pathStat = await lstat(target);
-    if (pathStat.dev !== stat.dev || pathStat.ino !== stat.ino) throw new Error(`asset target identity changed: ${target}`);
-  } finally { await handle.close(); }
+    if (actual !== target.sha256 || existing.byteLength !== target.bytes.byteLength) {
+      throw new Error(`asset target checksum collision: ${target.target}`);
+    }
+    const pathStat = await lstat(target.target);
+    if (pathStat.dev !== stat.dev || pathStat.ino !== stat.ino) {
+      throw new Error(`asset target identity changed: ${target.target}`);
+    }
+    if (target.created && (stat.dev !== target.stageDev || stat.ino !== target.stageIno)) {
+      throw new Error(`published asset lost its staging identity: ${target.target}`);
+    }
+    target.targetDev = stat.dev;
+    target.targetIno = stat.ino;
+    return handle;
+  } catch (error) {
+    await handle.close();
+    throw error;
+  }
+}
+
+async function assertPublishedFileUnchanged(
+  target: PublishedAsset,
+  phase: "before-stage-unlink" | "committed",
+): Promise<void> {
+  if (target.targetHandle === undefined || target.targetDev === undefined || target.targetIno === undefined) {
+    throw new Error(`published asset has no retained identity: ${target.target}`);
+  }
+  const expectedTargetLinks = target.created && phase === "before-stage-unlink" ? 2 : 1;
+  const stat = await target.targetHandle.stat();
+  if (!stat.isFile() || stat.dev !== target.targetDev || stat.ino !== target.targetIno || stat.nlink !== expectedTargetLinks) {
+    throw new Error(`published asset identity changed during transaction: ${target.target}`);
+  }
+  const pathStat = await lstat(target.target);
+  if (pathStat.isSymbolicLink() || !pathStat.isFile()
+    || pathStat.dev !== target.targetDev || pathStat.ino !== target.targetIno) {
+    throw new Error(`published asset path changed during transaction: ${target.target}`);
+  }
+  const stageStat = await target.stageHandle.stat();
+  const expectedStageLinks = phase === "before-stage-unlink" ? (target.created ? 2 : 1) : (target.created ? 1 : 0);
+  if (!stageStat.isFile() || stageStat.dev !== target.stageDev || stageStat.ino !== target.stageIno
+    || stageStat.nlink !== expectedStageLinks) {
+    throw new Error(`staged asset handle changed during transaction: ${target.staged}`);
+  }
+  if (phase === "before-stage-unlink") {
+    const stagedStat = await lstat(target.staged);
+    if (!stagedStat.isFile() || stagedStat.dev !== target.stageDev || stagedStat.ino !== target.stageIno) {
+      throw new Error(`staged asset identity changed during transaction: ${target.staged}`);
+    }
+  } else {
+    try {
+      await lstat(target.staged);
+      throw new Error(`staged asset link remained after commit: ${target.staged}`);
+    } catch (error) {
+      if (!hasCode(error, "ENOENT")) throw error;
+    }
+  }
+}
+
+async function unlinkIfOwned(target: string, dev: number | bigint, ino: number | bigint): Promise<void> {
+  try {
+    const stat = await lstat(target);
+    if (!stat.isSymbolicLink() && stat.dev === dev && stat.ino === ino) await unlink(target);
+  } catch (error) {
+    if (!hasCode(error, "ENOENT")) throw error;
+  }
 }
 
 function hasCode(error: unknown, code: string): boolean {
