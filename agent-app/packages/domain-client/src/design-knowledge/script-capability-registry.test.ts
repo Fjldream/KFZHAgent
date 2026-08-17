@@ -50,6 +50,26 @@ describe("script capability knowledge", () => {
       .map((action) => action.semanticAction)).toEqual(["navigate-page", "set-variable"]);
   });
 
+  it("ties each supported button action to its own compiler regression evidence", () => {
+    const compilerTestPath = "agent-app/packages/domain-client/src/compile/client-compiler.test.ts";
+    const expectedTestRefs = {
+      "navigate-page": `${compilerTestPath}#navigatePage`,
+      "set-variable": `${compilerTestPath}#setVariable`,
+    } as const;
+    const button = requireScriptCapabilityProfile("button");
+
+    for (const [semanticAction, expectedRef] of Object.entries(expectedTestRefs)) {
+      const action = button.actions.find((candidate) => candidate.semanticAction === semanticAction);
+      const otherRef = Object.values(expectedTestRefs).find((ref) => ref !== expectedRef);
+      expect(action?.evidence.map((item) => item.ref)).toContain(expectedRef);
+      expect(action?.evidence.map((item) => item.ref)).not.toContain(otherRef);
+
+      const { file, fragment } = resolveEvidence(expectedRef);
+      expect(existsSync(file)).toBe(true);
+      expect(readFileSync(file, "utf8")).toContain(fragment);
+    }
+  });
+
   it("does not claim planned datagrid methods as supported", () => {
     const table = requireScriptCapabilityProfile("easyui.1");
     expect(table.availability).toBe("planned");

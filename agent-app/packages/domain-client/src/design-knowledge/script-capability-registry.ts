@@ -6,10 +6,17 @@ import { listControlDesignProfiles } from "./control-design-registry.js";
 import { createKnowledgeRegistry } from "./registry.js";
 
 const TEMPLATE = (ref: string) => ({ kind: "template", ref });
-const ACTION_EVIDENCE = [
+const ACTION_IR_EVIDENCE = [
   { kind: "product-source", ref: "agent-app/packages/domain-client/src/ir/client-project-ir.schema.ts#RestrictedAction" },
   { kind: "compiler", ref: "agent-app/packages/domain-client/src/compile/control-compiler.ts#compileAction" },
 ] as const;
+
+function actionEvidence(testFragment: "navigatePage" | "setVariable") {
+  return [
+    ...ACTION_IR_EVIDENCE,
+    { kind: "compiler", ref: `agent-app/packages/domain-client/src/compile/client-compiler.test.ts#${testFragment}` },
+  ];
+}
 
 function plannedProfile(capabilityId: string): unknown {
   return {
@@ -35,8 +42,8 @@ const REVIEWED_PROFILES: Readonly<Record<string, unknown>> = {
     version: "1.0.0",
     availability: "supported",
     actions: [
-      { semanticAction: "navigate-page", implementation: "restricted-action", availability: "supported", evidence: ACTION_EVIDENCE },
-      { semanticAction: "set-variable", implementation: "restricted-action", availability: "supported", evidence: ACTION_EVIDENCE },
+      { semanticAction: "navigate-page", implementation: "restricted-action", availability: "supported", evidence: actionEvidence("navigatePage") },
+      { semanticAction: "set-variable", implementation: "restricted-action", availability: "supported", evidence: actionEvidence("setVariable") },
       { semanticAction: "open-dialog", implementation: "restricted-action", availability: "planned", evidence: [] },
     ],
     events: [],
