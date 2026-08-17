@@ -41,19 +41,19 @@ const RAW_PROFILES: readonly unknown[] = [
     ],
   })),
   ...[
-    { capabilityId: "input", parts: ["input", "label", "placeholder"] },
-    { capabilityId: "inputnumber", parts: ["input", "indicator", "label", "placeholder"] },
-    { capabilityId: "select", parts: ["input", "indicator", "label", "placeholder"] },
-    { capabilityId: "checkbox", parts: ["indicator", "label"] },
-    { capabilityId: "radio", parts: ["indicator", "label"] },
-    { capabilityId: "switch", parts: ["indicator", "label"] },
-    { capabilityId: "datetimepicker", parts: ["input", "label", "placeholder"] },
-  ].map(({ capabilityId, parts }) => ({
+    { capabilityId: "input", parts: ["input", "label", "placeholder"], states: FORM },
+    { capabilityId: "inputnumber", parts: ["input", "indicator", "label", "placeholder"], states: FORM },
+    { capabilityId: "select", parts: ["input", "indicator", "label", "placeholder"], states: INTERACTIVE },
+    { capabilityId: "checkbox", parts: ["indicator", "label"], states: INTERACTIVE },
+    { capabilityId: "radio", parts: ["indicator", "label"], states: INTERACTIVE },
+    { capabilityId: "switch", parts: ["indicator", "label"], states: INTERACTIVE },
+    { capabilityId: "datetimepicker", parts: ["input", "label", "placeholder"], states: FORM },
+  ].map(({ capabilityId, parts, states }) => ({
     schema: "kf-style-capability-profile/v1",
     capabilityId,
     version: "1.0.0",
     parts: [
-      { id: "root", availability: "supported", semanticRoles: ["form-control-root"], properties: [...SURFACE, ...TYPE, ...SPACE], states: [...FORM], notes: [] },
+      { id: "root", availability: "supported", semanticRoles: ["form-control-root"], properties: [...SURFACE, ...TYPE, ...SPACE], states: [...states], notes: [] },
       ...parts.map((id) => ({
         id,
         availability: "planned",

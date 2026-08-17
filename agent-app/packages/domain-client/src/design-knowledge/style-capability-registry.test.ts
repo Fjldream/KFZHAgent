@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { ComponentStyleSpec } from "@kf/contracts";
 import { getStyleAdapter } from "../style/adapters/base-adapters.js";
 import {
   listStyleCapabilityProfiles,
@@ -33,5 +34,30 @@ describe("style capability knowledge", () => {
     const root = requireStyleCapabilityProfile("button").parts.find((part) => part.id === "root");
     expect(root).toMatchObject({ availability: "supported" });
     expect(root?.states).toEqual(["hover", "active", "focus", "disabled", "selected"]);
+  });
+
+  it("aligns form-root state knowledge with the states each reviewed adapter compiles", () => {
+    const formStates = ["hover", "active", "focus", "disabled", "error"] as const;
+    const selectableStates = ["hover", "active", "focus", "disabled", "selected"] as const;
+    const expectedStates = {
+      input: formStates,
+      inputnumber: formStates,
+      datetimepicker: formStates,
+      select: selectableStates,
+      checkbox: selectableStates,
+      radio: selectableStates,
+      switch: selectableStates,
+    } as const;
+
+    for (const [capabilityId, states] of Object.entries(expectedStates)) {
+      const root = requireStyleCapabilityProfile(capabilityId).parts.find((part) => part.id === "root");
+      const adapter = getStyleAdapter(capabilityId);
+      const stateDeclarations = Object.fromEntries(
+        states.map((state) => [state, { opacity: 0.5 }]),
+      ) as ComponentStyleSpec["states"];
+
+      expect(root?.states).toEqual(states);
+      expect(adapter?.compile({ declarations: {}, states: stateDeclarations }).unsupported).toEqual([]);
+    }
   });
 });
