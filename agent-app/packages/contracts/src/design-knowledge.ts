@@ -1,16 +1,18 @@
 import { z } from "zod";
 
 const id = z.string().trim().min(1).max(100).regex(/^[A-Za-z][A-Za-z0-9_.-]*$/);
-const cssDeclaration = /\b(?:--[A-Za-z][\w-]*|[a-z][A-Za-z-]*)\s*:\s*[^;{}\n]+;/;
-const cssClassOrIdSelector = /(?:^|\s)[.#][A-Za-z_-][\w-]*(?::[A-Za-z-][\w-]*)?(?=$|\s|[>+~,{])/;
-const cssAttributeSelector = /\[[A-Za-z][\w-]*(?:\s*[~|^$*]?=\s*(?:"[^"]*"|'[^']*'|[A-Za-z0-9_-]+))?\]/;
-const javascriptIdentifierCall = /\b[A-Za-z_$][\w$]*\(/;
+const cssDeclaration = /\b(?:--[A-Za-z][\w-]*|[A-Za-z][A-Za-z-]*)\s*:\s*[^;{}\n]+(?:;|$)/i;
+const cssClassOrIdChain = /(?:^|\s)[.#][A-Za-z_-][\w-]*\s+[>+~]?\s*[#.A-Za-z_-][\w-]*/;
+const cssPseudoChain = /(?:^|\s)(?:[.#][A-Za-z_-][\w-]*|[a-z][\w-]*)(?:(?:::|:)[A-Za-z-][\w-]*(?:\([^)]*\))?)+(?=$|\s|[>+~,{])/;
+const cssAttributeSelector = /\[[A-Za-z][\w-]*\s*[~|^$*]?=\s*(?:"[^"]*"|'[^']*'|[A-Za-z0-9_-]+)(?:\s+[A-Za-z]+)?\]/;
+const javascriptIdentifierCall = /\b(?:[a-z$][A-Za-z0-9_$]*|[A-Z][a-z][A-Za-z0-9_$]*)(?:\s*|\?\.\s*)\(/;
 const unsafeTextPatterns = [
   /\b(?:javascript|vbscript)\s*:/i,
   /\b(?:https?|ftp):\/\//i,
   /(?:^|\s)(?:body|html|:root)\s*\{/i,
   cssDeclaration,
-  cssClassOrIdSelector,
+  cssClassOrIdChain,
+  cssPseudoChain,
   cssAttributeSelector,
   /[{}]/,
   /\b[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}\b/i,

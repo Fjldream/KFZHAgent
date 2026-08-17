@@ -42,15 +42,31 @@ describe("design knowledge contracts", () => {
       "color: #fff;",
       ".menu-item:hover",
       "[data-state=\"open\"]",
+      "display: grid",
+      "COLOR: red;",
+      ".menu-item:hover::before",
+      "button:hover",
+      "[data-state=\"open\" i]",
       "控件 ID: 6F9619FF-8B86-D011-B42D-00C04FC964FF",
       "javascript:alert(1)",
       "alert('run')",
       "doAnything()",
+      "doAnything ()",
+      "doAnything?.()",
       "const apiKey = 'secret';",
       "Authorization: Bearer token",
     ]) {
       expect(ControlDesignProfileSchema.safeParse({ ...controlProfile, useFor: [unsafeText] }).success).toBe(false);
     }
+  });
+
+  it("accepts descriptive Chinese, acronyms, references, and versions", () => {
+    expect(ControlDesignProfileSchema.safeParse({
+      ...controlProfile,
+      version: "2.4.1",
+      useFor: ["KPI(关键指标)用于概览", "参见 [Design-System] 的规范"],
+      designNotes: ["在高密度场景中保持信息层级清晰。"],
+    }).success).toBe(true);
   });
 
   it("requires planned style parts to be explicit", () => {
