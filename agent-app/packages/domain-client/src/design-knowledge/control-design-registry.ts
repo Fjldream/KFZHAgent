@@ -33,7 +33,7 @@ const RAW_PROFILES: readonly unknown[] = [
   {
     schema: "kf-control-design-profile/v1", capabilityId: "easyui.1", version: "1.0.0",
     semanticRoles: ["structured-record-list", "comparison", "record-selection"],
-    useFor: ["字段稳定且需要选择记录的数据列表"], avoidFor: ["图片主导的作品展示", "品牌叙事内容"],
+    useFor: ["可筛选的同构记录", "字段稳定且需要选择记录的数据列表"], avoidFor: ["图片主导的作品展示", "品牌叙事内容"],
     dataShapes: ["record-list"], densities: ["compact", "comfortable"], regions: ["main", "workspace"],
     minimumSize: { width: 640, height: 240 }, recommendedCompanions: ["easyui.6", "select", "easyui.22"],
     alternatives: [{ when: "内容强调图片和叙事", capabilityIds: ["image", "text", "button", "layout.2"] }],
