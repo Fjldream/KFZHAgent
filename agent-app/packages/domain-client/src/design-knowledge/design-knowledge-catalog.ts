@@ -14,6 +14,18 @@ export interface DesignKnowledgeSnapshot {
   readonly compositionRecipes: ReturnType<typeof listCompositionRecipes>;
 }
 
+interface DesignKnowledgeSources {
+  readonly controlDesignProfiles: ReturnType<typeof listControlDesignProfiles>;
+  readonly styleCapabilityProfiles: ReturnType<typeof listStyleCapabilityProfiles>;
+  readonly scriptCapabilityProfiles: ReturnType<typeof listScriptCapabilityProfiles>;
+  readonly compositionRecipes: ReturnType<typeof listCompositionRecipes>;
+}
+
+interface DesignKnowledgeDependencies {
+  readonly getControlCapability: (id: string) => unknown;
+  readonly getStyleAdapter: (id: string) => unknown;
+}
+
 function compareCodePoints(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
@@ -49,11 +61,14 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
-export function assertDesignKnowledgeIntegrity(): void {
-  const controlProfiles = listControlDesignProfiles();
-  const styleProfiles = listStyleCapabilityProfiles();
-  const scriptProfiles = listScriptCapabilityProfiles();
-  const recipes = listCompositionRecipes();
+function collectDesignKnowledgeIssues(
+  sources: DesignKnowledgeSources,
+  dependencies: DesignKnowledgeDependencies,
+): readonly string[] {
+  const controlProfiles = sources.controlDesignProfiles;
+  const styleProfiles = sources.styleCapabilityProfiles;
+  const scriptProfiles = sources.scriptCapabilityProfiles;
+  const recipes = sources.compositionRecipes;
   const controlProfileIds = new Set(controlProfiles.map((profile) => profile.capabilityId));
   const issues: string[] = [
     ...collectListIssues("control-design", controlProfiles, (profile) => profile.capabilityId),
@@ -63,7 +78,7 @@ export function assertDesignKnowledgeIntegrity(): void {
   ];
 
   for (const profile of controlProfiles) {
-    if (getControlCapability(profile.capabilityId) === undefined) {
+    if (dependencies.getControlCapability(profile.capabilityId) === undefined) {
       issues.push(`control-design ${profile.capabilityId}: technical capability not found`);
     }
     for (const companionId of profile.recommendedCompanions) {
@@ -81,7 +96,7 @@ export function assertDesignKnowledgeIntegrity(): void {
   }
 
   for (const profile of styleProfiles) {
-    if (getControlCapability(profile.capabilityId) === undefined) {
+    if (dependencies.getControlCapability(profile.capabilityId) === undefined) {
       issues.push(`style-capability ${profile.capabilityId}: technical capability not found`);
     }
     if (!controlProfileIds.has(profile.capabilityId)) {
@@ -89,14 +104,14 @@ export function assertDesignKnowledgeIntegrity(): void {
     }
     if (
       profile.parts.some((part) => part.availability === "supported")
-      && getStyleAdapter(profile.capabilityId) === undefined
+      && dependencies.getStyleAdapter(profile.capabilityId) === undefined
     ) {
       issues.push(`style-capability ${profile.capabilityId}: supported part has no style adapter`);
     }
   }
 
   for (const profile of scriptProfiles) {
-    if (getControlCapability(profile.capabilityId) === undefined) {
+    if (dependencies.getControlCapability(profile.capabilityId) === undefined) {
       issues.push(`script-capability ${profile.capabilityId}: technical capability not found`);
     }
     if (!controlProfileIds.has(profile.capabilityId)) {
@@ -145,10 +160,39 @@ export function assertDesignKnowledgeIntegrity(): void {
     }
   }
 
+  return Object.freeze([...new Set(issues)].sort(compareCodePoints));
+}
+
+function assertIntegrity(
+  sources: DesignKnowledgeSources,
+  dependencies: DesignKnowledgeDependencies,
+): void {
+  const issues = collectDesignKnowledgeIssues(sources, dependencies);
   if (issues.length > 0) {
-    const sortedIssues = [...new Set(issues)].sort(compareCodePoints);
-    throw new Error(`DESIGN_KNOWLEDGE_INTEGRITY_FAILED: ${sortedIssues.join("; ")}`);
+    throw new Error(`DESIGN_KNOWLEDGE_INTEGRITY_FAILED: ${issues.join("; ")}`);
   }
+}
+
+const DEFAULT_SOURCES: DesignKnowledgeSources = Object.freeze({
+  controlDesignProfiles: listControlDesignProfiles(),
+  styleCapabilityProfiles: listStyleCapabilityProfiles(),
+  scriptCapabilityProfiles: listScriptCapabilityProfiles(),
+  compositionRecipes: listCompositionRecipes(),
+});
+
+const DEFAULT_DEPENDENCIES: DesignKnowledgeDependencies = Object.freeze({
+  getControlCapability,
+  getStyleAdapter,
+});
+
+/** Test-only access for exercising malformed source combinations without mutating registries. */
+export const __designKnowledgeIntegrityTestHooks = Object.freeze({
+  collectIssues: collectDesignKnowledgeIssues,
+  assertIntegrity,
+});
+
+export function assertDesignKnowledgeIntegrity(): void {
+  assertIntegrity(DEFAULT_SOURCES, DEFAULT_DEPENDENCIES);
 }
 
 assertDesignKnowledgeIntegrity();
@@ -156,10 +200,10 @@ assertDesignKnowledgeIntegrity();
 const SNAPSHOT: DesignKnowledgeSnapshot = deepFreeze({
   schema: "kf-design-knowledge-catalog/v1",
   version: "1.0.0",
-  controlDesignProfiles: listControlDesignProfiles(),
-  styleCapabilityProfiles: listStyleCapabilityProfiles(),
-  scriptCapabilityProfiles: listScriptCapabilityProfiles(),
-  compositionRecipes: listCompositionRecipes(),
+  controlDesignProfiles: DEFAULT_SOURCES.controlDesignProfiles,
+  styleCapabilityProfiles: DEFAULT_SOURCES.styleCapabilityProfiles,
+  scriptCapabilityProfiles: DEFAULT_SOURCES.scriptCapabilityProfiles,
+  compositionRecipes: DEFAULT_SOURCES.compositionRecipes,
 });
 
 export function getDesignKnowledgeSnapshot(): DesignKnowledgeSnapshot {

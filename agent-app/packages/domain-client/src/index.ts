@@ -44,4 +44,8 @@ export * from "./design-knowledge/control-design-registry.js";
 export * from "./design-knowledge/style-capability-registry.js";
 export * from "./design-knowledge/script-capability-registry.js";
 export * from "./design-knowledge/composition-recipe-registry.js";
-export * from "./design-knowledge/design-knowledge-catalog.js";
+export {
+  assertDesignKnowledgeIntegrity,
+  getDesignKnowledgeSnapshot,
+  type DesignKnowledgeSnapshot,
+} from "./design-knowledge/design-knowledge-catalog.js";
