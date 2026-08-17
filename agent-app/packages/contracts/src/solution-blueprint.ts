@@ -13,12 +13,12 @@ const implementationFieldNames = new Set([
   "y",
   "coordinate",
   "coordinates",
+  "coords",
+  "bounds",
+  "rect",
+  "xpos",
+  "ypos",
   "geometry",
-  "position",
-  "left",
-  "top",
-  "width",
-  "height",
   "lefttoppt",
   "styledata",
   "styledatanew",
@@ -34,8 +34,20 @@ const quotedObjectKey = /\\?["']([A-Za-z][A-Za-z0-9_. -]*)\\?["']\s*:/g;
 const implementationAssignment = /\b([A-Za-z][A-Za-z0-9_. -]*)\s*(?:=|:)/g;
 const dottedImplementationToken = /\b[A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z][A-Za-z0-9_-]*)+\b/;
 const cssDeclaration = /(?:^|[;{]\s*)(?:color|display|position|width|height|margin(?:-[a-z]+)?|padding(?:-[a-z]+)?|background(?:-[a-z]+)?|border(?:-[a-z]+)?|font(?:-[a-z]+)?|opacity|z-index|flex(?:-[a-z]+)?|grid(?:-[a-z]+)?|transform|transition|animation)\s*:\s*[^;{}\n]+(?:;|})/i;
-const cssSelector = /(?:^|\s)(?:#[A-Za-z_-][A-Za-z0-9_-]*(?:\s*[>+~]\s*|\s*:[A-Za-z-]+|\s*\{)|\.[A-Za-z_-][A-Za-z0-9_-]*(?:\s*[>+~]\s*|\s*:[A-Za-z-]+|\s*\{)|\[[A-Za-z_-][A-Za-z0-9_-]*[~|^$*]?=[^\]]+\])/;
-const javascriptCall = /\b(?:[a-z][A-Za-z0-9_$]*|[A-Z][a-z][A-Za-z0-9_$]*)(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*\s*\(\s*(?:[A-Za-z0-9_$"'`,.\s-]+)?\s*\)/;
+const cssSelector = /(?:^|\s)(?:#[A-Za-z_-][A-Za-z0-9_-]*(?:\s*[>+~]\s*|\s*:[A-Za-z-]+|\s*\{)|\.[A-Za-z_-][A-Za-z0-9_-]*(?:\s*[>+~]\s*|\s*:[A-Za-z-]+|\s*\{)|\[[A-Za-z_-][A-Za-z0-9_-]*[~|^$*]?=[^\]]+\]|\[(?:data|aria)-[A-Za-z0-9_-]+(?:[~|^$*]?=[^\]]+)?\]|\[(?:disabled|checked|selected|readonly|required|hidden|multiple|open)\]|[A-Za-z_-][A-Za-z0-9_-]*\[(?:data|aria)-[A-Za-z0-9_-]+(?:[~|^$*]?=[^\]]+)?\]|\b(?:button|input|select|textarea|a|form|table|tr|td|div|span|section|main|header|footer|nav|label):[A-Za-z-]+)/i;
+const identifierCall = /\b([A-Za-z_$][A-Za-z0-9_$]*)(\s*)\(([^()]*)\)/g;
+const dangerousBuiltinNames = new Set([
+  "window",
+  "document",
+  "globalthis",
+  "eval",
+  "function",
+  "settimeout",
+  "setinterval",
+  "fetch",
+  "require",
+  "import",
+]);
 
 function normalizeImplementationKey(value: string): string {
   return value.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
@@ -72,6 +84,25 @@ function containsImplementationAssignment(value: string): boolean {
   return false;
 }
 
+function isCamelOrPascalIdentifier(value: string): boolean {
+  return /^[a-z]+(?:[A-Z][A-Za-z0-9_$]*)+$/.test(value)
+    || /^[A-Z][a-z]+(?:[A-Z][A-Za-z0-9_$]*)+$/.test(value);
+}
+
+function containsJavascriptCall(value: string): boolean {
+  identifierCall.lastIndex = 0;
+  for (const match of value.matchAll(identifierCall)) {
+    const name = match[1]!;
+    const whitespace = match[2]!;
+    const argumentsText = match[3]!;
+    const uppercaseChineseLabel = /^[A-Z]{2,}$/.test(name) && /[\u3400-\u9fff]/.test(argumentsText);
+    if (uppercaseChineseLabel) continue;
+    if (whitespace.length === 0) return true;
+    if (isCamelOrPascalIdentifier(name) || dangerousBuiltinNames.has(name.toLowerCase())) return true;
+  }
+  return false;
+}
+
 function implementationTextIssue(value: string): string | undefined {
   if (canonicalUuid.test(value)) return "canonical UUID/GUID values are not allowed";
   if (isRawJsonPayload(value)) return "raw JSON payloads are not allowed";
@@ -79,7 +110,7 @@ function implementationTextIssue(value: string): string | undefined {
   if (containsImplementationAssignment(value)) return "implementation assignments are not allowed";
   if (dottedImplementationToken.test(value)) return "dot-delimited implementation tokens are not allowed";
   if (cssDeclaration.test(value) || cssSelector.test(value)) return "CSS declarations and selectors are not allowed";
-  if (javascriptCall.test(value)) return "JavaScript calls are not allowed";
+  if (containsJavascriptCall(value)) return "JavaScript calls are not allowed";
   return undefined;
 }
 

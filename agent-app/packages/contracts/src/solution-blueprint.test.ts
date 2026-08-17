@@ -108,6 +108,10 @@ describe("CustomerSolutionBlueprintSchema", () => {
     expect(CustomerSolutionBlueprintSchema.safeParse({ ...valid, objective }).success).toBe(true);
   });
 
+  it.each(["Version (3.6)", "Status (open)"])("accepts a normal spaced label: %s", (objective) => {
+    expect(CustomerSolutionBlueprintSchema.safeParse({ ...valid, objective }).success).toBe(true);
+  });
+
   it("rejects implementation-specific fields", () => {
     expect(CustomerSolutionBlueprintSchema.safeParse({
       ...valid,
@@ -172,6 +176,18 @@ describe("CustomerSolutionBlueprintSchema", () => {
     })).success).toBe(false);
   });
 
+  it.each(["coords", "bounds", "rect", "xPos", "yPos"])("rejects coordinate alias %s in arbitrary sample data", (key) => {
+    expect(CustomerSolutionBlueprintSchema.safeParse(withPrimaryRegion({
+      sampleData: [{ [key]: "120, 48" }],
+    })).success).toBe(false);
+  });
+
+  it("accepts normal industry sample-data fields that are not coordinates", () => {
+    expect(CustomerSolutionBlueprintSchema.safeParse(withPrimaryRegion({
+      sampleData: [{ position: "销售经理", width: "60厘米", height: "120厘米" }],
+    })).success).toBe(true);
+  });
+
   it.each([
     "页面使用 content.hero，模块字段 expectedKind=data.table",
     "OpenVisitorDetail()",
@@ -179,6 +195,18 @@ describe("CustomerSolutionBlueprintSchema", () => {
     ".records:hover",
   ])("rejects implementation syntax in ordinary text: %s", (objective) => {
     expect(CustomerSolutionBlueprintSchema.safeParse({ ...valid, objective }).success).toBe(false);
+  });
+
+  it.each(["OpenVisitorDetail(访客)", "openVisitorDetail({ id: 1 })"])("rejects implementation call shape: %s", (objective) => {
+    expect(CustomerSolutionBlueprintSchema.safeParse({ ...valid, objective }).success).toBe(false);
+  });
+
+  it.each(["[disabled]", "button[data-region]", "button:hover"])("rejects CSS selector context: %s", (objective) => {
+    expect(CustomerSolutionBlueprintSchema.safeParse({ ...valid, objective }).success).toBe(false);
+  });
+
+  it("accepts ordinary bracketed design-system copy", () => {
+    expect(CustomerSolutionBlueprintSchema.safeParse({ ...valid, objective: "遵循 [Design-System] 的客户体验原则" }).success).toBe(true);
   });
 
   it.each(["linkId", "link-id", "configureData"])("rejects reserved implementation identifier %s", (id) => {
