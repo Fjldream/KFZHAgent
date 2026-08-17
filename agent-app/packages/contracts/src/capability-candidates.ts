@@ -1,11 +1,12 @@
 import { z } from "zod";
 
-const stableId = z.string().trim().min(1).max(100).regex(/^[A-Za-z][A-Za-z0-9_-]*$/);
+const blueprintStableId = z.string().trim().min(1).max(100).regex(/^[A-Za-z][A-Za-z0-9_-]*$/);
+const capabilityId = z.string().trim().min(1).max(100).regex(/^[A-Za-z][A-Za-z0-9_.-]*$/);
 const semver = z.string().trim().regex(/^\d+\.\d+\.\d+$/);
 const text = z.string().trim().min(1).max(400);
 
 const RankedCandidateSchema = z.object({
-  id: stableId,
+  id: capabilityId,
   score: z.number().finite().min(-1000).max(1000),
   reasons: z.array(text).min(1).max(8),
   limitations: z.array(text).max(8),
@@ -13,8 +14,8 @@ const RankedCandidateSchema = z.object({
 }).strict();
 
 export const RegionCapabilityCandidatesSchema = z.object({
-  pageId: stableId,
-  regionId: stableId,
+  pageId: blueprintStableId,
+  regionId: blueprintStableId,
   controls: z.array(RankedCandidateSchema).min(3).max(5),
   layouts: z.array(RankedCandidateSchema).min(1).max(3),
   recipes: z.array(RankedCandidateSchema).min(1).max(3),
@@ -25,7 +26,7 @@ export const CapabilityCandidateBundleSchema = z.object({
   knowledgeCatalogVersion: semver,
   blueprintHash: z.string().regex(/^[0-9a-f]{64}$/),
   regions: z.array(RegionCapabilityCandidatesSchema).min(1).max(96),
-  detailedCapabilityIds: z.array(stableId).min(1).max(25),
+  detailedCapabilityIds: z.array(capabilityId).min(1).max(25),
   generatedAtPolicy: z.literal("deterministic-no-timestamp"),
 }).strict().superRefine((bundle, ctx) => {
   const pageRegionPairs = new Set<string>();
