@@ -34,26 +34,12 @@ describe("design knowledge contracts", () => {
     expect(ControlDesignProfileSchema.safeParse({ ...controlProfile, useFor: [] }).success).toBe(false);
   });
 
-  it("rejects executable, CSS, credential-like, and selector text", () => {
+  it("rejects explicitly dangerous text payloads", () => {
     for (const unsafeText of [
-      "body { color: red; }",
-      "#app .card",
-      "display: grid;",
-      "color: #fff;",
-      ".menu-item:hover",
-      "[data-state=\"open\"]",
-      "display: grid",
-      "COLOR: red;",
-      ".menu-item:hover::before",
-      "button:hover",
-      "[data-state=\"open\" i]",
       "控件 ID: 6F9619FF-8B86-D011-B42D-00C04FC964FF",
       "javascript:alert(1)",
-      "alert('run')",
-      "doAnything()",
-      "doAnything ()",
-      "doAnything?.()",
-      "const apiKey = 'secret';",
+      "https://example.com/spec",
+      "<script>alert(1)</script>",
       "Authorization: Bearer token",
     ]) {
       expect(ControlDesignProfileSchema.safeParse({ ...controlProfile, useFor: [unsafeText] }).success).toBe(false);
@@ -64,7 +50,7 @@ describe("design knowledge contracts", () => {
     expect(ControlDesignProfileSchema.safeParse({
       ...controlProfile,
       version: "2.4.1",
-      useFor: ["KPI(关键指标)用于概览", "参见 [Design-System] 的规范"],
+      useFor: ["KPI(关键指标)用于概览", "参见 [Design-System] 的规范", "KPI: 关键指标", "状态 status: active"],
       designNotes: ["在高密度场景中保持信息层级清晰。"],
     }).success).toBe(true);
   });

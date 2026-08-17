@@ -1,24 +1,12 @@
 import { z } from "zod";
 
 const id = z.string().trim().min(1).max(100).regex(/^[A-Za-z][A-Za-z0-9_.-]*$/);
-const cssDeclaration = /\b(?:--[A-Za-z][\w-]*|[A-Za-z][A-Za-z-]*)\s*:\s*[^;{}\n]+(?:;|$)/i;
-const cssClassOrIdChain = /(?:^|\s)[.#][A-Za-z_-][\w-]*\s+[>+~]?\s*[#.A-Za-z_-][\w-]*/;
-const cssPseudoChain = /(?:^|\s)(?:[.#][A-Za-z_-][\w-]*|[a-z][\w-]*)(?:(?:::|:)[A-Za-z-][\w-]*(?:\([^)]*\))?)+(?=$|\s|[>+~,{])/;
-const cssAttributeSelector = /\[[A-Za-z][\w-]*\s*[~|^$*]?=\s*(?:"[^"]*"|'[^']*'|[A-Za-z0-9_-]+)(?:\s+[A-Za-z]+)?\]/;
-const javascriptIdentifierCall = /\b(?:[a-z$][A-Za-z0-9_$]*|[A-Z][a-z][A-Za-z0-9_$]*)(?:\s*|\?\.\s*)\(/;
 const unsafeTextPatterns = [
   /\b(?:javascript|vbscript)\s*:/i,
   /\b(?:https?|ftp):\/\//i,
-  /(?:^|\s)(?:body|html|:root)\s*\{/i,
-  cssDeclaration,
-  cssClassOrIdChain,
-  cssPseudoChain,
-  cssAttributeSelector,
-  /[{}]/,
   /\b[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}\b/i,
-  /<\/?script\b|\b(?:const|let|var|function|import|export|eval|document|window)\b|=>/,
-  javascriptIdentifierCall,
-  /\b(?:authorization|bearer|password|passwd|api[_-]?key|secret|token)\b\s*(?::|=)/i,
+  /<\/?script\b/i,
+  /\b(?:authorization|password|passwd|api[_-]?key|secret|token)\b\s*(?::|=)\s*\S+/i,
 ];
 const text = z.string().trim().min(1).max(400).superRefine((value, ctx) => {
   if (unsafeTextPatterns.some((pattern) => pattern.test(value))) {
