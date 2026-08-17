@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ActionPlanSchema,
+  ScriptPlanSchema,
   SolutionImplementationPlanSchema,
   SolutionNodeSchema,
 } from "./solution-implementation-plan.js";
@@ -40,7 +41,7 @@ const textControl = {
   properties: [{ name: "emphasis", value: "strong" }],
   mockDataId: "equipment-data",
   styleRole: "record-title",
-  eventActionIds: ["open-detail"],
+  eventBindings: [{ semanticEvent: "click", actionIds: ["open-detail"] }],
 } as const;
 
 const solutionPlanFixture = {
@@ -94,6 +95,7 @@ const solutionPlanFixture = {
       type: "record-key",
       initialValue: "pump-a",
       mockDataId: "equipment-data",
+      keyField: "recordKey",
     },
   ],
   pages: [
@@ -135,7 +137,7 @@ const solutionPlanFixture = {
             tabIds: ["active-tab", "maintenance-tab"],
             mockDataId: "equipment-data",
             styleRole: "record-title",
-            eventActionIds: [],
+            eventBindings: [],
           },
           {
             kind: "registered-module",
@@ -150,6 +152,7 @@ const solutionPlanFixture = {
               kind: "record",
               fields: [{ name: "summary", value: "展示所选设备的运行摘要" }],
             },
+            eventBindings: [{ semanticEvent: "navigate", actionIds: ["go-operations"] }],
             slots: [
               {
                 slotId: "actions",
@@ -163,7 +166,7 @@ const solutionPlanFixture = {
                     content: "查看完整详情",
                     properties: [],
                     styleRole: "primary-action",
-                    eventActionIds: ["go-operations"],
+                    eventBindings: [],
                   },
                 ],
               },
@@ -193,7 +196,7 @@ const solutionPlanFixture = {
         content: "一号循环泵当前运行平稳，最近一次巡检无异常。",
         properties: [],
         styleRole: "record-title",
-        eventActionIds: ["close-detail"],
+        eventBindings: [{ semanticEvent: "click", actionIds: ["close-detail"] }],
       },
     },
   ],
@@ -418,17 +421,52 @@ describe("SolutionImplementationPlanSchema", () => {
     expect(SolutionImplementationPlanSchema.safeParse(replaced).success).toBe(true);
   });
 
-  it("validates style-role, initial-state, group, and event-action references", () => {
+  it("validates style-role, initial-state, group, and semantic event-action references", () => {
     for (const mutate of [
       (plan: any) => { findNode(plan, "equipment-name").styleRole = "missing-role"; },
       (plan: any) => { plan.pages[0].initialStateIds = ["missing-state"]; },
       (plan: any) => { findNode(plan, "equipment-name").intent.groupWith = ["missing-node"]; },
-      (plan: any) => { findNode(plan, "equipment-name").eventActionIds = ["missing-action"]; },
+      (plan: any) => { findNode(plan, "equipment-name").eventBindings[0].actionIds = ["missing-action"]; },
+      (plan: any) => { findNode(plan, "equipment-detail-module").eventBindings[0].actionIds = ["missing-action"]; },
     ]) {
       const plan = cloneFixture();
       mutate(plan);
       expect(SolutionImplementationPlanSchema.safeParse(plan).success).toBe(false);
     }
+  });
+
+  it("requires bounded semantic event bindings instead of bare action-id arrays", () => {
+    const legacy = cloneFixture();
+    const control = findNode(legacy, "equipment-name");
+    delete control.eventBindings;
+    control.eventActionIds = ["open-detail"];
+    expect(SolutionImplementationPlanSchema.safeParse(legacy).success).toBe(false);
+
+    const unknownEvent = cloneFixture();
+    findNode(unknownEvent, "equipment-name").eventBindings[0].semanticEvent = "execute-code";
+    expect(SolutionImplementationPlanSchema.safeParse(unknownEvent).success).toBe(false);
+
+    const duplicateEvent = cloneFixture();
+    findNode(duplicateEvent, "equipment-name").eventBindings.push({ semanticEvent: "click", actionIds: ["open-detail"] });
+    expect(SolutionImplementationPlanSchema.safeParse(duplicateEvent).success).toBe(false);
+
+    const duplicateAction = cloneFixture();
+    findNode(duplicateAction, "equipment-name").eventBindings[0].actionIds.push("open-detail");
+    expect(SolutionImplementationPlanSchema.safeParse(duplicateAction).success).toBe(false);
+  });
+
+  it("requires every action to be reachable from a control or module binding", () => {
+    const unreachable = cloneFixture();
+    unreachable.actions.push({ id: "orphan-feedback", kind: "show-feedback", level: "info", message: "尚未触发" });
+    expect(SolutionImplementationPlanSchema.safeParse(unreachable).success).toBe(false);
+
+    const moduleTriggered = cloneFixture();
+    moduleTriggered.actions.push({ id: "module-feedback", kind: "show-feedback", level: "info", message: "模块已触发" });
+    findNode(moduleTriggered, "equipment-detail-module").eventBindings.push({
+      semanticEvent: "submit",
+      actionIds: ["module-feedback"],
+    });
+    expect(SolutionImplementationPlanSchema.safeParse(moduleTriggered).success).toBe(true);
   });
 
   it("validates navigation, overlay, local-state, control, action, and script targets", () => {
@@ -455,6 +493,12 @@ describe("SolutionImplementationPlanSchema", () => {
     expect(SolutionImplementationPlanSchema.safeParse(plan).success).toBe(false);
   });
 
+  it("rejects duplicate declarative action dependency edges", () => {
+    const plan = cloneFixture();
+    plan.actions[1].afterActionIds = ["mark-detail-open", "mark-detail-open"];
+    expect(SolutionImplementationPlanSchema.safeParse(plan).success).toBe(false);
+  });
+
   it("validates typed state effects, overlay visibility state, and declared tab targets", () => {
     const wrongStateValue = cloneFixture();
     wrongStateValue.actions[3].value = "not-boolean";
@@ -470,6 +514,7 @@ describe("SolutionImplementationPlanSchema", () => {
 
     const validTab = cloneFixture();
     validTab.actions.push({ id: "switch-view", kind: "switch-tab", targetId: "equipment-table", tabId: "active-tab" });
+    findNode(validTab, "equipment-table").eventBindings.push({ semanticEvent: "tab-click", actionIds: ["switch-view"] });
     expect(SolutionImplementationPlanSchema.safeParse(validTab).success).toBe(true);
   });
 
@@ -481,12 +526,17 @@ describe("SolutionImplementationPlanSchema", () => {
       type: "record-key-list",
       initialValue: ["pump-a"],
       mockDataId: "equipment-data",
+      keyField: "recordKey",
     });
     listState.actions.push({
       id: "select-equipment-list",
       kind: "set-state",
       stateId: "selected-equipment-list",
       value: { kind: "list", items: ["pump-a"] },
+    });
+    findNode(listState, "equipment-table").eventBindings.push({
+      semanticEvent: "change",
+      actionIds: ["select-equipment-list", "copy-selection"],
     });
     listState.actions.push({
       id: "copy-selection",
@@ -499,6 +549,72 @@ describe("SolutionImplementationPlanSchema", () => {
     const unknownValueReference = structuredClone(listState);
     unknownValueReference.actions.at(-1).value.stateId = "missing-state";
     expect(SolutionImplementationPlanSchema.safeParse(unknownValueReference).success).toBe(false);
+  });
+
+  it("validates record-key state against the declared dataset key domain", () => {
+    const missingKeyField = cloneFixture();
+    delete missingKeyField.localState[1].keyField;
+    expect(SolutionImplementationPlanSchema.safeParse(missingKeyField).success).toBe(false);
+
+    const unknownKeyField = cloneFixture();
+    unknownKeyField.localState[1].keyField = "missingField";
+    expect(SolutionImplementationPlanSchema.safeParse(unknownKeyField).success).toBe(false);
+
+    const unknownInitialKey = cloneFixture();
+    unknownInitialKey.localState[1].initialValue = "pump-missing";
+    expect(SolutionImplementationPlanSchema.safeParse(unknownInitialKey).success).toBe(false);
+
+    const unstableActualKey = cloneFixture();
+    unstableActualKey.mockData[0].records[0].values[0].value = "Pump A";
+    unstableActualKey.localState[1].initialValue = "Pump A";
+    expect(SolutionImplementationPlanSchema.safeParse(unstableActualKey).success).toBe(false);
+
+    const unselected = cloneFixture();
+    unselected.localState[1].initialValue = null;
+    expect(SolutionImplementationPlanSchema.safeParse(unselected).success).toBe(true);
+  });
+
+  it("validates record-key lists and set-state values against actual record keys", () => {
+    const listPlan = cloneFixture();
+    listPlan.localState.push({
+      id: "selected-equipment-list",
+      purpose: "保存批量选择的设备记录标识",
+      type: "record-key-list",
+      initialValue: ["pump-a"],
+      mockDataId: "equipment-data",
+      keyField: "recordKey",
+    });
+
+    const duplicateInitial = structuredClone(listPlan);
+    duplicateInitial.localState.at(-1).initialValue = ["pump-a", "pump-a"];
+    expect(SolutionImplementationPlanSchema.safeParse(duplicateInitial).success).toBe(false);
+
+    const unknownInitial = structuredClone(listPlan);
+    unknownInitial.localState.at(-1).initialValue = ["pump-missing"];
+    expect(SolutionImplementationPlanSchema.safeParse(unknownInitial).success).toBe(false);
+
+    const unknownSetValue = structuredClone(listPlan);
+    unknownSetValue.actions.push({
+      id: "select-missing-equipment",
+      kind: "set-state",
+      stateId: "selected-equipment-list",
+      value: { kind: "list", items: ["pump-missing"] },
+    });
+    findNode(unknownSetValue, "equipment-table").eventBindings.push({
+      semanticEvent: "change",
+      actionIds: ["select-missing-equipment"],
+    });
+    expect(SolutionImplementationPlanSchema.safeParse(unknownSetValue).success).toBe(false);
+
+    const validUnselect = cloneFixture();
+    validUnselect.actions.push({
+      id: "clear-selection",
+      kind: "set-state",
+      stateId: "selected-equipment",
+      value: null,
+    });
+    findNode(validUnselect, "equipment-table").eventBindings.push({ semanticEvent: "clear", actionIds: ["clear-selection"] });
+    expect(SolutionImplementationPlanSchema.safeParse(validUnselect).success).toBe(true);
   });
 
   it("keeps phase-two custom scripts purely declarative with no source or code-shaped fields", () => {
@@ -523,6 +639,26 @@ describe("SolutionImplementationPlanSchema", () => {
       "document.querySelector('#detail')",
       "if (selected) { detail = selected; }",
       "alert('unexpected')",
+      "detail.text ||= selection",
+      "detail.text &&= selection",
+      "detail.text ??= selection",
+      "detail.text %= selection",
+      "detail.text &= selection",
+      "detail.text |= selection",
+      "detail.text ^= selection",
+      "detail.text **= selection",
+      "delete detail.text",
+      "return selected",
+      "return 42",
+      "throw error",
+      "throw \"error\"",
+      "await selection",
+      "yield 1",
+      "break",
+      "continue",
+      "debugger",
+      "window.location.href",
+      "document.body.innerHTML",
       "detail.text = selection",
       "counter++",
       "records[0] = value",
@@ -533,6 +669,7 @@ describe("SolutionImplementationPlanSchema", () => {
       const plan = cloneFixture();
       plan.scripts[1].steps[0].intent = codeLikeIntent;
       expect(SolutionImplementationPlanSchema.safeParse(plan).success, codeLikeIntent).toBe(false);
+      expect(ScriptPlanSchema.safeParse(plan.scripts[1]).success, `standalone: ${codeLikeIntent}`).toBe(false);
     }
   });
 
@@ -541,6 +678,70 @@ describe("SolutionImplementationPlanSchema", () => {
     findNode(plan, "equipment-name").content = "Return policy and equipment class";
     findNode(plan, "equipment-name").properties.push({ name: "code", value: "PUMP-A" });
     expect(SolutionImplementationPlanSchema.safeParse(plan).success).toBe(true);
+  });
+
+  it("rejects implementation leakage through semantic properties and record fields", () => {
+    for (const name of [
+      "left", "top", "x", "y", "coords", "bounds", "rect", "xPos", "yPos",
+      "geometry", "coordinate", "right", "bottom", "zIndex", "marginTop", "padding",
+      "backgroundColor", "borderRadius", "fontSize", "gridColumn", "transitionDuration",
+      "boxShadow", "textAlign", "lineHeight",
+      "objectType", "uiModelType", "styleDataNew", "linkId", "configureData",
+    ]) {
+      const propertyPlan = cloneFixture();
+      findNode(propertyPlan, "equipment-name").properties.push({ name, value: "implementation value" });
+      expect(SolutionImplementationPlanSchema.safeParse(propertyPlan).success, `property ${name}`).toBe(false);
+
+      const recordPlan = cloneFixture();
+      findNode(recordPlan, "equipment-detail-module").content.fields.push({ name, value: "implementation value" });
+      expect(SolutionImplementationPlanSchema.safeParse(recordPlan).success, `record field ${name}`).toBe(false);
+    }
+  });
+
+  it("rejects value-level CSS and executable syntax while preserving semantic prose and source data", () => {
+    for (const content of [
+      "color: red",
+      "#app.active",
+      "value = selection",
+      "detail.text.value",
+      "detail.text.value = selection",
+      "records[index]",
+      "records[index] = value",
+      "refresh()",
+    ]) {
+      const plan = cloneFixture();
+      findNode(plan, "equipment-name").content = content;
+      expect(SolutionImplementationPlanSchema.safeParse(plan).success, content).toBe(false);
+    }
+
+    const semanticPlan = cloneFixture();
+    findNode(semanticPlan, "equipment-name").properties.push(
+      { name: "position", value: "leading" },
+      { name: "width", value: "comfortable" },
+      { name: "height", value: "content-driven" },
+    );
+    semanticPlan.mockData[0].fields[2].key = "source";
+    semanticPlan.mockData[0].records[0].values[2].field = "source";
+    semanticPlan.mockData[0].records[0].values[1].value = "example.com";
+    findNode(semanticPlan, "equipment-name").content = "api.example.com";
+    semanticPlan.scripts[1].steps[0].intent = "Show empty state if no record is selected";
+    expect(SolutionImplementationPlanSchema.safeParse(semanticPlan).success).toBe(true);
+  });
+
+  it("keeps registry-owned module slot membership out of the Task 3 schema", () => {
+    const syntacticOnly = cloneFixture();
+    findNode(syntacticOnly, "equipment-detail-module").slots[0].slotId = "future-slot";
+    expect(SolutionImplementationPlanSchema.safeParse(syntacticOnly).success).toBe(true);
+
+    const duplicate = cloneFixture();
+    const module = findNode(duplicate, "equipment-detail-module");
+    module.slots.push(structuredClone(module.slots[0]));
+    module.slots[1].children[0].id = "second-detail-action";
+    expect(SolutionImplementationPlanSchema.safeParse(duplicate).success).toBe(false);
+
+    const malformed = cloneFixture();
+    findNode(malformed, "equipment-detail-module").slots[0].slotId = "slot with spaces";
+    expect(SolutionImplementationPlanSchema.safeParse(malformed).success).toBe(false);
   });
 
   it("requires coherent semantic sizing intent and bounds recursive depth", () => {

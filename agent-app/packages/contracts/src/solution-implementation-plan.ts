@@ -18,7 +18,6 @@ const forbiddenSemanticNames = new Set([
   "objecttype",
   "script",
   "selector",
-  "source",
   "styledata",
   "styledatanew",
   "uimodeltype",
@@ -26,12 +25,61 @@ const forbiddenSemanticNames = new Set([
   "y",
 ]);
 
+const forbiddenImplementationPropertyNames = new Set([
+  ...forbiddenSemanticNames,
+  "bounds",
+  "bottom",
+  "boxshadow",
+  "display",
+  "color",
+  "coordinate",
+  "left",
+  "lineheight",
+  "margin",
+  "marginbottom",
+  "marginleft",
+  "marginright",
+  "margintop",
+  "opacity",
+  "padding",
+  "paddingbottom",
+  "paddingleft",
+  "paddingright",
+  "paddingtop",
+  "rect",
+  "right",
+  "top",
+  "textalign",
+  "transform",
+  "xpos",
+  "ypos",
+  "zindex",
+]);
+const forbiddenImplementationPropertyPrefixes = [
+  "animation",
+  "background",
+  "border",
+  "flex",
+  "font",
+  "grid",
+  "margin",
+  "padding",
+  "transform",
+  "transition",
+];
+
 function normalizeName(value: string): string {
   return value.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
 }
 
 function isForbiddenSemanticName(value: string): boolean {
   return forbiddenSemanticNames.has(normalizeName(value));
+}
+
+function isForbiddenImplementationPropertyName(value: string): boolean {
+  const normalized = normalizeName(value);
+  return forbiddenImplementationPropertyNames.has(normalized)
+    || forbiddenImplementationPropertyPrefixes.some((prefix) => normalized.startsWith(prefix));
 }
 
 const stableIdSchema = z
@@ -50,6 +98,17 @@ const semanticNameSchema = z
   .max(100)
   .regex(/^[A-Za-z][A-Za-z0-9_-]*$/)
   .refine((value) => !isForbiddenSemanticName(value), "implementation names are not allowed");
+
+const semanticPropertyNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(100)
+  .regex(/^[A-Za-z][A-Za-z0-9_-]*$/)
+  .refine(
+    (value) => !isForbiddenImplementationPropertyName(value),
+    "implementation property names are not allowed",
+  );
 
 /** Blueprint provenance also accepts legacy bounded human labels losslessly. */
 const provenanceIdSchema = z
@@ -88,8 +147,12 @@ const semanticTextSchema = z.string().trim().min(1).max(2_000);
 const shortTextSchema = z.string().trim().min(1).max(400);
 const declarativeStepTextSchema = semanticTextSchema.superRefine((value, ctx) => {
   if (
-    /\b(?:if|else|for|while|switch|try|catch|throw|async|await)\b|[{};]/.test(value)
-    || /(?:^|\s)[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.[A-Za-z_$][A-Za-z0-9_$]*)|(?:\[[^\]]+\]))*\s*(?:=|\+=|-=|\*=|\/=|\+\+|--)/.test(value)
+    /[{};]/.test(value)
+    || /\b(?:if|else|for|while|switch|try|catch|throw|async|await)\s*\(/.test(value)
+    || /(?:^|\s)[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.[A-Za-z_$][A-Za-z0-9_$]*)|(?:\[[^\]]+\]))*\s*(?:\|\|=|&&=|\?\?=|>>>=|<<=|>>=|\+=|-=|\*\*=|\*=|\/=|%=|&=|\|=|\^=|=|\+\+|--)/.test(value)
+    || /\bdelete\s+[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.[A-Za-z_$][A-Za-z0-9_$]*)|(?:\[[^\]]+\]))+/.test(value)
+    || /^(?:return|throw|await|yield)(?:\s+(?:[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.[A-Za-z_$][A-Za-z0-9_$]*)|(?:\[[^\]]+\]))*|-?\d+(?:\.\d+)?|true|false|null|undefined|["'][^"'\n]*["']))?$/.test(value.trim())
+    || /^(?:(?:break|continue)(?:\s+[A-Za-z_$][A-Za-z0-9_$]*)?|debugger)$/.test(value.trim())
     || /\b[A-Za-z_$][A-Za-z0-9_$]*\s*(?:\[[^\]]+\]|\.[A-Za-z_$][A-Za-z0-9_$]*)\s*(?:\(|\[)/.test(value)
     || /\b[A-Za-z_$][A-Za-z0-9_$]*\(/.test(value)
     || /\b(?:alert|setTimeout|setInterval|eval|Function)\s+\(/.test(value)
@@ -119,7 +182,7 @@ const SemanticValueSchema: z.ZodType<SemanticValue> = z.lazy(() =>
     z
       .object({
         kind: z.literal("record"),
-        fields: z.array(z.object({ name: semanticNameSchema, value: SemanticValueSchema }).strict()).max(32),
+        fields: z.array(z.object({ name: semanticPropertyNameSchema, value: SemanticValueSchema }).strict()).max(32),
       })
       .strict()
       .superRefine((value, ctx) => {
@@ -184,6 +247,41 @@ export const NodeIntentSchema = z
 
 export type NodeIntent = z.infer<typeof NodeIntentSchema>;
 
+export const SemanticEventSchema = z.enum([
+  "blur",
+  "change",
+  "clear",
+  "click",
+  "edit",
+  "error",
+  "filter",
+  "focus",
+  "input",
+  "load",
+  "navigate",
+  "open-modal",
+  "remove-tag",
+  "row-click",
+  "row-select",
+  "scroll",
+  "select",
+  "submit",
+  "tab-add",
+  "tab-click",
+  "tab-remove",
+  "toggle",
+  "visible-change",
+]);
+
+export const SemanticEventBindingSchema = z
+  .object({
+    semanticEvent: SemanticEventSchema,
+    actionIds: z.array(stableIdSchema).min(1).max(16),
+  })
+  .strict();
+
+export type SemanticEventBinding = z.infer<typeof SemanticEventBindingSchema>;
+
 interface SolutionNodeBase {
   id: string;
   sourceBlueprintRegionIds: string[];
@@ -205,6 +303,7 @@ export interface RegisteredModuleNode extends SolutionNodeBase {
   title: string;
   content?: SemanticValue | undefined;
   assetId?: string | undefined;
+  eventBindings: SemanticEventBinding[];
   slots: Array<{ slotId: string; children: SolutionNode[] }>;
 }
 
@@ -217,7 +316,7 @@ export interface ControlNode extends SolutionNodeBase {
   mockDataId?: string | undefined;
   styleRole: string;
   styleOverride?: z.infer<typeof StyleOverrideSchema> | undefined;
-  eventActionIds: string[];
+  eventBindings: SemanticEventBinding[];
 }
 
 export interface RepeaterNode extends SolutionNodeBase {
@@ -287,6 +386,8 @@ export const RegisteredModuleNodeSchema = z
     title: semanticTextSchema,
     content: SemanticValueSchema.optional(),
     assetId: stableIdSchema.optional(),
+    eventBindings: z.array(SemanticEventBindingSchema).max(16),
+    /** Task 4 validates these syntactic slot ids against the selected registry module declaration. */
     slots: z
       .array(
         z
@@ -300,7 +401,7 @@ export const RegisteredModuleNodeSchema = z
   })
   .strict();
 
-const SemanticPropertySchema = z.object({ name: semanticNameSchema, value: SemanticValueSchema }).strict();
+const SemanticPropertySchema = z.object({ name: semanticPropertyNameSchema, value: SemanticValueSchema }).strict();
 
 export const ControlNodeSchema = z
   .object({
@@ -313,7 +414,7 @@ export const ControlNodeSchema = z
     mockDataId: stableIdSchema.optional(),
     styleRole: stableIdSchema,
     styleOverride: StyleOverrideSchema.optional(),
-    eventActionIds: z.array(stableIdSchema).max(16),
+    eventBindings: z.array(SemanticEventBindingSchema).max(16),
   })
   .strict();
 
@@ -415,17 +516,26 @@ export const LocalStateDefinitionSchema = z
     type: z.enum(["boolean", "number", "text", "record-key", "record-key-list"]),
     initialValue: z.union([SemanticScalarSchema, z.array(stableIdSchema).max(100)]),
     mockDataId: stableIdSchema.optional(),
+    keyField: semanticNameSchema.optional(),
   })
   .strict()
   .superRefine((state, ctx) => {
     const valid =
       (state.type === "boolean" && typeof state.initialValue === "boolean")
       || (state.type === "number" && typeof state.initialValue === "number")
-      || ((state.type === "text" || state.type === "record-key") && typeof state.initialValue === "string")
+      || (state.type === "text" && typeof state.initialValue === "string")
+      || (state.type === "record-key" && (typeof state.initialValue === "string" || state.initialValue === null))
       || (state.type === "record-key-list" && Array.isArray(state.initialValue));
     if (!valid) ctx.addIssue({ code: "custom", path: ["initialValue"], message: `initial value does not match ${state.type}` });
-    if ((state.type === "record-key" || state.type === "record-key-list") !== (state.mockDataId !== undefined)) {
-      ctx.addIssue({ code: "custom", path: ["mockDataId"], message: "record-key state requires exactly one mock-data reference" });
+    const isRecordState = state.type === "record-key" || state.type === "record-key-list";
+    if (isRecordState !== (state.mockDataId !== undefined && state.keyField !== undefined)) {
+      ctx.addIssue({ code: "custom", message: "record-key state requires exactly one mock-data reference and key field" });
+    }
+    if (!isRecordState && (state.mockDataId !== undefined || state.keyField !== undefined)) {
+      ctx.addIssue({ code: "custom", message: "scalar state cannot declare record-key metadata" });
+    }
+    if (state.type === "record-key-list" && Array.isArray(state.initialValue) && new Set(state.initialValue).size !== state.initialValue.length) {
+      ctx.addIssue({ code: "custom", path: ["initialValue"], message: "record-key-list initial values must be unique" });
     }
   });
 
@@ -556,7 +666,9 @@ const CustomScriptPlanSchema = z
     });
   });
 
-export const ScriptPlanSchema = z.discriminatedUnion("kind", [TemplateScriptPlanSchema, CustomScriptPlanSchema]);
+export const ScriptPlanSchema = z
+  .discriminatedUnion("kind", [TemplateScriptPlanSchema, CustomScriptPlanSchema])
+  .superRefine((script, ctx) => validateImplementationFree(script, ctx));
 
 const SolutionImplementationPlanObjectSchema = z
   .object({
@@ -592,7 +704,7 @@ export const SolutionImplementationPlanSchema: z.ZodType<SolutionImplementationP
     validatePlanReferences(plan, ctx);
   });
 
-function implementationTextIssue(value: string): string | undefined {
+function implementationTextIssue(value: string, path: Array<string | number>): string | undefined {
   if (canonicalUuidToken.test(value)) return "GUID values are not allowed";
   const trimmed = value.trim();
   if (/^[{[]/.test(trimmed)) {
@@ -607,19 +719,30 @@ function implementationTextIssue(value: string): string | undefined {
   if (/:\s*\[\s*(?:-?\d|true\b|false\b|null\b|["'{[])/i.test(value) || /:\s*\{\s*(?:["']|[A-Za-z_$][A-Za-z0-9_$]*\s*:)/.test(value)) return "embedded raw JSON text is not allowed";
   if (/<\/?script\b|<style\b|\b(?:javascript|vbscript)\s*:/i.test(value)) return "executable markup is not allowed";
   if (/\b(?:const|let|var)\s+[A-Za-z_$][A-Za-z0-9_$]*\s*=|\bfunction\s+[A-Za-z_$][A-Za-z0-9_$]*\s*\(|\breturn\b[^;\n]*;|\bclass\s+[A-Za-z_$][A-Za-z0-9_$]*\s*\{|\b(?:import|require)\s*\(|\bnew\s+[A-Za-z_$][A-Za-z0-9_$]*\s*\(|=>|\$control\b|\$state\b|\$data\b|\$page\b|\$overlay\b|\$feedback\b|`|\$\{/i.test(value)) return "JavaScript-shaped text is not allowed";
+  if (/(?:^|\s)[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.[A-Za-z_$][A-Za-z0-9_$]*)|(?:\[[^\]\n]+\]))*\s*(?:\|\|=|&&=|\?\?=|>>>=|<<=|>>=|\+=|-=|\*\*=|\*=|\/=|%=|&=|\|=|\^=|=|\+\+|--)\s*(?:[A-Za-z_$][A-Za-z0-9_$]*|["'`]|-?\d)/.test(value)) return "executable assignment syntax is not allowed";
+  if (/\bdelete\s+[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.[A-Za-z_$][A-Za-z0-9_$]*)|(?:\[[^\]\n]+\]))+/.test(value)) return "executable unary syntax is not allowed";
+  if (/^(?:return|throw|await|yield)(?:\s+(?:[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.[A-Za-z_$][A-Za-z0-9_$]*)|(?:\[[^\]\n]+\]))*|-?\d+(?:\.\d+)?|true|false|null|undefined|["'][^"'\n]*["']))?$/.test(trimmed)) return "executable statement syntax is not allowed";
+  if (/^(?:(?:break|continue)(?:\s+[A-Za-z_$][A-Za-z0-9_$]*)?|debugger)$/.test(trimmed)) return "executable control statement is not allowed";
+  const structuralIdentifier = path.at(-1) === "moduleKind" || path.at(-1) === "capabilityId";
+  const codeLikeMember = /^(?:this|detail|record|records|selection|state|data|value|item|event|target|control|window|document|globalThis|process|console|navigator|location|localStorage|sessionStorage)(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+$/i.test(trimmed)
+    || /^[A-Za-z_$][A-Za-z0-9_$]*(?:\[[A-Za-z_$][A-Za-z0-9_$]*\])+$/.test(trimmed);
+  if (!structuralIdentifier && codeLikeMember) return "executable member or index syntax is not allowed";
   if (/\b(?:document|window|globalThis|fetch|XMLHttpRequest|WebSocket|eval|Function)\s*\.?[A-Za-z_$]*\s*\(/i.test(value)) return "JavaScript API calls are not allowed";
   if (/\b(?!rgb(?:a)?\b|hsl(?:a)?\b|var\b)[A-Za-z_$][A-Za-z0-9_$]*\(/i.test(value)) return "code-like calls are not allowed";
   if (/^\.[A-Za-z_-][A-Za-z0-9_-]*$/.test(trimmed) || (/^#[A-Za-z_-][A-Za-z0-9_-]*$/.test(trimmed) && !/^#[0-9a-f]{3,8}$/i.test(trimmed)) || /^\[[A-Za-z_-][^\]]*\]$/.test(trimmed)) return "CSS selectors are not allowed";
+  if (/^(?:#[A-Za-z_-][A-Za-z0-9_-]*|\.[A-Za-z_-][A-Za-z0-9_-]*)(?:[#.][A-Za-z_-][A-Za-z0-9_-]*)+$/.test(trimmed)) return "CSS selectors are not allowed";
   if (/^#[A-Za-z_-][A-Za-z0-9_-]*(?:\s+|\s*[>+~]\s*)/.test(trimmed) || /^(?:button|input|select|textarea|a|form|table|tr|td|div|span|section|main|header|footer|nav|label):[A-Za-z-]+(?:\([^)]*\))?$/.test(trimmed)) return "CSS selectors are not allowed";
   if (/(?:^|\s)(?:#[A-Za-z_-][A-Za-z0-9_-]*|\.[A-Za-z_-][A-Za-z0-9_-]*|\[[A-Za-z_-][^\]]*\]|(?:button|input|select|textarea|div|span|section|main|header|footer|nav):[A-Za-z-]+)\s*(?:\{|[>+~])/i.test(value)) return "CSS rules and selectors are not allowed";
-  if (/(?:^|[;{]\s*)(?:color|display|position|width|height|margin(?:-[a-z]+)?|padding(?:-[a-z]+)?|background(?:-[a-z]+)?|border(?:-[a-z]+)?|font(?:-[a-z]+)?|opacity|z-index|flex(?:-[a-z]+)?|grid(?:-[a-z]+)?|transform|transition|animation)\s*:\s*[^;{}\n]+(?:;|})/i.test(value)) return "CSS declarations are not allowed";
+  if (/(?:^|[;{]\s*)(?:color|display|margin(?:-[a-z]+)?|padding(?:-[a-z]+)?|background(?:-[a-z]+)?|border(?:-[a-z]+)?|font(?:-[a-z]+)?|opacity|z-index|flex(?:-[a-z]+)?|grid(?:-[a-z]+)?|transform|transition|animation)\s*:\s*[^;{}\n]+(?:;|}|$)/i.test(value)) return "CSS declarations are not allowed";
+  if (/(?:^|[;{]\s*)position\s*:\s*(?:absolute|fixed|relative|sticky)(?:\s*!important)?(?:;|}|$)/i.test(value)) return "CSS declarations are not allowed";
+  if (/(?:^|[;{]\s*)(?:width|height)\s*:\s*(?:-?\d+(?:\.\d+)?(?:px|r?em|%|vh|vw|vmin|vmax)|auto|fit-content|min-content|max-content|calc\([^\n{}]+\))(?:\s*!important)?(?:;|}|$)/i.test(value)) return "CSS declarations are not allowed";
   if (/\b[A-Za-z_$][A-Za-z0-9_$]*\.[A-Za-z_$][A-Za-z0-9_$]*\s*\(/.test(value)) return "code-like calls are not allowed";
   return undefined;
 }
 
 function validateImplementationFree(value: unknown, ctx: z.RefinementCtx, path: Array<string | number> = []): void {
   if (typeof value === "string") {
-    const issue = implementationTextIssue(value);
+    const issue = implementationTextIssue(value, path);
     if (issue !== undefined) ctx.addIssue({ code: "custom", path, message: issue });
     return;
   }
@@ -680,6 +803,7 @@ function validatePlanReferences(plan: SolutionImplementationPlan, ctx: z.Refinem
   const nodeIds = new Set<string>();
   const controlIds = new Set<string>();
   const roleIds = new Set<string>();
+  const boundActionIds = new Set<string>();
   const dataSets = new Map(plan.mockData.map((dataSet) => [dataSet.id, dataSet]));
   const statesById = new Map(plan.localState.map((state) => [state.id, state]));
   const pagesById = new Map(plan.pages.map((page) => [page.id, page]));
@@ -704,6 +828,7 @@ function validatePlanReferences(plan: SolutionImplementationPlan, ctx: z.Refinem
     if (state.mockDataId !== undefined && !mockDataIds.has(state.mockDataId)) {
       ctx.addIssue({ code: "custom", path: ["localState", index, "mockDataId"], message: `unknown mock-data id: ${state.mockDataId}` });
     }
+    validateRecordKeyState(state, index, dataSets, ctx);
   });
 
   const regionOwners = new Map<string, string>();
@@ -761,14 +886,68 @@ function validatePlanReferences(plan: SolutionImplementationPlan, ctx: z.Refinem
     scriptIds.add(script.id);
   });
 
-  validateNodeReferences(nodeEntries, roleIds, mockDataIds, dataSets, actionIds, nodeIds, ctx);
+  validateNodeReferences(nodeEntries, roleIds, mockDataIds, dataSets, actionIds, boundActionIds, nodeIds, ctx);
   const controlsById = new Map(
     nodeEntries
       .filter((entry): entry is typeof entry & { node: ControlNode } => entry.node.kind === "control")
       .map((entry) => [entry.node.id, entry.node]),
   );
-  validateActions(plan.actions, pageIds, overlayIds, statesById, nodeIds, controlsById, mockDataIds, actionIds, scriptIds, ctx);
+  validateActions(plan.actions, pageIds, overlayIds, statesById, dataSets, nodeIds, controlsById, mockDataIds, actionIds, boundActionIds, scriptIds, ctx);
   validateScripts(plan.scripts, mockDataIds, stateIds, controlIds, ctx);
+}
+
+function recordKeyDomain(
+  state: LocalStateDefinition,
+  statePath: Array<string | number>,
+  dataSets: Map<string, MockDataSet>,
+  ctx: z.RefinementCtx,
+): Set<string> | undefined {
+  if ((state.type !== "record-key" && state.type !== "record-key-list") || state.mockDataId === undefined || state.keyField === undefined) {
+    return undefined;
+  }
+  const dataSet = dataSets.get(state.mockDataId);
+  if (dataSet === undefined) return undefined;
+  const field = dataSet.fields.find((candidate) => candidate.key === state.keyField);
+  if (field === undefined) {
+    ctx.addIssue({ code: "custom", path: [...statePath, "keyField"], message: `unknown record-key field: ${state.keyField}` });
+    return undefined;
+  }
+  if (field.type !== "text") {
+    ctx.addIssue({ code: "custom", path: [...statePath, "keyField"], message: "record-key field must be text" });
+    return undefined;
+  }
+  const keys = new Set<string>();
+  dataSet.records.forEach((record, recordIndex) => {
+    const key = record.values.find((entry) => entry.field === state.keyField)?.value;
+    if (typeof key !== "string" || !stableIdSchema.safeParse(key).success) {
+      ctx.addIssue({ code: "custom", path: [...statePath, "keyField"], message: `record ${recordIndex} does not contain a stable record key` });
+      return;
+    }
+    if (keys.has(key)) {
+      ctx.addIssue({ code: "custom", path: [...statePath, "keyField"], message: `duplicate record key: ${key}` });
+    }
+    keys.add(key);
+  });
+  return keys;
+}
+
+function validateRecordKeyState(
+  state: LocalStateDefinition,
+  stateIndex: number,
+  dataSets: Map<string, MockDataSet>,
+  ctx: z.RefinementCtx,
+): void {
+  const path: Array<string | number> = ["localState", stateIndex];
+  const keys = recordKeyDomain(state, path, dataSets, ctx);
+  if (keys === undefined) return;
+  if (state.type === "record-key" && typeof state.initialValue === "string" && !keys.has(state.initialValue)) {
+    ctx.addIssue({ code: "custom", path: [...path, "initialValue"], message: `unknown initial record key: ${state.initialValue}` });
+  }
+  if (state.type === "record-key-list" && Array.isArray(state.initialValue)) {
+    state.initialValue.forEach((key, index) => {
+      if (!keys.has(key)) ctx.addIssue({ code: "custom", path: [...path, "initialValue", index], message: `unknown initial record key: ${key}` });
+    });
+  }
 }
 
 function validateOverlayNodeProvenance(
@@ -837,6 +1016,7 @@ function validateNodeReferences(
   mockDataIds: Set<string>,
   dataSets: Map<string, MockDataSet>,
   actionIds: Set<string>,
+  boundActionIds: Set<string>,
   nodeIds: Set<string>,
   ctx: z.RefinementCtx,
 ): void {
@@ -856,15 +1036,16 @@ function validateNodeReferences(
     if (node.kind === "control") {
       if (!roleIds.has(node.styleRole)) ctx.addIssue({ code: "custom", path: [...path, "styleRole"], message: `unknown style role: ${node.styleRole}` });
       if (node.mockDataId !== undefined && !mockDataIds.has(node.mockDataId)) ctx.addIssue({ code: "custom", path: [...path, "mockDataId"], message: `unknown mock-data id: ${node.mockDataId}` });
-      node.eventActionIds.forEach((actionId, index) => {
-        if (!actionIds.has(actionId)) ctx.addIssue({ code: "custom", path: [...path, "eventActionIds", index], message: `unknown action id: ${actionId}` });
-      });
+      validateEventBindings(node.eventBindings, [...path, "eventBindings"], actionIds, boundActionIds, ctx);
       const propertyNames = new Set<string>();
       node.properties.forEach((property, index) => {
         if (propertyNames.has(property.name)) ctx.addIssue({ code: "custom", path: [...path, "properties", index, "name"], message: `duplicate control property: ${property.name}` });
         propertyNames.add(property.name);
       });
       if (new Set(node.tabIds).size !== node.tabIds.length) ctx.addIssue({ code: "custom", path: [...path, "tabIds"], message: "control tab ids must be unique" });
+    }
+    if (node.kind === "registered-module") {
+      validateEventBindings(node.eventBindings, [...path, "eventBindings"], actionIds, boundActionIds, ctx);
     }
     if (node.kind === "repeater") {
       const dataSet = dataSets.get(node.mockDataId);
@@ -892,20 +1073,55 @@ function validateNodeReferences(
   });
 }
 
+function validateEventBindings(
+  bindings: SemanticEventBinding[],
+  path: Array<string | number>,
+  actionIds: Set<string>,
+  boundActionIds: Set<string>,
+  ctx: z.RefinementCtx,
+): void {
+  const events = new Set<string>();
+  bindings.forEach((binding, bindingIndex) => {
+    if (events.has(binding.semanticEvent)) {
+      ctx.addIssue({ code: "custom", path: [...path, bindingIndex, "semanticEvent"], message: `duplicate semantic event binding: ${binding.semanticEvent}` });
+    }
+    events.add(binding.semanticEvent);
+    const actions = new Set<string>();
+    binding.actionIds.forEach((actionId, actionIndex) => {
+      if (actions.has(actionId)) {
+        ctx.addIssue({ code: "custom", path: [...path, bindingIndex, "actionIds", actionIndex], message: `duplicate bound action id: ${actionId}` });
+      }
+      actions.add(actionId);
+      if (!actionIds.has(actionId)) {
+        ctx.addIssue({ code: "custom", path: [...path, bindingIndex, "actionIds", actionIndex], message: `unknown action id: ${actionId}` });
+      } else {
+        boundActionIds.add(actionId);
+      }
+    });
+  });
+}
+
 function validateActions(
   actions: ActionPlan[],
   pageIds: Set<string>,
   overlayIds: Set<string>,
   statesById: Map<string, LocalStateDefinition>,
+  dataSets: Map<string, MockDataSet>,
   nodeIds: Set<string>,
   controlsById: Map<string, ControlNode>,
   mockDataIds: Set<string>,
   actionIds: Set<string>,
+  boundActionIds: Set<string>,
   scriptIds: Set<string>,
   ctx: z.RefinementCtx,
 ): void {
   actions.forEach((action, index) => {
+    const chainedActionIds = new Set<string>();
     action.afterActionIds.forEach((actionId, refIndex) => {
+      if (chainedActionIds.has(actionId)) {
+        ctx.addIssue({ code: "custom", path: ["actions", index, "afterActionIds", refIndex], message: `duplicate chained action id: ${actionId}` });
+      }
+      chainedActionIds.add(actionId);
       if (!actionIds.has(actionId)) ctx.addIssue({ code: "custom", path: ["actions", index, "afterActionIds", refIndex], message: `unknown action id: ${actionId}` });
       if (actionId === action.id) ctx.addIssue({ code: "custom", path: ["actions", index, "afterActionIds", refIndex], message: "an action cannot follow itself" });
     });
@@ -914,7 +1130,7 @@ function validateActions(
     if (action.kind === "set-state") {
       const state = statesById.get(action.stateId);
       if (state === undefined) ctx.addIssue({ code: "custom", path: ["actions", index, "stateId"], message: `unknown state id: ${action.stateId}` });
-      else if (!stateValueMatches(state.type, action.value)) ctx.addIssue({ code: "custom", path: ["actions", index, "value"], message: `state value does not match ${state.type}` });
+      else validateStateActionValue(state, action.value, dataSets, ["actions", index, "value"], ctx);
     }
     if (action.kind === "set-visibility" && !nodeIds.has(action.targetId)) ctx.addIssue({ code: "custom", path: ["actions", index, "targetId"], message: `unknown node id: ${action.targetId}` });
     if (action.kind === "switch-tab") {
@@ -946,17 +1162,40 @@ function validateActions(
     visitState.set(actionId, "visited");
   };
   actions.forEach((action) => visit(action.id));
+
+  const reachableActionIds = new Set<string>();
+  const markReachable = (actionId: string): void => {
+    if (reachableActionIds.has(actionId)) return;
+    const entry = actionsById.get(actionId);
+    if (entry === undefined) return;
+    reachableActionIds.add(actionId);
+    entry.action.afterActionIds.forEach(markReachable);
+  };
+  boundActionIds.forEach(markReachable);
+  actions.forEach((action, index) => {
+    if (!reachableActionIds.has(action.id)) {
+      ctx.addIssue({ code: "custom", path: ["actions", index, "id"], message: `action is unreachable from any semantic event binding: ${action.id}` });
+    }
+  });
 }
 
-function stateValueMatches(type: LocalStateDefinition["type"], value: SemanticValue): boolean {
-  if (type === "boolean") return typeof value === "boolean";
-  if (type === "number") return typeof value === "number";
-  if (type === "text" || type === "record-key") return typeof value === "string";
-  return typeof value === "object"
-    && value !== null
-    && "kind" in value
-    && value.kind === "list"
-    && value.items.every((item) => typeof item === "string");
+function validateStateActionValue(
+  state: LocalStateDefinition,
+  value: SemanticValue,
+  dataSets: Map<string, MockDataSet>,
+  path: Array<string | number>,
+  ctx: z.RefinementCtx,
+): void {
+  if (state.type === "boolean" && typeof value === "boolean") return;
+  if (state.type === "number" && typeof value === "number") return;
+  if (state.type === "text" && typeof value === "string") return;
+  const keys = recordKeyDomain(state, path, dataSets, ctx);
+  if (state.type === "record-key" && (value === null || (typeof value === "string" && keys?.has(value)))) return;
+  if (state.type === "record-key-list" && typeof value === "object" && value !== null && "kind" in value && value.kind === "list") {
+    const items = value.items;
+    if (items.every((item) => typeof item === "string") && new Set(items).size === items.length && items.every((item) => keys?.has(item))) return;
+  }
+  ctx.addIssue({ code: "custom", path, message: `state value does not match ${state.type} domain` });
 }
 
 function validateScripts(
