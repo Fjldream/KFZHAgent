@@ -40,3 +40,8 @@ export * from "./modules/theme/module-theme.js";
 export * from "./modules/layout/layout-engine.js";
 export * from "./modules/layout/layout-errors.js";
 export * from "./modules/definitions/portal-modules.js";
+export * from "./design-knowledge/control-design-registry.js";
+export * from "./design-knowledge/style-capability-registry.js";
+export * from "./design-knowledge/script-capability-registry.js";
+export * from "./design-knowledge/composition-recipe-registry.js";
+export * from "./design-knowledge/design-knowledge-catalog.js";
