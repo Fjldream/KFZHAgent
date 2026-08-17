@@ -104,6 +104,10 @@ describe("CustomerSolutionBlueprintSchema", () => {
     }).success).toBe(true);
   });
 
+  it.each(["KPI: 95%;", "Version: 3.6;"])("accepts normal metric and version copy: %s", (objective) => {
+    expect(CustomerSolutionBlueprintSchema.safeParse({ ...valid, objective }).success).toBe(true);
+  });
+
   it("rejects implementation-specific fields", () => {
     expect(CustomerSolutionBlueprintSchema.safeParse({
       ...valid,
@@ -162,6 +166,21 @@ describe("CustomerSolutionBlueprintSchema", () => {
     })).success).toBe(false);
   });
 
+  it("rejects normalized coordinate metadata in arbitrary sample-data keys", () => {
+    expect(CustomerSolutionBlueprintSchema.safeParse(withPrimaryRegion({
+      sampleData: [{ coordinate: "120, 48" }],
+    })).success).toBe(false);
+  });
+
+  it.each([
+    "页面使用 content.hero，模块字段 expectedKind=data.table",
+    "OpenVisitorDetail()",
+    "[data-region=records]",
+    ".records:hover",
+  ])("rejects implementation syntax in ordinary text: %s", (objective) => {
+    expect(CustomerSolutionBlueprintSchema.safeParse({ ...valid, objective }).success).toBe(false);
+  });
+
   it.each(["linkId", "link-id", "configureData"])("rejects reserved implementation identifier %s", (id) => {
     expect(CustomerSolutionBlueprintSchema.safeParse({
       ...valid,
@@ -214,13 +233,41 @@ describe("CustomerSolutionBlueprintSchema", () => {
     }).success).toBe(false);
   });
 
-  it("accepts all maximum page, journey, and step bounds", () => {
-    const pages = Array.from({ length: 8 }, (_, index) => page(`page-${index + 1}`, `region-${index + 1}`));
-    const journeys = Array.from({ length: 12 }, (_, index) => ({
-      ...journey(`journey-${index + 1}`, "page-1", "region-1"),
-      steps: Array.from({ length: 12 }, () => ({ ...valid.journeys[0].steps[0], pageId: "page-1", regionId: "region-1" })),
+  it("accepts exactly eight pages", () => {
+    const pages = [
+      page("visitor-overview", "records"),
+      ...Array.from({ length: 7 }, (_, index) => page(`page-${index + 1}`, `region-${index + 1}`)),
+    ];
+    expect(CustomerSolutionBlueprintSchema.safeParse({ ...valid, pages }).success).toBe(true);
+  });
+
+  it("accepts exactly twelve regions on one page", () => {
+    const extraRegions = Array.from({ length: 9 }, (_, index) => ({
+      ...valid.pages[0].regions[0],
+      id: `extra-region-${index + 1}`,
     }));
-    expect(CustomerSolutionBlueprintSchema.safeParse({ ...valid, pages, journeys }).success).toBe(true);
+    expect(CustomerSolutionBlueprintSchema.safeParse({
+      ...valid,
+      pages: [{
+        ...valid.pages[0],
+        readingOrder: [...valid.pages[0].readingOrder, ...extraRegions.map((region) => region.id)],
+        regions: [...valid.pages[0].regions, ...extraRegions],
+      }],
+    }).success).toBe(true);
+  });
+
+  it("accepts exactly twelve journeys", () => {
+    expect(CustomerSolutionBlueprintSchema.safeParse({
+      ...valid,
+      journeys: Array.from({ length: 12 }, (_, index) => journey(`journey-${index + 1}`)),
+    }).success).toBe(true);
+  });
+
+  it("accepts exactly twelve steps in one journey", () => {
+    expect(CustomerSolutionBlueprintSchema.safeParse({
+      ...valid,
+      journeys: [{ ...valid.journeys[0], steps: Array.from({ length: 12 }, () => valid.journeys[0].steps[0]) }],
+    }).success).toBe(true);
   });
 
   it("rejects duplicate page IDs", () => {

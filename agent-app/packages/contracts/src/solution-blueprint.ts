@@ -11,6 +11,14 @@ const implementationFieldNames = new Set([
   "uimodeltype",
   "x",
   "y",
+  "coordinate",
+  "coordinates",
+  "geometry",
+  "position",
+  "left",
+  "top",
+  "width",
+  "height",
   "lefttoppt",
   "styledata",
   "styledatanew",
@@ -23,9 +31,11 @@ const implementationFieldNames = new Set([
 ]);
 const canonicalUuid = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
 const quotedObjectKey = /\\?["']([A-Za-z][A-Za-z0-9_. -]*)\\?["']\s*:/g;
-const cssDeclaration = /(?:^|[;{]\s*)(?:--[a-z0-9-]+|[a-z][a-z0-9-]*)\s*:\s*[^;{}\n]+(?:;|})/i;
-const cssSelector = /(?:^|\s)(?:#[A-Za-z_-][A-Za-z0-9_-]*|\.[A-Za-z_-][A-Za-z0-9_-]*)(?:\s*[>+~]\s*|\s*\{)/;
-const javascriptCall = /\b[a-z][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*\s*\([^()\r\n]*\)/;
+const implementationAssignment = /\b([A-Za-z][A-Za-z0-9_. -]*)\s*(?:=|:)/g;
+const dottedImplementationToken = /\b[A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z][A-Za-z0-9_-]*)+\b/;
+const cssDeclaration = /(?:^|[;{]\s*)(?:color|display|position|width|height|margin(?:-[a-z]+)?|padding(?:-[a-z]+)?|background(?:-[a-z]+)?|border(?:-[a-z]+)?|font(?:-[a-z]+)?|opacity|z-index|flex(?:-[a-z]+)?|grid(?:-[a-z]+)?|transform|transition|animation)\s*:\s*[^;{}\n]+(?:;|})/i;
+const cssSelector = /(?:^|\s)(?:#[A-Za-z_-][A-Za-z0-9_-]*(?:\s*[>+~]\s*|\s*:[A-Za-z-]+|\s*\{)|\.[A-Za-z_-][A-Za-z0-9_-]*(?:\s*[>+~]\s*|\s*:[A-Za-z-]+|\s*\{)|\[[A-Za-z_-][A-Za-z0-9_-]*[~|^$*]?=[^\]]+\])/;
+const javascriptCall = /\b(?:[a-z][A-Za-z0-9_$]*|[A-Z][a-z][A-Za-z0-9_$]*)(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*\s*\(\s*(?:[A-Za-z0-9_$"'`,.\s-]+)?\s*\)/;
 
 function normalizeImplementationKey(value: string): string {
   return value.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
@@ -54,10 +64,20 @@ function containsQuotedImplementationKey(value: string): boolean {
   return false;
 }
 
+function containsImplementationAssignment(value: string): boolean {
+  implementationAssignment.lastIndex = 0;
+  for (const match of value.matchAll(implementationAssignment)) {
+    if (isImplementationFieldName(match[1]!)) return true;
+  }
+  return false;
+}
+
 function implementationTextIssue(value: string): string | undefined {
   if (canonicalUuid.test(value)) return "canonical UUID/GUID values are not allowed";
   if (isRawJsonPayload(value)) return "raw JSON payloads are not allowed";
   if (containsQuotedImplementationKey(value)) return "implementation JSON keys are not allowed";
+  if (containsImplementationAssignment(value)) return "implementation assignments are not allowed";
+  if (dottedImplementationToken.test(value)) return "dot-delimited implementation tokens are not allowed";
   if (cssDeclaration.test(value) || cssSelector.test(value)) return "CSS declarations and selectors are not allowed";
   if (javascriptCall.test(value)) return "JavaScript calls are not allowed";
   return undefined;
