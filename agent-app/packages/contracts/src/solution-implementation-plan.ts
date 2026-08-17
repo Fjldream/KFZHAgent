@@ -27,12 +27,40 @@ const forbiddenSemanticNames = new Set([
 
 const forbiddenImplementationPropertyNames = new Set([
   ...forbiddenSemanticNames,
+  "animation",
+  "background",
+  "backgroundcolor",
+  "backgroundimage",
+  "border",
+  "bordercolor",
+  "borderradius",
+  "borderstyle",
+  "borderwidth",
   "bounds",
   "bottom",
   "boxshadow",
   "display",
   "color",
   "coordinate",
+  "flex",
+  "flexbasis",
+  "flexdirection",
+  "flexgrow",
+  "flexshrink",
+  "flexwrap",
+  "font",
+  "fontfamily",
+  "fontsize",
+  "fontstyle",
+  "fontweight",
+  "gap",
+  "grid",
+  "gridarea",
+  "gridcolumn",
+  "gridrow",
+  "gridtemplatecolumns",
+  "gridtemplaterows",
+  "height",
   "left",
   "lineheight",
   "margin",
@@ -46,27 +74,21 @@ const forbiddenImplementationPropertyNames = new Set([
   "paddingleft",
   "paddingright",
   "paddingtop",
+  "position",
   "rect",
   "right",
   "top",
   "textalign",
+  "textcolor",
   "transform",
+  "transformorigin",
+  "transition",
+  "transitionduration",
+  "width",
   "xpos",
   "ypos",
   "zindex",
 ]);
-const forbiddenImplementationPropertyPrefixes = [
-  "animation",
-  "background",
-  "border",
-  "flex",
-  "font",
-  "grid",
-  "margin",
-  "padding",
-  "transform",
-  "transition",
-];
 
 function normalizeName(value: string): string {
   return value.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
@@ -77,9 +99,7 @@ function isForbiddenSemanticName(value: string): boolean {
 }
 
 function isForbiddenImplementationPropertyName(value: string): boolean {
-  const normalized = normalizeName(value);
-  return forbiddenImplementationPropertyNames.has(normalized)
-    || forbiddenImplementationPropertyPrefixes.some((prefix) => normalized.startsWith(prefix));
+  return forbiddenImplementationPropertyNames.has(normalizeName(value));
 }
 
 const stableIdSchema = z
@@ -149,12 +169,12 @@ const declarativeStepTextSchema = semanticTextSchema.superRefine((value, ctx) =>
   if (
     /[{};]/.test(value)
     || /\b(?:if|else|for|while|switch|try|catch|throw|async|await)\s*\(/.test(value)
-    || /(?:^|\s)[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.[A-Za-z_$][A-Za-z0-9_$]*)|(?:\[[^\]]+\]))*\s*(?:\|\|=|&&=|\?\?=|>>>=|<<=|>>=|\+=|-=|\*\*=|\*=|\/=|%=|&=|\|=|\^=|=|\+\+|--)/.test(value)
+    || /(?:^|[\s(])[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.[A-Za-z_$][A-Za-z0-9_$]*)|(?:\[[^\]]+\]))*\s*(?:\|\|=|&&=|\?\?=|>>>=|<<=|>>=|\+=|-=|\*\*=|\*=|\/=|%=|&=|\|=|\^=|=|\+\+|--)/.test(value)
     || /\bdelete\s+[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.[A-Za-z_$][A-Za-z0-9_$]*)|(?:\[[^\]]+\]))+/.test(value)
     || /^(?:return|throw|await|yield)(?:\s+(?:[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.[A-Za-z_$][A-Za-z0-9_$]*)|(?:\[[^\]]+\]))*|-?\d+(?:\.\d+)?|true|false|null|undefined|["'][^"'\n]*["']))?$/.test(value.trim())
     || /^(?:(?:break|continue)(?:\s+[A-Za-z_$][A-Za-z0-9_$]*)?|debugger)$/.test(value.trim())
     || /\b[A-Za-z_$][A-Za-z0-9_$]*\s*(?:\[[^\]]+\]|\.[A-Za-z_$][A-Za-z0-9_$]*)\s*(?:\(|\[)/.test(value)
-    || /\b[A-Za-z_$][A-Za-z0-9_$]*\(/.test(value)
+    || /\b[A-Za-z_$][A-Za-z0-9_$]*(?:\?\.)?\(/.test(value)
     || /\b(?:alert|setTimeout|setInterval|eval|Function)\s+\(/.test(value)
   ) {
     ctx.addIssue({ code: "custom", message: "custom-script steps must be declarative prose, not executable syntax" });
@@ -719,18 +739,20 @@ function implementationTextIssue(value: string, path: Array<string | number>): s
   if (/:\s*\[\s*(?:-?\d|true\b|false\b|null\b|["'{[])/i.test(value) || /:\s*\{\s*(?:["']|[A-Za-z_$][A-Za-z0-9_$]*\s*:)/.test(value)) return "embedded raw JSON text is not allowed";
   if (/<\/?script\b|<style\b|\b(?:javascript|vbscript)\s*:/i.test(value)) return "executable markup is not allowed";
   if (/\b(?:const|let|var)\s+[A-Za-z_$][A-Za-z0-9_$]*\s*=|\bfunction\s+[A-Za-z_$][A-Za-z0-9_$]*\s*\(|\breturn\b[^;\n]*;|\bclass\s+[A-Za-z_$][A-Za-z0-9_$]*\s*\{|\b(?:import|require)\s*\(|\bnew\s+[A-Za-z_$][A-Za-z0-9_$]*\s*\(|=>|\$control\b|\$state\b|\$data\b|\$page\b|\$overlay\b|\$feedback\b|`|\$\{/i.test(value)) return "JavaScript-shaped text is not allowed";
-  if (/(?:^|\s)[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.[A-Za-z_$][A-Za-z0-9_$]*)|(?:\[[^\]\n]+\]))*\s*(?:\|\|=|&&=|\?\?=|>>>=|<<=|>>=|\+=|-=|\*\*=|\*=|\/=|%=|&=|\|=|\^=|=|\+\+|--)\s*(?:[A-Za-z_$][A-Za-z0-9_$]*|["'`]|-?\d)/.test(value)) return "executable assignment syntax is not allowed";
+  if (/(?:^|[\s(])[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.[A-Za-z_$][A-Za-z0-9_$]*)|(?:\[[^\]\n]+\]))*\s*(?:\|\|=|&&=|\?\?=|>>>=|<<=|>>=|\+=|-=|\*\*=|\*=|\/=|%=|&=|\|=|\^=|=|\+\+|--)\s*(?:[A-Za-z_$][A-Za-z0-9_$]*|["'`]|-?\d|\[\s*\])/.test(value)) return "executable assignment syntax is not allowed";
   if (/\bdelete\s+[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.[A-Za-z_$][A-Za-z0-9_$]*)|(?:\[[^\]\n]+\]))+/.test(value)) return "executable unary syntax is not allowed";
   if (/^(?:return|throw|await|yield)(?:\s+(?:[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.[A-Za-z_$][A-Za-z0-9_$]*)|(?:\[[^\]\n]+\]))*|-?\d+(?:\.\d+)?|true|false|null|undefined|["'][^"'\n]*["']))?$/.test(trimmed)) return "executable statement syntax is not allowed";
   if (/^(?:(?:break|continue)(?:\s+[A-Za-z_$][A-Za-z0-9_$]*)?|debugger)$/.test(trimmed)) return "executable control statement is not allowed";
   const structuralIdentifier = path.at(-1) === "moduleKind" || path.at(-1) === "capabilityId";
   const codeLikeMember = /^(?:this|detail|record|records|selection|state|data|value|item|event|target|control|window|document|globalThis|process|console|navigator|location|localStorage|sessionStorage)(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+$/i.test(trimmed)
-    || /^[A-Za-z_$][A-Za-z0-9_$]*(?:\[[A-Za-z_$][A-Za-z0-9_$]*\])+$/.test(trimmed);
+    || /^[A-Za-z_$][A-Za-z0-9_$]*(?:\[(?:[A-Za-z_$][A-Za-z0-9_$]*|\d+|["'][^"'\n]+["'])\])+$/.test(trimmed);
   if (!structuralIdentifier && codeLikeMember) return "executable member or index syntax is not allowed";
   if (/\b(?:document|window|globalThis|fetch|XMLHttpRequest|WebSocket|eval|Function)\s*\.?[A-Za-z_$]*\s*\(/i.test(value)) return "JavaScript API calls are not allowed";
-  if (/\b(?!rgb(?:a)?\b|hsl(?:a)?\b|var\b)[A-Za-z_$][A-Za-z0-9_$]*\(/i.test(value)) return "code-like calls are not allowed";
+  if (/\b(?!rgb(?:a)?\b|hsl(?:a)?\b|var\b)[A-Za-z_$][A-Za-z0-9_$]*(?:\?\.)?\(/i.test(value)) return "code-like calls are not allowed";
   if (/^\.[A-Za-z_-][A-Za-z0-9_-]*$/.test(trimmed) || (/^#[A-Za-z_-][A-Za-z0-9_-]*$/.test(trimmed) && !/^#[0-9a-f]{3,8}$/i.test(trimmed)) || /^\[[A-Za-z_-][^\]]*\]$/.test(trimmed)) return "CSS selectors are not allowed";
   if (/^(?:#[A-Za-z_-][A-Za-z0-9_-]*|\.[A-Za-z_-][A-Za-z0-9_-]*)(?:[#.][A-Za-z_-][A-Za-z0-9_-]*)+$/.test(trimmed)) return "CSS selectors are not allowed";
+  if (/^(?:#[A-Za-z_-][A-Za-z0-9_-]*|\.[A-Za-z_-][A-Za-z0-9_-]*|[A-Za-z][A-Za-z0-9-]*)(?::[A-Za-z-]+(?:\([^)]*\))?)+$/.test(trimmed)) return "CSS selectors are not allowed";
+  if (/^(?:#[A-Za-z_-][A-Za-z0-9_-]*|\.[A-Za-z_-][A-Za-z0-9_-]*|\[[^\]\n]+\])(?:\s+(?:#[A-Za-z_-][A-Za-z0-9_-]*|\.[A-Za-z_-][A-Za-z0-9_-]*|\[[^\]\n]+\]|[A-Za-z][A-Za-z0-9-]*))+$/.test(trimmed)) return "CSS selectors are not allowed";
   if (/^#[A-Za-z_-][A-Za-z0-9_-]*(?:\s+|\s*[>+~]\s*)/.test(trimmed) || /^(?:button|input|select|textarea|a|form|table|tr|td|div|span|section|main|header|footer|nav|label):[A-Za-z-]+(?:\([^)]*\))?$/.test(trimmed)) return "CSS selectors are not allowed";
   if (/(?:^|\s)(?:#[A-Za-z_-][A-Za-z0-9_-]*|\.[A-Za-z_-][A-Za-z0-9_-]*|\[[A-Za-z_-][^\]]*\]|(?:button|input|select|textarea|div|span|section|main|header|footer|nav):[A-Za-z-]+)\s*(?:\{|[>+~])/i.test(value)) return "CSS rules and selectors are not allowed";
   if (/(?:^|[;{]\s*)(?:color|display|margin(?:-[a-z]+)?|padding(?:-[a-z]+)?|background(?:-[a-z]+)?|border(?:-[a-z]+)?|font(?:-[a-z]+)?|opacity|z-index|flex(?:-[a-z]+)?|grid(?:-[a-z]+)?|transform|transition|animation)\s*:\s*[^;{}\n]+(?:;|}|$)/i.test(value)) return "CSS declarations are not allowed";

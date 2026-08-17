@@ -681,21 +681,42 @@ describe("SolutionImplementationPlanSchema", () => {
   });
 
   it("rejects implementation leakage through semantic properties and record fields", () => {
-    for (const name of [
-      "left", "top", "x", "y", "coords", "bounds", "rect", "xPos", "yPos",
-      "geometry", "coordinate", "right", "bottom", "zIndex", "marginTop", "padding",
-      "backgroundColor", "borderRadius", "fontSize", "gridColumn", "transitionDuration",
-      "boxShadow", "textAlign", "lineHeight",
-      "objectType", "uiModelType", "styleDataNew", "linkId", "configureData",
-    ]) {
+    for (const [name, value] of [
+      ["left", 0], ["top", 0], ["x", 0], ["y", 0], ["coords", "0,0"], ["bounds", "full"],
+      ["rect", "page"], ["xPos", 12], ["yPos", 16], ["width", 1024], ["height", 768],
+      ["position", "absolute"], ["geometry", "fixed"], ["coordinate", "screen"], ["right", 0],
+      ["bottom", 0], ["zIndex", 2], ["marginTop", "8px"], ["padding", "8px"], ["gap", "8px"],
+      ["backgroundColor", "red"], ["borderRadius", "4px"], ["fontSize", "12px"],
+      ["gridColumn", "1 / 2"], ["transitionDuration", "200ms"], ["boxShadow", "small"],
+      ["textAlign", "center"], ["lineHeight", 1.5], ["display", "grid"],
+      ["objectType", "control"], ["uiModelType", "text"], ["styleDataNew", "raw"],
+      ["linkId", "raw-link"], ["configureData", "raw-config"],
+    ] as const) {
       const propertyPlan = cloneFixture();
-      findNode(propertyPlan, "equipment-name").properties.push({ name, value: "implementation value" });
+      findNode(propertyPlan, "equipment-name").properties.push({ name, value });
       expect(SolutionImplementationPlanSchema.safeParse(propertyPlan).success, `property ${name}`).toBe(false);
 
       const recordPlan = cloneFixture();
-      findNode(recordPlan, "equipment-detail-module").content.fields.push({ name, value: "implementation value" });
+      findNode(recordPlan, "equipment-detail-module").content.fields.push({ name, value });
       expect(SolutionImplementationPlanSchema.safeParse(recordPlan).success, `record field ${name}`).toBe(false);
     }
+
+    const domainCompounds = cloneFixture();
+    findNode(domainCompounds, "equipment-name").properties.push(
+      { name: "backgroundCheckStatus", value: "complete" },
+      { name: "borderCheckpoint", value: "north-gate" },
+      { name: "fontLicense", value: "licensed" },
+      { name: "gridOperator", value: "regional-team" },
+      { name: "transitionOwner", value: "operations" },
+    );
+    findNode(domainCompounds, "equipment-detail-module").content.fields.push(
+      { name: "backgroundCheckStatus", value: "complete" },
+      { name: "borderCheckpoint", value: "north-gate" },
+      { name: "fontLicense", value: "licensed" },
+      { name: "gridOperator", value: "regional-team" },
+      { name: "transitionOwner", value: "operations" },
+    );
+    expect(SolutionImplementationPlanSchema.safeParse(domainCompounds).success).toBe(true);
   });
 
   it("rejects value-level CSS and executable syntax while preserving semantic prose and source data", () => {
@@ -708,23 +729,30 @@ describe("SolutionImplementationPlanSchema", () => {
       "records[index]",
       "records[index] = value",
       "refresh()",
+      ".card .title",
+      ".card:hover",
+      "records[0]",
+      "records[\"id\"]",
+      "(detail.text = selection)",
+      "value = []",
+      "refresh?.()",
     ]) {
       const plan = cloneFixture();
       findNode(plan, "equipment-name").content = content;
       expect(SolutionImplementationPlanSchema.safeParse(plan).success, content).toBe(false);
+
+      const scriptPlan = cloneFixture();
+      scriptPlan.scripts[1].steps[0].intent = content;
+      expect(SolutionImplementationPlanSchema.safeParse(scriptPlan).success, `script: ${content}`).toBe(false);
     }
 
     const semanticPlan = cloneFixture();
-    findNode(semanticPlan, "equipment-name").properties.push(
-      { name: "position", value: "leading" },
-      { name: "width", value: "comfortable" },
-      { name: "height", value: "content-driven" },
-    );
     semanticPlan.mockData[0].fields[2].key = "source";
     semanticPlan.mockData[0].records[0].values[2].field = "source";
     semanticPlan.mockData[0].records[0].values[1].value = "example.com";
     findNode(semanticPlan, "equipment-name").content = "api.example.com";
     semanticPlan.scripts[1].steps[0].intent = "Show empty state if no record is selected";
+    semanticPlan.scripts[1].steps[1].intent = "Show guidance for new operators while records are loading";
     expect(SolutionImplementationPlanSchema.safeParse(semanticPlan).success).toBe(true);
   });
 
