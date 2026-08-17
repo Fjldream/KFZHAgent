@@ -756,6 +756,43 @@ describe("SolutionImplementationPlanSchema", () => {
     expect(SolutionImplementationPlanSchema.safeParse(semanticPlan).success).toBe(true);
   });
 
+  it("rejects chained selectors, literal assignments, and index-member expressions in semantic text", () => {
+    const bypasses = [
+      ".card.title:hover",
+      "div .card",
+      "value = [1]",
+      "records[0].name",
+    ];
+    const results = bypasses.map((content) => {
+      const contentPlan = cloneFixture();
+      findNode(contentPlan, "equipment-name").content = content;
+      const scriptPlan = cloneFixture();
+      scriptPlan.scripts[1].steps[0].intent = content;
+      return {
+        content: SolutionImplementationPlanSchema.safeParse(contentPlan).success,
+        script: SolutionImplementationPlanSchema.safeParse(scriptPlan).success,
+      };
+    });
+    expect(results).toEqual([
+      { content: false, script: false },
+      { content: false, script: false },
+      { content: false, script: false },
+      { content: false, script: false },
+    ]);
+  });
+
+  it("accepts ordinary colon-delimited semantic tokens", () => {
+    for (const token of ["status:pending", "urn:isbn"]) {
+      const contentPlan = cloneFixture();
+      findNode(contentPlan, "equipment-name").content = token;
+      expect(SolutionImplementationPlanSchema.safeParse(contentPlan).success, `content: ${token}`).toBe(true);
+
+      const scriptPlan = cloneFixture();
+      scriptPlan.scripts[1].steps[0].intent = token;
+      expect(SolutionImplementationPlanSchema.safeParse(scriptPlan).success, `script: ${token}`).toBe(true);
+    }
+  });
+
   it("keeps registry-owned module slot membership out of the Task 3 schema", () => {
     const syntacticOnly = cloneFixture();
     findNode(syntacticOnly, "equipment-detail-module").slots[0].slotId = "future-slot";
