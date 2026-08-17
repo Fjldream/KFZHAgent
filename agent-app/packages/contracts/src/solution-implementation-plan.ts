@@ -90,6 +90,60 @@ const forbiddenImplementationPropertyNames = new Set([
   "zindex",
 ]);
 
+const knownCssPseudoClassNames = new Set([
+  "active",
+  "any-link",
+  "autofill",
+  "checked",
+  "default",
+  "defined",
+  "dir",
+  "disabled",
+  "empty",
+  "enabled",
+  "first-child",
+  "first-of-type",
+  "focus",
+  "focus-visible",
+  "focus-within",
+  "fullscreen",
+  "has",
+  "host",
+  "host-context",
+  "hover",
+  "in-range",
+  "indeterminate",
+  "invalid",
+  "is",
+  "lang",
+  "last-child",
+  "last-of-type",
+  "link",
+  "modal",
+  "not",
+  "nth-child",
+  "nth-last-child",
+  "nth-last-of-type",
+  "nth-of-type",
+  "only-child",
+  "only-of-type",
+  "optional",
+  "out-of-range",
+  "picture-in-picture",
+  "placeholder-shown",
+  "read-only",
+  "read-write",
+  "required",
+  "root",
+  "scope",
+  "target",
+  "user-invalid",
+  "user-valid",
+  "valid",
+  "visited",
+  "where",
+]);
+
 function normalizeName(value: string): string {
   return value.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
 }
@@ -100,6 +154,12 @@ function isForbiddenSemanticName(value: string): boolean {
 
 function isForbiddenImplementationPropertyName(value: string): boolean {
   return forbiddenImplementationPropertyNames.has(normalizeName(value));
+}
+
+function isKnownCssPseudoClassSelector(value: string): boolean {
+  const match = /^(?:[A-Za-z][A-Za-z0-9-]*|[.#][A-Za-z_-][A-Za-z0-9_-]*):([A-Za-z-]+)(?:\([^)]*\))?$/.exec(value);
+  const pseudoClassName = match?.[1];
+  return pseudoClassName !== undefined && knownCssPseudoClassNames.has(pseudoClassName.toLowerCase());
 }
 
 const stableIdSchema = z
@@ -753,7 +813,8 @@ function implementationTextIssue(value: string, path: Array<string | number>): s
   if (/^(?:#[A-Za-z_-][A-Za-z0-9_-]*|\.[A-Za-z_-][A-Za-z0-9_-]*)(?:[#.][A-Za-z_-][A-Za-z0-9_-]*)+$/.test(trimmed)) return "CSS selectors are not allowed";
   if (/^(?:#[A-Za-z_-][A-Za-z0-9_-]*|\.[A-Za-z_-][A-Za-z0-9_-]*)(?:[#.][A-Za-z_-][A-Za-z0-9_-]*)*(?::[A-Za-z-]+(?:\([^)]*\))?)+$/.test(trimmed)) return "CSS selectors are not allowed";
   if (/^(?:#[A-Za-z_-][A-Za-z0-9_-]*|\.[A-Za-z_-][A-Za-z0-9_-]*|\[[^\]\n]+\]|button|input|select|textarea|a|form|table|tr|td|div|span|section|main|header|footer|nav|label)(?:\s+(?:#[A-Za-z_-][A-Za-z0-9_-]*|\.[A-Za-z_-][A-Za-z0-9_-]*|\[[^\]\n]+\]|[A-Za-z][A-Za-z0-9-]*))+$/.test(trimmed)) return "CSS selectors are not allowed";
-  if (/^#[A-Za-z_-][A-Za-z0-9_-]*(?:\s+|\s*[>+~]\s*)/.test(trimmed) || /^(?:button|input|select|textarea|a|form|table|tr|td|div|span|section|main|header|footer|nav|label):[A-Za-z-]+(?:\([^)]*\))?$/.test(trimmed)) return "CSS selectors are not allowed";
+  if (/^[A-Za-z][A-Za-z0-9-]*\s+\.[A-Za-z_-][A-Za-z0-9_-]*$/.test(trimmed)) return "CSS selectors are not allowed";
+  if (/^#[A-Za-z_-][A-Za-z0-9_-]*(?:\s+|\s*[>+~]\s*)/.test(trimmed) || isKnownCssPseudoClassSelector(trimmed)) return "CSS selectors are not allowed";
   if (/(?:^|\s)(?:#[A-Za-z_-][A-Za-z0-9_-]*|\.[A-Za-z_-][A-Za-z0-9_-]*|\[[A-Za-z_-][^\]]*\]|(?:button|input|select|textarea|div|span|section|main|header|footer|nav):[A-Za-z-]+)\s*(?:\{|[>+~])/i.test(value)) return "CSS rules and selectors are not allowed";
   if (/(?:^|[;{]\s*)(?:color|display|margin(?:-[a-z]+)?|padding(?:-[a-z]+)?|background(?:-[a-z]+)?|border(?:-[a-z]+)?|font(?:-[a-z]+)?|opacity|z-index|flex(?:-[a-z]+)?|grid(?:-[a-z]+)?|transform|transition|animation)\s*:\s*[^;{}\n]+(?:;|}|$)/i.test(value)) return "CSS declarations are not allowed";
   if (/(?:^|[;{]\s*)position\s*:\s*(?:absolute|fixed|relative|sticky)(?:\s*!important)?(?:;|}|$)/i.test(value)) return "CSS declarations are not allowed";

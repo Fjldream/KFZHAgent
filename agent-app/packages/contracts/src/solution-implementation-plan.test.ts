@@ -781,6 +781,21 @@ describe("SolutionImplementationPlanSchema", () => {
     ]);
   });
 
+  it.each(["article:hover", "article .card"])(
+    "rejects generic tag selector syntax in full-plan content and script intent: %s",
+    (selector) => {
+      const contentPlan = cloneFixture();
+      findNode(contentPlan, "equipment-name").content = selector;
+      const scriptPlan = cloneFixture();
+      scriptPlan.scripts[1].steps[0].intent = selector;
+
+      expect({
+        content: SolutionImplementationPlanSchema.safeParse(contentPlan).success,
+        script: SolutionImplementationPlanSchema.safeParse(scriptPlan).success,
+      }).toEqual({ content: false, script: false });
+    },
+  );
+
   it("accepts ordinary colon-delimited semantic tokens", () => {
     for (const token of ["status:pending", "urn:isbn"]) {
       const contentPlan = cloneFixture();
