@@ -1,12 +1,32 @@
 import { z } from "zod";
 
 const id = z.string().trim().min(1).max(100).regex(/^[A-Za-z][A-Za-z0-9_.-]*$/);
-const text = z.string().trim().min(1).max(400);
+const unsafeTextPatterns = [
+  /\b(?:javascript|vbscript)\s*:/i,
+  /\b(?:https?|ftp):\/\//i,
+  /(?:^|\s)(?:body|html|:root)\s*\{/i,
+  /(?:^|\s)[#.][A-Za-z_-][\w-]*(?:\s+[>+~]?\s*[#.A-Za-z_-][\w-]*|\s*\{)/,
+  /[{}]/,
+  /\b[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}\b/i,
+  /<\/?script\b|\b(?:const|let|var|function|import|export|eval|document|window)\b|=>|\b(?:alert|confirm|prompt|fetch|setTimeout|setInterval)\s*\(/,
+  /\b(?:authorization|bearer|password|passwd|api[_-]?key|secret|token)\b\s*(?::|=)/i,
+];
+const text = z.string().trim().min(1).max(400).superRefine((value, ctx) => {
+  if (unsafeTextPatterns.some((pattern) => pattern.test(value))) {
+    ctx.addIssue({ code: "custom", message: "design knowledge text must be descriptive, not executable or sensitive content" });
+  }
+});
 const textList = z.array(text).max(16);
 const version = z.string().trim().regex(/^\d+\.\d+\.\d+$/);
+const repositoryRef = z.string().trim().min(1).max(300).superRefine((value, ctx) => {
+  const isRepositoryPath = /^(?!\/)(?!.*(?:^|\/)\.\.?($|\/))(?!.*\/\/)[^\s/\\#?:]+(?:\/[^\s/\\#?:]+)*(?:#[A-Za-z0-9_.:-]+)?$/.test(value);
+  if (!isRepositoryPath) {
+    ctx.addIssue({ code: "custom", message: "evidence ref must be a repository-relative path with an optional fragment" });
+  }
+});
 const evidence = z.object({
   kind: z.enum(["template", "compiler", "fixture", "product-source"]),
-  ref: z.string().trim().min(1).max(300),
+  ref: repositoryRef,
 }).strict();
 const availability = z.enum(["supported", "planned"]);
 

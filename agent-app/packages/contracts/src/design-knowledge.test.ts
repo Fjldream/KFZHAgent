@@ -34,6 +34,20 @@ describe("design knowledge contracts", () => {
     expect(ControlDesignProfileSchema.safeParse({ ...controlProfile, useFor: [] }).success).toBe(false);
   });
 
+  it("rejects executable, CSS, credential-like, and selector text", () => {
+    for (const unsafeText of [
+      "body { color: red; }",
+      "#app .card",
+      "控件 ID: 6F9619FF-8B86-D011-B42D-00C04FC964FF",
+      "javascript:alert(1)",
+      "alert('run')",
+      "const apiKey = 'secret';",
+      "Authorization: Bearer token",
+    ]) {
+      expect(ControlDesignProfileSchema.safeParse({ ...controlProfile, useFor: [unsafeText] }).success).toBe(false);
+    }
+  });
+
   it("requires planned style parts to be explicit", () => {
     const profile = StyleCapabilityProfileSchema.parse({
       schema: "kf-style-capability-profile/v1",
@@ -70,6 +84,34 @@ describe("design knowledge contracts", () => {
       limitations: [],
     };
     expect(ScriptCapabilityProfileSchema.safeParse(missingEvidence).success).toBe(false);
+  });
+
+  it("requires evidence references to be repository-relative paths", () => {
+    const profile = {
+      schema: "kf-script-capability-profile/v1",
+      capabilityId: "select",
+      version: "1.0.0",
+      availability: "supported",
+      actions: [],
+      events: [{
+        semanticEvent: "change",
+        kfEvent: "Change",
+        availability: "supported",
+        arguments: [],
+        evidence: [{ kind: "fixture", ref: "agent-app/fixtures/select.json#Change" }],
+      }],
+      methods: [],
+      initialization: { supportsConfigureData: false, lifecycleEvents: [] },
+      limitations: [],
+    };
+
+    expect(ScriptCapabilityProfileSchema.safeParse(profile).success).toBe(true);
+    for (const ref of ["/etc/passwd", "../secret.txt", "https://example.com/spec", "javascript:alert(1)"]) {
+      expect(ScriptCapabilityProfileSchema.safeParse({
+        ...profile,
+        events: [{ ...profile.events[0], evidence: [{ kind: "fixture", ref }] }],
+      }).success).toBe(false);
+    }
   });
 
   it("requires every recipe role to offer real candidates", () => {
