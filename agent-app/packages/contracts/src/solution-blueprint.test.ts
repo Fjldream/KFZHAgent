@@ -66,16 +66,110 @@ const valid = {
   openQuestions: [],
 } as const;
 
+function page(id: string, regionId: string) {
+  return {
+    ...valid.pages[0],
+    id,
+    title: `${id} 页面`,
+    readingOrder: [regionId],
+    regions: [{ ...valid.pages[0].regions[0], id: regionId }],
+  };
+}
+
+function journey(id: string, pageId = "visitor-overview", regionId = "records") {
+  return { ...valid.journeys[0], id, steps: [{ ...valid.journeys[0].steps[0], pageId, regionId }] };
+}
+
+function withPrimaryRegion(change: Record<string, unknown>) {
+  return {
+    ...valid,
+    pages: [{
+      ...valid.pages[0],
+      regions: [{ ...valid.pages[0].regions[0], ...change }, ...valid.pages[0].regions.slice(1)],
+    }],
+  };
+}
+
 describe("CustomerSolutionBlueprintSchema", () => {
   it("accepts a customer solution blueprint expressed only in customer semantics", () => {
     expect(CustomerSolutionBlueprintSchema.parse(valid).pages[0]?.id).toBe("visitor-overview");
     expect(DesignPlanSchema.safeParse(valid).success).toBe(true);
   });
 
+  it("accepts normal Chinese, KPI, and version descriptions", () => {
+    expect(CustomerSolutionBlueprintSchema.safeParse({
+      ...valid,
+      objective: "围绕园区KPI（关键指标）持续优化版本3.6的审核体验",
+      visualDirection: { ...valid.visualDirection, tone: "专业、友好且便于一线同事理解" },
+    }).success).toBe(true);
+  });
+
   it("rejects implementation-specific fields", () => {
     expect(CustomerSolutionBlueprintSchema.safeParse({
       ...valid,
       pages: [{ ...valid.pages[0], regions: [{ ...valid.pages[0].regions[0], expectedKind: "data.table" }] }],
+    }).success).toBe(false);
+  });
+
+  it.each([
+    "expectedKind",
+    "expected_kind",
+    "EXPECTED-KIND",
+    "moduleKind",
+    "moduleKinds",
+    "capabilityId",
+    "capabilityIds",
+    "guid",
+    "objectType",
+    "uiModelType",
+    "x",
+    "y",
+    "leftTopPt",
+    "styleData",
+    "styleDataNew",
+    "selector",
+    "css",
+    "js",
+    "javascript",
+    "linkId",
+    "configureData",
+  ])("rejects the implementation key %s in arbitrary sample data", (key) => {
+    expect(CustomerSolutionBlueprintSchema.safeParse(withPrimaryRegion({
+      sampleData: [{ [key]: "不应进入客户蓝图" }],
+    })).success).toBe(false);
+  });
+
+  it.each([
+    ["canonical UUID", "550e8400-e29b-41d4-a716-446655440000"],
+    ["raw JSON object", '{"访客":"陈嘉宁"}'],
+    ["raw JSON array", '[{"访客":"陈嘉宁"}]'],
+    ["quoted implementation JSON", '说明："{\\"styleDataNew\\":{}}"'],
+    ["CSS declaration", ".records { color: red; }"],
+    ["CSS selector", "#visitor-records > .record"],
+    ["lowercase JavaScript call", "loadrecords()"],
+    ["camelCase JavaScript call", "openVisitorDetail()"],
+  ])("rejects %s in an ordinary text field", (_label, value) => {
+    expect(CustomerSolutionBlueprintSchema.safeParse({ ...valid, objective: value }).success).toBe(false);
+  });
+
+  it.each([
+    "550e8400-e29b-41d4-a716-446655440000",
+    '{"linkId":"implementation"}',
+    "openVisitorDetail()",
+  ])("rejects implementation payloads in arbitrary sample-data values", (value) => {
+    expect(CustomerSolutionBlueprintSchema.safeParse(withPrimaryRegion({
+      sampleData: [{ "访客姓名": value }],
+    })).success).toBe(false);
+  });
+
+  it.each(["linkId", "link-id", "configureData"])("rejects reserved implementation identifier %s", (id) => {
+    expect(CustomerSolutionBlueprintSchema.safeParse({
+      ...valid,
+      pages: [{
+        ...valid.pages[0],
+        readingOrder: [id, "filters", "records"],
+        regions: [{ ...valid.pages[0].regions[0], id }, ...valid.pages[0].regions.slice(1)],
+      }],
     }).success).toBe(false);
   });
 
@@ -86,15 +180,103 @@ describe("CustomerSolutionBlueprintSchema", () => {
     }).success).toBe(false);
   });
 
-  it("rejects duplicate identifiers and an unknown reading-order region", () => {
+  it("rejects more than eight pages", () => {
+    const pages = Array.from({ length: 9 }, (_, index) => page(`page-${index + 1}`, `region-${index + 1}`));
+    expect(CustomerSolutionBlueprintSchema.safeParse({ ...valid, pages }).success).toBe(false);
+  });
+
+  it("rejects more than twelve regions on one page", () => {
+    const extraRegions = Array.from({ length: 10 }, (_, index) => ({
+      ...valid.pages[0].regions[0],
+      id: `extra-region-${index + 1}`,
+    }));
     expect(CustomerSolutionBlueprintSchema.safeParse({
       ...valid,
       pages: [{
         ...valid.pages[0],
-        readingOrder: ["summary", "missing"],
-        regions: [...valid.pages[0].regions, valid.pages[0].regions[0]],
-      }, valid.pages[0]],
-      journeys: [valid.journeys[0], valid.journeys[0]],
+        readingOrder: [...valid.pages[0].readingOrder, ...extraRegions.map((region) => region.id)],
+        regions: [...valid.pages[0].regions, ...extraRegions],
+      }],
+    }).success).toBe(false);
+  });
+
+  it("rejects more than twelve journeys", () => {
+    expect(CustomerSolutionBlueprintSchema.safeParse({
+      ...valid,
+      journeys: Array.from({ length: 13 }, (_, index) => journey(`journey-${index + 1}`)),
+    }).success).toBe(false);
+  });
+
+  it("rejects more than twelve steps in one journey", () => {
+    expect(CustomerSolutionBlueprintSchema.safeParse({
+      ...valid,
+      journeys: [{ ...valid.journeys[0], steps: Array.from({ length: 13 }, () => valid.journeys[0].steps[0]) }],
+    }).success).toBe(false);
+  });
+
+  it("accepts all maximum page, journey, and step bounds", () => {
+    const pages = Array.from({ length: 8 }, (_, index) => page(`page-${index + 1}`, `region-${index + 1}`));
+    const journeys = Array.from({ length: 12 }, (_, index) => ({
+      ...journey(`journey-${index + 1}`, "page-1", "region-1"),
+      steps: Array.from({ length: 12 }, () => ({ ...valid.journeys[0].steps[0], pageId: "page-1", regionId: "region-1" })),
+    }));
+    expect(CustomerSolutionBlueprintSchema.safeParse({ ...valid, pages, journeys }).success).toBe(true);
+  });
+
+  it("rejects duplicate page IDs", () => {
+    expect(CustomerSolutionBlueprintSchema.safeParse({
+      ...valid,
+      pages: [valid.pages[0], page("visitor-overview", "another-region")],
+    }).success).toBe(false);
+  });
+
+  it("rejects duplicate region IDs globally", () => {
+    expect(CustomerSolutionBlueprintSchema.safeParse({
+      ...valid,
+      pages: [valid.pages[0], page("another-page", "summary")],
+    }).success).toBe(false);
+  });
+
+  it("rejects duplicate journey IDs", () => {
+    expect(CustomerSolutionBlueprintSchema.safeParse({
+      ...valid,
+      journeys: [valid.journeys[0], journey("review-visitor")],
+    }).success).toBe(false);
+  });
+
+  it("rejects an unknown reading-order region", () => {
+    expect(CustomerSolutionBlueprintSchema.safeParse({
+      ...valid,
+      pages: [{ ...valid.pages[0], readingOrder: ["summary", "missing", "records"] }],
+    }).success).toBe(false);
+  });
+
+  it("rejects a duplicate reading-order region", () => {
+    expect(CustomerSolutionBlueprintSchema.safeParse({
+      ...valid,
+      pages: [{ ...valid.pages[0], readingOrder: ["summary", "summary", "records"] }],
+    }).success).toBe(false);
+  });
+
+  it("rejects a journey step with a missing page", () => {
+    expect(CustomerSolutionBlueprintSchema.safeParse({
+      ...valid,
+      journeys: [journey("review-visitor", "missing-page", "records")],
+    }).success).toBe(false);
+  });
+
+  it("rejects a journey step with a missing region", () => {
+    expect(CustomerSolutionBlueprintSchema.safeParse({
+      ...valid,
+      journeys: [journey("review-visitor", "visitor-overview", "missing-region")],
+    }).success).toBe(false);
+  });
+
+  it("rejects a journey step whose page and region exist but are not paired", () => {
+    expect(CustomerSolutionBlueprintSchema.safeParse({
+      ...valid,
+      pages: [valid.pages[0], page("second-page", "second-region")],
+      journeys: [journey("review-visitor", "visitor-overview", "second-region")],
     }).success).toBe(false);
   });
 });

@@ -1,16 +1,95 @@
 import { z } from "zod";
 
-const forbiddenImplementationTerm = /\b(?:expectedKind|module\s+kind|capability\s*id|guid|selector|css|js|styleDataNew|linkId|configureData)\b|坐标/i;
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const implementationFieldNames = new Set([
+  "expectedkind",
+  "modulekind",
+  "modulekinds",
+  "capabilityid",
+  "capabilityids",
+  "guid",
+  "objecttype",
+  "uimodeltype",
+  "x",
+  "y",
+  "lefttoppt",
+  "styledata",
+  "styledatanew",
+  "selector",
+  "css",
+  "js",
+  "javascript",
+  "linkid",
+  "configuredata",
+]);
+const canonicalUuid = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
+const quotedObjectKey = /\\?["']([A-Za-z][A-Za-z0-9_. -]*)\\?["']\s*:/g;
+const cssDeclaration = /(?:^|[;{]\s*)(?:--[a-z0-9-]+|[a-z][a-z0-9-]*)\s*:\s*[^;{}\n]+(?:;|})/i;
+const cssSelector = /(?:^|\s)(?:#[A-Za-z_-][A-Za-z0-9_-]*|\.[A-Za-z_-][A-Za-z0-9_-]*)(?:\s*[>+~]\s*|\s*\{)/;
+const javascriptCall = /\b[a-z][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*\s*\([^()\r\n]*\)/;
 
-/** Customer-facing language only: it cannot carry raw JSON or implementation terms. */
+function normalizeImplementationKey(value: string): string {
+  return value.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
+}
+
+function isImplementationFieldName(value: string): boolean {
+  return implementationFieldNames.has(normalizeImplementationKey(value));
+}
+
+function isRawJsonPayload(value: string): boolean {
+  const trimmed = value.trim();
+  if (!/^[{[]/.test(trimmed)) return false;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    return Array.isArray(parsed) || (typeof parsed === "object" && parsed !== null);
+  } catch {
+    return false;
+  }
+}
+
+function containsQuotedImplementationKey(value: string): boolean {
+  quotedObjectKey.lastIndex = 0;
+  for (const match of value.matchAll(quotedObjectKey)) {
+    if (isImplementationFieldName(match[1]!)) return true;
+  }
+  return false;
+}
+
+function implementationTextIssue(value: string): string | undefined {
+  if (canonicalUuid.test(value)) return "canonical UUID/GUID values are not allowed";
+  if (isRawJsonPayload(value)) return "raw JSON payloads are not allowed";
+  if (containsQuotedImplementationKey(value)) return "implementation JSON keys are not allowed";
+  if (cssDeclaration.test(value) || cssSelector.test(value)) return "CSS declarations and selectors are not allowed";
+  if (javascriptCall.test(value)) return "JavaScript calls are not allowed";
+  return undefined;
+}
+
+/** Recursively excludes platform implementation data from every v3 value. */
+function validateImplementationFree(value: unknown, ctx: z.RefinementCtx, path: Array<string | number> = []): void {
+  if (typeof value === "string") {
+    const message = implementationTextIssue(value);
+    if (message !== undefined) ctx.addIssue({ code: "custom", path, message });
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => validateImplementationFree(item, ctx, [...path, index]));
+    return;
+  }
+  if (typeof value === "object" && value !== null) {
+    Object.entries(value).forEach(([key, item]) => {
+      if (isImplementationFieldName(key)) {
+        ctx.addIssue({ code: "custom", path: [...path, key], message: "implementation fields are not allowed" });
+      }
+      validateImplementationFree(item, ctx, [...path, key]);
+    });
+  }
+}
+
+/** Customer-facing language only; implementation-free checks run recursively at the root. */
 const blueprintText = z
   .string()
   .trim()
   .min(1)
-  .max(600)
-  .refine((value) => !forbiddenImplementationTerm.test(value), "implementation details are not allowed")
-  .refine((value) => !/^[{[]/.test(value), "raw JSON is not allowed");
+  .max(600);
 
 const blueprintTextList = z.array(blueprintText).max(12);
 
@@ -21,32 +100,10 @@ const blueprintId = z
   .min(1)
   .max(100)
   .regex(/^[A-Za-z][A-Za-z0-9_-]*$/)
-  .refine((value) => !uuid.test(value), "platform-generated identifiers are not allowed");
-
-const forbiddenSampleDataKey = new Set([
-  "expectedkind",
-  "kind",
-  "capabilityid",
-  "guid",
-  "coordinate",
-  "coordinates",
-  "selector",
-  "css",
-  "js",
-  "styledatanew",
-  "linkid",
-  "configuredata",
-]);
+  .refine((value) => !isImplementationFieldName(value), "implementation identifiers are not allowed");
 
 const BlueprintSampleDataSchema = z
-  .record(blueprintText.max(100), blueprintText)
-  .superRefine((record, ctx) => {
-    Object.keys(record).forEach((key) => {
-      if (forbiddenSampleDataKey.has(key.replace(/[^a-z0-9]/gi, "").toLowerCase())) {
-        ctx.addIssue({ code: "custom", path: [key], message: "implementation fields are not allowed" });
-      }
-    });
-  });
+  .record(z.string().trim().min(1).max(100), blueprintText);
 
 export const BlueprintRegionSchema = z
   .object({
@@ -168,7 +225,10 @@ export const CustomerSolutionBlueprintSchema = z
     openQuestions: blueprintTextList,
   })
   .strict()
-  .superRefine(validateBlueprintReferences);
+  .superRefine((blueprint, ctx) => {
+    validateImplementationFree(blueprint, ctx);
+    validateBlueprintReferences(blueprint, ctx);
+  });
 
 export type BlueprintRegion = z.infer<typeof BlueprintRegionSchema>;
 export type BlueprintPage = z.infer<typeof BlueprintPageSchema>;
