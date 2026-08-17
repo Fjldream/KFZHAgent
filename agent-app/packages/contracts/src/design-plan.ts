@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { CustomerSolutionBlueprintSchema } from "./solution-blueprint.js";
+
+export type { CustomerSolutionBlueprint } from "./solution-blueprint.js";
 
 /**
  * IR 控件类型（与 client-project-ir 对齐；后续计划扩展控件时同步）。
@@ -124,6 +127,7 @@ export const CustomerEffectBlueprintSchema = z
 export const DesignPlanSchema = z.discriminatedUnion("schema", [
   LegacyDesignPlanSchema,
   CustomerEffectBlueprintSchema,
+  CustomerSolutionBlueprintSchema,
 ]);
 
 export type LegacyDesignPlan = z.infer<typeof LegacyDesignPlanSchema>;
