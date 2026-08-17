@@ -38,9 +38,14 @@ describe("design knowledge contracts", () => {
     for (const unsafeText of [
       "body { color: red; }",
       "#app .card",
+      "display: grid;",
+      "color: #fff;",
+      ".menu-item:hover",
+      "[data-state=\"open\"]",
       "控件 ID: 6F9619FF-8B86-D011-B42D-00C04FC964FF",
       "javascript:alert(1)",
       "alert('run')",
+      "doAnything()",
       "const apiKey = 'secret';",
       "Authorization: Bearer token",
     ]) {

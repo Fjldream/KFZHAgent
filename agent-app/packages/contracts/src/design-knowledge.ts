@@ -1,14 +1,21 @@
 import { z } from "zod";
 
 const id = z.string().trim().min(1).max(100).regex(/^[A-Za-z][A-Za-z0-9_.-]*$/);
+const cssDeclaration = /\b(?:--[A-Za-z][\w-]*|[a-z][A-Za-z-]*)\s*:\s*[^;{}\n]+;/;
+const cssClassOrIdSelector = /(?:^|\s)[.#][A-Za-z_-][\w-]*(?::[A-Za-z-][\w-]*)?(?=$|\s|[>+~,{])/;
+const cssAttributeSelector = /\[[A-Za-z][\w-]*(?:\s*[~|^$*]?=\s*(?:"[^"]*"|'[^']*'|[A-Za-z0-9_-]+))?\]/;
+const javascriptIdentifierCall = /\b[A-Za-z_$][\w$]*\(/;
 const unsafeTextPatterns = [
   /\b(?:javascript|vbscript)\s*:/i,
   /\b(?:https?|ftp):\/\//i,
   /(?:^|\s)(?:body|html|:root)\s*\{/i,
-  /(?:^|\s)[#.][A-Za-z_-][\w-]*(?:\s+[>+~]?\s*[#.A-Za-z_-][\w-]*|\s*\{)/,
+  cssDeclaration,
+  cssClassOrIdSelector,
+  cssAttributeSelector,
   /[{}]/,
   /\b[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}\b/i,
-  /<\/?script\b|\b(?:const|let|var|function|import|export|eval|document|window)\b|=>|\b(?:alert|confirm|prompt|fetch|setTimeout|setInterval)\s*\(/,
+  /<\/?script\b|\b(?:const|let|var|function|import|export|eval|document|window)\b|=>/,
+  javascriptIdentifierCall,
   /\b(?:authorization|bearer|password|passwd|api[_-]?key|secret|token)\b\s*(?::|=)/i,
 ];
 const text = z.string().trim().min(1).max(400).superRefine((value, ctx) => {
