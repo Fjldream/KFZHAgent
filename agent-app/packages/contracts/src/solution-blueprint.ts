@@ -19,6 +19,8 @@ const implementationFieldNames = new Set([
   "xpos",
   "ypos",
   "geometry",
+  "left",
+  "top",
   "lefttoppt",
   "styledata",
   "styledatanew",

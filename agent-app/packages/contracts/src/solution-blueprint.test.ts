@@ -182,6 +182,15 @@ describe("CustomerSolutionBlueprintSchema", () => {
     })).success).toBe(false);
   });
 
+  it.each([
+    ["left", "120"],
+    ["top", "48"],
+  ])("rejects positional key %s in arbitrary sample data", (key, value) => {
+    expect(CustomerSolutionBlueprintSchema.safeParse(withPrimaryRegion({
+      sampleData: [{ [key]: value }],
+    })).success).toBe(false);
+  });
+
   it("accepts normal industry sample-data fields that are not coordinates", () => {
     expect(CustomerSolutionBlueprintSchema.safeParse(withPrimaryRegion({
       sampleData: [{ position: "销售经理", width: "60厘米", height: "120厘米" }],
