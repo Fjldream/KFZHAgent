@@ -148,6 +148,6 @@ const registry = createKnowledgeRegistry(
   "SCRIPT_CAPABILITY_PROFILE_NOT_FOUND",
 );
 
-export const listScriptCapabilityProfiles: () => readonly ScriptCapabilityProfile[] = registry.list;
-export const getScriptCapabilityProfile: (capabilityId: string) => ScriptCapabilityProfile | undefined = registry.get;
-export const requireScriptCapabilityProfile: (capabilityId: string) => ScriptCapabilityProfile = registry.require;
+export const listScriptCapabilityProfiles: () => readonly ScriptCapabilityProfile[] = () => registry.list();
+export const getScriptCapabilityProfile: (capabilityId: string) => ScriptCapabilityProfile | undefined = (capabilityId) => registry.get(capabilityId);
+export const requireScriptCapabilityProfile: (capabilityId: string) => ScriptCapabilityProfile = (capabilityId) => registry.require(capabilityId);

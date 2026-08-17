@@ -168,6 +168,6 @@ const registry = createKnowledgeRegistry(
   "STYLE_CAPABILITY_PROFILE_NOT_FOUND",
 );
 
-export const listStyleCapabilityProfiles: () => readonly StyleCapabilityProfile[] = registry.list;
-export const getStyleCapabilityProfile: (capabilityId: string) => StyleCapabilityProfile | undefined = registry.get;
-export const requireStyleCapabilityProfile: (capabilityId: string) => StyleCapabilityProfile = registry.require;
+export const listStyleCapabilityProfiles: () => readonly StyleCapabilityProfile[] = () => registry.list();
+export const getStyleCapabilityProfile: (capabilityId: string) => StyleCapabilityProfile | undefined = (capabilityId) => registry.get(capabilityId);
+export const requireStyleCapabilityProfile: (capabilityId: string) => StyleCapabilityProfile = (capabilityId) => registry.require(capabilityId);

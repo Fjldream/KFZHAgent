@@ -231,6 +231,6 @@ const registry = createKnowledgeRegistry(
   "CONTROL_DESIGN_PROFILE_NOT_FOUND",
 );
 
-export const listControlDesignProfiles: () => readonly ControlDesignProfile[] = registry.list;
-export const getControlDesignProfile: (capabilityId: string) => ControlDesignProfile | undefined = registry.get;
-export const requireControlDesignProfile: (capabilityId: string) => ControlDesignProfile = registry.require;
+export const listControlDesignProfiles: () => readonly ControlDesignProfile[] = () => registry.list();
+export const getControlDesignProfile: (capabilityId: string) => ControlDesignProfile | undefined = (capabilityId) => registry.get(capabilityId);
+export const requireControlDesignProfile: (capabilityId: string) => ControlDesignProfile = (capabilityId) => registry.require(capabilityId);
