@@ -144,6 +144,25 @@ const knownCssPseudoClassNames = new Set([
   "where",
 ]);
 
+const standardHtmlAndSvgTagNames = new Set([
+  "a", "abbr", "address", "animate", "animatemotion", "animatetransform", "area", "article", "aside", "audio",
+  "b", "base", "bdi", "bdo", "blockquote", "body", "br", "button", "canvas", "caption", "circle", "cite",
+  "clippath", "code", "col", "colgroup", "data", "datalist", "dd", "defs", "del", "desc", "details", "dfn",
+  "dialog", "div", "dl", "dt", "ellipse", "em", "embed", "feblend", "fecolormatrix", "fecomponenttransfer",
+  "fecomposite", "feconvolvematrix", "fediffuselighting", "fedisplacementmap", "fedistantlight", "fedropshadow",
+  "feflood", "fefunca", "fefuncb", "fefuncg", "fefuncr", "fegaussianblur", "feimage", "femerge", "femergenode",
+  "femorphology", "feoffset", "fepointlight", "fespecularlighting", "fespotlight", "fetile", "feturbulence",
+  "fieldset", "figcaption", "figure", "filter", "footer", "foreignobject", "form", "g", "h1", "h2", "h3", "h4",
+  "h5", "h6", "head", "header", "hgroup", "hr", "html", "i", "iframe", "image", "img", "input", "ins", "kbd",
+  "label", "legend", "li", "line", "lineargradient", "link", "main", "map", "mark", "marker", "mask", "menu",
+  "meta", "metadata", "meter", "mpath", "nav", "noscript", "object", "ol", "optgroup", "option", "output", "p",
+  "path", "pattern", "picture", "polygon", "polyline", "pre", "progress", "q", "radialgradient", "rect", "rp", "rt",
+  "ruby", "s", "samp", "script", "search", "section", "select", "selectedcontent", "set", "slot", "small", "source",
+  "span", "stop", "strong", "style", "sub", "summary", "sup", "svg", "switch", "symbol", "table", "tbody", "td",
+  "template", "text", "textarea", "textpath", "tfoot", "th", "thead", "time", "title", "tr", "track", "tspan", "u",
+  "ul", "use", "var", "video", "view", "wbr",
+]);
+
 function normalizeName(value: string): string {
   return value.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
 }
@@ -157,9 +176,15 @@ function isForbiddenImplementationPropertyName(value: string): boolean {
 }
 
 function isKnownCssPseudoClassSelector(value: string): boolean {
-  const match = /^(?:[A-Za-z][A-Za-z0-9-]*|[.#][A-Za-z_-][A-Za-z0-9_-]*):([A-Za-z-]+)(?:\([^)]*\))?$/.exec(value);
-  const pseudoClassName = match?.[1];
-  return pseudoClassName !== undefined && knownCssPseudoClassNames.has(pseudoClassName.toLowerCase());
+  const match = /^([A-Za-z][A-Za-z0-9-]*|[.#][A-Za-z_-][A-Za-z0-9_-]*):([A-Za-z-]+)(?:\([^)]*\))?$/.exec(value);
+  const selectorPrefix = match?.[1];
+  const pseudoClassName = match?.[2];
+  return selectorPrefix !== undefined
+    && pseudoClassName !== undefined
+    && knownCssPseudoClassNames.has(pseudoClassName.toLowerCase())
+    && (selectorPrefix.startsWith(".")
+      || selectorPrefix.startsWith("#")
+      || standardHtmlAndSvgTagNames.has(selectorPrefix.toLowerCase()));
 }
 
 const stableIdSchema = z

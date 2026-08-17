@@ -796,17 +796,20 @@ describe("SolutionImplementationPlanSchema", () => {
     },
   );
 
-  it("accepts ordinary colon-delimited semantic tokens", () => {
-    for (const token of ["status:pending", "urn:isbn"]) {
+  it.each(["status:pending", "urn:isbn", "status:active", "validation:required", "state:disabled"])(
+    "accepts ordinary colon-delimited semantic tokens in full-plan content and script intent: %s",
+    (token) => {
       const contentPlan = cloneFixture();
       findNode(contentPlan, "equipment-name").content = token;
-      expect(SolutionImplementationPlanSchema.safeParse(contentPlan).success, `content: ${token}`).toBe(true);
-
       const scriptPlan = cloneFixture();
       scriptPlan.scripts[1].steps[0].intent = token;
-      expect(SolutionImplementationPlanSchema.safeParse(scriptPlan).success, `script: ${token}`).toBe(true);
-    }
-  });
+
+      expect({
+        content: SolutionImplementationPlanSchema.safeParse(contentPlan).success,
+        script: SolutionImplementationPlanSchema.safeParse(scriptPlan).success,
+      }).toEqual({ content: true, script: true });
+    },
+  );
 
   it("keeps registry-owned module slot membership out of the Task 3 schema", () => {
     const syntacticOnly = cloneFixture();
