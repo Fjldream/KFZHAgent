@@ -13,3 +13,4 @@ export * from "./module-delivery.js";
 export * from "./module-compilation.js";
 export * from "./design-knowledge.js";
 export * from "./capability-candidates.js";
+export * from "./solution-implementation-plan.js";
