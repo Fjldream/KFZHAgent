@@ -10,3 +10,4 @@ export * from "./asset.js";
 export * from "./module-plan.js";
 export * from "./module-delivery.js";
 export * from "./module-compilation.js";
+export * from "./design-knowledge.js";
