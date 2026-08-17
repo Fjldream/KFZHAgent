@@ -73,7 +73,7 @@ export const StyleCapabilityProfileSchema = z.object({
 const supportedMember = z.object({
   semanticEvent: id,
   kfEvent: text,
-  linkId: z.number().int().min(0).max(65535).optional(),
+  linkId: z.number().int().min(0).max(2147483647).optional(),
   availability,
   arguments: z.array(z.object({ name: id, position: z.number().int().min(0).max(32).optional() }).strict()).max(16),
   evidence: z.array(evidence).max(8),

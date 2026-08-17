@@ -121,6 +121,39 @@ describe("design knowledge contracts", () => {
     }
   });
 
+  it("accepts KF image link ids within signed 32-bit range", () => {
+    const profile = {
+      schema: "kf-script-capability-profile/v1",
+      capabilityId: "image",
+      version: "1.0.0",
+      availability: "supported",
+      actions: [],
+      events: [{
+        semanticEvent: "load",
+        kfEvent: "Load",
+        linkId: 200001,
+        availability: "supported",
+        arguments: [],
+        evidence: [{ kind: "template", ref: "agent-app/packages/domain-client/src/templates/control-templates/image.json" }],
+      }],
+      methods: [],
+      initialization: { supportsConfigureData: false, lifecycleEvents: [] },
+      limitations: [],
+    };
+
+    expect(ScriptCapabilityProfileSchema.safeParse(profile).success).toBe(true);
+    expect(ScriptCapabilityProfileSchema.safeParse({
+      ...profile,
+      events: [{ ...profile.events[0], linkId: 200002 }],
+    }).success).toBe(true);
+    for (const linkId of [-1, 1.5, 2147483648]) {
+      expect(ScriptCapabilityProfileSchema.safeParse({
+        ...profile,
+        events: [{ ...profile.events[0], linkId }],
+      }).success).toBe(false);
+    }
+  });
+
   it("requires every recipe role to offer real candidates", () => {
     const result = CompositionRecipeSchema.safeParse({
       schema: "kf-composition-recipe/v1",
