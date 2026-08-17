@@ -1,9 +1,20 @@
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   getScriptCapabilityProfile,
   listScriptCapabilityProfiles,
   requireScriptCapabilityProfile,
 } from "./script-capability-registry.js";
+
+const REPOSITORY_ROOT = fileURLToPath(new URL("../../../../../", import.meta.url));
+const baselineProfiles = listScriptCapabilityProfiles();
+
+function resolveEvidence(ref: string): { readonly file: string; readonly fragment: string | undefined } {
+  const [relativePath, fragment] = ref.split("#", 2);
+  return { file: path.resolve(REPOSITORY_ROOT, relativePath!), fragment };
+}
 
 describe("script capability knowledge", () => {
   it("records every phase-one control even when behavior is only planned", () => {
@@ -16,7 +27,7 @@ describe("script capability knowledge", () => {
       "Change", "visible-Change", "Remove-Tag", "Clear", "Blur", "Focus",
     ]);
     expect(select.events.every((event) => event.evidence.some((item) =>
-      item.ref === "templates/control-templates/select.json#connectArray",
+      item.ref === "agent-app/packages/domain-client/src/templates/control-templates/select.json#connectArray",
     ))).toBe(true);
   });
 
@@ -46,10 +57,54 @@ describe("script capability knowledge", () => {
   });
 
   it("gives every supported member repository evidence", () => {
-    for (const profile of listScriptCapabilityProfiles()) {
+    for (const profile of baselineProfiles) {
       for (const member of [...profile.actions, ...profile.events, ...profile.methods]) {
-        if (member.availability === "supported") expect(member.evidence.length).toBeGreaterThan(0);
+        if (member.availability !== "supported") continue;
+        expect(member.evidence.length).toBeGreaterThan(0);
+        for (const evidence of member.evidence) {
+          expect(existsSync(resolveEvidence(evidence.ref).file)).toBe(true);
+        }
       }
+    }
+  });
+
+  it("ties each supported template event to a real template field and event value", () => {
+    for (const profile of baselineProfiles) {
+      for (const event of profile.events.filter((member) => member.availability === "supported")) {
+        for (const evidence of event.evidence.filter((item) => item.kind === "template")) {
+          const { file, fragment } = resolveEvidence(evidence.ref);
+          expect(fragment).toBeDefined();
+          const template = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+          expect(template).toHaveProperty(fragment!);
+
+          if (fragment === "connectArray") {
+            expect(template[fragment]).toContain(event.kfEvent);
+          } else if (fragment === "linkMng") {
+            const links = (template[fragment] as { linkList: readonly Record<string, unknown>[] }).linkList;
+            expect(links).toContainEqual(expect.objectContaining({ name: event.kfEvent, linkId: event.linkId }));
+          }
+        }
+      }
+    }
+  });
+
+  it("preserves checkbox and tabs template event ordering", () => {
+    expect(requireScriptCapabilityProfile("checkbox").events.map((event) => event.kfEvent)).toEqual(["Change"]);
+    expect(requireScriptCapabilityProfile("tabs").events.map((event) => event.kfEvent)).toEqual([
+      "Tab-click", "Tab-remove", "Tab-add", "Edit",
+    ]);
+  });
+
+  it("does not invent link identifiers for connectArray events", () => {
+    for (const profile of baselineProfiles) {
+      if (profile.capabilityId === "image") continue;
+      expect(profile.events.every((event) => event.linkId === undefined)).toBe(true);
+    }
+  });
+
+  it("limits configureData support to the reviewed EasyUI control family", () => {
+    for (const profile of baselineProfiles) {
+      expect(profile.initialization.supportsConfigureData).toBe(profile.capabilityId.startsWith("easyui."));
     }
   });
 

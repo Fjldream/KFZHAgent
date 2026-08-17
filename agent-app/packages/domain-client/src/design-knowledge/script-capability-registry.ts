@@ -7,8 +7,8 @@ import { createKnowledgeRegistry } from "./registry.js";
 
 const TEMPLATE = (ref: string) => ({ kind: "template", ref });
 const ACTION_EVIDENCE = [
-  { kind: "product-source", ref: "ir/client-project-ir.schema.ts#RestrictedAction" },
-  { kind: "compiler", ref: "compile/control-compiler.ts#compileAction" },
+  { kind: "product-source", ref: "agent-app/packages/domain-client/src/ir/client-project-ir.schema.ts#RestrictedAction" },
+  { kind: "compiler", ref: "agent-app/packages/domain-client/src/compile/control-compiler.ts#compileAction" },
 ] as const;
 
 function plannedProfile(capabilityId: string): unknown {
@@ -51,7 +51,7 @@ const REVIEWED_PROFILES: Readonly<Record<string, unknown>> = {
     availability: "supported",
     actions: [],
     events: [
-      { semanticEvent: "change", kfEvent: "Change", availability: "supported", arguments: [], evidence: [TEMPLATE("templates/control-templates/checkbox.json#connectArray")] },
+      { semanticEvent: "change", kfEvent: "Change", availability: "supported", arguments: [], evidence: [TEMPLATE("agent-app/packages/domain-client/src/templates/control-templates/checkbox.json#connectArray")] },
     ],
     methods: [],
     initialization: { supportsConfigureData: false, lifecycleEvents: [] },
@@ -64,8 +64,8 @@ const REVIEWED_PROFILES: Readonly<Record<string, unknown>> = {
     availability: "supported",
     actions: [],
     events: [
-      { semanticEvent: "load", kfEvent: "Load", linkId: 200001, availability: "supported", arguments: [], evidence: [TEMPLATE("templates/control-templates/image.json#linkMng")] },
-      { semanticEvent: "error", kfEvent: "Error", linkId: 200002, availability: "supported", arguments: [], evidence: [TEMPLATE("templates/control-templates/image.json#linkMng")] },
+      { semanticEvent: "load", kfEvent: "Load", linkId: 200001, availability: "supported", arguments: [], evidence: [TEMPLATE("agent-app/packages/domain-client/src/templates/control-templates/image.json#linkMng")] },
+      { semanticEvent: "error", kfEvent: "Error", linkId: 200002, availability: "supported", arguments: [], evidence: [TEMPLATE("agent-app/packages/domain-client/src/templates/control-templates/image.json#linkMng")] },
     ],
     methods: [],
     initialization: { supportsConfigureData: false, lifecycleEvents: ["load", "error"] },
@@ -78,12 +78,12 @@ const REVIEWED_PROFILES: Readonly<Record<string, unknown>> = {
     availability: "supported",
     actions: [],
     events: [
-      { semanticEvent: "change", kfEvent: "Change", availability: "supported", arguments: [], evidence: [TEMPLATE("templates/control-templates/select.json#connectArray")] },
-      { semanticEvent: "visible-change", kfEvent: "visible-Change", availability: "supported", arguments: [], evidence: [TEMPLATE("templates/control-templates/select.json#connectArray")] },
-      { semanticEvent: "remove-tag", kfEvent: "Remove-Tag", availability: "supported", arguments: [], evidence: [TEMPLATE("templates/control-templates/select.json#connectArray")] },
-      { semanticEvent: "clear", kfEvent: "Clear", availability: "supported", arguments: [], evidence: [TEMPLATE("templates/control-templates/select.json#connectArray")] },
-      { semanticEvent: "blur", kfEvent: "Blur", availability: "supported", arguments: [], evidence: [TEMPLATE("templates/control-templates/select.json#connectArray")] },
-      { semanticEvent: "focus", kfEvent: "Focus", availability: "supported", arguments: [], evidence: [TEMPLATE("templates/control-templates/select.json#connectArray")] },
+      { semanticEvent: "change", kfEvent: "Change", availability: "supported", arguments: [], evidence: [TEMPLATE("agent-app/packages/domain-client/src/templates/control-templates/select.json#connectArray")] },
+      { semanticEvent: "visible-change", kfEvent: "visible-Change", availability: "supported", arguments: [], evidence: [TEMPLATE("agent-app/packages/domain-client/src/templates/control-templates/select.json#connectArray")] },
+      { semanticEvent: "remove-tag", kfEvent: "Remove-Tag", availability: "supported", arguments: [], evidence: [TEMPLATE("agent-app/packages/domain-client/src/templates/control-templates/select.json#connectArray")] },
+      { semanticEvent: "clear", kfEvent: "Clear", availability: "supported", arguments: [], evidence: [TEMPLATE("agent-app/packages/domain-client/src/templates/control-templates/select.json#connectArray")] },
+      { semanticEvent: "blur", kfEvent: "Blur", availability: "supported", arguments: [], evidence: [TEMPLATE("agent-app/packages/domain-client/src/templates/control-templates/select.json#connectArray")] },
+      { semanticEvent: "focus", kfEvent: "Focus", availability: "supported", arguments: [], evidence: [TEMPLATE("agent-app/packages/domain-client/src/templates/control-templates/select.json#connectArray")] },
     ],
     methods: [],
     initialization: { supportsConfigureData: false, lifecycleEvents: [] },
@@ -96,10 +96,10 @@ const REVIEWED_PROFILES: Readonly<Record<string, unknown>> = {
     availability: "supported",
     actions: [],
     events: [
-      { semanticEvent: "tab-click", kfEvent: "Tab-click", availability: "supported", arguments: [], evidence: [TEMPLATE("templates/control-templates/tabs.json#connectArray")] },
-      { semanticEvent: "tab-remove", kfEvent: "Tab-remove", availability: "supported", arguments: [], evidence: [TEMPLATE("templates/control-templates/tabs.json#connectArray")] },
-      { semanticEvent: "tab-add", kfEvent: "Tab-add", availability: "supported", arguments: [], evidence: [TEMPLATE("templates/control-templates/tabs.json#connectArray")] },
-      { semanticEvent: "edit", kfEvent: "Edit", availability: "supported", arguments: [], evidence: [TEMPLATE("templates/control-templates/tabs.json#connectArray")] },
+      { semanticEvent: "tab-click", kfEvent: "Tab-click", availability: "supported", arguments: [], evidence: [TEMPLATE("agent-app/packages/domain-client/src/templates/control-templates/tabs.json#connectArray")] },
+      { semanticEvent: "tab-remove", kfEvent: "Tab-remove", availability: "supported", arguments: [], evidence: [TEMPLATE("agent-app/packages/domain-client/src/templates/control-templates/tabs.json#connectArray")] },
+      { semanticEvent: "tab-add", kfEvent: "Tab-add", availability: "supported", arguments: [], evidence: [TEMPLATE("agent-app/packages/domain-client/src/templates/control-templates/tabs.json#connectArray")] },
+      { semanticEvent: "edit", kfEvent: "Edit", availability: "supported", arguments: [], evidence: [TEMPLATE("agent-app/packages/domain-client/src/templates/control-templates/tabs.json#connectArray")] },
     ],
     methods: [],
     initialization: { supportsConfigureData: false, lifecycleEvents: [] },
