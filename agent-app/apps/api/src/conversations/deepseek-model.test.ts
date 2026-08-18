@@ -859,6 +859,17 @@ describe("DeepSeekModelPort", () => {
     expect(implementationSystemPrompt).toContain('"kind":"literal","value"');
     expect(implementationSystemPrompt).toContain('"mode":"fixed","value"');
     expect(implementationSystemPrompt).toContain('"mode":"minmax","min"');
+    expect(capturedImplementationPrompt).toContain(
+      'width 精确联合：{"mode":"content"} | {"mode":"fill"} | {"mode":"fixed","value":320} | {"mode":"ratio","value":1.5} | {"mode":"minmax","min":240,"max":640}',
+    );
+    expect(capturedImplementationPrompt).toContain(
+      'height 精确联合：{"mode":"content"} | {"mode":"fill"} | {"mode":"viewport"} | {"mode":"fixed","value":320} | {"mode":"ratio","value":1.5} | {"mode":"minmax","min":240,"max":640}',
+    );
+    expect(capturedImplementationPrompt).toContain(
+      'parameters 每项精确联合：{"name":"limit","value":20} | {"name":"source","refKind":"mock-data|local-state|control","refId":"已声明 id"}',
+    );
+    expect(capturedImplementationPrompt).not.toContain('fixed/ratio 必须是 {"mode":"fixed"');
+    expect(capturedImplementationPrompt).not.toContain('"parameters":[字面量或语义引用参数]');
     expect(implementationSystemPrompt).toContain("语义样式意图");
     expect(implementationSystemPrompt).toContain("引用");
     const allProfileIds = getDesignKnowledgeSnapshot().controlDesignProfiles.map((profile) => profile.capabilityId);
