@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { getDesignKnowledgeSnapshot } from "../design-knowledge/design-knowledge-catalog.js";
 import { buildBlueprintRegionQueries } from "./blueprint-region-query.js";
 import {
+  __capabilityRetrievalTestHooks,
   assertSolutionPlanUsesCandidates,
   retrieveCapabilities,
 } from "./capability-retrieval.js";
@@ -139,6 +140,44 @@ describe("blueprint region query extraction", () => {
   });
 });
 
+describe("deterministic scoring", () => {
+  const zeroComponents = {
+    roleOverlap: 0,
+    dataShapeMatch: 0,
+    regionMatch: 0,
+    densityMatch: 0,
+    interactionCoverage: 0,
+    companionCompatibility: 0,
+    avoidForMatch: 0,
+    technicalLimitationMatch: 0,
+  };
+
+  it("uses the literal component weights without changing the arithmetic result", () => {
+    expect(__capabilityRetrievalTestHooks.scoreValue({
+      roleOverlap: 0.5,
+      dataShapeMatch: 0.25,
+      regionMatch: 0.2,
+      densityMatch: 0.1,
+      interactionCoverage: 0.3,
+      companionCompatibility: 0.5,
+      avoidForMatch: 0.05,
+      technicalLimitationMatch: 0.1,
+    })).toBe(32.25);
+  });
+
+  it("orders distinct close scores before applying the code-point ID tie-break", () => {
+    const higher = __capabilityRetrievalTestHooks.scoreValue({ ...zeroComponents, roleOverlap: 0.25000001 });
+    const lower = __capabilityRetrievalTestHooks.scoreValue({ ...zeroComponents, roleOverlap: 0.25 });
+    expect(higher).toBe(10.0000004);
+    expect(lower).toBe(10);
+    expect([
+      { id: "a-lower", score: lower },
+      { id: "z-higher", score: higher },
+    ].sort(__capabilityRetrievalTestHooks.compareRankedCandidates).map((candidate) => candidate.id))
+      .toEqual(["z-higher", "a-lower"]);
+  });
+});
+
 describe("deterministic capability retrieval", () => {
   it("ranks a bounded, technically valid portfolio candidate bundle deterministically", () => {
     const bundle = retrieveCapabilities({
@@ -220,6 +259,16 @@ describe("solution plan candidate validation", () => {
   it("accepts candidate-backed controls, layouts, recipes, and exact registered modules", () => {
     const bundle = retrieveCapabilities({ blueprint: portfolioBlueprint, knowledge: getDesignKnowledgeSnapshot() });
     expect(() => assertSolutionPlanUsesCandidates(planFor(bundle), bundle)).not.toThrow();
+  });
+
+  it("rejects a candidate-backed region when the owning blueprint page is wrong", () => {
+    const bundle = retrieveCapabilities({ blueprint: portfolioBlueprint, knowledge: getDesignKnowledgeSnapshot() });
+    const plan = planFor(bundle);
+    plan.pages[0]!.sourceBlueprintPageId = "wrong-page";
+
+    expect(() => assertSolutionPlanUsesCandidates(plan, bundle)).toThrow(
+      "control portfolio-control: capability image is not a candidate for page-regions [wrong-page/selected-work]",
+    );
   });
 
   it("throws one stable, sorted mismatch without substituting invalid choices", () => {

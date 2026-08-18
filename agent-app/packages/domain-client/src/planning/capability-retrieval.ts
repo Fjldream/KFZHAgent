@@ -132,7 +132,7 @@ function requiredInteractionIds(
 }
 
 function scoreValue(components: ScoreComponents): number {
-  const score =
+  return (
     40 * components.roleOverlap
     + 25 * components.dataShapeMatch
     + 15 * components.regionMatch
@@ -140,9 +140,22 @@ function scoreValue(components: ScoreComponents): number {
     + 10 * components.interactionCoverage
     + 8 * components.companionCompatibility
     - 60 * components.avoidForMatch
-    - 20 * components.technicalLimitationMatch;
-  return Number(score.toFixed(6));
+    - 20 * components.technicalLimitationMatch
+  );
 }
+
+function compareRankedCandidates(
+  left: Pick<RankedCandidate, "id" | "score">,
+  right: Pick<RankedCandidate, "id" | "score">,
+): number {
+  return right.score - left.score || compareCodePoints(left.id, right.id);
+}
+
+/** Test-only access for proving exact scoring arithmetic and ordering. */
+export const __capabilityRetrievalTestHooks = Object.freeze({
+  scoreValue,
+  compareRankedCandidates,
+});
 
 function scoreReasons(components: ScoreComponents): readonly string[] {
   const reasons: string[] = [];
@@ -248,7 +261,7 @@ function rankedControls(
     });
   }
 
-  return candidates.sort((left, right) => right.score - left.score || compareCodePoints(left.id, right.id));
+  return candidates.sort(compareRankedCandidates);
 }
 
 function recipeComponents(
@@ -293,7 +306,7 @@ function rankedRecipes(
       limitations: [...recipe.designNotes].slice(0, 8),
       knowledgeVersion: recipe.version,
     };
-  }).sort((left, right) => right.score - left.score || compareCodePoints(left.id, right.id));
+  }).sort(compareRankedCandidates);
 }
 
 function requireMinimumCandidates(draft: RankedRegionDraft): void {
@@ -392,32 +405,34 @@ const LAYOUT_CAPABILITIES: Readonly<Record<string, readonly string[]>> = Object.
   "overlay-anchor": Object.freeze(["layout.5"]),
 });
 
-function unmatchedSourceRegions(
+function unmatchedSourcePageRegions(
+  sourcePageId: string,
   sourceRegionIds: readonly string[],
   bundle: CapabilityCandidateBundle,
   category: "controls" | "layouts" | "recipes",
   acceptedIds: ReadonlySet<string>,
 ): readonly string[] {
-  const regionsById = new Map(bundle.regions.map((region) => [region.regionId, region]));
+  const regionsById = new Map(bundle.regions.map((region) => [`${region.pageId}\u0000${region.regionId}`, region]));
   return sourceRegionIds.filter((regionId) => {
-    const region = regionsById.get(regionId);
+    const region = regionsById.get(`${sourcePageId}\u0000${regionId}`);
     return region === undefined || !region[category].some((candidate) => acceptedIds.has(candidate.id));
-  });
+  }).map((regionId) => `${sourcePageId}/${regionId}`);
 }
 
 function walkNode(
   node: SolutionNode,
+  sourcePageId: string,
   bundle: CapabilityCandidateBundle,
   issues: string[],
   registry: ReturnType<typeof createDefaultModuleRegistry>,
 ): void {
   if (node.kind === "control") {
-    const unmatched = unmatchedSourceRegions(node.sourceBlueprintRegionIds, bundle, "controls", new Set([node.capabilityId]));
-    if (unmatched.length > 0) issues.push(`control ${node.id}: capability ${node.capabilityId} is not a candidate for regions [${unmatched.join(", ")}]`);
+    const unmatched = unmatchedSourcePageRegions(sourcePageId, node.sourceBlueprintRegionIds, bundle, "controls", new Set([node.capabilityId]));
+    if (unmatched.length > 0) issues.push(`control ${node.id}: capability ${node.capabilityId} is not a candidate for page-regions [${unmatched.join(", ")}]`);
     return;
   }
   if (node.kind === "repeater") {
-    walkNode(node.template, bundle, issues, registry);
+    walkNode(node.template, sourcePageId, bundle, issues, registry);
     return;
   }
   if (node.kind === "registered-module") {
@@ -431,21 +446,21 @@ function walkNode(
     }
     for (const slot of node.slots) {
       issues.push(`module ${node.id}: semantic slot ${slot.slotId} cannot be proven by the module registry (NEEDS_CONTEXT/BLOCKED)`);
-      slot.children.forEach((child) => walkNode(child, bundle, issues, registry));
+      slot.children.forEach((child) => walkNode(child, sourcePageId, bundle, issues, registry));
     }
     return;
   }
 
   const acceptedLayouts = new Set(LAYOUT_CAPABILITIES[node.layout] ?? []);
-  const unmatchedLayouts = unmatchedSourceRegions(node.sourceBlueprintRegionIds, bundle, "layouts", acceptedLayouts);
+  const unmatchedLayouts = unmatchedSourcePageRegions(sourcePageId, node.sourceBlueprintRegionIds, bundle, "layouts", acceptedLayouts);
   if (unmatchedLayouts.length > 0) {
-    issues.push(`layout ${node.id}: ${node.layout} is not backed by a layout candidate for regions [${unmatchedLayouts.join(", ")}]`);
+    issues.push(`layout ${node.id}: ${node.layout} is not backed by a layout candidate for page-regions [${unmatchedLayouts.join(", ")}]`);
   }
   if (node.recipeId !== undefined) {
-    const unmatchedRecipes = unmatchedSourceRegions(node.sourceBlueprintRegionIds, bundle, "recipes", new Set([node.recipeId]));
-    if (unmatchedRecipes.length > 0) issues.push(`layout ${node.id}: recipe ${node.recipeId} is not a candidate for regions [${unmatchedRecipes.join(", ")}]`);
+    const unmatchedRecipes = unmatchedSourcePageRegions(sourcePageId, node.sourceBlueprintRegionIds, bundle, "recipes", new Set([node.recipeId]));
+    if (unmatchedRecipes.length > 0) issues.push(`layout ${node.id}: recipe ${node.recipeId} is not a candidate for page-regions [${unmatchedRecipes.join(", ")}]`);
   }
-  node.children.forEach((child) => walkNode(child, bundle, issues, registry));
+  node.children.forEach((child) => walkNode(child, sourcePageId, bundle, issues, registry));
 }
 
 export function assertSolutionPlanUsesCandidates(
@@ -462,8 +477,8 @@ export function assertSolutionPlanUsesCandidates(
   }
 
   const registry = createDefaultModuleRegistry();
-  plan.pages.forEach((page) => walkNode(page.root, bundle, issues, registry));
-  plan.overlays.forEach((overlay) => walkNode(overlay.root, bundle, issues, registry));
+  plan.pages.forEach((page) => walkNode(page.root, page.sourceBlueprintPageId, bundle, issues, registry));
+  plan.overlays.forEach((overlay) => walkNode(overlay.root, overlay.sourceBlueprintPageId, bundle, issues, registry));
   if (issues.length > 0) {
     throw new Error(`SOLUTION_PLAN_CANDIDATE_MISMATCH: ${[...new Set(issues)].sort(compareCodePoints).join("; ")}`);
   }

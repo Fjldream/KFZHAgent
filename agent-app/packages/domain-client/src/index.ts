@@ -50,4 +50,8 @@ export {
   type DesignKnowledgeSnapshot,
 } from "./design-knowledge/design-knowledge-catalog.js";
 export * from "./planning/blueprint-region-query.js";
-export * from "./planning/capability-retrieval.js";
+export {
+  assertSolutionPlanUsesCandidates,
+  retrieveCapabilities,
+  type CapabilityRetrievalInput,
+} from "./planning/capability-retrieval.js";
