@@ -1,8 +1,8 @@
 // @ts-nocheck -- mock-fetch 场景的 JS 风格测试；行为由 vitest 断言验证。
 import { describe, expect, it, vi } from "vitest";
-import { canonicalModuleCompilationHash } from "@kf/contracts";
+import { canonicalModuleCompilationHash, canonicalServerHash } from "@kf/contracts";
 import { createHmacModuleArtifactAuthority } from "@kf/build-jobs";
-import { compileModulePlan, createDefaultModuleRegistry } from "@kf/domain-client";
+import { compileModulePlan, createDefaultModuleRegistry, getDesignKnowledgeSnapshot } from "@kf/domain-client";
 import { DeepSeekModelPort, deriveExactModulePlanOperations, extractJson, DeepSeekModelOutputError, validateModulePlanForContext } from "./deepseek-model.js";
 import { DeterministicFakeModelPort } from "./fake-model.js";
 
@@ -63,6 +63,164 @@ function detailedBlueprint(overrides: Record<string, unknown> = {}) {
     revisionNotes: { added: ["完整客户效果蓝图"], changed: [], retained: [] },
     acceptanceCriteria: ["至少展示两个产品案例和三个完整项目案例"],
     openQuestions: ["是否使用真实头像"],
+    ...overrides,
+  };
+}
+
+function solutionBlueprint(overrides: Record<string, unknown> = {}) {
+  return {
+    schema: "kf-design-plan/v3",
+    displayName: "园区访客协同中心",
+    objective: "帮助园区前台完成访客预约审核与到访接待",
+    audiences: ["园区前台", "安保人员"],
+    scenarios: ["预约审核", "到访核验"],
+    pages: [{
+      id: "visitor-overview",
+      title: "访客总览",
+      purpose: "集中处理当日访客预约",
+      readingOrder: ["visitor-list"],
+      regions: [{
+        id: "visitor-list",
+        purpose: "浏览并选择待处理访客",
+        semanticRoles: ["record-list", "selection"],
+        dataShape: "record-list",
+        density: "comfortable",
+        importance: "primary",
+        content: ["访客姓名", "来访单位", "预约时段"],
+        sampleData: [{ 访客姓名: "陈嘉宁", 来访单位: "海岚智造", 预约时段: "14:30" }],
+        interactions: ["选择访客并查看预约详情"],
+        states: ["待审核", "已通过", "已拒绝"],
+        visualIntent: "清晰可信且便于快速扫读",
+      }],
+    }],
+    journeys: [{
+      id: "review-visitor",
+      actor: "园区前台",
+      goal: "审核一条访客预约",
+      steps: [{
+        pageId: "visitor-overview",
+        regionId: "visitor-list",
+        action: "选择陈嘉宁的预约",
+        result: "展示预约详情并可决定是否通过",
+      }],
+      completion: "预约状态更新并给出明确反馈",
+    }],
+    visualDirection: {
+      tone: "专业友好",
+      colors: ["深海蓝", "暖橙"],
+      typography: "标题、状态和正文层级清楚",
+      spacingAndSurfaces: "舒适留白与轻量分区",
+    },
+    acceptanceScenarios: ["前台可以完成预约审核并看到结果"],
+    openQuestions: [],
+    ...overrides,
+  };
+}
+
+function capabilityCandidateBundle(blueprint = solutionBlueprint()) {
+  const ranked = (id: string) => ({
+    id,
+    score: 10,
+    reasons: ["语义匹配"],
+    limitations: [],
+    knowledgeVersion: "1.0.0",
+  });
+  return {
+    schema: "kf-capability-candidates/v1",
+    knowledgeCatalogVersion: "1.0.0",
+    blueprintHash: canonicalServerHash(blueprint),
+    regions: [{
+      pageId: "visitor-overview",
+      regionId: "visitor-list",
+      controls: [ranked("button"), ranked("easyui.1"), ranked("text")],
+      layouts: [ranked("layout.2")],
+      recipes: [ranked("list-workspace")],
+    }],
+    detailedCapabilityIds: ["button", "easyui.1", "layout.2", "text"],
+    generatedAtPolicy: "deterministic-no-timestamp",
+  };
+}
+
+function solutionImplementationPlan(blueprint = solutionBlueprint(), candidates = capabilityCandidateBundle(blueprint)) {
+  const intent = {
+    importance: "primary",
+    visualWeight: 4,
+    readingOrder: 0,
+    density: "comfortable",
+    groupWith: [],
+    width: { mode: "fill" },
+    height: { mode: "content" },
+    align: "stretch",
+  };
+  return {
+    schema: "kf-solution-implementation/v1",
+    projectKey: "visitor-center",
+    blueprintHash: canonicalServerHash(blueprint),
+    candidateBundleHash: canonicalServerHash(candidates),
+    theme: {
+      background: "#f4f7fb", surface: "#ffffff", primary: "#163a5f", accent: "#e47b32",
+      textPrimary: "#14212b", textSecondary: "#52616d", fontFamily: "Inter", spacingUnit: 8,
+      radiusScale: { small: 4, medium: 8, large: 16 },
+    },
+    roleStyles: [{ role: "record-title", declarations: {}, states: {} }],
+    mockData: [],
+    localState: [],
+    pages: [{
+      id: "visitor-solution-page",
+      title: "访客总览",
+      purpose: "查看当日预约",
+      canvas: "responsive",
+      sourceBlueprintPageId: "visitor-overview",
+      sourceBlueprintRegionIds: ["visitor-list"],
+      initialStateIds: [],
+      root: {
+        kind: "layout",
+        id: "visitor-root",
+        sourceBlueprintRegionIds: ["visitor-list"],
+        intent,
+        layout: "row",
+        children: [{
+          kind: "control",
+          id: "visitor-title",
+          sourceBlueprintRegionIds: ["visitor-list"],
+          intent,
+          capabilityId: "text",
+          content: "今日访客",
+          properties: [],
+          tabIds: [],
+          styleRole: "record-title",
+          eventBindings: [],
+        }],
+      },
+    }],
+    overlays: [],
+    actions: [],
+    scripts: [],
+  };
+}
+
+function solutionPlanningContext(overrides: Record<string, unknown> = {}) {
+  const blueprint = solutionBlueprint();
+  const candidates = capabilityCandidateBundle(blueprint);
+  return {
+    tenantId: "tenant-marker-must-not-leak",
+    userId: "user-marker-must-not-leak",
+    workspaceId: "workspace-marker-must-not-leak",
+    conversationId: "conversation-marker-must-not-leak",
+    generationWorkflow: "creative-v2",
+    recentMessages: [{ role: "user", content: "UNRELATED_RECENT_MESSAGE_MARKER" }],
+    conversationSummary: "UNRELATED_CONVERSATION_SUMMARY_MARKER",
+    revisionSummary: "UNRELATED_REVISION_SUMMARY_MARKER",
+    requirementText: "UNRELATED_REQUIREMENT_MARKER",
+    confirmedSolutionBlueprint: blueprint,
+    capabilityCandidates: candidates,
+    assetCatalog: [{
+      id: "visitor-portrait",
+      kind: "image",
+      name: "访客头像示例",
+      mimeType: "image/png",
+      description: "用于预约详情的已登记图片",
+    }],
     ...overrides,
   };
 }
@@ -541,6 +699,226 @@ describe("DeepSeekModelPort", () => {
     expect(result.modules.map((module) => module.name)).toEqual(["我的产品", "项目经历"]);
     expect(result.modules[0].sampleData[0].value).toBe("KingFusion 工业低代码平台");
     expect(result.acceptanceCriteria).toEqual(["至少展示两个产品案例和三个完整项目案例"]);
+  });
+
+  it("creates a schema-gated v3 customer blueprint for creative-v2 without leaking implementation vocabulary", async () => {
+    const blueprint = solutionBlueprint();
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify(blueprint) } }] }),
+    });
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+
+    const result = await port.createDesignPlan({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      generationWorkflow: "creative-v2",
+      recentMessages: [{ role: "user", content: "做一个多页面园区访客协同中心" }],
+      requirementText: "做一个多页面园区访客协同中心",
+      modulePlanningCatalog: [{
+        kind: "content.hero",
+        version: "1.0.0",
+        maturity: "stable",
+        variants: ["default"],
+        slots: [],
+        interactions: [],
+        layout: { regions: ["main"], minColumnSpan: 1, maxColumnSpan: 12, preferredHeights: ["large"] },
+      }],
+      editableEntities: [{ kind: "page", name: "Page1", type: "page", guid: "11111111-1111-4111-8111-111111111111" }],
+    });
+
+    expect(result).toEqual(blueprint);
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    const capturedBlueprintPrompt = body.messages.map((message: { content: string }) => message.content).join("\n");
+    expect(capturedBlueprintPrompt).toContain("kf-design-plan/v3");
+    expect(capturedBlueprintPrompt).toContain("客户任务");
+    expect(capturedBlueprintPrompt).toContain("多页面");
+    expect(capturedBlueprintPrompt).toContain("信息架构");
+    expect(capturedBlueprintPrompt).toContain("交互旅程");
+    expect(capturedBlueprintPrompt).toContain("视觉方向");
+    expect(capturedBlueprintPrompt).toContain("重新设计");
+    expect(capturedBlueprintPrompt).not.toContain("expectedKind");
+    expect(capturedBlueprintPrompt).not.toContain("content.hero");
+    expect(capturedBlueprintPrompt).not.toContain("11111111-1111-4111-8111-111111111111");
+    expect(new TextEncoder().encode(capturedBlueprintPrompt).byteLength).toBeLessThanOrEqual(128_000);
+  });
+
+  it("rejects a creative-v2 blueprint containing a forbidden implementation key at recursive depth", async () => {
+    const poisoned = solutionBlueprint();
+    poisoned.pages[0].regions[0].sampleData = [{ 访客姓名: "陈嘉宁", nested: { x: 40 } }];
+
+    await expect(makePort(poisoned).createDesignPlan({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      generationWorkflow: "creative-v2",
+      recentMessages: [],
+      requirementText: "访客中心",
+    })).rejects.toThrow(/forbidden field.*x/i);
+  });
+
+  it("repairs creative-v2 JSON extraction at most once", async () => {
+    const blueprint = solutionBlueprint();
+    const response = (content: string, finish_reason = "stop") => ({
+      ok: true,
+      json: async () => ({ choices: [{ finish_reason, message: { content } }] }),
+    });
+    const repairedFetch = vi.fn()
+      .mockResolvedValueOnce(response('{"schema":"kf-design-plan/v3"', "length"))
+      .mockResolvedValueOnce(response(JSON.stringify(blueprint)));
+    const repairedPort = new DeepSeekModelPort({ apiKey: "test-key", fetch: repairedFetch, baseUrl: "https://mock.local" });
+    await expect(repairedPort.createDesignPlan({
+      tenantId: "t", userId: "u", workspaceId: "w", conversationId: "c",
+      generationWorkflow: "creative-v2", recentMessages: [], requirementText: "访客中心",
+    })).resolves.toEqual(blueprint);
+    expect(repairedFetch).toHaveBeenCalledTimes(2);
+
+    const exhaustedFetch = vi.fn().mockResolvedValue(response('{"schema":"kf-design-plan/v3"', "length"));
+    const exhaustedPort = new DeepSeekModelPort({ apiKey: "test-key", fetch: exhaustedFetch, baseUrl: "https://mock.local" });
+    await expect(exhaustedPort.createDesignPlan({
+      tenantId: "t", userId: "u", workspaceId: "w", conversationId: "c",
+      generationWorkflow: "creative-v2", recentMessages: [], requirementText: "访客中心",
+    })).rejects.toThrow(DeepSeekModelOutputError);
+    expect(exhaustedFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("sends only bounded semantic planning inputs and filtered exact-ID knowledge", async () => {
+    const context = solutionPlanningContext();
+    const plan = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify(plan) } }] }),
+    });
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+
+    await expect(port.createSolutionImplementationPlan(context)).resolves.toEqual(plan);
+
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    const capturedImplementationPrompt = body.messages.map((message: { content: string }) => message.content).join("\n");
+    const marker = "语义规划输入(JSON)：";
+    const payloadText = body.messages[1].content.slice(body.messages[1].content.indexOf(marker) + marker.length).trim();
+    const payload = JSON.parse(payloadText);
+    const detailedIds = context.capabilityCandidates.detailedCapabilityIds;
+    expect(payload).toEqual(expect.objectContaining({
+      blueprint: context.confirmedSolutionBlueprint,
+      capabilityCandidates: context.capabilityCandidates,
+      assetCatalog: context.assetCatalog,
+    }));
+    expect(Object.keys(payload).sort()).toEqual([
+      "assetCatalog", "blueprint", "capabilityCandidates", "detailedDesignKnowledge",
+    ]);
+    expect(payload.detailedDesignKnowledge.controlProfiles.map((profile: { capabilityId: string }) => profile.capabilityId)).toEqual(detailedIds);
+    expect(payload.detailedDesignKnowledge.styleProfiles.map((profile: { capabilityId: string }) => profile.capabilityId)).toEqual(detailedIds);
+    expect(payload.detailedDesignKnowledge.scriptProfiles.map((profile: { capabilityId: string }) => profile.capabilityId)).toEqual(detailedIds);
+    expect(payload.detailedDesignKnowledge.controlProfiles).toHaveLength(4);
+    expect(capturedImplementationPrompt).toContain("kf-capability-candidates/v1");
+    expect(capturedImplementationPrompt).toContain("可以自由组合或忽略组合经验");
+    expect(capturedImplementationPrompt).toContain("页面");
+    expect(capturedImplementationPrompt).toContain("浮层");
+    expect(capturedImplementationPrompt).toContain("行业模拟数据");
+    expect(capturedImplementationPrompt).toContain("本地状态");
+    expect(capturedImplementationPrompt).toContain("声明式意图和步骤");
+    expect(capturedImplementationPrompt).toContain("不得输出可执行 JavaScript 或源代码");
+    expect(capturedImplementationPrompt).not.toContain("styleDataNew");
+    expect(capturedImplementationPrompt).not.toContain("linkId");
+    expect(capturedImplementationPrompt).not.toContain("configureData");
+    expect(capturedImplementationPrompt).not.toContain("evidence");
+    expect(capturedImplementationPrompt).not.toContain("agent-app/packages/domain-client");
+    expect(capturedImplementationPrompt).not.toContain("UNRELATED_RECENT_MESSAGE_MARKER");
+    expect(capturedImplementationPrompt).not.toContain("UNRELATED_CONVERSATION_SUMMARY_MARKER");
+    expect(capturedImplementationPrompt).not.toContain("UNRELATED_REVISION_SUMMARY_MARKER");
+    expect(capturedImplementationPrompt).not.toContain("UNRELATED_REQUIREMENT_MARKER");
+    const allProfileIds = getDesignKnowledgeSnapshot().controlDesignProfiles.map((profile) => profile.capabilityId);
+    const omittedProfileId = allProfileIds.find((id) => !detailedIds.includes(id));
+    expect(omittedProfileId).toBeDefined();
+    expect(capturedImplementationPrompt).not.toContain(`"capabilityId":"${omittedProfileId}"`);
+    expect(new TextEncoder().encode(capturedImplementationPrompt).byteLength).toBeLessThanOrEqual(128_000);
+  });
+
+  it("includes only bounded prior plan and rejection reasons in semantic repair", async () => {
+    const context = solutionPlanningContext();
+    const previous = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    const revised = structuredClone(previous);
+    revised.pages[0].title = "访客预约总览";
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify(revised) } }] }),
+    });
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+
+    await expect(port.reviseSolutionImplementationSubtree({
+      ...context,
+      previousSolutionImplementationPlan: previous,
+      solutionPlanRejectionReasons: ["visitor-title: capability must use an exact candidate"],
+    })).resolves.toEqual(revised);
+
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    const prompt = body.messages[1].content as string;
+    const marker = "语义规划输入(JSON)：";
+    const payload = JSON.parse(prompt.slice(prompt.indexOf(marker) + marker.length).trim());
+    expect(payload.previousPlan).toEqual(previous);
+    expect(payload.rejectionReasons).toEqual(["visitor-title: capability must use an exact candidate"]);
+    expect(Object.keys(payload).sort()).toEqual([
+      "assetCatalog", "blueprint", "capabilityCandidates", "detailedDesignKnowledge", "previousPlan", "rejectionReasons",
+    ]);
+    expect(new TextEncoder().encode(body.messages.map((message: { content: string }) => message.content).join("\n")).byteLength).toBeLessThanOrEqual(128_000);
+  });
+
+  it.each(["guid", "objectType", "uiModelType", "styleDataNew", "selector", "css", "x", "y", "leftTopPt", "linkId", "configureData"])(
+    "recursively rejects semantic plan output containing forbidden key %s",
+    async (forbiddenKey) => {
+      const context = solutionPlanningContext();
+      const plan = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+      plan.pages[0].root.children[0].content = {
+        kind: "record",
+        fields: [{ name: "safe", value: { kind: "record", fields: [], [forbiddenKey]: "poison" } }],
+      };
+
+      await expect(makePort(plan).createSolutionImplementationPlan(context)).rejects.toThrow(
+        new RegExp(`forbidden field.*${forbiddenKey}`, "i"),
+      );
+    },
+  );
+
+  it("fails closed before a semantic model call when required payload cannot fit 128000 UTF-8 bytes", async () => {
+    const context = solutionPlanningContext({
+      assetCatalog: Array.from({ length: 100 }, (_, index) => ({
+        id: `asset-${index}`,
+        kind: "image",
+        name: `资源 ${index}`,
+        mimeType: "image/png",
+        description: "界".repeat(1_000),
+      })),
+    });
+    const fetchImpl = vi.fn();
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+
+    await expect(port.createSolutionImplementationPlan(context)).rejects.toThrow(/128000|prompt.*bound/i);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("repairs semantic-plan JSON extraction once and never makes a third model-port call", async () => {
+    const context = solutionPlanningContext();
+    const plan = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    const response = (content: string, finish_reason = "stop") => ({
+      ok: true,
+      json: async () => ({ choices: [{ finish_reason, message: { content } }] }),
+    });
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(response('{"schema":"kf-solution-implementation/v1"', "length"))
+      .mockResolvedValueOnce(response(JSON.stringify(plan)));
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+
+    await expect(port.createSolutionImplementationPlan(context)).resolves.toEqual(plan);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+
+    const exhaustedFetch = vi.fn().mockResolvedValue(response("not json"));
+    const exhaustedPort = new DeepSeekModelPort({ apiKey: "test-key", fetch: exhaustedFetch, baseUrl: "https://mock.local" });
+    await expect(exhaustedPort.createSolutionImplementationPlan(context)).rejects.toThrow(DeepSeekModelOutputError);
+    expect(exhaustedFetch).toHaveBeenCalledTimes(2);
   });
 
   it("createDesignPlan prompt preserves the initial requirement and clarification answer", async () => {

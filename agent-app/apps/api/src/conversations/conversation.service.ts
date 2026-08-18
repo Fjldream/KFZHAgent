@@ -418,6 +418,7 @@ export class ConversationService {
         moduleArtifactAuthority: this.moduleArtifactAuthority,
         modulePlanCompiler: ports.modulePlanCompiler,
         assetCatalog: ports.assetCatalog,
+        capabilityRetrieval: ports.capabilityRetrieval,
         acceptedBlueprintConfirmation: ports.acceptedBlueprintConfirmation,
         isDomainSupported: (domain) => domain === "kingclient",
         defaultDomainKind: "kingclient",

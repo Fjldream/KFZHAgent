@@ -28,6 +28,8 @@ export interface ModelPortContext {
   userId: string;
   workspaceId: string;
   conversationId: string;
+  /** Server-owned bounded route discriminator; creative-v2 is the only v3 prompt path. */
+  generationWorkflow?: "legacy" | "module-v1" | "creative-v2" | undefined;
   recentMessages: GraphMessage[];
   conversationSummary?: string | undefined;
   revisionSummary?: string | undefined;
@@ -101,12 +103,12 @@ export interface ModelPort {
   createModulePlan(input: ModelPortContext): Promise<ModulePlan>;
   /** Return a complete revision while retaining every unaffected prior module exactly. */
   reviseModulePlan(input: ModelPortContext): Promise<ModulePlan>;
-  /** Task 7 supplies the production prompt; orchestration permits one primary call. */
-  createSolutionImplementationPlan?(
+  /** Production semantic planner; orchestration permits one primary call. */
+  createSolutionImplementationPlan(
     input: ModelPortContext,
   ): Promise<SolutionImplementationPlan>;
   /** One localized semantic subtree repair; orchestration never loops this call. */
-  reviseSolutionImplementationSubtree?(
+  reviseSolutionImplementationSubtree(
     input: ModelPortContext,
   ): Promise<SolutionImplementationPlan>;
   explainValidation(input: { tenantId: string; report: ValidationReport }): Promise<string>;

@@ -450,6 +450,12 @@ class StubModelPort implements ModelPort {
   async reviseModulePlan(): Promise<never> {
     throw new Error("module planning is not exercised by the legacy graph fixture");
   }
+  async createSolutionImplementationPlan(): Promise<never> {
+    throw new Error("creative-v2 planning is not exercised by the legacy graph fixture");
+  }
+  async reviseSolutionImplementationSubtree(): Promise<never> {
+    throw new Error("creative-v2 repair is not exercised by the legacy graph fixture");
+  }
   async createChangePlan(input: ModelPortContext): Promise<ChangePlan> {
     return {
       schema: "kf-change-plan/v1",

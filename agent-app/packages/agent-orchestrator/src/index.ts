@@ -41,6 +41,7 @@ export {
   type ModulePlanCompilerPort,
   type AssetCatalogPort,
   type AcceptedBlueprintConfirmationPort,
+  type CapabilityRetrievalPort,
 } from "./ports.js";
 export {
   ModuleCompilationCoordinator,

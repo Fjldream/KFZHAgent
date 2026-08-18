@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   CustomerEffectBlueprintSchema,
+  CustomerSolutionBlueprintSchema,
   type DesignPlan,
 } from "@kf/contracts";
 import type { AgentGraphStateValue, AgentGraphUpdate } from "../state.js";
@@ -53,6 +54,7 @@ export function createDesignPlanNode(deps: SolutionGraphDeps) {
       userId: state.userId,
       workspaceId: state.workspaceId,
       conversationId: state.conversationId,
+      generationWorkflow: state.generationWorkflow,
       recentMessages: state.recentMessages,
       requirementText: latestUserMessage(state),
       revisionSummary: state.revisionSummary,
@@ -69,13 +71,21 @@ export function createDesignPlanNode(deps: SolutionGraphDeps) {
     } catch {
       modelCallFailed = true;
     }
-    let parsed = CustomerEffectBlueprintSchema.safeParse(rawPlan);
+    const parseDesignPlan = (value: unknown) => state.generationWorkflow === "creative-v2"
+      ? CustomerSolutionBlueprintSchema.safeParse(value)
+      : CustomerEffectBlueprintSchema.safeParse(value);
+    let parsed = parseDesignPlan(rawPlan);
     let rejectionReasons = modelCallFailed
       ? ["模型未返回完整客户效果蓝图"]
       : parsed.success
         ? []
         : ["候选蓝图不符合完整客户效果蓝图结构"];
-    if (parsed.success && revising && state.designPlan !== undefined) {
+    if (
+      parsed.success
+      && parsed.data.schema === "kf-design-plan/v2"
+      && revising
+      && state.designPlan?.schema === "kf-design-plan/v2"
+    ) {
       rejectionReasons = assessBlueprintRevision(state.designPlan, parsed.data);
     }
 
@@ -90,11 +100,11 @@ export function createDesignPlanNode(deps: SolutionGraphDeps) {
       } catch {
         modelCallFailed = true;
       }
-      parsed = CustomerEffectBlueprintSchema.safeParse(retried);
+      parsed = parseDesignPlan(retried);
       rejectionReasons = modelCallFailed
         ? ["模型未返回完整客户效果蓝图"]
         : parsed.success
-          ? revising && state.designPlan !== undefined
+          ? parsed.data.schema === "kf-design-plan/v2" && revising && state.designPlan?.schema === "kf-design-plan/v2"
             ? assessBlueprintRevision(state.designPlan, parsed.data)
             : []
           : ["候选蓝图不符合完整客户效果蓝图结构"];

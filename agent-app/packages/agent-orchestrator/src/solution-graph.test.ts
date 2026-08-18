@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { Command, MemorySaver } from "@langchain/langgraph";
-import { deriveGuid, planHash } from "@kf/domain-client";
+import { deriveGuid, getDesignKnowledgeSnapshot, planHash, retrieveCapabilities } from "@kf/domain-client";
 import {
+  canonicalServerHash,
   solutionId,
   type ChangePlan,
   type CapabilityReport,
   type CustomerEffectBlueprint,
+  type CustomerSolutionBlueprint,
   type DesignPlan,
   type ServerPlanEnvelope,
+  type SolutionImplementationPlan,
   type SolutionIR,
   type UIImplementationSpec,
 } from "@kf/contracts";
@@ -40,6 +43,7 @@ class FakeWorkspaceQuery implements WorkspaceQueryPort {
   summaries = new Map<string, string>();
   messages = new Map<string, GraphMessage[]>();
   appendCalls: AppendMessageInput[] = [];
+  routing = new Map<string, { mode: "new" | "upload"; generationWorkflow: "legacy" | "module-v1" | "creative-v2" }>();
 
   async listRecentMessages({ conversationId }: { conversationId: string }): Promise<GraphMessage[]> {
     return this.messages.get(conversationId) ?? [];
@@ -64,6 +68,9 @@ class FakeWorkspaceQuery implements WorkspaceQueryPort {
   }
   async getCurrentRevisionId({ workspaceId }: { workspaceId: string }): Promise<string | undefined> {
     return this.currentRevision.get(workspaceId);
+  }
+  async getWorkspaceRouting({ workspaceId }: { workspaceId: string }) {
+    return this.routing.get(workspaceId);
   }
   async getRevisionSummary({ revisionId }: { revisionId: string }): Promise<string | undefined> {
     return this.revisionSummaries.get(revisionId);
@@ -143,6 +150,9 @@ class FakeModelPort implements ModelPort {
   reviseCalls: ModelPortContext[] = [];
   implementationCreateCalls: ModelPortContext[] = [];
   implementationReviseCalls: ModelPortContext[] = [];
+  designCalls: ModelPortContext[] = [];
+  solutionCreateCalls: ModelPortContext[] = [];
+  solutionReviseCalls: ModelPortContext[] = [];
   createdPlans: ChangePlan[] = [];
   /** When true, createChangePlan/reviseChangePlan return a schema-invalid plan. */
   invalidPlan = false;
@@ -181,6 +191,8 @@ class FakeModelPort implements ModelPort {
     input: ModelPortContext,
     opts?: { revising?: boolean },
   ): Promise<DesignPlan> {
+    this.designCalls.push(input);
+    if (input.generationWorkflow === "creative-v2") return creativeBlueprint();
     const base: CustomerEffectBlueprint = {
       schema: "kf-design-plan/v2",
       displayName: "客户效果方案",
@@ -307,6 +319,16 @@ class FakeModelPort implements ModelPort {
     throw new Error("module planning is not exercised by the legacy graph fixture");
   }
 
+  async createSolutionImplementationPlan(input: ModelPortContext): Promise<SolutionImplementationPlan> {
+    this.solutionCreateCalls.push(input);
+    return creativeImplementationPlan(input);
+  }
+
+  async reviseSolutionImplementationSubtree(input: ModelPortContext): Promise<SolutionImplementationPlan> {
+    this.solutionReviseCalls.push(input);
+    return creativeImplementationPlan(input);
+  }
+
   async createChangePlan(input: ModelPortContext): Promise<ChangePlan> {
     this.createCalls.push(input);
     return this.recordPlan(this.makePlan(input.workspaceId, "new"));
@@ -382,6 +404,106 @@ class FakeModelPort implements ModelPort {
   }
 }
 
+function creativeBlueprint(): CustomerSolutionBlueprint {
+  return {
+    schema: "kf-design-plan/v3",
+    displayName: "访客协同中心",
+    objective: "帮助园区前台处理访客预约",
+    audiences: ["园区前台"],
+    scenarios: ["预约审核"],
+    pages: [{
+      id: "visitor-overview",
+      title: "访客总览",
+      purpose: "处理当日预约",
+      readingOrder: ["visitor-list"],
+      regions: [{
+        id: "visitor-list",
+        purpose: "浏览访客记录",
+        semanticRoles: ["record-list"],
+        dataShape: "record-list",
+        density: "comfortable",
+        importance: "primary",
+        content: ["访客姓名", "预约时段"],
+        sampleData: [{ 访客姓名: "陈嘉宁", 预约时段: "14:30" }],
+        interactions: [],
+        states: ["待审核"],
+        visualIntent: "清晰可信",
+      }],
+    }],
+    journeys: [{
+      id: "review-visitor",
+      actor: "园区前台",
+      goal: "审核预约",
+      steps: [{ pageId: "visitor-overview", regionId: "visitor-list", action: "选择预约", result: "显示详情" }],
+      completion: "完成预约审核",
+    }],
+    visualDirection: { tone: "专业友好", colors: ["深海蓝"], typography: "层级清晰", spacingAndSurfaces: "舒适留白" },
+    acceptanceScenarios: ["可以查看并审核预约"],
+    openQuestions: [],
+  };
+}
+
+function creativeImplementationPlan(input: ModelPortContext): SolutionImplementationPlan {
+  const blueprint = input.confirmedSolutionBlueprint!;
+  const candidates = input.capabilityCandidates!;
+  const controlId = candidates.regions[0]!.controls[0]!.id;
+  const intent = {
+    importance: "primary" as const,
+    visualWeight: 4,
+    readingOrder: 0,
+    density: "comfortable" as const,
+    groupWith: [],
+    width: { mode: "fill" as const },
+    height: { mode: "content" as const },
+    align: "stretch" as const,
+  };
+  return {
+    schema: "kf-solution-implementation/v1",
+    projectKey: "visitor-center",
+    blueprintHash: canonicalServerHash(blueprint),
+    candidateBundleHash: canonicalServerHash(candidates),
+    theme: {
+      background: "#f4f7fb", surface: "#ffffff", primary: "#163a5f", accent: "#e47b32",
+      textPrimary: "#14212b", textSecondary: "#52616d", fontFamily: "Inter", spacingUnit: 8,
+      radiusScale: { small: 4, medium: 8, large: 16 },
+    },
+    roleStyles: [{ role: "record-title", declarations: {}, states: {} }],
+    mockData: [],
+    localState: [],
+    pages: [{
+      id: "visitor-solution-page",
+      title: "访客总览",
+      purpose: "查看当日预约",
+      canvas: "responsive",
+      sourceBlueprintPageId: "visitor-overview",
+      sourceBlueprintRegionIds: ["visitor-list"],
+      initialStateIds: [],
+      root: {
+        kind: "layout",
+        id: "visitor-root",
+        sourceBlueprintRegionIds: ["visitor-list"],
+        intent,
+        layout: "row",
+        children: [{
+          kind: "control",
+          id: "visitor-title",
+          sourceBlueprintRegionIds: ["visitor-list"],
+          intent,
+          capabilityId: controlId,
+          content: "今日访客",
+          properties: [],
+          tabIds: [],
+          styleRole: "record-title",
+          eventBindings: [],
+        }],
+      },
+    }],
+    overlays: [],
+    actions: [],
+    scripts: [],
+  };
+}
+
 interface Bed {
   deps: SolutionGraphDeps;
   graph: CompiledGraph;
@@ -389,6 +511,8 @@ interface Bed {
   repo: FakeChangePlanRepository;
   builds: FakeBuildJobPort;
   model: FakeModelPort;
+  capabilityRetrievalCalls: CustomerSolutionBlueprint[];
+  assetCatalogCalls: Array<{ tenantId: string; workspaceId: string }>;
 }
 
 function createBed(): Bed {
@@ -396,6 +520,8 @@ function createBed(): Bed {
   const repo = new FakeChangePlanRepository();
   const builds = new FakeBuildJobPort();
   const model = new FakeModelPort();
+  const capabilityRetrievalCalls: CustomerSolutionBlueprint[] = [];
+  const assetCatalogCalls: Array<{ tenantId: string; workspaceId: string }> = [];
   const capabilityReport: CapabilityReport = {
     status: "warning",
     full: [],
@@ -431,10 +557,22 @@ function createBed(): Bed {
       },
     },
     serverPlanSigner: TEST_SERVER_PLAN_SIGNER,
+    capabilityRetrieval: {
+      async retrieve({ blueprint }) {
+        capabilityRetrievalCalls.push(blueprint);
+        return retrieveCapabilities({ blueprint, knowledge: getDesignKnowledgeSnapshot() });
+      },
+    },
+    assetCatalog: {
+      async list(input) {
+        assetCatalogCalls.push(input);
+        return [];
+      },
+    },
     isDomainSupported: () => true,
   };
   const graph = compileSolutionGraph(deps, { checkpointer: new MemorySaver() });
-  return { deps, graph, workspace, repo, builds, model };
+  return { deps, graph, workspace, repo, builds, model, capabilityRetrievalCalls, assetCatalogCalls };
 }
 
 interface Ctx {
@@ -527,6 +665,38 @@ async function approve(bed: Bed, ctx: Ctx, payload: ApprovalInterrupt) {
 // ---------------------------------------------------------------------------
 
 describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
+  it("runs creative-v2 as exactly blueprint plus semantic-plan calls and stops without build authorization", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+    bed.workspace.routing.set(WORKSPACE_ID, { mode: "new", generationWorkflow: "creative-v2" });
+
+    bed.model.queueIntent("NEW_REQUIREMENT");
+    await sendUser(bed, ctx, "创建园区访客协同中心");
+    const design = await bed.graph.invoke(input(ctx), config(ctx));
+    expect(design).toMatchObject({ stage: "design-review", designPlan: creativeBlueprint() });
+
+    bed.model.queueIntent("CONFIRM_DESIGN");
+    await sendUser(bed, ctx, "确认设计");
+    const planned = await bed.graph.invoke(input(ctx), config(ctx));
+
+    expect(planned).toMatchObject({
+      stage: "solution-plan-ready",
+      solutionPlanRepairAttempt: 0,
+      lastErrorCode: undefined,
+    });
+    expect(bed.model.designCalls).toHaveLength(1);
+    expect(bed.model.solutionCreateCalls).toHaveLength(1);
+    expect(bed.model.solutionReviseCalls).toHaveLength(0);
+    expect(bed.capabilityRetrievalCalls).toEqual([creativeBlueprint()]);
+    expect(bed.assetCatalogCalls).toEqual([{ tenantId: TENANT_ID, workspaceId: WORKSPACE_ID }]);
+    expect(bed.builds.enqueues).toHaveLength(0);
+    expect(planned.changePlanId).toBeUndefined();
+    expect(planned.planHash).toBeUndefined();
+    expect(planned.buildAuthorization).toBeUndefined();
+    expect(planned.buildJobId).toBeUndefined();
+    expect(planned.previewArtifactId).toBeUndefined();
+  });
+
   it("routes an ordinary question to idle without planning or building", async () => {
     const bed = createBed();
     const ctx = seed(bed);

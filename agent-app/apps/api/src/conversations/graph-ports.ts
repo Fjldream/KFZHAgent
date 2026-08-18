@@ -2,6 +2,7 @@ import type {
   BuildJobPort,
   AcceptedBlueprintConfirmationPort,
   AssetCatalogPort,
+  CapabilityRetrievalPort,
   ModulePlanCompilerPort,
   UiImplementationCompilerPort,
   WorkspaceQueryPort,
@@ -16,9 +17,11 @@ import {
   deriveGuid,
   importNativeClientPackage,
   inspectClientProject,
+  getDesignKnowledgeSnapshot,
+  retrieveCapabilities,
 } from "@kf/domain-client";
 import type { ArtifactStorage } from "@kf/artifact-storage";
-import type { ChangePlan } from "@kf/contracts";
+import type { ChangePlan, CustomerSolutionBlueprint } from "@kf/contracts";
 import type { ModuleArtifactAuthority } from "@kf/build-jobs";
 import type { Prisma } from "@prisma/client";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -39,6 +42,19 @@ import { REVIEWED_KF36_MODULE_RUNTIME_EVIDENCE } from "./module-runtime-evidence
 /** How many recent messages are handed to the model (mirrors the graph bound). */
 const RECENT_MESSAGE_LIMIT = 20;
 
+/** Nest token for the production-local deterministic retrieval boundary. */
+export const CAPABILITY_RETRIEVAL_PORT = Symbol("CAPABILITY_RETRIEVAL_PORT");
+
+/** Pure in-process retrieval: immutable design knowledge in, bounded candidates out. */
+export const LOCAL_CAPABILITY_RETRIEVAL_PORT: CapabilityRetrievalPort = Object.freeze({
+  retrieve({ blueprint }: { blueprint: CustomerSolutionBlueprint }) {
+    return Promise.resolve(retrieveCapabilities({
+      blueprint,
+      knowledge: getDesignKnowledgeSnapshot(),
+    }));
+  },
+});
+
 export interface GraphPorts {
   workspaceQuery: WorkspaceQueryPort;
   changePlanRepository: ChangePlanRepository;
@@ -47,6 +63,7 @@ export interface GraphPorts {
   acceptedBlueprintConfirmation: AcceptedBlueprintConfirmationPort;
   modulePlanCompiler: ModulePlanCompilerPort;
   assetCatalog: AssetCatalogPort;
+  capabilityRetrieval: CapabilityRetrievalPort;
 }
 
 export function createGraphPorts(
@@ -99,7 +116,9 @@ export function createGraphPorts(
       if (workspace === null) return undefined;
       return {
         mode: workspace.mode === "upload" ? "upload" : "new",
-        generationWorkflow: workspace.generationWorkflow === "module-v1" ? "module-v1" : "legacy",
+        generationWorkflow: workspace.generationWorkflow === "module-v1"
+          ? "module-v1"
+          : workspace.generationWorkflow === "creative-v2" ? "creative-v2" : "legacy",
       };
     },
     async getRevisionSummary({ tenantId, revisionId }) {
@@ -327,7 +346,16 @@ export function createGraphPorts(
     },
   };
 
-  return { workspaceQuery, changePlanRepository, buildJobPort, uiImplementationCompiler, acceptedBlueprintConfirmation, modulePlanCompiler, assetCatalog };
+  return {
+    workspaceQuery,
+    changePlanRepository,
+    buildJobPort,
+    uiImplementationCompiler,
+    acceptedBlueprintConfirmation,
+    modulePlanCompiler,
+    assetCatalog,
+    capabilityRetrieval: LOCAL_CAPABILITY_RETRIEVAL_PORT,
+  };
 }
 
 function withoutUnverifiedModuleSources(spec: import("@kf/contracts").UIImplementationSpec): import("@kf/contracts").UIImplementationSpec {

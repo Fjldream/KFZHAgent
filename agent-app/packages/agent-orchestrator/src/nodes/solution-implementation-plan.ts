@@ -1,4 +1,5 @@
 import {
+  AssetRecordSchema,
   CapabilityCandidateBundleSchema,
   CustomerSolutionBlueprintSchema,
   SolutionImplementationPlanSchema,
@@ -81,12 +82,25 @@ export function createSolutionImplementationPlanNode(deps: SolutionGraphDeps) {
     ) {
       return { ...failure(0), lastErrorCode: "SOLUTION_PLANNING_FAILED" };
     }
+    if (deps.assetCatalog === undefined) {
+      return { ...failure(0), lastErrorCode: "SOLUTION_PLANNING_FAILED" };
+    }
+    let assets;
+    try {
+      assets = AssetRecordSchema.array().max(100).parse(await deps.assetCatalog.list({
+        tenantId: state.tenantId,
+        workspaceId: state.workspaceId,
+      }));
+    } catch {
+      return { ...failure(0), lastErrorCode: "SOLUTION_PLANNING_FAILED" };
+    }
 
     const baseContext: ModelPortContext = {
       tenantId: state.tenantId,
       userId: state.userId,
       workspaceId: state.workspaceId,
       conversationId: state.conversationId,
+      generationWorkflow: "creative-v2",
       recentMessages: state.recentMessages,
       conversationSummary: state.conversationSummary,
       revisionSummary: state.revisionSummary,
@@ -95,6 +109,7 @@ export function createSolutionImplementationPlanNode(deps: SolutionGraphDeps) {
       requirementText: latestUserMessage(state),
       confirmedSolutionBlueprint: blueprint,
       capabilityCandidates: candidates,
+      assetCatalog: assets,
     };
 
     let initial: PlanValidation;

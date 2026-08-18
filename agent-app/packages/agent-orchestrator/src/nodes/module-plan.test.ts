@@ -132,6 +132,8 @@ class ModuleModel implements ModelPort {
   createDesignPlan(): never { throw new Error("unused"); }
   createUiImplementation(): never { throw new Error("unused"); }
   reviseUiImplementation(): never { throw new Error("unused"); }
+  createSolutionImplementationPlan(): never { throw new Error("unused"); }
+  reviseSolutionImplementationSubtree(): never { throw new Error("unused"); }
   explainValidation(): never { throw new Error("unused"); }
 }
 

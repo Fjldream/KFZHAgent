@@ -1,24 +1,30 @@
 import type {
   AssetRecord,
   ChangePlan,
+  CustomerSolutionBlueprint,
   CustomerEffectBlueprint,
   DesignPlan,
   ModulePlan,
   ModulePlanOperation,
+  SolutionImplementationPlan,
   UIImplementationSpec,
   ValidationReport,
 } from "@kf/contracts";
 import {
   canonicalModuleCompilationHash,
   AssetRecordSchema,
+  CapabilityCandidateBundleSchema,
   changePlanSchema,
   CustomerEffectBlueprintSchema,
+  CustomerSolutionBlueprintSchema,
   ModulePlanSchema,
   solutionId,
+  SolutionImplementationPlanSchema,
+  canonicalServerHash,
   UIImplementationSpecSchema,
 } from "@kf/contracts";
 import { readVerifiedAcceptedBlueprintArtifact } from "@kf/build-jobs";
-import { listControlCapabilities } from "@kf/domain-client";
+import { getDesignKnowledgeSnapshot, listControlCapabilities } from "@kf/domain-client";
 import { KF_DESIGN_PRINCIPLES_FULL, KF_MODULE_PLANNING_PRINCIPLES } from "./kf-design-principles.js";
 import type {
   ClassifyIntentResult,
@@ -153,6 +159,38 @@ const MODULE_PLAN_SYSTEM_PROMPT = `你是 KingFusion 模块规划 Agent，只输
 - 只输出合法 JSON；不要 Markdown 围栏、解释、注释或额外文本。
 
 ${KF_MODULE_PLANNING_PRINCIPLES}`;
+
+const SOLUTION_BLUEPRINT_SYSTEM_PROMPT = `你是客户解决方案蓝图顾问。你只输出严格的 kf-design-plan/v3 JSON，不输出 Markdown、注释或额外说明。
+
+蓝图必须完整表达客户任务、多页面地图、每页信息架构与阅读顺序、真实行业内容和模拟示例、重要状态、跨页面交互旅程、视觉方向，以及对信息架构和交互方式的创造性重新设计。
+蓝图只描述客户能理解和确认的产品体验。禁止任何平台生成标识符、控件或模块种类、能力编号、通用唯一标识符、坐标、实现配置和工程内部字段。`;
+
+const SOLUTION_IMPLEMENTATION_SYSTEM_PROMPT = `你是完整交互式前端解决方案的语义规划 Agent。只输出严格的 kf-solution-implementation/v1 JSON，不输出 Markdown、注释或额外说明。
+
+必须覆盖完整页面、浮层、真实行业模拟数据、本地状态、用户动作，以及脚本的声明式意图和步骤。组合经验只是可选灵感，可以自由组合或忽略组合经验。
+只能使用候选包中明确提供的控件、布局和组合经验；详细能力知识只用于对应候选能力。
+不得输出可执行 JavaScript 或源代码，不得输出选择器、样式规则、几何坐标、平台原生 JSON、平台生成标识符或编译器配置。实际脚本实现属于后续阶段。`;
+
+const MAX_CREATIVE_PROMPT_BYTES = 128_000;
+const MAX_CREATIVE_RECENT_MESSAGES = 12;
+const MAX_CREATIVE_MESSAGE_CHARS = 2_000;
+const MAX_CREATIVE_REQUIREMENT_CHARS = 6_000;
+const MAX_SOLUTION_ASSETS = 100;
+const MAX_SOLUTION_REJECTION_REASONS = 20;
+const MAX_SOLUTION_REJECTION_REASON_CHARS = 300;
+const FORBIDDEN_SOLUTION_OUTPUT_KEYS = new Set([
+  "guid",
+  "objectType",
+  "uiModelType",
+  "styleDataNew",
+  "selector",
+  "css",
+  "x",
+  "y",
+  "leftTopPt",
+  "linkId",
+  "configureData",
+]);
 
 const MAX_MODULE_PLANNING_CATALOG = 50;
 const MAX_MODULE_PLANNING_ASSETS = 100;
@@ -926,6 +964,208 @@ function normalizeUiImplementationAliases(raw: unknown): unknown {
   };
 }
 
+function assertNoForbiddenSolutionKeys(value: unknown, path: readonly string[] = []): void {
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => assertNoForbiddenSolutionKeys(entry, [...path, String(index)]));
+    return;
+  }
+  if (value === null || typeof value !== "object") return;
+  for (const key of Object.keys(value)) {
+    if (FORBIDDEN_SOLUTION_OUTPUT_KEYS.has(key)) {
+      throw new DeepSeekModelOutputError(`forbidden field ${key} at ${[...path, key].join(".")}`);
+    }
+    assertNoForbiddenSolutionKeys((value as Record<string, unknown>)[key], [...path, key]);
+  }
+}
+
+function assertCreativePromptBound(system: string, user: string): void {
+  const bytes = new TextEncoder().encode(`${system}\n${user}`).byteLength;
+  if (bytes > MAX_CREATIVE_PROMPT_BYTES) {
+    throw new DeepSeekModelOutputError(`creative planning prompt exceeds 128000 UTF-8 byte bound (${bytes})`);
+  }
+}
+
+function boundedCreativeConversation(input: ModelPortContext): readonly { role: "user" | "assistant"; content: string }[] {
+  return input.recentMessages.slice(-MAX_CREATIVE_RECENT_MESSAGES).map((message) => ({
+    role: message.role,
+    content: message.content.slice(0, MAX_CREATIVE_MESSAGE_CHARS),
+  }));
+}
+
+function buildCreativeBlueprintPrompt(
+  input: ModelPortContext,
+  options: { revising: boolean; rejectionReasons?: readonly string[]; extractionRepair?: boolean },
+): string {
+  const previousBlueprint = input.designPlan?.schema === "kf-design-plan/v3"
+    ? CustomerSolutionBlueprintSchema.parse(input.designPlan)
+    : undefined;
+  const rejectionReasons = (options.rejectionReasons ?? [])
+    .slice(0, MAX_SOLUTION_REJECTION_REASONS)
+    .map((reason) => reason.slice(0, MAX_SOLUTION_REJECTION_REASON_CHARS));
+  const context = {
+    requirement: (input.requirementText ?? "").slice(0, MAX_CREATIVE_REQUIREMENT_CHARS),
+    recentConversation: boundedCreativeConversation(input),
+    ...(options.revising && previousBlueprint !== undefined ? { previousBlueprint } : {}),
+    ...(rejectionReasons.length > 0 ? { rejectionReasons } : {}),
+  };
+  const prompt = [
+    ...(options.extractionRepair
+      ? ["上一轮仅因 JSON 不完整或无法解析而失败；请重新输出同一份完整对象，只修复 JSON 结构。"]
+      : []),
+    options.revising
+      ? "请在上一版基础上回应客户修改，保留未要求改变的有效体验，并重新输出完整蓝图。"
+      : "请从客户任务出发提出完整方案，不照搬常见后台模板；创造性地重新设计信息架构和交互方式。",
+    "输出 schema 固定为 kf-design-plan/v3，必须包含：客户可读名称与目标、受众和场景、多页面地图、每页用途/区域/阅读顺序、每区具体内容与真实行业模拟示例、状态和交互、跨页交互旅程、视觉方向、客户验收场景和待确认问题。",
+    "蓝图上下文(JSON)：",
+    JSON.stringify(context),
+  ].join("\n");
+  assertCreativePromptBound(SOLUTION_BLUEPRINT_SYSTEM_PROMPT, prompt);
+  return prompt;
+}
+
+function detailedDesignKnowledge(candidates: ReturnType<typeof CapabilityCandidateBundleSchema.parse>) {
+  const knowledge = getDesignKnowledgeSnapshot();
+  const detailedIds = new Set(candidates.detailedCapabilityIds);
+  const exactProfiles = <T extends { capabilityId: string }>(profiles: readonly T[]): readonly T[] => {
+    const selected = profiles.filter((profile) => detailedIds.has(profile.capabilityId));
+    if (
+      selected.length !== candidates.detailedCapabilityIds.length
+      || selected.some((profile, index) => profile.capabilityId !== candidates.detailedCapabilityIds[index])
+    ) {
+      throw new DeepSeekModelOutputError("detailed capability profiles do not exactly match candidate IDs");
+    }
+    return selected;
+  };
+  const controlProfiles = exactProfiles(knowledge.controlDesignProfiles).map((profile) => ({
+    capabilityId: profile.capabilityId,
+    version: profile.version,
+    semanticRoles: profile.semanticRoles,
+    useFor: profile.useFor,
+    avoidFor: profile.avoidFor,
+    dataShapes: profile.dataShapes,
+    densities: profile.densities,
+    regions: profile.regions,
+    recommendedCompanions: profile.recommendedCompanions.filter((id) => detailedIds.has(id)),
+    alternatives: profile.alternatives
+      .map((alternative) => ({
+        when: alternative.when,
+        capabilityIds: alternative.capabilityIds.filter((id) => detailedIds.has(id)),
+      }))
+      .filter((alternative) => alternative.capabilityIds.length > 0),
+    parentRoles: profile.parentRoles,
+    childRoles: profile.childRoles,
+    designNotes: profile.designNotes,
+  }));
+  const styleProfiles = exactProfiles(knowledge.styleCapabilityProfiles).map((profile) => ({
+    capabilityId: profile.capabilityId,
+    version: profile.version,
+    parts: profile.parts.map((part) => ({
+      id: part.id,
+      availability: part.availability,
+      semanticRoles: part.semanticRoles,
+      properties: part.properties,
+      states: part.states,
+      notes: part.notes,
+    })),
+  }));
+  const scriptProfiles = exactProfiles(knowledge.scriptCapabilityProfiles).map((profile) => ({
+    capabilityId: profile.capabilityId,
+    version: profile.version,
+    availability: profile.availability,
+    actions: profile.actions.map((action) => ({
+      semanticAction: action.semanticAction,
+      availability: action.availability,
+    })),
+    events: profile.events.map((event) => ({
+      semanticEvent: event.semanticEvent,
+      availability: event.availability,
+      arguments: event.arguments.map((argument) => ({ name: argument.name })),
+    })),
+    methods: profile.methods.map((method) => ({
+      semanticMethod: method.semanticMethod,
+      availability: method.availability,
+      parameters: method.parameters,
+      returns: method.returns,
+    })),
+    lifecycleEvents: profile.initialization.lifecycleEvents,
+    limitations: profile.limitations,
+  }));
+  const recipeIds = new Set(candidates.regions.flatMap((region) => region.recipes.map((recipe) => recipe.id)));
+  const recipes = knowledge.compositionRecipes
+    .filter((recipe) => recipeIds.has(recipe.id))
+    .map((recipe) => ({
+      id: recipe.id,
+      version: recipe.version,
+      purpose: recipe.purpose,
+      useFor: recipe.useFor,
+      avoidFor: recipe.avoidFor,
+      requiredRoles: recipe.requiredRoles.map((role) => ({
+        role: role.role,
+        capabilityCandidates: role.capabilityCandidates.filter((id) => detailedIds.has(id)),
+      })),
+      optionalRoles: recipe.optionalRoles.map((role) => ({
+        role: role.role,
+        capabilityCandidates: role.capabilityCandidates.filter((id) => detailedIds.has(id)),
+      })),
+      layoutPrinciples: recipe.layoutPrinciples,
+      interactionFlow: recipe.interactionFlow,
+      substitutions: recipe.substitutions.map((substitution) => ({
+        when: substitution.when,
+        replaceRole: substitution.replaceRole,
+        withCapabilities: substitution.withCapabilities.filter((id) => detailedIds.has(id)),
+      })),
+      designNotes: recipe.designNotes,
+    }));
+  return { controlProfiles, styleProfiles, scriptProfiles, recipes };
+}
+
+function buildSolutionImplementationPrompt(input: ModelPortContext, revising: boolean, extractionRepair = false): string {
+  const blueprint = CustomerSolutionBlueprintSchema.parse(input.confirmedSolutionBlueprint);
+  const capabilityCandidates = CapabilityCandidateBundleSchema.parse(input.capabilityCandidates);
+  if (capabilityCandidates.blueprintHash !== canonicalServerHash(blueprint)) {
+    throw new DeepSeekModelOutputError("candidate bundle does not match confirmed solution blueprint");
+  }
+  const assetCatalog = AssetRecordSchema.array().max(MAX_SOLUTION_ASSETS).parse(input.assetCatalog ?? []);
+  const previousPlan = input.previousSolutionImplementationPlan === undefined
+    ? undefined
+    : SolutionImplementationPlanSchema.parse(input.previousSolutionImplementationPlan);
+  if (previousPlan !== undefined) assertNoForbiddenSolutionKeys(previousPlan);
+  const rejectionReasons = (input.solutionPlanRejectionReasons ?? []).map((reason) => {
+    if (typeof reason !== "string" || reason.trim().length === 0 || reason.length > MAX_SOLUTION_REJECTION_REASON_CHARS) {
+      throw new DeepSeekModelOutputError("solution plan rejection reason exceeds bound");
+    }
+    return reason;
+  });
+  if (rejectionReasons.length > MAX_SOLUTION_REJECTION_REASONS) {
+    throw new DeepSeekModelOutputError("too many solution plan rejection reasons");
+  }
+  if (revising && rejectionReasons.length === 0) {
+    throw new DeepSeekModelOutputError("semantic repair requires bounded rejection reasons");
+  }
+  const payload = {
+    blueprint,
+    capabilityCandidates,
+    detailedDesignKnowledge: detailedDesignKnowledge(capabilityCandidates),
+    assetCatalog,
+    ...(previousPlan === undefined ? {} : { previousPlan }),
+    ...(rejectionReasons.length === 0 ? {} : { rejectionReasons }),
+  };
+  const prompt = [
+    ...(extractionRepair
+      ? ["上一轮仅因 JSON 不完整或无法解析而失败；请重新输出同一份完整对象，只修复 JSON 结构。"]
+      : []),
+    revising
+      ? "根据拒绝原因局部修复语义子树，保持所有无关页面、节点、状态和动作不变，并返回完整计划。"
+      : "将已确认蓝图转换为完整交互式前端语义计划。",
+    "每个蓝图区必须被页面或浮层覆盖；提供真实行业模拟数据、本地状态、动作，以及脚本的声明式意图和步骤。组合经验可以自由组合或忽略组合经验。",
+    "不得输出可执行 JavaScript 或源代码；不得输出选择器、样式规则、几何、平台原生 JSON、平台生成标识符或编译器字段。",
+    "语义规划输入(JSON)：",
+    JSON.stringify(payload),
+  ].join("\n");
+  assertCreativePromptBound(SOLUTION_IMPLEMENTATION_SYSTEM_PROMPT, prompt);
+  return prompt;
+}
+
 export class DeepSeekModelPort implements ModelPort {
   private readonly baseUrl: string;
   private readonly model: string;
@@ -1030,6 +1270,12 @@ export class DeepSeekModelPort implements ModelPort {
     input: ModelPortContext,
     opts?: { revising?: boolean; rejectionReasons?: string[] },
   ): Promise<DesignPlan> {
+    if (input.generationWorkflow === "creative-v2") {
+      return this.generateCreativeBlueprint(input, {
+        revising: opts?.revising === true,
+        ...(opts?.rejectionReasons === undefined ? {} : { rejectionReasons: opts.rejectionReasons }),
+      });
+    }
     const revising = opts?.revising === true;
     const recentConversation = input.recentMessages
       .slice(-20)
@@ -1104,6 +1350,40 @@ export class DeepSeekModelPort implements ModelPort {
       );
     }
     return bindSingleKfPageNavigation(parsed.data, input.editableEntities);
+  }
+
+  private async requestCreativeBlueprint(
+    input: ModelPortContext,
+    options: { revising: boolean; rejectionReasons?: readonly string[]; extractionRepair?: boolean },
+  ): Promise<CustomerSolutionBlueprint> {
+    const raw = await this.chatJson(
+      SOLUTION_BLUEPRINT_SYSTEM_PROMPT,
+      buildCreativeBlueprintPrompt(input, options),
+      { maxTokens: 8000 },
+    );
+    assertNoForbiddenSolutionKeys(raw);
+    const parsed = CustomerSolutionBlueprintSchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new DeepSeekModelOutputError(
+        `solution blueprint failed zod gate: ${parsed.error.issues
+          .slice(0, 3)
+          .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+          .join("; ")}`,
+      );
+    }
+    return parsed.data;
+  }
+
+  private async generateCreativeBlueprint(
+    input: ModelPortContext,
+    options: { revising: boolean; rejectionReasons?: readonly string[] },
+  ): Promise<CustomerSolutionBlueprint> {
+    try {
+      return await this.requestCreativeBlueprint(input, options);
+    } catch (error) {
+      if (!(error instanceof JsonExtractionError)) throw error;
+      return this.requestCreativeBlueprint(input, { ...options, extractionRepair: true });
+    }
   }
 
   async createProjectDesign(input: ModelPortContext): Promise<ProjectDesign> {
@@ -1464,6 +1744,49 @@ export class DeepSeekModelPort implements ModelPort {
 
   reviseModulePlan(input: ModelPortContext): Promise<ModulePlan> {
     return this.generateModulePlan(input, true);
+  }
+
+  private async requestSolutionImplementationPlan(
+    input: ModelPortContext,
+    revising: boolean,
+    extractionRepair = false,
+  ): Promise<SolutionImplementationPlan> {
+    const raw = await this.chatJson(
+      SOLUTION_IMPLEMENTATION_SYSTEM_PROMPT,
+      buildSolutionImplementationPrompt(input, revising, extractionRepair),
+      { maxTokens: 12_000 },
+    );
+    assertNoForbiddenSolutionKeys(raw);
+    const parsed = SolutionImplementationPlanSchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new DeepSeekModelOutputError(
+        `solution implementation plan failed zod gate: ${parsed.error.issues
+          .slice(0, 3)
+          .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+          .join("; ")}`,
+      );
+    }
+    return parsed.data;
+  }
+
+  private async generateSolutionImplementationPlan(
+    input: ModelPortContext,
+    revising: boolean,
+  ): Promise<SolutionImplementationPlan> {
+    try {
+      return await this.requestSolutionImplementationPlan(input, revising);
+    } catch (error) {
+      if (!(error instanceof JsonExtractionError)) throw error;
+      return this.requestSolutionImplementationPlan(input, revising, true);
+    }
+  }
+
+  createSolutionImplementationPlan(input: ModelPortContext): Promise<SolutionImplementationPlan> {
+    return this.generateSolutionImplementationPlan(input, false);
+  }
+
+  reviseSolutionImplementationSubtree(input: ModelPortContext): Promise<SolutionImplementationPlan> {
+    return this.generateSolutionImplementationPlan(input, true);
   }
 
   /** 构造 create/revise 共用的计划生成 prompt。 */

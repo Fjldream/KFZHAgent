@@ -167,7 +167,10 @@ function bed(initial: unknown, repaired: unknown = plan()) {
   };
   return {
     modelPort,
-    node: createSolutionImplementationPlanNode({ modelPort } as never),
+    node: createSolutionImplementationPlanNode({
+      modelPort,
+      assetCatalog: { list: vi.fn().mockResolvedValue([]) },
+    } as never),
   };
 }
 
@@ -201,6 +204,67 @@ describe("solution implementation planning node", () => {
       capabilityCandidates,
     });
     expect({ ...state(priorBuild), ...update }).toMatchObject(priorBuild);
+  });
+
+  it("loads bounded model-safe asset metadata through AssetCatalogPort for semantic planning", async () => {
+    const modelPort = {
+      createSolutionImplementationPlan: vi.fn().mockResolvedValue(plan()),
+      reviseSolutionImplementationSubtree: vi.fn().mockResolvedValue(plan()),
+    };
+    const assetCatalog = {
+      list: vi.fn().mockResolvedValue([{
+        id: "visitor-portrait",
+        kind: "image",
+        name: "访客头像",
+        mimeType: "image/png",
+        description: "已登记的访客详情图片",
+      }]),
+    };
+    const node = createSolutionImplementationPlanNode({ modelPort, assetCatalog } as never);
+
+    const update = await node(state() as never);
+
+    expect(update).toMatchObject({ stage: "solution-plan-ready", lastErrorCode: undefined });
+    expect(assetCatalog.list).toHaveBeenCalledWith({ tenantId: "tenant-1", workspaceId: "workspace-1" });
+    expect(modelPort.createSolutionImplementationPlan).toHaveBeenCalledWith(expect.objectContaining({
+      assetCatalog: [{
+        id: "visitor-portrait",
+        kind: "image",
+        name: "访客头像",
+        mimeType: "image/png",
+        description: "已登记的访客详情图片",
+      }],
+    }));
+  });
+
+  it("fails closed before model access when asset metadata is missing or exceeds the bound", async () => {
+    const modelPort = {
+      createSolutionImplementationPlan: vi.fn().mockResolvedValue(plan()),
+      reviseSolutionImplementationSubtree: vi.fn().mockResolvedValue(plan()),
+    };
+    const missingPort = createSolutionImplementationPlanNode({ modelPort } as never);
+    const oversizedPort = createSolutionImplementationPlanNode({
+      modelPort,
+      assetCatalog: {
+        list: vi.fn().mockResolvedValue(Array.from({ length: 101 }, (_, index) => ({
+          id: `asset-${index}`,
+          kind: "image",
+          name: `资源 ${index}`,
+          mimeType: "image/png",
+          description: "模型安全元数据",
+        }))),
+      },
+    } as never);
+
+    await expect(missingPort(state() as never)).resolves.toMatchObject({
+      stage: "idle",
+      lastErrorCode: "SOLUTION_PLANNING_FAILED",
+    });
+    await expect(oversizedPort(state() as never)).resolves.toMatchObject({
+      stage: "idle",
+      lastErrorCode: "SOLUTION_PLANNING_FAILED",
+    });
+    expect(modelPort.createSolutionImplementationPlan).not.toHaveBeenCalled();
   });
 
   it("performs one localized repair after real candidate-reference validation fails", async () => {

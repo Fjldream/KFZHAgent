@@ -8,12 +8,20 @@ import { DeepSeekModelPort } from "./deepseek-model.js";
 import { ArtifactsModule } from "../artifacts/artifacts.module.js";
 import { AssetsModule } from "../assets/assets.module.js";
 import { DeliveryModule } from "../delivery/delivery.module.js";
+import {
+  CAPABILITY_RETRIEVAL_PORT,
+  LOCAL_CAPABILITY_RETRIEVAL_PORT,
+} from "./graph-ports.js";
 
 @Module({
   imports: [ArtifactsModule, AssetsModule, DeliveryModule],
   controllers: [ConversationController, ChangePlanController],
   providers: [
     ConversationService,
+    {
+      provide: CAPABILITY_RETRIEVAL_PORT,
+      useValue: LOCAL_CAPABILITY_RETRIEVAL_PORT,
+    },
     {
       provide: MODEL_PORT,
       // 默认 stub 抛 ModelPortNotConfiguredError（不产生任何计划）；

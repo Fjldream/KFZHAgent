@@ -6,6 +6,76 @@ import { createHmacModuleArtifactAuthority } from "@kf/build-jobs";
 import { createGraphPorts } from "./graph-ports.js";
 
 describe("conversation graph workspace query", () => {
+  it("round-trips creative-v2 from the persisted workspace routing field", async () => {
+    const findFirst = vi.fn().mockResolvedValue({ mode: "new", generationWorkflow: "creative-v2" });
+    const ports = createGraphPorts({ solutionWorkspace: { findFirst } }, {} as never);
+
+    await expect(ports.workspaceQuery.getWorkspaceRouting({ tenantId: "tenant-1", workspaceId: "workspace-1" }))
+      .resolves.toEqual({ mode: "new", generationWorkflow: "creative-v2" });
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { id: "workspace-1", tenantId: "tenant-1" },
+      select: { mode: true, generationWorkflow: true },
+    });
+  });
+
+  it("retrieves creative capability candidates locally without Prisma, assets, network, or model access", async () => {
+    const forbiddenAccess = new Proxy({}, {
+      get(_target, property) {
+        throw new Error(`unexpected external access: ${String(property)}`);
+      },
+    });
+    const ports = createGraphPorts(forbiddenAccess as never, forbiddenAccess as never);
+    const blueprint = {
+      schema: "kf-design-plan/v3" as const,
+      displayName: "园区访客中心",
+      objective: "帮助前台审核访客预约",
+      audiences: ["园区前台"],
+      scenarios: ["预约审核"],
+      pages: [{
+        id: "visitor-overview",
+        title: "访客总览",
+        purpose: "处理当日预约",
+        readingOrder: ["visitor-list"],
+        regions: [{
+          id: "visitor-list",
+          purpose: "浏览访客记录",
+          semanticRoles: ["record-list"],
+          dataShape: "record-list",
+          density: "comfortable" as const,
+          importance: "primary" as const,
+          content: ["访客姓名", "预约时段"],
+          sampleData: [{ 访客姓名: "陈嘉宁", 预约时段: "14:30" }],
+          interactions: [],
+          states: ["待审核"],
+          visualIntent: "清晰可信",
+        }],
+      }],
+      journeys: [{
+        id: "review-visitor",
+        actor: "园区前台",
+        goal: "审核预约",
+        steps: [{ pageId: "visitor-overview", regionId: "visitor-list", action: "选择预约", result: "显示详情" }],
+        completion: "完成预约审核",
+      }],
+      visualDirection: {
+        tone: "专业友好",
+        colors: ["深海蓝"],
+        typography: "层级清晰",
+        spacingAndSurfaces: "舒适留白",
+      },
+      acceptanceScenarios: ["可以查看并审核预约"],
+      openQuestions: [],
+    };
+
+    const first = await ports.capabilityRetrieval.retrieve({ blueprint });
+    const second = await ports.capabilityRetrieval.retrieve({ blueprint: structuredClone(blueprint) });
+
+    expect(second).toEqual(first);
+    expect(first.schema).toBe("kf-capability-candidates/v1");
+    expect(first.regions).toHaveLength(1);
+    expect(first.detailedCapabilityIds.length).toBeLessThanOrEqual(25);
+  });
+
   it("returns the latest twenty persisted messages in stable chronological order", async () => {
     const sameTimestamp = new Date("2026-08-12T05:00:24.000Z");
     const rows = Array.from({ length: 25 }, (_, index) => ({

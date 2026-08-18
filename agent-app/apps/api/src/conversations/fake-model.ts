@@ -1,4 +1,4 @@
-import type { ChangePlan, DesignPlan, ModulePlan, UIImplementationSpec } from "@kf/contracts";
+import type { ChangePlan, DesignPlan, ModulePlan, SolutionImplementationPlan, UIImplementationSpec } from "@kf/contracts";
 import { ModulePlanSchema, solutionId } from "@kf/contracts";
 import type {
   ClassifyIntentResult,
@@ -167,6 +167,14 @@ export class DeterministicFakeModelPort implements ModelPort {
     } catch (error) {
       return Promise.reject(error instanceof Error ? error : new Error(String(error)));
     }
+  }
+
+  createSolutionImplementationPlan(): Promise<SolutionImplementationPlan> {
+    return Promise.reject(new Error("deterministic fake creative-v2 semantic planning is not configured"));
+  }
+
+  reviseSolutionImplementationSubtree(): Promise<SolutionImplementationPlan> {
+    return Promise.reject(new Error("deterministic fake creative-v2 semantic repair is not configured"));
   }
 
   createChangePlan(input: ModelPortContext): Promise<ChangePlan> {

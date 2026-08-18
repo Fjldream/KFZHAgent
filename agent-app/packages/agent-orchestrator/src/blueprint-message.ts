@@ -1,17 +1,17 @@
 import {
-  CustomerEffectBlueprintSchema,
-  type CustomerEffectBlueprint,
+  DesignPlanSchema,
+  type DesignPlan,
 } from "@kf/contracts";
 
 const BLUEPRINT_MESSAGE_PREFIX = "KF_BLUEPRINT_MESSAGE/1\n";
 
 export interface DecodedBlueprintMessage {
-  blueprint: CustomerEffectBlueprint;
+  blueprint: DesignPlan;
   revision: number;
 }
 
 export function encodeBlueprintMessage(
-  blueprint: CustomerEffectBlueprint,
+  blueprint: DesignPlan,
   revision: number,
 ): string {
   return `${BLUEPRINT_MESSAGE_PREFIX}${JSON.stringify({
@@ -27,7 +27,7 @@ export function decodeBlueprintMessage(content: string): DecodedBlueprintMessage
   try {
     const value = JSON.parse(content.slice(BLUEPRINT_MESSAGE_PREFIX.length)) as Record<string, unknown>;
     const revision = value["revision"];
-    const blueprint = CustomerEffectBlueprintSchema.safeParse(value["blueprint"]);
+    const blueprint = DesignPlanSchema.safeParse(value["blueprint"]);
     if (
       value["kind"] !== "kf-customer-effect-blueprint" ||
       value["version"] !== 1 ||

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createDesignPlanNode } from "./design-plan.js";
 import { createPlanChangeNode } from "./plan-change.js";
 import { intentValues } from "../schemas/intent.js";
-import type { CustomerEffectBlueprint } from "@kf/contracts";
+import type { CustomerEffectBlueprint, CustomerSolutionBlueprint } from "@kf/contracts";
 import { decodeBlueprintMessage } from "../blueprint-message.js";
 
 const designPlan: CustomerEffectBlueprint = {
@@ -61,6 +61,43 @@ const revisedDesignPlan: CustomerEffectBlueprint = {
   acceptanceCriteria: [...designPlan.acceptanceCriteria, "展示异常级别和负责人"],
 };
 
+const creativeBlueprint: CustomerSolutionBlueprint = {
+  schema: "kf-design-plan/v3",
+  displayName: "访客协同中心",
+  objective: "帮助园区前台处理访客预约",
+  audiences: ["园区前台"],
+  scenarios: ["预约审核"],
+  pages: [{
+    id: "visitor-overview",
+    title: "访客总览",
+    purpose: "处理当日预约",
+    readingOrder: ["visitor-list"],
+    regions: [{
+      id: "visitor-list",
+      purpose: "浏览访客记录",
+      semanticRoles: ["record-list"],
+      dataShape: "record-list",
+      density: "comfortable",
+      importance: "primary",
+      content: ["访客姓名", "预约时段"],
+      sampleData: [{ 访客姓名: "陈嘉宁", 预约时段: "14:30" }],
+      interactions: [],
+      states: ["待审核"],
+      visualIntent: "清晰可信",
+    }],
+  }],
+  journeys: [{
+    id: "review-visitor",
+    actor: "园区前台",
+    goal: "审核预约",
+    steps: [{ pageId: "visitor-overview", regionId: "visitor-list", action: "选择预约", result: "显示详情" }],
+    completion: "完成预约审核",
+  }],
+  visualDirection: { tone: "专业友好", colors: ["深海蓝"], typography: "层级清晰", spacingAndSurfaces: "舒适留白" },
+  acceptanceScenarios: ["可以查看并审核预约"],
+  openQuestions: [],
+};
+
 function makeDesignDeps() {
   const modelPort = { createDesignPlan: vi.fn().mockResolvedValue(designPlan) };
   const workspaceQuery = {
@@ -108,6 +145,35 @@ describe("intent schema design-loop values", () => {
 });
 
 describe("design-plan node", () => {
+  it("passes the bounded workflow discriminator and validates/encodes v3 only for creative-v2", async () => {
+    const { deps, modelPort, workspaceQuery } = makeDesignDeps();
+    modelPort.createDesignPlan.mockResolvedValue(creativeBlueprint);
+    const node = createDesignPlanNode(deps);
+
+    const update = await node(baseState({ generationWorkflow: "creative-v2" }) as never);
+
+    expect(update).toMatchObject({ designPlan: creativeBlueprint, stage: "design-review" });
+    expect(modelPort.createDesignPlan).toHaveBeenCalledWith(
+      expect.objectContaining({ generationWorkflow: "creative-v2" }),
+      { revising: false },
+    );
+    const encoded = workspaceQuery.appendMessage.mock.calls[0]?.[0]?.content as string;
+    expect(decodeBlueprintMessage(encoded)).toEqual({ blueprint: creativeBlueprint, revision: 1 });
+  });
+
+  it("does not accept a v3 blueprint from module-v1 or legacy design planning", async () => {
+    const { deps, modelPort, workspaceQuery } = makeDesignDeps();
+    modelPort.createDesignPlan.mockResolvedValue(creativeBlueprint);
+    const node = createDesignPlanNode(deps);
+
+    const moduleResult = await node(baseState({ generationWorkflow: "module-v1" }) as never);
+    const legacyResult = await node(baseState({ generationWorkflow: "legacy" }) as never);
+
+    expect(moduleResult).toMatchObject({ stage: "idle", lastErrorCode: "INVALID_MODEL_OUTPUT" });
+    expect(legacyResult).toMatchObject({ stage: "idle", lastErrorCode: "INVALID_MODEL_OUTPUT" });
+    expect(workspaceQuery.appendMessage).not.toHaveBeenCalled();
+  });
+
   it("generates a design plan, hashes it, shows it, and returns to design-review", async () => {
     const { deps, modelPort, workspaceQuery } = makeDesignDeps();
     const node = createDesignPlanNode(deps);
@@ -164,9 +230,11 @@ describe("design-plan node", () => {
 
     const content = workspaceQuery.appendMessage.mock.calls[0]?.[0]?.content as string;
     const decoded = decodeBlueprintMessage(content);
-    expect(decoded?.blueprint.overview.objective).toBe("让值班人员快速掌握生产状态");
-    expect(decoded?.blueprint.modules[0]?.sampleData).toEqual([{ label: "当日产量", value: "12,680 件" }]);
-    expect(decoded?.blueprint.acceptanceCriteria).toEqual(["首屏展示产量、达成率和异常数"]);
+    expect(decoded?.blueprint.schema).toBe("kf-design-plan/v2");
+    if (decoded?.blueprint.schema !== "kf-design-plan/v2") throw new Error("expected v2 customer effect blueprint");
+    expect(decoded.blueprint.overview.objective).toBe("让值班人员快速掌握生产状态");
+    expect(decoded.blueprint.modules[0]?.sampleData).toEqual([{ label: "当日产量", value: "12,680 件" }]);
+    expect(decoded.blueprint.acceptanceCriteria).toEqual(["首屏展示产量、达成率和异常数"]);
   });
 
   it("revises (not regenerates) when revising=true, bumping revision and changing the hash", async () => {
