@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import {
   canonicalServerHash,
-  SemanticValueSchema,
   SolutionImplementationPlanSchema,
   type ActionPlan,
   type LayoutNode,
@@ -11,7 +10,6 @@ import {
   type NodeIntent,
   type RegisteredModuleNode,
   type SemanticEventBinding,
-  type SemanticValue,
   type SolutionImplementationPlan,
 } from "@kf/contracts";
 
@@ -66,27 +64,6 @@ function uniqueProvenanceIds(modules: readonly ModulePlanModule[]): string[] {
     }
   }
   return result;
-}
-
-function toSemanticValue(value: unknown): SemanticValue {
-  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
-  if (Array.isArray(value)) return { kind: "list", items: value.map(toSemanticValue) };
-  return {
-    kind: "record",
-    fields: Object.entries(value as Record<string, unknown>)
-      .map(([name, fieldValue]) => ({ name, value: toSemanticValue(fieldValue) })),
-  };
-}
-
-function convertContent(content: string | undefined): SemanticValue | undefined {
-  if (content === undefined) return undefined;
-  try {
-    const converted = toSemanticValue(JSON.parse(content) as unknown);
-    const parsed = SemanticValueSchema.safeParse(converted);
-    return parsed.success ? parsed.data : content;
-  } catch {
-    return content;
-  }
 }
 
 function moduleIntent(module: ModulePlanModule): NodeIntent {
@@ -181,7 +158,7 @@ function convertModule(
     semanticEvent: semanticEvent as SemanticEventBinding["semanticEvent"],
     actionIds,
   }));
-  const content = convertContent(module.content);
+  const content = module.content;
   return {
     id: module.id,
     kind: "registered-module",

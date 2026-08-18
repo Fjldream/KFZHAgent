@@ -44,7 +44,8 @@ describe("adaptLegacyModulePlan", () => {
   it("preserves module identity, content, provenance, asset binding, order, and visual intent", () => {
     const legacy = createPortalPlan();
     const source = legacy.pages[0]!.modules[0]!;
-    source.content = JSON.stringify({ headline: "Legacy hero", tags: ["one", "two"], featured: true, count: 2 });
+    const sourceContent = "{ \"headline\": \"  Legacy hero  \", \"tags\": [\"one\", \"two\"], \"featured\": true, \"count\": 2 }";
+    source.content = sourceContent;
     source.sourceBlueprintModuleIds = ["Hero region A", "Hero secondary region"];
     source.placement = {
       region: "main",
@@ -71,15 +72,7 @@ describe("adaptLegacyModulePlan", () => {
       assetId: source.assetId,
       sourceBlueprintRegionIds: ["Hero region A", "Hero secondary region"],
       slots: [],
-      content: {
-        kind: "record",
-        fields: [
-          { name: "headline", value: "Legacy hero" },
-          { name: "tags", value: { kind: "list", items: ["one", "two"] } },
-          { name: "featured", value: true },
-          { name: "count", value: 2 },
-        ],
-      },
+      content: sourceContent,
       intent: {
         importance: "secondary",
         visualWeight: 3,
@@ -91,6 +84,22 @@ describe("adaptLegacyModulePlan", () => {
         align: "center",
       },
     }));
+  });
+
+  it.each([
+    ["whitespace-bearing JSON", "{\"label\":\"  Ready  \"}"],
+    ["formatted and ordered JSON", "{ \"z\": 1, \"a\": [3, 2, 1] }"],
+    ["non-JSON text", "Ready: preserve this exact legacy value"],
+  ])("keeps %s byte-for-byte as inert content", (_caseName, content) => {
+    const legacy = createPortalPlan();
+    legacy.pages[0]!.modules[0]!.content = content;
+    const persisted = ModulePlanSchema.parse(legacy);
+
+    const adapted = adaptLegacyModulePlan(persisted);
+    const module = flattenNodes(adapted.pages[0]!.root)
+      .find((node) => node.kind === "registered-module" && node.id === "portal-hero")!;
+
+    expect(module).toMatchObject({ content });
   });
 
   it("creates reachable navigation actions on their owning registered modules without faking unsupported effects", () => {
