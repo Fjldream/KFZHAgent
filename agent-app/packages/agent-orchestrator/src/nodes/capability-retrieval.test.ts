@@ -14,7 +14,7 @@ const blueprint: CustomerSolutionBlueprint = {
     id: "visitor-page",
     title: "访客总览",
     purpose: "查看当日预约",
-    readingOrder: ["visitor-list"],
+    readingOrder: ["visitor-list", "visitor-summary"],
     regions: [{
       id: "visitor-list",
       purpose: "浏览访客记录",
@@ -27,6 +27,18 @@ const blueprint: CustomerSolutionBlueprint = {
       interactions: ["选择访客"],
       states: ["initial"],
       visualIntent: "清晰可信",
+    }, {
+      id: "visitor-summary",
+      purpose: "概览访客数量",
+      semanticRoles: ["status-summary"],
+      dataShape: "summary",
+      density: "comfortable",
+      importance: "secondary",
+      content: ["今日访客数"],
+      sampleData: [{ 今日访客数: "12" }],
+      interactions: ["查看访客列表"],
+      states: ["initial"],
+      visualIntent: "醒目简洁",
     }],
   }],
   journeys: [{
@@ -61,6 +73,12 @@ function candidates(blueprintHash = canonicalServerHash(blueprint)): CapabilityC
     regions: [{
       pageId: "visitor-page",
       regionId: "visitor-list",
+      controls: [ranked("text"), ranked("button"), ranked("easyui.1")],
+      layouts: [ranked("layout.2")],
+      recipes: [ranked("list-workspace")],
+    }, {
+      pageId: "visitor-page",
+      regionId: "visitor-summary",
       controls: [ranked("text"), ranked("button"), ranked("easyui.1")],
       layouts: [ranked("layout.2")],
       recipes: [ranked("list-workspace")],
@@ -136,6 +154,34 @@ describe("capability retrieval node", () => {
       capabilityCandidates: undefined,
       capabilityCandidatesHash: undefined,
     });
+  });
+
+  it("rejects a same-hash candidate bundle missing a confirmed blueprint page-region", async () => {
+    const forged = candidates();
+    forged.regions = forged.regions.slice(0, 1);
+    const retrieve = vi.fn().mockResolvedValue(forged);
+    const node = createCapabilityRetrievalNode({ capabilityRetrieval: { retrieve } } as never);
+
+    const update = await node(state() as never);
+
+    expect(forged.blueprintHash).toBe(canonicalServerHash(blueprint));
+    expect(update).toMatchObject({ stage: "idle", lastErrorCode: "CAPABILITY_RETRIEVAL_FAILED" });
+  });
+
+  it("rejects a same-hash candidate bundle with an extra page-region identity", async () => {
+    const forged = candidates();
+    forged.regions = [...forged.regions, {
+      ...forged.regions[0]!,
+      pageId: "forged-page",
+      regionId: "forged-region",
+    }];
+    const retrieve = vi.fn().mockResolvedValue(forged);
+    const node = createCapabilityRetrievalNode({ capabilityRetrieval: { retrieve } } as never);
+
+    const update = await node(state() as never);
+
+    expect(forged.blueprintHash).toBe(canonicalServerHash(blueprint));
+    expect(update).toMatchObject({ stage: "idle", lastErrorCode: "CAPABILITY_RETRIEVAL_FAILED" });
   });
 });
 

@@ -267,4 +267,36 @@ describe("solution implementation planning node", () => {
     expect(modelPort.createSolutionImplementationPlan).not.toHaveBeenCalled();
     expect(modelPort.reviseSolutionImplementationSubtree).not.toHaveBeenCalled();
   });
+
+  it("fails configuration preflight without calls when the primary planning method is missing", async () => {
+    const reviseSolutionImplementationSubtree = vi.fn().mockResolvedValue(plan());
+    const node = createSolutionImplementationPlanNode({
+      modelPort: { reviseSolutionImplementationSubtree },
+    } as never);
+
+    const update = await node(state() as never);
+
+    expect(update).toMatchObject({
+      stage: "idle",
+      lastErrorCode: "SOLUTION_PLANNING_MODEL_NOT_CONFIGURED",
+      solutionPlanRepairAttempt: undefined,
+    });
+    expect(reviseSolutionImplementationSubtree).not.toHaveBeenCalled();
+  });
+
+  it("fails configuration preflight without a partial call when the repair method is missing", async () => {
+    const createSolutionImplementationPlan = vi.fn().mockResolvedValue(plan());
+    const node = createSolutionImplementationPlanNode({
+      modelPort: { createSolutionImplementationPlan },
+    } as never);
+
+    const update = await node(state() as never);
+
+    expect(update).toMatchObject({
+      stage: "idle",
+      lastErrorCode: "SOLUTION_PLANNING_MODEL_NOT_CONFIGURED",
+      solutionPlanRepairAttempt: undefined,
+    });
+    expect(createSolutionImplementationPlan).not.toHaveBeenCalled();
+  });
 });

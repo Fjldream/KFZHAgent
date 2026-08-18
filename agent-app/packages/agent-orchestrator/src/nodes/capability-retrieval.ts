@@ -16,6 +16,23 @@ const FAILED_UPDATE = {
   lastErrorCode: "CAPABILITY_RETRIEVAL_FAILED",
 } as const;
 
+function pageRegionIdentity(pageId: string, regionId: string): string {
+  return `${pageId}\u0000${regionId}`;
+}
+
+function hasExactPageRegionCoverage(
+  blueprint: NonNullable<AgentGraphStateValue["designPlan"]> & { schema: "kf-design-plan/v3" },
+  bundle: NonNullable<AgentGraphStateValue["capabilityCandidates"]>,
+): boolean {
+  const expected = new Set(blueprint.pages.flatMap((page) =>
+    page.regions.map((region) => pageRegionIdentity(page.id, region.id)),
+  ));
+  const actual = new Set(bundle.regions.map((region) =>
+    pageRegionIdentity(region.pageId, region.regionId),
+  ));
+  return expected.size === actual.size && [...expected].every((identity) => actual.has(identity));
+}
+
 /** Retrieves a bounded candidate bundle without invoking the model. */
 export function createCapabilityRetrievalNode(deps: SolutionGraphDeps) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
@@ -31,7 +48,11 @@ export function createCapabilityRetrievalNode(deps: SolutionGraphDeps) {
       const parsedBundle = CapabilityCandidateBundleSchema.safeParse(
         await deps.capabilityRetrieval.retrieve({ blueprint }),
       );
-      if (!parsedBundle.success || parsedBundle.data.blueprintHash !== blueprintHash) {
+      if (
+        !parsedBundle.success
+        || parsedBundle.data.blueprintHash !== blueprintHash
+        || !hasExactPageRegionCoverage(blueprint, parsedBundle.data)
+      ) {
         return FAILED_UPDATE;
       }
       const bundle = parsedBundle.data;

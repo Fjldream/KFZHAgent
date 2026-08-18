@@ -46,11 +46,27 @@ function failure(attempt: 0 | 1): AgentGraphUpdate {
   };
 }
 
+function dependencyFailure(): AgentGraphUpdate {
+  return {
+    solutionImplementationPlan: undefined,
+    solutionImplementationPlanHash: undefined,
+    solutionPlanRepairAttempt: undefined,
+    stage: "idle",
+    lastErrorCode: "SOLUTION_PLANNING_MODEL_NOT_CONFIGURED",
+  };
+}
+
 /** Produces one semantic plan and permits at most one localized repair. */
 export function createSolutionImplementationPlanNode(deps: SolutionGraphDeps) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
     if (state.generationWorkflow !== "creative-v2") {
       return { ...failure(0), lastErrorCode: "SOLUTION_PLANNING_FAILED" };
+    }
+    if (
+      deps.modelPort.createSolutionImplementationPlan === undefined
+      || deps.modelPort.reviseSolutionImplementationSubtree === undefined
+    ) {
+      return dependencyFailure();
     }
     const parsedBlueprint = CustomerSolutionBlueprintSchema.safeParse(state.designPlan);
     const parsedCandidates = CapabilityCandidateBundleSchema.safeParse(state.capabilityCandidates);
@@ -62,7 +78,6 @@ export function createSolutionImplementationPlanNode(deps: SolutionGraphDeps) {
     if (
       candidates.blueprintHash !== canonicalServerHash(blueprint)
       || state.capabilityCandidatesHash !== canonicalServerHash(candidates)
-      || deps.modelPort.createSolutionImplementationPlan === undefined
     ) {
       return { ...failure(0), lastErrorCode: "SOLUTION_PLANNING_FAILED" };
     }
@@ -91,8 +106,6 @@ export function createSolutionImplementationPlanNode(deps: SolutionGraphDeps) {
     if (initial.reasons.length === 0 && initial.plan !== undefined) {
       return success(initial.plan, 0);
     }
-    if (deps.modelPort.reviseSolutionImplementationSubtree === undefined) return failure(0);
-
     let repaired: PlanValidation;
     try {
       repaired = validatePlan(await deps.modelPort.reviseSolutionImplementationSubtree({
