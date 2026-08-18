@@ -266,6 +266,23 @@ const declarativeStepTextSchema = semanticTextSchema.superRefine((value, ctx) =>
   }
 });
 const hashSchema = z.string().regex(/^[0-9a-f]{64}$/);
+const LEGACY_MODULE_PLAN_CANDIDATE_BUNDLE_HASH = "3e147b2b8351b526f10dd9dfc47c4c93bbfc29814d791400e3e5b02c38220840";
+
+/** Exact source-contract shapes admitted only by the legacy compatibility branch. */
+const legacyStableIdSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(100)
+  .regex(/^[A-Za-z][A-Za-z0-9_-]*$/)
+  .refine((value) => !canonicalUuid.test(value), "GUID-shaped identifiers are not allowed");
+const legacyProvenanceIdSchema = z.string().trim().min(1).max(100);
+const legacyModuleTextSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(2_000)
+  .refine((value) => !/<script\b|javascript\s*:|data\s*:\s*text\s*\/\s*html/i.test(value));
 
 export const SemanticScalarSchema = z.union([
   z.string().trim().max(2_000),
@@ -280,14 +297,14 @@ export type SemanticValue =
   | { kind: "list"; items: SemanticValue[] }
   | { kind: "record"; fields: Array<{ name: string; value: SemanticValue }> };
 
-const SemanticValueSchema: z.ZodType<SemanticValue> = z.lazy(() =>
+const SemanticValueShapeSchema: z.ZodType<SemanticValue> = z.lazy(() =>
   z.union([
     SemanticScalarSchema,
-    z.object({ kind: z.literal("list"), items: z.array(SemanticValueSchema).max(32) }).strict(),
+    z.object({ kind: z.literal("list"), items: z.array(SemanticValueShapeSchema).max(32) }).strict(),
     z
       .object({
         kind: z.literal("record"),
-        fields: z.array(z.object({ name: semanticPropertyNameSchema, value: SemanticValueSchema }).strict()).max(32),
+        fields: z.array(z.object({ name: semanticPropertyNameSchema, value: SemanticValueShapeSchema }).strict()).max(32),
       })
       .strict()
       .superRefine((value, ctx) => {
@@ -301,6 +318,12 @@ const SemanticValueSchema: z.ZodType<SemanticValue> = z.lazy(() =>
       }),
   ]),
 );
+
+/** A standalone semantic value includes the same safety/depth checks as a native-v3 plan. */
+export const SemanticValueSchema: z.ZodType<SemanticValue> = SemanticValueShapeSchema.superRefine((value, ctx) => {
+  validateImplementationFree(value, ctx);
+  validateSemanticValueDepth(value, ctx, [], 0);
+});
 
 const WidthIntentSchema = z
   .object({
@@ -544,6 +567,60 @@ export const SolutionNodeSchema: z.ZodType<SolutionNode> = z.lazy(() =>
   ]),
 );
 
+const legacyNodeCommonShape = {
+  id: legacyStableIdSchema,
+  sourceBlueprintRegionIds: z.array(legacyProvenanceIdSchema).min(1).max(12),
+  intent: NodeIntentSchema,
+};
+
+const LegacySolutionNodeSchema: z.ZodType<LayoutNode | RegisteredModuleNode> = z.lazy(() =>
+  z.discriminatedUnion("kind", [
+    z
+      .object({
+        ...legacyNodeCommonShape,
+        kind: z.literal("layout"),
+        layout: z.enum([
+          "row",
+          "column",
+          "grid",
+          "asymmetric-grid",
+          "split",
+          "stack",
+          "dock",
+          "sidebar-content",
+          "master-detail",
+          "scroll-region",
+          "overlay-anchor",
+        ]),
+        children: z.array(z.lazy(() => LegacySolutionNodeSchema)).min(1).max(24),
+      })
+      .strict(),
+    z
+      .object({
+        ...legacyNodeCommonShape,
+        kind: z.literal("registered-module"),
+        moduleKind: moduleKindSchema,
+        templateVersion: templateVersionSchema,
+        variant: legacyStableIdSchema,
+        title: legacyModuleTextSchema,
+        content: z.union([SemanticValueSchema, legacyModuleTextSchema]).optional(),
+        assetId: legacyStableIdSchema.optional(),
+        eventBindings: z.array(SemanticEventBindingSchema).max(16),
+        slots: z
+          .array(
+            z
+              .object({
+                slotId: legacyStableIdSchema,
+                children: z.array(z.lazy(() => LegacySolutionNodeSchema)).min(1).max(24),
+              })
+              .strict(),
+          )
+          .max(0),
+      })
+      .strict(),
+  ]),
+);
+
 export const RoleStyleIntentSchema = z
   .object({
     role: stableIdSchema,
@@ -775,6 +852,28 @@ export const ScriptPlanSchema = z
   .discriminatedUnion("kind", [TemplateScriptPlanSchema, CustomScriptPlanSchema])
   .superRefine((script, ctx) => validateImplementationFree(script, ctx));
 
+const LegacySolutionPageSchema = z
+  .object({
+    id: legacyStableIdSchema,
+    title: legacyModuleTextSchema,
+    purpose: legacyModuleTextSchema,
+    canvas: z.literal("responsive"),
+    sourceBlueprintPageId: legacyProvenanceIdSchema,
+    sourceBlueprintRegionIds: z.array(legacyProvenanceIdSchema).min(1).max(600),
+    initialStateIds: z.array(legacyStableIdSchema).max(0),
+    root: LegacySolutionNodeSchema,
+  })
+  .strict();
+
+const LegacyNavigateActionSchema = z
+  .object({
+    id: legacyStableIdSchema,
+    kind: z.literal("navigate-page"),
+    targetPageId: legacyStableIdSchema,
+    afterActionIds: z.array(legacyStableIdSchema).max(16).default([]),
+  })
+  .strict();
+
 const SolutionImplementationPlanObjectSchema = z
   .object({
     schema: z.literal("kf-solution-implementation/v1"),
@@ -792,6 +891,24 @@ const SolutionImplementationPlanObjectSchema = z
   })
   .strict();
 
+const NativeSolutionImplementationPlanObjectSchema = SolutionImplementationPlanObjectSchema.extend({
+  candidateBundleHash: hashSchema.refine(
+    (value) => value !== LEGACY_MODULE_PLAN_CANDIDATE_BUNDLE_HASH,
+    "legacy compatibility discriminator is reserved for adapted ModulePlan snapshots",
+  ),
+});
+
+const LegacySolutionImplementationPlanObjectSchema = SolutionImplementationPlanObjectSchema.extend({
+  candidateBundleHash: z.literal(LEGACY_MODULE_PLAN_CANDIDATE_BUNDLE_HASH),
+  roleStyles: z.array(RoleStyleIntentSchema).max(0),
+  mockData: z.array(MockDataSetSchema).max(0),
+  localState: z.array(LocalStateDefinitionSchema).max(0),
+  pages: z.array(LegacySolutionPageSchema).min(1).max(5),
+  overlays: z.array(OverlayPlanSchema).max(0),
+  actions: z.array(LegacyNavigateActionSchema).max(3_000),
+  scripts: z.array(ScriptPlanSchema).max(0),
+});
+
 export type RoleStyleIntent = z.infer<typeof RoleStyleIntentSchema>;
 export type MockDataSet = z.infer<typeof MockDataSetSchema>;
 export type LocalStateDefinition = z.infer<typeof LocalStateDefinitionSchema>;
@@ -802,12 +919,23 @@ export type ScriptPlan = z.infer<typeof ScriptPlanSchema>;
 export type ThemeIntent = z.infer<typeof ThemeSpecSchema>;
 export type SolutionImplementationPlan = z.infer<typeof SolutionImplementationPlanObjectSchema>;
 
-export const SolutionImplementationPlanSchema: z.ZodType<SolutionImplementationPlan> =
-  SolutionImplementationPlanObjectSchema.superRefine((plan, ctx) => {
+const NativeSolutionImplementationPlanSchema =
+  NativeSolutionImplementationPlanObjectSchema.superRefine((plan, ctx) => {
     validateImplementationFree(plan, ctx);
     validateSemanticValueContainers(plan, ctx);
     validatePlanReferences(plan, ctx);
   });
+
+const LegacySolutionImplementationPlanSchema =
+  LegacySolutionImplementationPlanObjectSchema.superRefine((plan, ctx) => {
+    validateSemanticValueContainers(plan, ctx);
+    validatePlanReferences(plan, ctx);
+  });
+
+export const SolutionImplementationPlanSchema: z.ZodType<SolutionImplementationPlan> = z.union([
+  NativeSolutionImplementationPlanSchema,
+  LegacySolutionImplementationPlanSchema,
+]);
 
 function implementationTextIssue(value: string, path: Array<string | number>): string | undefined {
   if (canonicalUuidToken.test(value)) return "GUID values are not allowed";
@@ -900,6 +1028,7 @@ function validateSemanticValueDepth(value: SemanticValue, ctx: z.RefinementCtx, 
 }
 
 function validatePlanReferences(plan: SolutionImplementationPlan, ctx: z.RefinementCtx): void {
+  const legacyCompatibility = plan.candidateBundleHash === LEGACY_MODULE_PLAN_CANDIDATE_BUNDLE_HASH;
   const allIds = new Set<string>();
   const pageIds = new Set<string>();
   const pageSourceIds = new Set<string>();
@@ -919,6 +1048,26 @@ function validatePlanReferences(plan: SolutionImplementationPlan, ctx: z.Refinem
 
   const registerId = (id: string, path: Array<string | number>): void => {
     if (allIds.has(id)) ctx.addIssue({ code: "custom", path, message: `duplicate global stable id: ${id}` });
+    allIds.add(id);
+  };
+  const registerPageId = (id: string, path: Array<string | number>): void => {
+    if (!legacyCompatibility) {
+      registerId(id, path);
+      return;
+    }
+    if (pageIds.has(id) || (allIds.has(id) && !nodeIds.has(id))) {
+      ctx.addIssue({ code: "custom", path, message: `duplicate global stable id: ${id}` });
+    }
+    allIds.add(id);
+  };
+  const registerNodeId = (id: string, path: Array<string | number>): void => {
+    if (!legacyCompatibility) {
+      registerId(id, path);
+      return;
+    }
+    if (nodeIds.has(id) || (allIds.has(id) && !pageIds.has(id))) {
+      ctx.addIssue({ code: "custom", path, message: `duplicate global stable id: ${id}` });
+    }
     allIds.add(id);
   };
 
@@ -941,23 +1090,24 @@ function validatePlanReferences(plan: SolutionImplementationPlan, ctx: z.Refinem
 
   const regionOwners = new Map<string, string>();
   plan.pages.forEach((page, pageIndex) => {
-    registerId(page.id, ["pages", pageIndex, "id"]);
+    registerPageId(page.id, ["pages", pageIndex, "id"]);
     pageIds.add(page.id);
     if (pageSourceIds.has(page.sourceBlueprintPageId)) {
       ctx.addIssue({ code: "custom", path: ["pages", pageIndex, "sourceBlueprintPageId"], message: `duplicate blueprint page provenance: ${page.sourceBlueprintPageId}` });
     }
     pageSourceIds.add(page.sourceBlueprintPageId);
     page.sourceBlueprintRegionIds.forEach((regionId, regionIndex) => {
-      const owner = regionOwners.get(regionId);
+      const ownershipKey = `${page.sourceBlueprintPageId}\u0000${regionId}`;
+      const owner = regionOwners.get(ownershipKey);
       if (owner !== undefined) {
         ctx.addIssue({ code: "custom", path: ["pages", pageIndex, "sourceBlueprintRegionIds", regionIndex], message: `blueprint region already belongs to ${owner}: ${regionId}` });
       }
-      regionOwners.set(regionId, page.sourceBlueprintPageId);
+      regionOwners.set(ownershipKey, page.sourceBlueprintPageId);
     });
     page.initialStateIds.forEach((stateId, stateIndex) => {
       if (!stateIds.has(stateId)) ctx.addIssue({ code: "custom", path: ["pages", pageIndex, "initialStateIds", stateIndex], message: `unknown state id: ${stateId}` });
     });
-    collectNode(page.root, ["pages", pageIndex, "root"], page, 0, nodeEntries, registerId, nodeIds, controlIds, ctx);
+    collectNode(page.root, ["pages", pageIndex, "root"], page, 0, nodeEntries, registerNodeId, nodeIds, controlIds, ctx);
   });
 
   plan.overlays.forEach((overlay, overlayIndex) => {
@@ -982,7 +1132,7 @@ function validatePlanReferences(plan: SolutionImplementationPlan, ctx: z.Refinem
       ctx.addIssue({ code: "custom", path: ["overlays", overlayIndex, "visibleStateId"], message: "overlay visibility requires a boolean state" });
     }
     validateOverlayNodeProvenance(overlay.root, new Set(overlay.sourceBlueprintRegionIds), ["overlays", overlayIndex, "root"], ctx);
-    collectNode(overlay.root, ["overlays", overlayIndex, "root"], hostPage, 0, nodeEntries, registerId, nodeIds, controlIds, ctx);
+    collectNode(overlay.root, ["overlays", overlayIndex, "root"], hostPage, 0, nodeEntries, registerNodeId, nodeIds, controlIds, ctx);
   });
 
   plan.actions.forEach((action, index) => {

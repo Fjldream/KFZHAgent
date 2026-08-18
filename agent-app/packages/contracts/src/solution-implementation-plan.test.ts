@@ -395,6 +395,64 @@ describe("SolutionImplementationPlanSchema", () => {
     expect(SolutionImplementationPlanSchema.safeParse(duplicateBlueprintPage).success).toBe(false);
   });
 
+  it("keys blueprint region ownership by source page and region", () => {
+    const plan = cloneFixture();
+    plan.pages.push({
+      id: "second-page",
+      title: "Second page",
+      purpose: "Show a second semantic page",
+      canvas: "responsive",
+      sourceBlueprintPageId: "second-blueprint",
+      sourceBlueprintRegionIds: ["equipment-region"],
+      initialStateIds: [],
+      root: {
+        kind: "layout",
+        id: "second-root",
+        sourceBlueprintRegionIds: ["equipment-region"],
+        intent,
+        layout: "column",
+        children: [{
+          kind: "registered-module",
+          id: "second-module",
+          sourceBlueprintRegionIds: ["equipment-region"],
+          intent,
+          moduleKind: "content.summary",
+          templateVersion: "1.0.0",
+          variant: "default",
+          title: "Second module",
+          eventBindings: [],
+          slots: [],
+        }],
+      },
+    });
+
+    expect(SolutionImplementationPlanSchema.safeParse(plan).success).toBe(true);
+  });
+
+  it("keeps legacy identifier and content exemptions unavailable to native-v3 plans", () => {
+    const mutations: Array<(plan: any) => void> = [
+      (plan) => { plan.pages[0].id = "script"; },
+      (plan) => { findNode(plan, "equipment-detail-module").id = "css"; },
+      (plan) => { findNode(plan, "equipment-detail-module").variant = "guid"; },
+      (plan) => { findNode(plan, "equipment-detail-module").sourceBlueprintRegionIds = ["a0b1c2d3-e4f5-6789-abcd-ef0123456789"]; },
+      (plan) => { findNode(plan, "equipment-detail-module").content = "return selected;"; },
+    ];
+    for (const mutate of mutations) {
+      const plan = cloneFixture();
+      mutate(plan);
+      expect(SolutionImplementationPlanSchema.safeParse(plan).success).toBe(false);
+    }
+
+    const tooManyRegions = cloneFixture();
+    tooManyRegions.pages[0].sourceBlueprintRegionIds = Array.from({ length: 13 }, (_, index) => `region-${index}`);
+    tooManyRegions.pages[0].root.sourceBlueprintRegionIds = [...tooManyRegions.pages[0].sourceBlueprintRegionIds];
+    expect(SolutionImplementationPlanSchema.safeParse(tooManyRegions).success).toBe(false);
+
+    const creativeWithLegacyDiscriminator = cloneFixture();
+    creativeWithLegacyDiscriminator.candidateBundleHash = "3e147b2b8351b526f10dd9dfc47c4c93bbfc29814d791400e3e5b02c38220840";
+    expect(SolutionImplementationPlanSchema.safeParse(creativeWithLegacyDiscriminator).success).toBe(false);
+  });
+
   it("scopes overlay descendants to the overlay's declared blueprint regions", () => {
     const plan = cloneFixture();
     plan.pages[0].sourceBlueprintRegionIds.push("maintenance-region");

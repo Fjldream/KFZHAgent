@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
 import {
   canonicalServerHash,
+  SemanticValueSchema,
   SolutionImplementationPlanSchema,
   type ActionPlan,
+  type LayoutNode,
   type ModuleInteraction,
   type ModulePlan,
   type ModulePlanModule,
@@ -79,7 +81,9 @@ function toSemanticValue(value: unknown): SemanticValue {
 function convertContent(content: string | undefined): SemanticValue | undefined {
   if (content === undefined) return undefined;
   try {
-    return toSemanticValue(JSON.parse(content) as unknown);
+    const converted = toSemanticValue(JSON.parse(content) as unknown);
+    const parsed = SemanticValueSchema.safeParse(converted);
+    return parsed.success ? parsed.data : content;
   } catch {
     return content;
   }
@@ -100,17 +104,43 @@ function moduleIntent(module: ModulePlanModule): NodeIntent {
   };
 }
 
-function rootIntent(): NodeIntent {
+function rootIntent(readingOrder = 0): NodeIntent {
   return {
     importance: "primary",
     visualWeight: 5,
-    readingOrder: 0,
+    readingOrder,
     density: "comfortable",
     groupWith: [],
     width: { mode: "fill" },
     height: { mode: "content" },
     align: "stretch",
   };
+}
+
+function groupLayout(mode: ModulePlan["pages"][number]["mode"]): LayoutNode["layout"] {
+  return mode === "dashboard-grid" ? "grid" : "column";
+}
+
+function groupModules(
+  modules: RegisteredModuleNode[],
+  pageId: string,
+  mode: ModulePlan["pages"][number]["mode"],
+  usedIds: Set<string>,
+): Array<RegisteredModuleNode | LayoutNode> {
+  if (modules.length <= 24) return modules;
+  const groups: LayoutNode[] = [];
+  for (let start = 0; start < modules.length; start += 24) {
+    const children = modules.slice(start, start + 24);
+    groups.push({
+      id: allocateGeneratedId("legacy-group", `${pageId}\u0000${start / 24}`, usedIds),
+      kind: "layout",
+      layout: groupLayout(mode),
+      sourceBlueprintRegionIds: [children[0]!.sourceBlueprintRegionIds[0]!],
+      intent: rootIntent(start / 24),
+      children,
+    });
+  }
+  return groups;
 }
 
 function convertNavigation(
@@ -177,6 +207,7 @@ export function adaptLegacyModulePlan(plan: ModulePlan): SolutionImplementationP
   const actions: ActionPlan[] = [];
   const pages = plan.pages.map((page) => {
     const sourceBlueprintRegionIds = uniqueProvenanceIds(page.modules);
+    const modules = page.modules.map((module) => convertModule(module, page.id, usedIds, actions));
     return {
       id: page.id,
       title: page.title,
@@ -189,9 +220,9 @@ export function adaptLegacyModulePlan(plan: ModulePlan): SolutionImplementationP
         id: allocateGeneratedId("legacy-layout", page.id, usedIds),
         kind: "layout" as const,
         layout: LAYOUT_BY_MODE[page.mode],
-        sourceBlueprintRegionIds: [...sourceBlueprintRegionIds],
+        sourceBlueprintRegionIds: [sourceBlueprintRegionIds[0]!],
         intent: rootIntent(),
-        children: page.modules.map((module) => convertModule(module, page.id, usedIds, actions)),
+        children: groupModules(modules, page.id, page.mode, usedIds),
       },
     };
   });
