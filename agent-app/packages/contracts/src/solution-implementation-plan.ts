@@ -147,7 +147,7 @@ const knownCssPseudoClassNames = new Set([
 const standardHtmlAndSvgTagNames = new Set([
   "a", "abbr", "address", "animate", "animatemotion", "animatetransform", "area", "article", "aside", "audio",
   "b", "base", "bdi", "bdo", "blockquote", "body", "br", "button", "canvas", "caption", "circle", "cite",
-  "clippath", "code", "col", "colgroup", "data", "datalist", "dd", "defs", "del", "desc", "details", "dfn",
+  "clippath", "code", "col", "colgroup", "data", "datalist", "dd", "defs", "del", "desc", "details", "dfn", "discard",
   "dialog", "div", "dl", "dt", "ellipse", "em", "embed", "feblend", "fecolormatrix", "fecomponenttransfer",
   "fecomposite", "feconvolvematrix", "fediffuselighting", "fedisplacementmap", "fedistantlight", "fedropshadow",
   "feflood", "fefunca", "fefuncb", "fefuncg", "fefuncr", "fegaussianblur", "feimage", "femerge", "femergenode",
@@ -160,7 +160,7 @@ const standardHtmlAndSvgTagNames = new Set([
   "ruby", "s", "samp", "script", "search", "section", "select", "selectedcontent", "set", "slot", "small", "source",
   "span", "stop", "strong", "style", "sub", "summary", "sup", "svg", "switch", "symbol", "table", "tbody", "td",
   "template", "text", "textarea", "textpath", "tfoot", "th", "thead", "time", "title", "tr", "track", "tspan", "u",
-  "ul", "use", "var", "video", "view", "wbr",
+  "ul", "unknown", "use", "var", "video", "view", "wbr",
 ]);
 
 function normalizeName(value: string): string {
