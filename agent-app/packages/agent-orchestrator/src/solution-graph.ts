@@ -106,6 +106,9 @@ export function routeAfterClassify(state: AgentGraphStateValue, deps?: SolutionG
     // Unsupported domain requests never reach planning or the build queue.
     return END;
   }
+  if (state.generationWorkflow === "creative-v2") {
+    return routeCreativeAfterClassify(state, deps);
+  }
   switch (state.intent) {
     case "QUESTION":
     case "ROLLBACK":
@@ -135,6 +138,28 @@ export function routeAfterClassify(state: AgentGraphStateValue, deps?: SolutionG
       return "cancel-plan";
     case "BUILD":
       return "enqueue-build";
+    default:
+      return END;
+  }
+}
+
+/** Phase 2 creative planning is terminal at semantic-plan readiness and has no legacy build authority. */
+function routeCreativeAfterClassify(state: AgentGraphStateValue, deps?: SolutionGraphDeps): string {
+  switch (state.intent) {
+    case "CLARIFY":
+      return "clarify";
+    case "NEW_REQUIREMENT":
+    case "MODIFY_REQUIREMENT":
+    case "REVISE_DESIGN":
+      return "design-plan";
+    case "CONFIRM_DESIGN":
+      return routeAfterDesignConfirmation(state, deps);
+    case "QUESTION":
+    case "ROLLBACK":
+    case "CONFIRM_BUILD":
+    case "CONFIRM_PLAN":
+    case "CANCEL_PLAN":
+    case "BUILD":
     default:
       return END;
   }

@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { canonicalModuleCompilationHash, canonicalServerHash } from "@kf/contracts";
 import { createHmacModuleArtifactAuthority } from "@kf/build-jobs";
-import { compileModulePlan, createDefaultModuleRegistry, getDesignKnowledgeSnapshot } from "@kf/domain-client";
+import { adaptLegacyModulePlan, compileModulePlan, createDefaultModuleRegistry, getDesignKnowledgeSnapshot } from "@kf/domain-client";
 import { DeepSeekModelPort, deriveExactModulePlanOperations, extractJson, DeepSeekModelOutputError, validateModulePlanForContext } from "./deepseek-model.js";
 import { DeterministicFakeModelPort } from "./fake-model.js";
 
@@ -731,6 +731,7 @@ describe("DeepSeekModelPort", () => {
 
     expect(result).toEqual(blueprint);
     const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    const blueprintSystemPrompt = body.messages[0].content as string;
     const capturedBlueprintPrompt = body.messages.map((message: { content: string }) => message.content).join("\n");
     expect(capturedBlueprintPrompt).toContain("kf-design-plan/v3");
     expect(capturedBlueprintPrompt).toContain("客户任务");
@@ -742,6 +743,11 @@ describe("DeepSeekModelPort", () => {
     expect(capturedBlueprintPrompt).not.toContain("expectedKind");
     expect(capturedBlueprintPrompt).not.toContain("content.hero");
     expect(capturedBlueprintPrompt).not.toContain("11111111-1111-4111-8111-111111111111");
+    expect(blueprintSystemPrompt).toContain('"pages":[{"id"');
+    expect(blueprintSystemPrompt).toContain('"regions":[{"id"');
+    expect(blueprintSystemPrompt).toContain('"readingOrder"');
+    expect(blueprintSystemPrompt).toContain('"journeys":[{"id"');
+    expect(blueprintSystemPrompt).toContain('"acceptanceScenarios"');
     expect(new TextEncoder().encode(capturedBlueprintPrompt).byteLength).toBeLessThanOrEqual(128_000);
   });
 
@@ -797,6 +803,7 @@ describe("DeepSeekModelPort", () => {
     await expect(port.createSolutionImplementationPlan(context)).resolves.toEqual(plan);
 
     const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    const implementationSystemPrompt = body.messages[0].content as string;
     const capturedImplementationPrompt = body.messages.map((message: { content: string }) => message.content).join("\n");
     const marker = "语义规划输入(JSON)：";
     const payloadText = body.messages[1].content.slice(body.messages[1].content.indexOf(marker) + marker.length).trim();
@@ -831,6 +838,29 @@ describe("DeepSeekModelPort", () => {
     expect(capturedImplementationPrompt).not.toContain("UNRELATED_CONVERSATION_SUMMARY_MARKER");
     expect(capturedImplementationPrompt).not.toContain("UNRELATED_REVISION_SUMMARY_MARKER");
     expect(capturedImplementationPrompt).not.toContain("UNRELATED_REQUIREMENT_MARKER");
+    expect(implementationSystemPrompt).toContain('"candidateBundleHash"');
+    expect(implementationSystemPrompt).toContain('"roleStyles"');
+    expect(implementationSystemPrompt).toContain('"mockData"');
+    expect(implementationSystemPrompt).toContain('"localState"');
+    expect(implementationSystemPrompt).toContain('"overlays"');
+    expect(implementationSystemPrompt).toContain('"actions"');
+    expect(implementationSystemPrompt).toContain('"scripts"');
+    expect(implementationSystemPrompt).toContain('"kind":"layout"');
+    expect(implementationSystemPrompt).toContain('"kind":"registered-module"');
+    expect(implementationSystemPrompt).toContain('"kind":"control"');
+    expect(implementationSystemPrompt).toContain('"kind":"repeater"');
+    expect(implementationSystemPrompt).toContain('"kind":"list","items"');
+    expect(implementationSystemPrompt).toContain('"kind":"record","fields"');
+    expect(implementationSystemPrompt).toContain('"kind":"custom"');
+    expect(implementationSystemPrompt).toContain('"steps"');
+    expect(implementationSystemPrompt).toContain('"styleOverride":{"declarations":{},"states":{}}');
+    expect(implementationSystemPrompt).toContain('"kind":"navigate-page","id":"stable-id","afterActionIds":[],"targetPageId"');
+    expect(implementationSystemPrompt).toContain('"kind":"set-control-value","id":"stable-id","afterActionIds":[],"targetId"');
+    expect(implementationSystemPrompt).toContain('"kind":"literal","value"');
+    expect(implementationSystemPrompt).toContain('"mode":"fixed","value"');
+    expect(implementationSystemPrompt).toContain('"mode":"minmax","min"');
+    expect(implementationSystemPrompt).toContain("语义样式意图");
+    expect(implementationSystemPrompt).toContain("引用");
     const allProfileIds = getDesignKnowledgeSnapshot().controlDesignProfiles.map((profile) => profile.capabilityId);
     const omittedProfileId = allProfileIds.find((id) => !detailedIds.includes(id));
     expect(omittedProfileId).toBeDefined();
@@ -865,6 +895,61 @@ describe("DeepSeekModelPort", () => {
       "assetCatalog", "blueprint", "capabilityCandidates", "detailedDesignKnowledge", "previousPlan", "rejectionReasons",
     ]);
     expect(new TextEncoder().encode(body.messages.map((message: { content: string }) => message.content).join("\n")).byteLength).toBeLessThanOrEqual(128_000);
+  });
+
+  it("rejects every create-call repair-context contaminant before sending a request", async () => {
+    const context = solutionPlanningContext();
+    const previous = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    const fetchImpl = vi.fn();
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+
+    await expect(port.createSolutionImplementationPlan({
+      ...context,
+      previousSolutionImplementationPlan: previous,
+    })).rejects.toThrow(/create.*prior|repair context/i);
+    await expect(port.createSolutionImplementationPlan({
+      ...context,
+      solutionPlanRejectionReasons: ["must not enter create"],
+    })).rejects.toThrow(/create.*rejection|repair context/i);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("allows repair with bounded reasons and no schema-valid prior plan", async () => {
+    const context = solutionPlanningContext();
+    const repaired = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify(repaired) } }] }),
+    });
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+
+    await expect(port.reviseSolutionImplementationSubtree({
+      ...context,
+      solutionPlanRejectionReasons: ["pages.0.root: candidate reference was rejected"],
+    })).resolves.toEqual(repaired);
+
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    const marker = "语义规划输入(JSON)：";
+    const payload = JSON.parse(body.messages[1].content.slice(body.messages[1].content.indexOf(marker) + marker.length).trim());
+    expect(payload.previousPlan).toBeUndefined();
+    expect(payload.rejectionReasons).toEqual(["pages.0.root: candidate reference was rejected"]);
+  });
+
+  it("rejects a legacy compatibility prior before inert code-like content can enter a repair request", async () => {
+    const context = solutionPlanningContext();
+    const source = modulePlan();
+    source.pages[0].modules[0].content = "const privateValue = window.hiddenValue;";
+    const legacyPrior = adaptLegacyModulePlan(source);
+    const fetchImpl = vi.fn();
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+
+    await expect(port.reviseSolutionImplementationSubtree({
+      ...context,
+      previousSolutionImplementationPlan: legacyPrior,
+      solutionPlanRejectionReasons: ["repair the selected region"],
+    })).rejects.toThrow(/legacy.*prior|native.*prior/i);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(JSON.stringify(fetchImpl.mock.calls)).not.toContain("privateValue");
   });
 
   it.each(["guid", "objectType", "uiModelType", "styleDataNew", "selector", "css", "x", "y", "leftTopPt", "linkId", "configureData"])(

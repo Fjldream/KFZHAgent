@@ -131,6 +131,61 @@ describe("workspace store load() 会话绑定", () => {
     expect(store.state.conversationId).toBe("conv-new");
   });
 
+  it("submits a displayed v3 blueprint confirmation through the conversation message request", async () => {
+    const v3Message = `KF_BLUEPRINT_MESSAGE/1\n${JSON.stringify({
+      kind: "kf-customer-effect-blueprint",
+      version: 1,
+      revision: 1,
+      blueprint: {
+        schema: "kf-design-plan/v3",
+        displayName: "园区访客协同中心",
+        objective: "审核访客预约",
+        audiences: ["园区前台"],
+        scenarios: ["预约审核"],
+        pages: [{
+          id: "visitor-overview",
+          title: "访客总览",
+          purpose: "处理预约",
+          readingOrder: ["visitor-list"],
+          regions: [{
+            id: "visitor-list",
+            purpose: "浏览预约",
+            semanticRoles: ["记录列表"],
+            dataShape: "访客记录",
+            density: "comfortable",
+            importance: "primary",
+            content: ["访客姓名"],
+            sampleData: [{ 访客姓名: "陈嘉宁" }],
+            interactions: ["查看详情"],
+            states: ["待审核"],
+            visualIntent: "清晰扫读",
+          }],
+        }],
+        journeys: [{
+          id: "review-visitor",
+          actor: "园区前台",
+          goal: "审核预约",
+          steps: [{ pageId: "visitor-overview", regionId: "visitor-list", action: "选择预约", result: "显示详情" }],
+          completion: "完成审核",
+        }],
+        visualDirection: { tone: "专业", colors: ["深蓝"], typography: "层级清楚", spacingAndSurfaces: "舒适留白" },
+        acceptanceScenarios: ["可以完成审核"],
+        openQuestions: [],
+      },
+    })}`;
+    api.listConversations.mockResolvedValue([convA]);
+    api.listMessages.mockResolvedValue([{ id: "blueprint-v3", role: "assistant", content: v3Message }]);
+    streamMessageTurn.mockResolvedValue({ stage: "solution-plan-ready" });
+
+    const store = useWorkspace();
+    await store.load("ws-1");
+    expect(store.state.messages[0]?.content).toBe(v3Message);
+
+    await store.sendMessage("确认");
+
+    expect(streamMessageTurn).toHaveBeenCalledWith("conv-a", "确认", expect.any(Function));
+  });
+
   it("切换到另一个工程时重新绑定其会话（不残留旧工程 conversationId）", async () => {
     const ws2 = { id: "ws-2", name: "工程B", mode: "new", currentRevisionId: null };
     api.listConversations.mockResolvedValue([convB]); // ws-1 有会话

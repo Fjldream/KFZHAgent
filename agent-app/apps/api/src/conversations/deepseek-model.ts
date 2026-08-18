@@ -18,6 +18,7 @@ import {
   CustomerEffectBlueprintSchema,
   CustomerSolutionBlueprintSchema,
   ModulePlanSchema,
+  LEGACY_MODULE_PLAN_CANDIDATE_BUNDLE_HASH,
   solutionId,
   SolutionImplementationPlanSchema,
   canonicalServerHash,
@@ -163,13 +164,40 @@ ${KF_MODULE_PLANNING_PRINCIPLES}`;
 const SOLUTION_BLUEPRINT_SYSTEM_PROMPT = `你是客户解决方案蓝图顾问。你只输出严格的 kf-design-plan/v3 JSON，不输出 Markdown、注释或额外说明。
 
 蓝图必须完整表达客户任务、多页面地图、每页信息架构与阅读顺序、真实行业内容和模拟示例、重要状态、跨页面交互旅程、视觉方向，以及对信息架构和交互方式的创造性重新设计。
-蓝图只描述客户能理解和确认的产品体验。禁止任何平台生成标识符、控件或模块种类、能力编号、通用唯一标识符、坐标、实现配置和工程内部字段。`;
+蓝图只描述客户能理解和确认的产品体验。禁止任何平台生成标识符、控件或模块种类、能力编号、通用唯一标识符、坐标、实现配置和工程内部字段。
+
+精确 JSON 结构（所有顶层键都必填且只能出现这些键）：
+{"schema":"kf-design-plan/v3","displayName":"客户可读名称","objective":"客户任务目标","audiences":["受众"],"scenarios":["场景"],"pages":[{"id":"semantic-page-id","title":"页面标题","purpose":"页面用途","readingOrder":["semantic-region-id"],"regions":[{"id":"semantic-region-id","purpose":"区域用途","semanticRoles":["客户可读语义角色"],"dataShape":"业务数据形态","density":"compact|comfortable|spacious","importance":"primary|secondary|supporting","content":["具体内容"],"sampleData":[{"业务字段":"真实感模拟值"}],"interactions":["客户可感知交互"],"states":["重要状态"],"visualIntent":"区域视觉意图"}]}],"journeys":[{"id":"semantic-journey-id","actor":"参与者","goal":"旅程目标","steps":[{"pageId":"已声明页面 id","regionId":"该页面已声明区域 id","action":"用户动作","result":"可见结果"}],"completion":"完成结果"}],"visualDirection":{"tone":"整体基调","colors":["颜色方向"],"typography":"文字层级","spacingAndSurfaces":"留白与表面"},"acceptanceScenarios":["客户可观察验收场景"],"openQuestions":[]}
+page、region、journey 的 id 是稳定语义 id；readingOrder 只能引用同页 region，journey step 必须引用已声明的 page-region 组合。`;
 
 const SOLUTION_IMPLEMENTATION_SYSTEM_PROMPT = `你是完整交互式前端解决方案的语义规划 Agent。只输出严格的 kf-solution-implementation/v1 JSON，不输出 Markdown、注释或额外说明。
 
 必须覆盖完整页面、浮层、真实行业模拟数据、本地状态、用户动作，以及脚本的声明式意图和步骤。组合经验只是可选灵感，可以自由组合或忽略组合经验。
 只能使用候选包中明确提供的控件、布局和组合经验；详细能力知识只用于对应候选能力。
-不得输出可执行 JavaScript 或源代码，不得输出选择器、样式规则、几何坐标、平台原生 JSON、平台生成标识符或编译器配置。实际脚本实现属于后续阶段。`;
+不得输出可执行 JavaScript 或源代码，不得输出选择器、样式规则、几何坐标、平台原生 JSON、平台生成标识符或编译器配置。实际脚本实现属于后续阶段。
+
+精确顶层结构（键均必填）：
+{"schema":"kf-solution-implementation/v1","projectKey":"stable-project-key","blueprintHash":"64位小写十六进制","candidateBundleHash":"64位小写十六进制","theme":{},"roleStyles":[],"mockData":[],"localState":[],"pages":[],"overlays":[],"actions":[],"scripts":[]}
+blueprintHash 必须等于确认蓝图的服务端规范哈希，candidateBundleHash 必须等于候选包的服务端规范哈希；不得自行改写或猜测。
+
+语义值只能是字符串、有限数字、布尔值、null，或递归结构 {"kind":"list","items":[语义值]} / {"kind":"record","fields":[{"name":"semantic-name","value":语义值}]}。
+每个节点共同包含 {"id":"stable-id","sourceBlueprintRegionIds":["已确认区域 id"],"intent":{"importance":"primary|secondary|supporting","visualWeight":1,"readingOrder":0,"density":"compact|comfortable|spacious","groupWith":[],"width":{"mode":"content|fixed|fill|ratio|minmax"},"height":{"mode":"content|fixed|fill|viewport|ratio|minmax"},"align":"start|center|end|stretch"}}。content/fill/viewport 不带尺寸值；fixed/ratio 必须是 {"mode":"fixed","value":320}；minmax 必须是 {"mode":"minmax","min":240,"max":640}。
+节点是以下 kind 判别联合之一：
+- {"kind":"layout","layout":"row|column|grid|asymmetric-grid|split|stack|dock|sidebar-content|master-detail|scroll-region|overlay-anchor","recipeId":"可选候选组合 id","children":[节点]}
+- {"kind":"registered-module","moduleKind":"服务器明确授权的模块 kind","templateVersion":"授权版本","variant":"授权变体","title":"标题","content":语义值,"assetId":"可选资产 id","eventBindings":[事件绑定],"slots":[{"slotId":"授权槽位","children":[节点]}]}；输入未提供授权模块时不得使用此分支。
+- {"kind":"control","capabilityId":"候选控件 id","content":语义值,"properties":[{"name":"semantic-property","value":语义值}],"tabIds":[],"mockDataId":"可选模拟数据 id","styleRole":"角色样式 id","styleOverride":{"declarations":{},"states":{}},"eventBindings":[事件绑定]}；styleOverride 可省略，若提供也只能是下述语义样式结构。
+- {"kind":"repeater","mockDataId":"模拟数据 id","itemAlias":"item-name","keyField":"字段 key","maxItems":20,"template":节点}
+事件绑定结构为 {"semanticEvent":"候选能力支持的语义事件","actionIds":["动作 id"]}。
+
+theme 必须完整包含 background、surface、primary、accent、textPrimary、textSecondary、fontFamily、spacingUnit、radiusScale:{small,medium,large}。这些是语义主题令牌，不是原始 CSS。
+roleStyles 每项是 {"role":"stable-role","declarations":{"backgroundColor":"可选语义颜色令牌","textColor":"可选语义颜色令牌","borderColor":"可选语义颜色令牌","borderRadius":8,"fontSize":16,"fontWeight":600,"lineHeight":1.5,"padding":8,"margin":0,"gap":8,"boxShadow":"none|small|medium|large","opacity":1,"textAlign":"left|center|right"},"states":{"hover":{},"active":{},"focus":{},"disabled":{},"selected":{},"error":{}}}；只写结构化语义样式意图，禁止原始 CSS 规则和选择器。
+mockData 每项是 {"id":"stable-id","purpose":"行业用途","fields":[{"key":"semantic-key","label":"客户可读标签","type":"text|number|boolean|date"}],"records":[{"values":[{"field":"已声明字段 key","value":语义标量}]}]}。
+localState 每项是 {"id":"stable-id","purpose":"状态用途","type":"boolean|number|text|record-key|record-key-list","initialValue":语义标量或稳定 id 数组,"mockDataId":"记录状态时必填","keyField":"记录状态时必填"}。
+pages 每项是 {"id":"stable-id","title":"标题","purpose":"用途","canvas":"responsive|desktop|large-display","sourceBlueprintPageId":"确认页面 id","sourceBlueprintRegionIds":["确认区域 id"],"initialStateIds":["状态 id"],"root":节点}。
+overlays 每项是 {"id":"stable-id","title":"标题","purpose":"用途","presentation":"dialog|window|drawer|confirmation","hostPageId":"页面 id","sourceBlueprintPageId":"确认页面 id","sourceBlueprintRegionIds":["确认区域 id"],"visibleStateId":"布尔状态 id","dismissible":true,"root":节点}。
+actions 每项是下列精确 kind 联合之一：{"kind":"navigate-page","id":"stable-id","afterActionIds":[],"targetPageId":"页面 id"}、{"kind":"open-overlay","id":"stable-id","afterActionIds":[],"overlayId":"浮层 id"}、{"kind":"close-overlay","id":"stable-id","afterActionIds":[],"overlayId":"浮层 id","result":"可选语义标量"}、{"kind":"set-visibility","id":"stable-id","afterActionIds":[],"targetId":"节点 id","visible":true}、{"kind":"switch-tab","id":"stable-id","afterActionIds":[],"targetId":"节点 id","tabId":"tab id"}、{"kind":"set-state","id":"stable-id","afterActionIds":[],"stateId":"状态 id","value":语义值}、{"kind":"set-control-value","id":"stable-id","afterActionIds":[],"targetId":"控件 id","value":值表达式}、{"kind":"show-feedback","id":"stable-id","afterActionIds":[],"level":"success|info|warning|error","message":"反馈"}、{"kind":"run-script","id":"stable-id","afterActionIds":[],"scriptId":"脚本 id"}。值表达式只能是 {"kind":"literal","value":语义值}、{"kind":"local-state","stateId":"状态 id"} 或 {"kind":"mock-data","mockDataId":"模拟数据 id"}。
+scripts 是声明式计划联合：{"kind":"template","id":"stable-id","purpose":"用途","inputs":[脚本端口],"outputs":[脚本端口],"template":"模板 id","parameters":[字面量或语义引用参数]}，或 {"kind":"custom","id":"stable-id","purpose":"用途","inputs":[脚本端口],"outputs":[脚本端口],"steps":[{"order":1,"intent":"自然语言声明式步骤","inputNames":[],"outputNames":[]}]}。脚本端口为 {"name":"semantic-name","description":"说明","refKind":"mock-data|local-state|control","refId":"已声明 id"}。
+所有 stable id 在计划中全局唯一；来源 id、样式、模拟数据、状态、节点、页面、浮层、动作和脚本引用必须命中已声明对象；每个确认页面/区域必须且只能由对应页面或浮层覆盖。`;
 
 const MAX_CREATIVE_PROMPT_BYTES = 128_000;
 const MAX_CREATIVE_RECENT_MESSAGES = 12;
@@ -1120,6 +1148,13 @@ function detailedDesignKnowledge(candidates: ReturnType<typeof CapabilityCandida
 }
 
 function buildSolutionImplementationPrompt(input: ModelPortContext, revising: boolean, extractionRepair = false): string {
+  if (
+    !revising
+    && (input.previousSolutionImplementationPlan !== undefined
+      || input.solutionPlanRejectionReasons !== undefined)
+  ) {
+    throw new DeepSeekModelOutputError("create semantic planning rejects repair context: prior plan and rejection reasons are revision-only");
+  }
   const blueprint = CustomerSolutionBlueprintSchema.parse(input.confirmedSolutionBlueprint);
   const capabilityCandidates = CapabilityCandidateBundleSchema.parse(input.capabilityCandidates);
   if (capabilityCandidates.blueprintHash !== canonicalServerHash(blueprint)) {
@@ -1129,6 +1164,9 @@ function buildSolutionImplementationPrompt(input: ModelPortContext, revising: bo
   const previousPlan = input.previousSolutionImplementationPlan === undefined
     ? undefined
     : SolutionImplementationPlanSchema.parse(input.previousSolutionImplementationPlan);
+  if (previousPlan?.candidateBundleHash === LEGACY_MODULE_PLAN_CANDIDATE_BUNDLE_HASH) {
+    throw new DeepSeekModelOutputError("legacy compatibility prior plans cannot enter native semantic repair");
+  }
   if (previousPlan !== undefined) assertNoForbiddenSolutionKeys(previousPlan);
   const rejectionReasons = (input.solutionPlanRejectionReasons ?? []).map((reason) => {
     if (typeof reason !== "string" || reason.trim().length === 0 || reason.length > MAX_SOLUTION_REJECTION_REASON_CHARS) {

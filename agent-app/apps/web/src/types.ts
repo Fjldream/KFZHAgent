@@ -199,6 +199,7 @@ export interface DesignPlanView {
 }
 
 export interface CustomerEffectBlueprintView {
+  schema: "kf-design-plan/v2";
   revision: number;
   displayName: string;
   overview: {
@@ -228,6 +229,51 @@ export interface CustomerEffectBlueprintView {
   acceptanceCriteria: string[];
   openQuestions: string[];
 }
+
+export interface CustomerSolutionBlueprintView {
+  schema: "kf-design-plan/v3";
+  revision: number;
+  displayName: string;
+  objective: string;
+  audiences: string[];
+  scenarios: string[];
+  pages: Array<{
+    id: string;
+    title: string;
+    purpose: string;
+    readingOrder: string[];
+    regions: Array<{
+      id: string;
+      purpose: string;
+      semanticRoles: string[];
+      dataShape: string;
+      density: "compact" | "comfortable" | "spacious";
+      importance: "primary" | "secondary" | "supporting";
+      content: string[];
+      sampleData: Array<Array<{ label: string; value: string }>>;
+      interactions: string[];
+      states: string[];
+      visualIntent: string;
+    }>;
+  }>;
+  journeys: Array<{
+    id: string;
+    actor: string;
+    goal: string;
+    steps: Array<{ pageId: string; regionId: string; action: string; result: string }>;
+    completion: string;
+  }>;
+  visualDirection: {
+    tone: string;
+    colors: string[];
+    typography: string;
+    spacingAndSurfaces: string;
+  };
+  acceptanceScenarios: string[];
+  openQuestions: string[];
+}
+
+export type CustomerBlueprintView = CustomerEffectBlueprintView | CustomerSolutionBlueprintView;
 
 const OPTION_CIRCLED = /^[①-⑩]/;
 const OPTION_NUMERIC = /^\d+[.、]/;
@@ -315,7 +361,7 @@ const BLUEPRINT_MESSAGE_PREFIX = "KF_BLUEPRINT_MESSAGE/1\n";
 /** Decode the internal transport envelope into a customer-only view model. */
 export function parseCustomerEffectBlueprint(
   content: string,
-): CustomerEffectBlueprintView | null {
+): CustomerBlueprintView | null {
   if (!content.startsWith(BLUEPRINT_MESSAGE_PREFIX)) return null;
   try {
     const envelope = JSON.parse(content.slice(BLUEPRINT_MESSAGE_PREFIX.length)) as unknown;
@@ -329,11 +375,14 @@ export function parseCustomerEffectBlueprint(
       typeof revision !== "number" ||
       !Number.isInteger(revision) ||
       revision < 1 ||
-      !isRecord(blueprint) ||
-      blueprint["schema"] !== "kf-design-plan/v2"
+      !isRecord(blueprint)
     ) {
       return null;
     }
+    if (blueprint["schema"] === "kf-design-plan/v3") {
+      return parseCustomerSolutionBlueprint(blueprint, revision);
+    }
+    if (blueprint["schema"] !== "kf-design-plan/v2") return null;
 
     const overview = blueprint["overview"];
     const architecture = blueprint["informationArchitecture"];
@@ -384,6 +433,7 @@ export function parseCustomerEffectBlueprint(
     const parsedModules = modules.map(parseBlueprintModule);
     if (parsedModules.some((module) => module === null)) return null;
     return {
+      schema: "kf-design-plan/v2",
       revision,
       displayName: blueprint["displayName"],
       overview: {
@@ -411,6 +461,185 @@ export function parseCustomerEffectBlueprint(
   } catch {
     return null;
   }
+}
+
+const SOLUTION_TEXT_MAX = 600;
+const SOLUTION_LIST_MAX = 12;
+const SOLUTION_PAGE_MAX = 8;
+const SOLUTION_JOURNEY_MAX = 12;
+const SOLUTION_SAMPLE_FIELD_MAX = 32;
+const SOLUTION_ID = /^[A-Za-z][A-Za-z0-9_-]*$/;
+
+function boundedText(value: unknown, max = SOLUTION_TEXT_MAX): string | null {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= max
+    && value.trim() === value
+    ? value
+    : null;
+}
+
+function boundedId(value: unknown): string | null {
+  const text = boundedText(value, 100);
+  return text !== null && SOLUTION_ID.test(text) ? text : null;
+}
+
+function boundedTextArray(value: unknown, min = 0, max = SOLUTION_LIST_MAX): string[] | null {
+  if (!Array.isArray(value) || value.length < min || value.length > max) return null;
+  const parsed = value.map((item) => boundedText(item));
+  return parsed.some((item) => item === null) ? null : parsed as string[];
+}
+
+function boundedIdArray(value: unknown, min = 0, max = SOLUTION_LIST_MAX): string[] | null {
+  if (!Array.isArray(value) || value.length < min || value.length > max) return null;
+  const parsed = value.map((item) => boundedId(item));
+  return parsed.some((item) => item === null) ? null : parsed as string[];
+}
+
+function parseCustomerSolutionBlueprint(
+  blueprint: Record<string, unknown>,
+  revision: number,
+): CustomerSolutionBlueprintView | null {
+  const displayName = boundedText(blueprint["displayName"]);
+  const objective = boundedText(blueprint["objective"]);
+  const audiences = boundedTextArray(blueprint["audiences"], 1);
+  const scenarios = boundedTextArray(blueprint["scenarios"], 1);
+  const acceptanceScenarios = boundedTextArray(blueprint["acceptanceScenarios"], 1);
+  const openQuestions = boundedTextArray(blueprint["openQuestions"]);
+  const pagesValue = blueprint["pages"];
+  const journeysValue = blueprint["journeys"];
+  const visual = blueprint["visualDirection"];
+  if (
+    displayName === null || objective === null || audiences === null || scenarios === null
+    || acceptanceScenarios === null || openQuestions === null
+    || !Array.isArray(pagesValue) || pagesValue.length < 1 || pagesValue.length > SOLUTION_PAGE_MAX
+    || !Array.isArray(journeysValue) || journeysValue.length < 1 || journeysValue.length > SOLUTION_JOURNEY_MAX
+    || !isRecord(visual)
+  ) return null;
+
+  const tone = boundedText(visual["tone"]);
+  const colors = boundedTextArray(visual["colors"], 1);
+  const typography = boundedText(visual["typography"]);
+  const spacingAndSurfaces = boundedText(visual["spacingAndSurfaces"]);
+  if (tone === null || colors === null || typography === null || spacingAndSurfaces === null) return null;
+
+  const pages = pagesValue.map(parseSolutionPage);
+  if (pages.some((page) => page === null)) return null;
+  const typedPages = pages as CustomerSolutionBlueprintView["pages"];
+  const pageIds = new Set<string>();
+  const regionOwners = new Map<string, string>();
+  for (const page of typedPages) {
+    if (pageIds.has(page.id)) return null;
+    pageIds.add(page.id);
+    const pageRegionIds = new Set(page.regions.map((region) => region.id));
+    if (pageRegionIds.size !== page.regions.length) return null;
+    if (new Set(page.readingOrder).size !== page.readingOrder.length) return null;
+    if (page.readingOrder.some((regionId) => !pageRegionIds.has(regionId))) return null;
+    for (const regionId of pageRegionIds) {
+      if (regionOwners.has(regionId)) return null;
+      regionOwners.set(regionId, page.id);
+    }
+  }
+
+  const journeys = journeysValue.map(parseSolutionJourney);
+  if (journeys.some((journey) => journey === null)) return null;
+  const typedJourneys = journeys as CustomerSolutionBlueprintView["journeys"];
+  if (new Set(typedJourneys.map((journey) => journey.id)).size !== typedJourneys.length) return null;
+  if (typedJourneys.some((journey) => journey.steps.some((step) =>
+    regionOwners.get(step.regionId) !== step.pageId))) return null;
+
+  return {
+    schema: "kf-design-plan/v3",
+    revision,
+    displayName,
+    objective,
+    audiences,
+    scenarios,
+    pages: typedPages,
+    journeys: typedJourneys,
+    visualDirection: { tone, colors, typography, spacingAndSurfaces },
+    acceptanceScenarios,
+    openQuestions,
+  };
+}
+
+function parseSolutionPage(value: unknown): CustomerSolutionBlueprintView["pages"][number] | null {
+  if (!isRecord(value)) return null;
+  const id = boundedId(value["id"]);
+  const title = boundedText(value["title"]);
+  const purpose = boundedText(value["purpose"]);
+  const readingOrder = boundedIdArray(value["readingOrder"], 1);
+  const regionsValue = value["regions"];
+  if (
+    id === null || title === null || purpose === null || readingOrder === null
+    || !Array.isArray(regionsValue) || regionsValue.length < 1 || regionsValue.length > SOLUTION_LIST_MAX
+  ) return null;
+  const regions = regionsValue.map(parseSolutionRegion);
+  if (regions.some((region) => region === null)) return null;
+  return { id, title, purpose, readingOrder, regions: regions as CustomerSolutionBlueprintView["pages"][number]["regions"] };
+}
+
+function parseSolutionRegion(value: unknown): CustomerSolutionBlueprintView["pages"][number]["regions"][number] | null {
+  if (!isRecord(value)) return null;
+  const id = boundedId(value["id"]);
+  const purpose = boundedText(value["purpose"]);
+  const semanticRoles = boundedTextArray(value["semanticRoles"], 1);
+  const dataShape = boundedText(value["dataShape"]);
+  const content = boundedTextArray(value["content"], 1);
+  const interactions = boundedTextArray(value["interactions"]);
+  const states = boundedTextArray(value["states"], 1);
+  const visualIntent = boundedText(value["visualIntent"]);
+  const density = value["density"];
+  const importance = value["importance"];
+  const sampleValue = value["sampleData"];
+  if (
+    id === null || purpose === null || semanticRoles === null || dataShape === null || content === null
+    || interactions === null || states === null || visualIntent === null
+    || (density !== "compact" && density !== "comfortable" && density !== "spacious")
+    || (importance !== "primary" && importance !== "secondary" && importance !== "supporting")
+    || !Array.isArray(sampleValue) || sampleValue.length > SOLUTION_LIST_MAX
+  ) return null;
+  const sampleData = sampleValue.map((sample) => {
+    if (!isRecord(sample)) return null;
+    const entries = Object.entries(sample);
+    if (entries.length > SOLUTION_SAMPLE_FIELD_MAX) return null;
+    const fields = entries.map(([label, raw]) => {
+      const parsedLabel = boundedText(label, 100);
+      const parsedValue = boundedText(raw);
+      return parsedLabel === null || parsedValue === null ? null : { label: parsedLabel, value: parsedValue };
+    });
+    return fields.some((field) => field === null) ? null : fields as Array<{ label: string; value: string }>;
+  });
+  if (sampleData.some((sample) => sample === null)) return null;
+  return {
+    id, purpose, semanticRoles, dataShape, density, importance, content,
+    sampleData: sampleData as Array<Array<{ label: string; value: string }>>,
+    interactions, states, visualIntent,
+  };
+}
+
+function parseSolutionJourney(value: unknown): CustomerSolutionBlueprintView["journeys"][number] | null {
+  if (!isRecord(value)) return null;
+  const id = boundedId(value["id"]);
+  const actor = boundedText(value["actor"]);
+  const goal = boundedText(value["goal"]);
+  const completion = boundedText(value["completion"]);
+  const stepsValue = value["steps"];
+  if (
+    id === null || actor === null || goal === null || completion === null
+    || !Array.isArray(stepsValue) || stepsValue.length < 1 || stepsValue.length > SOLUTION_LIST_MAX
+  ) return null;
+  const steps = stepsValue.map((step) => {
+    if (!isRecord(step)) return null;
+    const pageId = boundedId(step["pageId"]);
+    const regionId = boundedId(step["regionId"]);
+    const action = boundedText(step["action"]);
+    const result = boundedText(step["result"]);
+    return pageId === null || regionId === null || action === null || result === null
+      ? null : { pageId, regionId, action, result };
+  });
+  if (steps.some((step) => step === null)) return null;
+  return { id, actor, goal, steps: steps as CustomerSolutionBlueprintView["journeys"][number]["steps"], completion };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

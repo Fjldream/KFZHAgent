@@ -697,6 +697,47 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     expect(planned.previewArtifactId).toBeUndefined();
   });
 
+  it("keeps every later creative-v2 intent in design review or terminal without legacy approval or build side effects", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+    bed.workspace.routing.set(WORKSPACE_ID, { mode: "new", generationWorkflow: "creative-v2" });
+
+    bed.model.queueIntent("NEW_REQUIREMENT");
+    await sendUser(bed, ctx, "创建园区访客协同中心");
+    await bed.graph.invoke(input(ctx), config(ctx));
+    bed.model.queueIntent("CONFIRM_DESIGN");
+    await sendUser(bed, ctx, "确认设计");
+    const ready = await bed.graph.invoke(input(ctx), config(ctx));
+    expect(ready.stage).toBe("solution-plan-ready");
+
+    for (const [intent, message, expectedStage] of [
+      ["CONFIRM_PLAN", "批准工程计划", "idle"],
+      ["BUILD", "立即开始构建", "idle"],
+      ["NEW_REQUIREMENT", "新增到访统计页", "design-review"],
+      ["MODIFY_REQUIREMENT", "把审核旅程改得更清晰", "design-review"],
+    ] as const) {
+      bed.model.queueIntent(intent);
+      await sendUser(bed, ctx, message);
+      const result = await bed.graph.invoke(input(ctx), config(ctx));
+      expect(result.stage).toBe(expectedStage);
+      expect(result.changePlanId).toBeUndefined();
+      expect(result.planHash).toBeUndefined();
+      expect(result.activeChangeRequestId).toBeUndefined();
+      expect(result.buildAuthorization).toBeUndefined();
+      expect(result.buildJobId).toBeUndefined();
+      expect(result.previewArtifactId).toBeUndefined();
+      expect(result.lastErrorCode).toBeUndefined();
+    }
+
+    expect(bed.model.createCalls).toHaveLength(0);
+    expect(bed.model.reviseCalls).toHaveLength(0);
+    expect(bed.repo.requests.size).toBe(0);
+    expect(bed.repo.plans.size).toBe(0);
+    expect(bed.repo.statusCalls).toHaveLength(0);
+    expect(bed.builds.enqueues).toHaveLength(0);
+    expect(await interruptPayload(bed, ctx)).toBeUndefined();
+  });
+
   it("routes an ordinary question to idle without planning or building", async () => {
     const bed = createBed();
     const ctx = seed(bed);

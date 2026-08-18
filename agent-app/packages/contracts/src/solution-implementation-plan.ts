@@ -266,7 +266,7 @@ const declarativeStepTextSchema = semanticTextSchema.superRefine((value, ctx) =>
   }
 });
 const hashSchema = z.string().regex(/^[0-9a-f]{64}$/);
-const LEGACY_MODULE_PLAN_CANDIDATE_BUNDLE_HASH = "3e147b2b8351b526f10dd9dfc47c4c93bbfc29814d791400e3e5b02c38220840";
+export const LEGACY_MODULE_PLAN_CANDIDATE_BUNDLE_HASH = "3e147b2b8351b526f10dd9dfc47c4c93bbfc29814d791400e3e5b02c38220840";
 
 /** Exact source-contract shapes admitted only by the legacy compatibility branch. */
 const legacyStableIdSchema = z

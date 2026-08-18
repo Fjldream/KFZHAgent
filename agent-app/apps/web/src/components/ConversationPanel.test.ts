@@ -64,6 +64,94 @@ function blueprintMessage(revision = 1): string {
   })}`;
 }
 
+function solutionBlueprintMessage(revision = 1): string {
+  return `KF_BLUEPRINT_MESSAGE/1\n${JSON.stringify({
+    kind: "kf-customer-effect-blueprint",
+    version: 1,
+    revision,
+    blueprint: {
+      schema: "kf-design-plan/v3",
+      displayName: "园区访客协同中心",
+      objective: "让前台和安保顺畅完成访客预约审核与到访核验",
+      audiences: ["园区前台", "安保人员"],
+      scenarios: ["预约审核", "到访核验"],
+      pages: [
+        {
+          id: "visitor-overview",
+          title: "访客总览",
+          purpose: "集中处理当日访客预约",
+          readingOrder: ["visitor-list", "visitor-status"],
+          regions: [
+            {
+              id: "visitor-list",
+              purpose: "浏览并选择待处理访客",
+              semanticRoles: ["记录列表", "选择入口"],
+              dataShape: "访客预约记录",
+              density: "comfortable",
+              importance: "primary",
+              content: ["访客姓名", "来访单位", "预约时段"],
+              sampleData: [{ 访客姓名: "陈嘉宁", 来访单位: "海岚智造", 预约时段: "14:30" }],
+              interactions: ["选择访客后查看预约详情"],
+              states: ["待审核", "已通过", "已拒绝"],
+              visualIntent: "突出待处理记录并便于扫读",
+            },
+            {
+              id: "visitor-status",
+              purpose: "概览今日接待状态",
+              semanticRoles: ["状态摘要"],
+              dataShape: "状态统计",
+              density: "compact",
+              importance: "supporting",
+              content: ["待审核数量", "已到访数量"],
+              sampleData: [{ 待审核数量: "6", 已到访数量: "18" }],
+              interactions: [],
+              states: ["正常接待"],
+              visualIntent: "轻量展示并服务主任务",
+            },
+          ],
+        },
+        {
+          id: "visitor-detail",
+          title: "预约详情",
+          purpose: "核验预约并做出审核决定",
+          readingOrder: ["visitor-profile"],
+          regions: [{
+            id: "visitor-profile",
+            purpose: "核对访客与来访信息",
+            semanticRoles: ["详情", "审核操作"],
+            dataShape: "单条预约详情",
+            density: "comfortable",
+            importance: "primary",
+            content: ["证件姓名", "接待人", "来访事由"],
+            sampleData: [{ 证件姓名: "陈嘉宁", 接待人: "李雯", 来访事由: "方案评审" }],
+            interactions: ["通过或拒绝预约"],
+            states: ["核验中", "审核完成"],
+            visualIntent: "关键信息与决定入口清楚分组",
+          }],
+        },
+      ],
+      journeys: [{
+        id: "review-visitor",
+        actor: "园区前台",
+        goal: "审核一条访客预约",
+        steps: [
+          { pageId: "visitor-overview", regionId: "visitor-list", action: "选择陈嘉宁的预约", result: "进入预约详情" },
+          { pageId: "visitor-detail", regionId: "visitor-profile", action: "核验信息并通过", result: "预约状态更新为已通过" },
+        ],
+        completion: "前台看到审核成功反馈，安保可核验到访",
+      }],
+      visualDirection: {
+        tone: "专业友好",
+        colors: ["深海蓝", "暖橙"],
+        typography: "标题、状态和正文层级清楚",
+        spacingAndSurfaces: "舒适留白与轻量分区",
+      },
+      acceptanceScenarios: ["前台可以从总览进入详情并完成预约审核"],
+      openQuestions: ["是否需要展示访客头像"],
+    },
+  })}`;
+}
+
 // ---------------------------------------------------------------------------
 // parseClarifyingQuestion：识别「问题\n①选项\n②选项」格式
 // ---------------------------------------------------------------------------
@@ -157,6 +245,8 @@ describe("parseDesignPlan", () => {
 describe("parseCustomerEffectBlueprint", () => {
   it("parses every customer-visible section from a versioned blueprint message", () => {
     const view = parseCustomerEffectBlueprint(blueprintMessage());
+    expect(view?.schema).toBe("kf-design-plan/v2");
+    if (view?.schema !== "kf-design-plan/v2") throw new Error("expected a v2 blueprint view");
     expect(view?.revision).toBe(1);
     expect(view?.displayName).toBe("个人求职作品集");
     expect(view?.overview.objective).toContain("招聘经理");
@@ -172,6 +262,45 @@ describe("parseCustomerEffectBlueprint", () => {
   it("returns null for malformed or ordinary messages", () => {
     expect(parseCustomerEffectBlueprint("普通回复")).toBeNull();
     expect(parseCustomerEffectBlueprint("KF_BLUEPRINT_MESSAGE/1\n{broken")).toBeNull();
+  });
+
+  it("parses a bounded v3 solution blueprint envelope into a typed customer view", () => {
+    const view = parseCustomerEffectBlueprint(solutionBlueprintMessage());
+
+    expect(view).toMatchObject({
+      schema: "kf-design-plan/v3",
+      revision: 1,
+      displayName: "园区访客协同中心",
+      objective: expect.stringContaining("访客预约审核"),
+      pages: [
+        expect.objectContaining({
+          title: "访客总览",
+          readingOrder: ["visitor-list", "visitor-status"],
+          regions: [expect.objectContaining({
+            states: ["待审核", "已通过", "已拒绝"],
+            interactions: ["选择访客后查看预约详情"],
+          }), expect.any(Object)],
+        }),
+        expect.objectContaining({ title: "预约详情" }),
+      ],
+      journeys: [expect.objectContaining({ completion: expect.stringContaining("审核成功") })],
+      acceptanceScenarios: ["前台可以从总览进入详情并完成预约审核"],
+    });
+  });
+
+  it("rejects an otherwise valid v3 envelope that exceeds the bounded page count", () => {
+    const envelope = JSON.parse(solutionBlueprintMessage().slice("KF_BLUEPRINT_MESSAGE/1\n".length));
+    envelope.blueprint.pages = Array.from({ length: 9 }, (_, index) => ({
+      ...envelope.blueprint.pages[0],
+      id: `page-${index}`,
+      regions: envelope.blueprint.pages[0].regions.map((region: Record<string, unknown>, regionIndex: number) => ({
+        ...region,
+        id: `region-${index}-${regionIndex}`,
+      })),
+      readingOrder: ["region-0-0"],
+    }));
+
+    expect(parseCustomerEffectBlueprint(`KF_BLUEPRINT_MESSAGE/1\n${JSON.stringify(envelope)}`)).toBeNull();
   });
 });
 
@@ -239,6 +368,28 @@ describe("ConversationPanel enriched rendering", () => {
     expect(wrapper.text()).not.toContain("kf-design-plan/v2");
 
     await wrapper.get('[data-testid="blueprint-confirm"]').trigger("click");
+    expect(wrapper.emitted("send")?.[0]?.[0]).toBe("确认");
+  });
+
+  it("renders every customer-review boundary of a v3 blueprint and emits its confirmation", async () => {
+    const wrapper = mount(ConversationPanel, {
+      props: { messages: [{ role: "assistant", content: solutionBlueprintMessage() }] },
+    });
+
+    const card = wrapper.get('[data-testid="solution-blueprint-card"]');
+    const text = card.text();
+    expect(text).toContain("园区访客协同中心");
+    expect(text).toContain("访客总览");
+    expect(text).toContain("预约详情");
+    expect(text).toContain("访客姓名");
+    expect(text).toContain("待审核");
+    expect(text).toContain("选择访客后查看预约详情");
+    expect(text).toContain("审核一条访客预约");
+    expect(text).toContain("专业友好");
+    expect(text).toContain("前台可以从总览进入详情并完成预约审核");
+    expect(text).not.toContain("kf-design-plan/v3");
+
+    await card.get('[data-testid="blueprint-confirm"]').trigger("click");
     expect(wrapper.emitted("send")?.[0]?.[0]).toBe("确认");
   });
 

@@ -10,7 +10,7 @@ import {
 import type {
   ChatMessage,
   ClarifyingQuestionView,
-  CustomerEffectBlueprintView,
+  CustomerBlueprintView,
   DesignPlanView,
 } from "../types";
 
@@ -49,7 +49,7 @@ interface RenderedMessage {
   role: "user" | "assistant";
   content: string;
   clarify: ClarifyingQuestionView | null;
-  blueprint: CustomerEffectBlueprintView | null;
+  blueprint: CustomerBlueprintView | null;
   plan: DesignPlanView | null;
 }
 
@@ -256,7 +256,10 @@ function submit(): void {
           </div>
         </template>
         <template v-else-if="message.blueprint !== null">
-          <article class="content effect-blueprint" data-testid="effect-blueprint-card">
+          <article
+            class="content effect-blueprint"
+            :data-testid="message.blueprint.schema === 'kf-design-plan/v3' ? 'solution-blueprint-card' : 'effect-blueprint-card'"
+          >
             <header class="blueprint-header">
               <div>
                 <span class="plan-badge">效果蓝图</span>
@@ -265,6 +268,7 @@ function submit(): void {
               <h3 class="plan-name">{{ message.blueprint.displayName }}</h3>
             </header>
 
+            <template v-if="message.blueprint.schema === 'kf-design-plan/v2'">
             <section class="blueprint-section revision-summary">
               <h4>{{ message.blueprint.revision === 1 ? "方案要点" : "本次更新" }}</h4>
               <ul v-if="message.blueprint.revisionNotes.added.length > 0">
@@ -344,6 +348,78 @@ function submit(): void {
               <h4>待您确认</h4>
               <ul><li v-for="item in message.blueprint.openQuestions" :key="item">{{ item }}</li></ul>
             </section>
+            </template>
+
+            <template v-else>
+              <section class="blueprint-section">
+                <h4>客户任务</h4>
+                <p>{{ message.blueprint.objective }}</p>
+                <dl class="blueprint-facts">
+                  <div><dt>目标受众</dt><dd>{{ message.blueprint.audiences.join("、") }}</dd></div>
+                  <div><dt>使用场景</dt><dd>{{ message.blueprint.scenarios.join("、") }}</dd></div>
+                </dl>
+              </section>
+
+              <section class="blueprint-section">
+                <h4>页面与信息架构</h4>
+                <div class="blueprint-modules solution-pages">
+                  <article v-for="page in message.blueprint.pages" :key="page.id" class="blueprint-module solution-page">
+                    <h5>{{ page.title }}</h5>
+                    <p>{{ page.purpose }}</p>
+                    <div class="module-detail"><strong>阅读顺序</strong>{{ page.readingOrder.join(" → ") }}</div>
+                    <div class="solution-regions">
+                      <section v-for="region in page.regions" :key="region.id" class="solution-region">
+                        <h6>{{ region.purpose }}</h6>
+                        <div class="module-detail"><strong>内容</strong>{{ region.content.join("、") }}</div>
+                        <div class="module-detail"><strong>状态</strong>{{ region.states.join("、") }}</div>
+                        <div v-if="region.interactions.length > 0" class="module-detail">
+                          <strong>关键交互</strong>{{ region.interactions.join("；") }}
+                        </div>
+                        <div class="module-detail"><strong>视觉意图</strong>{{ region.visualIntent }}</div>
+                        <dl v-for="(record, recordIndex) in region.sampleData" :key="`${region.id}-sample-${recordIndex}`" class="sample-data">
+                          <div v-for="field in record" :key="`${region.id}-${recordIndex}-${field.label}`">
+                            <dt>{{ field.label }}</dt><dd>{{ field.value }}</dd>
+                          </div>
+                        </dl>
+                      </section>
+                    </div>
+                  </article>
+                </div>
+              </section>
+
+              <section class="blueprint-section">
+                <h4>交互旅程</h4>
+                <article v-for="journey in message.blueprint.journeys" :key="journey.id" class="solution-journey">
+                  <h5>{{ journey.actor }} · {{ journey.goal }}</h5>
+                  <ol>
+                    <li v-for="(step, stepIndex) in journey.steps" :key="`${journey.id}-${stepIndex}`">
+                      {{ step.action }} → {{ step.result }}
+                    </li>
+                  </ol>
+                  <p>完成效果：{{ journey.completion }}</p>
+                </article>
+              </section>
+
+              <section class="blueprint-section">
+                <h4>视觉方向</h4>
+                <dl class="blueprint-facts">
+                  <div><dt>整体基调</dt><dd>{{ message.blueprint.visualDirection.tone }}</dd></div>
+                  <div><dt>配色</dt><dd>{{ message.blueprint.visualDirection.colors.join("、") }}</dd></div>
+                  <div><dt>文字层级</dt><dd>{{ message.blueprint.visualDirection.typography }}</dd></div>
+                  <div><dt>留白与表面</dt><dd>{{ message.blueprint.visualDirection.spacingAndSurfaces }}</dd></div>
+                </dl>
+              </section>
+
+              <section class="blueprint-section acceptance">
+                <h4>最终验收效果</h4>
+                <ul><li v-for="item in message.blueprint.acceptanceScenarios" :key="item">{{ item }}</li></ul>
+              </section>
+
+              <section v-if="message.blueprint.openQuestions.length > 0" class="blueprint-section">
+                <h4>待您确认</h4>
+                <ul><li v-for="item in message.blueprint.openQuestions" :key="item">{{ item }}</li></ul>
+              </section>
+            </template>
 
             <p class="blueprint-guidance">可以继续告诉我需要修改的细节；确认这份效果蓝图后，我再生成工程实施计划。</p>
             <button v-if="isBlueprintActionable(index)" type="button" class="plan-confirm" data-testid="blueprint-confirm" @click="submitBlueprint(index)">
@@ -510,6 +586,12 @@ function submit(): void {
 .blueprint-modules { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
 .blueprint-module { padding: 0.6rem; border: 1px solid var(--color-border); border-radius: 10px; min-width: 0; }
 .blueprint-module h5 { margin: 0 0 0.2rem; color: var(--color-accent); font-size: 0.86rem; }
+.solution-pages { grid-template-columns: 1fr; }
+.solution-regions { display: grid; gap: 0.45rem; margin-top: 0.5rem; }
+.solution-region { padding: 0.5rem; border-radius: 8px; background: rgba(15, 23, 42, 0.035); }
+.solution-region h6, .solution-journey h5 { margin: 0; font-size: 0.82rem; color: var(--color-accent); }
+.solution-journey + .solution-journey { margin-top: 0.55rem; }
+.solution-journey ol { margin: 0.35rem 0; padding-left: 1.2rem; font-size: 0.8rem; }
 .module-detail { margin-top: 0.35rem; font-size: 0.8rem; }
 .module-detail strong { display: block; color: var(--color-text-secondary); font-size: 0.74rem; }
 .sample-data { margin: 0.4rem 0 0; padding: 0.4rem; border-radius: 7px; background: rgba(15, 23, 42, 0.04); font-size: 0.78rem; }
