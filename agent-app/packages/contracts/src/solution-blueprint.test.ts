@@ -104,6 +104,10 @@ describe("CustomerSolutionBlueprintSchema", () => {
     }).success).toBe(true);
   });
 
+  it.each(["Version(3.6)", "KPI(关键指标)"])("accepts an unspaced benign product label: %s", (content) => {
+    expect(CustomerSolutionBlueprintSchema.safeParse(withPrimaryRegion({ content: [content] })).success).toBe(true);
+  });
+
   it.each(["KPI: 95%;", "Version: 3.6;"])("accepts normal metric and version copy: %s", (objective) => {
     expect(CustomerSolutionBlueprintSchema.safeParse({ ...valid, objective }).success).toBe(true);
   });
@@ -158,6 +162,16 @@ describe("CustomerSolutionBlueprintSchema", () => {
     ["camelCase JavaScript call", "openVisitorDetail()"],
   ])("rejects %s in an ordinary text field", (_label, value) => {
     expect(CustomerSolutionBlueprintSchema.safeParse({ ...valid, objective: value }).success).toBe(false);
+  });
+
+  it.each([
+    "color: red",
+    "position: absolute",
+    "div::before",
+    "--brand-color: red",
+    "export default 42",
+  ])("rejects a targeted raw implementation example without requiring a full rule: %s", (objective) => {
+    expect(CustomerSolutionBlueprintSchema.safeParse({ ...valid, objective }).success).toBe(false);
   });
 
   it.each([

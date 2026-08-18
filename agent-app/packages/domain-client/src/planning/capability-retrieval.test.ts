@@ -219,6 +219,28 @@ describe("deterministic capability retrieval", () => {
     }
   });
 
+  it.each([
+    "点击记录查看详情",
+    "筛选并搜索访客记录",
+    "切换标签页",
+    "打开和关闭对话框",
+    "选择并更改审核状态",
+  ])("normalizes a natural Chinese interaction and fails closed when three supported controls do not exist: %s", (interaction) => {
+    const blueprint = structuredClone(portfolioBlueprint);
+    blueprint.pages[0]!.regions[0]!.interactions = [interaction];
+
+    expect(() => retrieveCapabilities({ blueprint, knowledge: getDesignKnowledgeSnapshot() }))
+      .toThrow("CAPABILITY_RETRIEVAL_BLOCKED");
+  });
+
+  it("does not return technically inert candidates for 点击记录查看详情", () => {
+    const blueprint = structuredClone(portfolioBlueprint);
+    blueprint.pages[0]!.regions[0]!.interactions = ["点击记录查看详情"];
+
+    expect(() => retrieveCapabilities({ blueprint, knowledge: getDesignKnowledgeSnapshot() }))
+      .toThrow("CAPABILITY_RETRIEVAL_BLOCKED");
+  });
+
   it("keeps every one of 96 regions bounded under the global detail budget", () => {
     const blueprint = structuredClone(portfolioBlueprint);
     blueprint.pages = Array.from({ length: 8 }, (_, pageIndex) => {
@@ -268,6 +290,38 @@ describe("solution plan candidate validation", () => {
 
     expect(() => assertSolutionPlanUsesCandidates(plan, bundle)).toThrow(
       "control portfolio-control: capability image is not a candidate for page-regions [wrong-page/selected-work]",
+    );
+  });
+
+  it("rejects a native plan that omits a candidate-backed region from page provenance", () => {
+    const sourceBundle = retrieveCapabilities({ blueprint: portfolioBlueprint, knowledge: getDesignKnowledgeSnapshot() });
+    const sourceRegion = sourceBundle.regions[0]!;
+    const bundle: CapabilityCandidateBundle = {
+      ...sourceBundle,
+      regions: [sourceRegion, { ...structuredClone(sourceRegion), regionId: "supporting-work" }],
+    };
+    const plan = planFor(bundle);
+
+    expect(() => assertSolutionPlanUsesCandidates(plan, bundle)).toThrow(
+      "missing plan page-region provenance [portfolio-home/supporting-work]",
+    );
+  });
+
+  it("rejects a native plan that omits a candidate-backed page from provenance", () => {
+    const sourceBundle = retrieveCapabilities({ blueprint: portfolioBlueprint, knowledge: getDesignKnowledgeSnapshot() });
+    const sourceRegion = sourceBundle.regions[0]!;
+    const bundle: CapabilityCandidateBundle = {
+      ...sourceBundle,
+      regions: [sourceRegion, {
+        ...structuredClone(sourceRegion),
+        pageId: "portfolio-detail",
+        regionId: "project-detail",
+      }],
+    };
+    const plan = planFor(bundle);
+
+    expect(() => assertSolutionPlanUsesCandidates(plan, bundle)).toThrow(
+      "missing plan page-region provenance [portfolio-detail/project-detail]",
     );
   });
 

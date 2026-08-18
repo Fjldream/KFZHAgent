@@ -19,7 +19,7 @@ import { AUDIT_ACTIONS, AuditService } from "../audit/audit.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { ARTIFACT_STORAGE } from "../artifacts/artifact-storage.js";
 import { PG_POOL, createCheckpointSaver } from "./checkpointer.js";
-import { createGraphPorts } from "./graph-ports.js";
+import { CAPABILITY_RETRIEVAL_PORT, createGraphPorts } from "./graph-ports.js";
 import { MODEL_PORT } from "./model-port.js";
 import { MODULE_ARTIFACT_AUTHORITY, SERVER_PLAN_AUTHORITY } from "./server-plan-authority.js";
 import type { ModuleArtifactAuthority, ServerPlanAuthority } from "@kf/build-jobs";
@@ -110,6 +110,8 @@ export class ConversationService {
     @Inject(MODULE_ARTIFACT_AUTHORITY) private readonly moduleArtifactAuthority: ModuleArtifactAuthority,
     private readonly assetService: AssetService,
     private readonly deliverySnapshots: DeliverySnapshotService,
+    @Inject(CAPABILITY_RETRIEVAL_PORT)
+    private readonly capabilityRetrieval: NonNullable<SolutionGraphDeps["capabilityRetrieval"]>,
   ) {}
 
   async create(tenantId: string, workspaceId: string, title?: string): Promise<Conversation> {
@@ -418,7 +420,7 @@ export class ConversationService {
         moduleArtifactAuthority: this.moduleArtifactAuthority,
         modulePlanCompiler: ports.modulePlanCompiler,
         assetCatalog: ports.assetCatalog,
-        capabilityRetrieval: ports.capabilityRetrieval,
+        capabilityRetrieval: this.capabilityRetrieval,
         acceptedBlueprintConfirmation: ports.acceptedBlueprintConfirmation,
         isDomainSupported: (domain) => domain === "kingclient",
         defaultDomainKind: "kingclient",

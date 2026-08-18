@@ -29,7 +29,12 @@ import { encodeBlueprintMessage } from "../blueprint-message.js";
  */
 export function createDesignPlanNode(deps: SolutionGraphDeps) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
-    const revising = state.revising === true || state.intent === "REVISE_DESIGN";
+    const revisingReadyCreativeBlueprint =
+      state.generationWorkflow === "creative-v2"
+      && state.stage === "solution-plan-ready"
+      && state.designPlan?.schema === "kf-design-plan/v3"
+      && (state.intent === "NEW_REQUIREMENT" || state.intent === "MODIFY_REQUIREMENT");
+    const revising = state.revising === true || state.intent === "REVISE_DESIGN" || revisingReadyCreativeBlueprint;
     let modulePlanningCatalog;
     let editableEntities = (state as { editableEntities?: import("../ports.js").EditableEntity[] }).editableEntities;
     if (state.generationWorkflow === "module-v1" && state.workspaceMode !== "upload") {
@@ -145,6 +150,15 @@ export function createDesignPlanNode(deps: SolutionGraphDeps) {
       designRevision: revision,
       stage: "design-review",
       revising: undefined,
+      ...(revisingReadyCreativeBlueprint
+        ? {
+            capabilityCandidates: undefined,
+            capabilityCandidatesHash: undefined,
+            solutionImplementationPlan: undefined,
+            solutionImplementationPlanHash: undefined,
+            solutionPlanRepairAttempt: undefined,
+          }
+        : {}),
       // 设计计划成功生成后清除历史错误码，避免残留 INVALID_MODEL_OUTPUT
       // 阻断后续进入审批/构建流程。
       lastErrorCode: undefined,

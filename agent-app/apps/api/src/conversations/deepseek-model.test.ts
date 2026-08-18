@@ -134,12 +134,14 @@ function capabilityCandidateBundle(blueprint = solutionBlueprint()) {
       regionId: "visitor-list",
       controls: [ranked("button"), ranked("easyui.1"), ranked("text")],
       layouts: [ranked("layout.2")],
-      recipes: [ranked("list-workspace")],
+      recipes: [ranked("filtered-record-workspace")],
     }],
     detailedCapabilityIds: ["button", "easyui.1", "layout.2", "text"],
     generatedAtPolicy: "deterministic-no-timestamp",
   };
 }
+
+type CapabilityCandidateBundleFixture = ReturnType<typeof capabilityCandidateBundle>;
 
 function solutionImplementationPlan(blueprint = solutionBlueprint(), candidates = capabilityCandidateBundle(blueprint)) {
   const intent = {
@@ -821,6 +823,9 @@ describe("DeepSeekModelPort", () => {
     expect(payload.detailedDesignKnowledge.styleProfiles.map((profile: { capabilityId: string }) => profile.capabilityId)).toEqual(detailedIds);
     expect(payload.detailedDesignKnowledge.scriptProfiles.map((profile: { capabilityId: string }) => profile.capabilityId)).toEqual(detailedIds);
     expect(payload.detailedDesignKnowledge.controlProfiles).toHaveLength(4);
+    expect(payload.detailedDesignKnowledge.recipes).toEqual([
+      expect.objectContaining({ id: "filtered-record-workspace", version: "1.0.0" }),
+    ]);
     expect(capturedImplementationPrompt).toContain("kf-capability-candidates/v1");
     expect(capturedImplementationPrompt).toContain("可以自由组合或忽略组合经验");
     expect(capturedImplementationPrompt).toContain("页面");
@@ -877,6 +882,36 @@ describe("DeepSeekModelPort", () => {
     expect(omittedProfileId).toBeDefined();
     expect(capturedImplementationPrompt).not.toContain(`"capabilityId":"${omittedProfileId}"`);
     expect(new TextEncoder().encode(capturedImplementationPrompt).byteLength).toBeLessThanOrEqual(128_000);
+  });
+
+  it.each([
+    ["catalog version", (candidates: CapabilityCandidateBundleFixture) => { candidates.knowledgeCatalogVersion = "9.9.9"; }, /catalog version.*9\.9\.9/i],
+    ["candidate profile version", (candidates: CapabilityCandidateBundleFixture) => { candidates.regions[0].controls[0].knowledgeVersion = "9.9.9"; }, /candidate profile.*9\.9\.9/i],
+    ["extra detailed identity", (candidates: CapabilityCandidateBundleFixture) => {
+      candidates.detailedCapabilityIds = ["button", "easyui.1", "image", "layout.2", "text"];
+    }, /detailed capability IDs/i],
+    ["missing detailed identity", (candidates: CapabilityCandidateBundleFixture) => {
+      candidates.detailedCapabilityIds = candidates.detailedCapabilityIds.filter((id: string) => id !== "text");
+    }, /detailed/i],
+    ["duplicate detailed identity", (candidates: CapabilityCandidateBundleFixture) => {
+      candidates.detailedCapabilityIds = ["button", ...candidates.detailedCapabilityIds];
+    }, /detailed/i],
+    ["stale recipe version", (candidates: CapabilityCandidateBundleFixture) => { candidates.regions[0].recipes[0].knowledgeVersion = "9.9.9"; }, /recipe.*9\.9\.9/i],
+    ["unknown recipe identity", (candidates: CapabilityCandidateBundleFixture) => { candidates.regions[0].recipes[0].id = "unknown-recipe"; }, /recipe.*unknown-recipe/i],
+  ])("rejects a %s mismatch before fetching semantic output", async (_label, mutate, expectedError) => {
+    const context = solutionPlanningContext();
+    const candidates = structuredClone(context.capabilityCandidates);
+    mutate(candidates);
+    const responsePlan = solutionImplementationPlan(context.confirmedSolutionBlueprint, candidates);
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify(responsePlan) } }] }),
+    });
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+
+    await expect(port.createSolutionImplementationPlan({ ...context, capabilityCandidates: candidates }))
+      .rejects.toThrow(expectedError);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("includes only bounded prior plan and rejection reasons in semantic repair", async () => {

@@ -1056,6 +1056,33 @@ function buildCreativeBlueprintPrompt(
 
 function detailedDesignKnowledge(candidates: ReturnType<typeof CapabilityCandidateBundleSchema.parse>) {
   const knowledge = getDesignKnowledgeSnapshot();
+  if (candidates.knowledgeCatalogVersion !== knowledge.version) {
+    throw new DeepSeekModelOutputError(
+      `candidate knowledge catalog version ${candidates.knowledgeCatalogVersion} does not match active ${knowledge.version}`,
+    );
+  }
+  const advertisedDetailVersions = new Map<string, string>();
+  for (const candidate of candidates.regions.flatMap((region) => [...region.controls, ...region.layouts])) {
+    const priorVersion = advertisedDetailVersions.get(candidate.id);
+    if (priorVersion !== undefined && priorVersion !== candidate.knowledgeVersion) {
+      throw new DeepSeekModelOutputError(`candidate ${candidate.id} advertises conflicting knowledge versions`);
+    }
+    advertisedDetailVersions.set(candidate.id, candidate.knowledgeVersion);
+  }
+  const exactDetailedIds = [...advertisedDetailVersions.keys()].sort();
+  if (
+    exactDetailedIds.length !== candidates.detailedCapabilityIds.length
+    || exactDetailedIds.some((id, index) => id !== candidates.detailedCapabilityIds[index])
+  ) {
+    throw new DeepSeekModelOutputError("detailed capability IDs do not exactly cover advertised control and layout candidates");
+  }
+  const activeControlProfiles = new Map(knowledge.controlDesignProfiles.map((profile) => [profile.capabilityId, profile]));
+  for (const [id, advertisedVersion] of advertisedDetailVersions) {
+    const active = activeControlProfiles.get(id);
+    if (active === undefined || active.version !== advertisedVersion) {
+      throw new DeepSeekModelOutputError(`candidate profile ${id}@${advertisedVersion} does not match active knowledge`);
+    }
+  }
   const detailedIds = new Set(candidates.detailedCapabilityIds);
   const exactProfiles = <T extends { capabilityId: string }>(profiles: readonly T[]): readonly T[] => {
     const selected = profiles.filter((profile) => detailedIds.has(profile.capabilityId));
@@ -1121,9 +1148,30 @@ function detailedDesignKnowledge(candidates: ReturnType<typeof CapabilityCandida
     lifecycleEvents: profile.initialization.lifecycleEvents,
     limitations: profile.limitations,
   }));
-  const recipeIds = new Set(candidates.regions.flatMap((region) => region.recipes.map((recipe) => recipe.id)));
-  const recipes = knowledge.compositionRecipes
-    .filter((recipe) => recipeIds.has(recipe.id))
+  const advertisedRecipeVersions = new Map<string, string>();
+  for (const candidate of candidates.regions.flatMap((region) => region.recipes)) {
+    const priorVersion = advertisedRecipeVersions.get(candidate.id);
+    if (priorVersion !== undefined && priorVersion !== candidate.knowledgeVersion) {
+      throw new DeepSeekModelOutputError(`recipe ${candidate.id} advertises conflicting knowledge versions`);
+    }
+    advertisedRecipeVersions.set(candidate.id, candidate.knowledgeVersion);
+  }
+  const recipeIds = [...advertisedRecipeVersions.keys()].sort();
+  const activeRecipes = new Map(knowledge.compositionRecipes.map((recipe) => [recipe.id, recipe]));
+  for (const [id, advertisedVersion] of advertisedRecipeVersions) {
+    const active = activeRecipes.get(id);
+    if (active === undefined || active.version !== advertisedVersion) {
+      throw new DeepSeekModelOutputError(`recipe ${id}@${advertisedVersion} does not match active knowledge`);
+    }
+  }
+  const selectedRecipes = knowledge.compositionRecipes.filter((recipe) => advertisedRecipeVersions.has(recipe.id));
+  if (
+    selectedRecipes.length !== recipeIds.length
+    || selectedRecipes.some((recipe, index) => recipe.id !== recipeIds[index])
+  ) {
+    throw new DeepSeekModelOutputError("recipe profiles do not exactly cover advertised recipe candidates");
+  }
+  const recipes = selectedRecipes
     .map((recipe) => ({
       id: recipe.id,
       version: recipe.version,

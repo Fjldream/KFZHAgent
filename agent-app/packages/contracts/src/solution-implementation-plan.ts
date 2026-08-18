@@ -187,6 +187,28 @@ function isKnownCssPseudoClassSelector(value: string): boolean {
       || standardHtmlAndSvgTagNames.has(selectorPrefix.toLowerCase()));
 }
 
+function isKnownCssPseudoElementSelector(value: string): boolean {
+  const match = /^([A-Za-z][A-Za-z0-9-]*|[.#][A-Za-z_-][A-Za-z0-9_-]*)::([A-Za-z-]+)(?:\([^)]*\))?$/.exec(value);
+  const selectorPrefix = match?.[1];
+  return selectorPrefix !== undefined
+    && (selectorPrefix.startsWith(".")
+      || selectorPrefix.startsWith("#")
+      || standardHtmlAndSvgTagNames.has(selectorPrefix.toLowerCase()));
+}
+
+function containsJavascriptCall(value: string): boolean {
+  const call = /\b([A-Za-z_$][A-Za-z0-9_$]*)(?:\?\.)?\s*\(([^()]*)\)/g;
+  for (const match of value.matchAll(call)) {
+    const name = match[1]!;
+    const argumentsText = match[2]!;
+    if (/^(?:rgb|rgba|hsl|hsla|var)$/i.test(name)) continue;
+    if (/^[A-Z]{2,}$/.test(name) && /[\u3400-\u9fff]/.test(argumentsText)) continue;
+    if (/^version$/i.test(name) && /^\s*\d+(?:\.\d+)+\s*$/.test(argumentsText)) continue;
+    return true;
+  }
+  return false;
+}
+
 const stableIdSchema = z
   .string()
   .trim()
@@ -259,7 +281,7 @@ const declarativeStepTextSchema = semanticTextSchema.superRefine((value, ctx) =>
     || /^(?:return|throw|await|yield)(?:\s+(?:[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.[A-Za-z_$][A-Za-z0-9_$]*)|(?:\[[^\]]+\]))*|-?\d+(?:\.\d+)?|true|false|null|undefined|["'][^"'\n]*["']))?$/.test(value.trim())
     || /^(?:(?:break|continue)(?:\s+[A-Za-z_$][A-Za-z0-9_$]*)?|debugger)$/.test(value.trim())
     || /\b[A-Za-z_$][A-Za-z0-9_$]*\s*(?:\[[^\]]+\]|\.[A-Za-z_$][A-Za-z0-9_$]*)\s*(?:\(|\[)/.test(value)
-    || /\b[A-Za-z_$][A-Za-z0-9_$]*(?:\?\.)?\(/.test(value)
+    || containsJavascriptCall(value)
     || /\b(?:alert|setTimeout|setInterval|eval|Function)\s+\(/.test(value)
   ) {
     ctx.addIssue({ code: "custom", message: "custom-script steps must be declarative prose, not executable syntax" });
@@ -961,17 +983,19 @@ function implementationTextIssue(value: string, path: Array<string | number>): s
     || /^[A-Za-z_$][A-Za-z0-9_$]*(?:\[(?:[A-Za-z_$][A-Za-z0-9_$]*|\d+|["'][^"'\n]+["'])\])+(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*$/.test(trimmed);
   if (!structuralIdentifier && codeLikeMember) return "executable member or index syntax is not allowed";
   if (/\b(?:document|window|globalThis|fetch|XMLHttpRequest|WebSocket|eval|Function)\s*\.?[A-Za-z_$]*\s*\(/i.test(value)) return "JavaScript API calls are not allowed";
-  if (/\b(?!rgb(?:a)?\b|hsl(?:a)?\b|var\b)[A-Za-z_$][A-Za-z0-9_$]*(?:\?\.)?\(/i.test(value)) return "code-like calls are not allowed";
+  if (containsJavascriptCall(value)) return "code-like calls are not allowed";
   if (/^\.[A-Za-z_-][A-Za-z0-9_-]*$/.test(trimmed) || (/^#[A-Za-z_-][A-Za-z0-9_-]*$/.test(trimmed) && !/^#[0-9a-f]{3,8}$/i.test(trimmed)) || /^\[[A-Za-z_-][^\]]*\]$/.test(trimmed)) return "CSS selectors are not allowed";
   if (/^(?:#[A-Za-z_-][A-Za-z0-9_-]*|\.[A-Za-z_-][A-Za-z0-9_-]*)(?:[#.][A-Za-z_-][A-Za-z0-9_-]*)+$/.test(trimmed)) return "CSS selectors are not allowed";
   if (/^(?:#[A-Za-z_-][A-Za-z0-9_-]*|\.[A-Za-z_-][A-Za-z0-9_-]*)(?:[#.][A-Za-z_-][A-Za-z0-9_-]*)*(?::[A-Za-z-]+(?:\([^)]*\))?)+$/.test(trimmed)) return "CSS selectors are not allowed";
   if (/^(?:#[A-Za-z_-][A-Za-z0-9_-]*|\.[A-Za-z_-][A-Za-z0-9_-]*|\[[^\]\n]+\]|button|input|select|textarea|a|form|table|tr|td|div|span|section|main|header|footer|nav|label)(?:\s+(?:#[A-Za-z_-][A-Za-z0-9_-]*|\.[A-Za-z_-][A-Za-z0-9_-]*|\[[^\]\n]+\]|[A-Za-z][A-Za-z0-9-]*))+$/.test(trimmed)) return "CSS selectors are not allowed";
   if (/^[A-Za-z][A-Za-z0-9-]*\s+\.[A-Za-z_-][A-Za-z0-9_-]*$/.test(trimmed)) return "CSS selectors are not allowed";
-  if (/^#[A-Za-z_-][A-Za-z0-9_-]*(?:\s+|\s*[>+~]\s*)/.test(trimmed) || isKnownCssPseudoClassSelector(trimmed)) return "CSS selectors are not allowed";
+  if (/^#[A-Za-z_-][A-Za-z0-9_-]*(?:\s+|\s*[>+~]\s*)/.test(trimmed) || isKnownCssPseudoClassSelector(trimmed) || isKnownCssPseudoElementSelector(trimmed)) return "CSS selectors are not allowed";
   if (/(?:^|\s)(?:#[A-Za-z_-][A-Za-z0-9_-]*|\.[A-Za-z_-][A-Za-z0-9_-]*|\[[A-Za-z_-][^\]]*\]|(?:button|input|select|textarea|div|span|section|main|header|footer|nav):[A-Za-z-]+)\s*(?:\{|[>+~])/i.test(value)) return "CSS rules and selectors are not allowed";
   if (/(?:^|[;{]\s*)(?:color|display|margin(?:-[a-z]+)?|padding(?:-[a-z]+)?|background(?:-[a-z]+)?|border(?:-[a-z]+)?|font(?:-[a-z]+)?|opacity|z-index|flex(?:-[a-z]+)?|grid(?:-[a-z]+)?|transform|transition|animation)\s*:\s*[^;{}\n]+(?:;|}|$)/i.test(value)) return "CSS declarations are not allowed";
   if (/(?:^|[;{]\s*)position\s*:\s*(?:absolute|fixed|relative|sticky)(?:\s*!important)?(?:;|}|$)/i.test(value)) return "CSS declarations are not allowed";
   if (/(?:^|[;{]\s*)(?:width|height)\s*:\s*(?:-?\d+(?:\.\d+)?(?:px|r?em|%|vh|vw|vmin|vmax)|auto|fit-content|min-content|max-content|calc\([^\n{}]+\))(?:\s*!important)?(?:;|}|$)/i.test(value)) return "CSS declarations are not allowed";
+  if (/(?:^|[;{]\s*)--[A-Za-z0-9_-]+\s*:\s*[^;{}\n]+(?:;|}|$)/.test(value)) return "CSS declarations are not allowed";
+  if (/(?:^|\n)\s*(?:export\s+(?:default\b|(?:const|let|var|function|class)\b|\{|\*)|import\s+(?:[A-Za-z_$*{]|["']))[^\n]*(?:$|\n)/i.test(value)) return "static JavaScript module statements are not allowed";
   if (/\b[A-Za-z_$][A-Za-z0-9_$]*\.[A-Za-z_$][A-Za-z0-9_$]*\s*\(/.test(value)) return "code-like calls are not allowed";
   return undefined;
 }
@@ -1074,6 +1098,7 @@ function validatePlanReferences(plan: SolutionImplementationPlan, ctx: z.Refinem
   plan.roleStyles.forEach((style, index) => {
     if (roleIds.has(style.role)) ctx.addIssue({ code: "custom", path: ["roleStyles", index, "role"], message: `duplicate style role: ${style.role}` });
     roleIds.add(style.role);
+    if (!legacyCompatibility) registerId(style.role, ["roleStyles", index, "role"]);
   });
   plan.mockData.forEach((dataSet, index) => {
     registerId(dataSet.id, ["mockData", index, "id"]);

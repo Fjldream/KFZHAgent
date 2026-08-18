@@ -1,5 +1,6 @@
 import {
   canonicalServerHash,
+  LEGACY_MODULE_PLAN_CANDIDATE_BUNDLE_HASH,
   type CapabilityCandidateBundle,
   type CompositionRecipe,
   type ControlCapability,
@@ -20,6 +21,12 @@ const MAX_CONTROLS = 5;
 const MIN_LAYOUTS = 1;
 const MAX_LAYOUTS = 3;
 const MAX_RECIPES = 3;
+const NATURAL_INTERACTION_MAPPINGS: ReadonlyArray<readonly [string, RegExp]> = [
+  ["navigate-page", /(?:点击|打开|进入|查看).*(?:详情|明细)|(?:详情|明细).*(?:打开|查看|进入)/],
+  ["change", /筛选|过滤|搜索|检索|选择|选中|更改|变更/],
+  ["tab-click", /(?:标签页?|页签).*(?:切换|点击|选择)|(?:切换|点击|选择).*(?:标签页?|页签)/],
+  ["open-dialog", /(?:对话框|弹窗).*(?:打开|关闭|开关)|(?:打开|关闭).*(?:对话框|弹窗)/],
+];
 
 type RankedCandidate = CapabilityCandidateBundle["regions"][number]["controls"][number];
 
@@ -126,6 +133,9 @@ function requiredInteractionIds(
     if (/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(normalized)) found.add(normalized);
     for (const token of normalized.match(/[a-z][a-z0-9]*(?:-[a-z0-9]+)*/g) ?? []) {
       if (knownInteractionIds.has(token)) found.add(token);
+    }
+    for (const [semanticId, pattern] of NATURAL_INTERACTION_MAPPINGS) {
+      if (knownInteractionIds.has(semanticId) && pattern.test(normalized)) found.add(semanticId);
     }
   }
   return [...found].sort(compareCodePoints);
@@ -474,6 +484,25 @@ export function assertSolutionPlanUsesCandidates(
   const expectedBundleHash = canonicalHash(bundle);
   if (plan.candidateBundleHash !== expectedBundleHash) {
     issues.push(`candidate bundle hash: expected ${expectedBundleHash}, received ${plan.candidateBundleHash}`);
+  }
+
+  if (plan.candidateBundleHash !== LEGACY_MODULE_PLAN_CANDIDATE_BUNDLE_HASH) {
+    const bundleIdentities = new Set(bundle.regions.map((region) =>
+      `${region.pageId}\u0000${region.regionId}`,
+    ));
+    const planIdentities = new Set(plan.pages.flatMap((page) =>
+      page.sourceBlueprintRegionIds.map((regionId) =>
+        `${page.sourceBlueprintPageId}\u0000${regionId}`,
+      ),
+    ));
+    const displayIdentities = (identities: readonly string[]): string => identities
+      .map((identity) => identity.replace("\u0000", "/"))
+      .sort(compareCodePoints)
+      .join(", ");
+    const missing = [...bundleIdentities].filter((identity) => !planIdentities.has(identity));
+    const extra = [...planIdentities].filter((identity) => !bundleIdentities.has(identity));
+    if (missing.length > 0) issues.push(`missing plan page-region provenance [${displayIdentities(missing)}]`);
+    if (extra.length > 0) issues.push(`extra plan page-region provenance [${displayIdentities(extra)}]`);
   }
 
   const registry = createDefaultModuleRegistry();

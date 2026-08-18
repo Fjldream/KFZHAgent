@@ -381,6 +381,18 @@ describe("SolutionImplementationPlanSchema", () => {
     }
   });
 
+  it("registers native style roles in the global stable-id namespace", () => {
+    for (const collision of ["operations-page", "equipment-name", "detail-visible", "open-detail"]) {
+      const plan = cloneFixture();
+      plan.roleStyles.push({ role: collision, declarations: {}, states: {} });
+      expect(SolutionImplementationPlanSchema.safeParse(plan).success, collision).toBe(false);
+    }
+
+    const duplicateRole = cloneFixture();
+    duplicateRole.roleStyles[1].role = "record-title";
+    expect(SolutionImplementationPlanSchema.safeParse(duplicateRole).success).toBe(false);
+  });
+
   it("validates page and node blueprint provenance", () => {
     const unknownRegion = cloneFixture();
     findNode(unknownRegion, "equipment-name").sourceBlueprintRegionIds = ["invented-region"];
@@ -812,6 +824,32 @@ describe("SolutionImplementationPlanSchema", () => {
     semanticPlan.scripts[1].steps[0].intent = "Show empty state if no record is selected";
     semanticPlan.scripts[1].steps[1].intent = "Show guidance for new operators while records are loading";
     expect(SolutionImplementationPlanSchema.safeParse(semanticPlan).success).toBe(true);
+  });
+
+  it.each([
+    "color: red",
+    "position: absolute",
+    "div::before",
+    "--brand-color: red",
+    "export default 42",
+  ])("rejects targeted raw implementation text in semantic values and declarative steps: %s", (content) => {
+    const contentPlan = cloneFixture();
+    findNode(contentPlan, "equipment-name").content = content;
+    const scriptPlan = cloneFixture();
+    scriptPlan.scripts[1].steps[0].intent = content;
+
+    expect({
+      content: SolutionImplementationPlanSchema.safeParse(contentPlan).success,
+      script: SolutionImplementationPlanSchema.safeParse(scriptPlan).success,
+    }).toEqual({ content: false, script: false });
+  });
+
+  it("preserves unspaced benign product labels in semantic values and declarative custom-script prose", () => {
+    const plan = cloneFixture();
+    findNode(plan, "equipment-name").content = "Version(3.6)";
+    plan.scripts[1].steps[0].intent = "汇总KPI(关键指标)并形成客户可读说明";
+
+    expect(SolutionImplementationPlanSchema.safeParse(plan).success).toBe(true);
   });
 
   it("rejects chained selectors, literal assignments, and index-member expressions in semantic text", () => {

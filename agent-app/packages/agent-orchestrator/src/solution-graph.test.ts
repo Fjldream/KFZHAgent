@@ -151,6 +151,7 @@ class FakeModelPort implements ModelPort {
   implementationCreateCalls: ModelPortContext[] = [];
   implementationReviseCalls: ModelPortContext[] = [];
   designCalls: ModelPortContext[] = [];
+  designOptions: Array<{ revising?: boolean; rejectionReasons?: string[] } | undefined> = [];
   solutionCreateCalls: ModelPortContext[] = [];
   solutionReviseCalls: ModelPortContext[] = [];
   createdPlans: ChangePlan[] = [];
@@ -192,7 +193,13 @@ class FakeModelPort implements ModelPort {
     opts?: { revising?: boolean },
   ): Promise<DesignPlan> {
     this.designCalls.push(input);
-    if (input.generationWorkflow === "creative-v2") return creativeBlueprint();
+    this.designOptions.push(opts);
+    if (input.generationWorkflow === "creative-v2") {
+      const blueprint = creativeBlueprint();
+      return input.designPlan?.schema === "kf-design-plan/v3"
+        ? { ...blueprint, displayName: "访客协同中心修订版" }
+        : blueprint;
+    }
     const base: CustomerEffectBlueprint = {
       schema: "kf-design-plan/v2",
       displayName: "客户效果方案",
@@ -695,6 +702,62 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     expect(planned.buildAuthorization).toBeUndefined();
     expect(planned.buildJobId).toBeUndefined();
     expect(planned.previewArtifactId).toBeUndefined();
+  });
+
+  it("revises a ready creative blueprint from the preserved checkpoint stage and clears stale creative state", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+    bed.workspace.routing.set(WORKSPACE_ID, { mode: "new", generationWorkflow: "creative-v2" });
+    const preservedLegacy = {
+      activeChangeRequestId: "legacy-change-request",
+      changePlanId: "legacy-change-plan",
+      planHash: "c".repeat(64),
+      buildJobId: "legacy-build-job",
+      buildAuthorization: "legacy-plan-approval" as const,
+      previewArtifactId: "legacy-preview-artifact",
+    };
+
+    bed.model.queueIntent("NEW_REQUIREMENT");
+    await sendUser(bed, ctx, "创建园区访客协同中心");
+    await bed.graph.invoke({ ...input(ctx), ...preservedLegacy }, config(ctx));
+    bed.model.queueIntent("CONFIRM_DESIGN");
+    await sendUser(bed, ctx, "确认设计");
+    const ready = await bed.graph.invoke(input(ctx), config(ctx));
+    expect(ready.stage).toBe("solution-plan-ready");
+    const previousBlueprint = ready.designPlan;
+    expect(previousBlueprint?.schema).toBe("kf-design-plan/v3");
+    expect(ready.capabilityCandidates).toBeDefined();
+    expect(ready.solutionImplementationPlan).toBeDefined();
+
+    bed.model.queueIntent("MODIFY_REQUIREMENT");
+    await sendUser(bed, ctx, "把方案名称调整为访客协同中心修订版");
+    const revised = await bed.graph.invoke({
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      workspaceId: ctx.workspaceId,
+      conversationId: ctx.conversationId,
+      recentMessages: [] as GraphMessage[],
+    }, config(ctx));
+
+    expect(bed.model.designOptions.at(-1)).toMatchObject({ revising: true });
+    expect(bed.model.designCalls.at(-1)?.designPlan).toEqual(previousBlueprint);
+    expect(revised).toMatchObject({
+      stage: "design-review",
+      designPlan: expect.objectContaining({ displayName: "访客协同中心修订版" }),
+      ...preservedLegacy,
+      lastErrorCode: undefined,
+    });
+    expect(revised.capabilityCandidates).toBeUndefined();
+    expect(revised.capabilityCandidatesHash).toBeUndefined();
+    expect(revised.solutionImplementationPlan).toBeUndefined();
+    expect(revised.solutionImplementationPlanHash).toBeUndefined();
+    expect(revised.solutionPlanRepairAttempt).toBeUndefined();
+    expect(bed.model.solutionCreateCalls).toHaveLength(1);
+    expect(bed.model.solutionReviseCalls).toHaveLength(0);
+    expect(bed.repo.requests.size).toBe(0);
+    expect(bed.repo.plans.size).toBe(0);
+    expect(bed.builds.enqueues).toHaveLength(0);
+    expect(await interruptPayload(bed, ctx)).toBeUndefined();
   });
 
   it("keeps every later creative-v2 intent in design review or terminal without legacy approval or build side effects", async () => {

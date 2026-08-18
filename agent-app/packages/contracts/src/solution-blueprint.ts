@@ -35,8 +35,11 @@ const canonicalUuid = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 const quotedObjectKey = /\\?["']([A-Za-z][A-Za-z0-9_. -]*)\\?["']\s*:/g;
 const implementationAssignment = /\b([A-Za-z][A-Za-z0-9_. -]*)\s*(?:=|:)/g;
 const dottedImplementationToken = /\b[A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z][A-Za-z0-9_-]*)+\b/;
-const cssDeclaration = /(?:^|[;{]\s*)(?:color|display|position|width|height|margin(?:-[a-z]+)?|padding(?:-[a-z]+)?|background(?:-[a-z]+)?|border(?:-[a-z]+)?|font(?:-[a-z]+)?|opacity|z-index|flex(?:-[a-z]+)?|grid(?:-[a-z]+)?|transform|transition|animation)\s*:\s*[^;{}\n]+(?:;|})/i;
+const cssDeclaration = /(?:^|[;{]\s*)(?:color|display|position|width|height|margin(?:-[a-z]+)?|padding(?:-[a-z]+)?|background(?:-[a-z]+)?|border(?:-[a-z]+)?|font(?:-[a-z]+)?|opacity|z-index|flex(?:-[a-z]+)?|grid(?:-[a-z]+)?|transform|transition|animation)\s*:\s*[^;{}\n]+(?:;|}|$)/i;
+const cssCustomProperty = /(?:^|[;{]\s*)--[A-Za-z0-9_-]+\s*:\s*[^;{}\n]+(?:;|}|$)/;
+const cssPseudoElement = /(?:^|\s)(?:[.#][A-Za-z_-][A-Za-z0-9_-]*|button|input|select|textarea|a|form|table|tr|td|div|span|section|main|header|footer|nav|label)::[A-Za-z-]+(?:\([^)]*\))?/i;
 const cssSelector = /(?:^|\s)(?:#[A-Za-z_-][A-Za-z0-9_-]*(?:\s*[>+~]\s*|\s*:[A-Za-z-]+|\s*\{)|\.[A-Za-z_-][A-Za-z0-9_-]*(?:\s*[>+~]\s*|\s*:[A-Za-z-]+|\s*\{)|\[[A-Za-z_-][A-Za-z0-9_-]*[~|^$*]?=[^\]]+\]|\[(?:data|aria)-[A-Za-z0-9_-]+(?:[~|^$*]?=[^\]]+)?\]|\[(?:disabled|checked|selected|readonly|required|hidden|multiple|open)\]|[A-Za-z_-][A-Za-z0-9_-]*\[(?:data|aria)-[A-Za-z0-9_-]+(?:[~|^$*]?=[^\]]+)?\]|\b(?:button|input|select|textarea|a|form|table|tr|td|div|span|section|main|header|footer|nav|label):[A-Za-z-]+)/i;
+const staticModuleStatement = /(?:^|\n)\s*(?:export\s+(?:default\b|(?:const|let|var|function|class)\b|\{|\*)|import\s+(?:[A-Za-z_$*{]|["']))[^\n]*(?:$|\n)/i;
 const identifierCall = /\b([A-Za-z_$][A-Za-z0-9_$]*)(\s*)\(([^()]*)\)/g;
 const dangerousBuiltinNames = new Set([
   "window",
@@ -98,7 +101,8 @@ function containsJavascriptCall(value: string): boolean {
     const whitespace = match[2]!;
     const argumentsText = match[3]!;
     const uppercaseChineseLabel = /^[A-Z]{2,}$/.test(name) && /[\u3400-\u9fff]/.test(argumentsText);
-    if (uppercaseChineseLabel) continue;
+    const numericVersionLabel = /^version$/i.test(name) && /^\s*\d+(?:\.\d+)+\s*$/.test(argumentsText);
+    if (uppercaseChineseLabel || numericVersionLabel) continue;
     if (whitespace.length === 0) return true;
     if (isCamelOrPascalIdentifier(name) || dangerousBuiltinNames.has(name.toLowerCase())) return true;
   }
@@ -111,7 +115,8 @@ function implementationTextIssue(value: string): string | undefined {
   if (containsQuotedImplementationKey(value)) return "implementation JSON keys are not allowed";
   if (containsImplementationAssignment(value)) return "implementation assignments are not allowed";
   if (dottedImplementationToken.test(value)) return "dot-delimited implementation tokens are not allowed";
-  if (cssDeclaration.test(value) || cssSelector.test(value)) return "CSS declarations and selectors are not allowed";
+  if (cssDeclaration.test(value) || cssCustomProperty.test(value) || cssPseudoElement.test(value) || cssSelector.test(value)) return "CSS declarations and selectors are not allowed";
+  if (staticModuleStatement.test(value)) return "static JavaScript module statements are not allowed";
   if (containsJavascriptCall(value)) return "JavaScript calls are not allowed";
   return undefined;
 }
