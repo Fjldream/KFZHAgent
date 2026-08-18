@@ -3,6 +3,7 @@ import type { ModuleCompilationOutcome, ModulePlanningSummary } from "@kf/domain
 import type { BuildJobStatus } from "@kf/build-jobs";
 import type {
   CapabilityReport,
+  CapabilityCandidateBundle,
   ChangePlan,
   InternalChangePlan,
   ServerPlanEnvelope,
@@ -10,6 +11,7 @@ import type {
   UIImplementationSpec,
   AcceptedBlueprintArtifact,
   CustomerEffectBlueprint,
+  CustomerSolutionBlueprint,
 } from "@kf/contracts";
 import type { ModelPort } from "./model-port.js";
 import type { GraphMessage } from "./state.js";
@@ -84,7 +86,7 @@ export interface WorkspaceQueryPort {
     workspaceId: string;
   }): Promise<{
     mode: "new" | "upload";
-    generationWorkflow: "legacy" | "module-v1";
+    generationWorkflow: "legacy" | "module-v1" | "creative-v2";
   } | undefined>;
   /** Bounded, model-safe summary of a revision (never the full JSON). */
   getRevisionSummary(input: {
@@ -219,6 +221,13 @@ export interface AcceptedBlueprintConfirmationPort {
   }): Promise<AcceptedBlueprintArtifact>;
 }
 
+/** Deterministic local retrieval boundary. Implementations make no model call. */
+export interface CapabilityRetrievalPort {
+  retrieve(input: {
+    blueprint: CustomerSolutionBlueprint;
+  }): Promise<CapabilityCandidateBundle>;
+}
+
 /** Server-only authority port. Implementations hold the HMAC key outside graph state. */
 export interface ServerPlanSignerPort {
   sign(input: {
@@ -249,6 +258,8 @@ export interface SolutionGraphDeps {
   modulePlanCompiler?: ModulePlanCompilerPort;
   assetCatalog?: AssetCatalogPort;
   acceptedBlueprintConfirmation?: AcceptedBlueprintConfirmationPort;
+  /** Required only by the creative-v2 route. */
+  capabilityRetrieval?: CapabilityRetrievalPort;
   /** Domain support predicate (DomainRegistry-backed in production). */
   isDomainSupported: (domain: string) => boolean;
   /** Domain used when enqueueing a build (defaults to the KF client domain). */

@@ -1,9 +1,12 @@
 import type {
   AssetRecord,
+  CapabilityCandidateBundle,
   ChangePlan,
   CustomerEffectBlueprint,
+  CustomerSolutionBlueprint,
   DesignPlan,
   ModulePlan,
+  SolutionImplementationPlan,
   UIImplementationSpec,
   ValidationReport,
 } from "@kf/contracts";
@@ -51,6 +54,14 @@ export interface ModelPortContext {
   modulePlanRejectionReasons?: string[] | undefined;
   /** Bounded deterministic gate failures supplied for a single repair attempt. */
   implementationRejectionReasons?: string[] | undefined;
+  /** Confirmed v3 customer semantics for the creative-v2 solution-planning path. */
+  confirmedSolutionBlueprint?: CustomerSolutionBlueprint | undefined;
+  /** Deterministically retrieved, hash-bound candidates; never model-authored. */
+  capabilityCandidates?: CapabilityCandidateBundle | undefined;
+  /** Schema-valid prior semantic plan supplied only to localize one repair. */
+  previousSolutionImplementationPlan?: SolutionImplementationPlan | undefined;
+  /** Bounded schema/reference issues supplied only to the localized repair call. */
+  solutionPlanRejectionReasons?: string[] | undefined;
   /**
    * Model-editable entities of the current revision (controls/pages with their
    * KF GUIDs). A real LLM must reference these exact GUIDs in change plans —
@@ -90,6 +101,14 @@ export interface ModelPort {
   createModulePlan(input: ModelPortContext): Promise<ModulePlan>;
   /** Return a complete revision while retaining every unaffected prior module exactly. */
   reviseModulePlan(input: ModelPortContext): Promise<ModulePlan>;
+  /** Task 7 supplies the production prompt; orchestration permits one primary call. */
+  createSolutionImplementationPlan?(
+    input: ModelPortContext,
+  ): Promise<SolutionImplementationPlan>;
+  /** One localized semantic subtree repair; orchestration never loops this call. */
+  reviseSolutionImplementationSubtree?(
+    input: ModelPortContext,
+  ): Promise<SolutionImplementationPlan>;
   explainValidation(input: { tenantId: string; report: ValidationReport }): Promise<string>;
 }
 

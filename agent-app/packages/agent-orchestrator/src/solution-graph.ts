@@ -17,6 +17,8 @@ import { createApprovalNode, createCancelPlanNode } from "./nodes/approval.js";
 import { createEnqueueBuildNode } from "./nodes/enqueue-build.js";
 import { createImplementationPlanNode } from "./nodes/implementation-plan.js";
 import { createModulePlanNode } from "./nodes/module-plan.js";
+import { createCapabilityRetrievalNode } from "./nodes/capability-retrieval.js";
+import { createSolutionImplementationPlanNode } from "./nodes/solution-implementation-plan.js";
 
 /**
  * Thrown when the caller tries to run a conversation that is paused at the
@@ -75,6 +77,8 @@ export function compileSolutionGraph(
     .addNode("design-plan", createDesignPlanNode(deps))
     .addNode("implementation-plan", createImplementationPlanNode(deps))
     .addNode("module-plan", createModulePlanNode(deps))
+    .addNode("capability-retrieval", createCapabilityRetrievalNode(deps))
+    .addNode("solution-implementation-plan", createSolutionImplementationPlanNode(deps))
     .addNode("plan-change", createPlanChangeNode(deps))
     .addNode("approval", createApprovalNode())
     .addNode("cancel-plan", createCancelPlanNode(deps))
@@ -85,6 +89,8 @@ export function compileSolutionGraph(
     .addConditionalEdges("classify-intent", (state) => routeAfterClassify(state, deps))
     .addConditionalEdges("implementation-plan", routeAfterPlanChange)
     .addConditionalEdges("module-plan", routeAfterModulePlan)
+    .addConditionalEdges("capability-retrieval", routeAfterCapabilityRetrieval)
+    .addEdge("solution-implementation-plan", END)
     .addConditionalEdges("plan-change", routeAfterPlanChange)
     .addConditionalEdges("approval", routeAfterApproval)
     .addEdge("cancel-plan", END)
@@ -116,7 +122,7 @@ export function routeAfterClassify(state: AgentGraphStateValue, deps?: SolutionG
         ? "module-plan"
         : state.designPlan?.schema === "kf-design-plan/v2" ? "implementation-plan" : "plan-change";
     case "CONFIRM_DESIGN":
-      return useModuleWorkflow(state, deps) ? "module-plan" : state.designPlan?.schema === "kf-design-plan/v2" ? "implementation-plan" : "plan-change";
+      return routeAfterDesignConfirmation(state, deps);
     case "REVISE_DESIGN":
       return "design-plan";
     case "CONFIRM_BUILD":
@@ -132,6 +138,23 @@ export function routeAfterClassify(state: AgentGraphStateValue, deps?: SolutionG
     default:
       return END;
   }
+}
+
+/** Creative-v2 accepts only a confirmed v3 blueprint; prior workflows retain their routes. */
+export function routeAfterDesignConfirmation(
+  state: AgentGraphStateValue,
+  deps?: SolutionGraphDeps,
+): string {
+  if (state.generationWorkflow === "creative-v2") {
+    return state.designPlan?.schema === "kf-design-plan/v3" ? "capability-retrieval" : END;
+  }
+  return useModuleWorkflow(state, deps)
+    ? "module-plan"
+    : state.designPlan?.schema === "kf-design-plan/v2" ? "implementation-plan" : "plan-change";
+}
+
+export function routeAfterCapabilityRetrieval(state: AgentGraphStateValue): string {
+  return state.stage === "implementation-planning" ? "solution-implementation-plan" : END;
 }
 
 function useModuleWorkflow(state: AgentGraphStateValue, deps: SolutionGraphDeps | undefined): boolean {

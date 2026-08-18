@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   CapabilityReportSchema,
+  CapabilityCandidateBundleSchema,
   AcceptedBlueprintArtifactSchema,
   ModuleCompilationArtifactSchema,
   ModuleDeliveryReportSchema,
@@ -9,6 +10,7 @@ import {
   pendingRequirementSchema,
   DesignPlanSchema,
   UIImplementationSpecSchema,
+  SolutionImplementationPlanSchema,
   type DesignPlan,
 } from "@kf/contracts";
 import { StateSchema } from "@langchain/langgraph";
@@ -41,6 +43,7 @@ export const StageSchema = z.enum([
   "design-planning",
   "implementation-planning",
   "preview-review",
+  "solution-plan-ready",
   "done",
 ]);
 export type Stage = z.infer<typeof StageSchema>;
@@ -98,7 +101,7 @@ export const AgentGraphState = new StateSchema({
   conversationId: z.string().min(1),
   currentRevisionId: z.string().optional(),
   workspaceMode: z.enum(["new", "upload"]).optional(),
-  generationWorkflow: z.enum(["legacy", "module-v1"]).optional(),
+  generationWorkflow: z.enum(["legacy", "module-v1", "creative-v2"]).optional(),
   activeChangeRequestId: z.string().optional(),
   changePlanId: z.string().optional(),
   planHash: z.string().optional(),
@@ -143,6 +146,13 @@ export const AgentGraphState = new StateSchema({
   moduleDeliveryReport: ModuleDeliveryReportSchema.optional(),
   moduleDeliveryOwnerMappings: ModuleDeliveryOwnerMappingsSchema.optional(),
   moduleRepairAttempt: z.number().int().min(0).max(3).optional(),
+  /** Deterministic retrieval output bound to the exact canonical v3 blueprint. */
+  capabilityCandidates: CapabilityCandidateBundleSchema.optional(),
+  capabilityCandidatesHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  /** Semantic-only creative plan. Phase 2 stops before compilation/build. */
+  solutionImplementationPlan: SolutionImplementationPlanSchema.optional(),
+  solutionImplementationPlanHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  solutionPlanRepairAttempt: z.number().int().min(0).max(1).optional(),
   /** Server-routed proof of why the current ChangePlan may enter the build queue. */
   buildAuthorization: z.enum([
     "confirmed-blueprint",
