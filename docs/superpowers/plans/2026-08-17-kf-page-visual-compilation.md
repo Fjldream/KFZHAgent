@@ -28,7 +28,7 @@
 - Phase 3 does not change graph routing, ChangePlan compilation, Worker/build queues, download behavior, or the frozen static preview.
 - This phase does not compile ActionGraph or JavaScript and does not wire the Worker/build queue.
 - Existing static preview remains frozen and is not extended.
-- Domain-client full-suite verification may report only the pre-existing 9 `ENOENT` failures for absent `/tmp/kf_ref/1.0.0.1/project/page/...` reference fixtures; every collected non-fixture test must pass and no other exception is accepted.
+- Domain-client full-suite verification must have zero failures. When `/tmp/kf_ref/1.0.0.1/project/page/...` is absent, exactly five real-Golden tests may be reported as skipped (three control-compiler Golden checks and two inspector Golden checks); all synthetic and collected tests still run.
 - Use TDD for every task and commit only the files named by that task.
 
 ---
@@ -520,4 +520,4 @@ Phase 3 is complete only when:
 - only evidence-backed semantic parts are promoted to `supported`; planned parts remain fail-closed;
 - v1 implementation specs still parse and adapt to the v2 subset;
 - v2 action/script slots remain structurally present but are not compiled in this phase;
-- contracts tests pass; domain-client has no failures other than the exact 9 recorded missing-`/tmp/kf_ref` fixture exceptions; contracts/domain-client typechecks and lints pass.
+- contracts and domain-client tests have zero failures; only the exact five documented real-Golden skips are allowed when `/tmp/kf_ref` is absent; contracts/domain-client typechecks and lints pass.
