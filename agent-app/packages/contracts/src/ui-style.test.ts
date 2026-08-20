@@ -372,6 +372,10 @@ describe("KF UI style contracts", () => {
     "[data-admin], button",
     "article, custom-widget",
     ".a, #b, [data-x]",
+    " ARTICLE , SPAN ",
+    ".A , #Modal",
+    "custom-widget,\nARTICLE",
+    "[DATA-ADMIN], BUTTON",
   ])("rejects structurally executable native semantic text %s", (payload) => {
     const poisoned = mutableNativeV2Fixture();
     poisoned.pages[0]!.controls[1]!.nativeProperties = { semanticDescription: payload };
@@ -418,6 +422,11 @@ describe("KF UI style contracts", () => {
     "状态正常, 等待复核",
     "Status is active, awaiting review",
     "园区A, 园区B, 等待确认",
+    "Active, Pending",
+    "v1, v2",
+    "North, South",
+    " ACTIVE , pending ",
+    "V1,\nV2",
   ])("accepts bounded native domain text %s", (payload) => {
     const valid = mutableNativeV2Fixture();
     valid.pages[0]!.controls[1]!.nativeProperties = { semanticDescription: payload };

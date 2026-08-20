@@ -144,10 +144,28 @@ const interactiveCssTagNames = new Set([
   "a", "button", "form", "input", "label", "option", "select", "textarea",
 ]);
 
+const htmlSelectorTagNames = new Set(`
+  a abbr address area article aside audio b base bdi bdo blockquote body br button canvas caption cite code col colgroup
+  data datalist dd del details dfn dialog div dl dt em embed fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6
+  head header hgroup hr html i iframe img input ins kbd label legend li link main map mark menu meta meter nav noscript
+  object ol optgroup option output p picture pre progress q rp rt ruby s samp script search section select slot small
+  source span strong style sub summary sup table tbody td template textarea tfoot th thead time title tr track u ul var
+  video wbr
+`.trim().split(/\s+/));
+
 const cssSelectorAtomPattern = "(?:[A-Za-z][A-Za-z0-9-]*|[.#][A-Za-z_-][A-Za-z0-9_-]*|\\[[^\\]\\n]+\\])";
 const cssDescendantSelector = new RegExp(`^${cssSelectorAtomPattern}(?:\\s+${cssSelectorAtomPattern})+$`);
 const cssCombinatorSelector = new RegExp(`^${cssSelectorAtomPattern}(?:\\s*[>+~]\\s*${cssSelectorAtomPattern})+$`);
 const cssSelectorList = new RegExp(`^${cssSelectorAtomPattern}(?:\\s*,\\s*${cssSelectorAtomPattern})+$`);
+
+function isCssSelectorListText(value: string): boolean {
+  if (!cssSelectorList.test(value)) return false;
+  if (/(?:[.#]|\[)/.test(value)) return true;
+
+  const atoms = value.split(",").map((atom) => atom.trim().toLowerCase());
+  return atoms.some((atom) => /^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/.test(atom))
+    || atoms.every((atom) => htmlSelectorTagNames.has(atom));
+}
 
 function isCssSelectorText(value: string): boolean {
   if (/^\.[A-Za-z_-][A-Za-z0-9_-]*$/.test(value)
@@ -159,7 +177,7 @@ function isCssSelectorText(value: string): boolean {
 
   if (cssDescendantSelector.test(value) && /(?:^|\s)(?:[.#]|\[)/.test(value)) return true;
   if (cssCombinatorSelector.test(value)) return true;
-  if (cssSelectorList.test(value)) return true;
+  if (isCssSelectorListText(value)) return true;
 
   const pseudoMatch = /^([A-Za-z][A-Za-z0-9-]*|[.#][A-Za-z_-][A-Za-z0-9_-]*):{1,2}[A-Za-z-]+(?:\([^)]*\))?$/.exec(value);
   const pseudoPrefix = pseudoMatch?.[1];
