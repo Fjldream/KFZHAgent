@@ -168,6 +168,28 @@ describe("measureIntrinsic", () => {
       .toEqual({ minWidth: 320, preferredWidth: 640, maxWidth: 640, minHeight: 180, preferredHeight: 320, maxHeight: 480, overflow: "clip" });
   });
 
+  it.each([
+    ["available NaN", { available: Number.NaN }],
+    ["available infinity", { available: Infinity }],
+    ["available negative", { available: -1 }],
+    ["minimum NaN", { available: 640, min: Number.NaN }],
+    ["minimum infinity", { available: 640, min: Infinity }],
+    ["maximum NaN", { available: 640, max: Number.NaN }],
+    ["maximum negative infinity", { available: 640, max: -Infinity }],
+  ])("rejects invalid module width constraint %s before intersection", (_name, width) => {
+    const layoutContract = { minColumnSpan: 4, maxColumnSpan: 8, height: { min: 180, preferred: { compact: 220, small: 260, medium: 320, large: 400, full: 480 }, max: 480 } } as const;
+    const node = { kind: "registered-module" as const, id: "invalid-width", moduleKind: "content.hero", templateVersion: "1.0.0", variant: "default", title: "门户", intent: { density: "comfortable" as const } };
+    expect(() => measureIntrinsic({ kind: "registered-module", node, density: "comfortable", width, font, layoutContract }))
+      .toThrow("INTRINSIC_MEASURE_MODULE_WIDTH_INVALID");
+  });
+
+  it("treats legal zero module widths as an unsatisfiable intersection", () => {
+    const layoutContract = { minColumnSpan: 4, maxColumnSpan: 8, height: { min: 180, preferred: { compact: 220, small: 260, medium: 320, large: 400, full: 480 }, max: 480 } } as const;
+    const node = { kind: "registered-module" as const, id: "zero-width", moduleKind: "content.hero", templateVersion: "1.0.0", variant: "default", title: "门户", intent: { density: "comfortable" as const } };
+    expect(() => measureIntrinsic({ kind: "registered-module", node, density: "comfortable", width: { available: 0, min: 0, max: 0 }, font, layoutContract }))
+      .toThrow("INTRINSIC_MEASURE_MODULE_WIDTH_UNSATISFIABLE");
+  });
+
   it("fails closed for an unresolved repeater field and returns ordered finite results for successful hostile-number inputs", () => {
     const unresolved: SemanticValue = { kind: "repeater-field", itemAlias: "row", field: "name" };
     expect(() => measureIntrinsic(genericInput("text", unresolved))).toThrow("INTRINSIC_MEASURE_UNRESOLVED_REPEATER_FIELD");

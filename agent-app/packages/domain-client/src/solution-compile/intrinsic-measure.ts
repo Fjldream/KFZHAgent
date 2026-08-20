@@ -160,6 +160,7 @@ function dockAxes(children: readonly IntrinsicSize[], gap: number, input: Layout
 
 function measureModule(input: RegisteredModuleIntrinsicMeasureInput): IntrinsicSize {
   assertDensity(input.density, input.node.intent.density);
+  if (!validModuleWidth(input.width.available) || !validModuleWidth(input.width.min) || !validModuleWidth(input.width.max)) throw new Error("INTRINSIC_MEASURE_MODULE_WIDTH_INVALID");
   const contract = input.layoutContract;
   if (!Number.isInteger(contract.minColumnSpan) || !Number.isInteger(contract.maxColumnSpan) || contract.minColumnSpan < 1 || contract.maxColumnSpan > 12 || contract.minColumnSpan > contract.maxColumnSpan) throw new Error("INTRINSIC_MEASURE_MODULE_LAYOUT_INVALID");
   const height = contract.height;
@@ -235,6 +236,7 @@ function max<T extends WidthField | HeightField>(children: readonly IntrinsicSiz
 function positiveFinite(value: number): boolean { return Number.isFinite(value) && value > 0; }
 function boundedPositive(value: number | undefined, maximum: number): boolean { return value === undefined || (positiveFinite(value) && value <= maximum); }
 function optionalPositiveInteger(value: number | undefined): boolean { return value === undefined || (Number.isInteger(value) && value > 0); }
+function validModuleWidth(value: number | undefined): boolean { return value === undefined || (Number.isFinite(value) && value >= 0); }
 function nonnegative(value: number | undefined): number { return value === undefined || !Number.isFinite(value) || value < 0 ? 0 : Math.min(value, MAX_DIMENSION); }
 function dimension(value: number, fallback: number): number { return Number.isFinite(value) && value >= 0 ? Math.min(value, MAX_DIMENSION) : fallback; }
 function signed(value: number | undefined): number { return value === undefined || !Number.isFinite(value) ? 0 : clamp(value, -100, 100); }
