@@ -351,6 +351,18 @@ describe("KF UI style contracts", () => {
     " ASYNC FUNCTION run() {\n return 1;\n} ",
     "async () => 1",
     "(value) => value",
+    "body\n>\ncustom-widget {\n cursor: pointer;\n}",
+    "article > span",
+    ".a,.b{cursor:pointer}",
+    "*{cursor:pointer}",
+    " BODY\n >\n CUSTOM-WIDGET {\n CURSOR : pointer;\n} ",
+    "(api.run())",
+    "await api.run()",
+    "api.run(\n \"x\"\n)",
+    "api.run(other(1))",
+    "api?.run?.()",
+    "return api[\"run\"](\n nested(1)\n)",
+    " ReTuRn API.RUN(OTHER(1)) ",
   ])("rejects structurally executable native semantic text %s", (payload) => {
     const poisoned = mutableNativeV2Fixture();
     poisoned.pages[0]!.controls[1]!.nativeProperties = { semanticDescription: payload };
@@ -391,6 +403,9 @@ describe("KF UI style contracts", () => {
     "urn:kingfusion:equipment:status",
     "园区/设备/巡检",
     "设备路径：园区/设备/巡检\n当前状态：active",
+    "设备说明 {等待现场复核}",
+    "Release notes {status active; owner team}",
+    "参数范围 {温度：正常；压力：稳定}",
   ])("accepts bounded native domain text %s", (payload) => {
     const valid = mutableNativeV2Fixture();
     valid.pages[0]!.controls[1]!.nativeProperties = { semanticDescription: payload };

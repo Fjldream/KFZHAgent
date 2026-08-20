@@ -140,11 +140,6 @@ const allowedOnPrefixedDomainFieldNames = new Set([
   "onlypending",
 ]);
 
-const commonCssTagNames = new Set([
-  "a", "body", "button", "div", "form", "html", "img", "input", "label", "li", "main", "nav", "option",
-  "p", "section", "select", "span", "table", "tbody", "td", "textarea", "th", "thead", "tr", "ul",
-]);
-
 const interactiveCssTagNames = new Set([
   "a", "button", "form", "input", "label", "option", "select", "textarea",
 ]);
@@ -162,14 +157,7 @@ function isCssSelectorText(value: string): boolean {
   }
 
   if (cssDescendantSelector.test(value) && /(?:^|\s)(?:[.#]|\[)/.test(value)) return true;
-  if (cssCombinatorSelector.test(value)) {
-    const atoms = value.split(/\s*[>+~]\s*/);
-    if (atoms.some((atom) => /^(?:[.#]|\[)/.test(atom))
-      || atoms.some((atom) => /^[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)+$/.test(atom))
-      || atoms.every((atom) => commonCssTagNames.has(atom.toLowerCase()))) {
-      return true;
-    }
-  }
+  if (cssCombinatorSelector.test(value)) return true;
 
   const pseudoMatch = /^([A-Za-z][A-Za-z0-9-]*|[.#][A-Za-z_-][A-Za-z0-9_-]*):{1,2}[A-Za-z-]+(?:\([^)]*\))?$/.exec(value);
   const pseudoPrefix = pseudoMatch?.[1];
@@ -180,14 +168,108 @@ function isCssSelectorText(value: string): boolean {
 }
 
 function isCssRuleText(value: string): boolean {
-  const match = /^([^{}\n]+)\{([^{}]*)\}$/.exec(value);
-  if (match === null) return false;
-  const selector = match[1]!.trim();
-  const declarations = match[2]!;
-  const selectorPrelude = isCssSelectorText(selector)
-    || /^[A-Za-z][A-Za-z0-9-]*(?::{1,2}[A-Za-z-]+(?:\([^)]*\))?)?$/.test(selector);
-  return selectorPrelude
+  const openBrace = value.indexOf("{");
+  const closeBrace = value.lastIndexOf("}");
+  if (openBrace <= 0
+    || closeBrace !== value.length - 1
+    || value.indexOf("{", openBrace + 1) !== -1
+    || value.indexOf("}") !== closeBrace) {
+    return false;
+  }
+  const selectorPrelude = value.slice(0, openBrace).trim();
+  const declarations = value.slice(openBrace + 1, closeBrace);
+  return selectorPrelude.length > 0
     && /^\s*(?:(?:--)?[A-Za-z][A-Za-z0-9-]*\s*:\s*[^;{}]+(?:;\s*|$))+$/.test(declarations);
+}
+
+function isJavascriptIdentifierStart(value: string | undefined): boolean {
+  return value !== undefined && /[A-Za-z_$]/.test(value);
+}
+
+function isJavascriptIdentifierPart(value: string | undefined): boolean {
+  return value !== undefined && /[A-Za-z0-9_$]/.test(value);
+}
+
+function skipWhitespace(value: string, start: number): number {
+  let cursor = start;
+  while (/\s/.test(value[cursor] ?? "")) cursor += 1;
+  return cursor;
+}
+
+function readIdentifierEnd(value: string, start: number): number | undefined {
+  if (!isJavascriptIdentifierStart(value[start])) return undefined;
+  let cursor = start + 1;
+  while (isJavascriptIdentifierPart(value[cursor])) cursor += 1;
+  return cursor;
+}
+
+function readQuotedMemberEnd(value: string, start: number): number | undefined {
+  if (value[start] !== "[") return undefined;
+  let cursor = skipWhitespace(value, start + 1);
+  const quote = value[cursor];
+  if (quote !== "\"" && quote !== "'") return undefined;
+  cursor += 1;
+  while (cursor < value.length && value[cursor] !== quote) {
+    cursor += value[cursor] === "\\" ? 2 : 1;
+  }
+  if (value[cursor] !== quote) return undefined;
+  cursor = skipWhitespace(value, cursor + 1);
+  return value[cursor] === "]" ? cursor + 1 : undefined;
+}
+
+function hasBalancedCall(value: string, openParen: number): boolean {
+  let depth = 0;
+  let quote: string | undefined;
+  for (let cursor = openParen; cursor < value.length; cursor += 1) {
+    const character = value[cursor]!;
+    if (quote !== undefined) {
+      if (character === "\\") cursor += 1;
+      else if (character === quote) quote = undefined;
+      continue;
+    }
+    if (character === "\"" || character === "'" || character === "`") {
+      quote = character;
+    } else if (character === "(") {
+      depth += 1;
+    } else if (character === ")") {
+      depth -= 1;
+      if (depth === 0) return true;
+    }
+  }
+  return false;
+}
+
+function containsJavascriptMemberCall(value: string): boolean {
+  for (let start = 0; start < value.length; start += 1) {
+    if (!isJavascriptIdentifierStart(value[start]) || isJavascriptIdentifierPart(value[start - 1])) continue;
+    let cursor = readIdentifierEnd(value, start)!;
+    let memberCount = 0;
+    while (cursor < value.length) {
+      cursor = skipWhitespace(value, cursor);
+      const optionalMember = value.startsWith("?.", cursor);
+      if (optionalMember || value[cursor] === ".") {
+        const memberStart = skipWhitespace(value, cursor + (optionalMember ? 2 : 1));
+        if (value[memberStart] === "(") {
+          if (optionalMember && memberCount > 0 && hasBalancedCall(value, memberStart)) return true;
+          break;
+        }
+        const memberEnd = readIdentifierEnd(value, memberStart);
+        if (memberEnd === undefined) break;
+        memberCount += 1;
+        cursor = memberEnd;
+        continue;
+      }
+      const quotedMemberEnd = readQuotedMemberEnd(value, cursor);
+      if (quotedMemberEnd === undefined) break;
+      memberCount += 1;
+      cursor = quotedMemberEnd;
+    }
+    if (memberCount === 0) continue;
+    cursor = skipWhitespace(value, cursor);
+    if (value.startsWith("?.", cursor)) cursor = skipWhitespace(value, cursor + 2);
+    if (value[cursor] === "(" && hasBalancedCall(value, cursor)) return true;
+  }
+  return false;
 }
 
 export function normalizeImplementationOwnedFieldName(value: string): string {
@@ -212,8 +294,7 @@ export function sharedImplementationTextIssue(value: string): string | undefined
   }
   if (/\b(?:import|require)\s*\(/i.test(value)
     || /\bnew\s+(?:[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*|\(\s*[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*\s*\))\s*\(/i.test(value)
-    || /\b(?:console|document|globalThis|localStorage|location|navigator|process|sessionStorage|window)\s*(?:(?:\.|\?\.)\s*[A-Za-z_$][A-Za-z0-9_$]*|\[\s*["'][A-Za-z_$][A-Za-z0-9_$]*["']\s*\])\s*\(/i.test(value)
-    || /^[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\s*(?:\.|\?\.)\s*[A-Za-z_$][A-Za-z0-9_$]*)|(?:\s*\[\s*["'][A-Za-z_$][A-Za-z0-9_$]*["']\s*\]))+\s*\([^()\n]*\)$/.test(trimmed)
+    || containsJavascriptMemberCall(value)
     || /\b(?:async\s+)?function(?:\s*\*)?\s*(?:[A-Za-z_$][A-Za-z0-9_$]*\s*)?\([^)]*\)\s*\{/i.test(value)) {
     return "JavaScript calls and execution entry points are not allowed";
   }
