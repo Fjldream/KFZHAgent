@@ -61,6 +61,19 @@ const assets = [{
 }];
 
 describe("versioned module registry", () => {
+  it.each([
+    ["NaN minimum", Number.NaN, 8],
+    ["infinite maximum", 4, Infinity],
+    ["fractional minimum", 1.5, 8],
+    ["reversed spans", 8, 4],
+    ["below one", 0, 8],
+    ["above twelve", 4, 13],
+  ])("rejects %s module column spans", (_name, minColumnSpan, maxColumnSpan) => {
+    const registry = new ModuleRegistry();
+    expect(() => registry.register(definition({ layout: { ...layout, minColumnSpan, maxColumnSpan } })))
+      .toThrow("MODULE_DEFINITION_INVALID: hero@1.0.0 has invalid layout bounds");
+  });
+
   it("rejects missing, incomplete, and out-of-range module height contracts", () => {
     const registry = new ModuleRegistry();
     expect(() => registry.register(definition({ layout: { ...layout, height: undefined } as unknown as ModuleDefinition["layout"] })))

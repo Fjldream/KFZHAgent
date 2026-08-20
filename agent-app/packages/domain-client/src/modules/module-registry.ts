@@ -164,6 +164,8 @@ function assertDefinition(definition: ModuleDefinition): void {
   if (
     definition.layout.regions.length === 0
     || definition.layout.preferredHeights.length === 0
+    || !Number.isInteger(definition.layout.minColumnSpan)
+    || !Number.isInteger(definition.layout.maxColumnSpan)
     || definition.layout.minColumnSpan < 1
     || definition.layout.maxColumnSpan > 12
     || definition.layout.minColumnSpan > definition.layout.maxColumnSpan
