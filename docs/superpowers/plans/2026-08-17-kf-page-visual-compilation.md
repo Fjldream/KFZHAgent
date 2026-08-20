@@ -178,7 +178,8 @@ git commit -m "feat: define UI implementation v2"
 
 ```ts
 expect(measureIntrinsic(textInput("园区访客预约审核", 160))).toMatchObject({ minHeight: 24, preferredHeight: 48 });
-expect(measureIntrinsic(buttonInput("提交审核"))).toMatchObject({ minHeight: 32, maxHeight: 56 });
+expect(measureIntrinsic(linkButtonInput("提交审核"))).toMatchObject({ minHeight: 40, maxHeight: 56 });
+expect(measureIntrinsic(nativeButtonInput("提交审核"))).toMatchObject({ minHeight: 60, maxHeight: 60 });
 expect(measureIntrinsic(datagridInput(8))).toMatchObject({ minHeight: 240 });
 expect(measureIntrinsic(imageInput("16:9", 640)).preferredHeight).toBe(360);
 ```
@@ -201,7 +202,7 @@ export interface IntrinsicSize {
 }
 ```
 
-Use reviewed profile minimum sizes, CJK width `fontSize`, Latin width `0.56 * fontSize`, resolved line height, padding, border, item counts, table header/row heights, image ratio, and layout child measures. Cap text measurement at declared line clamp. No browser or preview renderer is used.
+Use reviewed profile minimum sizes, CJK width `fontSize`, Latin width `0.56 * fontSize`, resolved line height, padding, border, item counts, table header/row heights, image ratio, and layout child measures. The 32–56px action-control band applies only when compatible with the reviewed profile; the native `button` profile's evidenced 60px minimum prevails rather than being silently clamped. Derive text capping from the existing structured contract (`truncate: true` means one line; otherwise use the bounded compiler default) instead of accepting a free-standing line-clamp fact that the semantic plan cannot supply. No browser or preview renderer is used.
 
 - [ ] **Step 4: Run measurement tests and typecheck**
 
