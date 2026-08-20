@@ -28,6 +28,7 @@
 - Phase 3 does not change graph routing, ChangePlan compilation, Worker/build queues, download behavior, or the frozen static preview.
 - This phase does not compile ActionGraph or JavaScript and does not wire the Worker/build queue.
 - Existing static preview remains frozen and is not extended.
+- Domain-client full-suite verification may report only the pre-existing 9 `ENOENT` failures for absent `/tmp/kf_ref/1.0.0.1/project/page/...` reference fixtures; every collected non-fixture test must pass and no other exception is accepted.
 - Use TDD for every task and commit only the files named by that task.
 
 ---
@@ -53,6 +54,8 @@
 - Create `agent-app/packages/domain-client/src/solution-compile/component-compiler.test.ts`: expansion, native property, and parent tests.
 - Create `agent-app/packages/domain-client/src/solution-compile/module-node-compiler.ts`: bridge existing registered modules into the new tree.
 - Create `agent-app/packages/domain-client/src/solution-compile/module-node-compiler.test.ts`: module output and source mapping tests.
+- Modify `agent-app/packages/domain-client/src/planning/capability-retrieval.ts`: export the single reviewed semantic-layout compatibility lookup used by retrieval and compilation.
+- Modify `agent-app/packages/domain-client/src/planning/capability-retrieval.test.ts`: prove compiler lookup and retrieval filtering share the same mapping.
 - Create `agent-app/packages/domain-client/src/solution-compile/solution-compiler.ts`: deterministic phase coordinator.
 - Create `agent-app/packages/domain-client/src/solution-compile/solution-compiler.test.ts`: complete portal/admin/dashboard snapshots.
 
@@ -168,7 +171,7 @@ git commit -m "feat: define UI implementation v2"
 - Create: `agent-app/packages/domain-client/src/solution-compile/intrinsic-measure.test.ts`
 
 **Interfaces:**
-- Consumes: one expanded semantic node, resolved density, width constraint, control design profile, and style font metrics.
+- Consumes: one expanded semantic node, resolved density, width constraint, control design profile or registered module layout contract, and style font metrics.
 - Produces: `measureIntrinsic(input: IntrinsicMeasureInput): IntrinsicSize`.
 
 - [ ] **Step 1: Write failing measurement tests**
@@ -298,10 +301,12 @@ git commit -m "feat: compile content-driven KF layouts"
 - Create: `agent-app/packages/domain-client/src/solution-compile/component-compiler.test.ts`
 - Create: `agent-app/packages/domain-client/src/solution-compile/module-node-compiler.ts`
 - Create: `agent-app/packages/domain-client/src/solution-compile/module-node-compiler.test.ts`
+- Modify: `agent-app/packages/domain-client/src/planning/capability-retrieval.ts`
+- Modify: `agent-app/packages/domain-client/src/planning/capability-retrieval.test.ts`
 
 **Interfaces:**
 - Consumes: measured semantic nodes, mock data, capability candidates, `ModuleRegistry`, registered `ModuleDefinition.compile()`, control templates, and component property validators.
-- Produces: `compileComponents(input): UIImplementationControlV2[]` and `compileRegisteredModuleNode(input): UIImplementationControlV2[]`.
+- Produces: `compileComponents(input): UIImplementationControlV2[]`, `compileOverlay(input): UIImplementationControlV2[]`, `compileRegisteredModuleNode(input): UIImplementationControlV2[]`, and `layoutCapabilityIdsFor(kind): readonly string[]`.
 
 ```ts
 export interface ComponentCompileInput {
@@ -334,7 +339,7 @@ pnpm --dir agent-app --filter @kf/domain-client exec vitest run src/solution-com
 
 Resolve each `ControlNode.capabilityId` against the exact page-region candidate evidence and technical registry. Convert semantic property arrays to plain data through one bounded `semanticValueToData()` helper, resolve `repeater-field` references only against the current record, then validate the resulting record with `validateGeneratedComponentProperties()`; never copy arbitrary model properties. Map `content` to the reviewed content field for the selected capability and map `mockDataId` through existing native data adapters where the capability supports that data shape.
 
-Every `LayoutNode` emits a compiler-owned KF layout/container control selected deterministically from the signed layout candidates compatible with its semantic layout kind; ties use candidate order then code-point capability ID. Its children receive that layout control as `parentId`. A semantic layout with no compatible signed layout candidate is a blocking error, not a geometry-only phantom container.
+Every `LayoutNode` emits a compiler-owned KF layout/container control selected deterministically from the signed layout candidates returned by the same exported `layoutCapabilityIdsFor()` lookup used by retrieval; ties use candidate order then code-point capability ID. Its children receive that layout control as `parentId`. A semantic layout with no compatible signed layout candidate is a blocking error, not a geometry-only phantom container. Do not duplicate the semantic-layout compatibility table in a second compiler file.
 
 Expand Repeaters with stable IDs `${repeaterId}--${normalizedKey}--${templateNodeId}` and fail on duplicate/missing keys, unresolved `repeater-field` references, or `maxItems` overflow. Compile Overlay roots under an explicit host/page relation with hidden initial state and higher z-order. Preserve exact source blueprint page/region IDs; journey coverage remains semantic-plan validation and is not fabricated at this layer.
 
@@ -345,14 +350,14 @@ Resolve exact kind/version independently through `ModuleRegistry.require()` and 
 - [ ] **Step 5: Run component, module, and control regressions**
 
 ```bash
-pnpm --dir agent-app --filter @kf/domain-client exec vitest run src/solution-compile/component-compiler.test.ts src/solution-compile/module-node-compiler.test.ts src/modules/module-compiler.test.ts src/implementation/ui-implementation-compiler.test.ts src/compile/control-compiler.test.ts
+pnpm --dir agent-app --filter @kf/domain-client exec vitest run src/solution-compile/component-compiler.test.ts src/solution-compile/module-node-compiler.test.ts src/planning/capability-retrieval.test.ts src/modules/module-compiler.test.ts src/implementation/ui-implementation-compiler.test.ts src/compile/control-compiler.test.ts
 pnpm --dir agent-app --filter @kf/domain-client typecheck
 ```
 
 - [ ] **Step 6: Commit component compilation**
 
 ```bash
-git add agent-app/packages/domain-client/src/solution-compile/component-compiler.ts agent-app/packages/domain-client/src/solution-compile/component-compiler.test.ts agent-app/packages/domain-client/src/solution-compile/module-node-compiler.ts agent-app/packages/domain-client/src/solution-compile/module-node-compiler.test.ts
+git add agent-app/packages/domain-client/src/solution-compile/component-compiler.ts agent-app/packages/domain-client/src/solution-compile/component-compiler.test.ts agent-app/packages/domain-client/src/solution-compile/module-node-compiler.ts agent-app/packages/domain-client/src/solution-compile/module-node-compiler.test.ts agent-app/packages/domain-client/src/planning/capability-retrieval.ts agent-app/packages/domain-client/src/planning/capability-retrieval.test.ts
 git commit -m "feat: compile solution controls and overlays"
 ```
 
@@ -474,7 +479,7 @@ Run: `pnpm --dir agent-app --filter @kf/domain-client exec vitest run src/soluti
 
 - [ ] **Step 3: Implement compilation order and failure paths**
 
-The order is: parse the native or isolated legacy plan; for native input run `assertSolutionPlanUsesCandidates()` before any expansion; resolve tokens/role styles; expand registered modules and repeater records; measure intrinsic content; choose signed layout capabilities; solve pages and overlays; compile controls/native properties; compile styles; assemble v2; validate geometry/parent/source integrity; deep-freeze output. The compiler receives `ModuleRegistry`, approved asset facts, and the exact knowledge/catalog version as explicit dependencies—never process globals. Errors use `SOLUTION_COMPILE_FAILED` with `phase`, `nodeId`, `code`, `message`, and at most five sorted alternatives. Do not call a model.
+The order is: parse the native or isolated legacy plan; for native input run `assertSolutionPlanUsesCandidates()` before expansion; resolve tokens/role styles; expand repeater records into semantic nodes; measure controls and registered modules from content/profile/registered layout contracts without invoking module compile; choose signed layout capabilities; solve pages and overlays; compile registered module outputs inside their solved bounds; compile controls/native properties; compile styles; assemble v2; validate geometry/parent/source integrity; deep-freeze output. The compiler receives `ModuleRegistry`, approved asset facts, and the exact knowledge/catalog version as explicit dependencies—never process globals. Errors use `SOLUTION_COMPILE_FAILED` with `phase`, `nodeId`, `code`, `message`, and at most five sorted alternatives. Do not call a model.
 
 - [ ] **Step 4: Add three deterministic fixtures**
 
@@ -515,4 +520,4 @@ Phase 3 is complete only when:
 - only evidence-backed semantic parts are promoted to `supported`; planned parts remain fail-closed;
 - v1 implementation specs still parse and adapt to the v2 subset;
 - v2 action/script slots remain structurally present but are not compiled in this phase;
-- contracts and domain-client tests/typechecks/lints pass.
+- contracts tests pass; domain-client has no failures other than the exact 9 recorded missing-`/tmp/kf_ref` fixture exceptions; contracts/domain-client typechecks and lints pass.
