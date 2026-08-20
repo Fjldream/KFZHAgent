@@ -242,7 +242,7 @@ describe("KF 容器对象识别（easyui / 布局）", () => {
 });
 
 describe("真实页面 golden round-trip（KF JSON → IR）", () => {
-  it("datagrid 页面：18 个 easyui 控件（含 4 个静态 Button）转为 EasyuiControlIR，未知字段不再累积", async () => {
+  it.skipIf(!hasRefPages)("datagrid 页面：18 个 easyui 控件（含 4 个静态 Button）转为 EasyuiControlIR，未知字段不再累积", async () => {
     const page = await readRefPage("数据列表1.json");
     const { controls, unknownFields } = kfControlToIR(page.objects);
     // 真实页面共 22 个对象：18 个 easyui datagrid + 4 个静态 Button（uiModelType 35，由 index 层识别）
@@ -273,7 +273,7 @@ describe("真实页面 golden round-trip（KF JSON → IR）", () => {
     expect(unknownFields).toEqual([]);
   });
 
-  it("布局页面：顶层布局 + 递归识别嵌套 easyui/子布局，unknownFields 不再累积", async () => {
+  it.skipIf(!hasRefPages)("布局页面：顶层布局 + 递归识别嵌套 easyui/子布局，unknownFields 不再累积", async () => {
     const page = await readRefPage("分页查询.json");
     const { controls, unknownFields } = kfControlToIR(page.objects);
     const types = controls.map((c) => `${c.type}:${c.layoutType ?? c.proto}`);

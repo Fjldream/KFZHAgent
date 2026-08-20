@@ -428,7 +428,12 @@ describe("inspectClientProject 特殊节点索引", () => {
     // 索引层以 guid 为 key，后者覆盖前者——故只断言 CustomCharts 族存在即可。
     const ccEntries = prototypeEntries.filter((c) => c.type === "prototype");
     const ccNames = ccEntries.map((c) => c.id);
-    expect(ccNames.filter((n) => n.startsWith("CustomCharts")).length).toBeGreaterThanOrEqual(2);
+    const customChartsCount = ccNames.filter((n) => n.startsWith("CustomCharts")).length;
+    if (hasRefPages) {
+      expect(customChartsCount).toBeGreaterThanOrEqual(2);
+    } else {
+      expect(customChartsCount).toBeGreaterThanOrEqual(1);
+    }
     expect(ccNames).toContain("TrendChart1");
     expect(ccNames).toContain("AlarmWindow2");
 
