@@ -361,8 +361,17 @@ describe("KF UI style contracts", () => {
     "api.run(\n \"x\"\n)",
     "api.run(other(1))",
     "api?.run?.()",
+    "api?.[\"run\"]()",
+    "window?.[\"alert\"](\"x\")",
+    "location?.[\"assign\"](\"/next\")",
+    "navigator?.[\"sendBeacon\"](\"/x\")",
     "return api[\"run\"](\n nested(1)\n)",
     " ReTuRn API.RUN(OTHER(1)) ",
+    ".a,.b",
+    "#app, .modal",
+    "[data-admin], button",
+    "article, custom-widget",
+    ".a, #b, [data-x]",
   ])("rejects structurally executable native semantic text %s", (payload) => {
     const poisoned = mutableNativeV2Fixture();
     poisoned.pages[0]!.controls[1]!.nativeProperties = { semanticDescription: payload };
@@ -406,6 +415,9 @@ describe("KF UI style contracts", () => {
     "设备说明 {等待现场复核}",
     "Release notes {status active; owner team}",
     "参数范围 {温度：正常；压力：稳定}",
+    "状态正常, 等待复核",
+    "Status is active, awaiting review",
+    "园区A, 园区B, 等待确认",
   ])("accepts bounded native domain text %s", (payload) => {
     const valid = mutableNativeV2Fixture();
     valid.pages[0]!.controls[1]!.nativeProperties = { semanticDescription: payload };

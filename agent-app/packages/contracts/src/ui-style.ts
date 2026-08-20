@@ -147,6 +147,7 @@ const interactiveCssTagNames = new Set([
 const cssSelectorAtomPattern = "(?:[A-Za-z][A-Za-z0-9-]*|[.#][A-Za-z_-][A-Za-z0-9_-]*|\\[[^\\]\\n]+\\])";
 const cssDescendantSelector = new RegExp(`^${cssSelectorAtomPattern}(?:\\s+${cssSelectorAtomPattern})+$`);
 const cssCombinatorSelector = new RegExp(`^${cssSelectorAtomPattern}(?:\\s*[>+~]\\s*${cssSelectorAtomPattern})+$`);
+const cssSelectorList = new RegExp(`^${cssSelectorAtomPattern}(?:\\s*,\\s*${cssSelectorAtomPattern})+$`);
 
 function isCssSelectorText(value: string): boolean {
   if (/^\.[A-Za-z_-][A-Za-z0-9_-]*$/.test(value)
@@ -158,6 +159,7 @@ function isCssSelectorText(value: string): boolean {
 
   if (cssDescendantSelector.test(value) && /(?:^|\s)(?:[.#]|\[)/.test(value)) return true;
   if (cssCombinatorSelector.test(value)) return true;
+  if (cssSelectorList.test(value)) return true;
 
   const pseudoMatch = /^([A-Za-z][A-Za-z0-9-]*|[.#][A-Za-z_-][A-Za-z0-9_-]*):{1,2}[A-Za-z-]+(?:\([^)]*\))?$/.exec(value);
   const pseudoPrefix = pseudoMatch?.[1];
@@ -252,6 +254,13 @@ function containsJavascriptMemberCall(value: string): boolean {
         if (value[memberStart] === "(") {
           if (optionalMember && memberCount > 0 && hasBalancedCall(value, memberStart)) return true;
           break;
+        }
+        if (optionalMember && value[memberStart] === "[") {
+          const quotedMemberEnd = readQuotedMemberEnd(value, memberStart);
+          if (quotedMemberEnd === undefined) break;
+          memberCount += 1;
+          cursor = quotedMemberEnd;
+          continue;
         }
         const memberEnd = readIdentifierEnd(value, memberStart);
         if (memberEnd === undefined) break;
