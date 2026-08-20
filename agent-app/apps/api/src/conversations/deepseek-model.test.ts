@@ -496,6 +496,31 @@ describe("DeepSeekModelPort", () => {
     expect(result.intent).toBe("NEW_REQUIREMENT");
   });
 
+  it("allows interpolation examples in ordinary intent-classification discussion", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{
+          message: { content: JSON.stringify({ intent: "QUESTION", requestedDomains: ["kingclient"] }) },
+        }],
+      }),
+    });
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+    const interpolationExample = "$" + "{name}";
+
+    await expect(port.classifyIntent({
+      tenantId: "t",
+      userId: "u",
+      workspaceId: "w",
+      conversationId: "c",
+      recentMessages: [{ role: "user", content: `如何解释 ${interpolationExample}` }],
+      requirementText: `如何解释 ${interpolationExample}`,
+    })).resolves.toMatchObject({ intent: "QUESTION" });
+
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    expect(body.messages[1].content).toContain(interpolationExample);
+  });
+
   it("classifyIntent falls back to QUESTION on invalid output", async () => {
     const port = makePort({ intent: "INVENTED_INTENT" });
     const result = await port.classifyIntent({

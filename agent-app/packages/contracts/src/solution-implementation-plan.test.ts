@@ -270,6 +270,38 @@ describe("SolutionImplementationPlanSchema", () => {
     ]);
   });
 
+  it.each([
+    ["role style", (plan: any) => {
+      plan.roleStyles[0].declarations = {
+        fontSize: 18,
+        paddingHorizontal: 16,
+        borderTopWidth: 1,
+        borderTopColor: "#d0d7de",
+        advanced: [{
+          kind: "gradient",
+          angle: 90,
+          stops: [{ offset: 0, color: "#163a5f" }, { offset: 1, color: "#e47b32" }],
+        }],
+      };
+    }],
+    ["control style override", (plan: any) => {
+      findNode(plan, "equipment-table").styleOverride = {
+        declarations: {
+          paddingVertical: 12,
+          borderLeftWidth: 2,
+          borderLeftColor: "#163a5f",
+          advanced: [{ kind: "transform", translateX: 4, scale: 1.02 }],
+        },
+        states: { hover: { paddingHorizontal: 14, borderBottomWidth: 1 } },
+      };
+    }],
+  ])("accepts native v2 declarations in a %s", (_label, mutate) => {
+    const plan = cloneFixture();
+    mutate(plan);
+
+    expect(SolutionImplementationPlanSchema.safeParse(plan).success).toBe(true);
+  });
+
   it("accepts exactly the planned layout relationship vocabulary", () => {
     const layouts = [
       "row", "column", "grid", "asymmetric-grid", "split", "stack", "dock", "sidebar-content",
@@ -460,6 +492,8 @@ describe("SolutionImplementationPlanSchema", () => {
       },
     }];
 
+    expect(SolutionImplementationPlanSchema.safeParse(plan).success).toBe(true);
+    plan.theme.background = "red;position:fixed";
     expect(SolutionImplementationPlanSchema.safeParse(plan).success).toBe(true);
     plan.pages[0].root.content = { kind: "repeater-field", itemAlias: "item", field: "name" };
     expect(SolutionImplementationPlanSchema.safeParse(plan).success).toBe(false);

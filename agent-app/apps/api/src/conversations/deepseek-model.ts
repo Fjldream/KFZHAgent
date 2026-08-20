@@ -1307,7 +1307,6 @@ export class DeepSeekModelPort implements ModelPort {
       temperature: 0.2,
       max_tokens: options.maxTokens ?? 4000,
     };
-    assertNoInterpolationSyntax(requestBody);
     const serializedRequest = JSON.stringify(requestBody);
     const serializedRequestBytes = new TextEncoder().encode(serializedRequest).byteLength;
     if (serializedRequestBytes > MAX_CREATIVE_PROMPT_BYTES) {
@@ -1873,9 +1872,14 @@ export class DeepSeekModelPort implements ModelPort {
     revising: boolean,
     extractionRepair = false,
   ): Promise<SolutionImplementationPlan> {
+    const userPrompt = buildSolutionImplementationPrompt(input, revising, extractionRepair);
+    assertNoInterpolationSyntax({
+      system: SOLUTION_IMPLEMENTATION_SYSTEM_PROMPT,
+      user: userPrompt,
+    });
     const raw = await this.chatJson(
       SOLUTION_IMPLEMENTATION_SYSTEM_PROMPT,
-      buildSolutionImplementationPrompt(input, revising, extractionRepair),
+      userPrompt,
       { maxTokens: 12_000 },
     );
     assertNoForbiddenSolutionKeys(raw);

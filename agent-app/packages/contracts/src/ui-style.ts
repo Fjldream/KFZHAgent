@@ -22,20 +22,62 @@ const nativeStyleColor = z.string().trim().min(1).max(128).refine(
 );
 const legacyStyleColor = z.string().max(128);
 
+const implementationOwnedFieldNames = new Set([
+  "configuredata",
+  "coordinates",
+  "coords",
+  "css",
+  "geometry",
+  "guid",
+  "javascript",
+  "js",
+  "lefttoppt",
+  "linkid",
+  "objecttype",
+  "onclick",
+  "script",
+  "selector",
+  "styledata",
+  "styledatanew",
+  "uimodeltype",
+  "x",
+  "y",
+]);
+
+export function normalizeImplementationOwnedFieldName(value: string): string {
+  return value.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
+}
+
+export function isImplementationOwnedFieldName(value: string): boolean {
+  return implementationOwnedFieldNames.has(normalizeImplementationOwnedFieldName(value));
+}
+
+export function sharedImplementationTextIssue(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (/<\/?(?:script|style|iframe|object|embed)\b|\b(?:javascript|vbscript)\s*:/i.test(value)) {
+    return "executable markup is not allowed";
+  }
+  if (/\b(?:alert|eval|fetch|Function|setInterval|setTimeout|WebSocket|XMLHttpRequest)\s*\(/i.test(value)
+    || /\b(?:document|globalThis|window)\s*\./i.test(value)
+    || /=>/.test(value)) {
+    return "JavaScript APIs and executable syntax are not allowed";
+  }
+  if (/^[A-Za-z][A-Za-z0-9-]*\s*[>+~]\s*(?:[.#][A-Za-z_-][A-Za-z0-9_-]*|\[[^\]\n]+\])$/.test(trimmed)) {
+    return "CSS selectors are not allowed";
+  }
+  return undefined;
+}
+
 type ImplementationDataValue = string | number | boolean | null
   | ImplementationDataValue[]
   | { [key: string]: ImplementationDataValue };
 
 const forbiddenImplementationDataKeys = new Set([
   "code",
-  "css",
   "html",
   "innerhtml",
-  "javascript",
   "outerhtml",
   "rawcss",
-  "script",
-  "selector",
   "selectortext",
   "sourcecode",
   "stylesheet",
@@ -45,20 +87,17 @@ const forbiddenImplementationDataKeys = new Set([
 const ImplementationDataKeySchema = z.string().trim().min(1).max(100)
   .regex(/^[A-Za-z][A-Za-z0-9_-]*$/)
   .refine(
-    (key) => !forbiddenImplementationDataKeys.has(key.toLowerCase()),
+    (key) => !isImplementationOwnedFieldName(key)
+      && !forbiddenImplementationDataKeys.has(normalizeImplementationOwnedFieldName(key)),
     "raw style, selector, markup, and script keys are not allowed",
   );
 
 const ImplementationDataStringSchema = z.string().max(2_000).refine(
-  (value) => !value.includes("${")
+  (value) => sharedImplementationTextIssue(value) === undefined
+    && !value.includes("${")
     && !/!important\b/i.test(value)
     && !/\b(?:var|calc|url|expression)\s*\(/i.test(value)
-    && !/(?:^|[;{\s])(?:animation|background(?:-color|-image)?|border(?:-[a-z-]+)?|color|display|font(?:-[a-z-]+)?|height|margin(?:-[a-z-]+)?|opacity|overflow|padding(?:-[a-z-]+)?|position|transform|transition|width|z-index)\s*:/i.test(value)
-    && !/<\/?(?:script|style|iframe|object|embed)\b/i.test(value)
-    && !/\b(?:alert|eval|fetch|setInterval|setTimeout)\s*\(/.test(value)
-    && !/\b(?:document|globalThis|window)\s*\./.test(value)
-    && !/=>/.test(value)
-    && !/\b[a-z_$][A-Za-z0-9_$]*\s*\(/.test(value),
+    && !/(?:^|[;{\s])(?:animation|background(?:-color|-image)?|border(?:-[a-z-]+)?|color|display|font(?:-[a-z-]+)?|height|margin(?:-[a-z-]+)?|opacity|overflow|padding(?:-[a-z-]+)?|position|transform|transition|width|z-index)\s*:/i.test(value),
   "raw CSS, selectors, markup, scripts, and interpolation are not allowed",
 );
 
@@ -72,13 +111,7 @@ const ImplementationDataNodeSchema: z.ZodType<ImplementationDataValue> = z.lazy(
 ]));
 
 const ImplementationDataValueSchema = ImplementationDataNodeSchema.superRefine((value, ctx) => {
-  let nodeCount = 0;
   const visit = (node: ImplementationDataValue, depth: number): void => {
-    nodeCount += 1;
-    if (nodeCount > 1_000) {
-      ctx.addIssue({ code: "custom", message: "implementation data exceeds 1000 semantic values" });
-      return;
-    }
     if (depth > 8) {
       ctx.addIssue({ code: "custom", message: "implementation data exceeds maximum depth 8" });
       return;
@@ -104,6 +137,23 @@ const ImplementationDataRecordSchema = z.record(
   if (Object.keys(record).length > 100) {
     ctx.addIssue({ code: "custom", message: "implementation data records may contain at most 100 fields" });
   }
+  let nodeCount = 1;
+  let budgetExceeded = false;
+  const visit = (value: ImplementationDataValue): void => {
+    if (budgetExceeded) return;
+    nodeCount += 1;
+    if (nodeCount > 1_000) {
+      budgetExceeded = true;
+      ctx.addIssue({ code: "custom", message: "implementation data record exceeds 1000 total semantic values" });
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+    } else if (value !== null && typeof value === "object") {
+      Object.values(value).forEach(visit);
+    }
+  };
+  Object.values(record).forEach(visit);
 });
 
 export const GradientStopSchema = z.object({
@@ -191,7 +241,7 @@ const StyleStatesSchema = z.object({
   error: StyleDeclarationSchema.optional(),
 }).strict();
 
-const StyleStatesV2Schema = z.object({
+export const StyleStatesV2Schema = z.object({
   hover: StyleDeclarationV2Schema.optional(),
   active: StyleDeclarationV2Schema.optional(),
   focus: StyleDeclarationV2Schema.optional(),
@@ -237,6 +287,19 @@ export const ThemeSpecSchema = z.object({
     medium: z.number().min(0).max(100),
     large: z.number().min(0).max(100),
   }).strict(),
+}).strict();
+
+const nativeFontFamily = z.string().trim().min(1).max(200)
+  .regex(/^[\p{L}\p{N} _-]+$/u, "native font family must be a semantic family name");
+
+export const NativeThemeSpecSchema = ThemeSpecSchema.extend({
+  background: nativeStyleColor,
+  surface: nativeStyleColor,
+  primary: nativeStyleColor,
+  accent: nativeStyleColor,
+  textPrimary: nativeStyleColor,
+  textSecondary: nativeStyleColor,
+  fontFamily: nativeFontFamily,
 }).strict();
 
 export const UIComponentSpecSchema = z.object({
@@ -415,7 +478,7 @@ function backgroundAssetIdsFromStyle(
 export const UIImplementationSpecV2Schema = z.object({
   schema: z.literal("kf-ui-implementation/v2"),
   compatibility: z.enum(["native", "adapted-v1"]),
-  theme: ThemeSpecSchema,
+  theme: z.union([ThemeSpecSchema, NativeThemeSpecSchema]),
   compiledRoleStyles: z.record(stableId, ComponentStyleSpecV2Schema),
   pages: z.array(UIImplementationPageAnyV2Schema).min(1),
   compiledActions: z.array(z.never()).max(0),
@@ -431,6 +494,12 @@ export const UIImplementationSpecV2Schema = z.object({
       ctx.addIssue({ code: "custom", path: ["compiledRoleStyles"], message: "adapted v1 implementations cannot invent compiled role styles" });
     }
     return;
+  }
+  const nativeTheme = NativeThemeSpecSchema.safeParse(implementation.theme);
+  if (!nativeTheme.success) {
+    nativeTheme.error.issues.forEach((issue) => {
+      ctx.addIssue({ code: "custom", path: ["theme", ...issue.path], message: issue.message });
+    });
   }
   if (implementation.pages.length > 32) {
     ctx.addIssue({ code: "custom", path: ["pages"], message: "native implementations may contain at most 32 pages" });
@@ -502,12 +571,9 @@ export const UIImplementationSpecV2Schema = z.object({
     }
     const matchingControls = implementation.pages.flatMap((page) =>
       page.compatibility === "native"
-        ? page.controls.filter((control) => control.role === role || control.style?.role === role)
+        ? page.controls.filter((control) => (control.style?.role ?? control.role) === role)
         : []);
     backgroundAssetIds.forEach((assetId) => {
-      if (matchingControls.length === 0) {
-        ctx.addIssue({ code: "custom", path: ["compiledRoleStyles", role], message: `background image asset has no matching control declaration: ${assetId}` });
-      }
       matchingControls.forEach((control) => {
         if (!(control.assetIds ?? []).includes(assetId)) {
           ctx.addIssue({ code: "custom", path: ["compiledRoleStyles", role], message: `background image asset is not declared for matching control ${control.id}: ${assetId}` });
@@ -600,6 +666,7 @@ export type StyleDeclarationV2 = z.infer<typeof StyleDeclarationV2Schema>;
 export type StyleDeclaration = z.infer<typeof StyleDeclarationSchema>;
 export type ComponentStyleSpec = z.infer<typeof ComponentStyleSpecSchema>;
 export type ThemeSpec = z.infer<typeof ThemeSpecSchema>;
+export type NativeThemeSpec = z.infer<typeof NativeThemeSpecSchema>;
 export type UIComponentSpec = z.infer<typeof UIComponentSpecSchema>;
 export type UIImplementationSpec = z.infer<typeof UIImplementationSpecSchema>;
 export type CompiledStyleSpec = z.infer<typeof CompiledStyleSpecSchema>;

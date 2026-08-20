@@ -250,11 +250,50 @@ describe("KF UI style contracts", () => {
     const valid = mutableNativeV2Fixture();
     valid.pages[0]!.controls[1]!.dataBinding!.records = [{
       status: "status:active",
+      statusLabel: "status(active)",
       product: "Version(3.6)",
       summary: "设备由一号班组负责，等待复核",
     }];
 
     expect(UIImplementationSpecV2Schema.safeParse(valid).success).toBe(true);
+  });
+
+  it.each([
+    "FuNcTiOn('return 1')",
+    "WeBsOcKeT('wss://attacker.example')",
+    "XmLhTtPrEqUeSt()",
+    "body > .admin",
+  ])("rejects explicit dangerous native implementation text %s", (payload) => {
+    const poisoned = mutableNativeV2Fixture();
+    poisoned.pages[0]!.controls[1]!.nativeProperties = { targetDescription: payload };
+
+    expect(UIImplementationSpecV2Schema.safeParse(poisoned).success).toBe(false);
+  });
+
+  it.each([
+    "StyleDataNew",
+    "CONFIGURE_DATA",
+    "OnClick",
+    "LINK-ID",
+    "ObjectType",
+    "ui_model_type",
+  ])("rejects implementation-owned native field %s after normalized matching", (field) => {
+    const poisoned = mutableNativeV2Fixture();
+    poisoned.pages[0]!.controls[1]!.nativeProperties = { [field]: "poison" };
+
+    expect(UIImplementationSpecV2Schema.safeParse(poisoned).success).toBe(false);
+  });
+
+  it("rejects implementation payloads in a native theme without tightening the v1 adapter theme", () => {
+    const native = structuredClone(v2Fixture);
+    (native.theme as { background: string }).background = "red;position:fixed";
+    expect(UIImplementationSpecV2Schema.safeParse(native).success).toBe(false);
+
+    const legacy = UIImplementationSpecSchema.parse({
+      ...v1Fixture,
+      theme: { ...v1Fixture.theme, background: "red;position:fixed" },
+    });
+    expect(UIImplementationSpecV2Schema.safeParse(adaptUiImplementationV1(legacy)).success).toBe(true);
   });
 
   it("rejects an overwide native semantic record in an otherwise valid v2 envelope", () => {
@@ -264,6 +303,28 @@ describe("KF UI style contracts", () => {
     );
 
     expect(UIImplementationSpecV2Schema.safeParse(overwide).success).toBe(false);
+  });
+
+  it("shares one recursive value budget across every field in a native semantic record", () => {
+    const overBudget = mutableNativeV2Fixture();
+    const sixHundredLeaves = Array.from({ length: 6 }, () => Array.from({ length: 100 }, (_, index) => index));
+    overBudget.pages[0]!.controls[1]!.nativeProperties = {
+      primaryRecords: sixHundredLeaves,
+      secondaryRecords: sixHundredLeaves,
+    };
+
+    expect(UIImplementationSpecV2Schema.safeParse(overBudget).success).toBe(false);
+  });
+
+  it("accepts a native semantic record within the shared recursive value budget", () => {
+    const withinBudget = mutableNativeV2Fixture();
+    const fourHundredLeaves = Array.from({ length: 4 }, () => Array.from({ length: 100 }, (_, index) => index));
+    withinBudget.pages[0]!.controls[1]!.nativeProperties = {
+      primaryRecords: fourHundredLeaves,
+      secondaryRecords: fourHundredLeaves,
+    };
+
+    expect(UIImplementationSpecV2Schema.safeParse(withinBudget).success).toBe(true);
   });
 
   it("rejects raw CSS and unknown declaration keys", () => {
@@ -383,6 +444,27 @@ describe("KF UI style contracts", () => {
     ];
 
     expect(UIImplementationSpecV2Schema.safeParse(undeclared).success).toBe(false);
+  });
+
+  it("ignores a control base role when style.role overrides the effective compiled role", () => {
+    const overridden = structuredClone(v2Fixture);
+    (overridden.pages[0]!.controls[1]!.style as { role?: string }).role = "secondary-heading";
+    (overridden.compiledRoleStyles.heading.declarations as Record<string, unknown>).advanced = [
+      { kind: "background-image", assetId: "role-only-asset" },
+    ];
+
+    expect(UIImplementationSpecV2Schema.safeParse(overridden).success).toBe(true);
+  });
+
+  it("requires assets declared by controls whose style.role selects the compiled role", () => {
+    const overridden = structuredClone(v2Fixture);
+    (overridden.pages[0]!.controls[1]!.style as { role?: string }).role = "secondary-heading";
+    (overridden.compiledRoleStyles as Record<string, unknown>)["secondary-heading"] = {
+      declarations: { advanced: [{ kind: "background-image", assetId: "role-only-asset" }] },
+      states: {},
+    };
+
+    expect(UIImplementationSpecV2Schema.safeParse(overridden).success).toBe(false);
   });
 
   it("rejects an overlay host owned by a different implementation page", () => {

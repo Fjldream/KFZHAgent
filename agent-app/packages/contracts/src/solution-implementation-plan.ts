@@ -1,32 +1,19 @@
 import { z } from "zod";
 import { projectKeySchema } from "./solution.js";
-import { StyleDeclarationSchema, ThemeSpecSchema } from "./ui-style.js";
+import {
+  isImplementationOwnedFieldName as isForbiddenSemanticName,
+  NativeThemeSpecSchema,
+  normalizeImplementationOwnedFieldName as normalizeName,
+  sharedImplementationTextIssue,
+  StyleDeclarationSchema,
+  StyleDeclarationV2Schema,
+  StyleStatesV2Schema,
+  ThemeSpecSchema,
+} from "./ui-style.js";
 
 const canonicalUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const canonicalUuidToken = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
-const forbiddenSemanticNames = new Set([
-  "configuredata",
-  "coordinates",
-  "coords",
-  "css",
-  "geometry",
-  "guid",
-  "javascript",
-  "js",
-  "lefttoppt",
-  "linkid",
-  "objecttype",
-  "script",
-  "selector",
-  "styledata",
-  "styledatanew",
-  "uimodeltype",
-  "x",
-  "y",
-]);
-
 const forbiddenImplementationPropertyNames = new Set([
-  ...forbiddenSemanticNames,
   "animation",
   "background",
   "backgroundcolor",
@@ -163,16 +150,9 @@ const standardHtmlAndSvgTagNames = new Set([
   "ul", "unknown", "use", "var", "video", "view", "wbr",
 ]);
 
-function normalizeName(value: string): string {
-  return value.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
-}
-
-function isForbiddenSemanticName(value: string): boolean {
-  return forbiddenSemanticNames.has(normalizeName(value));
-}
-
 function isForbiddenImplementationPropertyName(value: string): boolean {
-  return forbiddenImplementationPropertyNames.has(normalizeName(value));
+  return isForbiddenSemanticName(value)
+    || forbiddenImplementationPropertyNames.has(normalizeName(value));
 }
 
 function isKnownCssPseudoClassSelector(value: string): boolean {
@@ -527,21 +507,10 @@ const nodeCommonShape = {
   intent: NodeIntentSchema,
 };
 
-const StyleStatesSchema = z
-  .object({
-    hover: StyleDeclarationSchema.optional(),
-    active: StyleDeclarationSchema.optional(),
-    focus: StyleDeclarationSchema.optional(),
-    disabled: StyleDeclarationSchema.optional(),
-    selected: StyleDeclarationSchema.optional(),
-    error: StyleDeclarationSchema.optional(),
-  })
-  .strict();
-
 const StyleOverrideSchema = z
   .object({
-    declarations: StyleDeclarationSchema.default({}),
-    states: StyleStatesSchema.default({}),
+    declarations: StyleDeclarationV2Schema.default({}),
+    states: StyleStatesV2Schema.default({}),
   })
   .strict();
 
@@ -687,10 +656,25 @@ const LegacySolutionNodeSchema: z.ZodType<LayoutNode | RegisteredModuleNode> = z
 export const RoleStyleIntentSchema = z
   .object({
     role: stableIdSchema,
-    declarations: StyleDeclarationSchema.default({}),
-    states: StyleStatesSchema.default({}),
+    declarations: StyleDeclarationV2Schema.default({}),
+    states: StyleStatesV2Schema.default({}),
   })
   .strict();
+
+const LegacyStyleStatesSchema = z.object({
+  hover: StyleDeclarationSchema.optional(),
+  active: StyleDeclarationSchema.optional(),
+  focus: StyleDeclarationSchema.optional(),
+  disabled: StyleDeclarationSchema.optional(),
+  selected: StyleDeclarationSchema.optional(),
+  error: StyleDeclarationSchema.optional(),
+}).strict();
+
+const LegacyRoleStyleIntentSchema = z.object({
+  role: stableIdSchema,
+  declarations: StyleDeclarationSchema.default({}),
+  states: LegacyStyleStatesSchema.default({}),
+}).strict();
 
 const MockFieldSchema = z
   .object({
@@ -955,6 +939,7 @@ const SolutionImplementationPlanObjectSchema = z
   .strict();
 
 const NativeSolutionImplementationPlanObjectSchema = SolutionImplementationPlanObjectSchema.extend({
+  theme: NativeThemeSpecSchema,
   candidateBundleHash: hashSchema.refine(
     (value) => value !== LEGACY_MODULE_PLAN_CANDIDATE_BUNDLE_HASH,
     "legacy compatibility discriminator is reserved for adapted ModulePlan snapshots",
@@ -963,7 +948,7 @@ const NativeSolutionImplementationPlanObjectSchema = SolutionImplementationPlanO
 
 const LegacySolutionImplementationPlanObjectSchema = SolutionImplementationPlanObjectSchema.extend({
   candidateBundleHash: z.literal(LEGACY_MODULE_PLAN_CANDIDATE_BUNDLE_HASH),
-  roleStyles: z.array(RoleStyleIntentSchema).max(0),
+  roleStyles: z.array(LegacyRoleStyleIntentSchema).max(0),
   mockData: z.array(MockDataSetSchema).max(0),
   localState: z.array(LocalStateDefinitionSchema).max(0),
   pages: z.array(LegacySolutionPageSchema).min(1).max(5),
@@ -1003,6 +988,8 @@ export const SolutionImplementationPlanSchema: z.ZodType<SolutionImplementationP
 
 function implementationTextIssue(value: string, path: Array<string | number>): string | undefined {
   if (canonicalUuidToken.test(value)) return "GUID values are not allowed";
+  const sharedIssue = sharedImplementationTextIssue(value);
+  if (sharedIssue !== undefined) return sharedIssue;
   const trimmed = value.trim();
   if (/^[{[]/.test(trimmed)) {
     try {
