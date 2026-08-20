@@ -1,4 +1,4 @@
-import type { ControlDesignProfile, NodeIntent } from "@kf/contracts";
+import type { ControlDesignProfile, NodeIntent, RegisteredModuleNode, SemanticValue } from "@kf/contracts";
 import type { ModuleLayoutContract } from "../modules/module-registry.js";
 
 const MAX_DIMENSION = 8_192;
@@ -23,8 +23,8 @@ export interface IntrinsicFontMetrics {
 }
 export interface IntrinsicWidthConstraint { readonly available: number; readonly min?: number; readonly max?: number; }
 export interface ExpandedControlMeasureNode {
-  readonly kind: "control"; readonly id: string; readonly capabilityId: string; readonly content: ResolvedSemanticValue;
-  readonly properties: readonly Readonly<{ name: string; value: ResolvedSemanticValue }>[]; readonly tabIds: readonly string[];
+  readonly kind: "control"; readonly id: string; readonly capabilityId: string; readonly content: SemanticValue;
+  readonly properties: readonly Readonly<{ name: string; value: SemanticValue }>[]; readonly tabIds: readonly string[];
   readonly intent: Pick<NodeIntent, "density">;
 }
 export interface ExpandedLayoutMeasureNode {
@@ -32,7 +32,7 @@ export interface ExpandedLayoutMeasureNode {
   readonly layout: "row" | "column" | "grid" | "asymmetric-grid" | "split" | "stack" | "dock" | "sidebar-content" | "master-detail" | "scroll-region" | "overlay-anchor";
   readonly intent: Pick<NodeIntent, "density">;
 }
-export interface ExpandedRegisteredModuleMeasureNode { readonly kind: "registered-module"; readonly id: string; readonly moduleKind: string; readonly templateVersion: string; readonly variant: string; readonly title: string; }
+export type ExpandedRegisteredModuleMeasureNode = Pick<RegisteredModuleNode, "kind" | "id" | "moduleKind" | "templateVersion" | "variant" | "title"> & Readonly<{ intent: Pick<NodeIntent, "density"> }>;
 export interface DataGridMeasureFacts { readonly recordCount: number; readonly headerHeight?: number; readonly rowHeight?: number; readonly visibleRowLimit?: number; }
 export interface ImageMeasureFacts { readonly aspectRatio: Readonly<{ width: number; height: number }>; }
 export interface ResolvedControlStyleFacts { readonly truncate?: boolean; }
@@ -56,13 +56,13 @@ function measureControl(input: ControlIntrinsicMeasureInput): IntrinsicSize {
   assertDensity(input.density, input.node.intent.density);
   assertProfile(input.node.capabilityId, input.profile.capabilityId);
   assertControlFamily(input.family, input.node.capabilityId);
-  assertResolvedValue(input.node.content);
-  input.node.properties.forEach((property) => assertResolvedValue(property.value));
+  const content = resolveSemanticValue(input.node.content);
+  input.node.properties.forEach((property) => resolveSemanticValue(property.value));
   const metrics = metricsFor(input.font);
   const envelope = widthEnvelope(input.width, input.profile.minimumSize.width);
   if (input.family === "datagrid") return measureDataGrid(input, metrics, envelope);
   if (input.family === "image") return measureImage(input, metrics, envelope);
-  const textWidth = textMeasure(input.node.content, metrics);
+  const textWidth = textMeasure(content, metrics);
   const preferredWidth = clamp(textWidth + metrics.horizontalInset, envelope.min, envelope.outer);
   const lineLimit = input.style.truncate === true ? 1 : MAX_TEXT_LINES;
   const lines = textWidth === 0 ? 1 : Math.min(lineLimit, Math.max(1, Math.ceil(textWidth / Math.max(1, envelope.outer - metrics.horizontalInset))));
@@ -79,13 +79,15 @@ function measureControl(input: ControlIntrinsicMeasureInput): IntrinsicSize {
 
 function measureDataGrid(input: DataGridControlIntrinsicMeasureInput, metrics: Metrics, envelope: WidthEnvelope): IntrinsicSize {
   const facts = input.dataGrid;
-  if (!Number.isInteger(facts.recordCount) || facts.recordCount < 0 || !optionalPositive(facts.headerHeight) || !optionalPositive(facts.rowHeight) || !optionalPositiveInteger(facts.visibleRowLimit)) throw new Error("INTRINSIC_MEASURE_DATAGRID_FACTS_INVALID");
+  if (!Number.isInteger(facts.recordCount) || facts.recordCount < 0 || !boundedPositive(facts.headerHeight, MAX_DIMENSION) || !boundedPositive(facts.rowHeight, Math.floor(MAX_DIMENSION / MAX_GRID_ROWS)) || !optionalPositiveInteger(facts.visibleRowLimit)) throw new Error("INTRINSIC_MEASURE_DATAGRID_FACTS_INVALID");
   const defaults = input.density === "compact" ? { header: 32, row: 28 } : input.density === "spacious" ? { header: 40, row: 36 } : { header: 36, row: 32 };
   const header = facts.headerHeight ?? defaults.header;
   const row = facts.rowHeight ?? defaults.row;
   const limit = Math.min(facts.visibleRowLimit ?? MAX_GRID_ROWS, MAX_GRID_ROWS);
   const visible = Math.min(facts.recordCount, limit);
-  const height = Math.max(dimension(input.profile.minimumSize.height, 0), header + visible * row + metrics.verticalInset);
+  const calculated = header + visible * row + metrics.verticalInset;
+  if (!Number.isFinite(calculated) || calculated > MAX_DIMENSION) throw new Error("INTRINSIC_MEASURE_DATAGRID_FACTS_INVALID");
+  const height = Math.max(dimension(input.profile.minimumSize.height, 0), calculated);
   return size(envelope.min, clamp(640, envelope.min, envelope.outer), envelope.outer, height, height, height, facts.recordCount > limit ? "scroll" : "clip");
 }
 
@@ -93,7 +95,9 @@ function measureImage(input: ImageControlIntrinsicMeasureInput, metrics: Metrics
   const { width, height } = input.image.aspectRatio;
   if (!positiveFinite(width) || !positiveFinite(height)) throw new Error("INTRINSIC_MEASURE_IMAGE_RATIO_INVALID");
   const contentWidth = Math.max(0, envelope.outer - metrics.horizontalInset);
-  const ratioHeight = contentWidth * height / width + metrics.verticalInset;
+  const quotient = height / width;
+  const ratioHeight = contentWidth * quotient + metrics.verticalInset;
+  if (!Number.isFinite(quotient) || quotient <= 0 || quotient > MAX_DIMENSION || !Number.isFinite(ratioHeight) || ratioHeight < 0 || ratioHeight > MAX_DIMENSION) throw new Error("INTRINSIC_MEASURE_IMAGE_RATIO_INVALID");
   const profileHeight = dimension(input.profile.minimumSize.height, 0);
   const preferredHeight = Math.max(profileHeight, ratioHeight);
   return size(envelope.min, envelope.outer, envelope.outer, profileHeight, preferredHeight, preferredHeight, "clip");
@@ -105,7 +109,7 @@ function measureLayout(input: LayoutIntrinsicMeasureInput): IntrinsicSize {
   const children = input.childMeasures.map(normalizeChild);
   const gap = nonnegative(input.gap);
   const layout = input.node.layout;
-  if (layout === "stack" || layout === "overlay-anchor") return maxAxes(children, "wrap");
+  if (layout === "stack" || layout === "overlay-anchor") return maxAxes(children, input, "wrap");
   if (layout === "row") return rowAxes(children, gap, input, "wrap");
   if (layout === "column" || layout === "scroll-region") return columnAxes(children, gap, input, layout === "scroll-region" ? "scroll" : "wrap");
   if (layout === "grid") return gridAxes(children, gap, input, false);
@@ -126,13 +130,14 @@ function columnAxes(children: readonly IntrinsicSize[], gap: number, input: Layo
   const spaces = gap * (children.length - 1);
   return constrained(input, max(children, "minWidth"), max(children, "preferredWidth"), max(children, "maxWidth"), sum(children, "minHeight") + spaces, sum(children, "preferredHeight") + spaces, sum(children, "maxHeight") + spaces, overflow);
 }
-function maxAxes(children: readonly IntrinsicSize[], overflow: IntrinsicOverflow): IntrinsicSize {
-  return size(max(children, "minWidth"), max(children, "preferredWidth"), max(children, "maxWidth"), max(children, "minHeight"), max(children, "preferredHeight"), max(children, "maxHeight"), overflow);
+function maxAxes(children: readonly IntrinsicSize[], input: LayoutIntrinsicMeasureInput, overflow: IntrinsicOverflow): IntrinsicSize {
+  return constrained(input, max(children, "minWidth"), max(children, "preferredWidth"), max(children, "maxWidth"), max(children, "minHeight"), max(children, "preferredHeight"), max(children, "maxHeight"), overflow);
 }
 function gridAxes(children: readonly IntrinsicSize[], gap: number, input: LayoutIntrinsicMeasureInput, asymmetric: boolean): IntrinsicSize {
   const outer = widthEnvelope(input.width, 0).outer;
   const minimumTrack = max(children, "minWidth");
-  const columns = asymmetric ? Math.min(2, children.length) : Math.min(children.length, Math.max(1, Math.floor((outer + gap) / (minimumTrack + gap))));
+  const fittingColumns = Math.max(1, Math.floor((outer + gap) / (minimumTrack + gap)));
+  const columns = Math.min(children.length, 12, asymmetric ? 2 : 12, fittingColumns);
   const rows: IntrinsicSize[][] = [];
   children.forEach((child, index) => { const row = rows[Math.floor(index / columns)]; if (row === undefined) rows.push([child]); else row.push(child); });
   const rowHeight = (field: HeightField): number => rows.reduce((total, row) => total + max(row, field), 0) + gap * (rows.length - 1);
@@ -153,6 +158,7 @@ function dockAxes(children: readonly IntrinsicSize[], gap: number, input: Layout
 }
 
 function measureModule(input: RegisteredModuleIntrinsicMeasureInput): IntrinsicSize {
+  assertDensity(input.density, input.node.intent.density);
   const contract = input.layoutContract;
   if (!Number.isInteger(contract.minColumnSpan) || !Number.isInteger(contract.maxColumnSpan) || contract.minColumnSpan < 1 || contract.maxColumnSpan > 12 || contract.minColumnSpan > contract.maxColumnSpan) throw new Error("INTRINSIC_MEASURE_MODULE_LAYOUT_INVALID");
   const height = contract.height;
@@ -194,13 +200,11 @@ function glyphWidth(glyph: string, fontSize: number): number {
   if (/^[\u4E00-\u9FFF\u3400-\u4DBF\uF900-\uFAFF\u3040-\u30FF\uAC00-\uD7AF\uFF01-\uFF60\uFFE0-\uFFE6]$/u.test(glyph)) return fontSize;
   return /^\p{ASCII}$/u.test(glyph) ? (glyph === " " ? fontSize * 0.28 : fontSize * 0.56) : fontSize;
 }
-function assertResolvedValue(value: unknown): asserts value is ResolvedSemanticValue {
-  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return;
-  if (!isRecord(value)) throw new Error("INTRINSIC_MEASURE_SEMANTIC_VALUE_INVALID");
+function resolveSemanticValue(value: SemanticValue): ResolvedSemanticValue {
+  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
   if (value.kind === "repeater-field") throw new Error("INTRINSIC_MEASURE_UNRESOLVED_REPEATER_FIELD");
-  if (value.kind === "list" && Array.isArray(value.items)) { value.items.forEach(assertResolvedValue); return; }
-  if (value.kind === "record" && Array.isArray(value.fields)) { value.fields.forEach((field) => { if (!isRecord(field) || typeof field.name !== "string") throw new Error("INTRINSIC_MEASURE_SEMANTIC_VALUE_INVALID"); assertResolvedValue(field.value); }); return; }
-  throw new Error("INTRINSIC_MEASURE_SEMANTIC_VALUE_INVALID");
+  if (value.kind === "list") return Object.freeze({ kind: "list", items: Object.freeze(value.items.map(resolveSemanticValue)) });
+  return Object.freeze({ kind: "record", fields: Object.freeze(value.fields.map((field) => Object.freeze({ name: field.name, value: resolveSemanticValue(field.value) }))) });
 }
 function assertProfile(capabilityId: string, profileId: string): void { if ((capabilityId === "datagrid" ? "easyui.1" : capabilityId) !== profileId) throw new Error("INTRINSIC_MEASURE_PROFILE_CAPABILITY_MISMATCH"); }
 function assertDensity(input: IntrinsicDensity, node: IntrinsicDensity): void { if (input !== node) throw new Error("INTRINSIC_MEASURE_DENSITY_MISMATCH"); }
@@ -220,12 +224,11 @@ function size(minWidth: number, preferredWidth: number, maxWidth: number, minHei
 function sum<T extends WidthField | HeightField>(children: readonly IntrinsicSize[], field: T): number { return children.reduce((total, child) => total + child[field], 0); }
 function max<T extends WidthField | HeightField>(children: readonly IntrinsicSize[], field: T): number { return Math.max(...children.map((child) => child[field])); }
 function positiveFinite(value: number): boolean { return Number.isFinite(value) && value > 0; }
-function optionalPositive(value: number | undefined): boolean { return value === undefined || positiveFinite(value); }
+function boundedPositive(value: number | undefined, maximum: number): boolean { return value === undefined || (positiveFinite(value) && value <= maximum); }
 function optionalPositiveInteger(value: number | undefined): boolean { return value === undefined || (Number.isInteger(value) && value > 0); }
 function nonnegative(value: number | undefined): number { return value === undefined || !Number.isFinite(value) || value < 0 ? 0 : Math.min(value, MAX_DIMENSION); }
 function dimension(value: number, fallback: number): number { return Number.isFinite(value) && value >= 0 ? Math.min(value, MAX_DIMENSION) : fallback; }
 function signed(value: number | undefined): number { return value === undefined || !Number.isFinite(value) ? 0 : clamp(value, -100, 100); }
 function clamp(value: number, min: number, max: number): number { return Math.min(Math.max(value, min), max); }
 function round(value: number): number { return Math.round(value * 100) / 100; }
-function isRecord(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === "object"; }
 function isActionControl(capabilityId: string): boolean { return capabilityId === "button" || capabilityId === "easyui.2"; }
