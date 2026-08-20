@@ -3,7 +3,7 @@ import {
   adaptUiImplementationV1,
   AdvancedStyleDeclarationSchema,
   AnyUIImplementationSpecSchema,
-  ComponentStyleSpecSchema,
+  ComponentStyleSpecV2Schema,
   ControlCapabilitySchema,
   UIImplementationSpecV2Schema,
   UIImplementationSpecSchema,
@@ -41,11 +41,13 @@ const v1Fixture = UIImplementationSpecSchema.parse({
 
 const v2Fixture = {
   schema: "kf-ui-implementation/v2",
+  compatibility: "native",
   theme,
   compiledRoleStyles: {
     heading: { declarations: { fontSize: 24, fontWeight: 600 }, states: {} },
   },
   pages: [{
+    compatibility: "native",
     id: "home",
     width: 1440,
     height: 900,
@@ -115,9 +117,31 @@ const v2Fixture = {
   compiledScripts: [],
 };
 
+type MutableNativeV2Fixture = {
+  pages: Array<{
+    sourceBlueprintPageId?: string;
+    controls: Array<{
+      nativeProperties: Record<string, unknown>;
+      compiledStyle?: {
+        nativeFields: Record<string, unknown>;
+        cssFragments: Array<{ declarations: Record<string, unknown> }>;
+      };
+      dataBinding?: { records?: Array<Record<string, unknown>> };
+      style?: { declarations: Record<string, unknown>; parts?: Record<string, unknown> };
+      sourceSolutionNodeId?: string;
+      sourceBlueprintPageId?: string;
+      sourceBlueprintRegionIds?: string[];
+    }>;
+  }>;
+};
+
+function mutableNativeV2Fixture(): MutableNativeV2Fixture {
+  return structuredClone(v2Fixture) as unknown as MutableNativeV2Fixture;
+}
+
 describe("KF UI style contracts", () => {
   it("accepts structured style intent without raw CSS", () => {
-    const parsed = ComponentStyleSpecSchema.parse({
+    const parsed = ComponentStyleSpecV2Schema.parse({
       role: "primary-action",
       declarations: {
         backgroundColor: "{theme.primary}",
@@ -132,7 +156,7 @@ describe("KF UI style contracts", () => {
   });
 
   it("accepts the reviewed advanced style vocabulary and semantic parts", () => {
-    const parsed = ComponentStyleSpecSchema.parse({
+    const parsed = ComponentStyleSpecV2Schema.parse({
       declarations: {
         borderTopWidth: 1,
         borderRightWidth: 2,
@@ -178,18 +202,74 @@ describe("KF UI style contracts", () => {
     expect(AdvancedStyleDeclarationSchema.safeParse({
       kind: "transform", translateX: 201, scale: 1.3, rotate: 16,
     }).success).toBe(false);
-    expect(ComponentStyleSpecSchema.safeParse({
+    expect(ComponentStyleSpecV2Schema.safeParse({
       declarations: { transition: { property: "all", durationMs: 800, easing: "linear" } },
     }).success).toBe(false);
-    expect(ComponentStyleSpecSchema.safeParse({
+    expect(ComponentStyleSpecV2Schema.safeParse({
       parts: { icon: { css: ".icon{position:fixed}" } },
     }).success).toBe(false);
   });
 
+  it.each([
+    ["native property raw CSS", (fixture: MutableNativeV2Fixture) => {
+      fixture.pages[0]!.controls[1]!.nativeProperties = {
+        label: "访客姓名",
+        nested: { css: "body{display:none}" },
+      };
+    }],
+    ["compiled native selector", (fixture: MutableNativeV2Fixture) => {
+      fixture.pages[0]!.controls[1]!.compiledStyle!.nativeFields = {
+        backgroundColor: "#ffffff",
+        nested: { selector: "body" },
+      };
+    }],
+    ["data-binding JavaScript", (fixture: MutableNativeV2Fixture) => {
+      fixture.pages[0]!.controls[1]!.dataBinding!.records = [{
+        name: "陈嘉宁",
+        formatter: "alert(1)",
+      }];
+    }],
+  ])("rejects %s injected into an otherwise valid native v2 envelope", (_label, mutate) => {
+    const poisoned = mutableNativeV2Fixture();
+    mutate(poisoned);
+
+    expect(UIImplementationSpecV2Schema.safeParse(poisoned).success).toBe(false);
+  });
+
+  it.each(["red !important", "var(--attacker)", "calc(1px)"])(
+    "rejects unsafe native v2 color value %s",
+    (color) => {
+      const poisoned = mutableNativeV2Fixture();
+      poisoned.pages[0]!.controls[1]!.style!.declarations.backgroundColor = color;
+
+      expect(UIImplementationSpecV2Schema.safeParse(poisoned).success).toBe(false);
+    },
+  );
+
+  it("preserves bounded domain records that merely resemble technical prose", () => {
+    const valid = mutableNativeV2Fixture();
+    valid.pages[0]!.controls[1]!.dataBinding!.records = [{
+      status: "status:active",
+      product: "Version(3.6)",
+      summary: "设备由一号班组负责，等待复核",
+    }];
+
+    expect(UIImplementationSpecV2Schema.safeParse(valid).success).toBe(true);
+  });
+
+  it("rejects an overwide native semantic record in an otherwise valid v2 envelope", () => {
+    const overwide = mutableNativeV2Fixture();
+    overwide.pages[0]!.controls[1]!.nativeProperties = Object.fromEntries(
+      Array.from({ length: 101 }, (_, index) => [`field${index}`, index]),
+    );
+
+    expect(UIImplementationSpecV2Schema.safeParse(overwide).success).toBe(false);
+  });
+
   it("rejects raw CSS and unknown declaration keys", () => {
-    expect(ComponentStyleSpecSchema.safeParse({ css: "body{display:none}" }).success).toBe(false);
-    expect(ComponentStyleSpecSchema.safeParse({ declarations: { position: "fixed" } }).success).toBe(false);
-    expect(ComponentStyleSpecSchema.safeParse({
+    expect(ComponentStyleSpecV2Schema.safeParse({ css: "body{display:none}" }).success).toBe(false);
+    expect(ComponentStyleSpecV2Schema.safeParse({ declarations: { position: "fixed" } }).success).toBe(false);
+    expect(ComponentStyleSpecV2Schema.safeParse({
       declarations: { backgroundColor: "red;position:fixed" },
     }).success).toBe(false);
   });
@@ -255,15 +335,149 @@ describe("KF UI style contracts", () => {
     expect(UIImplementationSpecV2Schema.safeParse(unknownHost).success).toBe(false);
   });
 
+  it.each([
+    ["page blueprint id", (fixture: MutableNativeV2Fixture) => {
+      delete fixture.pages[0]!.sourceBlueprintPageId;
+    }],
+    ["solution node id", (fixture: MutableNativeV2Fixture) => {
+      delete fixture.pages[0]!.controls[1]!.sourceSolutionNodeId;
+    }],
+    ["control blueprint page id", (fixture: MutableNativeV2Fixture) => {
+      delete fixture.pages[0]!.controls[1]!.sourceBlueprintPageId;
+    }],
+    ["control blueprint region ids", (fixture: MutableNativeV2Fixture) => {
+      delete fixture.pages[0]!.controls[1]!.sourceBlueprintRegionIds;
+    }],
+  ])("rejects native v2 output missing provenance %s", (_label, mutate) => {
+    const incomplete = mutableNativeV2Fixture();
+    mutate(incomplete);
+    expect(UIImplementationSpecV2Schema.safeParse(incomplete).success).toBe(false);
+  });
+
+  it.each([
+    ["nested semantic part", (fixture: MutableNativeV2Fixture) => {
+      fixture.pages[0]!.controls[1]!.style!.parts = {
+        icon: {
+          declarations: {},
+          states: {
+            hover: { advanced: [{ kind: "background-image", assetId: "rogue-asset" }] },
+          },
+        },
+      };
+    }],
+    ["compiled style fragment", (fixture: MutableNativeV2Fixture) => {
+      fixture.pages[0]!.controls[1]!.compiledStyle!.cssFragments[0]!.declarations.advanced = [
+        { kind: "background-image", assetId: "rogue-asset" },
+      ];
+    }],
+  ])("rejects a %s background image absent from the control asset declaration", (_label, mutate) => {
+    const undeclared = mutableNativeV2Fixture();
+    mutate(undeclared);
+    expect(UIImplementationSpecV2Schema.safeParse(undeclared).success).toBe(false);
+  });
+
+  it("rejects a compiled role background image absent from matching control asset declarations", () => {
+    const undeclared = structuredClone(v2Fixture);
+    (undeclared.compiledRoleStyles.heading.declarations as Record<string, unknown>).advanced = [
+      { kind: "background-image", assetId: "rogue-asset" },
+    ];
+
+    expect(UIImplementationSpecV2Schema.safeParse(undeclared).success).toBe(false);
+  });
+
+  it("rejects an overlay host owned by a different implementation page", () => {
+    const wrongOwner = structuredClone(v2Fixture);
+    wrongOwner.pages.push({
+      compatibility: "native",
+      id: "secondary",
+      width: 800,
+      height: 600,
+      sourceBlueprintPageId: "secondary-blueprint",
+      controls: [{
+        id: "secondary-root",
+        role: "surface",
+        capabilityId: "layout.2",
+        depth: 0,
+        zIndex: 0,
+        geometry: { x: 0, y: 0, width: 800, height: 600 },
+        nativeProperties: {},
+        compiledStyle: { nativeFields: {}, cssFragments: [], warnings: [] },
+        sourceSolutionNodeId: "secondary-layout",
+        sourceBlueprintPageId: "secondary-blueprint",
+        sourceBlueprintRegionIds: ["secondary-region"],
+        eventBindings: [],
+      }],
+    });
+    wrongOwner.pages[0]!.controls[2]!.overlayHost!.hostPageId = "secondary";
+
+    expect(UIImplementationSpecV2Schema.safeParse(wrongOwner).success).toBe(false);
+  });
+
   it("adapts v1 components without inventing parents or creative provenance", () => {
     const adapted = adaptUiImplementationV1(v1Fixture);
 
-    expect(adapted.pages[0]?.controls[0]?.parentId).toBeUndefined();
-    expect(adapted.pages[0]?.controls[0]?.sourceSolutionNodeId).toBeUndefined();
-    expect(adapted.pages[0]?.controls[0]?.overlayHost).toBeUndefined();
+    expect(adapted.pages[0]?.controls[0]).not.toHaveProperty("parentId");
+    expect(adapted.pages[0]?.controls[0]).not.toHaveProperty("sourceSolutionNodeId");
+    expect(adapted.pages[0]?.controls[0]).not.toHaveProperty("overlayHost");
     expect(adapted.pages[0]?.controls[0]?.style).toEqual(component.style);
     expect(adapted.compiledActions).toEqual([]);
     expect(adapted.compiledScripts).toEqual([]);
+    expect(UIImplementationSpecV2Schema.safeParse(adapted).success).toBe(true);
+  });
+
+  it("preserves the legacy v1 empty-color contract in the compatibility adapter", () => {
+    const legacy = UIImplementationSpecSchema.parse({
+      ...v1Fixture,
+      pages: [{
+        ...v1Fixture.pages[0],
+        components: [{
+          ...v1Fixture.pages[0]!.components[0],
+          style: { declarations: { backgroundColor: "" }, states: {} },
+        }],
+      }],
+    });
+
+    const adapted = adaptUiImplementationV1(legacy);
+    expect((adapted as unknown as Record<string, unknown>).compatibility).toBe("adapted-v1");
+    expect(adapted.pages[0]?.controls[0]?.style?.declarations.backgroundColor).toBe("");
+  });
+
+  it("adapts a legacy v1 component that extends beyond its page", () => {
+    const legacy = UIImplementationSpecSchema.parse({
+      ...v1Fixture,
+      pages: [{
+        ...v1Fixture.pages[0],
+        components: [{
+          ...v1Fixture.pages[0]!.components[0],
+          geometry: { x: 1_400, y: 40, width: 100, height: 48 },
+        }],
+      }],
+    });
+
+    const adapted = adaptUiImplementationV1(legacy);
+    expect((adapted as unknown as Record<string, unknown>).compatibility).toBe("adapted-v1");
+    expect(UIImplementationSpecV2Schema.safeParse(adapted).success).toBe(true);
+  });
+
+  it("adapts legacy v1 control ids that repeat on different pages", () => {
+    const legacy = UIImplementationSpecSchema.parse({
+      ...v1Fixture,
+      pages: [
+        {
+          ...v1Fixture.pages[0],
+          id: "page-one",
+          components: [{ ...v1Fixture.pages[0]!.components[0], id: "shared-control" }],
+        },
+        {
+          ...v1Fixture.pages[0],
+          id: "page-two",
+          components: [{ ...v1Fixture.pages[0]!.components[0], id: "shared-control" }],
+        },
+      ],
+    });
+
+    const adapted = adaptUiImplementationV1(legacy);
+    expect((adapted as unknown as Record<string, unknown>).compatibility).toBe("adapted-v1");
     expect(UIImplementationSpecV2Schema.safeParse(adapted).success).toBe(true);
   });
 

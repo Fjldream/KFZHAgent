@@ -12,16 +12,103 @@ const boundedId = z.string().trim().min(1).max(100);
 const stableId = boundedId.regex(/^[A-Za-z][A-Za-z0-9_-]*$/);
 const px = z.number().min(-200).max(200);
 const nonnegativePx = z.number().min(0).max(200);
-const styleColor = z.string().trim().min(1).max(128).refine(
-  (value) => !/[;<>\r\n]/.test(value)
-    && !/(?:url|linear-gradient|radial-gradient|expression)\s*\(|javascript\s*:/i.test(value)
-    && (!/[{}]/.test(value) || /^\{theme\.[A-Za-z][A-Za-z0-9]*\}$/.test(value)),
-  "raw CSS color values are not allowed",
+const nativeStyleColor = z.string().trim().min(1).max(128).refine(
+  (value) => /^\{theme\.[A-Za-z][A-Za-z0-9]*\}$/.test(value)
+    || /^#(?:[0-9A-F]{3}|[0-9A-F]{4}|[0-9A-F]{6}|[0-9A-F]{8})$/i.test(value)
+    || /^[A-Za-z]+$/.test(value)
+    || /^rgba?\(\s*(?:\d{1,3}%?\s*,\s*){2}\d{1,3}%?(?:\s*,\s*(?:0(?:\.\d+)?|1(?:\.0+)?))?\s*\)$/i.test(value)
+    || /^hsla?\(\s*-?\d{1,3}(?:\.\d+)?(?:deg)?\s*,\s*\d{1,3}(?:\.\d+)?%\s*,\s*\d{1,3}(?:\.\d+)?%(?:\s*,\s*(?:0(?:\.\d+)?|1(?:\.0+)?))?\s*\)$/i.test(value),
+  "only theme tokens and bounded literal colors are allowed",
 );
+const legacyStyleColor = z.string().max(128);
+
+type ImplementationDataValue = string | number | boolean | null
+  | ImplementationDataValue[]
+  | { [key: string]: ImplementationDataValue };
+
+const forbiddenImplementationDataKeys = new Set([
+  "code",
+  "css",
+  "html",
+  "innerhtml",
+  "javascript",
+  "outerhtml",
+  "rawcss",
+  "script",
+  "selector",
+  "selectortext",
+  "sourcecode",
+  "stylesheet",
+  "styletext",
+]);
+
+const ImplementationDataKeySchema = z.string().trim().min(1).max(100)
+  .regex(/^[A-Za-z][A-Za-z0-9_-]*$/)
+  .refine(
+    (key) => !forbiddenImplementationDataKeys.has(key.toLowerCase()),
+    "raw style, selector, markup, and script keys are not allowed",
+  );
+
+const ImplementationDataStringSchema = z.string().max(2_000).refine(
+  (value) => !value.includes("${")
+    && !/!important\b/i.test(value)
+    && !/\b(?:var|calc|url|expression)\s*\(/i.test(value)
+    && !/(?:^|[;{\s])(?:animation|background(?:-color|-image)?|border(?:-[a-z-]+)?|color|display|font(?:-[a-z-]+)?|height|margin(?:-[a-z-]+)?|opacity|overflow|padding(?:-[a-z-]+)?|position|transform|transition|width|z-index)\s*:/i.test(value)
+    && !/<\/?(?:script|style|iframe|object|embed)\b/i.test(value)
+    && !/\b(?:alert|eval|fetch|setInterval|setTimeout)\s*\(/.test(value)
+    && !/\b(?:document|globalThis|window)\s*\./.test(value)
+    && !/=>/.test(value)
+    && !/\b[a-z_$][A-Za-z0-9_$]*\s*\(/.test(value),
+  "raw CSS, selectors, markup, scripts, and interpolation are not allowed",
+);
+
+const ImplementationDataNodeSchema: z.ZodType<ImplementationDataValue> = z.lazy(() => z.union([
+  ImplementationDataStringSchema,
+  z.number().finite(),
+  z.boolean(),
+  z.null(),
+  z.array(ImplementationDataNodeSchema).max(100),
+  z.record(ImplementationDataKeySchema, ImplementationDataNodeSchema),
+]));
+
+const ImplementationDataValueSchema = ImplementationDataNodeSchema.superRefine((value, ctx) => {
+  let nodeCount = 0;
+  const visit = (node: ImplementationDataValue, depth: number): void => {
+    nodeCount += 1;
+    if (nodeCount > 1_000) {
+      ctx.addIssue({ code: "custom", message: "implementation data exceeds 1000 semantic values" });
+      return;
+    }
+    if (depth > 8) {
+      ctx.addIssue({ code: "custom", message: "implementation data exceeds maximum depth 8" });
+      return;
+    }
+    if (Array.isArray(node)) {
+      node.forEach((entry) => visit(entry, depth + 1));
+    } else if (node !== null && typeof node === "object") {
+      const entries = Object.values(node);
+      if (entries.length > 100) {
+        ctx.addIssue({ code: "custom", message: "implementation data objects may contain at most 100 fields" });
+        return;
+      }
+      entries.forEach((entry) => visit(entry, depth + 1));
+    }
+  };
+  visit(value, 0);
+});
+
+const ImplementationDataRecordSchema = z.record(
+  ImplementationDataKeySchema,
+  ImplementationDataValueSchema,
+).superRefine((record, ctx) => {
+  if (Object.keys(record).length > 100) {
+    ctx.addIssue({ code: "custom", message: "implementation data records may contain at most 100 fields" });
+  }
+});
 
 export const GradientStopSchema = z.object({
   offset: z.number().min(0).max(1),
-  color: styleColor,
+  color: nativeStyleColor,
 }).strict();
 
 export const AdvancedStyleDeclarationSchema = z.discriminatedUnion("kind", [
@@ -30,18 +117,18 @@ export const AdvancedStyleDeclarationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("transform"), translateX: px.optional(), translateY: px.optional(), scale: z.number().min(0.8).max(1.2).optional(), rotate: z.number().min(-15).max(15).optional() }).strict(),
 ]);
 
-export const StyleDeclarationSchema = z.object({
-  backgroundColor: styleColor.optional(),
-  textColor: styleColor.optional(),
-  borderColor: styleColor.optional(),
+export const StyleDeclarationV2Schema = z.object({
+  backgroundColor: nativeStyleColor.optional(),
+  textColor: nativeStyleColor.optional(),
+  borderColor: nativeStyleColor.optional(),
   borderTopWidth: nonnegativePx.optional(),
   borderRightWidth: nonnegativePx.optional(),
   borderBottomWidth: nonnegativePx.optional(),
   borderLeftWidth: nonnegativePx.optional(),
-  borderTopColor: styleColor.optional(),
-  borderRightColor: styleColor.optional(),
-  borderBottomColor: styleColor.optional(),
-  borderLeftColor: styleColor.optional(),
+  borderTopColor: nativeStyleColor.optional(),
+  borderRightColor: nativeStyleColor.optional(),
+  borderBottomColor: nativeStyleColor.optional(),
+  borderLeftColor: nativeStyleColor.optional(),
   borderRadius: z.number().min(0).max(100).optional(),
   borderTopLeftRadius: z.number().min(0).max(100).optional(),
   borderTopRightRadius: z.number().min(0).max(100).optional(),
@@ -63,10 +150,10 @@ export const StyleDeclarationSchema = z.object({
   objectFit: z.enum(["contain", "cover", "fill", "none", "scale-down"]).optional(),
   overflow: z.enum(["visible", "hidden", "auto", "scroll"]).optional(),
   iconSize: z.number().min(1).max(200).optional(),
-  iconColor: styleColor.optional(),
+  iconColor: nativeStyleColor.optional(),
   iconGap: nonnegativePx.optional(),
   focusRing: z.object({
-    color: styleColor,
+    color: nativeStyleColor,
     width: z.number().min(1).max(8),
     offset: z.number().min(0).max(16),
   }).strict().optional(),
@@ -78,6 +165,23 @@ export const StyleDeclarationSchema = z.object({
   advanced: z.array(AdvancedStyleDeclarationSchema).max(8).optional(),
 }).strict();
 
+/** Frozen v1 declaration surface. Native v2 uses StyleDeclarationV2Schema above. */
+export const StyleDeclarationSchema = z.object({
+  backgroundColor: legacyStyleColor.optional(),
+  textColor: legacyStyleColor.optional(),
+  borderColor: legacyStyleColor.optional(),
+  borderRadius: z.number().min(0).max(100).optional(),
+  fontSize: z.number().min(8).max(200).optional(),
+  fontWeight: z.number().int().min(100).max(900).optional(),
+  lineHeight: z.number().min(0.5).max(4).optional(),
+  padding: z.number().min(0).max(200).optional(),
+  margin: z.number().min(0).max(200).optional(),
+  gap: z.number().min(0).max(200).optional(),
+  boxShadow: z.enum(["none", "small", "medium", "large"]).optional(),
+  opacity: z.number().min(0).max(1).optional(),
+  textAlign: z.enum(["left", "center", "right"]).optional(),
+}).strict();
+
 const StyleStatesSchema = z.object({
   hover: StyleDeclarationSchema.optional(),
   active: StyleDeclarationSchema.optional(),
@@ -87,16 +191,36 @@ const StyleStatesSchema = z.object({
   error: StyleDeclarationSchema.optional(),
 }).strict();
 
+const StyleStatesV2Schema = z.object({
+  hover: StyleDeclarationV2Schema.optional(),
+  active: StyleDeclarationV2Schema.optional(),
+  focus: StyleDeclarationV2Schema.optional(),
+  disabled: StyleDeclarationV2Schema.optional(),
+  selected: StyleDeclarationV2Schema.optional(),
+  error: StyleDeclarationV2Schema.optional(),
+}).strict();
+
 export const SemanticPartStyleSpecSchema = z.object({
-  declarations: StyleDeclarationSchema.default({}),
-  states: StyleStatesSchema.default({}),
+  declarations: StyleDeclarationV2Schema.default({}),
+  states: StyleStatesV2Schema.default({}),
 }).strict();
 
 export const ComponentStyleSpecSchema = z.object({
   role: z.string().min(1).max(100).optional(),
   declarations: StyleDeclarationSchema.default({}),
   states: StyleStatesSchema.default({}),
-  parts: z.record(stableId, SemanticPartStyleSpecSchema).optional(),
+}).strict();
+
+const SemanticPartStyleSpecV2Schema = z.object({
+  declarations: StyleDeclarationV2Schema.default({}),
+  states: StyleStatesV2Schema.default({}),
+}).strict();
+
+export const ComponentStyleSpecV2Schema = z.object({
+  role: z.string().min(1).max(100).optional(),
+  declarations: StyleDeclarationV2Schema.default({}),
+  states: StyleStatesV2Schema.default({}),
+  parts: z.record(stableId, SemanticPartStyleSpecV2Schema).optional(),
 }).strict();
 
 export const ThemeSpecSchema = z.object({
@@ -155,7 +279,7 @@ const GeometrySchema = z.object({
 const CompiledStyleFragmentSchema = z.object({
   selectorToken: z.string().regex(/^(?:root|part:[A-Za-z][A-Za-z0-9_-]*)$/),
   state: z.enum(["normal", "hover", "active", "focus", "disabled", "selected", "error"]),
-  declarations: StyleDeclarationSchema,
+  declarations: StyleDeclarationV2Schema,
 }).strict();
 
 const CompiledStyleWarningSchema = z.object({
@@ -164,7 +288,7 @@ const CompiledStyleWarningSchema = z.object({
 }).strict();
 
 export const CompiledStyleSpecSchema = z.object({
-  nativeFields: z.record(z.string().trim().min(1).max(100), z.unknown()),
+  nativeFields: ImplementationDataRecordSchema,
   cssFragments: z.array(CompiledStyleFragmentSchema).max(128),
   warnings: z.array(CompiledStyleWarningSchema).max(64),
 }).strict();
@@ -173,7 +297,7 @@ const DataBindingSpecSchema = z.object({
   mockDataId: boundedId,
   field: boundedId.optional(),
   recordKey: z.union([z.string().max(2_000), z.number().finite(), z.boolean()]).optional(),
-  records: z.array(z.record(z.string().trim().min(1).max(100), z.unknown())).max(100).optional(),
+  records: z.array(ImplementationDataRecordSchema).max(100).optional(),
 }).strict();
 
 const OverlayHostMetadataSchema = z.object({
@@ -196,26 +320,56 @@ export const UIImplementationControlV2Schema = z.object({
   depth: z.number().int().min(0).max(32),
   zIndex: z.number().int().min(0).max(1_000_000),
   geometry: GeometrySchema,
-  nativeProperties: z.record(z.string().trim().min(1).max(100), z.unknown()),
-  style: ComponentStyleSpecSchema.optional(),
+  nativeProperties: ImplementationDataRecordSchema,
+  style: ComponentStyleSpecV2Schema.optional(),
   compiledStyle: CompiledStyleSpecSchema.optional(),
   dataBinding: DataBindingSpecSchema.optional(),
   assetIds: z.array(boundedId).max(64).optional(),
   overlayHost: OverlayHostMetadataSchema.optional(),
-  sourceSolutionNodeId: boundedId.optional(),
+  sourceSolutionNodeId: boundedId,
   sourceRepeaterId: boundedId.optional(),
-  sourceBlueprintPageId: boundedId.optional(),
-  sourceBlueprintRegionIds: z.array(boundedId).min(1).max(12).optional(),
+  sourceBlueprintPageId: boundedId,
+  sourceBlueprintRegionIds: z.array(boundedId).min(1).max(12),
   eventBindings: z.array(z.never()).max(0),
 }).strict();
 
 const UIImplementationPageV2Schema = z.object({
+  compatibility: z.literal("native"),
   id: boundedId,
   width: z.number().positive(),
   height: z.number().positive(),
-  sourceBlueprintPageId: boundedId.optional(),
+  sourceBlueprintPageId: boundedId,
   controls: z.array(UIImplementationControlV2Schema).min(1).max(5_000),
 }).strict();
+
+const UIImplementationCompatibilityControlV2Schema = z.object({
+  id: z.string().min(1).max(100),
+  role: z.string().min(1).max(100),
+  sourceModuleId: z.string().min(1).max(100).optional(),
+  capabilityId: z.string().min(1).max(100),
+  critical: z.boolean(),
+  fallbackCapabilityId: z.string().min(1).max(100).optional(),
+  content: z.string().max(2_000).optional(),
+  depth: z.literal(0),
+  zIndex: z.number().int().nonnegative(),
+  geometry: GeometrySchema,
+  nativeProperties: z.record(z.string(), z.unknown()),
+  style: ComponentStyleSpecSchema,
+  eventBindings: z.array(z.never()).max(0),
+}).strict();
+
+const UIImplementationCompatibilityPageV2Schema = z.object({
+  compatibility: z.literal("adapted-v1"),
+  id: z.string().min(1).max(100),
+  width: z.number().positive(),
+  height: z.number().positive(),
+  controls: z.array(UIImplementationCompatibilityControlV2Schema).min(1),
+}).strict();
+
+const UIImplementationPageAnyV2Schema = z.discriminatedUnion("compatibility", [
+  UIImplementationPageV2Schema,
+  UIImplementationCompatibilityPageV2Schema,
+]);
 
 function containsGeometry(
   outer: { x: number; y: number; width: number; height: number },
@@ -227,17 +381,66 @@ function containsGeometry(
     && inner.y + inner.height <= outer.y + outer.height;
 }
 
+function backgroundAssetIdsFromStyle(
+  style: z.infer<typeof ComponentStyleSpecV2Schema> | undefined,
+): string[] {
+  if (style === undefined) {
+    return [];
+  }
+  const assetIds: string[] = [];
+  const visitDeclarations = (declarations: z.infer<typeof StyleDeclarationV2Schema>): void => {
+    declarations.advanced?.forEach((declaration) => {
+      if (declaration.kind === "background-image") {
+        assetIds.push(declaration.assetId);
+      }
+    });
+  };
+  const visitStates = (states: Record<string, z.infer<typeof StyleDeclarationV2Schema> | undefined>): void => {
+    Object.values(states).forEach((declarations) => {
+      if (declarations !== undefined) {
+        visitDeclarations(declarations);
+      }
+    });
+  };
+
+  visitDeclarations(style.declarations);
+  visitStates(style.states);
+  Object.values(style.parts ?? {}).forEach((part) => {
+    visitDeclarations(part.declarations);
+    visitStates(part.states);
+  });
+  return assetIds;
+}
+
 export const UIImplementationSpecV2Schema = z.object({
   schema: z.literal("kf-ui-implementation/v2"),
+  compatibility: z.enum(["native", "adapted-v1"]),
   theme: ThemeSpecSchema,
-  compiledRoleStyles: z.record(stableId, ComponentStyleSpecSchema),
-  pages: z.array(UIImplementationPageV2Schema).min(1).max(32),
+  compiledRoleStyles: z.record(stableId, ComponentStyleSpecV2Schema),
+  pages: z.array(UIImplementationPageAnyV2Schema).min(1),
   compiledActions: z.array(z.never()).max(0),
   compiledScripts: z.array(z.never()).max(0),
 }).strict().superRefine((implementation, ctx) => {
+  implementation.pages.forEach((page, pageIndex) => {
+    if (page.compatibility !== implementation.compatibility) {
+      ctx.addIssue({ code: "custom", path: ["pages", pageIndex, "compatibility"], message: "page compatibility must match the implementation compatibility branch" });
+    }
+  });
+  if (implementation.compatibility === "adapted-v1") {
+    if (Object.keys(implementation.compiledRoleStyles).length > 0) {
+      ctx.addIssue({ code: "custom", path: ["compiledRoleStyles"], message: "adapted v1 implementations cannot invent compiled role styles" });
+    }
+    return;
+  }
+  if (implementation.pages.length > 32) {
+    ctx.addIssue({ code: "custom", path: ["pages"], message: "native implementations may contain at most 32 pages" });
+  }
   const pageIds = new Set<string>();
   const controlIds = new Set<string>();
   implementation.pages.forEach((page, pageIndex) => {
+    if (page.compatibility !== "native") {
+      return;
+    }
     if (pageIds.has(page.id)) {
       ctx.addIssue({ code: "custom", path: ["pages", pageIndex, "id"], message: `duplicate implementation page id: ${page.id}` });
     }
@@ -268,18 +471,48 @@ export const UIImplementationSpecV2Schema = z.object({
           ctx.addIssue({ code: "custom", path: [...path, "geometry"], message: `control geometry exceeds parent bounds: ${control.id}` });
         }
       }
-      if (control.overlayHost !== undefined && !pageIds.has(control.overlayHost.hostPageId)
-        && !implementation.pages.some((candidate) => candidate.id === control.overlayHost?.hostPageId)) {
-        ctx.addIssue({ code: "custom", path: [...path, "overlayHost", "hostPageId"], message: `unknown overlay host page id: ${control.overlayHost.hostPageId}` });
+      if (control.overlayHost !== undefined && control.overlayHost.hostPageId !== page.id) {
+        ctx.addIssue({ code: "custom", path: [...path, "overlayHost", "hostPageId"], message: "overlay host must be owned by the control's implementation page" });
       }
-      if (control.sourceBlueprintPageId !== undefined
-        && page.sourceBlueprintPageId !== undefined
-        && control.sourceBlueprintPageId !== page.sourceBlueprintPageId) {
+      if (control.sourceBlueprintPageId !== page.sourceBlueprintPageId) {
         ctx.addIssue({ code: "custom", path: [...path, "sourceBlueprintPageId"], message: "control blueprint page provenance must match its implementation page" });
       }
       if (control.assetIds !== undefined && new Set(control.assetIds).size !== control.assetIds.length) {
         ctx.addIssue({ code: "custom", path: [...path, "assetIds"], message: "control asset ids must be unique" });
       }
+      const declaredAssetIds = new Set(control.assetIds ?? []);
+      const backgroundAssetIds = [
+        ...backgroundAssetIdsFromStyle(control.style),
+        ...(control.compiledStyle?.cssFragments.flatMap((fragment) =>
+          fragment.declarations.advanced
+            ?.filter((declaration) => declaration.kind === "background-image")
+            .map((declaration) => declaration.assetId) ?? []) ?? []),
+      ];
+      backgroundAssetIds.forEach((assetId) => {
+        if (!declaredAssetIds.has(assetId)) {
+          ctx.addIssue({ code: "custom", path: [...path, "assetIds"], message: `background image asset is not declared for control ${control.id}: ${assetId}` });
+        }
+      });
+    });
+  });
+  Object.entries(implementation.compiledRoleStyles).forEach(([role, style]) => {
+    const backgroundAssetIds = backgroundAssetIdsFromStyle(style);
+    if (backgroundAssetIds.length === 0) {
+      return;
+    }
+    const matchingControls = implementation.pages.flatMap((page) =>
+      page.compatibility === "native"
+        ? page.controls.filter((control) => control.role === role || control.style?.role === role)
+        : []);
+    backgroundAssetIds.forEach((assetId) => {
+      if (matchingControls.length === 0) {
+        ctx.addIssue({ code: "custom", path: ["compiledRoleStyles", role], message: `background image asset has no matching control declaration: ${assetId}` });
+      }
+      matchingControls.forEach((control) => {
+        if (!(control.assetIds ?? []).includes(assetId)) {
+          ctx.addIssue({ code: "custom", path: ["compiledRoleStyles", role], message: `background image asset is not declared for matching control ${control.id}: ${assetId}` });
+        }
+      });
     });
   });
 });
@@ -287,9 +520,11 @@ export const UIImplementationSpecV2Schema = z.object({
 export function adaptUiImplementationV1(input: UIImplementationSpec): UIImplementationSpecV2 {
   return UIImplementationSpecV2Schema.parse({
     schema: "kf-ui-implementation/v2",
+    compatibility: "adapted-v1",
     theme: input.theme,
     compiledRoleStyles: {},
     pages: input.pages.map((page) => ({
+      compatibility: "adapted-v1",
       id: page.id,
       width: page.width,
       height: page.height,
@@ -361,23 +596,8 @@ export const CapabilityReportSchema = z.object({
 
 export type CapabilityStatus = z.infer<typeof CapabilityStatusSchema>;
 export type AdvancedStyleDeclaration = z.infer<typeof AdvancedStyleDeclarationSchema>;
-export type StyleDeclarationV2 = z.infer<typeof StyleDeclarationSchema>;
-/** Retained as the v1 declaration surface so current exhaustive consumers stay source-compatible. */
-export type StyleDeclaration = Pick<StyleDeclarationV2,
-  | "backgroundColor"
-  | "textColor"
-  | "borderColor"
-  | "borderRadius"
-  | "fontSize"
-  | "fontWeight"
-  | "lineHeight"
-  | "padding"
-  | "margin"
-  | "gap"
-  | "boxShadow"
-  | "opacity"
-  | "textAlign"
->;
+export type StyleDeclarationV2 = z.infer<typeof StyleDeclarationV2Schema>;
+export type StyleDeclaration = z.infer<typeof StyleDeclarationSchema>;
 export type ComponentStyleSpec = z.infer<typeof ComponentStyleSpecSchema>;
 export type ThemeSpec = z.infer<typeof ThemeSpecSchema>;
 export type UIComponentSpec = z.infer<typeof UIComponentSpecSchema>;

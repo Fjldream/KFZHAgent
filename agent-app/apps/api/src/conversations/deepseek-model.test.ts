@@ -804,7 +804,8 @@ describe("DeepSeekModelPort", () => {
 
     await expect(port.createSolutionImplementationPlan(context)).resolves.toEqual(plan);
 
-    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    const serializedBody = fetchImpl.mock.calls[0][1].body as string;
+    const body = JSON.parse(serializedBody);
     const implementationSystemPrompt = body.messages[0].content as string;
     const capturedImplementationPrompt = body.messages.map((message: { content: string }) => message.content).join("\n");
     const marker = "语义规划输入(JSON)：";
@@ -887,6 +888,7 @@ describe("DeepSeekModelPort", () => {
     expect(omittedProfileId).toBeDefined();
     expect(capturedImplementationPrompt).not.toContain(`"capabilityId":"${omittedProfileId}"`);
     expect(new TextEncoder().encode(capturedImplementationPrompt).byteLength).toBeLessThanOrEqual(128_000);
+    expect(new TextEncoder().encode(serializedBody).byteLength).toBeLessThanOrEqual(128_000);
   });
 
   it.each([
@@ -1033,6 +1035,44 @@ describe("DeepSeekModelPort", () => {
     const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
 
     await expect(port.createSolutionImplementationPlan(context)).rejects.toThrow(/128000|prompt.*bound/i);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("recursively rejects interpolation syntax in asset metadata before fetching", async () => {
+    const context = solutionPlanningContext({
+      assetCatalog: [{
+        id: "visitor-portrait",
+        kind: "image",
+        name: "访客头像示例",
+        mimeType: "image/png",
+        description: "已登记头像 $" + "{variant}",
+      }],
+    });
+    const fetchImpl = vi.fn();
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+
+    await expect(port.createSolutionImplementationPlan(context)).rejects.toThrow(/interpolation.*assetCatalog|assetCatalog.*interpolation/i);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when JSON escaping pushes the serialized HTTP request beyond 128000 UTF-8 bytes", async () => {
+    const context = solutionPlanningContext({
+      assetCatalog: Array.from({ length: 35 }, (_, index) => ({
+        id: `quoted-asset-${index}`,
+        kind: "image",
+        name: `quoted asset ${index}`,
+        mimeType: "image/png",
+        description: "\"".repeat(1_000),
+      })),
+    });
+    const plan = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify(plan) } }] }),
+    });
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+
+    await expect(port.createSolutionImplementationPlan(context)).rejects.toThrow(/serialized HTTP request.*128000/i);
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 

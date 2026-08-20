@@ -1010,6 +1010,28 @@ function assertNoForbiddenSolutionKeys(value: unknown, path: readonly string[] =
   }
 }
 
+const INTERPOLATION_OPENER = "$" + "{";
+
+function assertNoInterpolationSyntax(value: unknown, path: readonly string[] = []): void {
+  if (typeof value === "string") {
+    if (value.includes(INTERPOLATION_OPENER)) {
+      throw new DeepSeekModelOutputError(`interpolation syntax is forbidden at ${path.join(".") || "request"}`);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => assertNoInterpolationSyntax(entry, [...path, String(index)]));
+    return;
+  }
+  if (value === null || typeof value !== "object") return;
+  Object.entries(value).forEach(([key, entry]) => {
+    if (key.includes(INTERPOLATION_OPENER)) {
+      throw new DeepSeekModelOutputError(`interpolation syntax is forbidden at ${[...path, key].join(".")}`);
+    }
+    assertNoInterpolationSyntax(entry, [...path, key]);
+  });
+}
+
 function assertCreativePromptBound(system: string, user: string): void {
   const bytes = new TextEncoder().encode(`${system}\n${user}`).byteLength;
   if (bytes > MAX_CREATIVE_PROMPT_BYTES) {
@@ -1240,6 +1262,7 @@ function buildSolutionImplementationPrompt(input: ModelPortContext, revising: bo
     ...(previousPlan === undefined ? {} : { previousPlan }),
     ...(rejectionReasons.length === 0 ? {} : { rejectionReasons }),
   };
+  assertNoInterpolationSyntax(payload);
   const prompt = [
     ...(extractionRepair
       ? ["上一轮仅因 JSON 不完整或无法解析而失败；请重新输出同一份完整对象，只修复 JSON 结构。"]
@@ -1274,6 +1297,24 @@ export class DeepSeekModelPort implements ModelPort {
     user: string,
     options: { maxTokens?: number } = {},
   ): Promise<unknown> {
+    const requestBody = {
+      model: this.model,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.2,
+      max_tokens: options.maxTokens ?? 4000,
+    };
+    assertNoInterpolationSyntax(requestBody);
+    const serializedRequest = JSON.stringify(requestBody);
+    const serializedRequestBytes = new TextEncoder().encode(serializedRequest).byteLength;
+    if (serializedRequestBytes > MAX_CREATIVE_PROMPT_BYTES) {
+      throw new DeepSeekModelOutputError(
+        `serialized HTTP request exceeds 128000 UTF-8 byte bound (${serializedRequestBytes})`,
+      );
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     let response: Response;
@@ -1284,16 +1325,7 @@ export class DeepSeekModelPort implements ModelPort {
           "Content-Type": "application/json",
           Authorization: `Bearer ${this.options.apiKey}`,
         },
-        body: JSON.stringify({
-          model: this.model,
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: user },
-          ],
-          response_format: { type: "json_object" },
-          temperature: 0.2,
-          max_tokens: options.maxTokens ?? 4000,
-        }),
+        body: serializedRequest,
         signal: controller.signal,
       });
     } catch (error) {
