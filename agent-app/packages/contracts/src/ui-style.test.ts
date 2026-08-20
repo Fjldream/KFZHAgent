@@ -246,6 +246,47 @@ describe("KF UI style contracts", () => {
     },
   );
 
+  it.each([
+    "notAColor",
+    "position",
+    "rgb(256, 0, 0)",
+    "rgb(101%, 0%, 0%)",
+    "rgba(0, 0, 0, 1.1)",
+    "rgba(0, 0, 0, -0.1)",
+    "hsl(361, 50%, 50%)",
+    "hsl(-1, 50%, 50%)",
+    "hsl(120, 101%, 50%)",
+    "hsl(120, 50%, -1%)",
+    "hsla(120, 50%, 50%, 1.1)",
+  ])("rejects out-of-contract native color %s", (color) => {
+    const poisoned = mutableNativeV2Fixture();
+    poisoned.pages[0]!.controls[1]!.style!.declarations.backgroundColor = color;
+
+    expect(UIImplementationSpecV2Schema.safeParse(poisoned).success).toBe(false);
+  });
+
+  it.each([
+    "transparent",
+    "red",
+    "rebeccapurple",
+    "#abc",
+    "#12345678",
+    "{theme.primary}",
+    "rgb(255, 0, 128)",
+    "rgb(100%, 0%, 50%)",
+    "rgb(12.5, 64, 128.25)",
+    "rgba(0, 0, 0, .5)",
+    "rgba(0, 0, 0, 50%)",
+    "hsl(360, 100%, 50%)",
+    "hsla(0, 0%, 0%, 1)",
+    "hsla(240deg, 100%, 50%, 25%)",
+  ])("accepts bounded native color %s", (color) => {
+    const valid = mutableNativeV2Fixture();
+    valid.pages[0]!.controls[1]!.style!.declarations.backgroundColor = color;
+
+    expect(UIImplementationSpecV2Schema.safeParse(valid).success).toBe(true);
+  });
+
   it("preserves bounded domain records that merely resemble technical prose", () => {
     const valid = mutableNativeV2Fixture();
     valid.pages[0]!.controls[1]!.dataBinding!.records = [{
@@ -268,6 +309,74 @@ describe("KF UI style contracts", () => {
     poisoned.pages[0]!.controls[1]!.nativeProperties = { targetDescription: payload };
 
     expect(UIImplementationSpecV2Schema.safeParse(poisoned).success).toBe(false);
+  });
+
+  it.each([
+    ".admin",
+    "div .admin",
+    ".a > .b",
+    "body > span",
+    ".admin{cursor:pointer}",
+    "@import \"evil.css\"",
+    "button:hover",
+    "[data-admin]",
+    "#app",
+    "location.assign(\"/next\")",
+    "navigator.sendBeacon(\"/x\")",
+    "new Worker(\"worker.js\")",
+    "require(\"pkg\")",
+    "import(\"pkg\")",
+  ])("rejects structurally executable native semantic text %s", (payload) => {
+    const poisoned = mutableNativeV2Fixture();
+    poisoned.pages[0]!.controls[1]!.nativeProperties = { semanticDescription: payload };
+
+    expect(UIImplementationSpecV2Schema.safeParse(poisoned).success).toBe(false);
+  });
+
+  it.each([
+    "onLoad",
+    "oNlOaD",
+    "ON_LOAD",
+    "on-load",
+    "OnError",
+    "ONERROR",
+    "ON_ERROR",
+    "on_error",
+    "onSubmit",
+    "onCustomEvent",
+    "ON-CHANGE",
+  ])("rejects native event-handler field %s after normalized matching", (field) => {
+    const poisoned = mutableNativeV2Fixture();
+    poisoned.pages[0]!.controls[1]!.nativeProperties = { [field]: "domain value" };
+
+    expect(UIImplementationSpecV2Schema.safeParse(poisoned).success).toBe(false);
+  });
+
+  it.each([
+    "status(active)",
+    "Version(3.6)",
+    "status:active",
+    "article:hover",
+    "设备路径由运维组复核",
+    "https://example.com/operations/status",
+    "urn:kingfusion:equipment:status",
+    "园区/设备/巡检",
+  ])("accepts bounded native domain text %s", (payload) => {
+    const valid = mutableNativeV2Fixture();
+    valid.pages[0]!.controls[1]!.nativeProperties = { semanticDescription: payload };
+
+    expect(UIImplementationSpecV2Schema.safeParse(valid).success).toBe(true);
+  });
+
+  it("preserves domain field names that merely start with on", () => {
+    const valid = mutableNativeV2Fixture();
+    valid.pages[0]!.controls[1]!.nativeProperties = {
+      onlineStatus: "active",
+      onboardingStage: "reviewed",
+      onlyPending: false,
+    };
+
+    expect(UIImplementationSpecV2Schema.safeParse(valid).success).toBe(true);
   });
 
   it.each([

@@ -12,12 +12,70 @@ const boundedId = z.string().trim().min(1).max(100);
 const stableId = boundedId.regex(/^[A-Za-z][A-Za-z0-9_-]*$/);
 const px = z.number().min(-200).max(200);
 const nonnegativePx = z.number().min(0).max(200);
+
+const cssNamedColors = new Set(`
+  aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood
+  cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson currentcolor cyan darkblue darkcyan
+  darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred
+  darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue
+  dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green
+  greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue
+  lightcoral lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue
+  lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue
+  mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue
+  mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid palegoldenrod palegreen
+  paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurple red rosybrown royalblue
+  saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen
+  steelblue tan teal thistle tomato transparent turquoise violet wheat white whitesmoke yellow yellowgreen
+`.trim().split(/\s+/));
+
+const unsignedDecimal = /^(?:\d+(?:\.\d+)?|\.\d+)$/;
+
+function isBoundedNumericToken(value: string, maximum: number): boolean {
+  return unsignedDecimal.test(value) && Number(value) <= maximum;
+}
+
+function isBoundedPercentage(value: string): boolean {
+  return value.endsWith("%") && isBoundedNumericToken(value.slice(0, -1), 100);
+}
+
+function isAlphaChannel(value: string): boolean {
+  return isBoundedPercentage(value) || isBoundedNumericToken(value, 1);
+}
+
+function isRgbColor(value: string): boolean {
+  const match = /^(rgb|rgba)\(([^()]*)\)$/i.exec(value);
+  if (match === null) return false;
+  const channels = match[2]!.split(",").map((channel) => channel.trim());
+  const expectedChannels = match[1]!.toLowerCase() === "rgba" ? 4 : 3;
+  if (channels.length !== expectedChannels) return false;
+  if (!channels.slice(0, 3).every((channel) => isBoundedPercentage(channel) || isBoundedNumericToken(channel, 255))) {
+    return false;
+  }
+  return channels.length === 3 || isAlphaChannel(channels[3]!);
+}
+
+function isHslColor(value: string): boolean {
+  const match = /^(hsl|hsla)\(([^()]*)\)$/i.exec(value);
+  if (match === null) return false;
+  const channels = match[2]!.split(",").map((channel) => channel.trim());
+  const expectedChannels = match[1]!.toLowerCase() === "hsla" ? 4 : 3;
+  if (channels.length !== expectedChannels) return false;
+  const hue = channels[0]!.replace(/deg$/i, "");
+  if (!isBoundedNumericToken(hue, 360)
+    || !isBoundedPercentage(channels[1]!)
+    || !isBoundedPercentage(channels[2]!)) {
+    return false;
+  }
+  return channels.length === 3 || isAlphaChannel(channels[3]!);
+}
+
 const nativeStyleColor = z.string().trim().min(1).max(128).refine(
   (value) => /^\{theme\.[A-Za-z][A-Za-z0-9]*\}$/.test(value)
     || /^#(?:[0-9A-F]{3}|[0-9A-F]{4}|[0-9A-F]{6}|[0-9A-F]{8})$/i.test(value)
-    || /^[A-Za-z]+$/.test(value)
-    || /^rgba?\(\s*(?:\d{1,3}%?\s*,\s*){2}\d{1,3}%?(?:\s*,\s*(?:0(?:\.\d+)?|1(?:\.0+)?))?\s*\)$/i.test(value)
-    || /^hsla?\(\s*-?\d{1,3}(?:\.\d+)?(?:deg)?\s*,\s*\d{1,3}(?:\.\d+)?%\s*,\s*\d{1,3}(?:\.\d+)?%(?:\s*,\s*(?:0(?:\.\d+)?|1(?:\.0+)?))?\s*\)$/i.test(value),
+    || cssNamedColors.has(value.toLowerCase())
+    || isRgbColor(value)
+    || isHslColor(value),
   "only theme tokens and bounded literal colors are allowed",
 );
 const legacyStyleColor = z.string().max(128);
@@ -44,12 +102,87 @@ const implementationOwnedFieldNames = new Set([
   "y",
 ]);
 
+const eventHandlerNames = new Set([
+  "abort",
+  "blur",
+  "change",
+  "click",
+  "close",
+  "contextmenu",
+  "dblclick",
+  "error",
+  "focus",
+  "input",
+  "keydown",
+  "keypress",
+  "keyup",
+  "load",
+  "mousedown",
+  "mouseenter",
+  "mouseleave",
+  "mousemove",
+  "mouseout",
+  "mouseover",
+  "mouseup",
+  "reset",
+  "resize",
+  "scroll",
+  "select",
+  "submit",
+  "touchend",
+  "touchmove",
+  "touchstart",
+  "unload",
+]);
+
+const commonCssTagNames = new Set([
+  "a", "body", "button", "div", "form", "html", "img", "input", "label", "li", "main", "nav", "option",
+  "p", "section", "select", "span", "table", "tbody", "td", "textarea", "th", "thead", "tr", "ul",
+]);
+
+const interactiveCssTagNames = new Set([
+  "a", "button", "form", "input", "label", "option", "select", "textarea",
+]);
+
+const cssSelectorAtomPattern = "(?:[A-Za-z][A-Za-z0-9-]*|[.#][A-Za-z_-][A-Za-z0-9_-]*|\\[[^\\]\\n]+\\])";
+const cssDescendantSelector = new RegExp(`^${cssSelectorAtomPattern}(?:\\s+${cssSelectorAtomPattern})+$`);
+const cssCombinatorSelector = new RegExp(`^${cssSelectorAtomPattern}(?:\\s*[>+~]\\s*${cssSelectorAtomPattern})+$`);
+
+function isCssSelectorText(value: string): boolean {
+  if (/^\.[A-Za-z_-][A-Za-z0-9_-]*$/.test(value)
+    || (/^#[A-Za-z_-][A-Za-z0-9_-]*$/.test(value) && !/^#[0-9A-F]{3,8}$/i.test(value))
+    || /^\[[^\]\n]+\]$/.test(value)
+    || /^(?:[.#][A-Za-z_-][A-Za-z0-9_-]*){2,}$/.test(value)) {
+    return true;
+  }
+
+  if (cssDescendantSelector.test(value) && /(?:^|\s)(?:[.#]|\[)/.test(value)) return true;
+  if (cssCombinatorSelector.test(value)) {
+    const atoms = value.split(/\s*[>+~]\s*/);
+    if (atoms.some((atom) => /^[.#[]/.test(atom))
+      || atoms.every((atom) => commonCssTagNames.has(atom.toLowerCase()))) {
+      return true;
+    }
+  }
+
+  const pseudoMatch = /^([A-Za-z][A-Za-z0-9-]*|[.#][A-Za-z_-][A-Za-z0-9_-]*):{1,2}[A-Za-z-]+(?:\([^)]*\))?$/.exec(value);
+  const pseudoPrefix = pseudoMatch?.[1];
+  return pseudoPrefix !== undefined
+    && (pseudoPrefix.startsWith(".")
+      || pseudoPrefix.startsWith("#")
+      || interactiveCssTagNames.has(pseudoPrefix.toLowerCase()));
+}
+
 export function normalizeImplementationOwnedFieldName(value: string): string {
   return value.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
 }
 
 export function isImplementationOwnedFieldName(value: string): boolean {
-  return implementationOwnedFieldNames.has(normalizeImplementationOwnedFieldName(value));
+  const normalized = normalizeImplementationOwnedFieldName(value);
+  if (implementationOwnedFieldNames.has(normalized)) return true;
+  if (normalized.startsWith("on") && eventHandlerNames.has(normalized.slice(2))) return true;
+  return /^(?:on|On)[A-Z][A-Za-z0-9]*$/.test(value)
+    || /^on[-_][A-Za-z0-9]+$/i.test(value);
 }
 
 export function sharedImplementationTextIssue(value: string): string | undefined {
@@ -62,7 +195,16 @@ export function sharedImplementationTextIssue(value: string): string | undefined
     || /=>/.test(value)) {
     return "JavaScript APIs and executable syntax are not allowed";
   }
-  if (/^[A-Za-z][A-Za-z0-9-]*\s*[>+~]\s*(?:[.#][A-Za-z_-][A-Za-z0-9_-]*|\[[^\]\n]+\])$/.test(trimmed)) {
+  if (/\b(?:import|require)\s*\(/i.test(value)
+    || /\bnew\s+[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*\s*\(/i.test(value)
+    || /\b(?:console|document|globalThis|localStorage|location|navigator|process|sessionStorage|window)\s*(?:\?\.)?\.\s*[A-Za-z_$][A-Za-z0-9_$]*\s*\(/i.test(value)
+    || /^[A-Za-z_$][A-Za-z0-9_$]*(?:\s*(?:\?\.)?\.\s*[A-Za-z_$][A-Za-z0-9_$]*)+\s*\([^()\n]*\)$/.test(trimmed)) {
+    return "JavaScript calls and execution entry points are not allowed";
+  }
+  const cssRule = /^([^{}\n]+)\{[^{}\n]*:[^{}\n]*\}$/.exec(trimmed);
+  if (isCssSelectorText(trimmed)
+    || (cssRule?.[1] !== undefined && isCssSelectorText(cssRule[1].trim()))
+    || /^@(?:charset|container|font-face|import|keyframes|layer|media|namespace|page|property|supports)\b/i.test(trimmed)) {
     return "CSS selectors are not allowed";
   }
   return undefined;
