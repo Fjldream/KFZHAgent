@@ -43,31 +43,63 @@ function isAlphaChannel(value: string): boolean {
   return isBoundedPercentage(value) || isBoundedNumericToken(value, 1);
 }
 
+function haveConsistentRgbUnits(channels: string[]): boolean {
+  return channels.every(isBoundedPercentage)
+    || channels.every((channel) => isBoundedNumericToken(channel, 255));
+}
+
+function splitModernColorBody(body: string): { channels: string[]; alpha?: string } | undefined {
+  if (body.includes(",")) return undefined;
+  const sections = body.trim().split(/\s*\/\s*/);
+  if (sections.length > 2) return undefined;
+  const channels = sections[0]!.trim().split(/\s+/);
+  const alpha = sections[1]?.trim();
+  if (alpha === "" || alpha?.includes(" ") === true) return undefined;
+  return alpha === undefined ? { channels } : { channels, alpha };
+}
+
 function isRgbColor(value: string): boolean {
   const match = /^(rgb|rgba)\(([^()]*)\)$/i.exec(value);
   if (match === null) return false;
-  const channels = match[2]!.split(",").map((channel) => channel.trim());
-  const expectedChannels = match[1]!.toLowerCase() === "rgba" ? 4 : 3;
-  if (channels.length !== expectedChannels) return false;
-  if (!channels.slice(0, 3).every((channel) => isBoundedPercentage(channel) || isBoundedNumericToken(channel, 255))) {
-    return false;
+  const body = match[2]!;
+  if (body.includes(",")) {
+    const channels = body.split(",").map((channel) => channel.trim());
+    const expectedChannels = match[1]!.toLowerCase() === "rgba" ? 4 : 3;
+    return channels.length === expectedChannels
+      && haveConsistentRgbUnits(channels.slice(0, 3))
+      && (channels.length === 3 || isAlphaChannel(channels[3]!));
   }
-  return channels.length === 3 || isAlphaChannel(channels[3]!);
+  const modern = splitModernColorBody(body);
+  return modern !== undefined
+    && modern.channels.length === 3
+    && haveConsistentRgbUnits(modern.channels)
+    && (modern.alpha === undefined || isAlphaChannel(modern.alpha));
+}
+
+function isHueChannel(value: string): boolean {
+  return isBoundedNumericToken(value.replace(/deg$/i, ""), 360);
 }
 
 function isHslColor(value: string): boolean {
   const match = /^(hsl|hsla)\(([^()]*)\)$/i.exec(value);
   if (match === null) return false;
-  const channels = match[2]!.split(",").map((channel) => channel.trim());
-  const expectedChannels = match[1]!.toLowerCase() === "hsla" ? 4 : 3;
-  if (channels.length !== expectedChannels) return false;
-  const hue = channels[0]!.replace(/deg$/i, "");
-  if (!isBoundedNumericToken(hue, 360)
-    || !isBoundedPercentage(channels[1]!)
-    || !isBoundedPercentage(channels[2]!)) {
-    return false;
+  const body = match[2]!;
+  if (body.includes(",")) {
+    const channels = body.split(",").map((channel) => channel.trim());
+    const expectedChannels = match[1]!.toLowerCase() === "hsla" ? 4 : 3;
+    return channels.length === expectedChannels
+      && isHueChannel(channels[0]!)
+      && isBoundedPercentage(channels[1]!)
+      && isBoundedPercentage(channels[2]!)
+      && (channels.length === 3 || isAlphaChannel(channels[3]!));
   }
-  return channels.length === 3 || isAlphaChannel(channels[3]!);
+  const modern = splitModernColorBody(body);
+  return modern !== undefined
+    && modern.channels.length === 3
+    && isHueChannel(modern.channels[0]!)
+    && isBoundedPercentage(modern.channels[1]!)
+    && isBoundedPercentage(modern.channels[2]!)
+    && (modern.alpha === undefined || isAlphaChannel(modern.alpha));
 }
 
 const nativeStyleColor = z.string().trim().min(1).max(128).refine(
@@ -102,37 +134,10 @@ const implementationOwnedFieldNames = new Set([
   "y",
 ]);
 
-const eventHandlerNames = new Set([
-  "abort",
-  "blur",
-  "change",
-  "click",
-  "close",
-  "contextmenu",
-  "dblclick",
-  "error",
-  "focus",
-  "input",
-  "keydown",
-  "keypress",
-  "keyup",
-  "load",
-  "mousedown",
-  "mouseenter",
-  "mouseleave",
-  "mousemove",
-  "mouseout",
-  "mouseover",
-  "mouseup",
-  "reset",
-  "resize",
-  "scroll",
-  "select",
-  "submit",
-  "touchend",
-  "touchmove",
-  "touchstart",
-  "unload",
+const allowedOnPrefixedDomainFieldNames = new Set([
+  "onboardingstage",
+  "onlinestatus",
+  "onlypending",
 ]);
 
 const commonCssTagNames = new Set([
@@ -159,7 +164,8 @@ function isCssSelectorText(value: string): boolean {
   if (cssDescendantSelector.test(value) && /(?:^|\s)(?:[.#]|\[)/.test(value)) return true;
   if (cssCombinatorSelector.test(value)) {
     const atoms = value.split(/\s*[>+~]\s*/);
-    if (atoms.some((atom) => /^[.#[]/.test(atom))
+    if (atoms.some((atom) => /^(?:[.#]|\[)/.test(atom))
+      || atoms.some((atom) => /^[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)+$/.test(atom))
       || atoms.every((atom) => commonCssTagNames.has(atom.toLowerCase()))) {
       return true;
     }
@@ -173,6 +179,17 @@ function isCssSelectorText(value: string): boolean {
       || interactiveCssTagNames.has(pseudoPrefix.toLowerCase()));
 }
 
+function isCssRuleText(value: string): boolean {
+  const match = /^([^{}\n]+)\{([^{}]*)\}$/.exec(value);
+  if (match === null) return false;
+  const selector = match[1]!.trim();
+  const declarations = match[2]!;
+  const selectorPrelude = isCssSelectorText(selector)
+    || /^[A-Za-z][A-Za-z0-9-]*(?::{1,2}[A-Za-z-]+(?:\([^)]*\))?)?$/.test(selector);
+  return selectorPrelude
+    && /^\s*(?:(?:--)?[A-Za-z][A-Za-z0-9-]*\s*:\s*[^;{}]+(?:;\s*|$))+$/.test(declarations);
+}
+
 export function normalizeImplementationOwnedFieldName(value: string): string {
   return value.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
 }
@@ -180,9 +197,7 @@ export function normalizeImplementationOwnedFieldName(value: string): string {
 export function isImplementationOwnedFieldName(value: string): boolean {
   const normalized = normalizeImplementationOwnedFieldName(value);
   if (implementationOwnedFieldNames.has(normalized)) return true;
-  if (normalized.startsWith("on") && eventHandlerNames.has(normalized.slice(2))) return true;
-  return /^(?:on|On)[A-Z][A-Za-z0-9]*$/.test(value)
-    || /^on[-_][A-Za-z0-9]+$/i.test(value);
+  return normalized.startsWith("on") && !allowedOnPrefixedDomainFieldNames.has(normalized);
 }
 
 export function sharedImplementationTextIssue(value: string): string | undefined {
@@ -196,14 +211,14 @@ export function sharedImplementationTextIssue(value: string): string | undefined
     return "JavaScript APIs and executable syntax are not allowed";
   }
   if (/\b(?:import|require)\s*\(/i.test(value)
-    || /\bnew\s+[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*\s*\(/i.test(value)
-    || /\b(?:console|document|globalThis|localStorage|location|navigator|process|sessionStorage|window)\s*(?:\?\.)?\.\s*[A-Za-z_$][A-Za-z0-9_$]*\s*\(/i.test(value)
-    || /^[A-Za-z_$][A-Za-z0-9_$]*(?:\s*(?:\?\.)?\.\s*[A-Za-z_$][A-Za-z0-9_$]*)+\s*\([^()\n]*\)$/.test(trimmed)) {
+    || /\bnew\s+(?:[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*|\(\s*[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*\s*\))\s*\(/i.test(value)
+    || /\b(?:console|document|globalThis|localStorage|location|navigator|process|sessionStorage|window)\s*(?:(?:\.|\?\.)\s*[A-Za-z_$][A-Za-z0-9_$]*|\[\s*["'][A-Za-z_$][A-Za-z0-9_$]*["']\s*\])\s*\(/i.test(value)
+    || /^[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\s*(?:\.|\?\.)\s*[A-Za-z_$][A-Za-z0-9_$]*)|(?:\s*\[\s*["'][A-Za-z_$][A-Za-z0-9_$]*["']\s*\]))+\s*\([^()\n]*\)$/.test(trimmed)
+    || /\b(?:async\s+)?function(?:\s*\*)?\s*(?:[A-Za-z_$][A-Za-z0-9_$]*\s*)?\([^)]*\)\s*\{/i.test(value)) {
     return "JavaScript calls and execution entry points are not allowed";
   }
-  const cssRule = /^([^{}\n]+)\{[^{}\n]*:[^{}\n]*\}$/.exec(trimmed);
   if (isCssSelectorText(trimmed)
-    || (cssRule?.[1] !== undefined && isCssSelectorText(cssRule[1].trim()))
+    || isCssRuleText(trimmed)
     || /^@(?:charset|container|font-face|import|keyframes|layer|media|namespace|page|property|supports)\b/i.test(trimmed)) {
     return "CSS selectors are not allowed";
   }

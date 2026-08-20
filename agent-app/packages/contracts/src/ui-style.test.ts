@@ -251,12 +251,18 @@ describe("KF UI style contracts", () => {
     "position",
     "rgb(256, 0, 0)",
     "rgb(101%, 0%, 0%)",
+    "rgb(100%, 0, 255)",
+    "rgb(100% 0 255)",
+    "rgb(255, 0, 0 / 50%)",
     "rgba(0, 0, 0, 1.1)",
     "rgba(0, 0, 0, -0.1)",
     "hsl(361, 50%, 50%)",
     "hsl(-1, 50%, 50%)",
     "hsl(120, 101%, 50%)",
     "hsl(120, 50%, -1%)",
+    "hsl(240, 100, 50%)",
+    "hsl(240 100 50% / .5)",
+    "hsl(240, 100%, 50% / .5)",
     "hsla(120, 50%, 50%, 1.1)",
   ])("rejects out-of-contract native color %s", (color) => {
     const poisoned = mutableNativeV2Fixture();
@@ -277,9 +283,15 @@ describe("KF UI style contracts", () => {
     "rgb(12.5, 64, 128.25)",
     "rgba(0, 0, 0, .5)",
     "rgba(0, 0, 0, 50%)",
+    "rgb(255 0 0 / 50%)",
+    "rgb(100% 0% 50%)",
+    "rgba(12.5 64 128.25 / .5)",
     "hsl(360, 100%, 50%)",
     "hsla(0, 0%, 0%, 1)",
     "hsla(240deg, 100%, 50%, 25%)",
+    "hsl(240 100% 50% / .5)",
+    "hsl(240deg 100% 50%)",
+    "hsla(240 100% 50% / 25%)",
   ])("accepts bounded native color %s", (color) => {
     const valid = mutableNativeV2Fixture();
     valid.pages[0]!.controls[1]!.style!.declarations.backgroundColor = color;
@@ -326,6 +338,19 @@ describe("KF UI style contracts", () => {
     "new Worker(\"worker.js\")",
     "require(\"pkg\")",
     "import(\"pkg\")",
+    "article{color:red}",
+    "article{cursor:pointer}",
+    ".admin {\n color:red;\n}",
+    ".admin {\n cursor:pointer;\n}",
+    " BODY\n >\n custom-widget ",
+    "location?.assign(\"/next\")",
+    " WINDOW?.ALERT (\"x\") ",
+    "navigator[\"sendBeacon\"](\"/x\")",
+    "new (Worker)(\"worker.js\")",
+    "function run(){ return 1; }",
+    " ASYNC FUNCTION run() {\n return 1;\n} ",
+    "async () => 1",
+    "(value) => value",
   ])("rejects structurally executable native semantic text %s", (payload) => {
     const poisoned = mutableNativeV2Fixture();
     poisoned.pages[0]!.controls[1]!.nativeProperties = { semanticDescription: payload };
@@ -344,6 +369,10 @@ describe("KF UI style contracts", () => {
     "on_error",
     "onSubmit",
     "onCustomEvent",
+    "oNCustomEvent",
+    "ONCustomEvent",
+    "oncustomEvent",
+    "on_custom_event",
     "ON-CHANGE",
   ])("rejects native event-handler field %s after normalized matching", (field) => {
     const poisoned = mutableNativeV2Fixture();
@@ -361,6 +390,7 @@ describe("KF UI style contracts", () => {
     "https://example.com/operations/status",
     "urn:kingfusion:equipment:status",
     "园区/设备/巡检",
+    "设备路径：园区/设备/巡检\n当前状态：active",
   ])("accepts bounded native domain text %s", (payload) => {
     const valid = mutableNativeV2Fixture();
     valid.pages[0]!.controls[1]!.nativeProperties = { semanticDescription: payload };
@@ -368,13 +398,16 @@ describe("KF UI style contracts", () => {
     expect(UIImplementationSpecV2Schema.safeParse(valid).success).toBe(true);
   });
 
-  it("preserves domain field names that merely start with on", () => {
+  it.each([
+    "onlineStatus",
+    "ONLINE_STATUS",
+    "onboardingStage",
+    "onboarding-stage",
+    "onlyPending",
+    "ONLY_PENDING",
+  ])("preserves explicitly allowed on-prefixed domain field %s", (field) => {
     const valid = mutableNativeV2Fixture();
-    valid.pages[0]!.controls[1]!.nativeProperties = {
-      onlineStatus: "active",
-      onboardingStage: "reviewed",
-      onlyPending: false,
-    };
+    valid.pages[0]!.controls[1]!.nativeProperties = { [field]: "active" };
 
     expect(UIImplementationSpecV2Schema.safeParse(valid).success).toBe(true);
   });
