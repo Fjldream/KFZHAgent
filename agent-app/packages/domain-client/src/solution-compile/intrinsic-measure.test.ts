@@ -99,6 +99,14 @@ describe("measureIntrinsic", () => {
     for (const ratio of [{ width: Number.MIN_VALUE, height: Number.MAX_VALUE }, { width: Number.MAX_VALUE, height: Number.MIN_VALUE }]) expect(() => measureIntrinsic({ ...genericInput("image", "", 640), family: "image", image: { aspectRatio: ratio }, font: paddedFont })).toThrow("INTRINSIC_MEASURE_IMAGE_RATIO_INVALID");
   });
 
+  it("rejects an image whose insets consume its entire outer width", () => {
+    const zeroContentBox: IntrinsicFontMetrics = { fontSize: 16, lineHeight: 1.5, padding: { horizontal: 100, vertical: 0 } };
+    const narrowButPositive: IntrinsicFontMetrics = { fontSize: 16, lineHeight: 1.5, padding: { horizontal: 99, vertical: 0 } };
+    const input = { ...genericInput("image", "", 200), family: "image" as const, image: { aspectRatio: { width: 16, height: 9 } } };
+    expect(() => measureIntrinsic({ ...input, font: zeroContentBox })).toThrow("INTRINSIC_MEASURE_IMAGE_CONTENT_BOX_UNSATISFIABLE");
+    expect(measureIntrinsic({ ...input, font: narrowButPositive })).toMatchObject({ preferredWidth: 200, preferredHeight: 200 });
+  });
+
   it("measures each layout semantic family with its own conservative aggregation", () => {
     expect(measureIntrinsic(layoutInput("row"))).toMatchObject({ minWidth: 192, preferredWidth: 272, maxWidth: 300, minHeight: 32, preferredHeight: 48, maxHeight: 72 });
     expect(measureIntrinsic(layoutInput("column"))).toMatchObject({ minWidth: 100, preferredWidth: 140, maxWidth: 200, minHeight: 68, preferredHeight: 100, maxHeight: 140 });
@@ -146,6 +154,18 @@ describe("measureIntrinsic", () => {
     expect(result).toEqual({ minWidth: 320, preferredWidth: 640, maxWidth: 640, minHeight: 180, preferredHeight: 400, maxHeight: 480, overflow: "clip" });
     expect(() => measureIntrinsic({ kind: "registered-module", node: { kind: "registered-module", id: "bad", moduleKind: "bad", templateVersion: "1", variant: "default", title: "bad", intent: { density: "compact" } }, density: "compact", width: { available: 800 }, font, layoutContract: { ...valid, minColumnSpan: 1.5 } })).toThrow("INTRINSIC_MEASURE_MODULE_LAYOUT_INVALID");
     expect(() => measureIntrinsic({ kind: "registered-module", node: { kind: "registered-module", id: "mismatch", moduleKind: "bad", templateVersion: "1", variant: "default", title: "bad", intent: { density: "compact" } }, density: "spacious", width: { available: 800 }, font, layoutContract: valid })).toThrow("INTRINSIC_MEASURE_DENSITY_MISMATCH");
+  });
+
+  it("requires a finite feasible intersection between module contract and width constraints", () => {
+    const valid = { minColumnSpan: 4, maxColumnSpan: 8, height: { min: 180, preferred: { compact: 220, small: 260, medium: 320, large: 400, full: 480 }, max: 480 } } as const;
+    const node = { kind: "registered-module" as const, id: "bounded", moduleKind: "content.hero", templateVersion: "1.0.0", variant: "default", title: "门户", intent: { density: "comfortable" as const } };
+    const input = { kind: "registered-module" as const, node, density: "comfortable" as const, font, layoutContract: valid };
+    expect(() => measureIntrinsic({ ...input, width: { available: 640 }, columnWidth: Number.MAX_VALUE })).toThrow("INTRINSIC_MEASURE_MODULE_LAYOUT_INVALID");
+    expect(() => measureIntrinsic({ ...input, width: { available: 640 }, columnWidth: Number.MIN_VALUE })).toThrow("INTRINSIC_MEASURE_MODULE_LAYOUT_INVALID");
+    expect(() => measureIntrinsic({ ...input, width: { available: 800, min: 1_000 } })).toThrow("INTRINSIC_MEASURE_MODULE_WIDTH_UNSATISFIABLE");
+    expect(() => measureIntrinsic({ ...input, width: { available: 300, max: 300 } })).toThrow("INTRINSIC_MEASURE_MODULE_WIDTH_UNSATISFIABLE");
+    expect(measureIntrinsic({ ...input, width: { available: 640, min: 320, max: 640 }, columnWidth: 80 }))
+      .toEqual({ minWidth: 320, preferredWidth: 640, maxWidth: 640, minHeight: 180, preferredHeight: 320, maxHeight: 480, overflow: "clip" });
   });
 
   it("fails closed for an unresolved repeater field and returns ordered finite results for successful hostile-number inputs", () => {

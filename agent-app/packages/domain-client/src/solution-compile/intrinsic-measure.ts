@@ -95,6 +95,7 @@ function measureImage(input: ImageControlIntrinsicMeasureInput, metrics: Metrics
   const { width, height } = input.image.aspectRatio;
   if (!positiveFinite(width) || !positiveFinite(height)) throw new Error("INTRINSIC_MEASURE_IMAGE_RATIO_INVALID");
   const contentWidth = Math.max(0, envelope.outer - metrics.horizontalInset);
+  if (contentWidth <= 0) throw new Error("INTRINSIC_MEASURE_IMAGE_CONTENT_BOX_UNSATISFIABLE");
   const quotient = height / width;
   const ratioHeight = contentWidth * quotient + metrics.verticalInset;
   if (!Number.isFinite(quotient) || quotient <= 0 || quotient > MAX_DIMENSION || !Number.isFinite(ratioHeight) || ratioHeight < 0 || ratioHeight > MAX_DIMENSION) throw new Error("INTRINSIC_MEASURE_IMAGE_RATIO_INVALID");
@@ -165,12 +166,20 @@ function measureModule(input: RegisteredModuleIntrinsicMeasureInput): IntrinsicS
   const keys = ["compact", "small", "medium", "large", "full"] as const;
   if (!Number.isInteger(height.min) || !Number.isInteger(height.max) || height.min <= 0 || height.max < height.min || keys.some((key) => !Number.isInteger(height.preferred[key]) || height.preferred[key] < height.min || height.preferred[key] > height.max)) throw new Error("INTRINSIC_MEASURE_MODULE_LAYOUT_INVALID");
   const columnWidth = input.columnWidth === undefined ? 80 : input.columnWidth;
-  if (!positiveFinite(columnWidth)) throw new Error("INTRINSIC_MEASURE_MODULE_LAYOUT_INVALID");
-  const envelope = widthEnvelope(input.width, contract.minColumnSpan * columnWidth);
-  const maxWidth = Math.min(envelope.outer, contract.maxColumnSpan * columnWidth);
-  const preferredWidth = clamp(envelope.outer, envelope.min, maxWidth);
+  if (!Number.isFinite(columnWidth) || columnWidth < 1 || columnWidth > MAX_DIMENSION) throw new Error("INTRINSIC_MEASURE_MODULE_LAYOUT_INVALID");
+  const contractMinimum = contract.minColumnSpan * columnWidth;
+  const contractMaximum = contract.maxColumnSpan * columnWidth;
+  if (!positiveFinite(contractMinimum) || !positiveFinite(contractMaximum) || contractMinimum > MAX_DIMENSION || contractMaximum > MAX_DIMENSION || contractMinimum > contractMaximum) throw new Error("INTRINSIC_MEASURE_MODULE_LAYOUT_INVALID");
+  const available = nonnegative(input.width.available);
+  const declaredMaximum = input.width.max === undefined ? available : nonnegative(input.width.max);
+  const constraintMaximum = Math.min(available, declaredMaximum);
+  const requestedMinimum = nonnegative(input.width.min);
+  const minimum = Math.max(contractMinimum, requestedMinimum);
+  const maximum = Math.min(contractMaximum, constraintMaximum);
+  if (minimum > maximum) throw new Error("INTRINSIC_MEASURE_MODULE_WIDTH_UNSATISFIABLE");
+  const preferredWidth = clamp(available, minimum, maximum);
   const key = input.density === "compact" ? "compact" : input.density === "spacious" ? "large" : "medium";
-  return size(envelope.min, preferredWidth, maxWidth, height.min, height.preferred[key], height.max, "clip");
+  return size(minimum, preferredWidth, maximum, height.min, height.preferred[key], height.max, "clip");
 }
 
 interface Metrics { readonly fontSize: number; readonly lineHeight: number; readonly letterSpacing: number; readonly horizontalInset: number; readonly verticalInset: number; }
