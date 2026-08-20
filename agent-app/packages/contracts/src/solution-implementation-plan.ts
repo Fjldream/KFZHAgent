@@ -313,11 +313,46 @@ export const SemanticScalarSchema = z.union([
   z.null(),
 ]);
 
+export const RepeaterFieldReferenceSchema = z.object({
+  kind: z.literal("repeater-field"),
+  itemAlias: semanticNameSchema,
+  field: semanticNameSchema,
+}).strict();
+
 export type SemanticScalar = z.infer<typeof SemanticScalarSchema>;
+export type RepeaterFieldReference = z.infer<typeof RepeaterFieldReferenceSchema>;
 export type SemanticValue =
   | SemanticScalar
   | { kind: "list"; items: SemanticValue[] }
-  | { kind: "record"; fields: Array<{ name: string; value: SemanticValue }> };
+  | { kind: "record"; fields: Array<{ name: string; value: SemanticValue }> }
+  | RepeaterFieldReference;
+
+type LegacySemanticValue =
+  | SemanticScalar
+  | { kind: "list"; items: LegacySemanticValue[] }
+  | { kind: "record"; fields: Array<{ name: string; value: LegacySemanticValue }> };
+
+const LegacySemanticValueShapeSchema: z.ZodType<LegacySemanticValue> = z.lazy(() =>
+  z.union([
+    SemanticScalarSchema,
+    z.object({ kind: z.literal("list"), items: z.array(LegacySemanticValueShapeSchema).max(32) }).strict(),
+    z
+      .object({
+        kind: z.literal("record"),
+        fields: z.array(z.object({ name: semanticPropertyNameSchema, value: LegacySemanticValueShapeSchema }).strict()).max(32),
+      })
+      .strict()
+      .superRefine((value, ctx) => {
+        const names = new Set<string>();
+        value.fields.forEach((field, index) => {
+          if (names.has(field.name)) {
+            ctx.addIssue({ code: "custom", path: ["fields", index, "name"], message: `duplicate semantic field: ${field.name}` });
+          }
+          names.add(field.name);
+        });
+      }),
+  ]),
+);
 
 const SemanticValueShapeSchema: z.ZodType<SemanticValue> = z.lazy(() =>
   z.union([
@@ -338,11 +373,17 @@ const SemanticValueShapeSchema: z.ZodType<SemanticValue> = z.lazy(() =>
           names.add(field.name);
         });
       }),
+    RepeaterFieldReferenceSchema,
   ]),
 );
 
 /** A standalone semantic value includes the same safety/depth checks as a native-v3 plan. */
 export const SemanticValueSchema: z.ZodType<SemanticValue> = SemanticValueShapeSchema.superRefine((value, ctx) => {
+  validateImplementationFree(value, ctx);
+  validateSemanticValueDepth(value, ctx, [], 0);
+});
+
+const LegacySemanticValueSchema: z.ZodType<LegacySemanticValue> = LegacySemanticValueShapeSchema.superRefine((value, ctx) => {
   validateImplementationFree(value, ctx);
   validateSemanticValueDepth(value, ctx, [], 0);
 });
@@ -625,7 +666,7 @@ const LegacySolutionNodeSchema: z.ZodType<LayoutNode | RegisteredModuleNode> = z
         templateVersion: templateVersionSchema,
         variant: legacyStableIdSchema,
         title: legacyModuleTextSchema,
-        content: z.union([SemanticValueSchema, legacyModuleTextSchema]).optional(),
+        content: z.union([LegacySemanticValueSchema, legacyModuleTextSchema]).optional(),
         assetId: legacyStableIdSchema.optional(),
         eventBindings: z.array(SemanticEventBindingSchema).max(16),
         slots: z
@@ -777,7 +818,7 @@ const actionBaseShape = {
 };
 
 export const ValueExpressionSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("literal"), value: SemanticValueSchema }).strict(),
+  z.object({ kind: z.literal("literal"), value: LegacySemanticValueSchema }).strict(),
   z.object({ kind: z.literal("local-state"), stateId: stableIdSchema }).strict(),
   z.object({ kind: z.literal("mock-data"), mockDataId: stableIdSchema }).strict(),
 ]);
@@ -788,7 +829,7 @@ export const ActionPlanSchema = z.discriminatedUnion("kind", [
   z.object({ ...actionBaseShape, kind: z.literal("close-overlay"), overlayId: stableIdSchema, result: SemanticScalarSchema.optional() }).strict(),
   z.object({ ...actionBaseShape, kind: z.literal("set-visibility"), targetId: stableIdSchema, visible: z.boolean() }).strict(),
   z.object({ ...actionBaseShape, kind: z.literal("switch-tab"), targetId: stableIdSchema, tabId: stableIdSchema }).strict(),
-  z.object({ ...actionBaseShape, kind: z.literal("set-state"), stateId: stableIdSchema, value: SemanticValueSchema }).strict(),
+  z.object({ ...actionBaseShape, kind: z.literal("set-state"), stateId: stableIdSchema, value: LegacySemanticValueSchema }).strict(),
   z.object({ ...actionBaseShape, kind: z.literal("set-control-value"), targetId: stableIdSchema, value: ValueExpressionSchema }).strict(),
   z.object({ ...actionBaseShape, kind: z.literal("show-feedback"), level: z.enum(["success", "info", "warning", "error"]), message: shortTextSchema }).strict(),
   z.object({ ...actionBaseShape, kind: z.literal("run-script"), scriptId: stableIdSchema }).strict(),
@@ -945,6 +986,7 @@ const NativeSolutionImplementationPlanSchema =
   NativeSolutionImplementationPlanObjectSchema.superRefine((plan, ctx) => {
     validateImplementationFree(plan, ctx);
     validateSemanticValueContainers(plan, ctx);
+    validateRepeaterFieldReferenceScopes(plan, ctx);
     validatePlanReferences(plan, ctx);
   });
 
@@ -1038,7 +1080,7 @@ function isSemanticContainer(value: unknown): value is Exclude<SemanticValue, Se
   return kind === "list" || kind === "record";
 }
 
-function validateSemanticValueDepth(value: SemanticValue, ctx: z.RefinementCtx, path: Array<string | number>, depth: number): void {
+function validateSemanticValueDepth(value: SemanticValue | LegacySemanticValue, ctx: z.RefinementCtx, path: Array<string | number>, depth: number): void {
   if (depth > 8) {
     ctx.addIssue({ code: "custom", path, message: "semantic value nesting exceeds eight levels" });
     return;
@@ -1046,9 +1088,79 @@ function validateSemanticValueDepth(value: SemanticValue, ctx: z.RefinementCtx, 
   if (typeof value !== "object" || value === null) return;
   if (value.kind === "list") {
     value.items.forEach((item, index) => validateSemanticValueDepth(item, ctx, [...path, "items", index], depth + 1));
-  } else {
+  } else if (value.kind === "record") {
     value.fields.forEach((field, index) => validateSemanticValueDepth(field.value, ctx, [...path, "fields", index, "value"], depth + 1));
   }
+}
+
+function validateRepeaterFieldReferenceScopes(
+  plan: SolutionImplementationPlan,
+  ctx: z.RefinementCtx,
+): void {
+  const dataSets = new Map(plan.mockData.map((dataSet) => [dataSet.id, dataSet]));
+  const validateValue = (
+    value: SemanticValue,
+    scopes: ReadonlyMap<string, MockDataSet>,
+    path: Array<string | number>,
+  ): void => {
+    if (typeof value !== "object" || value === null) return;
+    if (value.kind === "repeater-field") {
+      const dataSet = scopes.get(value.itemAlias);
+      if (dataSet === undefined) {
+        ctx.addIssue({
+          code: "custom",
+          path: [...path, "itemAlias"],
+          message: `repeater-field alias is not in scope: ${value.itemAlias}`,
+        });
+      } else if (!dataSet.fields.some((field) => field.key === value.field)) {
+        ctx.addIssue({
+          code: "custom",
+          path: [...path, "field"],
+          message: `unknown repeater-field field for ${value.itemAlias}: ${value.field}`,
+        });
+      }
+      return;
+    }
+    if (value.kind === "list") {
+      value.items.forEach((item, index) => validateValue(item, scopes, [...path, "items", index]));
+      return;
+    }
+    value.fields.forEach((field, index) => validateValue(field.value, scopes, [...path, "fields", index, "value"]));
+  };
+  const visitNode = (
+    node: SolutionNode,
+    scopes: ReadonlyMap<string, MockDataSet>,
+    path: Array<string | number>,
+  ): void => {
+    if (node.kind === "control") {
+      validateValue(node.content, scopes, [...path, "content"]);
+      node.properties.forEach((property, index) => validateValue(property.value, scopes, [...path, "properties", index, "value"]));
+      return;
+    }
+    if (node.kind === "registered-module") {
+      if (node.content !== undefined) validateValue(node.content, scopes, [...path, "content"]);
+      node.slots.forEach((slot, slotIndex) => slot.children.forEach((child, childIndex) =>
+        visitNode(child, scopes, [...path, "slots", slotIndex, "children", childIndex])));
+      return;
+    }
+    if (node.kind === "layout") {
+      node.children.forEach((child, index) => visitNode(child, scopes, [...path, "children", index]));
+      return;
+    }
+    const nestedScopes = new Map(scopes);
+    const dataSet = dataSets.get(node.mockDataId);
+    if (dataSet !== undefined) nestedScopes.set(node.itemAlias, dataSet);
+    visitNode(node.template, nestedScopes, [...path, "template"]);
+  };
+
+  plan.pages.forEach((page, pageIndex) => visitNode(page.root, new Map(), ["pages", pageIndex, "root"]));
+  plan.overlays.forEach((overlay, overlayIndex) => visitNode(overlay.root, new Map(), ["overlays", overlayIndex, "root"]));
+  plan.actions.forEach((action, actionIndex) => {
+    if (action.kind === "set-state") validateValue(action.value, new Map(), ["actions", actionIndex, "value"]);
+    if (action.kind === "set-control-value" && action.value.kind === "literal") {
+      validateValue(action.value.value, new Map(), ["actions", actionIndex, "value", "value"]);
+    }
+  });
 }
 
 function validatePlanReferences(plan: SolutionImplementationPlan, ctx: z.RefinementCtx): void {

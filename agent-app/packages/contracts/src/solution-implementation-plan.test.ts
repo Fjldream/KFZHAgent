@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ActionPlanSchema,
+  RepeaterFieldReferenceSchema,
   ScriptPlanSchema,
   SolutionImplementationPlanSchema,
   SolutionNodeSchema,
@@ -253,6 +254,12 @@ function findNode(plan: any, id: string): any {
   throw new Error(`node not found: ${id}`);
 }
 
+function planWithRepeaterField(itemAlias: string, field: string): any {
+  const plan = cloneFixture();
+  findNode(plan, "equipment-name").content = { kind: "repeater-field", itemAlias, field };
+  return plan;
+}
+
 describe("SolutionImplementationPlanSchema", () => {
   it("accepts the complete semantic implementation tree and preserves the exact top-level vocabulary", () => {
     const parsed = SolutionImplementationPlanSchema.parse(solutionPlanFixture);
@@ -288,6 +295,26 @@ describe("SolutionImplementationPlanSchema", () => {
     ];
     actions.forEach((action) => expect(ActionPlanSchema.safeParse(action).success, action.kind).toBe(true));
     expect(ActionPlanSchema.safeParse({ id: "a", kind: "execute-javascript", afterActionIds: [] }).success).toBe(false);
+  });
+
+  it("keeps repeater-field references out of standalone action values", () => {
+    expect(ActionPlanSchema.safeParse({
+      id: "set-name",
+      kind: "set-state",
+      stateId: "selected-name",
+      value: { kind: "repeater-field", itemAlias: "equipment", field: "name" },
+      afterActionIds: [],
+    }).success).toBe(false);
+    expect(ActionPlanSchema.safeParse({
+      id: "set-name",
+      kind: "set-control-value",
+      targetId: "equipment-name",
+      value: {
+        kind: "literal",
+        value: { kind: "repeater-field", itemAlias: "equipment", field: "name" },
+      },
+      afterActionIds: [],
+    }).success).toBe(false);
   });
 
   it("uses real dotted phase-one capability ids without treating modules as control candidates", () => {
@@ -352,6 +379,90 @@ describe("SolutionImplementationPlanSchema", () => {
     const duplicateField = cloneFixture();
     duplicateField.mockData[0].records[0].values.push({ field: "status", value: "等待检修" });
     expect(SolutionImplementationPlanSchema.safeParse(duplicateField).success).toBe(false);
+  });
+
+  it("accepts repeater-field references only for an in-scope alias and declared dataset field", () => {
+    expect(RepeaterFieldReferenceSchema.parse({
+      kind: "repeater-field", itemAlias: "equipment", field: "name",
+    })).toEqual({ kind: "repeater-field", itemAlias: "equipment", field: "name" });
+    expect(SolutionImplementationPlanSchema.safeParse(planWithRepeaterField("equipment", "name")).success).toBe(true);
+    expect(SolutionImplementationPlanSchema.safeParse(planWithRepeaterField("wrong-alias", "name")).success).toBe(false);
+    expect(SolutionImplementationPlanSchema.safeParse(planWithRepeaterField("equipment", "missing-field")).success).toBe(false);
+
+    const outside = cloneFixture();
+    findNode(outside, "equipment-table").content = { kind: "repeater-field", itemAlias: "equipment", field: "name" };
+    expect(SolutionImplementationPlanSchema.safeParse(outside).success).toBe(false);
+  });
+
+  it("resolves shadowed repeater aliases against the nearest matching dataset", () => {
+    const plan = cloneFixture();
+    plan.mockData.push({
+      id: "maintenance-data",
+      purpose: "演示设备维护负责人记录",
+      fields: [
+        { key: "recordKey", label: "记录标识", type: "text" },
+        { key: "owner", label: "维护负责人", type: "text" },
+      ],
+      records: [{ values: [{ field: "recordKey", value: "owner-a" }, { field: "owner", value: "陈嘉宁" }] }],
+    });
+    const outer = findNode(plan, "equipment-list");
+    outer.template = {
+      kind: "repeater",
+      id: "maintenance-list",
+      sourceBlueprintRegionIds: ["equipment-region"],
+      intent,
+      mockDataId: "maintenance-data",
+      itemAlias: "equipment",
+      keyField: "recordKey",
+      maxItems: 4,
+      template: {
+        ...structuredClone(textControl),
+        id: "maintenance-owner",
+        content: { kind: "repeater-field", itemAlias: "equipment", field: "owner" },
+        mockDataId: "maintenance-data",
+      },
+    };
+    expect(SolutionImplementationPlanSchema.safeParse(plan).success).toBe(true);
+
+    findNode(plan, "maintenance-owner").content.field = "name";
+    expect(SolutionImplementationPlanSchema.safeParse(plan).success).toBe(false);
+  });
+
+  it("does not admit repeater-field references through the reserved legacy branch", () => {
+    const plan = cloneFixture();
+    plan.candidateBundleHash = "3e147b2b8351b526f10dd9dfc47c4c93bbfc29814d791400e3e5b02c38220840";
+    plan.roleStyles = [];
+    plan.mockData = [];
+    plan.localState = [];
+    plan.overlays = [];
+    plan.scripts = [];
+    plan.actions = [];
+    plan.pages = [{
+      id: "legacy-page",
+      title: "Legacy page",
+      purpose: "Preserve an adapted legacy page",
+      canvas: "responsive",
+      sourceBlueprintPageId: "Legacy Blueprint",
+      sourceBlueprintRegionIds: ["Legacy Region"],
+      initialStateIds: [],
+      root: {
+        kind: "registered-module",
+        id: "legacy-module",
+        sourceBlueprintRegionIds: ["Legacy Region"],
+        intent,
+        moduleKind: "content.hero",
+        templateVersion: "1.0.0",
+        variant: "default",
+        title: "Legacy module",
+        content: "Legacy content",
+        eventBindings: [],
+        slots: [],
+      },
+    }];
+
+    expect(SolutionImplementationPlanSchema.safeParse(plan).success).toBe(true);
+    plan.pages[0].root.content = { kind: "repeater-field", itemAlias: "item", field: "name" };
+    expect(SolutionImplementationPlanSchema.safeParse(plan).success).toBe(false);
   });
 
   it("rejects technical placeholder mock content", () => {

@@ -856,6 +856,11 @@ describe("DeepSeekModelPort", () => {
     expect(implementationSystemPrompt).toContain('"kind":"repeater"');
     expect(implementationSystemPrompt).toContain('"kind":"list","items"');
     expect(implementationSystemPrompt).toContain('"kind":"record","fields"');
+    expect(implementationSystemPrompt).toContain(
+      '语义值精确联合：字符串 | 有限数字 | 布尔值 | null | {"kind":"list","items":[语义值]} | {"kind":"record","fields":[{"name":"semantic-name","value":语义值}]} | {"kind":"repeater-field","itemAlias":"semantic-name","field":"semantic-name"}',
+    );
+    expect(implementationSystemPrompt).toContain("字段引用只能使用上述 repeater-field 对象，禁止使用美元符号、花括号或字符串插值");
+    expect(capturedImplementationPrompt).not.toContain("${");
     expect(implementationSystemPrompt).toContain('"kind":"custom"');
     expect(implementationSystemPrompt).toContain('"steps"');
     expect(implementationSystemPrompt).toContain('"styleOverride":{"declarations":{},"states":{}}');

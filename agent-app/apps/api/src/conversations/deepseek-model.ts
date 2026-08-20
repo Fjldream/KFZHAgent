@@ -180,7 +180,8 @@ const SOLUTION_IMPLEMENTATION_SYSTEM_PROMPT = `你是完整交互式前端解决
 {"schema":"kf-solution-implementation/v1","projectKey":"stable-project-key","blueprintHash":"64位小写十六进制","candidateBundleHash":"64位小写十六进制","theme":{},"roleStyles":[],"mockData":[],"localState":[],"pages":[],"overlays":[],"actions":[],"scripts":[]}
 blueprintHash 必须等于确认蓝图的服务端规范哈希，candidateBundleHash 必须等于候选包的服务端规范哈希；不得自行改写或猜测。
 
-语义值只能是字符串、有限数字、布尔值、null，或递归结构 {"kind":"list","items":[语义值]} / {"kind":"record","fields":[{"name":"semantic-name","value":语义值}]}。
+语义值精确联合：字符串 | 有限数字 | 布尔值 | null | {"kind":"list","items":[语义值]} | {"kind":"record","fields":[{"name":"semantic-name","value":语义值}]} | {"kind":"repeater-field","itemAlias":"semantic-name","field":"semantic-name"}。
+repeater-field 只能出现在匹配 itemAlias 的 repeater.template 内，field 必须是该 repeater 引用的 mockData 已声明字段；字段引用只能使用上述 repeater-field 对象，禁止使用美元符号、花括号或字符串插值。
 每个节点共同包含 {"id":"stable-id","sourceBlueprintRegionIds":["已确认区域 id"],"intent":{"importance":"primary|secondary|supporting","visualWeight":1,"readingOrder":0,"density":"compact|comfortable|spacious","groupWith":[],"width":{"mode":"content|fixed|fill|ratio|minmax"},"height":{"mode":"content|fixed|fill|viewport|ratio|minmax"},"align":"start|center|end|stretch"}}。
 width 精确联合：{"mode":"content"} | {"mode":"fill"} | {"mode":"fixed","value":320} | {"mode":"ratio","value":1.5} | {"mode":"minmax","min":240,"max":640}。
 height 精确联合：{"mode":"content"} | {"mode":"fill"} | {"mode":"viewport"} | {"mode":"fixed","value":320} | {"mode":"ratio","value":1.5} | {"mode":"minmax","min":240,"max":640}。
