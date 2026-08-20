@@ -8,19 +8,24 @@
 
 **Tech Stack:** TypeScript ES modules, Zod 4, Vitest, existing KF templates/module compiler/style engine, pnpm workspace, `@kf/contracts`, `@kf/domain-client`.
 
+**Spec:** `docs/superpowers/specs/2026-08-17-kf-creative-solution-generation-design.md`
+
 ## Global Constraints
 
 - Target runtime is KingFusion 3.6.
-- Input is a validated `kf-solution-implementation/v1` snapshot and its bound capability candidate bundle.
+- Native input is a validated `kf-solution-implementation/v1` snapshot plus the exact signed candidate bundle accepted by `assertSolutionPlanUsesCandidates()`. The isolated legacy ModulePlan compatibility branch is accepted through its reserved discriminator and the Module Registry, without fabricating a candidate bundle.
 - Layout, GUIDs, instance names, selectors, CSS scoping, native properties, and page height are compiler-owned.
 - The model never supplies final coordinates, selectors, complete CSS rules, KF native JSON, or `styleDataNew`.
-- Default page width is 1440 unless the semantic plan supplies an allowed canvas width; default height is content-driven, not 900 or another fixed viewport.
+- Canvas widths are compiler-owned and deterministic: `responsive` and `desktop` compile at 1440 px, while `large-display` compiles at 1920 px. Default height is content-driven, not 900 or another fixed viewport.
 - Layout failure recovery order is: preferred layout, compress spacing, reduce columns, increase content height, enable declared local scrolling, then fail with a node-specific error.
 - The compiler must not delete content, overlap controls, shrink text below declared minimums, or use oversized pages to hide failures.
 - `spacious` changes rhythm and surface spacing but must not create large empty regions.
 - Style inheritance order is `Theme Tokens → Role Styles → Instance Overrides`.
 - Advanced style declarations are property/value whitelisted and automatically scoped; raw selectors and global CSS are rejected.
 - Existing `kf-ui-implementation/v1` remains parseable and converts to the v2 subset.
+- Registered modules are validated independently with `ModuleRegistry.require(kind, version)` and the registered variant list; they are intentionally not members of `CapabilityCandidateBundle`.
+- The current Module Registry declares asset slots, not semantic child slots. Native plans with non-empty `RegisteredModuleNode.slots` already fail the candidate boundary and the visual compiler must fail closed if called without that boundary.
+- Phase 3 does not change graph routing, ChangePlan compilation, Worker/build queues, download behavior, or the frozen static preview.
 - This phase does not compile ActionGraph or JavaScript and does not wire the Worker/build queue.
 - Existing static preview remains frozen and is not extended.
 - Use TDD for every task and commit only the files named by that task.
@@ -31,8 +36,12 @@
 
 ### Contracts
 
+- Modify `agent-app/packages/contracts/src/solution-implementation-plan.ts`: add a bounded repeater-item field reference needed to materialize record cards.
+- Modify `agent-app/packages/contracts/src/solution-implementation-plan.test.ts`: reference scope, alias, field, and legacy compatibility tests.
 - Modify `agent-app/packages/contracts/src/ui-style.ts`: richer token/style contracts and `UIImplementationSpec v2`.
 - Modify `agent-app/packages/contracts/src/ui-style.test.ts`: v1 compatibility, v2 strictness, and advanced-style rejection.
+- Modify `agent-app/apps/api/src/conversations/deepseek-model.ts`: expose the exact repeater-field reference shape in the semantic-plan skeleton.
+- Modify `agent-app/apps/api/src/conversations/deepseek-model.test.ts`: captured-request contract-shape assertion.
 
 ### Layout and component compilation
 
@@ -58,21 +67,29 @@
 - Modify `agent-app/packages/domain-client/src/style/style-adapter.ts`: part-aware adapter interface.
 - Modify `agent-app/packages/domain-client/src/style/adapters/base-adapters.ts`: high-frequency part adapters.
 - Modify `agent-app/packages/domain-client/src/style/adapters/base-adapters.test.ts`: native versus CSS field tests.
+- Modify `agent-app/packages/domain-client/src/style/runtime-profile.ts`: reviewed part selector ownership.
+- Modify `agent-app/packages/domain-client/src/style/runtime-profile.test.ts`: trusted selector evidence and rejection tests.
+- Modify `agent-app/packages/domain-client/src/design-knowledge/style-capability-registry.ts`: promote only parts backed by the new reviewed adapters.
+- Modify `agent-app/packages/domain-client/src/design-knowledge/style-capability-registry.test.ts`: exact supported-part evidence assertions.
 - Modify `agent-app/packages/domain-client/src/style/style-engine.ts`: compile resolved v2 styles.
 - Modify `agent-app/packages/domain-client/src/style/style-engine.test.ts`: scoped style merge tests.
 - Modify `agent-app/packages/domain-client/src/index.ts`: export the solution compiler and v1 adapter.
 
 ---
 
-### Task 1: Define richer styles and UIImplementationSpec v2
+### Task 1: Close the semantic input gap and define UIImplementationSpec v2
 
 **Files:**
+- Modify: `agent-app/packages/contracts/src/solution-implementation-plan.ts`
+- Modify: `agent-app/packages/contracts/src/solution-implementation-plan.test.ts`
 - Modify: `agent-app/packages/contracts/src/ui-style.ts`
 - Modify: `agent-app/packages/contracts/src/ui-style.test.ts`
+- Modify: `agent-app/apps/api/src/conversations/deepseek-model.ts`
+- Modify: `agent-app/apps/api/src/conversations/deepseek-model.test.ts`
 
 **Interfaces:**
-- Consumes: existing `UIImplementationSpecSchema` v1 and `ComponentStyleSpecSchema`.
-- Produces: `UIImplementationSpecV2Schema`, `AnyUIImplementationSpecSchema`, `UIImplementationSpecV2`, `AnyUIImplementationSpec`, `CompiledStyleSpec`, and `adaptUiImplementationV1()` while retaining the existing v1 names.
+- Consumes: native `SemanticValueSchema`, `RepeaterNodeSchema`, existing `UIImplementationSpecSchema` v1, and `ComponentStyleSpecSchema`.
+- Produces: `RepeaterFieldReferenceSchema`, `UIImplementationSpecV2Schema`, `AnyUIImplementationSpecSchema`, `UIImplementationSpecV2`, `UIImplementationControlV2`, `AnyUIImplementationSpec`, `CompiledStyleSpec`, and `adaptUiImplementationV1()` while retaining the existing v1 names.
 
 - [ ] **Step 1: Write failing v2 contract tests**
 
@@ -84,13 +101,30 @@ expect(UIImplementationSpecV2Schema.safeParse({
   pages: [{ ...v2Fixture.pages[0], controls: [{ ...v2Fixture.pages[0].controls[0], compiledStyle: { css: "body{display:none}" } }] }],
 }).success).toBe(false);
 expect(UIImplementationSpecV2Schema.safeParse(v2WithUnknownParent).success).toBe(false);
+expect(SolutionImplementationPlanSchema.safeParse(planWithRepeaterField("visitor", "name")).success).toBe(true);
+expect(SolutionImplementationPlanSchema.safeParse(planWithRepeaterField("wrong-alias", "name")).success).toBe(false);
+expect(SolutionImplementationPlanSchema.safeParse(planWithRepeaterField("visitor", "missing-field")).success).toBe(false);
 ```
 
 - [ ] **Step 2: Run the test and verify v2 is not defined**
 
-Run: `pnpm --dir agent-app --filter @kf/contracts exec vitest run src/ui-style.test.ts`
+Run: `pnpm --dir agent-app --filter @kf/contracts exec vitest run src/ui-style.test.ts src/solution-implementation-plan.test.ts`
 
-- [ ] **Step 3: Extend style intent without accepting raw CSS**
+- [ ] **Step 3: Add the bounded repeater-field reference and prompt shape**
+
+Add exactly one native semantic value variant:
+
+```ts
+export const RepeaterFieldReferenceSchema = z.object({
+  kind: z.literal("repeater-field"),
+  itemAlias: semanticNameSchema,
+  field: semanticNameSchema,
+}).strict();
+```
+
+It is legal only inside the matching `RepeaterNode.template`; `itemAlias` must equal the enclosing repeater alias and `field` must exist in the referenced `MockDataSet`. Nested repeaters shadow outer aliases. The legacy compatibility branch remains unchanged. Update the captured DeepSeek semantic skeleton to show this exact variant and forbid invented `${...}` interpolation syntax.
+
+- [ ] **Step 4: Extend style intent without accepting raw CSS**
 
 Add per-side border widths/colors/radii, horizontal/vertical padding, letter spacing, truncation, gradients, background asset IDs, object fit, overflow, icon size/color/gap, focus ring, bounded translate/scale/rotate, and transition property/duration/easing. Add semantic parts as a record keyed by reviewed part IDs. Advanced declarations use a discriminated value union, never a free CSS string.
 
@@ -102,22 +136,26 @@ export const AdvancedStyleDeclarationSchema = z.discriminatedUnion("kind", [
 ]);
 ```
 
-- [ ] **Step 4: Define concrete v2 output**
+- [ ] **Step 5: Define concrete v2 output**
 
-`UIImplementationSpecV2Schema` contains canonical theme tokens, compiled role styles, pages with computed width/height, flattened controls with `parentId`, `depth`, `zIndex`, geometry, native properties, compiled style output, data binding, event bindings, action/script references, assets, overlay host metadata, and blueprint source IDs. Keep action/script arrays empty-capable for phase 3. Add cross-reference and containment checks. Preserve the existing `UIImplementationSpecSchema` and `UIImplementationSpec` exports as v1 so current module/compiler code remains source-compatible. Add `AnyUIImplementationSpecSchema = z.discriminatedUnion("schema", [UIImplementationSpecSchema, UIImplementationSpecV2Schema])` and its inferred type for new dispatching code.
+`UIImplementationSpecV2Schema` contains canonical theme tokens, compiled role styles, pages with computed width/height, flattened controls with `parentId`, `depth`, `zIndex`, geometry, native properties, compiled style output, data binding, assets, overlay host metadata, and blueprint source IDs. In Phase 3 each control has `eventBindings: z.array(z.never()).max(0)` and the top level has `compiledActions: z.array(z.never()).max(0)` plus `compiledScripts: z.array(z.never()).max(0)`; Phase 4 replaces these empty structural slots with its canonical compiled contracts. Add cross-reference and containment checks. Preserve the existing `UIImplementationSpecSchema` and `UIImplementationSpec` exports as v1 so current module/compiler code remains source-compatible. `adaptUiImplementationV1()` maps v1 `pages[].components` to v2 `pages[].controls` without inventing parents, provenance, actions, scripts, or overlays. Add `AnyUIImplementationSpecSchema = z.discriminatedUnion("schema", [UIImplementationSpecSchema, UIImplementationSpecV2Schema])` and its inferred type for new dispatching code.
 
-- [ ] **Step 5: Run contract regression tests**
+- [ ] **Step 6: Run contract and captured-prompt regression tests**
 
 ```bash
 pnpm --dir agent-app --filter @kf/contracts exec vitest run src/ui-style.test.ts src/change-plan.test.ts src/module-plan.test.ts
+pnpm --dir agent-app --filter @kf/contracts exec vitest run src/solution-implementation-plan.test.ts
+pnpm --dir agent-app --filter @kf/api exec vitest run src/conversations/deepseek-model.test.ts
 pnpm --dir agent-app --filter @kf/contracts typecheck
 pnpm --dir agent-app --filter @kf/contracts lint
+pnpm --dir agent-app --filter @kf/api typecheck
+pnpm --dir agent-app --filter @kf/api lint
 ```
 
-- [ ] **Step 6: Commit v2 contracts**
+- [ ] **Step 7: Commit input and v2 contracts**
 
 ```bash
-git add agent-app/packages/contracts/src/ui-style.ts agent-app/packages/contracts/src/ui-style.test.ts
+git add agent-app/packages/contracts/src/solution-implementation-plan.ts agent-app/packages/contracts/src/solution-implementation-plan.test.ts agent-app/packages/contracts/src/ui-style.ts agent-app/packages/contracts/src/ui-style.test.ts agent-app/apps/api/src/conversations/deepseek-model.ts agent-app/apps/api/src/conversations/deepseek-model.test.ts
 git commit -m "feat: define UI implementation v2"
 ```
 
@@ -188,6 +226,20 @@ git commit -m "feat: measure KF solution content"
 - Consumes: expanded semantic tree and `measureIntrinsic()`.
 - Produces: `compileLayout(input: LayoutCompileInput): CompiledLayoutTree` and `LayoutCompileError`.
 
+```ts
+export interface LayoutCompileInput {
+  readonly page: SolutionPage;
+  readonly expandedRoot: SolutionNode;
+  readonly intrinsicByNodeId: ReadonlyMap<string, IntrinsicSize>;
+}
+export interface CompiledLayoutTree {
+  readonly pageWidth: 1440 | 1920;
+  readonly pageHeight: number;
+  readonly root: CompiledLayoutNode;
+  readonly byId: ReadonlyMap<string, CompiledLayoutNode>;
+}
+```
+
 - [ ] **Step 1: Write failing layout behavior tests**
 
 ```ts
@@ -205,7 +257,11 @@ Run: `pnpm --dir agent-app --filter @kf/domain-client exec vitest run src/soluti
 
 - [ ] **Step 3: Implement recursive layout primitives**
 
-Support all eleven layout kinds. Columns and rows allocate content first, then fixed, minmax, ratio, and fill. Grid chooses the requested column count only when child minimum widths fit; otherwise reduces columns. `asymmetric-grid`, `sidebar-content`, and `master-detail` honor weights. Dock reserves edges before center. Stack and Overlay anchor share geometry intentionally and set z-order. Scroll regions are allowed only when declared.
+Support all eleven layout kinds. Invalid `groupWith` references fail. Build sibling group connected-components, sort groups by their minimum `(readingOrder, stableId)`, then sort members by `(readingOrder, stableId)` so grouped nodes are adjacent without changing their internal reading order. Columns and rows allocate content first, then fixed, minmax, ratio, and fill. Grid derives the largest fitting column count from child minimum widths, capped at 12, and reduces it deterministically when necessary because the semantic contract intentionally contains no model-authored column count. `visualWeight` controls ratio allocation; `importance` wins scarce-space allocation; `align` controls cross-axis placement.
+
+Ordered composite semantics are compiler-owned: `split`, `sidebar-content`, and `master-detail` require exactly two children, with the first child acting as the leading/sidebar/master region and the second as content/detail. `dock` accepts two to five children; the last child is center and preceding children map in order to north, west, east, then south. `asymmetric-grid` uses `visualWeight` to derive track ratios. Stack and `overlay-anchor` intentionally share geometry and increment z-order. `scroll-region` is the only layout allowed to introduce local scrolling. The solver rejects ambiguous child counts rather than guessing.
+
+Map `responsive` and `desktop` pages to 1440 px and `large-display` pages to 1920 px. Density page padding is applied once at the page root, not once per nested layout.
 
 Use density tokens:
 
@@ -245,7 +301,17 @@ git commit -m "feat: compile content-driven KF layouts"
 
 **Interfaces:**
 - Consumes: measured semantic nodes, mock data, capability candidates, `ModuleRegistry`, registered `ModuleDefinition.compile()`, control templates, and component property validators.
-- Produces: `compileComponents(input): CompiledControl[]` and `compileRegisteredModuleNode(input): CompiledControl[]`.
+- Produces: `compileComponents(input): UIImplementationControlV2[]` and `compileRegisteredModuleNode(input): UIImplementationControlV2[]`.
+
+```ts
+export interface ComponentCompileInput {
+  readonly plan: SolutionImplementationPlan;
+  readonly bundle?: CapabilityCandidateBundle;
+  readonly layout: CompiledLayoutTree;
+  readonly moduleRegistry: ModuleRegistry;
+  readonly approvedAssets: readonly ApprovedAssetFacts[];
+}
+```
 
 - [ ] **Step 1: Write failing component expansion tests**
 
@@ -266,11 +332,15 @@ pnpm --dir agent-app --filter @kf/domain-client exec vitest run src/solution-com
 
 - [ ] **Step 3: Implement deterministic component compilation**
 
-Resolve each `ControlNode.capabilityId` against the candidate bundle and technical registry. Generate native properties using the existing control compiler/property validation, never by copying arbitrary model properties. Expand Repeaters with stable IDs `${repeaterId}--${normalizedKey}--${templateNodeId}` and fail on duplicate/missing keys or `maxItems` overflow. Compile Overlay roots under an explicit host/page relation with hidden initial state and higher z-order. Preserve source blueprint page/region/journey IDs.
+Resolve each `ControlNode.capabilityId` against the exact page-region candidate evidence and technical registry. Convert semantic property arrays to plain data through one bounded `semanticValueToData()` helper, resolve `repeater-field` references only against the current record, then validate the resulting record with `validateGeneratedComponentProperties()`; never copy arbitrary model properties. Map `content` to the reviewed content field for the selected capability and map `mockDataId` through existing native data adapters where the capability supports that data shape.
+
+Every `LayoutNode` emits a compiler-owned KF layout/container control selected deterministically from the signed layout candidates compatible with its semantic layout kind; ties use candidate order then code-point capability ID. Its children receive that layout control as `parentId`. A semantic layout with no compatible signed layout candidate is a blocking error, not a geometry-only phantom container.
+
+Expand Repeaters with stable IDs `${repeaterId}--${normalizedKey}--${templateNodeId}` and fail on duplicate/missing keys, unresolved `repeater-field` references, or `maxItems` overflow. Compile Overlay roots under an explicit host/page relation with hidden initial state and higher z-order. Preserve exact source blueprint page/region IDs; journey coverage remains semantic-plan validation and is not fabricated at this layer.
 
 - [ ] **Step 4: Bridge registered modules**
 
-Resolve the exact kind/version through `ModuleRegistry.require()`, parse node content through the definition's `contentSchema`, validate asset slots and required KF capabilities, then call the registered `ModuleDefinition.compile()` with compiler-owned local bounds. Prefix returned local component IDs with the semantic module ID and translate their geometry into the allocated node rectangle. Do not call `compileModulePlan()` here because that legacy coordinator requires a v2 `AcceptedBlueprintArtifact` containing `expectedKind`; the creative v3 blueprint intentionally has no such field. Reject modules whose kind/version/variant is absent from candidate evidence, and do not let module output determine total page height.
+Resolve exact kind/version independently through `ModuleRegistry.require()` and validate the registered variant. For native input, convert record-shaped semantic content to plain data (`undefined` becomes `{}`) and reject non-record content. For the reserved legacy branch, parse the preserved legacy JSON string strictly as data and pass the result through the same registered `contentSchema`; never evaluate it or reinterpret code-like strings. Validate approved assets and required KF capabilities, then call `ModuleDefinition.compile()` with compiler-owned local bounds. Non-empty semantic child slots fail with `MODULE_CHILD_SLOT_UNSUPPORTED` because the current registry owns only asset slots. Prefix returned local component IDs with the semantic module ID, preserve stable source mapping, and translate local geometry into the allocated node rectangle. Do not call `compileModulePlan()` here because that legacy coordinator requires a v2 `AcceptedBlueprintArtifact` containing `expectedKind`; the creative v3 blueprint intentionally has no such field. Modules are not required to appear in candidate evidence, and module output must not determine total page height.
 
 - [ ] **Step 5: Run component, module, and control regressions**
 
@@ -300,6 +370,10 @@ git commit -m "feat: compile solution controls and overlays"
 - Modify: `agent-app/packages/domain-client/src/style/style-adapter.ts`
 - Modify: `agent-app/packages/domain-client/src/style/adapters/base-adapters.ts`
 - Modify: `agent-app/packages/domain-client/src/style/adapters/base-adapters.test.ts`
+- Modify: `agent-app/packages/domain-client/src/style/runtime-profile.ts`
+- Modify: `agent-app/packages/domain-client/src/style/runtime-profile.test.ts`
+- Modify: `agent-app/packages/domain-client/src/design-knowledge/style-capability-registry.ts`
+- Modify: `agent-app/packages/domain-client/src/design-knowledge/style-capability-registry.test.ts`
 - Modify: `agent-app/packages/domain-client/src/style/style-engine.ts`
 - Modify: `agent-app/packages/domain-client/src/style/style-engine.test.ts`
 
@@ -341,12 +415,12 @@ export interface StylePartAdapter {
 }
 ```
 
-Add reviewed parts for Button, inputs, Select, Tabs, Datagrid, Tree/List, Image, Tag, NavMenu, Dialog/Window, and layout surfaces. The compiler creates a unique component scope token and combines it with adapter selectors; it never accepts a selector from the plan.
+Add reviewed parts for Button, inputs, Select, Tabs, Datagrid, Tree/List, Image, Tag, NavMenu, Dialog/Window, and layout surfaces only where repository templates/runtime evidence establish a selector. Put selector ownership in the branded `KF36_RUNTIME_PROFILE`, make adapters consume that trusted mapping, and promote the matching `StyleCapabilityProfile.parts[].availability` from `planned` to `supported` with exact evidence assertions. Parts without selector evidence remain `planned` and fail closed. The compiler creates a unique component scope token and combines it with adapter selectors; it never accepts a selector from the plan.
 
 - [ ] **Step 5: Run all style regressions**
 
 ```bash
-pnpm --dir agent-app --filter @kf/domain-client exec vitest run src/style/advanced-style.test.ts src/style/theme-resolver.test.ts src/style/css-compiler.test.ts src/style/adapters/base-adapters.test.ts src/style/style-engine.test.ts src/style/style-data-merge.test.ts
+pnpm --dir agent-app --filter @kf/domain-client exec vitest run src/style/advanced-style.test.ts src/style/theme-resolver.test.ts src/style/css-compiler.test.ts src/style/adapters/base-adapters.test.ts src/style/runtime-profile.test.ts src/design-knowledge/style-capability-registry.test.ts src/style/style-engine.test.ts src/style/style-data-merge.test.ts
 pnpm --dir agent-app --filter @kf/domain-client typecheck
 pnpm --dir agent-app --filter @kf/domain-client lint
 ```
@@ -354,7 +428,7 @@ pnpm --dir agent-app --filter @kf/domain-client lint
 - [ ] **Step 6: Commit visual style compilation**
 
 ```bash
-git add agent-app/packages/domain-client/src/style/advanced-style.ts agent-app/packages/domain-client/src/style/advanced-style.test.ts agent-app/packages/domain-client/src/style/theme-resolver.ts agent-app/packages/domain-client/src/style/theme-resolver.test.ts agent-app/packages/domain-client/src/style/css-compiler.ts agent-app/packages/domain-client/src/style/css-compiler.test.ts agent-app/packages/domain-client/src/style/style-adapter.ts agent-app/packages/domain-client/src/style/adapters/base-adapters.ts agent-app/packages/domain-client/src/style/adapters/base-adapters.test.ts agent-app/packages/domain-client/src/style/style-engine.ts agent-app/packages/domain-client/src/style/style-engine.test.ts
+git add agent-app/packages/domain-client/src/style/advanced-style.ts agent-app/packages/domain-client/src/style/advanced-style.test.ts agent-app/packages/domain-client/src/style/theme-resolver.ts agent-app/packages/domain-client/src/style/theme-resolver.test.ts agent-app/packages/domain-client/src/style/css-compiler.ts agent-app/packages/domain-client/src/style/css-compiler.test.ts agent-app/packages/domain-client/src/style/style-adapter.ts agent-app/packages/domain-client/src/style/adapters/base-adapters.ts agent-app/packages/domain-client/src/style/adapters/base-adapters.test.ts agent-app/packages/domain-client/src/style/runtime-profile.ts agent-app/packages/domain-client/src/style/runtime-profile.test.ts agent-app/packages/domain-client/src/design-knowledge/style-capability-registry.ts agent-app/packages/domain-client/src/design-knowledge/style-capability-registry.test.ts agent-app/packages/domain-client/src/style/style-engine.ts agent-app/packages/domain-client/src/style/style-engine.test.ts
 git commit -m "feat: compile scoped KF visual styles"
 ```
 
@@ -370,6 +444,17 @@ git commit -m "feat: compile scoped KF visual styles"
 **Interfaces:**
 - Consumes: `SolutionImplementationPlan`, `CapabilityCandidateBundle`, registered module compiler, layout/component/style compilers, and approved asset facts.
 - Produces: `compileSolutionImplementation(input: SolutionCompileInput): UIImplementationSpecV2`.
+
+```ts
+export interface SolutionCompileInput {
+  readonly plan: SolutionImplementationPlan;
+  /** Required for native plans; forbidden for the reserved legacy branch. */
+  readonly candidateBundle?: CapabilityCandidateBundle;
+  readonly moduleRegistry: ModuleRegistry;
+  readonly approvedAssets: readonly ApprovedAssetFacts[];
+  readonly activeCatalogVersion: string;
+}
+```
 
 - [ ] **Step 1: Write failing end-to-end compiler tests**
 
@@ -389,7 +474,7 @@ Run: `pnpm --dir agent-app --filter @kf/domain-client exec vitest run src/soluti
 
 - [ ] **Step 3: Implement compilation order and failure paths**
 
-The order is: validate hashes and references; resolve tokens/role styles; expand modules/repeaters; measure intrinsic content; solve pages and overlays; compile controls/native properties; compile styles; assemble v2; validate geometry/parent/source integrity; deep-freeze output. Errors use `SOLUTION_COMPILE_FAILED` with `phase`, `nodeId`, `code`, `message`, and bounded alternatives. Do not call a model.
+The order is: parse the native or isolated legacy plan; for native input run `assertSolutionPlanUsesCandidates()` before any expansion; resolve tokens/role styles; expand registered modules and repeater records; measure intrinsic content; choose signed layout capabilities; solve pages and overlays; compile controls/native properties; compile styles; assemble v2; validate geometry/parent/source integrity; deep-freeze output. The compiler receives `ModuleRegistry`, approved asset facts, and the exact knowledge/catalog version as explicit dependencies—never process globals. Errors use `SOLUTION_COMPILE_FAILED` with `phase`, `nodeId`, `code`, `message`, and at most five sorted alternatives. Do not call a model.
 
 - [ ] **Step 4: Add three deterministic fixtures**
 
@@ -424,8 +509,10 @@ Phase 3 is complete only when:
 - content measurement changes actual node height and final page height;
 - portfolio, industrial dashboard, and admin fixtures have materially different compositions;
 - no fixture contains severe overlap, out-of-page controls, mechanical full-height stretching, or excessive unused vertical space;
-- controls, repeaters, overlays, and registered modules preserve stable IDs and blueprint provenance;
+- controls, repeaters, overlays, layout containers, and registered modules preserve stable IDs and blueprint provenance;
+- repeater-field references materialize distinct record content and cannot escape their alias/data-set scope;
 - style tokens, roles, parts, states, instance overrides, native fields, and scoped CSS compile without accepting model selectors or raw CSS;
+- only evidence-backed semantic parts are promoted to `supported`; planned parts remain fail-closed;
 - v1 implementation specs still parse and adapt to the v2 subset;
 - v2 action/script slots remain structurally present but are not compiled in this phase;
 - contracts and domain-client tests/typechecks/lints pass.
