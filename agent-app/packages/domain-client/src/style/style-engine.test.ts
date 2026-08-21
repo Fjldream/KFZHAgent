@@ -1,9 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { ComponentStyleSpec, ThemeSpec } from "@kf/contracts";
+import {
+  ComponentStyleSpecV2Schema,
+  type ApprovedAssetFacts,
+  type ComponentStyleSpec,
+  type ThemeSpec,
+} from "@kf/contracts";
+import type { z } from "zod";
 import { KF36_RUNTIME_PROFILE } from "./runtime-profile.js";
 import {
   assertStyleCompilationAccepted,
   compileControlStyle,
+  compileResolvedStyle,
   listStyleCompilationIssues,
 } from "./style-engine.js";
 
@@ -21,6 +28,12 @@ const themeFixture: ThemeSpec = {
 
 function style(styleSpec: Partial<ComponentStyleSpec>): ComponentStyleSpec {
   return { declarations: {}, states: {}, ...styleSpec };
+}
+
+type StyleV2 = z.infer<typeof ComponentStyleSpecV2Schema>;
+
+function styleV2(styleSpec: Partial<StyleV2>): StyleV2 {
+  return ComponentStyleSpecV2Schema.parse({ declarations: {}, states: {}, ...styleSpec });
 }
 
 describe("compileControlStyle", () => {
@@ -136,7 +149,7 @@ describe("compileControlStyle", () => {
       runtimeProfile: {
         runtimeFamily: "kingfusion-client",
         runtimeVersion: "3.6",
-        selectors: { button: { root: "#domId" } },
+        selectors: { button: { root: "#domId", parts: {} } },
       },
     })).toThrow(/UNTRUSTED_SELECTOR_ROLES/);
   });
@@ -181,6 +194,24 @@ describe("compileControlStyle", () => {
       .toThrow(/UNSUPPORTED_STYLE_CAPABILITY|STYLE_ADAPTER_UNAVAILABLE/);
   });
 
+  it("does not let a selector-evidence adapter bypass preserve-only policy", () => {
+    const compiled = compileControlStyle({
+      capabilityId: "easyui.1",
+      theme: themeFixture,
+      instanceStyle: style({ declarations: { fontSize: 14 } }),
+      runtimeProfile: KF36_RUNTIME_PROFILE,
+    });
+
+    expect(compiled).toMatchObject({
+      nativeFields: {},
+      styleDataNew: "",
+      unsupported: [{ token: "declarations.fontSize" }],
+      warnings: [{ code: "STYLE_CAPABILITY_PRESERVE_ONLY" }],
+    });
+    expect(() => assertStyleCompilationAccepted("easyui.1", compiled))
+      .toThrow(/UNSUPPORTED_STYLE_CAPABILITY|STYLE_CAPABILITY_PRESERVE_ONLY/);
+  });
+
   it("rejects unexpected or invalid native fields at the style assignment boundary", () => {
     expect(() => assertStyleCompilationAccepted("button", {
       nativeFields: { styleDataNew: "#domId{display:none}" },
@@ -195,5 +226,202 @@ describe("compileControlStyle", () => {
       unsupported: [],
       warnings: [],
     })).toThrow(/INVALID_NATIVE_STYLE_FIELD/);
+  });
+});
+
+describe("compileResolvedStyle", () => {
+  const roleStyle = styleV2({
+    role: "primary-action",
+    declarations: { backgroundColor: "{theme.primary}", textColor: "#ffffff" },
+    states: { hover: { backgroundColor: "#1d4ed8" } },
+  });
+
+  it("resolves theme tokens, the matched role, and instance overrides before splitting ownership", () => {
+    const compiled = compileResolvedStyle({
+      componentId: "visitor-primary-action",
+      capabilityId: "button",
+      theme: themeFixture,
+      styleRole: "primary-action",
+      roleStyle,
+      instanceOverride: styleV2({
+        role: "primary-action",
+        declarations: { backgroundColor: "#0b6bcb", borderRadius: 8 },
+        states: { hover: { textColor: "#f8fafc" } },
+      }),
+      approvedAssets: [],
+      runtimeProfile: KF36_RUNTIME_PROFILE,
+    });
+
+    expect(compiled.nativeFields).toEqual({ backgroundColor: "#0b6bcb" });
+    expect(compiled.cssFragments).toEqual([
+      { selectorToken: "root", state: "normal", declarations: { textColor: "#ffffff", borderRadius: 8 } },
+      { selectorToken: "root", state: "hover", declarations: { backgroundColor: "#1d4ed8", textColor: "#f8fafc" } },
+    ]);
+    expect(compiled.styleDataNew).toBe(
+      "#domId .el-button{border-radius:8px;color:#ffffff}" +
+      "#domId .el-button:hover{background-color:#1d4ed8;color:#f8fafc}",
+    );
+    expect(compiled.warnings).toEqual([]);
+    expect(compiled.unsupported).toEqual([]);
+  });
+
+  it("accepts the full reviewed v2 color grammar for native-owned background fields", () => {
+    const compiled = compileResolvedStyle({
+      componentId: "named-color-action",
+      capabilityId: "button",
+      theme: themeFixture,
+      styleRole: "named-action",
+      roleStyle: styleV2({ role: "named-action", declarations: { backgroundColor: "rebeccapurple" } }),
+      approvedAssets: [],
+      runtimeProfile: KF36_RUNTIME_PROFILE,
+    });
+
+    expect(compiled.nativeFields).toEqual({ backgroundColor: "rebeccapurple" });
+    expect(() => assertStyleCompilationAccepted("button", compiled)).not.toThrow();
+  });
+
+  it("compiles semantic parts and states from adapter-owned selector evidence", () => {
+    const compiled = compileResolvedStyle({
+      componentId: "visitor-tabs",
+      capabilityId: "tabs",
+      theme: themeFixture,
+      styleRole: "navigation",
+      roleStyle: styleV2({ role: "navigation" }),
+      instanceOverride: styleV2({
+        role: "navigation",
+        parts: {
+          tab: { declarations: {}, states: { selected: { textColor: "#111111" } } },
+          "active-indicator": { declarations: { backgroundColor: "#2563eb" }, states: {} },
+        },
+      }),
+      approvedAssets: [],
+      runtimeProfile: KF36_RUNTIME_PROFILE,
+    });
+
+    expect(compiled.cssFragments).toEqual([
+      { selectorToken: "part:tab", state: "selected", declarations: { textColor: "#111111" } },
+      { selectorToken: "part:active-indicator", state: "normal", declarations: { backgroundColor: "#2563eb" } },
+    ]);
+    expect(compiled.scopedFragments?.map((fragment) => fragment.selector)).toEqual([
+      "#domId .el-tabs__item.is-active",
+      "#domId .el-tabs__active-bar",
+    ]);
+  });
+
+  it("creates deterministic collision-resistant component scopes without cross-component leakage", () => {
+    const compile = (componentId: string) => compileResolvedStyle({
+      componentId,
+      capabilityId: "button",
+      theme: themeFixture,
+      styleRole: "primary-action",
+      roleStyle,
+      approvedAssets: [],
+      runtimeProfile: KF36_RUNTIME_PROFILE,
+    });
+    const first = compile("visitor/action one");
+    const repeated = compile("visitor/action one");
+    const second = compile("visitor/action-one");
+
+    expect(first.scopeToken).toBe(repeated.scopeToken);
+    expect(first.scopeToken).not.toBe(second.scopeToken);
+    expect(first.scopeToken).toMatch(/^kf36-[A-Za-z][A-Za-z0-9_-]*-[a-f0-9]{32}$/);
+    expect(first.scopedFragments?.every((fragment) => fragment.componentScopeToken === first.scopeToken)).toBe(true);
+    expect(first.styleDataNew).not.toContain(second.scopeToken!);
+    expect(second.styleDataNew).not.toContain(first.scopeToken!);
+  });
+
+  it("compiles Task 4 scroll overflow through layout CSS ownership and never a native unknown field", () => {
+    const compiled = compileResolvedStyle({
+      componentId: "scroll-surface",
+      capabilityId: "layout.4",
+      theme: themeFixture,
+      styleRole: "structure",
+      roleStyle: styleV2({ role: "structure" }),
+      instanceOverride: styleV2({ declarations: { overflow: "auto" } }),
+      approvedAssets: [],
+      runtimeProfile: KF36_RUNTIME_PROFILE,
+    });
+
+    expect(compiled.nativeFields).toEqual({});
+    expect(compiled.cssFragments).toEqual([
+      { selectorToken: "root", state: "normal", declarations: { overflow: "auto" } },
+    ]);
+    expect(compiled.styleDataNew).toBe("#domId{overflow:auto}");
+  });
+
+  it("resolves approved background assets to compiler-owned targets", () => {
+    const sha256 = "c".repeat(64);
+    const approvedAsset: ApprovedAssetFacts = {
+      workspaceAssetId: "00000000-0000-4000-8000-000000000001",
+      targetPath: `project/res/images/${sha256}.png`,
+      mediaType: "image/png",
+      sha256,
+      sizeBytes: 64,
+    };
+    const compiled = compileResolvedStyle({
+      componentId: "hero-image",
+      capabilityId: "image",
+      theme: themeFixture,
+      styleRole: "hero",
+      roleStyle: styleV2({ role: "hero" }),
+      instanceOverride: styleV2({
+        parts: {
+          media: {
+            declarations: { advanced: [{ kind: "background-image", assetId: "asset-00000000000040008000000000000001" }] },
+            states: {},
+          },
+        },
+      }),
+      approvedAssets: [approvedAsset],
+      runtimeProfile: KF36_RUNTIME_PROFILE,
+    });
+
+    expect(compiled.scopedFragments?.[0]?.resolvedAssets).toEqual([{
+      assetId: "asset-00000000000040008000000000000001",
+      targetPath: `project/res/images/${sha256}.png`,
+      token: `asset-sha256:${sha256}`,
+    }]);
+    expect(compiled.styleDataNew).toBe(
+      `#domId .el-image__inner{background-image:url("project/res/images/${sha256}.png")}`,
+    );
+  });
+
+  it("fails closed for role mismatch, unsupported parts/states/properties, preserve-only policy, and forged profiles", () => {
+    const base = {
+      componentId: "strict-component",
+      capabilityId: "tabs",
+      theme: themeFixture,
+      styleRole: "navigation",
+      roleStyle: styleV2({ role: "navigation" }),
+      approvedAssets: [],
+      runtimeProfile: KF36_RUNTIME_PROFILE,
+    };
+
+    expect(() => compileResolvedStyle({ ...base, styleRole: "other" })).toThrow(/STYLE_ROLE_MISMATCH/);
+    expect(() => compileResolvedStyle({
+      ...base,
+      instanceOverride: styleV2({ parts: { label: { declarations: { textColor: "#ffffff" }, states: {} } } }),
+    })).toThrow(/STYLE_PART_UNSUPPORTED/);
+    expect(() => compileResolvedStyle({
+      ...base,
+      instanceOverride: styleV2({ parts: { panel: { declarations: {}, states: { selected: { opacity: 1 } } } } }),
+    })).toThrow(/STYLE_STATE_UNSUPPORTED/);
+    expect(() => compileResolvedStyle({
+      ...base,
+      capabilityId: "input",
+      instanceOverride: styleV2({ declarations: { objectFit: "cover" } }),
+    })).toThrow(/STYLE_PROPERTY_UNSUPPORTED/);
+    expect(() => compileResolvedStyle({
+      ...base,
+      capabilityId: "easyui.1",
+    })).toThrow(/STYLE_CAPABILITY_PRESERVE_ONLY/);
+    expect(() => compileResolvedStyle({
+      ...base,
+      runtimeProfile: {
+        runtimeFamily: "kingfusion-client",
+        runtimeVersion: "3.6",
+        selectors: KF36_RUNTIME_PROFILE.selectors,
+      },
+    })).toThrow(/UNTRUSTED_RUNTIME_PROFILE/);
   });
 });

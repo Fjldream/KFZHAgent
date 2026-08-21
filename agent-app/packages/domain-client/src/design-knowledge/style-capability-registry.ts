@@ -2,169 +2,163 @@ import {
   StyleCapabilityProfileSchema,
   type StyleCapabilityProfile,
 } from "@kf/contracts";
-import { listControlDesignProfiles } from "./control-design-registry.js";
+import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
 import { createKnowledgeRegistry } from "./registry.js";
 
-const SURFACE = ["backgroundColor", "borderColor", "borderRadius", "boxShadow", "opacity"] as const;
-const TYPE = ["textColor", "fontSize", "fontWeight", "lineHeight", "textAlign"] as const;
-const SPACE = ["padding", "margin", "gap"] as const;
-const INTERACTIVE = ["hover", "active", "focus", "disabled", "selected"] as const;
-const FORM = ["hover", "active", "focus", "disabled", "error"] as const;
+type StyleKnowledgeProperty = StyleCapabilityProfile["parts"][number]["properties"][number];
 
-const RAW_PROFILES: readonly unknown[] = [
-  {
-    schema: "kf-style-capability-profile/v1", capabilityId: "text", version: "1.0.0",
-    parts: [{ id: "root", availability: "supported", semanticRoles: ["text-container"], properties: [...TYPE], states: ["hover", "active", "focus", "disabled"], notes: [] }],
-  },
-  {
-    schema: "kf-style-capability-profile/v1", capabilityId: "richtext", version: "1.0.0",
-    parts: [
-      { id: "root", availability: "supported", semanticRoles: ["richtext-container"], properties: [...SURFACE, ...TYPE, ...SPACE], states: [...FORM], notes: [] },
-      { id: "content", availability: "planned", semanticRoles: ["richtext-content"], properties: [...TYPE, ...SPACE], states: [], notes: ["需要专用适配器后才可安全编译内部内容样式。"] },
-    ],
-  },
-  {
-    schema: "kf-style-capability-profile/v1", capabilityId: "image", version: "1.0.0",
-    parts: [
-      { id: "root", availability: "supported", semanticRoles: ["media-container"], properties: [...SURFACE, ...SPACE], states: ["hover", "active", "focus", "disabled"], notes: [] },
-      { id: "media", availability: "planned", semanticRoles: ["media-content"], properties: ["opacity"], states: [], notes: ["媒体元素需要专用选择器适配。"] },
-    ],
-  },
-  ...["tag", "button", "easyui.2"].map((capabilityId) => ({
-    schema: "kf-style-capability-profile/v1",
-    capabilityId,
-    version: "1.0.0",
-    parts: [
-      { id: "root", availability: "supported", semanticRoles: ["interactive-root"], properties: [...SURFACE, ...TYPE, ...SPACE], states: [...INTERACTIVE], notes: [] },
-      { id: "label", availability: "planned", semanticRoles: ["label-content"], properties: [...TYPE], states: [], notes: ["文本子元素需要专用适配器。"] },
-      { id: "icon", availability: "planned", semanticRoles: ["icon-content"], properties: [...TYPE], states: [], notes: ["图标子元素需要专用适配器。"] },
-    ],
-  })),
-  ...[
-    { capabilityId: "input", parts: ["input", "label", "placeholder"], states: FORM },
-    { capabilityId: "inputnumber", parts: ["input", "indicator", "label", "placeholder"], states: FORM },
-    { capabilityId: "select", parts: ["input", "indicator", "label", "placeholder"], states: INTERACTIVE },
-    { capabilityId: "checkbox", parts: ["indicator", "label"], states: INTERACTIVE },
-    { capabilityId: "radio", parts: ["indicator", "label"], states: INTERACTIVE },
-    { capabilityId: "switch", parts: ["indicator", "label"], states: INTERACTIVE },
-    { capabilityId: "datetimepicker", parts: ["input", "label", "placeholder"], states: FORM },
-  ].map(({ capabilityId, parts, states }) => ({
-    schema: "kf-style-capability-profile/v1",
-    capabilityId,
-    version: "1.0.0",
-    parts: [
-      { id: "root", availability: "supported", semanticRoles: ["form-control-root"], properties: [...SURFACE, ...TYPE, ...SPACE], states: [...states], notes: [] },
-      ...parts.map((id) => ({
-        id,
-        availability: "planned",
-        semanticRoles: [`${id}-content`],
-        properties: [...TYPE],
-        states: [],
-        notes: ["内部控件部分需要专用适配器。"],
-      })),
-    ],
-  })),
-  {
-    schema: "kf-style-capability-profile/v1", capabilityId: "tabs", version: "1.0.0",
-    parts: [
-      { id: "root", availability: "supported", semanticRoles: ["tabs-container"], properties: [...SURFACE, ...SPACE], states: [...INTERACTIVE], notes: [] },
-      { id: "tab", availability: "planned", semanticRoles: ["tab-item"], properties: [...SURFACE, ...TYPE, ...SPACE], states: [...INTERACTIVE], notes: ["标签项需要专用适配器。"] },
-      { id: "active-indicator", availability: "planned", semanticRoles: ["selection-indicator"], properties: ["backgroundColor", "opacity"], states: [], notes: ["活动指示器需要专用适配器。"] },
-      { id: "panel", availability: "planned", semanticRoles: ["tab-panel"], properties: [...SURFACE, ...SPACE], states: [], notes: ["内容面板需要专用适配器。"] },
-    ],
-  },
-  ...["layout.2", "layout.4", "layout.5"].map((capabilityId) => ({
-    schema: "kf-style-capability-profile/v1",
-    capabilityId,
-    version: "1.0.0",
-    parts: [{ id: "root", availability: "supported", semanticRoles: ["layout-container"], properties: [...SURFACE, ...SPACE], states: [], notes: [] }],
-  })),
-  {
-    schema: "kf-style-capability-profile/v1", capabilityId: "list", version: "1.0.0",
-    parts: [
-      { id: "root", availability: "planned", semanticRoles: ["list-container"], properties: [...SURFACE, ...SPACE], states: [], notes: ["列表没有已审核的样式适配器。"] },
-      { id: "item", availability: "planned", semanticRoles: ["list-item"], properties: [...SURFACE, ...TYPE, ...SPACE], states: [...INTERACTIVE], notes: ["列表项没有已审核的样式适配器。"] },
-    ],
-  },
-  {
-    schema: "kf-style-capability-profile/v1", capabilityId: "tree", version: "1.0.0",
-    parts: [
-      { id: "root", availability: "planned", semanticRoles: ["tree-container"], properties: [...SURFACE, ...SPACE], states: [], notes: ["树控件没有已审核的样式适配器。"] },
-      { id: "node", availability: "planned", semanticRoles: ["tree-node"], properties: [...SURFACE, ...TYPE, ...SPACE], states: [...INTERACTIVE], notes: ["树节点没有已审核的样式适配器。"] },
-    ],
-  },
-  {
-    schema: "kf-style-capability-profile/v1", capabilityId: "navmenu", version: "1.0.0",
-    parts: [
-      { id: "root", availability: "planned", semanticRoles: ["navigation-container"], properties: [...SURFACE, ...SPACE], states: [], notes: ["导航菜单没有已审核的样式适配器。"] },
-      { id: "item", availability: "planned", semanticRoles: ["navigation-item"], properties: [...SURFACE, ...TYPE, ...SPACE], states: [...INTERACTIVE], notes: ["导航项没有已审核的样式适配器。"] },
-      { id: "group", availability: "planned", semanticRoles: ["navigation-group"], properties: [...SURFACE, ...SPACE], states: [], notes: ["导航分组没有已审核的样式适配器。"] },
-    ],
-  },
-  {
-    schema: "kf-style-capability-profile/v1", capabilityId: "easyui.1", version: "1.0.0",
-    parts: [
-      { id: "root", availability: "planned", semanticRoles: ["table-container"], properties: [...SURFACE, ...SPACE], states: [], notes: ["数据表没有已审核的样式适配器。"] },
-      { id: "header", availability: "planned", semanticRoles: ["table-header"], properties: [...SURFACE, ...TYPE, ...SPACE], states: [], notes: ["表头没有已审核的样式适配器。"] },
-      { id: "row", availability: "planned", semanticRoles: ["table-row"], properties: [...SURFACE, ...TYPE, ...SPACE], states: [...INTERACTIVE], notes: ["行元素没有已审核的样式适配器。"] },
-      { id: "cell", availability: "planned", semanticRoles: ["table-cell"], properties: [...SURFACE, ...TYPE, ...SPACE], states: [], notes: ["单元格没有已审核的样式适配器。"] },
-      { id: "empty", availability: "planned", semanticRoles: ["empty-state"], properties: [...SURFACE, ...TYPE, ...SPACE], states: [], notes: ["空状态没有已审核的样式适配器。"] },
-    ],
-  },
-  {
-    schema: "kf-style-capability-profile/v1", capabilityId: "easyui.6", version: "1.0.0",
-    parts: [
-      { id: "root", availability: "planned", semanticRoles: ["search-container"], properties: [...SURFACE, ...SPACE], states: [], notes: ["搜索控件没有已审核的样式适配器。"] },
-      { id: "input", availability: "planned", semanticRoles: ["search-input"], properties: [...TYPE, ...SPACE], states: [...FORM], notes: ["搜索输入区域没有已审核的样式适配器。"] },
-      { id: "placeholder", availability: "planned", semanticRoles: ["placeholder-content"], properties: [...TYPE], states: [], notes: ["占位内容没有已审核的样式适配器。"] },
-    ],
-  },
-  {
-    schema: "kf-style-capability-profile/v1", capabilityId: "easyui.12", version: "1.0.0",
-    parts: [
-      { id: "root", availability: "planned", semanticRoles: ["dialog-container"], properties: [...SURFACE, ...SPACE], states: [], notes: ["弹窗没有已审核的样式适配器。"] },
-      { id: "header", availability: "planned", semanticRoles: ["dialog-header"], properties: [...SURFACE, ...TYPE, ...SPACE], states: [], notes: ["弹窗标题区没有已审核的样式适配器。"] },
-      { id: "content", availability: "planned", semanticRoles: ["dialog-content"], properties: [...SURFACE, ...TYPE, ...SPACE], states: [], notes: ["弹窗内容区没有已审核的样式适配器。"] },
-    ],
-  },
-  {
-    schema: "kf-style-capability-profile/v1", capabilityId: "easyui.18", version: "1.0.0",
-    parts: [
-      { id: "root", availability: "planned", semanticRoles: ["hierarchical-table-container"], properties: [...SURFACE, ...SPACE], states: [], notes: ["树表没有已审核的样式适配器。"] },
-      { id: "header", availability: "planned", semanticRoles: ["table-header"], properties: [...SURFACE, ...TYPE, ...SPACE], states: [], notes: ["表头没有已审核的样式适配器。"] },
-      { id: "row", availability: "planned", semanticRoles: ["hierarchical-row"], properties: [...SURFACE, ...TYPE, ...SPACE], states: [...INTERACTIVE], notes: ["行元素没有已审核的样式适配器。"] },
-      { id: "cell", availability: "planned", semanticRoles: ["table-cell"], properties: [...SURFACE, ...TYPE, ...SPACE], states: [], notes: ["单元格没有已审核的样式适配器。"] },
-    ],
-  },
-  {
-    schema: "kf-style-capability-profile/v1", capabilityId: "easyui.19", version: "1.0.0",
-    parts: [
-      { id: "root", availability: "planned", semanticRoles: ["window-container"], properties: [...SURFACE, ...SPACE], states: [], notes: ["窗口没有已审核的样式适配器。"] },
-      { id: "header", availability: "planned", semanticRoles: ["window-header"], properties: [...SURFACE, ...TYPE, ...SPACE], states: [], notes: ["窗口标题区没有已审核的样式适配器。"] },
-      { id: "content", availability: "planned", semanticRoles: ["window-content"], properties: [...SURFACE, ...TYPE, ...SPACE], states: [], notes: ["窗口内容区没有已审核的样式适配器。"] },
-    ],
-  },
-  {
-    schema: "kf-style-capability-profile/v1", capabilityId: "easyui.22", version: "1.0.0",
-    parts: [
-      { id: "root", availability: "planned", semanticRoles: ["pagination-container"], properties: [...SURFACE, ...SPACE], states: [], notes: ["分页控件没有已审核的样式适配器。"] },
-      { id: "item", availability: "planned", semanticRoles: ["pagination-item"], properties: [...SURFACE, ...TYPE, ...SPACE], states: [...INTERACTIVE], notes: ["分页项没有已审核的样式适配器。"] },
-    ],
-  },
-];
-
-const PROFILES = RAW_PROFILES.map((profile) => StyleCapabilityProfileSchema.parse(profile));
-const controlProfileIds = new Set(listControlDesignProfiles().map((profile) => profile.capabilityId));
-
-for (const profile of PROFILES) {
-  if (!controlProfileIds.has(profile.capabilityId)) {
-    throw new Error(`STYLE_CAPABILITY_PROFILE_CONTROL_NOT_FOUND: ${profile.capabilityId}`);
-  }
+interface PartSpec {
+  readonly id: string;
+  readonly semanticRole: string;
+  readonly properties: readonly StyleKnowledgeProperty[];
 }
+
+const SURFACE = Object.freeze([
+  "backgroundColor", "borderColor", "borderRadius", "boxShadow", "opacity",
+] as const satisfies readonly StyleKnowledgeProperty[]);
+const TYPE = Object.freeze([
+  "textColor", "fontSize", "fontWeight", "lineHeight", "textAlign",
+] as const satisfies readonly StyleKnowledgeProperty[]);
+const SPACE = Object.freeze([
+  "padding", "margin", "gap",
+] as const satisfies readonly StyleKnowledgeProperty[]);
+const ALL = Object.freeze([...SURFACE, ...TYPE, ...SPACE]);
+
+function spec(
+  id: string,
+  semanticRole: string,
+  properties: readonly StyleKnowledgeProperty[],
+): PartSpec {
+  return Object.freeze({ id, semanticRole, properties });
+}
+
+function profile(capabilityId: string, parts: readonly PartSpec[]): StyleCapabilityProfile {
+  const runtimeParts = KF36_RUNTIME_PROFILE.selectors[capabilityId]?.parts ?? {};
+  return StyleCapabilityProfileSchema.parse({
+    schema: "kf-style-capability-profile/v1",
+    capabilityId,
+    version: "1.0.0",
+    parts: parts.map((part) => {
+      const runtimePart = runtimeParts[part.id];
+      return {
+        id: part.id,
+        availability: runtimePart === undefined ? "planned" : "supported",
+        semanticRoles: [part.semanticRole],
+        properties: [...part.properties],
+        states: runtimePart === undefined ? [] : Object.keys(runtimePart.stateSelectors),
+        notes: runtimePart === undefined
+          ? ["缺少经模板与运行时证据审核的语义部件 selector；必须 fail closed。"]
+          : [],
+      };
+    }),
+  });
+}
+
+const PROFILES: readonly StyleCapabilityProfile[] = Object.freeze([
+  profile("text", [spec("root", "text-container", TYPE)]),
+  profile("richtext", [
+    spec("root", "richtext-container", ALL),
+    spec("content", "richtext-content", [...TYPE, ...SPACE]),
+  ]),
+  profile("image", [
+    spec("root", "media-container", [...SURFACE, ...SPACE]),
+    spec("media", "media-content", ["borderRadius", "opacity"]),
+  ]),
+  ...["tag", "button", "easyui.2"].map((capabilityId) => profile(capabilityId, [
+    spec("root", "interactive-root", ALL),
+    spec("label", "label-content", TYPE),
+    spec("icon", "icon-content", [...TYPE, "opacity"]),
+  ])),
+  profile("input", [
+    spec("root", "form-control-root", ALL),
+    spec("input", "input-content", [...SURFACE, ...TYPE, ...SPACE]),
+    spec("label", "label-content", TYPE),
+    spec("placeholder", "placeholder-content", [...TYPE, "opacity"]),
+  ]),
+  profile("inputnumber", [
+    spec("root", "form-control-root", ALL),
+    spec("input", "input-content", [...SURFACE, ...TYPE, ...SPACE]),
+    spec("indicator", "indicator-content", [...TYPE, "opacity"]),
+    spec("label", "label-content", TYPE),
+    spec("placeholder", "placeholder-content", [...TYPE, "opacity"]),
+  ]),
+  profile("select", [
+    spec("root", "form-control-root", ALL),
+    spec("input", "input-content", [...SURFACE, ...TYPE, ...SPACE]),
+    spec("indicator", "indicator-content", [...TYPE, "opacity"]),
+    spec("label", "label-content", TYPE),
+    spec("placeholder", "placeholder-content", [...TYPE, "opacity"]),
+  ]),
+  ...["checkbox", "radio", "switch"].map((capabilityId) => profile(capabilityId, [
+    spec("root", "form-control-root", ALL),
+    spec("indicator", "indicator-content", [...TYPE, "opacity"]),
+    spec("label", "label-content", TYPE),
+  ])),
+  profile("datetimepicker", [
+    spec("root", "form-control-root", ALL),
+    spec("input", "input-content", [...SURFACE, ...TYPE, ...SPACE]),
+    spec("label", "label-content", TYPE),
+    spec("placeholder", "placeholder-content", [...TYPE, "opacity"]),
+  ]),
+  profile("tabs", [
+    spec("root", "tabs-container", [...SURFACE, ...SPACE]),
+    spec("tab", "tab-item", ALL),
+    spec("active-indicator", "selection-indicator", ["backgroundColor", "opacity"]),
+    spec("panel", "tab-panel", [...SURFACE, ...SPACE]),
+  ]),
+  ...["layout.2", "layout.4", "layout.5"].map((capabilityId) => profile(capabilityId, [
+    spec("root", "layout-container", [...SURFACE, ...SPACE]),
+  ])),
+  profile("list", [
+    spec("root", "list-container", [...SURFACE, ...SPACE]),
+    spec("item", "list-item", ALL),
+  ]),
+  profile("tree", [
+    spec("root", "tree-container", [...SURFACE, ...SPACE]),
+    spec("node", "tree-node", ALL),
+  ]),
+  profile("navmenu", [
+    spec("root", "navigation-container", [...SURFACE, ...SPACE]),
+    spec("item", "navigation-item", ALL),
+    spec("group", "navigation-group", [...SURFACE, ...SPACE]),
+  ]),
+  profile("easyui.1", [
+    spec("root", "table-container", [...SURFACE, ...SPACE]),
+    spec("header", "table-header", ALL),
+    spec("row", "table-row", ALL),
+    spec("cell", "table-cell", ALL),
+    spec("empty", "empty-state", ALL),
+  ]),
+  profile("easyui.6", [
+    spec("root", "search-container", [...SURFACE, ...SPACE]),
+    spec("input", "search-input", [...TYPE, ...SPACE]),
+    spec("placeholder", "placeholder-content", [...TYPE, "opacity"]),
+  ]),
+  profile("easyui.12", [
+    spec("root", "dialog-container", [...SURFACE, ...SPACE]),
+    spec("header", "dialog-header", ALL),
+    spec("content", "dialog-content", ALL),
+  ]),
+  profile("easyui.18", [
+    spec("root", "hierarchical-table-container", [...SURFACE, ...SPACE]),
+    spec("header", "table-header", ALL),
+    spec("row", "hierarchical-row", ALL),
+    spec("cell", "table-cell", ALL),
+  ]),
+  profile("easyui.19", [
+    spec("root", "window-container", [...SURFACE, ...SPACE]),
+    spec("header", "window-header", ALL),
+    spec("content", "window-content", ALL),
+  ]),
+  profile("easyui.22", [
+    spec("root", "pagination-container", [...SURFACE, ...SPACE]),
+    spec("item", "pagination-item", ALL),
+  ]),
+]);
 
 const registry = createKnowledgeRegistry(
   PROFILES,
-  (profile) => profile.capabilityId,
+  (entry) => entry.capabilityId,
   "STYLE_CAPABILITY_PROFILE_NOT_FOUND",
 );
 

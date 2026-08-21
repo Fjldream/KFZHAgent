@@ -1,71 +1,108 @@
 import type { ComponentStyleSpec, StyleDeclaration } from "@kf/contracts";
 import { getControlCapability, listControlCapabilities } from "../control-capability-registry.js";
 import { serializeStyleColor } from "../css-compiler.js";
+import {
+  KF36_RUNTIME_PROFILE,
+  isTrustedKF36StylePart,
+  type KFStylePartSelector,
+} from "../runtime-profile.js";
 import type {
   StyleAdapter,
   StyleAdapterResult,
+  StyleDeclarationKey,
+  StylePartAdapter,
   UnsupportedStyle,
 } from "../style-adapter.js";
 
-type StyleState = keyof ComponentStyleSpec["states"];
+type LegacyStyleState = keyof ComponentStyleSpec["states"];
 
-interface AdapterDefinition {
-  readonly capabilityId: string;
-  readonly supportedStates: readonly StyleState[];
-}
+const SURFACE_PROPERTIES = Object.freeze([
+  "backgroundColor", "borderColor",
+  "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth",
+  "borderTopColor", "borderRightColor", "borderBottomColor", "borderLeftColor",
+  "borderRadius", "borderTopLeftRadius", "borderTopRightRadius",
+  "borderBottomRightRadius", "borderBottomLeftRadius", "boxShadow", "opacity",
+] as const satisfies readonly StyleDeclarationKey[]);
+const TYPE_PROPERTIES = Object.freeze([
+  "textColor", "fontSize", "fontWeight", "lineHeight", "letterSpacing", "textAlign", "truncate",
+] as const satisfies readonly StyleDeclarationKey[]);
+const SPACE_PROPERTIES = Object.freeze([
+  "padding", "paddingHorizontal", "paddingVertical", "margin", "gap",
+] as const satisfies readonly StyleDeclarationKey[]);
+const EFFECT_PROPERTIES = Object.freeze([
+  "focusRing", "transition", "advanced",
+] as const satisfies readonly StyleDeclarationKey[]);
+const ICON_PROPERTIES = Object.freeze([
+  "iconSize", "iconColor", "iconGap", "opacity", "transition", "advanced",
+] as const satisfies readonly StyleDeclarationKey[]);
+const ROOT_CSS_PROPERTIES = Object.freeze([
+  ...SURFACE_PROPERTIES,
+  ...TYPE_PROPERTIES,
+  ...SPACE_PROPERTIES,
+  ...EFFECT_PROPERTIES,
+  "overflow",
+] as const satisfies readonly StyleDeclarationKey[]);
 
-const INTERACTIVE_STATES = Object.freeze([
-  "hover",
-  "active",
-  "focus",
-  "disabled",
-] as const);
-
-const FORM_STATES = Object.freeze([
-  "hover",
-  "active",
-  "focus",
-  "disabled",
-  "error",
-] as const);
-
-const SELECTABLE_STATES = Object.freeze([
-  "hover",
-  "active",
-  "focus",
-  "disabled",
-  "selected",
-] as const);
-
-const ADAPTER_DEFINITIONS: readonly AdapterDefinition[] = Object.freeze([
-  { capabilityId: "text", supportedStates: INTERACTIVE_STATES },
-  { capabilityId: "richtext", supportedStates: FORM_STATES },
-  { capabilityId: "image", supportedStates: INTERACTIVE_STATES },
-  { capabilityId: "tag", supportedStates: SELECTABLE_STATES },
-  { capabilityId: "button", supportedStates: SELECTABLE_STATES },
-  { capabilityId: "easyui.2", supportedStates: SELECTABLE_STATES },
-  { capabilityId: "input", supportedStates: FORM_STATES },
-  { capabilityId: "inputnumber", supportedStates: FORM_STATES },
-  { capabilityId: "select", supportedStates: SELECTABLE_STATES },
-  { capabilityId: "checkbox", supportedStates: SELECTABLE_STATES },
-  { capabilityId: "radio", supportedStates: SELECTABLE_STATES },
-  { capabilityId: "switch", supportedStates: SELECTABLE_STATES },
-  { capabilityId: "datetimepicker", supportedStates: FORM_STATES },
-  { capabilityId: "tabs", supportedStates: SELECTABLE_STATES },
-  { capabilityId: "spacer", supportedStates: [] },
-  { capabilityId: "layout.2", supportedStates: [] },
-  { capabilityId: "layout.4", supportedStates: [] },
-  { capabilityId: "layout.5", supportedStates: [] },
-  { capabilityId: "layout.6", supportedStates: [] },
+const PRESERVE_ONLY_EVIDENCE_ADAPTERS = new Set([
+  "easyui.1", "easyui.12", "easyui.19", "list", "navmenu", "tree",
 ]);
 
-function splitDeclarations(declarations: StyleDeclaration): Pick<StyleAdapterResult, "nativeFields" | "cssDeclarations"> {
-  const { backgroundColor, ...cssDeclarations } = declarations;
+function partProperties(capabilityId: string, semanticPart: string): readonly StyleDeclarationKey[] {
+  if (semanticPart === "root") return ROOT_CSS_PROPERTIES;
+  if (semanticPart === "media") {
+    return Object.freeze(["objectFit", "opacity", "borderRadius", "transition", "advanced"] as const);
+  }
+  if (semanticPart === "icon" || semanticPart === "indicator") return ICON_PROPERTIES;
+  if (semanticPart === "placeholder") {
+    return Object.freeze(["textColor", "fontSize", "fontWeight", "lineHeight", "letterSpacing", "opacity"] as const);
+  }
+  if (semanticPart === "active-indicator") {
+    return Object.freeze(["backgroundColor", "opacity", "transition", "advanced"] as const);
+  }
+  if (semanticPart === "input") {
+    return Object.freeze([...SURFACE_PROPERTIES, ...TYPE_PROPERTIES, ...SPACE_PROPERTIES, ...EFFECT_PROPERTIES] as const);
+  }
+  if (capabilityId === "tabs" && semanticPart === "tab") return ROOT_CSS_PROPERTIES;
+  if (semanticPart === "label") return Object.freeze([...TYPE_PROPERTIES, ...SPACE_PROPERTIES] as const);
+  return ROOT_CSS_PROPERTIES;
+}
 
+function createPartAdapter(
+  capabilityId: string,
+  selectorMapping: KFStylePartSelector,
+  nativeAllowed: boolean,
+): StylePartAdapter {
+  if (!isTrustedKF36StylePart(selectorMapping)) {
+    throw new Error(`UNTRUSTED_STYLE_PART_SELECTOR: ${capabilityId}.${selectorMapping.semanticPart}`);
+  }
+  return Object.freeze({
+    semanticPart: selectorMapping.semanticPart,
+    selector: selectorMapping.selector,
+    nativeProperties: Object.freeze(
+      nativeAllowed && selectorMapping.semanticPart === "root"
+        ? ["backgroundColor" as const]
+        : [],
+    ),
+    cssProperties: partProperties(capabilityId, selectorMapping.semanticPart),
+    supportedStates: Object.freeze(Object.keys(selectorMapping.stateSelectors)),
+  });
+}
+
+function splitDeclarations(
+  declarations: StyleDeclaration,
+  rootPart: StylePartAdapter,
+): Pick<StyleAdapterResult, "nativeFields" | "cssDeclarations"> {
+  const { backgroundColor, ...cssDeclarations } = declarations;
+  const nativeBackground = rootPart.nativeProperties.includes("backgroundColor") && backgroundColor !== undefined
+    ? { backgroundColor: serializeStyleColor(backgroundColor) }
+    : {};
+  const cssBackground = rootPart.nativeProperties.includes("backgroundColor")
+    ? {}
+    : backgroundColor === undefined ? {} : { backgroundColor };
+  const css = { ...cssBackground, ...cssDeclarations };
   return {
-    // backgroundColor is a reviewed common-control field in the KF patch allowlist.
-    nativeFields: backgroundColor === undefined ? {} : { backgroundColor: serializeStyleColor(backgroundColor) },
-    cssDeclarations: Object.keys(cssDeclarations).length === 0 ? {} : { normal: cssDeclarations },
+    nativeFields: nativeBackground,
+    cssDeclarations: Object.keys(css).length === 0 ? {} : { normal: css },
   };
 }
 
@@ -80,35 +117,42 @@ function unsupportedStateDeclarations(
   }));
 }
 
-function createAdapter(definition: AdapterDefinition): StyleAdapter {
-  const supportedStates = new Set<string>(definition.supportedStates);
+function createAdapter(capabilityId: string): StyleAdapter {
+  const selectorRoles = KF36_RUNTIME_PROFILE.selectors[capabilityId];
+  if (selectorRoles === undefined) throw new Error(`STYLE_SELECTOR_UNAVAILABLE: ${capabilityId}`);
+  const nativeAllowed = !PRESERVE_ONLY_EVIDENCE_ADAPTERS.has(capabilityId);
+  const parts = Object.values(selectorRoles.parts).map((mapping) =>
+    createPartAdapter(capabilityId, mapping, nativeAllowed));
+  const rootPart = parts.find((candidate) => candidate.semanticPart === "root");
+  if (rootPart === undefined) throw new Error(`STYLE_ROOT_PART_MISSING: ${capabilityId}`);
+  const supportedStates = new Set(rootPart.supportedStates);
 
   return Object.freeze({
-    capabilityId: definition.capabilityId,
+    capabilityId,
+    parts: Object.freeze(parts),
     compile(style: ComponentStyleSpec): StyleAdapterResult {
-      const result = splitDeclarations(style.declarations);
+      const result = splitDeclarations(style.declarations, rootPart);
       const unsupported: UnsupportedStyle[] = [];
-
       for (const [state, declarations] of Object.entries(style.states)) {
-        if (!declarations) {
-          continue;
-        }
+        if (declarations === undefined) continue;
         if (!supportedStates.has(state)) {
-          unsupported.push(...unsupportedStateDeclarations(state, declarations, definition.capabilityId));
+          unsupported.push(...unsupportedStateDeclarations(state, declarations, capabilityId));
           continue;
         }
-        result.cssDeclarations[state as StyleState] = declarations;
+        result.cssDeclarations[state as LegacyStyleState] = declarations;
       }
-
       return { ...result, unsupported };
     },
   });
 }
 
-const STYLE_ADAPTERS: readonly StyleAdapter[] = Object.freeze(
-  ADAPTER_DEFINITIONS.map(createAdapter),
-);
-
+const adapterCapabilityIds = Object.freeze([
+  "text", "richtext", "image", "tag", "button", "easyui.2", "input", "inputnumber",
+  "select", "checkbox", "radio", "switch", "datetimepicker", "tabs", "spacer",
+  "layout.2", "layout.4", "layout.5", "layout.6",
+  ...PRESERVE_ONLY_EVIDENCE_ADAPTERS,
+]);
+const STYLE_ADAPTERS: readonly StyleAdapter[] = Object.freeze(adapterCapabilityIds.map(createAdapter));
 const STYLE_ADAPTERS_BY_CAPABILITY = new Map(
   STYLE_ADAPTERS.map((adapter) => [adapter.capabilityId, adapter]),
 );
@@ -124,15 +168,19 @@ export function assertStyleAdapterRegistry(): void {
       || !STYLE_ADAPTERS_BY_CAPABILITY.has(capability.id),
     )
     .map((capability) => capability.id);
-  const unknownAdapterCapabilities = STYLE_ADAPTERS
-    .map((adapter) => adapter.capabilityId)
-    .filter((capabilityId) => !getControlCapability(capabilityId));
+  const invalidAdapters = STYLE_ADAPTERS
+    .filter((adapter) => {
+      const capability = getControlCapability(adapter.capabilityId);
+      return capability === undefined
+        || (capability.style.status !== "pending-verification"
+          && !PRESERVE_ONLY_EVIDENCE_ADAPTERS.has(adapter.capabilityId));
+    })
+    .map((adapter) => adapter.capabilityId);
 
-  if (missingAdapters.length > 0 || unknownAdapterCapabilities.length > 0) {
+  if (missingAdapters.length > 0 || invalidAdapters.length > 0) {
     throw new Error(
       "STYLE_ADAPTER_REGISTRY_MISMATCH: " +
-        `missing=[${missingAdapters.join(", ")}]; ` +
-        `unknown=[${unknownAdapterCapabilities.join(", ")}]`,
+        `missing=[${missingAdapters.join(", ")}]; invalid=[${invalidAdapters.join(", ")}]`,
     );
   }
 }
