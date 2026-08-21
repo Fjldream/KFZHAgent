@@ -5,6 +5,7 @@ import {
   UIImplementationControlV2Schema,
   modelAssetIdToWorkspaceAssetId,
   type ApprovedAssetFacts,
+  type ComponentStyleSpec,
   type ControlCapability,
   type ModulePlanModule,
   type RegisteredModuleNode,
@@ -61,6 +62,9 @@ const SAFE_DATA_KEY = /^[A-Za-z][A-Za-z0-9_-]{0,99}$/;
 const SAFE_LOCAL_ID = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 const FORBIDDEN_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 const CONFIGURATION_ONLY_NATIVE_CAPABILITIES = new Set(["easyui.1"]);
+const STYLE_ROOT_KEYS = new Set(["role", "declarations", "states"]);
+const STYLE_STATE_KEYS = ["hover", "active", "focus", "disabled", "selected", "error"] as const;
+const STYLE_STATE_KEY_SET = new Set<string>(STYLE_STATE_KEYS);
 const CONTENT_FIELDS: Readonly<Record<string, string>> = Object.freeze({
   button: "text",
   text: "text",
@@ -249,6 +253,52 @@ function technicallyAvailableCapabilityIds(): ReadonlySet<string> {
     .map((capability) => capability.id));
 }
 
+function isPlainRecord(value: object): boolean {
+  return Reflect.getPrototypeOf(value) === Object.prototype && !Array.isArray(value);
+}
+
+function hasOnlyDataKeys(value: object, allowed: ReadonlySet<string>): boolean {
+  return Reflect.ownKeys(value).every((key) => {
+    if (typeof key !== "string" || !allowed.has(key)) return false;
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor?.get === undefined && descriptor?.set === undefined;
+  });
+}
+
+function isSemanticallyEmptyConfigurationStyle(style: ComponentStyleSpec | undefined): boolean {
+  if (style === undefined) return true;
+  if (style === null || typeof style !== "object") return false;
+  if (!isPlainRecord(style) || !hasOnlyDataKeys(style, STYLE_ROOT_KEYS) || style.role !== undefined) return false;
+  const declarations = style.declarations;
+  if (declarations !== undefined && (declarations === null || typeof declarations !== "object"
+    || !isPlainRecord(declarations) || Reflect.ownKeys(declarations).length > 0)) return false;
+  const states = style.states;
+  if (states === undefined) return true;
+  if (states === null || typeof states !== "object"
+    || !isPlainRecord(states) || !hasOnlyDataKeys(states, STYLE_STATE_KEY_SET)) return false;
+  return STYLE_STATE_KEYS.every((state) => {
+    const declaration = states[state];
+    return declaration === undefined
+      || (declaration !== null && typeof declaration === "object"
+        && isPlainRecord(declaration) && Reflect.ownKeys(declaration).length === 0);
+  });
+}
+
+function assertConfigurationOnlyStyle(
+  nodeId: string,
+  outputId: string,
+  capabilityId: string,
+  style: ComponentStyleSpec | undefined,
+): void {
+  if (!CONFIGURATION_ONLY_NATIVE_CAPABILITIES.has(capabilityId)
+    || isSemanticallyEmptyConfigurationStyle(style)) return;
+  fail(
+    "MODULE_COMPONENT_CAPABILITY_PRESERVE_ONLY",
+    [nodeId, "components", outputId, "capabilityId", capabilityId, "style"],
+    "configuration-only native capability requires semantically empty style",
+  );
+}
+
 function assertOutputCapability(nodeId: string, outputId: string, capabilityId: string): void {
   const path: CompilePath = [nodeId, "components", outputId, "capabilityId", capabilityId];
   const capability = getControlCapability(capabilityId);
@@ -262,12 +312,16 @@ function assertOutputCapability(nodeId: string, outputId: string, capabilityId: 
 }
 
 function assertRequiredCapabilities(definition: ModuleDefinition, nodeId: string): void {
+  if (definition.requiredKfCapabilities.includes("webcontainer")) {
+    fail(
+      "MODULE_WEBCONTAINER_UNAUTHORIZED",
+      [nodeId, "requiredKfCapabilities", "webcontainer"],
+      "creative compilation has no WebContainer authorization input",
+    );
+  }
   const available = technicallyAvailableCapabilityIds();
   const missing = definition.requiredKfCapabilities.filter((capability) => !available.has(capability));
   if (missing.length > 0) fail("MODULE_KF_CAPABILITY_MISSING", [nodeId, "requiredKfCapabilities"], missing.join(", "));
-  if (definition.requiredKfCapabilities.includes("webcontainer")) {
-    fail("MODULE_WEBCONTAINER_UNAUTHORIZED", [nodeId, "requiredKfCapabilities"], "creative compilation has no WebContainer authorization input");
-  }
 }
 
 function approvedModuleAsset(
@@ -430,7 +484,12 @@ export function compileRegisteredModuleNode(input: RegisteredModuleNodeCompileIn
   if (output.components.length === 0) fail("MODULE_COMPILE_EMPTY", [input.node.id, "components"], `${definition.kind}@${definition.version}`);
 
   const components = output.components.map((component, index) => {
-    const parsed = UIComponentSpecSchema.safeParse(component);
+    assertConfigurationOnlyStyle(input.node.id, component.id, component.capabilityId, component.style);
+    const parsed = UIComponentSpecSchema.safeParse(
+      component.capabilityId === "easyui.1" && component.style === undefined
+        ? { ...component, style: {} }
+        : component,
+    );
     if (!parsed.success) fail("MODULE_COMPONENT_INVALID", [input.node.id, "components", index], parsed.error.issues[0]?.message ?? "schema rejected component");
     assertOutputCapability(input.node.id, parsed.data.id, parsed.data.capabilityId);
     return parsed.data;

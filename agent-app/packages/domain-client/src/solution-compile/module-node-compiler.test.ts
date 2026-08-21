@@ -2,6 +2,7 @@ import {
   LEGACY_MODULE_PLAN_CANDIDATE_BUNDLE_HASH,
   UIImplementationControlV2Schema,
   type ApprovedAssetFacts,
+  type ComponentStyleSpec,
   type NodeIntent,
   type RegisteredModuleNode,
   type SolutionImplementationPlan,
@@ -85,6 +86,30 @@ function definition(overrides: Partial<ModuleDefinition> = {}): ModuleDefinition
     }),
     ...overrides,
   };
+}
+
+function configurationOnlyTableDefinition(style: ComponentStyleSpec | undefined): ModuleDefinition {
+  return definition({
+    requiredKfCapabilities: ["easyui.1"],
+    compile: () => ({
+      components: [{
+        id: "datagrid", role: "native-datagrid", capabilityId: "easyui.1", critical: true,
+        geometry: { x: 0, y: 0, width: 300, height: 80 },
+        properties: {
+          striped: true,
+          pagination: false,
+          pageSize: 20,
+          tableData: {
+            columns: [{ key: "name", label: "姓名", align: "left" }],
+            rows: [{ name: "陈佳宁" }],
+            pageSize: 20,
+          },
+        },
+        style: style as ComponentStyleSpec,
+      }],
+      deliveryGaps: [],
+    }),
+  });
 }
 
 function registryFor(...definitions: ModuleDefinition[]): ModuleRegistry {
@@ -219,6 +244,16 @@ describe("compileRegisteredModuleNode", () => {
     expect(error).toMatchObject({ code: "MODULE_KF_CAPABILITY_MISSING", path: ["profile-module", "requiredKfCapabilities"] });
   });
 
+  it("reports required webcontainer authorization before generic capability availability", () => {
+    const unauthorized = definition({ requiredKfCapabilities: ["webcontainer", "missing.capability"] });
+    const error = readCompileError(() => compileRegisteredModuleNode(
+      compileInput(moduleNode(), registryFor(unauthorized)),
+    ));
+
+    expect(error.code).toBe("MODULE_WEBCONTAINER_UNAUTHORIZED");
+    expect(error.path).toEqual(["profile-module", "requiredKfCapabilities", "webcontainer"]);
+  });
+
   it.each([
     ["layout.0 local parent", "accordion", "layout.0", "MODULE_COMPONENT_CAPABILITY_PRESERVE_ONLY", true],
     ["layout.3 local parent", "tabs", "layout.3", "MODULE_COMPONENT_CAPABILITY_PRESERVE_ONLY", true],
@@ -256,6 +291,68 @@ describe("compileRegisteredModuleNode", () => {
     expect(controls.map((control) => [control.id, control.capabilityId, control.parentId])).toEqual([
       ["profile-module--surface", "layout.2", "root"],
       ["profile-module--title", "text", "profile-module--surface"],
+    ]);
+  });
+
+  it.each([
+    ["an absent style", undefined],
+    ["a schema-defaulted empty style", {} as never],
+    ["empty declarations and state branches", { declarations: {}, states: { hover: undefined, active: {} } }],
+  ] as const)("accepts typed easyui.1 table data with %s", (_label, style) => {
+    const tableDefinition = configurationOnlyTableDefinition(style);
+    const controls = compileRegisteredModuleNode(compileInput(moduleNode(), registryFor(tableDefinition)));
+
+    expect(controls).toHaveLength(1);
+    expect(controls[0]).toMatchObject({
+      id: "profile-module--datagrid",
+      capabilityId: "easyui.1",
+      nativeProperties: {
+        striped: true,
+        pagination: false,
+        pageSize: 20,
+        tableData: {
+          columns: [{ key: "name", label: "姓名", align: "left" }],
+          rows: [{ name: "陈佳宁" }],
+          pageSize: 20,
+        },
+      },
+    });
+    expect(controls[0]!.style).not.toHaveProperty("role");
+    expect(controls[0]!.style).toMatchObject({ declarations: {} });
+  });
+
+  it("does not default an absent style for ordinary module output", () => {
+    const missingStyle = definition({
+      compile: () => ({
+        components: [{
+          id: "title", role: "title", capabilityId: "text", critical: true, content: "访客",
+          geometry: { x: 0, y: 0, width: 100, height: 24 }, properties: {}, style: undefined as never,
+        }],
+        deliveryGaps: [],
+      }),
+    });
+    const error = readCompileError(() => compileRegisteredModuleNode(
+      compileInput(moduleNode(), registryFor(missingStyle)),
+    ));
+
+    expect(error.code).toBe("MODULE_COMPONENT_INVALID");
+    expect(error.path).toEqual(["profile-module", "components", 0]);
+  });
+
+  it.each([
+    ["role", { role: "data", declarations: {}, states: {} }],
+    ["background declaration", { declarations: { backgroundColor: "#ffffff" }, states: {} }],
+    ["hover opacity", { declarations: {}, states: { hover: { opacity: 0.5 } } }],
+    ["parts", { declarations: {}, states: {}, parts: { cell: { declarations: {}, states: {} } } } as never],
+  ] as const)("rejects easyui.1 configuration-only output carrying %s style", (_label, style) => {
+    const tableDefinition = configurationOnlyTableDefinition(style);
+    const error = readCompileError(() => compileRegisteredModuleNode(
+      compileInput(moduleNode(), registryFor(tableDefinition)),
+    ));
+
+    expect(error.code).toBe("MODULE_COMPONENT_CAPABILITY_PRESERVE_ONLY");
+    expect(error.path).toEqual([
+      "profile-module", "components", "datagrid", "capabilityId", "easyui.1", "style",
     ]);
   });
 
