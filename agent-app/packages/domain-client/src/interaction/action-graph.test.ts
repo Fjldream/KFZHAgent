@@ -186,7 +186,7 @@ describe("normalizeActionGraph", () => {
 
     const duplicateIdentity = implementation([{ id: "open-button", capabilityId: "button", sourceSolutionNodeId: "duplicate" }]);
     expect(() => normalizeActionGraph({ plan: plan(), implementation: duplicateIdentity }))
-      .toThrowError(expect.objectContaining({ code: "ACTION_IMPLEMENTATION_INVALID", nodeId: "implementation" }));
+      .toThrowError(expect.objectContaining({ code: "ACTION_IMPLEMENTATION_INVALID", nodeId: "open-button" }));
 
     const extraPage = implementation();
     const home = extraPage.pages[0]!;
@@ -202,6 +202,34 @@ describe("normalizeActionGraph", () => {
     extraPage.runtimeCorrelation!.pages.push({ semanticPageId: "rogue-page", pageGuid: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" });
     expect(() => normalizeActionGraph({ plan: plan(), implementation: extraPage }))
       .toThrowError(expect.objectContaining({ code: "ACTION_RUNTIME_CORRELATION_EXTRA", nodeId: "rogue-page" }));
+  });
+
+  it("maps authoritative implementation schema failures to stable semantic node ids", () => {
+    const correlationControl = implementation();
+    correlationControl.runtimeCorrelation!.controls[0]!.instanceName = "invalid";
+    expect(() => normalizeActionGraph({ plan: plan(), implementation: correlationControl }))
+      .toThrowError(expect.objectContaining({ code: "ACTION_IMPLEMENTATION_INVALID", nodeId: "open-button" }));
+
+    const correlationPage = implementation();
+    correlationPage.runtimeCorrelation!.pages[0]!.pageGuid = "invalid";
+    expect(() => normalizeActionGraph({ plan: plan(), implementation: correlationPage }))
+      .toThrowError(expect.objectContaining({ code: "ACTION_IMPLEMENTATION_INVALID", nodeId: "home" }));
+
+    const page = implementation();
+    page.pages[0]!.width = -1;
+    expect(() => normalizeActionGraph({ plan: plan(), implementation: page }))
+      .toThrowError(expect.objectContaining({ code: "ACTION_IMPLEMENTATION_INVALID", nodeId: "home" }));
+
+    const control = implementation();
+    if (control.pages[0]!.compatibility !== "native") throw new Error("native fixture required");
+    control.pages[0]!.controls[0]!.capabilityId = "";
+    expect(() => normalizeActionGraph({ plan: plan(), implementation: control }))
+      .toThrowError(expect.objectContaining({ code: "ACTION_IMPLEMENTATION_INVALID", nodeId: "open-button" }));
+
+    const invalidCorrelationId = implementation();
+    invalidCorrelationId.runtimeCorrelation!.controls[0]!.semanticControlId = "";
+    expect(() => normalizeActionGraph({ plan: plan(), implementation: invalidCorrelationId }))
+      .toThrowError(expect.objectContaining({ code: "ACTION_IMPLEMENTATION_INVALID", nodeId: "runtimeCorrelation.controls[0]" }));
   });
 
   it("accepts a real Phase3 implementation after compiler-owned correlation is attached", () => {

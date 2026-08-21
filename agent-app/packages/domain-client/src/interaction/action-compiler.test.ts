@@ -165,7 +165,7 @@ describe("compileNativeActions", () => {
     const { normalizeActionGraph } = await import("./action-graph.js");
     const data = fixture();
     data.implementation.runtimeCorrelation!.controls[0]!.semanticControlId = "stale-go";
-    expect(() => normalizeActionGraph(data)).toThrowError(expect.objectContaining({ code: "ACTION_IMPLEMENTATION_INVALID", nodeId: "implementation" }));
+    expect(() => normalizeActionGraph(data)).toThrowError(expect.objectContaining({ code: "ACTION_IMPLEMENTATION_INVALID", nodeId: "stale-go" }));
 
     const missingPage = fixture();
     missingPage.implementation.runtimeCorrelation!.pages = missingPage.implementation.runtimeCorrelation!.pages.filter((entry) => entry.semanticPageId !== "detail-page");
@@ -174,7 +174,7 @@ describe("compileNativeActions", () => {
     const guidAlias = fixture();
     guidAlias.implementation.runtimeCorrelation!.pages[0]!.pageGuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     guidAlias.implementation.runtimeCorrelation!.pages[1]!.pageGuid = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
-    expect(() => normalizeActionGraph(guidAlias)).toThrowError(expect.objectContaining({ code: "ACTION_IMPLEMENTATION_INVALID", nodeId: "implementation" }));
+    expect(() => normalizeActionGraph(guidAlias)).toThrowError(expect.objectContaining({ code: "ACTION_IMPLEMENTATION_INVALID", nodeId: "detail-page" }));
   });
 
   it("routes conditions and run-script through bounded requests and never marks script closure complete", async () => {
@@ -322,7 +322,7 @@ describe("compileNativeActions", () => {
 
     detailPage.controls[1]!.overlayHost!.hostPageId = "home";
     expect(() => normalizeActionGraph(data)).toThrowError(expect.objectContaining({
-      code: "ACTION_IMPLEMENTATION_INVALID", nodeId: "implementation",
+      code: "ACTION_IMPLEMENTATION_INVALID", nodeId: "overlay-host",
     }));
     detailPage.controls[1]!.overlayHost!.hostPageId = "detail-page";
 
@@ -492,5 +492,45 @@ describe("compileNativeActions", () => {
     expect(result.bindings).toEqual([]);
     expect(result.scriptRequests).toHaveLength(2);
     expect(result.scriptRequests.every((item) => item.reason === "EVENT_ALIAS_EVIDENCE_CONFLICT")).toBe(true);
+  });
+
+  it("treats linkId as alias consistency metadata rather than KF event identity", async () => {
+    let leftLinkId: number | undefined;
+    let rightLinkId: number | undefined = 7;
+    vi.doMock("../design-knowledge/script-capability-registry.js", () => ({
+      requireScriptCapabilityProfile: () => ({
+        schema: "kf-script-capability-profile/v1", capabilityId: "button", version: "1.0.0", availability: "supported",
+        actions: [{ semanticAction: "show-feedback", implementation: "restricted-action", availability: "supported", evidence: [{ kind: "compiler", ref: "reviewed#feedback" }] }],
+        events: [
+          { semanticEvent: "click", kfEvent: "Click", ...(leftLinkId === undefined ? {} : { linkId: leftLinkId }), availability: "supported", arguments: [], evidence: [{ kind: "template", ref: "reviewed#click" }] },
+          { semanticEvent: "change", kfEvent: "Click", ...(rightLinkId === undefined ? {} : { linkId: rightLinkId }), availability: "supported", arguments: [], evidence: [{ kind: "template", ref: "reviewed#click" }] },
+        ],
+        methods: [], properties: [], initialization: { supportsConfigureData: false, lifecycleEvents: [] }, limitations: [],
+      }),
+    }));
+    const { normalizeActionGraph } = await import("./action-graph.js");
+    const { compileNativeActions } = await import("./action-compiler.js");
+    const compile = () => {
+      const data = fixture();
+      const root = data.plan.pages[0]!.root;
+      if (root.kind !== "control") throw new Error("control fixture required");
+      root.eventBindings = [
+        { semanticEvent: "click", actionIds: ["left"] },
+        { semanticEvent: "change", actionIds: ["right"] },
+      ];
+      data.plan.actions = [
+        { id: "left", kind: "show-feedback", level: "info", message: "左", afterActionIds: [] },
+        { id: "right", kind: "show-feedback", level: "info", message: "右", afterActionIds: [] },
+      ];
+      return compileNativeActions({ normalized: normalizeActionGraph(data) });
+    };
+    for (const links of [[undefined, 7], [7, 8]] as const) {
+      [leftLinkId, rightLinkId] = links;
+      const result = compile();
+      expect(result.actions, String(links)).toEqual([]);
+      expect(result.bindings, String(links)).toEqual([]);
+      expect(result.scriptRequests, String(links)).toHaveLength(2);
+      expect(result.scriptRequests.every((item) => item.reason === "EVENT_ALIAS_EVIDENCE_CONFLICT"), String(links)).toBe(true);
+    }
   });
 });

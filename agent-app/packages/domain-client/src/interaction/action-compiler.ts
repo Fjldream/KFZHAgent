@@ -259,7 +259,7 @@ export function compileNativeActions(input: CompileNativeActionsInput): NativeAc
       requests.push(request(action, "TRIGGER_EVENT_UNSUPPORTED", scriptsById));
       continue;
     }
-    const key = `${owner.instanceName}\u0000${event.kfEvent}\u0000${event.linkId === undefined ? "none" : event.linkId}\u0000event`;
+    const key = `${owner.instanceName}\u0000${event.kfEvent}\u0000event`;
     const group = groups.get(key) ?? [];
     group.push({ action, owner, profile, event });
     groups.set(key, group);
@@ -270,7 +270,11 @@ export function compileNativeActions(input: CompileNativeActionsInput): NativeAc
       group.forEach(({ action }) => requests.push(request(action, "BINDING_CAPACITY_EXCEEDED", scriptsById)));
       continue;
     }
-    const aliasSignatures = new Set(group.map(({ event }) => JSON.stringify({ arguments: event.arguments, evidence: event.evidence })));
+    const aliasSignatures = new Set(group.map(({ event }) => JSON.stringify({
+      linkId: event.linkId === undefined ? null : event.linkId,
+      arguments: event.arguments,
+      evidence: event.evidence,
+    })));
     if (aliasSignatures.size !== 1) {
       group.forEach(({ action }) => requests.push(request(action, "EVENT_ALIAS_EVIDENCE_CONFLICT", scriptsById)));
       continue;

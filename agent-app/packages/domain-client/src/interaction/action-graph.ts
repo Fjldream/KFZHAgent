@@ -279,6 +279,46 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
+function ownDataProperty(value: unknown, key: PropertyKey): unknown {
+  if (value === null || typeof value !== "object") return undefined;
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor !== undefined && "value" in descriptor ? descriptor.value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function safeSemanticId(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length <= 100 && /^[A-Za-z][A-Za-z0-9_-]*$/.test(trimmed) ? trimmed : undefined;
+}
+
+function implementationIssueNodeId(implementation: unknown, path: readonly PropertyKey[]): string {
+  if (path[0] === "runtimeCorrelation"
+    && (path[1] === "controls" || path[1] === "pages")
+    && typeof path[2] === "number") {
+    const collectionName = path[1];
+    const correlation = ownDataProperty(implementation, "runtimeCorrelation");
+    const collection = ownDataProperty(correlation, collectionName);
+    const entry = ownDataProperty(collection, path[2]);
+    const idKey = collectionName === "controls" ? "semanticControlId" : "semanticPageId";
+    return safeSemanticId(ownDataProperty(entry, idKey)) ?? `runtimeCorrelation.${collectionName}[${path[2]}]`;
+  }
+  if (path[0] === "pages" && typeof path[1] === "number") {
+    const pages = ownDataProperty(implementation, "pages");
+    const page = ownDataProperty(pages, path[1]);
+    if (path[2] === "controls" && typeof path[3] === "number") {
+      const controls = ownDataProperty(page, "controls");
+      const control = ownDataProperty(controls, path[3]);
+      return safeSemanticId(ownDataProperty(control, "id")) ?? `pages[${path[1]}].controls[${path[3]}]`;
+    }
+    return safeSemanticId(ownDataProperty(page, "id")) ?? `pages[${path[1]}]`;
+  }
+  return "implementation";
+}
+
 export function normalizeActionGraph(input: NormalizeActionGraphInput): NormalizedActionGraph {
   const cloned = cloneInput(input);
   const plan = cloned.plan;
@@ -286,7 +326,7 @@ export function normalizeActionGraph(input: NormalizeActionGraphInput): Normaliz
   if (!implementationResult.success) {
     throw new ActionGraphNormalizationError(
       "ACTION_IMPLEMENTATION_INVALID",
-      "implementation",
+      implementationIssueNodeId(cloned.implementation, implementationResult.error.issues[0]?.path ?? []),
       implementationResult.error.issues[0]?.message,
       { cause: implementationResult.error },
     );
