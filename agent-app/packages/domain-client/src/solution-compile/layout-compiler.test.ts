@@ -1,6 +1,6 @@
 import type { LayoutNode, NodeIntent, SolutionNode, SolutionPage } from "@kf/contracts";
 import { describe, expect, it } from "vitest";
-import type { IntrinsicSize } from "./intrinsic-measure.js";
+import { measureIntrinsic, type IntrinsicSize } from "./intrinsic-measure.js";
 import {
   LayoutCompileError,
   compileLayout,
@@ -604,7 +604,7 @@ describe("compileLayout", () => {
     expect([...scrolled.byId.values()].filter((node) => node.overflow === "local-scroll").map((node) => node.id)).toEqual(["scroll-root"]);
     expect(scrolled.pageHeight).toBe(300);
     expect(scrolled.root.geometry).toEqual({ x: 40, y: 40, width: 1_360, height: 220 });
-    expect(scrolled.root.scrollContentExtent).toEqual({ width: 1_360, height: 326 });
+    expect(scrolled.root.scrollContentExtent).toEqual({ width: 1_360, height: 332 });
     expect(scrolled.byId.get("scroll-b")!.geometry.y + scrolled.byId.get("scroll-b")!.geometry.height)
       .toBeGreaterThan(scrolled.root.geometry.y + scrolled.root.geometry.height);
     expect(scrolled.byId.get("scroll-b")!.geometry.y + scrolled.byId.get("scroll-b")!.geometry.height)
@@ -613,6 +613,33 @@ describe("compileLayout", () => {
       .toEqual(["scroll-root"]);
     expectGeometrySafe(scrolled);
     expect(() => compile(plainRoot, childSizes)).toThrowError(/LAYOUT_UNSATISFIABLE:.*plain-root/);
+  });
+
+  it("compiles a fixed viewport from the real scroll-region intrinsic measurement", () => {
+    const item = intrinsic({ minHeight: 160, preferredHeight: 160, maxHeight: 160 });
+    const measuredRoot = measureIntrinsic({
+      kind: "layout",
+      node: { kind: "layout", id: "measured-scroll-root", layout: "scroll-region", intent: { density: "comfortable" } },
+      density: "comfortable",
+      width: { available: 1_360 },
+      font: { fontSize: 16, lineHeight: 1.5 },
+      childMeasures: [item, item],
+      gap: 12,
+    });
+    const root = layout("measured-scroll-root", "scroll-region", [
+      control("measured-scroll-a"),
+      control("measured-scroll-b", { readingOrder: 1 }),
+    ], { height: { mode: "fixed", value: 220 } });
+    const compiled = compile(root, new Map([
+      [root.id, measuredRoot],
+      ["measured-scroll-a", item],
+      ["measured-scroll-b", item],
+    ]));
+
+    expect(measuredRoot).toMatchObject({ minHeight: 0, preferredHeight: 332, maxHeight: 332, overflow: "scroll" });
+    expect(compiled.root.geometry.height).toBe(220);
+    expect(compiled.root.scrollContentExtent).toEqual({ width: 1_360, height: 332 });
+    expect(compiled.pageHeight).toBe(300);
   });
 
   it("bounds every scrolling descendant while keeping deeper children inside their direct parent", () => {
@@ -635,6 +662,54 @@ describe("compileLayout", () => {
     expect(leaf.y + leaf.height).toBeLessThanOrEqual(nestedBox.y + nestedBox.height);
     expect(leaf.y + leaf.height).toBeLessThanOrEqual(compiled.root.geometry.y + compiled.root.scrollContentExtent!.height);
     expectGeometrySafe(compiled);
+  });
+
+  it("gives nested scroll regions independent tight extents and stops the outer extent at the inner viewport", () => {
+    const inner = layout("inner-scroll", "scroll-region", [
+      control("inner-scroll-a"),
+      control("inner-scroll-b", { readingOrder: 1 }),
+    ], { readingOrder: 1, height: { mode: "fixed", value: 100 } });
+    const root = layout("outer-scroll", "scroll-region", [
+      control("outer-scroll-a"),
+      inner,
+    ], { height: { mode: "fixed", value: 150 } });
+    const item = intrinsic({ minHeight: 100, preferredHeight: 100, maxHeight: 100 });
+    const compiled = compile(root, new Map([
+      ["outer-scroll-a", item],
+      ["inner-scroll-a", item],
+      ["inner-scroll-b", item],
+    ]));
+    const innerCompiled = compiled.byId.get("inner-scroll")!;
+    const innerLast = compiled.byId.get("inner-scroll-b")!;
+
+    expect(compiled.pageHeight).toBe(230);
+    expect(compiled.root.scrollContentExtent).toEqual({ width: 1_360, height: 224 });
+    expect(innerCompiled.scrollContentExtent).toEqual({ width: 1_360, height: 212 });
+    expect(innerCompiled.geometry.y + innerCompiled.geometry.height).toBeGreaterThan(compiled.pageHeight);
+    expect(innerLast.geometry.y + innerLast.geometry.height)
+      .toBeGreaterThan(compiled.root.geometry.y + compiled.root.scrollContentExtent!.height);
+    expectGeometrySafe(compiled);
+  });
+
+  it("reports the intrinsic maximum as available when a fixed intent exceeds it", () => {
+    const root = layout("fixed-above-max", "column", [control("fixed-above-max-child")], {
+      width: { mode: "fixed", value: 500 },
+    });
+
+    try {
+      compile(root, new Map([[root.id, intrinsic({ maxWidth: 300 })]]));
+      throw new Error("expected compileLayout to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(LayoutCompileError);
+      if (!(error instanceof LayoutCompileError)) return;
+      expect(error.details).toEqual({
+        nodeId: "fixed-above-max",
+        minimumRequired: { width: 500, height: 32 },
+        available: { width: 300, height: 48 },
+        attemptedColumns: [],
+        scrollAllowed: false,
+      });
+    }
   });
 
   it("returns node-specific structured details for an impossible grid", () => {

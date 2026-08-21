@@ -260,7 +260,16 @@ function validateIntentAgainstIntrinsic(node: SolutionNode, measured: IntrinsicS
     if ((intent.mode === "fixed" || intent.mode === "viewport") && intent.value !== undefined) {
       const bounds = axis === "width" ? width : height;
       if (intent.value < bounds.minimum || intent.value > bounds.maximum) {
-        unsatisfiable(node.id, width.minimum, height.minimum, axis === "width" ? intent.value : width.preferred, axis === "height" ? intent.value : height.preferred, [], false);
+        const exceedsMaximum = intent.value > bounds.maximum;
+        unsatisfiable(
+          node.id,
+          axis === "width" && exceedsMaximum ? intent.value : width.minimum,
+          axis === "height" && exceedsMaximum ? intent.value : height.minimum,
+          axis === "width" ? (exceedsMaximum ? bounds.maximum : intent.value) : width.preferred,
+          axis === "height" ? (exceedsMaximum ? bounds.maximum : intent.value) : height.preferred,
+          [],
+          false,
+        );
       }
     }
   }
@@ -390,7 +399,7 @@ function contentExtent(
   const visit = (node: CompiledLayoutNode): void => {
     right = Math.max(right, node.geometry.x + node.geometry.width);
     bottom = Math.max(bottom, node.geometry.y + node.geometry.height);
-    node.children.forEach(visit);
+    if (node.layout !== "scroll-region") node.children.forEach(visit);
   };
   children.forEach(visit);
   return Object.freeze({ width: round(right - viewport.x), height: round(bottom - viewport.y) });
@@ -673,7 +682,8 @@ function allocateAxis(
   const minimumSpaces = minimum * Math.max(0, children.length - 1);
   let gap = preferred;
   let usable = available - preferredSpaces;
-  if (minimumTotal > usable) {
+  const preserveScrollGap = parent.layout === "scroll-region" && axis === "height";
+  if (minimumTotal > usable && !preserveScrollGap) {
     gap = minimum;
     usable = available - minimumSpaces;
   }

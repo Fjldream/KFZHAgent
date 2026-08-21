@@ -605,9 +605,34 @@ const GeometrySchema = z.object({
 }).strict();
 
 const ScrollContentExtentSchema = z.object({
-  width: z.number().finite().positive(),
-  height: z.number().finite().positive(),
+  width: z.number().finite().positive().max(100_000),
+  height: z.number().finite().positive().max(100_000),
 }).strict();
+
+const VisibleLayoutKindSchema = z.enum([
+  "row",
+  "column",
+  "grid",
+  "asymmetric-grid",
+  "split",
+  "stack",
+  "dock",
+  "sidebar-content",
+  "master-detail",
+  "overlay-anchor",
+]);
+
+const CompiledLayoutMetadataSchema = z.discriminatedUnion("overflow", [
+  z.object({
+    kind: z.literal("scroll-region"),
+    overflow: z.literal("local-scroll"),
+    scrollContentExtent: ScrollContentExtentSchema,
+  }).strict(),
+  z.object({
+    kind: VisibleLayoutKindSchema,
+    overflow: z.literal("visible"),
+  }).strict(),
+]);
 
 const CompiledStyleFragmentSchema = z.object({
   selectorToken: z.string().regex(/^(?:root|part:[A-Za-z][A-Za-z0-9_-]*)$/),
@@ -653,7 +678,7 @@ export const UIImplementationControlV2Schema = z.object({
   depth: z.number().int().min(0).max(32),
   zIndex: z.number().int().min(0).max(1_000_000),
   geometry: GeometrySchema,
-  scrollContentExtent: ScrollContentExtentSchema.optional(),
+  compiledLayout: CompiledLayoutMetadataSchema.optional(),
   nativeProperties: ImplementationDataRecordSchema,
   style: ComponentStyleSpecV2Schema.optional(),
   compiledStyle: CompiledStyleSpecSchema.optional(),
@@ -786,6 +811,15 @@ export const UIImplementationSpecV2Schema = z.object({
     }
     pageIds.add(page.id);
     const controlsById = new Map(page.controls.map((control) => [control.id, control]));
+    const childrenByParent = new Map<string, Array<z.infer<typeof UIImplementationControlV2Schema>>>();
+    page.controls.forEach((control) => {
+      if (control.parentId === undefined) return;
+      const siblings = childrenByParent.get(control.parentId) ?? [];
+      siblings.push(control);
+      childrenByParent.set(control.parentId, siblings);
+    });
+    const isScrollOwner = (control: z.infer<typeof UIImplementationControlV2Schema>): boolean =>
+      control.compiledLayout?.kind === "scroll-region";
     const nearestScrollAncestor = (control: z.infer<typeof UIImplementationControlV2Schema>) => {
       const visited = new Set<string>();
       let parentId = control.parentId;
@@ -793,7 +827,7 @@ export const UIImplementationSpecV2Schema = z.object({
         visited.add(parentId);
         const parent = controlsById.get(parentId);
         if (parent === undefined) return undefined;
-        if (parent.scrollContentExtent !== undefined) return parent;
+        if (isScrollOwner(parent)) return parent;
         parentId = parent.parentId;
       }
       return undefined;
@@ -806,17 +840,20 @@ export const UIImplementationSpecV2Schema = z.object({
       controlIds.add(control.id);
       const scrollAncestor = nearestScrollAncestor(control);
       if (scrollAncestor !== undefined) {
-        const extent = scrollAncestor.scrollContentExtent!;
-        if (!containsGeometry({
-          x: scrollAncestor.geometry.x,
-          y: scrollAncestor.geometry.y,
-          width: extent.width,
-          height: extent.height,
-        }, control.geometry)) {
-          ctx.addIssue({ code: "custom", path: [...path, "geometry"], message: `control geometry exceeds scroll content extent: ${control.id}` });
+        const metadata = scrollAncestor.compiledLayout;
+        if (metadata !== undefined && metadata.kind === "scroll-region") {
+          const extent = metadata.scrollContentExtent;
+          if (!containsGeometry({
+            x: scrollAncestor.geometry.x,
+            y: scrollAncestor.geometry.y,
+            width: extent.width,
+            height: extent.height,
+          }, control.geometry)) {
+            ctx.addIssue({ code: "custom", path: [...path, "geometry"], message: `control geometry exceeds scroll content extent: ${control.id}` });
+          }
         }
       }
-      if ((scrollAncestor === undefined || control.scrollContentExtent !== undefined)
+      if (scrollAncestor === undefined
         && !containsGeometry({ x: 0, y: 0, width: page.width, height: page.height }, control.geometry)) {
         ctx.addIssue({ code: "custom", path: [...path, "geometry"], message: `control geometry exceeds page bounds: ${control.id}` });
       }
@@ -832,21 +869,38 @@ export const UIImplementationSpecV2Schema = z.object({
         if (control.depth !== parent.depth + 1) {
           ctx.addIssue({ code: "custom", path: [...path, "depth"], message: "control depth must be exactly one greater than its parent" });
         }
-        if ((parent.scrollContentExtent === undefined || control.scrollContentExtent !== undefined)
-          && !containsGeometry(parent.geometry, control.geometry)) {
+        if (!isScrollOwner(parent) && !containsGeometry(parent.geometry, control.geometry)) {
           ctx.addIssue({ code: "custom", path: [...path, "geometry"], message: `control geometry exceeds parent bounds: ${control.id}` });
         }
       }
-      if (control.scrollContentExtent !== undefined) {
+      if (control.compiledLayout !== undefined) {
         if (!control.capabilityId.startsWith("layout.")) {
-          ctx.addIssue({ code: "custom", path: [...path, "scrollContentExtent"], message: "scroll content extent is compiler-owned layout metadata" });
+          ctx.addIssue({ code: "custom", path: [...path, "compiledLayout"], message: "compiled layout is compiler-owned layout-container metadata" });
         }
-        if (!page.controls.some((candidate) => candidate.parentId === control.id)) {
-          ctx.addIssue({ code: "custom", path: [...path, "scrollContentExtent"], message: "scroll content extent requires child controls" });
+        if ((childrenByParent.get(control.id) ?? []).length === 0) {
+          ctx.addIssue({ code: "custom", path: [...path, "compiledLayout"], message: "compiled layout metadata requires child controls" });
         }
-        if (control.scrollContentExtent.width < control.geometry.width
-          || control.scrollContentExtent.height < control.geometry.height) {
-          ctx.addIssue({ code: "custom", path: [...path, "scrollContentExtent"], message: "scroll content extent cannot be smaller than its viewport" });
+        if (control.compiledLayout.kind === "scroll-region") {
+          const extent = control.compiledLayout.scrollContentExtent;
+          if (extent.width < control.geometry.width || extent.height < control.geometry.height) {
+            ctx.addIssue({ code: "custom", path: [...path, "compiledLayout", "scrollContentExtent"], message: "scroll content extent cannot be smaller than its viewport" });
+          }
+          let maximumRight = control.geometry.x + control.geometry.width;
+          let maximumBottom = control.geometry.y + control.geometry.height;
+          const visitOwnedSubtree = (ownerId: string): void => {
+            (childrenByParent.get(ownerId) ?? []).forEach((descendant) => {
+              maximumRight = Math.max(maximumRight, descendant.geometry.x + descendant.geometry.width);
+              maximumBottom = Math.max(maximumBottom, descendant.geometry.y + descendant.geometry.height);
+              if (!isScrollOwner(descendant)) visitOwnedSubtree(descendant.id);
+            });
+          };
+          visitOwnedSubtree(control.id);
+          const quantize = (value: number): number => Math.round(value * 100) / 100;
+          const derivedWidth = quantize(maximumRight - control.geometry.x);
+          const derivedHeight = quantize(maximumBottom - control.geometry.y);
+          if (quantize(extent.width) !== derivedWidth || quantize(extent.height) !== derivedHeight) {
+            ctx.addIssue({ code: "custom", path: [...path, "compiledLayout", "scrollContentExtent"], message: "scroll content extent must equal the tight bounds of its owned scroll subtree" });
+          }
         }
       }
       if (control.overlayHost !== undefined && control.overlayHost.hostPageId !== page.id) {

@@ -117,6 +117,29 @@ describe("measureIntrinsic", () => {
     expect(measureIntrinsic(layoutInput("scroll-region"))).toMatchObject({ overflow: "scroll", preferredHeight: 100 });
   });
 
+  it("separates a scroll viewport minimum from its natural content extent", () => {
+    const item: IntrinsicSize = {
+      minWidth: 80,
+      preferredWidth: 160,
+      maxWidth: 1_600,
+      minHeight: 160,
+      preferredHeight: 160,
+      maxHeight: 160,
+      overflow: "wrap",
+    };
+
+    expect(measureIntrinsic(layoutInput("scroll-region", [item, item]))).toEqual({
+      minWidth: 80,
+      preferredWidth: 160,
+      maxWidth: 300,
+      minHeight: 0,
+      preferredHeight: 332,
+      maxHeight: 332,
+      overflow: "scroll",
+    });
+    expect(measureIntrinsic(layoutInput("column", [item, item])).minHeight).toBe(332);
+  });
+
   it("rejects ambiguous composite and empty layout structures rather than fabricating a size", () => {
     expect(() => measureIntrinsic(layoutInput("split", [children[0]!]))).toThrow("INTRINSIC_MEASURE_LAYOUT_CHILD_COUNT");
     expect(() => measureIntrinsic(layoutInput("dock", [children[0]!]))).toThrow("INTRINSIC_MEASURE_LAYOUT_CHILD_COUNT");

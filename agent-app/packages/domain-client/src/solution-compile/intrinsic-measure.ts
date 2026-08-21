@@ -112,7 +112,8 @@ function measureLayout(input: LayoutIntrinsicMeasureInput): IntrinsicSize {
   const layout = input.node.layout;
   if (layout === "stack" || layout === "overlay-anchor") return maxAxes(children, input, "wrap");
   if (layout === "row") return rowAxes(children, gap, input, "wrap");
-  if (layout === "column" || layout === "scroll-region") return columnAxes(children, gap, input, layout === "scroll-region" ? "scroll" : "wrap");
+  if (layout === "column") return columnAxes(children, gap, input, "wrap");
+  if (layout === "scroll-region") return scrollAxes(children, gap, input);
   if (layout === "grid") return gridAxes(children, gap, input, false);
   if (layout === "asymmetric-grid") return gridAxes(children, gap, input, true);
   if (layout === "split" || layout === "sidebar-content" || layout === "master-detail") {
@@ -130,6 +131,10 @@ function rowAxes(children: readonly IntrinsicSize[], gap: number, input: LayoutI
 function columnAxes(children: readonly IntrinsicSize[], gap: number, input: LayoutIntrinsicMeasureInput, overflow: IntrinsicOverflow): IntrinsicSize {
   const spaces = gap * (children.length - 1);
   return constrained(input, max(children, "minWidth"), max(children, "preferredWidth"), max(children, "maxWidth"), sum(children, "minHeight") + spaces, sum(children, "preferredHeight") + spaces, sum(children, "maxHeight") + spaces, overflow);
+}
+function scrollAxes(children: readonly IntrinsicSize[], gap: number, input: LayoutIntrinsicMeasureInput): IntrinsicSize {
+  const spaces = gap * (children.length - 1);
+  return constrained(input, max(children, "minWidth"), max(children, "preferredWidth"), max(children, "maxWidth"), 0, sum(children, "preferredHeight") + spaces, sum(children, "maxHeight") + spaces, "scroll");
 }
 function maxAxes(children: readonly IntrinsicSize[], input: LayoutIntrinsicMeasureInput, overflow: IntrinsicOverflow): IntrinsicSize {
   return constrained(input, max(children, "minWidth"), max(children, "preferredWidth"), max(children, "maxWidth"), max(children, "minHeight"), max(children, "preferredHeight"), max(children, "maxHeight"), overflow);

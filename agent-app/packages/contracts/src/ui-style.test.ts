@@ -132,7 +132,11 @@ function scrollV2Fixture() {
           id: "scroll-root",
           capabilityId: "layout.4",
           geometry: { x: 40, y: 40, width: 1_360, height: 220 },
-          scrollContentExtent: { width: 1_360, height: 326 },
+          compiledLayout: {
+            kind: "scroll-region",
+            overflow: "local-scroll",
+            scrollContentExtent: { width: 1_360, height: 332 },
+          },
           sourceSolutionNodeId: "scroll-layout",
         },
         {
@@ -146,7 +150,7 @@ function scrollV2Fixture() {
           ...child,
           id: "scroll-second",
           parentId: "scroll-root",
-          geometry: { x: 40, y: 206, width: 1_360, height: 160 },
+          geometry: { x: 40, y: 212, width: 1_360, height: 160 },
           sourceSolutionNodeId: "scroll-second",
         },
         {
@@ -154,8 +158,66 @@ function scrollV2Fixture() {
           id: "scroll-leaf",
           parentId: "scroll-second",
           depth: 2,
-          geometry: { x: 60, y: 340, width: 100, height: 20 },
+          geometry: { x: 60, y: 346, width: 100, height: 20 },
           sourceSolutionNodeId: "scroll-leaf",
+        },
+      ],
+    }],
+  };
+}
+
+function nestedScrollV2Fixture() {
+  const sourcePage = v2Fixture.pages[0]!;
+  const root = sourcePage.controls[0]!;
+  const child = sourcePage.controls[1]!;
+  return {
+    ...v2Fixture,
+    pages: [{
+      ...sourcePage,
+      height: 230,
+      controls: [
+        {
+          ...root,
+          id: "outer-scroll",
+          capabilityId: "layout.4",
+          geometry: { x: 40, y: 40, width: 1_360, height: 150 },
+          compiledLayout: {
+            kind: "scroll-region",
+            overflow: "local-scroll",
+            scrollContentExtent: { width: 1_360, height: 212 },
+          },
+          sourceSolutionNodeId: "outer-scroll",
+        },
+        {
+          ...root,
+          id: "inner-scroll",
+          parentId: "outer-scroll",
+          capabilityId: "layout.4",
+          depth: 1,
+          zIndex: 1,
+          geometry: { x: 40, y: 152, width: 1_360, height: 100 },
+          compiledLayout: {
+            kind: "scroll-region",
+            overflow: "local-scroll",
+            scrollContentExtent: { width: 1_360, height: 212 },
+          },
+          sourceSolutionNodeId: "inner-scroll",
+        },
+        {
+          ...child,
+          id: "inner-first",
+          parentId: "inner-scroll",
+          depth: 2,
+          geometry: { x: 40, y: 152, width: 1_360, height: 100 },
+          sourceSolutionNodeId: "inner-first",
+        },
+        {
+          ...child,
+          id: "inner-second",
+          parentId: "inner-scroll",
+          depth: 2,
+          geometry: { x: 40, y: 264, width: 1_360, height: 100 },
+          sourceSolutionNodeId: "inner-second",
         },
       ],
     }],
@@ -589,19 +651,51 @@ describe("KF UI style contracts", () => {
     if (parsedPage.compatibility !== "native") return;
 
     expect(parsedPage.height).toBe(300);
-    expect(parsedPage.controls[0]!.scrollContentExtent).toEqual({ width: 1_360, height: 326 });
+    const compiledLayout = parsedPage.controls[0]!.compiledLayout;
+    expect(compiledLayout?.kind).toBe("scroll-region");
+    if (compiledLayout?.kind !== "scroll-region") return;
+    expect(compiledLayout.scrollContentExtent).toEqual({ width: 1_360, height: 332 });
     expect(parsedPage.controls[2]!.geometry.y + parsedPage.controls[2]!.geometry.height)
       .toBeGreaterThan(parsedPage.height);
   });
 
-  it("rejects invalid or misused scroll content extents and out-of-extent descendants", () => {
+  it("accepts every visible layout kind only with visible overflow and no scroll extent", () => {
+    for (const kind of ["row", "column", "grid", "asymmetric-grid", "split", "stack", "dock", "sidebar-content", "master-detail", "overlay-anchor"] as const) {
+      const page = v2Fixture.pages[0]!;
+      const root = page.controls[0]!;
+      expect(UIImplementationSpecV2Schema.safeParse({
+        ...v2Fixture,
+        pages: [{ ...page, controls: [{ ...root, compiledLayout: { kind, overflow: "visible" } }, ...page.controls.slice(1)] }],
+      }).success).toBe(true);
+    }
+  });
+
+  it("accepts nested scroll owners while stopping outer extent derivation at the inner viewport", () => {
+    const parsed = UIImplementationSpecV2Schema.parse(nestedScrollV2Fixture());
+    const page = parsed.pages[0]!;
+    expect(page.compatibility).toBe("native");
+    if (page.compatibility !== "native") return;
+
+    expect(page.controls[1]!.geometry.y + page.controls[1]!.geometry.height).toBeGreaterThan(page.height);
+    expect(page.controls[3]!.geometry.y + page.controls[3]!.geometry.height).toBeGreaterThan(252);
+    expect(page.controls[0]!.compiledLayout?.kind).toBe("scroll-region");
+    expect(page.controls[1]!.compiledLayout?.kind).toBe("scroll-region");
+  });
+
+  it("rejects invalid, loose, legacy, or misused compiled layout metadata", () => {
     const fixture = scrollV2Fixture();
     const page = fixture.pages[0]!;
     const root = page.controls[0]!;
 
     expect(UIImplementationSpecV2Schema.safeParse({
       ...fixture,
-      pages: [{ ...page, controls: [{ ...root, scrollContentExtent: { width: 1_359, height: 326 } }, ...page.controls.slice(1)] }],
+      pages: [{
+        ...page,
+        controls: [{
+          ...root,
+          compiledLayout: { kind: "scroll-region", overflow: "local-scroll", scrollContentExtent: { width: 1_360, height: 10_000 } },
+        }, ...page.controls.slice(1)],
+      }],
     }).success).toBe(false);
     expect(UIImplementationSpecV2Schema.safeParse({
       ...fixture,
@@ -610,6 +704,16 @@ describe("KF UI style contracts", () => {
     expect(UIImplementationSpecV2Schema.safeParse({
       ...fixture,
       pages: [{ ...page, controls: [{ ...root }] }],
+    }).success).toBe(false);
+    expect(UIImplementationSpecV2Schema.safeParse({
+      ...fixture,
+      pages: [{
+        ...page,
+        controls: [{
+          ...root,
+          compiledLayout: { kind: "scroll-region", overflow: "local-scroll", scrollContentExtent: { width: 1_360, height: 200 } },
+        }, ...page.controls.slice(1)],
+      }],
     }).success).toBe(false);
     expect(UIImplementationSpecV2Schema.safeParse({
       ...fixture,
@@ -624,9 +728,16 @@ describe("KF UI style contracts", () => {
       ...fixture,
       pages: [{
         ...page,
-        controls: page.controls.map((control) => control.id === "scroll-second"
-          ? { ...control, capabilityId: "layout.4", scrollContentExtent: { width: 1_360, height: 160 } }
-          : control),
+        controls: [{
+          ...root,
+          compiledLayout: {
+            kind: "column",
+            overflow: "visible",
+            scrollContentExtent: { width: 1_360, height: 10_000 },
+          },
+        }, ...page.controls.slice(1).map((control) => control.id === "scroll-second"
+          ? { ...control, geometry: { ...control.geometry, y: 9_880 } }
+          : control)],
       }],
     }).success).toBe(false);
     expect(UIImplementationSpecV2Schema.safeParse({
@@ -642,8 +753,41 @@ describe("KF UI style contracts", () => {
       ...fixture,
       pages: [{
         ...page,
-        controls: page.controls.map((control) => control.id === "scroll-root"
-          ? { ...control, geometry: { ...control.geometry, y: 100 } }
+        controls: [{ ...root, scrollContentExtent: { width: 1_360, height: 332 } }, ...page.controls.slice(1)],
+      }],
+    }).success).toBe(false);
+    expect(UIImplementationSpecV2Schema.safeParse({
+      ...fixture,
+      pages: [{ ...page, controls: [{ ...root, compiledLayout: { kind: "scroll-region", overflow: "visible" } }, ...page.controls.slice(1)] }],
+    }).success).toBe(false);
+    expect(UIImplementationSpecV2Schema.safeParse({
+      ...fixture,
+      pages: [{ ...page, controls: [{ ...root, compiledLayout: { kind: "column", overflow: "local-scroll" } }, ...page.controls.slice(1)] }],
+    }).success).toBe(false);
+    expect(UIImplementationSpecV2Schema.safeParse({
+      ...fixture,
+      pages: [{
+        ...page,
+        controls: [{
+          ...root,
+          compiledLayout: { kind: "scroll-region", overflow: "local-scroll", scrollContentExtent: { width: 100_001, height: 332 } },
+        }, ...page.controls.slice(1)],
+      }],
+    }).success).toBe(false);
+  });
+
+  it("rejects nested scroll extents that swallow inner-owned descendants", () => {
+    const fixture = nestedScrollV2Fixture();
+    const page = fixture.pages[0]!;
+    expect(UIImplementationSpecV2Schema.safeParse({
+      ...fixture,
+      pages: [{
+        ...page,
+        controls: page.controls.map((control) => control.id === "outer-scroll"
+          ? {
+            ...control,
+            compiledLayout: { kind: "scroll-region", overflow: "local-scroll", scrollContentExtent: { width: 1_360, height: 324 } },
+          }
           : control),
       }],
     }).success).toBe(false);
