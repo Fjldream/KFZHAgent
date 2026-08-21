@@ -146,6 +146,10 @@ export const ScriptCapabilityProfileSchema = z.object({
       ctx.addIssue({ code: "custom", path: [field], message: `duplicate script capability ${field}` });
     }
   });
+  const normalizedKfProperties = profile.properties.map((member) => member.kfProperty.toLowerCase());
+  if (new Set(normalizedKfProperties).size !== normalizedKfProperties.length) {
+    ctx.addIssue({ code: "custom", path: ["properties"], message: "duplicate case-normalized KF runtime property" });
+  }
 });
 
 const recipeRole = z.object({ role: id, capabilityCandidates: z.array(id).min(1).max(16) }).strict();

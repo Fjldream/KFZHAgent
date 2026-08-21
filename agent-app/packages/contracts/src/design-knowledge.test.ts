@@ -123,6 +123,20 @@ describe("design knowledge contracts", () => {
       ...profile,
       properties: [{ ...profile.properties[0], readable: false, writable: false }],
     }).success).toBe(false);
+    expect(ScriptCapabilityProfileSchema.safeParse({
+      ...profile,
+      properties: [
+        profile.properties[0],
+        { ...profile.properties[0], semanticProperty: "selected-value", kfProperty: "value", readable: true, writable: false },
+      ],
+    }).success).toBe(false);
+    expect(ScriptCapabilityProfileSchema.safeParse({
+      ...profile,
+      properties: [
+        profile.properties[0],
+        { ...profile.properties[0], kfProperty: "OtherValue", readable: false, writable: true },
+      ],
+    }).success).toBe(false);
   });
 
   it("requires evidence references to be repository-relative paths", () => {

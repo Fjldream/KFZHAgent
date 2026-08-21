@@ -6,51 +6,28 @@ import {
   CompilerBindingIdSchema,
   CompilerPageGuidSchema,
   CompilerScriptIdSchema,
+  semanticImplementationTextIssue,
   StableSemanticIdSchema,
 } from "./action-graph.js";
 
 const semanticName = StableSemanticIdSchema;
 const semanticText = z.string().trim().min(1).max(2_000)
-  .refine((value) => ActionScalarSchema.safeParse(value).success, "implementation text is not allowed in script descriptions");
+  .refine((value) => semanticImplementationTextIssue(value, "semantic-text") === undefined, "implementation text is not allowed in script descriptions");
 const shortText = z.string().trim().min(1).max(400)
-  .refine((value) => ActionScalarSchema.safeParse(value).success, "implementation text is not allowed in script descriptions");
+  .refine((value) => semanticImplementationTextIssue(value, "semantic-text") === undefined, "implementation text is not allowed in script descriptions");
 const scalar = ActionScalarSchema;
 
-function containsExecutableCall(value: string): boolean {
-  const calls = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\(([^()]*)\)/g;
-  for (const match of value.matchAll(calls)) {
-    const name = match[1]!;
-    const argumentsText = match[2]!;
-    if (/^(?:rgb|rgba|hsl|hsla|var)$/i.test(name)) continue;
-    if (/^[A-Z]{2,}$/.test(name) && /[\u3400-\u9fff]/.test(argumentsText)) continue;
-    if (/^version$/i.test(name) && /^\s*\d+(?:\.\d+)+\s*$/.test(argumentsText)) continue;
-    return true;
-  }
-  return false;
-}
-
-function hasExecutableDeclarativeSyntax(value: string): boolean {
-  return /[{};]/.test(value)
-    || /=>|\b(?:const|let|var|function|class|return|throw|await|yield|break|continue|debugger|delete)\b/.test(value)
-    || /\b(?:document|window|globalThis|fetch|XMLHttpRequest|WebSocket|eval|Function)\b/i.test(value)
-    || /\$\w+\s*\./.test(value)
-    || /(?:^|[\s(])[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.[A-Za-z_$][A-Za-z0-9_$]*)|(?:\[[^\]]+\]))*\s*(?:\|\|=|&&=|\?\?=|>>>=|<<=|>>=|\+=|-=|\*\*=|\*=|\/=|%=|&=|\|=|\^=|=|\+\+|--)/.test(value)
-    || /\b[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*|\[[^\]]+\])+\s*\(/.test(value)
-    || containsExecutableCall(value);
-}
-
 const declarativeIntent = semanticText.refine(
-  (value) => !hasExecutableDeclarativeSyntax(value),
+  (value) => semanticImplementationTextIssue(value, "semantic-text") === undefined,
   "custom-script steps must be declarative prose, not executable syntax",
 );
 
-const obviousForbiddenSource = /\b(?:fetch|XMLHttpRequest|WebSocket|eval|Function|document|window|globalThis|import|require)\b/i;
 const semanticSource = z.string().min(1).max(8_000).refine(
-  (value) => !obviousForbiddenSource.test(value),
-  "SCRIPT_SOURCE_OBVIOUSLY_FORBIDDEN",
+  (value) => semanticImplementationTextIssue(value, "semantic-js-source") === undefined,
+  "SCRIPT_SOURCE_IMPLEMENTATION_LEAKAGE",
 );
 const compiledSource = z.string().min(1).max(32_000).refine(
-  (value) => !obviousForbiddenSource.test(value),
+  (value) => semanticImplementationTextIssue(value, "compiled-js") === undefined,
   "COMPILED_SCRIPT_FORBIDDEN_TOKEN",
 );
 
@@ -169,9 +146,7 @@ export const CompiledScriptModuleSchema = z.object({
   pageReferences: z.array(PageReferenceSchema).max(32),
   source: compiledSource,
   sourceHash: hash,
-  validation: z.object({ kind: z.literal("ast-allowlist/v1"), sourceHash: hash }).strict(),
 }).strict().superRefine((module, ctx) => {
-  if (module.sourceHash !== module.validation.sourceHash) ctx.addIssue({ code: "custom", path: ["validation", "sourceHash"], message: "COMPILED_SCRIPT_VALIDATION_HASH_MISMATCH" });
   if (new Set(module.instanceReferences.map((reference) => reference.semanticId)).size !== module.instanceReferences.length) ctx.addIssue({ code: "custom", path: ["instanceReferences"], message: "COMPILED_INSTANCE_REFERENCE_DUPLICATE" });
   if (new Set(module.pageReferences.map((reference) => reference.semanticId)).size !== module.pageReferences.length) ctx.addIssue({ code: "custom", path: ["pageReferences"], message: "COMPILED_PAGE_REFERENCE_DUPLICATE" });
   if (!module.instanceReferences.some((reference) => reference.instanceName === module.ownerInstanceName)) ctx.addIssue({ code: "custom", path: ["ownerInstanceName"], message: "COMPILED_SCRIPT_OWNER_UNDECLARED" });

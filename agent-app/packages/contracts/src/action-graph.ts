@@ -24,6 +24,22 @@ function isImplementationOwnedName(value: string): boolean {
   return implementationOwnedNames.has(normalized) || (normalized.startsWith("on") && !safeOnNames.has(normalized));
 }
 
+const rawRuntimeNames = new Set([
+  "configuredata", "coordinates", "coords", "geometry", "guid", "javascript", "lefttoppt", "linkid", "linkmng",
+  "objecttype", "onclick", "selector", "styledata", "styledatanew", "uimodeltype",
+]);
+const domAndNetworkNames = new Set([
+  "document", "window", "globalthis", "navigator", "location", "localstorage", "sessionstorage", "fetch",
+  "xmlhttprequest", "websocket", "eval", "function", "require", "import",
+]);
+const selectorTagNames = new Set([
+  "a", "button", "form", "input", "label", "option", "select", "textarea",
+]);
+const htmlTagNames = new Set([
+  "a", "article", "body", "button", "div", "footer", "form", "header", "input", "label", "main", "nav",
+  "section", "select", "span", "table", "td", "textarea", "tr",
+]);
+
 function containsUnsafeCall(value: string): boolean {
   const calls = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\(([^()]*)\)/g;
   for (const match of value.matchAll(calls)) {
@@ -48,21 +64,80 @@ function isRawJsonText(value: string): boolean {
   }
 }
 
-function isSafeActionText(value: string): boolean {
+function cssSelectorOrRuleIssue(value: string, strictSelectors: boolean): string | undefined {
   const trimmed = value.trim();
-  return !/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/i.test(value)
-    && !isRawJsonText(value)
-    && !/<\/?(?:script|style|iframe|object|embed)\b|\b(?:javascript|vbscript)\s*:/i.test(value)
-    && !/\b(?:alert|eval|fetch|Function|setInterval|setTimeout|WebSocket|XMLHttpRequest)\s*\(/i.test(value)
-    && !/\b(?:document|globalThis|window)\s*\./i.test(value)
-    && !/\b(?:import|require)\s*\(/i.test(value)
-    && !/=>|\$\{|\$(?:control|state|data|page|overlay|feedback)\b/.test(value)
-    && !/(?:^|[\s(])[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.[A-Za-z_$][A-Za-z0-9_$]*)|(?:\[[^\]]+\]))*\s*(?:\|\|=|&&=|\?\?=|\+=|-=|\*=|\/=|%=|=|\+\+|--)/.test(value)
-    && !containsUnsafeCall(value)
-    && (/^#[0-9a-f]{3,8}$/i.test(trimmed) || !/^\s*(?:[.#][A-Za-z_-][A-Za-z0-9_-]*|\[[^\]\n]+\])(?:\s*[>+~ ]\s*(?:[.#]?[A-Za-z_-][A-Za-z0-9_-]*|\[[^\]\n]+\]))*(?::[A-Za-z-]+(?:\([^)]*\))?)?\s*$/.test(trimmed))
-    && !/^(?:a|button|form|input|label|option|select|textarea):{1,2}[A-Za-z-]+(?:\([^)]*\))?$/i.test(trimmed)
-    && !/^[A-Za-z][A-Za-z0-9-]*\s+(?:[.#]|\[)/.test(trimmed)
-    && !/(?:^|[;{]\s*)(?:color|display|margin(?:-[a-z]+)?|padding(?:-[a-z]+)?|background(?:-[a-z]+)?|border(?:-[a-z]+)?|font(?:-[a-z]+)?|opacity|position|transform|transition|animation|width|height)\s*:/i.test(value);
+  if (/^#[0-9a-f]{3,8}$/i.test(trimmed)) return undefined;
+  if (/(?:^|["'`\s])(?:\.[A-Za-z_-][A-Za-z0-9_-]*|#[A-Za-z_-][A-Za-z0-9_-]*|\[[A-Za-z_-][^\]\n]*\])\s*,\s*(?:\.[A-Za-z_-][A-Za-z0-9_-]*|#[A-Za-z_-][A-Za-z0-9_-]*|\[[A-Za-z_-][^\]\n]*\])/.test(value)) return "CSS selector lists are not allowed";
+  const selectorAtom = /^(?:[A-Za-z][A-Za-z0-9-]*|[.#][A-Za-z_-][A-Za-z0-9_-]*|\[[^\]\n]+\])$/;
+  const selectorParts = trimmed.split(/\s*[>+~]\s*/);
+  if (selectorParts.length > 1 && selectorParts.every((part) => selectorAtom.test(part.trim()))) return "CSS combinator selectors are not allowed";
+  const selectorListParts = trimmed.split(/\s*,\s*/);
+  if (selectorListParts.length > 1 && selectorListParts.every((part) => selectorAtom.test(part))
+    && (selectorListParts.some((part) => part.startsWith(".") || part.startsWith("#") || part.startsWith("["))
+      || selectorListParts.every((part) => htmlTagNames.has(part.toLowerCase()) || part.includes("-")))) {
+    return "CSS selector lists are not allowed";
+  }
+  if (/^(?:\.[A-Za-z_-][A-Za-z0-9_-]*|#[A-Za-z_-][A-Za-z0-9_-]*|\[[^\]\n]+\])$/.test(trimmed)) return "CSS selectors are not allowed";
+  if (/(?:^|["'`\s])\[[A-Za-z_-][^\]\n]*\](?=["'`\s;]|$)/.test(value)) return "CSS attribute selectors are not allowed";
+  if (/^[.#][A-Za-z_-][A-Za-z0-9_-]*:{1,2}[A-Za-z-]+(?:\([^)]*\))?$/.test(trimmed)) return "CSS pseudo selectors are not allowed";
+  const pseudo = /\b([A-Za-z][A-Za-z0-9-]*):{1,2}([A-Za-z-]+)(?:\([^)]*\))?/g;
+  for (const match of value.matchAll(pseudo)) {
+    const prefix = match[1]!.toLowerCase();
+    if (selectorTagNames.has(prefix) || (strictSelectors && (htmlTagNames.has(prefix) || prefix === "discard" || prefix === "unknown"))) return "CSS pseudo selectors are not allowed";
+  }
+  if (/(?:^|["'`\s])(?:\.[A-Za-z_-][A-Za-z0-9_-]*|#[A-Za-z_-][A-Za-z0-9_-]*|\[[^\]\n]+\])\s*(?:[>+~]|\s)\s*(?:\.?[A-Za-z_-][A-Za-z0-9_-]*|#[A-Za-z_-][A-Za-z0-9_-]*|\[[^\]\n]+\])/.test(value)) return "CSS combinator selectors are not allowed";
+  if (/^[A-Za-z][A-Za-z0-9-]*\s+(?:[.#]|\[)/.test(trimmed)) return "CSS descendant selectors are not allowed";
+  if (/^@(?:charset|container|font-face|import|keyframes|layer|media|namespace|page|property|supports)\b/i.test(trimmed)) return "CSS at-rules are not allowed";
+  if (/(?:^|[;{]\s*)(?:--[A-Za-z0-9_-]+|animation|background(?:-[a-z]+)?|border(?:-[a-z]+)?|color|display|font(?:-[a-z]+)?|height|margin(?:-[a-z]+)?|opacity|overflow|padding(?:-[a-z]+)?|position|transform|transition|width|z-index)\s*:/i.test(value)) return "CSS declarations are not allowed";
+  if (/[^{}\n]+\{\s*(?:--?[A-Za-z]|[A-Za-z][A-Za-z0-9-]*)\s*:/.test(value)) return "CSS rules are not allowed";
+  return undefined;
+}
+
+export type SemanticImplementationTextMode = "semantic-text" | "semantic-js-source" | "implementation-data" | "compiled-js";
+
+export function semanticImplementationTextIssue(
+  value: string,
+  mode: SemanticImplementationTextMode,
+  options: { structuralIdentifier?: boolean; strictSelectors?: boolean; allowDottedIdentifier?: boolean } = {},
+): string | undefined {
+  const trimmed = value.trim();
+  if (/^https?:\/\/\S+$/i.test(trimmed)
+    || /^urn:[A-Za-z0-9][A-Za-z0-9:._-]*$/i.test(trimmed)
+    || /^(?:[A-Za-z0-9-]+\.)+(?:com|org|net|io|cn|com\.cn|gov\.cn)$/i.test(trimmed)) return undefined;
+  if (/^\{theme\.[A-Za-z][A-Za-z0-9]*\}$/.test(trimmed)) return undefined;
+  if (/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/i.test(value)) return "GUID values are not allowed";
+  if (/<\/?(?:script|style|iframe|object|embed)\b|\b(?:javascript|vbscript)\s*:/i.test(value)) return "executable markup is not allowed";
+  const selectorIssue = cssSelectorOrRuleIssue(value, options.strictSelectors ?? mode === "semantic-js-source");
+  if (selectorIssue !== undefined) return selectorIssue;
+  const identifiers = value.match(/[A-Za-z_$][A-Za-z0-9_$]*/g) ?? [];
+  for (const identifier of identifiers) {
+    const normalized = normalizedName(identifier);
+    if (domAndNetworkNames.has(normalized)) return `forbidden runtime name: ${identifier}`;
+    if (rawRuntimeNames.has(normalized)) return `implementation runtime name: ${identifier}`;
+  }
+  if (mode === "semantic-js-source") {
+    if (/\b[A-Za-z_$][A-Za-z0-9_$]*[0-9]+\b/.test(value)) return "KF instance-shaped identifiers are not allowed";
+    if (/\?\.\s*\[|\[\s*["'][^"']+["']\s*\]\s*(?:\?\.)?\s*\(/.test(value)) return "computed or optional bracket calls are not allowed";
+    return undefined;
+  }
+  if (mode === "compiled-js") return undefined;
+  if (mode === "implementation-data") {
+    if (/=>/.test(value)) return "JavaScript syntax is not allowed";
+    if (containsUnsafeCall(value) && !/^status\([^()]*\)$/i.test(trimmed)) return "code-like calls are not allowed";
+    if (/\b[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.|\?\.)[A-Za-z_$][A-Za-z0-9_$]*|(?:\?\.)?\[[^\]]+\])+(?:\?\.)?\s*\(/.test(trimmed)) return "code-like calls are not allowed";
+    return undefined;
+  }
+  if (isRawJsonText(value)) return "raw JSON text is not allowed";
+  if (/:\s*(?:\[\s*(?:-?\d|true\b|false\b|null\b|["'{[])|\{\s*(?:["']|[A-Za-z_$][A-Za-z0-9_$]*\s*:))/i.test(value)) return "embedded raw JSON text is not allowed";
+  if (/=>|\$\{|\$(?:control|state|data|page|overlay|feedback|timer)\b/.test(value)) return "JavaScript syntax is not allowed";
+  if (/(?:^|[\s(])[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.[A-Za-z_$][A-Za-z0-9_$]*)|(?:\[[^\]]+\]))*\s*(?:\|\|=|&&=|\?\?=|>>>=|<<=|>>=|\+=|-=|\*\*=|\*=|\/=|%=|&=|\|=|\^=|=|\+\+|--)/.test(value)) return "executable assignment syntax is not allowed";
+  if (/\b(?:const|let|var)\s+[A-Za-z_$][A-Za-z0-9_$]*\b|\bfunction\s*[A-Za-z_$]*\s*\(|\bclass\s+[A-Za-z_$][A-Za-z0-9_$]*\s*\{|^(?:\s*)(?:return|throw|await|yield|break|continue|debugger|delete)\b|^\s*export\s+(?:default\b|\{|\*)/m.test(value)) return "JavaScript statements are not allowed";
+  if (!options.structuralIdentifier && containsUnsafeCall(value) && !/^status\([^()]*\)$/i.test(trimmed)) return "code-like calls are not allowed";
+  if (!options.structuralIdentifier && /^[A-Za-z_$][A-Za-z0-9_$]*\?\.\s*\([^)]*\)$/.test(trimmed)) return "code-like calls are not allowed";
+  if (!options.structuralIdentifier && /\b[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.|\?\.)[A-Za-z_$][A-Za-z0-9_$]*|(?:\?\.)?\[[^\]]+\])+(?:\?\.)?\s*\(/.test(trimmed)) return "code-like calls are not allowed";
+  if (!options.structuralIdentifier && !options.allowDottedIdentifier
+    && /\b[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*|\[[^\]]+\])+/.test(trimmed)) return "executable member or index syntax is not allowed";
+  return undefined;
 }
 
 export const StableSemanticIdSchema = z.string().trim().min(1).max(100)
@@ -72,10 +147,14 @@ export const StableSemanticIdSchema = z.string().trim().min(1).max(100)
 
 const semanticName = z.string().trim().min(1).max(100).regex(/^[A-Za-z][A-Za-z0-9_-]*$/)
   .refine((value) => !isImplementationOwnedName(value), "implementation names are not allowed");
-const shortText = z.string().trim().min(1).max(400);
+const shortText = z.string().trim().min(1).max(400)
+  .refine((value) => semanticImplementationTextIssue(value, "semantic-text") === undefined, "implementation text is not allowed");
 
 export const ActionScalarSchema = z.union([
-  z.string().trim().max(2_000).refine(isSafeActionText, "implementation text is not allowed in action values"),
+  z.string().trim().max(2_000).refine(
+    (value) => semanticImplementationTextIssue(value, "semantic-text") === undefined,
+    "implementation text is not allowed in action values",
+  ),
   z.number().finite().min(-1_000_000_000).max(1_000_000_000),
   z.boolean(),
   z.null(),
@@ -97,8 +176,9 @@ const ActionValueShapeSchema: z.ZodType<ActionValue> = z.lazy(() => z.union([
   }).strict(),
 ]));
 
-export const ActionValueSchema: z.ZodType<ActionValue> = ActionValueShapeSchema.superRefine((value, ctx) => {
+function preflightActionValue(value: ActionValue, ctx: z.RefinementCtx): void {
   const pending: Array<{ value: ActionValue; depth: number }> = [{ value, depth: 0 }];
+  const seen = new WeakSet<object>();
   let count = 0;
   while (pending.length > 0) {
     const current = pending.pop()!;
@@ -111,20 +191,91 @@ export const ActionValueSchema: z.ZodType<ActionValue> = ActionValueShapeSchema.
       ctx.addIssue({ code: "custom", message: "ACTION_VALUE_DEPTH_EXCEEDED" });
       return;
     }
-    if (current.value !== null && typeof current.value === "object") {
-      if (current.value.kind === "list") {
-        current.value.items.forEach((item) => pending.push({ value: item, depth: current.depth + 1 }));
-      } else {
+    if (current.value === null || typeof current.value !== "object") continue;
+    if (seen.has(current.value)) {
+      ctx.addIssue({ code: "custom", message: "ACTION_VALUE_CYCLE_OR_SHARED_REFERENCE" });
+      return;
+    }
+    seen.add(current.value);
+    let descriptors: PropertyDescriptorMap;
+    let keys: PropertyKey[];
+    let prototype: object | null;
+    try {
+      descriptors = Object.getOwnPropertyDescriptors(current.value);
+      keys = Reflect.ownKeys(current.value);
+      prototype = Reflect.getPrototypeOf(current.value);
+    } catch {
+      ctx.addIssue({ code: "custom", message: "ACTION_VALUE_DESCRIPTOR_UNSAFE" });
+      return;
+    }
+    if (keys.some((key) => typeof key === "symbol")) {
+      ctx.addIssue({ code: "custom", message: "ACTION_VALUE_SYMBOL_KEY_FORBIDDEN" });
+      return;
+    }
+    if (prototype !== Object.prototype && prototype !== Array.prototype && prototype !== null) {
+      ctx.addIssue({ code: "custom", message: "ACTION_VALUE_PROTOTYPE_FORBIDDEN" });
+      return;
+    }
+    for (const key of keys) {
+      const descriptor = descriptors[String(key)];
+      if (descriptor === undefined || descriptor.get !== undefined || descriptor.set !== undefined || !("value" in descriptor)) {
+        ctx.addIssue({ code: "custom", message: "ACTION_VALUE_ACCESSOR_FORBIDDEN" });
+        return;
+      }
+    }
+    if (Array.isArray(current.value)) {
+      const lengthDescriptor = descriptors["length"];
+      const length = lengthDescriptor?.value as unknown;
+      if (typeof length !== "number" || !Number.isSafeInteger(length) || length < 0 || length > 32) {
+        ctx.addIssue({ code: "custom", message: "ACTION_VALUE_ARRAY_BOUND_EXCEEDED" });
+        return;
+      }
+      for (let index = 0; index < length; index += 1) {
+        const descriptor = descriptors[String(index)];
+        if (descriptor === undefined || !("value" in descriptor)) {
+          ctx.addIssue({ code: "custom", message: "ACTION_VALUE_SPARSE_ARRAY_FORBIDDEN" });
+          return;
+        }
+        pending.push({ value: descriptor.value as ActionValue, depth: current.depth });
+      }
+    } else {
+      if (keys.length > 100) {
+        ctx.addIssue({ code: "custom", message: "ACTION_VALUE_OBJECT_BOUND_EXCEEDED" });
+        return;
+      }
+      const kind = descriptors["kind"]?.value as unknown;
+      keys.forEach((key) => {
+        const nextDepth = (kind === "list" && key === "items") || (kind === "record" && key === "fields")
+          ? current.depth + 1
+          : current.depth;
+        pending.push({ value: descriptors[String(key)]!.value as ActionValue, depth: nextDepth });
+      });
+    }
+  }
+}
+
+const ActionValuePreflightSchema = z.unknown()
+  .superRefine((value, ctx) => preflightActionValue(value as ActionValue, ctx))
+  .transform((value) => value as ActionValue);
+
+export const ActionValueSchema: z.ZodType<ActionValue> = ActionValuePreflightSchema
+  .pipe(ActionValueShapeSchema as z.ZodType<ActionValue, ActionValue>)
+  .superRefine((value, ctx) => {
+    const pending: ActionValue[] = [value];
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      if (current === null || typeof current !== "object") continue;
+      if (current.kind === "list") pending.push(...current.items);
+      else {
         const names = new Set<string>();
-        current.value.fields.forEach((field) => {
+        current.fields.forEach((field) => {
           if (names.has(field.name)) ctx.addIssue({ code: "custom", message: `ACTION_VALUE_FIELD_DUPLICATE: ${field.name}` });
           names.add(field.name);
-          pending.push({ value: field.value, depth: current.depth + 1 });
+          pending.push(field.value);
         });
       }
     }
-  }
-});
+  });
 
 export const SemanticEventSchema = z.enum([
   "blur", "change", "clear", "click", "edit", "error", "filter", "focus", "input", "load", "navigate",
@@ -244,6 +395,7 @@ export const ActionGraphSchema = z.object({
     globalIds.add(id);
   }));
   const actionById = new Map<string, { index: number; dependencies: string[] }>();
+  const invokedScriptIds = new Set<string>();
   graph.actions.forEach((action, actionIndex) => {
     if (globalIds.has(action.id)) ctx.addIssue({ code: "custom", path: ["actions", actionIndex, "id"], message: `ACTION_ID_GLOBAL_DUPLICATE: ${action.id}` });
     globalIds.add(action.id);
@@ -256,12 +408,18 @@ export const ActionGraphSchema = z.object({
         if (operand.kind === "control-value" && !sets.controls.has(operand.controlId)) ctx.addIssue({ code: "custom", path: ["actions", actionIndex, "conditions", conditionIndex, operandIndex === 0 ? "left" : "right"], message: `ACTION_CONDITION_CONTROL_UNKNOWN: ${operand.controlId}` });
       });
     });
-    action.effects.forEach((effect, effectIndex) => addUnknownEffectIssue(effect, sets, ctx, ["actions", actionIndex, "effects", effectIndex]));
+    action.effects.forEach((effect, effectIndex) => {
+      addUnknownEffectIssue(effect, sets, ctx, ["actions", actionIndex, "effects", effectIndex]);
+      if (effect.kind === "run-script") invokedScriptIds.add(effect.scriptId);
+    });
     if (new Set(action.afterActionIds).size !== action.afterActionIds.length) ctx.addIssue({ code: "custom", path: ["actions", actionIndex, "afterActionIds"], message: `ACTION_DEPENDENCY_DUPLICATE: ${action.id}` });
   });
   graph.actions.forEach((action, actionIndex) => action.afterActionIds.forEach((dependencyId, dependencyIndex) => {
     if (!actionById.has(dependencyId)) ctx.addIssue({ code: "custom", path: ["actions", actionIndex, "afterActionIds", dependencyIndex], message: `ACTION_DEPENDENCY_UNKNOWN: ${dependencyId}` });
   }));
+  graph.references.scriptIds.forEach((scriptId, scriptIndex) => {
+    if (!invokedScriptIds.has(scriptId)) ctx.addIssue({ code: "custom", path: ["references", "scriptIds", scriptIndex], message: `ACTION_SCRIPT_ORPHANED: ${scriptId}` });
+  });
   const finished = new Set<string>();
   graph.actions.forEach((start) => {
     if (finished.has(start.id)) return;

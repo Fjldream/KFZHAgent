@@ -2,6 +2,7 @@ import { z } from "zod";
 import { projectKeySchema } from "./solution.js";
 import {
   ActionPlanSchema,
+  semanticImplementationTextIssue,
   SemanticEventBindingSchema,
   type ActionPlan,
   type SemanticEventBinding,
@@ -15,7 +16,6 @@ import {
   isImplementationOwnedFieldName as isForbiddenSemanticName,
   NativeThemeSpecSchema,
   normalizeImplementationOwnedFieldName as normalizeName,
-  sharedImplementationTextIssue,
   StyleDeclarationSchema,
   StyleDeclarationV2Schema,
   StyleStatesV2Schema,
@@ -88,116 +88,9 @@ const forbiddenImplementationPropertyNames = new Set([
   "zindex",
 ]);
 
-const knownCssPseudoClassNames = new Set([
-  "active",
-  "any-link",
-  "autofill",
-  "checked",
-  "default",
-  "defined",
-  "dir",
-  "disabled",
-  "empty",
-  "enabled",
-  "first-child",
-  "first-of-type",
-  "focus",
-  "focus-visible",
-  "focus-within",
-  "fullscreen",
-  "has",
-  "host",
-  "host-context",
-  "hover",
-  "in-range",
-  "indeterminate",
-  "invalid",
-  "is",
-  "lang",
-  "last-child",
-  "last-of-type",
-  "link",
-  "modal",
-  "not",
-  "nth-child",
-  "nth-last-child",
-  "nth-last-of-type",
-  "nth-of-type",
-  "only-child",
-  "only-of-type",
-  "optional",
-  "out-of-range",
-  "picture-in-picture",
-  "placeholder-shown",
-  "read-only",
-  "read-write",
-  "required",
-  "root",
-  "scope",
-  "target",
-  "user-invalid",
-  "user-valid",
-  "valid",
-  "visited",
-  "where",
-]);
-
-const standardHtmlAndSvgTagNames = new Set([
-  "a", "abbr", "address", "animate", "animatemotion", "animatetransform", "area", "article", "aside", "audio",
-  "b", "base", "bdi", "bdo", "blockquote", "body", "br", "button", "canvas", "caption", "circle", "cite",
-  "clippath", "code", "col", "colgroup", "data", "datalist", "dd", "defs", "del", "desc", "details", "dfn", "discard",
-  "dialog", "div", "dl", "dt", "ellipse", "em", "embed", "feblend", "fecolormatrix", "fecomponenttransfer",
-  "fecomposite", "feconvolvematrix", "fediffuselighting", "fedisplacementmap", "fedistantlight", "fedropshadow",
-  "feflood", "fefunca", "fefuncb", "fefuncg", "fefuncr", "fegaussianblur", "feimage", "femerge", "femergenode",
-  "femorphology", "feoffset", "fepointlight", "fespecularlighting", "fespotlight", "fetile", "feturbulence",
-  "fieldset", "figcaption", "figure", "filter", "footer", "foreignobject", "form", "g", "h1", "h2", "h3", "h4",
-  "h5", "h6", "head", "header", "hgroup", "hr", "html", "i", "iframe", "image", "img", "input", "ins", "kbd",
-  "label", "legend", "li", "line", "lineargradient", "link", "main", "map", "mark", "marker", "mask", "menu",
-  "meta", "metadata", "meter", "mpath", "nav", "noscript", "object", "ol", "optgroup", "option", "output", "p",
-  "path", "pattern", "picture", "polygon", "polyline", "pre", "progress", "q", "radialgradient", "rect", "rp", "rt",
-  "ruby", "s", "samp", "script", "search", "section", "select", "selectedcontent", "set", "slot", "small", "source",
-  "span", "stop", "strong", "style", "sub", "summary", "sup", "svg", "switch", "symbol", "table", "tbody", "td",
-  "template", "text", "textarea", "textpath", "tfoot", "th", "thead", "time", "title", "tr", "track", "tspan", "u",
-  "ul", "unknown", "use", "var", "video", "view", "wbr",
-]);
-
 function isForbiddenImplementationPropertyName(value: string): boolean {
   return isForbiddenSemanticName(value)
     || forbiddenImplementationPropertyNames.has(normalizeName(value));
-}
-
-function isKnownCssPseudoClassSelector(value: string): boolean {
-  const match = /^([A-Za-z][A-Za-z0-9-]*|[.#][A-Za-z_-][A-Za-z0-9_-]*):([A-Za-z-]+)(?:\([^)]*\))?$/.exec(value);
-  const selectorPrefix = match?.[1];
-  const pseudoClassName = match?.[2];
-  return selectorPrefix !== undefined
-    && pseudoClassName !== undefined
-    && knownCssPseudoClassNames.has(pseudoClassName.toLowerCase())
-    && (selectorPrefix.startsWith(".")
-      || selectorPrefix.startsWith("#")
-      || standardHtmlAndSvgTagNames.has(selectorPrefix.toLowerCase()));
-}
-
-function isKnownCssPseudoElementSelector(value: string): boolean {
-  const match = /^([A-Za-z][A-Za-z0-9-]*|[.#][A-Za-z_-][A-Za-z0-9_-]*)::([A-Za-z-]+)(?:\([^)]*\))?$/.exec(value);
-  const selectorPrefix = match?.[1];
-  return selectorPrefix !== undefined
-    && (selectorPrefix.startsWith(".")
-      || selectorPrefix.startsWith("#")
-      || standardHtmlAndSvgTagNames.has(selectorPrefix.toLowerCase()));
-}
-
-function containsJavascriptCall(value: string): boolean {
-  const call = /\b([A-Za-z_$][A-Za-z0-9_$]*)(?:\?\.)?\s*\(([^()]*)\)/g;
-  for (const match of value.matchAll(call)) {
-    const name = match[1]!;
-    const argumentsText = match[2]!;
-    if (/^(?:rgb|rgba|hsl|hsla|var)$/i.test(name)) continue;
-    if (/^[A-Z]{2,}$/.test(name) && /[\u3400-\u9fff]/.test(argumentsText)) continue;
-    if (/^version$/i.test(name) && /^\s*\d+(?:\.\d+)+\s*$/.test(argumentsText)) continue;
-    return true;
-  }
-  return false;
 }
 
 const stableIdSchema = z
@@ -843,52 +736,16 @@ export const SolutionImplementationPlanSchema: z.ZodType<SolutionImplementationP
 ]);
 
 function implementationTextIssue(value: string, path: Array<string | number>): string | undefined {
-  if (canonicalUuidToken.test(value)) return "GUID values are not allowed";
-  const sharedIssue = sharedImplementationTextIssue(value);
-  if (sharedIssue !== undefined) return sharedIssue;
-  const trimmed = value.trim();
-  if (/^[{[]/.test(trimmed)) {
-    try {
-      const parsed: unknown = JSON.parse(trimmed);
-      if (Array.isArray(parsed) || (parsed !== null && typeof parsed === "object")) return "raw JSON text is not allowed";
-    } catch {
-      // Descriptive text may legitimately begin with a bracket.
-    }
-  }
-  if (/[{[]\s*["'][A-Za-z][A-Za-z0-9_. -]*["']\s*:/.test(value)) return "embedded raw JSON text is not allowed";
-  if (/:\s*\[\s*(?:-?\d|true\b|false\b|null\b|["'{[])/i.test(value) || /:\s*\{\s*(?:["']|[A-Za-z_$][A-Za-z0-9_$]*\s*:)/.test(value)) return "embedded raw JSON text is not allowed";
-  if (/<\/?script\b|<style\b|\b(?:javascript|vbscript)\s*:/i.test(value)) return "executable markup is not allowed";
-  if (/\b(?:const|let|var)\s+[A-Za-z_$][A-Za-z0-9_$]*\s*=|\bfunction\s+[A-Za-z_$][A-Za-z0-9_$]*\s*\(|\breturn\b[^;\n]*;|\bclass\s+[A-Za-z_$][A-Za-z0-9_$]*\s*\{|\b(?:import|require)\s*\(|\bnew\s+[A-Za-z_$][A-Za-z0-9_$]*\s*\(|=>|\$control\b|\$state\b|\$data\b|\$page\b|\$overlay\b|\$feedback\b|`|\$\{/i.test(value)) return "JavaScript-shaped text is not allowed";
-  if (/(?:^|[\s(])[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.[A-Za-z_$][A-Za-z0-9_$]*)|(?:\[[^\]\n]+\]))*\s*(?:\|\|=|&&=|\?\?=|>>>=|<<=|>>=|\+=|-=|\*\*=|\*=|\/=|%=|&=|\|=|\^=|=|\+\+|--)\s*(?:[A-Za-z_$][A-Za-z0-9_$]*|["'`]|-?\d|\[[^\]\n]*\]|\{[^{}\n]*\})/.test(value)) return "executable assignment syntax is not allowed";
-  if (/\bdelete\s+[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.[A-Za-z_$][A-Za-z0-9_$]*)|(?:\[[^\]\n]+\]))+/.test(value)) return "executable unary syntax is not allowed";
-  if (/^(?:return|throw|await|yield)(?:\s+(?:[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.[A-Za-z_$][A-Za-z0-9_$]*)|(?:\[[^\]\n]+\]))*|-?\d+(?:\.\d+)?|true|false|null|undefined|["'][^"'\n]*["']))?$/.test(trimmed)) return "executable statement syntax is not allowed";
-  if (/^(?:(?:break|continue)(?:\s+[A-Za-z_$][A-Za-z0-9_$]*)?|debugger)$/.test(trimmed)) return "executable control statement is not allowed";
   const structuralIdentifier = path.at(-1) === "moduleKind" || path.at(-1) === "capabilityId";
-  const codeLikeMember = /^(?:this|detail|record|records|selection|state|data|value|item|event|target|control|window|document|globalThis|process|console|navigator|location|localStorage|sessionStorage)(?:(?:\.[A-Za-z_$][A-Za-z0-9_$]*)|(?:\[(?:[A-Za-z_$][A-Za-z0-9_$]*|\d+|["'][^"'\n]+["'])\]))+$/i.test(trimmed)
-    || /^[A-Za-z_$][A-Za-z0-9_$]*(?:\[(?:[A-Za-z_$][A-Za-z0-9_$]*|\d+|["'][^"'\n]+["'])\])+(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*$/.test(trimmed);
-  if (!structuralIdentifier && codeLikeMember) return "executable member or index syntax is not allowed";
-  if (/\b(?:document|window|globalThis|fetch|XMLHttpRequest|WebSocket|eval|Function)\s*\.?[A-Za-z_$]*\s*\(/i.test(value)) return "JavaScript API calls are not allowed";
-  if (containsJavascriptCall(value)) return "code-like calls are not allowed";
-  if (/^\.[A-Za-z_-][A-Za-z0-9_-]*$/.test(trimmed) || (/^#[A-Za-z_-][A-Za-z0-9_-]*$/.test(trimmed) && !/^#[0-9a-f]{3,8}$/i.test(trimmed)) || /^\[[A-Za-z_-][^\]]*\]$/.test(trimmed)) return "CSS selectors are not allowed";
-  if (/^(?:#[A-Za-z_-][A-Za-z0-9_-]*|\.[A-Za-z_-][A-Za-z0-9_-]*)(?:[#.][A-Za-z_-][A-Za-z0-9_-]*)+$/.test(trimmed)) return "CSS selectors are not allowed";
-  if (/^(?:#[A-Za-z_-][A-Za-z0-9_-]*|\.[A-Za-z_-][A-Za-z0-9_-]*)(?:[#.][A-Za-z_-][A-Za-z0-9_-]*)*(?::[A-Za-z-]+(?:\([^)]*\))?)+$/.test(trimmed)) return "CSS selectors are not allowed";
-  if (/^(?:#[A-Za-z_-][A-Za-z0-9_-]*|\.[A-Za-z_-][A-Za-z0-9_-]*|\[[^\]\n]+\]|button|input|select|textarea|a|form|table|tr|td|div|span|section|main|header|footer|nav|label)(?:\s+(?:#[A-Za-z_-][A-Za-z0-9_-]*|\.[A-Za-z_-][A-Za-z0-9_-]*|\[[^\]\n]+\]|[A-Za-z][A-Za-z0-9-]*))+$/.test(trimmed)) return "CSS selectors are not allowed";
-  if (/^[A-Za-z][A-Za-z0-9-]*\s+\.[A-Za-z_-][A-Za-z0-9_-]*$/.test(trimmed)) return "CSS selectors are not allowed";
-  if (/^#[A-Za-z_-][A-Za-z0-9_-]*(?:\s+|\s*[>+~]\s*)/.test(trimmed) || isKnownCssPseudoClassSelector(trimmed) || isKnownCssPseudoElementSelector(trimmed)) return "CSS selectors are not allowed";
-  if (/(?:^|\s)(?:#[A-Za-z_-][A-Za-z0-9_-]*|\.[A-Za-z_-][A-Za-z0-9_-]*|\[[A-Za-z_-][^\]]*\]|(?:button|input|select|textarea|div|span|section|main|header|footer|nav):[A-Za-z-]+)\s*(?:\{|[>+~])/i.test(value)) return "CSS rules and selectors are not allowed";
-  if (/(?:^|[;{]\s*)(?:color|display|margin(?:-[a-z]+)?|padding(?:-[a-z]+)?|background(?:-[a-z]+)?|border(?:-[a-z]+)?|font(?:-[a-z]+)?|opacity|z-index|flex(?:-[a-z]+)?|grid(?:-[a-z]+)?|transform|transition|animation)\s*:\s*[^;{}\n]+(?:;|}|$)/i.test(value)) return "CSS declarations are not allowed";
-  if (/(?:^|[;{]\s*)position\s*:\s*(?:absolute|fixed|relative|sticky)(?:\s*!important)?(?:;|}|$)/i.test(value)) return "CSS declarations are not allowed";
-  if (/(?:^|[;{]\s*)(?:width|height)\s*:\s*(?:-?\d+(?:\.\d+)?(?:px|r?em|%|vh|vw|vmin|vmax)|auto|fit-content|min-content|max-content|calc\([^\n{}]+\))(?:\s*!important)?(?:;|}|$)/i.test(value)) return "CSS declarations are not allowed";
-  if (/(?:^|[;{]\s*)--[A-Za-z0-9_-]+\s*:\s*[^;{}\n]+(?:;|}|$)/.test(value)) return "CSS declarations are not allowed";
-  if (/(?:^|\n)\s*(?:export\s+(?:default\b|(?:const|let|var|function|class)\b|\{|\*)|import\s+(?:[A-Za-z_$*{]|["']))[^\n]*(?:$|\n)/i.test(value)) return "static JavaScript module statements are not allowed";
-  if (/\b[A-Za-z_$][A-Za-z0-9_$]*\.[A-Za-z_$][A-Za-z0-9_$]*\s*\(/.test(value)) return "code-like calls are not allowed";
-  return undefined;
+  return semanticImplementationTextIssue(value, "semantic-text", { structuralIdentifier, strictSelectors: true });
 }
 
 function validateImplementationFree(value: unknown, ctx: z.RefinementCtx, path: Array<string | number> = []): void {
   if (typeof value === "string") {
-    if (path.length === 3 && path[0] === "scripts" && typeof path[1] === "number" && path[2] === "source") return;
-    const issue = implementationTextIssue(value, path);
+    const semanticSource = path.length === 3 && path[0] === "scripts" && typeof path[1] === "number" && path[2] === "source";
+    const issue = semanticSource
+      ? semanticImplementationTextIssue(value, "semantic-js-source")
+      : implementationTextIssue(value, path);
     if (issue !== undefined) ctx.addIssue({ code: "custom", path, message: issue });
     return;
   }

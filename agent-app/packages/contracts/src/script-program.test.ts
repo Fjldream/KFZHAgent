@@ -93,7 +93,6 @@ const compiledScript = {
   pageReferences: [{ semanticId: "home", pageGuid: "00000000-0000-4000-8000-000000000001" }],
   source: "KFPage.State.set(\"submitted\",true);",
   sourceHash: "a".repeat(64),
-  validation: { kind: "ast-allowlist/v1", sourceHash: "a".repeat(64) },
 };
 
 describe("script program contracts", () => {
@@ -136,6 +135,29 @@ describe("script program contracts", () => {
   it("bounds semantic source before AST validation", () => {
     expect(ScriptPlanSchema.safeParse({ ...sourcePlan.scripts[0], source: "" }).success).toBe(false);
     expect(ScriptPlanSchema.safeParse({ ...sourcePlan.scripts[0], source: "x".repeat(8_001) }).success).toBe(false);
+  });
+
+  it("allows semantic JavaScript syntax but rejects KF implementation semantics", () => {
+    const validSources = [
+      "const records = $data.get(\"records\"); const active = records.filter((record) => record.status === \"active\"); $data.set(\"filtered-records\", active);",
+      "const message = \"操作完成\"; $feedback.show(\"success\", message);",
+    ];
+    validSources.forEach((source) => expect(ScriptPlanSchema.safeParse({ ...sourcePlan.scripts[0], source }).success, source).toBe(true));
+
+    const forbiddenSources = [
+      "const id = \"00000000-0000-4000-8000-000000000001\";",
+      "const value = Select1.Value;",
+      "const value = input1.Value;",
+      "const value = linkId;",
+      "const selector = \".a,.b\";",
+      "const selector = \"[data-secret]\";",
+      "const selector = \"button:hover\";",
+      "$control?.[\"getValue\"](\"status-filter\");",
+      "$control?.[\"styleDataNew\"](\"status-filter\");",
+      "const raw = styleDataNew;",
+      "const raw = configureData;",
+    ];
+    forbiddenSources.forEach((source) => expect(ScriptPlanSchema.safeParse({ ...sourcePlan.scripts[0], source }).success, source).toBe(false));
   });
 
   it("allows the exact bounded semantic source path in a whole native plan only", () => {
@@ -211,6 +233,10 @@ describe("script program contracts", () => {
       }],
       compiledActions: [],
       compiledScripts: [compiledScript],
+      runtimeCorrelation: {
+        controls: [{ semanticControlId: "submit-button", instanceName: "Button1" }],
+        pages: [{ semanticPageId: "home", pageGuid: "00000000-0000-4000-8000-000000000001" }],
+      },
     };
     expect(UIImplementationSpecV2Schema.safeParse(native).success).toBe(true);
 
@@ -226,6 +252,18 @@ describe("script program contracts", () => {
     if (!contextualResult.success) {
       expect(contextualResult.error.issues.some((issue) => issue.message === "compiler instance name cannot reuse a semantic id")).toBe(true);
     }
+
+    const wrongBindingOwner = structuredClone(native);
+    wrongBindingOwner.pages[0]!.controls[0]!.eventBindings[0]!.ownerInstanceName = "Button2";
+    expect(UIImplementationSpecV2Schema.safeParse(wrongBindingOwner).success).toBe(false);
+
+    const duplicateInstance = structuredClone(native);
+    duplicateInstance.runtimeCorrelation.controls.push({ semanticControlId: "other-control", instanceName: "Button1" });
+    expect(UIImplementationSpecV2Schema.safeParse(duplicateInstance).success).toBe(false);
+
+    const wrongPageGuid = structuredClone(native);
+    wrongPageGuid.compiledScripts[0]!.pageReferences[0]!.pageGuid = "00000000-0000-4000-8000-000000000002";
+    expect(UIImplementationSpecV2Schema.safeParse(wrongPageGuid).success).toBe(false);
 
     const v1 = UIImplementationSpecSchema.parse({
       schema: "kf-ui-implementation/v1",

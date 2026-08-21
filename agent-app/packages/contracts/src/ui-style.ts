@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { CompiledNativeActionSchema } from "./action-graph.js";
+import {
+  CompiledNativeActionSchema,
+  CompilerInstanceNameSchema,
+  CompilerPageGuidSchema,
+  semanticImplementationTextIssue,
+} from "./action-graph.js";
 import { CompiledEventBindingSchema, CompiledScriptModuleSchema } from "./script-program.js";
 
 export const CapabilityStatusSchema = z.enum([
@@ -142,165 +147,6 @@ const allowedOnPrefixedDomainFieldNames = new Set([
   "onlypending",
 ]);
 
-const interactiveCssTagNames = new Set([
-  "a", "button", "form", "input", "label", "option", "select", "textarea",
-]);
-
-const htmlSelectorTagNames = new Set(`
-  a abbr address area article aside audio b base bdi bdo blockquote body br button canvas caption cite code col colgroup
-  data datalist dd del details dfn dialog div dl dt em embed fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6
-  head header hgroup hr html i iframe img input ins kbd label legend li link main map mark menu meta meter nav noscript
-  object ol optgroup option output p picture pre progress q rp rt ruby s samp script search section select slot small
-  source span strong style sub summary sup table tbody td template textarea tfoot th thead time title tr track u ul var
-  video wbr
-`.trim().split(/\s+/));
-
-const cssSelectorAtomPattern = "(?:[A-Za-z][A-Za-z0-9-]*|[.#][A-Za-z_-][A-Za-z0-9_-]*|\\[[^\\]\\n]+\\])";
-const cssDescendantSelector = new RegExp(`^${cssSelectorAtomPattern}(?:\\s+${cssSelectorAtomPattern})+$`);
-const cssCombinatorSelector = new RegExp(`^${cssSelectorAtomPattern}(?:\\s*[>+~]\\s*${cssSelectorAtomPattern})+$`);
-const cssSelectorList = new RegExp(`^${cssSelectorAtomPattern}(?:\\s*,\\s*${cssSelectorAtomPattern})+$`);
-
-function isCssSelectorListText(value: string): boolean {
-  if (!cssSelectorList.test(value)) return false;
-  if (/(?:[.#]|\[)/.test(value)) return true;
-
-  const atoms = value.split(",").map((atom) => atom.trim().toLowerCase());
-  return atoms.some((atom) => /^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/.test(atom))
-    || atoms.every((atom) => htmlSelectorTagNames.has(atom));
-}
-
-function isCssSelectorText(value: string): boolean {
-  if (/^\.[A-Za-z_-][A-Za-z0-9_-]*$/.test(value)
-    || (/^#[A-Za-z_-][A-Za-z0-9_-]*$/.test(value) && !/^#[0-9A-F]{3,8}$/i.test(value))
-    || /^\[[^\]\n]+\]$/.test(value)
-    || /^(?:[.#][A-Za-z_-][A-Za-z0-9_-]*){2,}$/.test(value)) {
-    return true;
-  }
-
-  if (cssDescendantSelector.test(value) && /(?:^|\s)(?:[.#]|\[)/.test(value)) return true;
-  if (cssCombinatorSelector.test(value)) return true;
-  if (isCssSelectorListText(value)) return true;
-
-  const pseudoMatch = /^([A-Za-z][A-Za-z0-9-]*|[.#][A-Za-z_-][A-Za-z0-9_-]*):{1,2}[A-Za-z-]+(?:\([^)]*\))?$/.exec(value);
-  const pseudoPrefix = pseudoMatch?.[1];
-  return pseudoPrefix !== undefined
-    && (pseudoPrefix.startsWith(".")
-      || pseudoPrefix.startsWith("#")
-      || interactiveCssTagNames.has(pseudoPrefix.toLowerCase()));
-}
-
-function isCssRuleText(value: string): boolean {
-  const openBrace = value.indexOf("{");
-  const closeBrace = value.lastIndexOf("}");
-  if (openBrace <= 0
-    || closeBrace !== value.length - 1
-    || value.indexOf("{", openBrace + 1) !== -1
-    || value.indexOf("}") !== closeBrace) {
-    return false;
-  }
-  const selectorPrelude = value.slice(0, openBrace).trim();
-  const declarations = value.slice(openBrace + 1, closeBrace);
-  return selectorPrelude.length > 0
-    && /^\s*(?:(?:--)?[A-Za-z][A-Za-z0-9-]*\s*:\s*[^;{}]+(?:;\s*|$))+$/.test(declarations);
-}
-
-function isJavascriptIdentifierStart(value: string | undefined): boolean {
-  return value !== undefined && /[A-Za-z_$]/.test(value);
-}
-
-function isJavascriptIdentifierPart(value: string | undefined): boolean {
-  return value !== undefined && /[A-Za-z0-9_$]/.test(value);
-}
-
-function skipWhitespace(value: string, start: number): number {
-  let cursor = start;
-  while (/\s/.test(value[cursor] ?? "")) cursor += 1;
-  return cursor;
-}
-
-function readIdentifierEnd(value: string, start: number): number | undefined {
-  if (!isJavascriptIdentifierStart(value[start])) return undefined;
-  let cursor = start + 1;
-  while (isJavascriptIdentifierPart(value[cursor])) cursor += 1;
-  return cursor;
-}
-
-function readQuotedMemberEnd(value: string, start: number): number | undefined {
-  if (value[start] !== "[") return undefined;
-  let cursor = skipWhitespace(value, start + 1);
-  const quote = value[cursor];
-  if (quote !== "\"" && quote !== "'") return undefined;
-  cursor += 1;
-  while (cursor < value.length && value[cursor] !== quote) {
-    cursor += value[cursor] === "\\" ? 2 : 1;
-  }
-  if (value[cursor] !== quote) return undefined;
-  cursor = skipWhitespace(value, cursor + 1);
-  return value[cursor] === "]" ? cursor + 1 : undefined;
-}
-
-function hasBalancedCall(value: string, openParen: number): boolean {
-  let depth = 0;
-  let quote: string | undefined;
-  for (let cursor = openParen; cursor < value.length; cursor += 1) {
-    const character = value[cursor]!;
-    if (quote !== undefined) {
-      if (character === "\\") cursor += 1;
-      else if (character === quote) quote = undefined;
-      continue;
-    }
-    if (character === "\"" || character === "'" || character === "`") {
-      quote = character;
-    } else if (character === "(") {
-      depth += 1;
-    } else if (character === ")") {
-      depth -= 1;
-      if (depth === 0) return true;
-    }
-  }
-  return false;
-}
-
-function containsJavascriptMemberCall(value: string): boolean {
-  for (let start = 0; start < value.length; start += 1) {
-    if (!isJavascriptIdentifierStart(value[start]) || isJavascriptIdentifierPart(value[start - 1])) continue;
-    let cursor = readIdentifierEnd(value, start)!;
-    let memberCount = 0;
-    while (cursor < value.length) {
-      cursor = skipWhitespace(value, cursor);
-      const optionalMember = value.startsWith("?.", cursor);
-      if (optionalMember || value[cursor] === ".") {
-        const memberStart = skipWhitespace(value, cursor + (optionalMember ? 2 : 1));
-        if (value[memberStart] === "(") {
-          if (optionalMember && memberCount > 0 && hasBalancedCall(value, memberStart)) return true;
-          break;
-        }
-        if (optionalMember && value[memberStart] === "[") {
-          const quotedMemberEnd = readQuotedMemberEnd(value, memberStart);
-          if (quotedMemberEnd === undefined) break;
-          memberCount += 1;
-          cursor = quotedMemberEnd;
-          continue;
-        }
-        const memberEnd = readIdentifierEnd(value, memberStart);
-        if (memberEnd === undefined) break;
-        memberCount += 1;
-        cursor = memberEnd;
-        continue;
-      }
-      const quotedMemberEnd = readQuotedMemberEnd(value, cursor);
-      if (quotedMemberEnd === undefined) break;
-      memberCount += 1;
-      cursor = quotedMemberEnd;
-    }
-    if (memberCount === 0) continue;
-    cursor = skipWhitespace(value, cursor);
-    if (value.startsWith("?.", cursor)) cursor = skipWhitespace(value, cursor + 2);
-    if (value[cursor] === "(" && hasBalancedCall(value, cursor)) return true;
-  }
-  return false;
-}
-
 export function normalizeImplementationOwnedFieldName(value: string): string {
   return value.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
 }
@@ -312,27 +158,7 @@ export function isImplementationOwnedFieldName(value: string): boolean {
 }
 
 export function sharedImplementationTextIssue(value: string): string | undefined {
-  const trimmed = value.trim();
-  if (/<\/?(?:script|style|iframe|object|embed)\b|\b(?:javascript|vbscript)\s*:/i.test(value)) {
-    return "executable markup is not allowed";
-  }
-  if (/\b(?:alert|eval|fetch|Function|setInterval|setTimeout|WebSocket|XMLHttpRequest)\s*\(/i.test(value)
-    || /\b(?:document|globalThis|window)\s*\./i.test(value)
-    || /=>/.test(value)) {
-    return "JavaScript APIs and executable syntax are not allowed";
-  }
-  if (/\b(?:import|require)\s*\(/i.test(value)
-    || /\bnew\s+(?:[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*|\(\s*[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*\s*\))\s*\(/i.test(value)
-    || containsJavascriptMemberCall(value)
-    || /\b(?:async\s+)?function(?:\s*\*)?\s*(?:[A-Za-z_$][A-Za-z0-9_$]*\s*)?\([^)]*\)\s*\{/i.test(value)) {
-    return "JavaScript calls and execution entry points are not allowed";
-  }
-  if (isCssSelectorText(trimmed)
-    || isCssRuleText(trimmed)
-    || /^@(?:charset|container|font-face|import|keyframes|layer|media|namespace|page|property|supports)\b/i.test(trimmed)) {
-    return "CSS selectors are not allowed";
-  }
-  return undefined;
+  return semanticImplementationTextIssue(value, "implementation-data", { allowDottedIdentifier: true });
 }
 
 type ImplementationDataValue = string | number | boolean | null
@@ -737,6 +563,17 @@ const UIImplementationPageAnyV2Schema = z.discriminatedUnion("compatibility", [
   UIImplementationCompatibilityPageV2Schema,
 ]);
 
+const RuntimeCorrelationSchema = z.object({
+  controls: z.array(z.object({
+    semanticControlId: stableId,
+    instanceName: CompilerInstanceNameSchema,
+  }).strict()).max(5_000),
+  pages: z.array(z.object({
+    semanticPageId: stableId,
+    pageGuid: CompilerPageGuidSchema,
+  }).strict()).max(32),
+}).strict();
+
 function containsGeometry(
   outer: { x: number; y: number; width: number; height: number },
   inner: { x: number; y: number; width: number; height: number },
@@ -790,6 +627,7 @@ export const UIImplementationSpecV2Schema = z.object({
   pages: z.array(UIImplementationPageAnyV2Schema).min(1),
   compiledActions: z.array(CompiledNativeActionSchema).max(3_200),
   compiledScripts: z.array(CompiledScriptModuleSchema).max(200),
+  runtimeCorrelation: RuntimeCorrelationSchema.optional(),
 }).strict().superRefine((implementation, ctx) => {
   implementation.pages.forEach((page, pageIndex) => {
     if (page.compatibility !== implementation.compatibility) {
@@ -805,6 +643,9 @@ export const UIImplementationSpecV2Schema = z.object({
     }
     if (implementation.compiledScripts.length > 0) {
       ctx.addIssue({ code: "custom", path: ["compiledScripts"], message: "adapted v1 implementations cannot contain compiled scripts" });
+    }
+    if (implementation.runtimeCorrelation !== undefined) {
+      ctx.addIssue({ code: "custom", path: ["runtimeCorrelation"], message: "adapted v1 implementations cannot contain runtime correlation" });
     }
     return;
   }
@@ -990,24 +831,66 @@ export const UIImplementationSpecV2Schema = z.object({
       });
     });
   });
+  const hasEventBindings = implementation.pages.some((page) =>
+    page.compatibility === "native" && page.controls.some((control) => control.eventBindings.length > 0));
+  if ((hasEventBindings || implementation.compiledActions.length > 0 || implementation.compiledScripts.length > 0)
+    && implementation.runtimeCorrelation === undefined) {
+    ctx.addIssue({ code: "custom", path: ["runtimeCorrelation"], message: "compiled interactions require compiler-owned runtime correlation" });
+  }
+  const instanceByControl = new Map<string, string>();
+  const controlByInstance = new Map<string, string>();
+  const guidByPage = new Map<string, string>();
+  const pageByGuid = new Map<string, string>();
+  implementation.runtimeCorrelation?.controls.forEach((entry, index) => {
+    if (!controlIds.has(entry.semanticControlId)) ctx.addIssue({ code: "custom", path: ["runtimeCorrelation", "controls", index, "semanticControlId"], message: `unknown correlated control: ${entry.semanticControlId}` });
+    if (instanceByControl.has(entry.semanticControlId)) ctx.addIssue({ code: "custom", path: ["runtimeCorrelation", "controls", index, "semanticControlId"], message: `duplicate correlated control: ${entry.semanticControlId}` });
+    if (controlByInstance.has(entry.instanceName)) ctx.addIssue({ code: "custom", path: ["runtimeCorrelation", "controls", index, "instanceName"], message: `compiler instance mapped to multiple controls: ${entry.instanceName}` });
+    instanceByControl.set(entry.semanticControlId, entry.instanceName);
+    controlByInstance.set(entry.instanceName, entry.semanticControlId);
+  });
+  implementation.runtimeCorrelation?.pages.forEach((entry, index) => {
+    if (!pageIds.has(entry.semanticPageId)) ctx.addIssue({ code: "custom", path: ["runtimeCorrelation", "pages", index, "semanticPageId"], message: `unknown correlated page: ${entry.semanticPageId}` });
+    if (guidByPage.has(entry.semanticPageId)) ctx.addIssue({ code: "custom", path: ["runtimeCorrelation", "pages", index, "semanticPageId"], message: `duplicate correlated page: ${entry.semanticPageId}` });
+    if (pageByGuid.has(entry.pageGuid)) ctx.addIssue({ code: "custom", path: ["runtimeCorrelation", "pages", index, "pageGuid"], message: `compiler page GUID mapped to multiple pages: ${entry.pageGuid}` });
+    guidByPage.set(entry.semanticPageId, entry.pageGuid);
+    pageByGuid.set(entry.pageGuid, entry.semanticPageId);
+  });
+  if (implementation.runtimeCorrelation !== undefined) {
+    controlIds.forEach((controlId) => {
+      if (!instanceByControl.has(controlId)) ctx.addIssue({ code: "custom", path: ["runtimeCorrelation", "controls"], message: `missing correlated control: ${controlId}` });
+    });
+    pageIds.forEach((pageId) => {
+      if (!guidByPage.has(pageId)) ctx.addIssue({ code: "custom", path: ["runtimeCorrelation", "pages"], message: `missing correlated page: ${pageId}` });
+    });
+  }
   const compiledActionIds = new Set<string>();
+  const compiledActionById = new Map<string, (typeof implementation.compiledActions)[number]>();
   implementation.compiledActions.forEach((action, actionIndex) => {
     if (compiledActionIds.has(action.id)) ctx.addIssue({ code: "custom", path: ["compiledActions", actionIndex, "id"], message: `duplicate compiled action id: ${action.id}` });
     compiledActionIds.add(action.id);
+    compiledActionById.set(action.id, action);
     if (semanticIds.has(action.ownerInstanceName)) ctx.addIssue({ code: "custom", path: ["compiledActions", actionIndex, "ownerInstanceName"], message: "compiler instance name cannot reuse a semantic id" });
     if ("targetInstanceName" in action && semanticIds.has(action.targetInstanceName)) ctx.addIssue({ code: "custom", path: ["compiledActions", actionIndex, "targetInstanceName"], message: "compiler target instance cannot reuse a semantic id" });
+    if (!controlByInstance.has(action.ownerInstanceName)) ctx.addIssue({ code: "custom", path: ["compiledActions", actionIndex, "ownerInstanceName"], message: `unmapped compiled action owner: ${action.ownerInstanceName}` });
+    if ("targetInstanceName" in action && !controlByInstance.has(action.targetInstanceName)) ctx.addIssue({ code: "custom", path: ["compiledActions", actionIndex, "targetInstanceName"], message: `unmapped compiled action target: ${action.targetInstanceName}` });
+    if (action.kind === "navigate-page" && !pageByGuid.has(action.targetPageGuid)) ctx.addIssue({ code: "custom", path: ["compiledActions", actionIndex, "targetPageGuid"], message: `unmapped compiled page GUID: ${action.targetPageGuid}` });
   });
   const compiledScriptIds = new Set<string>();
+  const compiledScriptById = new Map<string, (typeof implementation.compiledScripts)[number]>();
   implementation.compiledScripts.forEach((module, moduleIndex) => {
     if (compiledScriptIds.has(module.id)) ctx.addIssue({ code: "custom", path: ["compiledScripts", moduleIndex, "id"], message: `duplicate compiled script id: ${module.id}` });
     compiledScriptIds.add(module.id);
+    compiledScriptById.set(module.id, module);
     if (semanticIds.has(module.ownerInstanceName)) ctx.addIssue({ code: "custom", path: ["compiledScripts", moduleIndex, "ownerInstanceName"], message: "compiler instance name cannot reuse a semantic id" });
+    if (!controlByInstance.has(module.ownerInstanceName)) ctx.addIssue({ code: "custom", path: ["compiledScripts", moduleIndex, "ownerInstanceName"], message: `unmapped compiled script owner: ${module.ownerInstanceName}` });
     module.instanceReferences.forEach((reference, referenceIndex) => {
       if (!controlIds.has(reference.semanticId)) ctx.addIssue({ code: "custom", path: ["compiledScripts", moduleIndex, "instanceReferences", referenceIndex, "semanticId"], message: `unknown compiled control reference: ${reference.semanticId}` });
       if (semanticIds.has(reference.instanceName)) ctx.addIssue({ code: "custom", path: ["compiledScripts", moduleIndex, "instanceReferences", referenceIndex, "instanceName"], message: "compiler instance name cannot reuse a semantic id" });
+      if (instanceByControl.get(reference.semanticId) !== reference.instanceName) ctx.addIssue({ code: "custom", path: ["compiledScripts", moduleIndex, "instanceReferences", referenceIndex], message: `compiled control correlation mismatch: ${reference.semanticId}` });
     });
     module.pageReferences.forEach((reference, referenceIndex) => {
       if (!pageIds.has(reference.semanticId)) ctx.addIssue({ code: "custom", path: ["compiledScripts", moduleIndex, "pageReferences", referenceIndex, "semanticId"], message: `unknown compiled page reference: ${reference.semanticId}` });
+      if (guidByPage.get(reference.semanticId) !== reference.pageGuid) ctx.addIssue({ code: "custom", path: ["compiledScripts", moduleIndex, "pageReferences", referenceIndex], message: `compiled page correlation mismatch: ${reference.semanticId}` });
     });
   });
   const bindingIds = new Set<string>();
@@ -1022,15 +905,20 @@ export const UIImplementationSpecV2Schema = z.object({
         if (bindingIds.has(binding.id)) ctx.addIssue({ code: "custom", path: [...path, "id"], message: `duplicate compiled binding id: ${binding.id}` });
         bindingIds.add(binding.id);
         if (semanticIds.has(binding.ownerInstanceName)) ctx.addIssue({ code: "custom", path: [...path, "ownerInstanceName"], message: "compiler instance name cannot reuse a semantic id" });
+        if (instanceByControl.get(control.id) !== binding.ownerInstanceName) ctx.addIssue({ code: "custom", path: [...path, "ownerInstanceName"], message: `compiled binding owner mismatch: ${control.id}` });
         const eventPhase = `${binding.kfEvent}\u0000${binding.phase}`;
         if (eventPhases.has(eventPhase)) ctx.addIssue({ code: "custom", path, message: `duplicate compiled event phase: ${binding.kfEvent}/${binding.phase}` });
         eventPhases.add(eventPhase);
         binding.scriptModuleIds.forEach((moduleId, moduleIdIndex) => {
           if (!compiledScriptIds.has(moduleId)) ctx.addIssue({ code: "custom", path: [...path, "scriptModuleIds", moduleIdIndex], message: `unknown compiled script id: ${moduleId}` });
+          const module = compiledScriptById.get(moduleId);
+          if (module !== undefined && module.ownerInstanceName !== binding.ownerInstanceName) ctx.addIssue({ code: "custom", path: [...path, "scriptModuleIds", moduleIdIndex], message: `compiled script owner mismatch: ${moduleId}` });
           referencedEventScripts.add(moduleId);
         });
         binding.nativeActionIds.forEach((actionId, actionIdIndex) => {
           if (!compiledActionIds.has(actionId)) ctx.addIssue({ code: "custom", path: [...path, "nativeActionIds", actionIdIndex], message: `unknown compiled action id: ${actionId}` });
+          const action = compiledActionById.get(actionId);
+          if (action !== undefined && action.ownerInstanceName !== binding.ownerInstanceName) ctx.addIssue({ code: "custom", path: [...path, "nativeActionIds", actionIdIndex], message: `compiled action owner mismatch: ${actionId}` });
           referencedNativeActions.add(actionId);
         });
       });
