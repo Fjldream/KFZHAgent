@@ -52,6 +52,17 @@ export interface MaterializedScopedStyleFragment {
   readonly resolvedAssets: readonly ResolvedStyleAsset[];
 }
 
+export interface MaterializedComponentStyle {
+  readonly componentCorrelationId: string;
+  readonly runtimeDomId: string;
+  readonly cssText: string;
+  readonly fragments: readonly MaterializedScopedStyleFragment[];
+}
+
+export interface MaterializedScopedStyleCollection {
+  readonly components: readonly MaterializedComponentStyle[];
+}
+
 const TRUSTED_SCOPED_STYLE_FRAGMENTS = new WeakSet<CompiledScopedStyleFragment>();
 
 const STATE_ORDER: readonly StyleState[] = [
@@ -366,8 +377,8 @@ export function compileScopedStyleFragment(
   return fragment;
 }
 
-/** Correlates compiler output with a concrete KF component, then mirrors setStyleFormat's domId replacement. */
-export function materializeScopedStyleFragment(
+/** Internal primitive used only after the collection gate proves a complete one-to-one binding. */
+function materializeScopedStyleFragment(
   fragment: CompiledScopedStyleFragment,
   binding: RuntimeStyleComponentBinding,
 ): MaterializedScopedStyleFragment {
@@ -389,6 +400,91 @@ export function materializeScopedStyleFragment(
     cssText: cssText.cssText,
     resolvedAssets: fragment.resolvedAssets,
   });
+}
+
+/** Task 6 runtime handoff gate for a complete component/style binding collection. */
+export function materializeScopedStyleCollection(
+  fragments: readonly CompiledScopedStyleFragment[],
+  bindings: readonly RuntimeStyleComponentBinding[],
+): MaterializedScopedStyleCollection {
+  const fragmentComponentIds = new Set<string>();
+  const fragmentKeys = new Set<string>();
+  const assetLayersByComponent = new Map<string, number>();
+  for (const fragment of fragments) {
+    if (!TRUSTED_SCOPED_STYLE_FRAGMENTS.has(fragment)) {
+      throw new Error("UNTRUSTED_SCOPED_STYLE_FRAGMENT");
+    }
+    const fragmentKey = `${fragment.componentCorrelationId}\u0000${fragment.selectorToken}\u0000${fragment.state}`;
+    if (fragmentKeys.has(fragmentKey)) {
+      throw new Error(`STYLE_SCOPED_FRAGMENT_DUPLICATE: ${fragment.componentCorrelationId}.${fragment.selectorToken}.${fragment.state}`);
+    }
+    fragmentKeys.add(fragmentKey);
+    fragmentComponentIds.add(fragment.componentCorrelationId);
+    const assetLayerCount = (assetLayersByComponent.get(fragment.componentCorrelationId) ?? 0)
+      + fragment.resolvedAssets.length;
+    if (assetLayerCount > 1) {
+      throw new Error(
+        `STYLE_ASSET_LAYER_BUDGET: component ${fragment.componentCorrelationId} contains ${assetLayerCount} asset layers`,
+      );
+    }
+    assetLayersByComponent.set(fragment.componentCorrelationId, assetLayerCount);
+  }
+
+  const componentToDomId = new Map<string, string>();
+  const domIdToComponent = new Map<string, string>();
+  for (const binding of bindings) {
+    materializeKF36StyleData("", binding.runtimeDomId);
+    const existingDomId = componentToDomId.get(binding.componentCorrelationId);
+    if (existingDomId !== undefined) {
+      if (existingDomId === binding.runtimeDomId) {
+        throw new Error(`STYLE_COMPONENT_BINDING_DUPLICATE: ${binding.componentCorrelationId}`);
+      }
+      throw new Error(`STYLE_COMPONENT_BINDING_NOT_ONE_TO_ONE: ${binding.componentCorrelationId}`);
+    }
+    const existingComponent = domIdToComponent.get(binding.runtimeDomId);
+    if (existingComponent !== undefined) {
+      throw new Error(`STYLE_RUNTIME_DOM_BINDING_NOT_ONE_TO_ONE: ${binding.runtimeDomId}`);
+    }
+    componentToDomId.set(binding.componentCorrelationId, binding.runtimeDomId);
+    domIdToComponent.set(binding.runtimeDomId, binding.componentCorrelationId);
+  }
+
+  for (const componentCorrelationId of fragmentComponentIds) {
+    if (!componentToDomId.has(componentCorrelationId)) {
+      throw new Error(`STYLE_COMPONENT_BINDING_MISSING: ${componentCorrelationId}`);
+    }
+  }
+  for (const componentCorrelationId of componentToDomId.keys()) {
+    if (!fragmentComponentIds.has(componentCorrelationId)) {
+      throw new Error(`STYLE_COMPONENT_BINDING_EXTRA: ${componentCorrelationId}`);
+    }
+  }
+
+  const grouped = new Map<string, {
+    readonly runtimeDomId: string;
+    readonly fragments: MaterializedScopedStyleFragment[];
+  }>();
+  for (const fragment of fragments) {
+    const runtimeDomId = componentToDomId.get(fragment.componentCorrelationId)!;
+    const materialized = materializeScopedStyleFragment(fragment, {
+      componentCorrelationId: fragment.componentCorrelationId,
+      runtimeDomId,
+    });
+    const existing = grouped.get(fragment.componentCorrelationId);
+    if (existing === undefined) {
+      grouped.set(fragment.componentCorrelationId, { runtimeDomId, fragments: [materialized] });
+    } else {
+      existing.fragments.push(materialized);
+    }
+  }
+
+  const components = [...grouped.entries()].map(([componentCorrelationId, group]) => Object.freeze({
+    componentCorrelationId,
+    runtimeDomId: group.runtimeDomId,
+    cssText: group.fragments.map((fragment) => fragment.cssText).join(""),
+    fragments: Object.freeze([...group.fragments]),
+  }));
+  return Object.freeze({ components: Object.freeze(components) });
 }
 
 /** Serializes legacy v1 declarations against the fixed root selector placeholder. */

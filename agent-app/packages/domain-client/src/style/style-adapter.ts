@@ -24,7 +24,10 @@ export interface CompiledControlStyle {
   scopeToken?: string;
   /** Contract-safe semantic fragments consumed by native UI v2. */
   cssFragments?: CompiledStyleFragment[];
-  /** Evidence-owned persisted selectors plus the component correlation required for runtime DOM-id binding. */
+  /**
+   * Evidence-owned persisted selectors plus component correlation metadata.
+   * Task 6 must submit the complete set to materializeScopedStyleCollection; fragments are not a standalone binding API.
+   */
   scopedFragments?: CompiledScopedStyleFragment[];
 }
 

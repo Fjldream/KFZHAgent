@@ -35,6 +35,14 @@ import type {
 } from "./style-adapter.js";
 import { resolveComponentStyle, resolveStyle } from "./theme-resolver.js";
 
+export {
+  materializeScopedStyleCollection,
+  type MaterializedComponentStyle,
+  type MaterializedScopedStyleCollection,
+  type MaterializedScopedStyleFragment,
+  type RuntimeStyleComponentBinding,
+} from "./css-compiler.js";
+
 export interface CompileControlStyleInput {
   capabilityId: string;
   theme: ThemeSpec;
@@ -286,6 +294,13 @@ export function compileResolvedStyle(input: CompileResolvedStyleInput): Compiled
     if (adapterPart.semanticPart === "root") continue;
     const partStyle = resolvedParts[adapterPart.semanticPart];
     if (partStyle !== undefined) compileResolvedPart(context, adapterPart.semanticPart, partStyle);
+  }
+  const assetLayerCount = scopedFragments.reduce(
+    (count, fragment) => count + fragment.resolvedAssets.length,
+    0,
+  );
+  if (assetLayerCount > 1) {
+    throw new Error(`STYLE_ASSET_LAYER_BUDGET: component ${input.componentId} contains ${assetLayerCount} asset layers`);
   }
 
   return {

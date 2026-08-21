@@ -7,13 +7,14 @@ import {
 } from "@kf/contracts";
 import type { z } from "zod";
 import { KF36_RUNTIME_PROFILE } from "./runtime-profile.js";
+import * as styleEngineModule from "./style-engine.js";
 import {
   assertStyleCompilationAccepted,
   compileControlStyle,
   compileResolvedStyle,
   listStyleCompilationIssues,
+  materializeScopedStyleCollection,
 } from "./style-engine.js";
-import { materializeScopedStyleFragment } from "./css-compiler.js";
 
 const themeFixture: ThemeSpec = {
   background: "#0b1220",
@@ -26,6 +27,16 @@ const themeFixture: ThemeSpec = {
   spacingUnit: 8,
   radiusScale: { small: 4, medium: 8, large: 12 },
 };
+const styleAssetSha256 = "c".repeat(64);
+const approvedStyleAsset: ApprovedAssetFacts = {
+  workspaceAssetId: "00000000-0000-4000-8000-000000000001",
+  targetPath: `project/res/images/${styleAssetSha256}.png`,
+  mediaType: "image/png",
+  sha256: styleAssetSha256,
+  sizeBytes: 64,
+};
+const styleAssetId = "asset-00000000000040008000000000000001";
+const backgroundAsset = { kind: "background-image" as const, assetId: styleAssetId };
 
 function style(styleSpec: Partial<ComponentStyleSpec>): ComponentStyleSpec {
   return { declarations: {}, states: {}, ...styleSpec };
@@ -239,6 +250,11 @@ describe("compileResolvedStyle", () => {
     states: { hover: { backgroundColor: "#1d4ed8" } },
   });
 
+  it("publishes only the collection materialization gate at the Task 6 production boundary", () => {
+    expect(Reflect.has(styleEngineModule, "materializeScopedStyleCollection")).toBe(true);
+    expect(Reflect.has(styleEngineModule, "materializeScopedStyleFragment")).toBe(false);
+  });
+
   it("resolves theme tokens, the matched role, and instance overrides before splitting ownership", () => {
     const compiled = compileResolvedStyle({
       componentId: "visitor-primary-action",
@@ -354,28 +370,31 @@ describe("compileResolvedStyle", () => {
     expect(first.scopedFragments?.[0]?.componentCorrelationId).toBe("visitor/action one");
     expect(second.scopedFragments?.[0]?.componentCorrelationId).toBe("visitor/action-one");
 
-    const firstRuntime = materializeScopedStyleFragment(first.scopedFragments![0]!, {
-      componentCorrelationId: "visitor/action one",
-      runtimeDomId: "k11111111-1111-4111-8111-111111111111",
-    });
-    const secondRuntime = materializeScopedStyleFragment(second.scopedFragments![0]!, {
-      componentCorrelationId: "visitor/action-one",
-      runtimeDomId: "k22222222-2222-4222-8222-222222222222",
-    });
-    expect(firstRuntime.selector).toBe(
+    const runtimeStyles = materializeScopedStyleCollection(
+      [first.scopedFragments![0]!, second.scopedFragments![0]!],
+      [
+        {
+          componentCorrelationId: "visitor/action one",
+          runtimeDomId: "k11111111-1111-4111-8111-111111111111",
+        },
+        {
+          componentCorrelationId: "visitor/action-one",
+          runtimeDomId: "k22222222-2222-4222-8222-222222222222",
+        },
+      ],
+    );
+    const firstRuntime = runtimeStyles.components[0]!;
+    const secondRuntime = runtimeStyles.components[1]!;
+    expect(firstRuntime.fragments[0]!.selector).toBe(
       "#k11111111-1111-4111-8111-111111111111 .el-button",
     );
-    expect(secondRuntime.selector).toBe(
+    expect(secondRuntime.fragments[0]!.selector).toBe(
       "#k22222222-2222-4222-8222-222222222222 .el-button",
     );
     expect(firstRuntime.cssText).toContain("#k11111111-1111-4111-8111-111111111111");
     expect(firstRuntime.cssText).not.toContain(secondRuntime.runtimeDomId);
     expect(secondRuntime.cssText).toContain("#k22222222-2222-4222-8222-222222222222");
     expect(secondRuntime.cssText).not.toContain(firstRuntime.runtimeDomId);
-    expect(() => materializeScopedStyleFragment(first.scopedFragments![0]!, {
-      componentCorrelationId: "visitor/action-one",
-      runtimeDomId: "k22222222-2222-4222-8222-222222222222",
-    })).toThrow(/STYLE_COMPONENT_CORRELATION_MISMATCH/);
   });
 
   it("compiles Task 4 scroll overflow through layout CSS ownership and never a native unknown field", () => {
@@ -398,14 +417,6 @@ describe("compileResolvedStyle", () => {
   });
 
   it("resolves approved background assets to compiler-owned targets", () => {
-    const sha256 = "c".repeat(64);
-    const approvedAsset: ApprovedAssetFacts = {
-      workspaceAssetId: "00000000-0000-4000-8000-000000000001",
-      targetPath: `project/res/images/${sha256}.png`,
-      mediaType: "image/png",
-      sha256,
-      sizeBytes: 64,
-    };
     const compiled = compileResolvedStyle({
       componentId: "hero-image",
       capabilityId: "image",
@@ -415,23 +426,82 @@ describe("compileResolvedStyle", () => {
       instanceOverride: styleV2({
         parts: {
           media: {
-            declarations: { advanced: [{ kind: "background-image", assetId: "asset-00000000000040008000000000000001" }] },
+            declarations: { advanced: [backgroundAsset] },
             states: {},
           },
         },
       }),
-      approvedAssets: [approvedAsset],
+      approvedAssets: [approvedStyleAsset],
       runtimeProfile: KF36_RUNTIME_PROFILE,
     });
 
     expect(compiled.scopedFragments?.[0]?.resolvedAssets).toEqual([{
-      assetId: "asset-00000000000040008000000000000001",
-      targetPath: `project/res/images/${sha256}.png`,
-      token: `asset-sha256:${sha256}`,
+      assetId: styleAssetId,
+      targetPath: `project/res/images/${styleAssetSha256}.png`,
+      token: `asset-sha256:${styleAssetSha256}`,
     }]);
     expect(compiled.styleDataNew).toBe(
-      `#domId .el-image__inner{background-image:url("project/res/images/${sha256}.png")}`,
+      `#domId .el-image__inner{background-image:url("project/res/images/${styleAssetSha256}.png")}`,
     );
+  });
+
+  it("allows one component asset layer combined with multiple structured gradients", () => {
+    const compiled = compileResolvedStyle({
+      componentId: "single-asset-surface",
+      capabilityId: "button",
+      theme: themeFixture,
+      styleRole: "primary-action",
+      roleStyle: styleV2({
+        role: "primary-action",
+        declarations: {
+          advanced: [
+            { kind: "gradient", angle: 90, stops: [{ offset: 0, color: "#000000" }, { offset: 1, color: "#ffffff" }] },
+            backgroundAsset,
+            { kind: "gradient", angle: 180, stops: [{ offset: 0, color: "#163a5f" }, { offset: 1, color: "#e47b32" }] },
+          ],
+        },
+      }),
+      approvedAssets: [approvedStyleAsset],
+      runtimeProfile: KF36_RUNTIME_PROFILE,
+    });
+
+    expect(compiled.scopedFragments?.flatMap((fragment) => fragment.resolvedAssets)).toHaveLength(1);
+    expect(compiled.styleDataNew.match(/url\(/g)).toHaveLength(1);
+    expect(compiled.styleDataNew.match(/linear-gradient\(/g)).toHaveLength(2);
+  });
+
+  it.each([
+    ["root and root state", styleV2({
+      role: "asset-budget",
+      declarations: { advanced: [backgroundAsset] },
+      states: { hover: { advanced: [backgroundAsset] } },
+    })],
+    ["two semantic parts", styleV2({
+      role: "asset-budget",
+      parts: {
+        tab: { declarations: { advanced: [backgroundAsset] }, states: {} },
+        panel: { declarations: { advanced: [backgroundAsset] }, states: {} },
+      },
+    })],
+    ["semantic part and part state", styleV2({
+      role: "asset-budget",
+      parts: {
+        tab: {
+          declarations: { advanced: [backgroundAsset] },
+          states: { selected: { advanced: [backgroundAsset] } },
+        },
+      },
+    })],
+  ] as const)("rejects a second component asset layer across %s", (_caseName, roleStyleWithAssets) => {
+    expect(() => compileResolvedStyle({
+      componentId: "asset-budget-component",
+      capabilityId: _caseName === "root and root state" ? "button" : "tabs",
+      theme: themeFixture,
+      styleRole: "asset-budget",
+      roleStyle: roleStyleWithAssets,
+      approvedAssets: [approvedStyleAsset],
+      runtimeProfile: KF36_RUNTIME_PROFILE,
+    })).toThrow(/STYLE_ASSET_LAYER_BUDGET: component/);
   });
 
   it("fails closed for role mismatch, unsupported parts/states/properties, preserve-only policy, and forged profiles", () => {
