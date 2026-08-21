@@ -295,6 +295,37 @@ describe("compileRegisteredModuleNode", () => {
   });
 
   it.each([
+    ["null", null],
+    ["string", "not-a-component"],
+    ["number", 42],
+    ["boolean", false],
+    ["array", []],
+    ["custom prototype", Object.setPrototypeOf({
+      id: "title", role: "title", capabilityId: "text", critical: true, content: "访客",
+      geometry: { x: 0, y: 0, width: 100, height: 24 }, properties: {},
+      style: { declarations: {}, states: {} },
+    }, { inherited: true })],
+    ["accessor", Object.defineProperty({
+      role: "title", capabilityId: "text", critical: true, content: "访客",
+      geometry: { x: 0, y: 0, width: 100, height: 24 }, properties: {},
+      style: { declarations: {}, states: {} },
+    }, "id", {
+      enumerable: true,
+      get: () => { throw new Error("component id accessor was evaluated"); },
+    })],
+  ] as const)("rejects a malformed %s module component item before property access", (_label, item) => {
+    const malformedOutput = definition({
+      compile: () => ({ components: [item as never], deliveryGaps: [] }),
+    });
+    const error = readCompileError(() => compileRegisteredModuleNode(
+      compileInput(moduleNode(), registryFor(malformedOutput)),
+    ));
+
+    expect(error.code).toBe("MODULE_COMPONENT_INVALID");
+    expect(error.path).toEqual(["profile-module", "components", 0]);
+  });
+
+  it.each([
     ["an absent style", undefined],
     ["a schema-defaulted empty style", {} as never],
     ["empty declarations and state branches", { declarations: {}, states: { hover: undefined, active: {} } }],

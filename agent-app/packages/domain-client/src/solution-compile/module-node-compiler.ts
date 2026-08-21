@@ -265,6 +265,20 @@ function hasOnlyDataKeys(value: object, allowed: ReadonlySet<string>): boolean {
   });
 }
 
+function isPlainComponentItem(value: object): boolean {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  try {
+    if (Reflect.getPrototypeOf(value) !== Object.prototype) return false;
+    return Reflect.ownKeys(value).every((key) => {
+      if (typeof key !== "string") return false;
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      return descriptor?.get === undefined && descriptor?.set === undefined;
+    });
+  } catch {
+    return false;
+  }
+}
+
 function isSemanticallyEmptyConfigurationStyle(style: ComponentStyleSpec | undefined): boolean {
   if (style === undefined) return true;
   if (style === null || typeof style !== "object") return false;
@@ -484,6 +498,9 @@ export function compileRegisteredModuleNode(input: RegisteredModuleNodeCompileIn
   if (output.components.length === 0) fail("MODULE_COMPILE_EMPTY", [input.node.id, "components"], `${definition.kind}@${definition.version}`);
 
   const components = output.components.map((component, index) => {
+    if (!isPlainComponentItem(component)) {
+      fail("MODULE_COMPONENT_INVALID", [input.node.id, "components", index], "plain component record required");
+    }
     assertConfigurationOnlyStyle(input.node.id, component.id, component.capabilityId, component.style);
     const parsed = UIComponentSpecSchema.safeParse(
       component.capabilityId === "easyui.1" && component.style === undefined
