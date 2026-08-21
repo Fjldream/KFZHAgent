@@ -80,7 +80,14 @@ const v2Fixture = {
         style: { declarations: { fontSize: 24 }, states: {} },
         compiledStyle: {
           nativeFields: {},
-          cssFragments: [{ selectorToken: "root", state: "normal", declarations: { fontSize: 24 } }],
+          cssFragments: [{
+            selectorToken: "root",
+            state: "normal",
+            declarations: { fontSize: 24 },
+            persistedSelector: "#domId",
+            persistedDeclarations: [{ property: "font-size", value: "24px" }],
+          }],
+          styleDataNew: "#domId{font-size:24px}",
           warnings: [],
         },
         dataBinding: { mockDataId: "visitor-data", field: "name" },
@@ -233,8 +240,15 @@ type MutableNativeV2Fixture = {
       nativeProperties: Record<string, unknown>;
       compiledStyle?: {
         nativeFields: Record<string, unknown>;
-        cssFragments: Array<{ declarations: Record<string, unknown> }>;
+        cssFragments: Array<{
+          selectorToken?: string;
+          state?: string;
+          declarations: Record<string, object | string | number | boolean | null>;
+          persistedSelector?: string;
+          persistedDeclarations?: Array<{ property: string; value: string }>;
+        }>;
         styleDataNew?: string;
+        warnings?: Array<{ code: string; message: string }>;
       };
       dataBinding?: { records?: Array<Record<string, unknown>> };
       style?: { declarations: Record<string, unknown>; parts?: Record<string, unknown> };
@@ -908,26 +922,89 @@ describe("KF UI style contracts", () => {
     }).success).toBe(false);
   });
 
-  it("accepts only bounded compiler-owned #domId CSS in compiledStyle.styleDataNew", () => {
+  it("accepts only the canonical persisted serialization of compiler-owned CSS fragments", () => {
     const valid = mutableNativeV2Fixture();
-    valid.pages[0]!.controls[1]!.compiledStyle!.styleDataNew =
-      "#domId .el-button{border-radius:8px;color:#ffffff}" +
-      "#domId .el-button:hover{background-color:#1d4ed8}";
-    expect(UIImplementationSpecV2Schema.safeParse(valid).success).toBe(true);
+    valid.pages[0]!.controls[1]!.compiledStyle = {
+      nativeFields: {},
+      cssFragments: [
+        {
+          selectorToken: "root",
+          state: "normal",
+          declarations: { borderRadius: 8, textColor: "#ffffff", gap: 8 },
+          persistedSelector: "#domId .el-button",
+          persistedDeclarations: [
+            { property: "border-radius", value: "8px" },
+            { property: "color", value: "#ffffff" },
+            { property: "gap", value: "8px" },
+          ],
+        },
+        {
+          selectorToken: "root",
+          state: "hover",
+          declarations: { backgroundColor: "#1d4ed8" },
+          persistedSelector: "#domId .el-button:hover",
+          persistedDeclarations: [{ property: "background-color", value: "#1d4ed8" }],
+        },
+      ],
+      styleDataNew: "#domId .el-button{border-radius:8px;color:#ffffff;gap:8px}" +
+        "#domId .el-button:hover{background-color:#1d4ed8}",
+      warnings: [],
+    };
+    const validResult = UIImplementationSpecV2Schema.safeParse(valid);
+    expect(validResult.success, validResult.success ? "" : JSON.stringify(validResult.error.issues)).toBe(true);
 
-    for (const payload of [
-      "body{display:none}",
-      "#other .el-button{color:red}",
-      "#domId{position:fixed}",
-      "#domId{color:red!important}",
-      "#domId{background:url(javascript:alert(1))}",
-      "#domId{color:red}@media all{body{display:none}}",
-      "#domId{color:red;}",
-    ]) {
+    const poisonedCases: Array<readonly [string, string, string]> = [
+      ["body", "color", "red"],
+      ["#other .el-button", "color", "red"],
+      ["#domId", "position", "fixed"],
+      ["#domId", "color", "red!important"],
+      ["#domId", "background-image", "u\\72l(https://external.example/x.png)"],
+      ["#domId", "background-image", "u\\72l(javascript:alert(1))"],
+      ["#domId .el\\2d button", "color", "red"],
+      ["#domId", "c\\6flor", "red"],
+      ["#domId", "color", "red/*comment*/"],
+      ["#domId", "color", " red"],
+    ];
+    for (const [selector, property, value] of poisonedCases) {
       const poisoned = mutableNativeV2Fixture();
-      poisoned.pages[0]!.controls[1]!.compiledStyle!.styleDataNew = payload;
+      poisoned.pages[0]!.controls[1]!.compiledStyle = {
+        nativeFields: {},
+        cssFragments: [{
+          selectorToken: "root",
+          state: "normal",
+          declarations: { textColor: "red" },
+          persistedSelector: selector,
+          persistedDeclarations: [{ property, value }],
+        }],
+        styleDataNew: `${selector}{${property}:${value}}`,
+        warnings: [],
+      };
       expect(UIImplementationSpecV2Schema.safeParse(poisoned).success).toBe(false);
     }
+
+    const forgedIndependentPayload = structuredClone(valid);
+    forgedIndependentPayload.pages[0]!.controls[1]!.compiledStyle!.styleDataNew = "#domId{color:red}";
+    expect(UIImplementationSpecV2Schema.safeParse(forgedIndependentPayload).success).toBe(false);
+
+    const approvedLayers = mutableNativeV2Fixture();
+    const background = "linear-gradient(135deg,#163a5f 0%,#e47b32 100%)," +
+      `url("project/res/images/${"a".repeat(64)}.png")`;
+    approvedLayers.pages[0]!.controls[1]!.compiledStyle = {
+      nativeFields: {},
+      cssFragments: [{
+        selectorToken: "root",
+        state: "normal",
+        declarations: { advanced: [
+          { kind: "gradient", angle: 135, stops: [{ offset: 0, color: "#163a5f" }, { offset: 1, color: "#e47b32" }] },
+          { kind: "background-image", assetId: "portrait-asset" },
+        ] },
+        persistedSelector: "#domId",
+        persistedDeclarations: [{ property: "background-image", value: background }],
+      }],
+      styleDataNew: `#domId{background-image:${background}}`,
+      warnings: [],
+    };
+    expect(UIImplementationSpecV2Schema.safeParse(approvedLayers).success).toBe(true);
 
     const overBudget = mutableNativeV2Fixture();
     overBudget.pages[0]!.controls[1]!.compiledStyle!.styleDataNew =

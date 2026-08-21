@@ -17,6 +17,7 @@ import { adaptLegacyModulePlan } from "../planning/legacy-module-plan-adapter.js
 import {
   SolutionCompileError,
   compileSolutionImplementation,
+  type SolutionCompileInput,
 } from "./solution-compiler.js";
 
 const CATALOG_VERSION = "1.0.0";
@@ -28,6 +29,16 @@ const approvedAsset = {
   targetPath: `project/res/images/${SHA}.png`,
   mediaType: "image/png" as const,
   sha256: SHA,
+  sizeBytes: 4096,
+};
+const SECOND_WORKSPACE_ASSET_ID = "66666666-7777-8888-9999-aaaaaaaaaaaa";
+const SECOND_MODEL_ASSET_ID = workspaceAssetIdToModelId(SECOND_WORKSPACE_ASSET_ID);
+const SECOND_SHA = "b".repeat(64);
+const secondApprovedAsset = {
+  workspaceAssetId: SECOND_WORKSPACE_ASSET_ID,
+  targetPath: `project/res/images/${SECOND_SHA}.png`,
+  mediaType: "image/png" as const,
+  sha256: SECOND_SHA,
   sizeBytes: 4096,
 };
 
@@ -161,6 +172,16 @@ function compileFixture(fixture: Readonly<{ plan: SolutionImplementationPlan; bu
   });
 }
 
+function compileInput(fixture: Readonly<{ plan: SolutionImplementationPlan; bundle: CapabilityCandidateBundle }>): SolutionCompileInput {
+  return {
+    plan: fixture.plan,
+    candidateBundle: fixture.bundle,
+    moduleRegistry: createDefaultModuleRegistry(),
+    approvedAssets: [approvedAsset],
+    activeCatalogVersion: CATALOG_VERSION,
+  };
+}
+
 function portfolioFixture() {
   const sourcePages = [
     { pageId: "bp-home", regions: ["hero", "work"] },
@@ -249,31 +270,198 @@ function adminFixture() {
   });
 }
 
+function recordsDataSet(id: string, count: number) {
+  return {
+    id,
+    purpose: "展开预算测试数据",
+    fields: [{ key: "id", label: "编号", type: "text" as const }],
+    records: Array.from({ length: count }, (_entry, index) => ({
+      values: [{ field: "id", value: `R-${index}` }],
+    })),
+  };
+}
+
+function repeaterNode(
+  id: string,
+  region: string,
+  mockDataId: string,
+  itemAlias: string,
+  template: SolutionNode,
+  maxItems = 100,
+): SolutionNode {
+  return {
+    kind: "repeater",
+    id,
+    mockDataId,
+    itemAlias,
+    keyField: "id",
+    maxItems,
+    sourceBlueprintRegionIds: [region],
+    intent: intent(0),
+    template,
+  };
+}
+
+function exactExpansionBudgetFixture(recordCount: number) {
+  const sourcePages = [{ pageId: "bp-budget", regions: ["budget"] }] as const;
+  const template = layout("budget-template", "budget", "column", Array.from(
+    { length: 8 },
+    (_entry, index) => textNode(`budget-child-${index}`, "budget", `项目 ${index}`, index),
+  ));
+  return planWithBundle("expansion-budget", [{
+    id: "budget-page",
+    title: "展开预算",
+    purpose: "验证展开边界",
+    canvas: "desktop",
+    sourceBlueprintPageId: "bp-budget",
+    sourceBlueprintRegionIds: ["budget"],
+    initialStateIds: [],
+    root: layout("budget-root", "budget", "scroll-region", [
+      repeaterNode("budget-repeater", "budget", "budget-data", "budgetItem", template),
+      ...Array.from({ length: 9 }, (_entry, index) =>
+        textNode(`budget-static-${index}`, "budget", `固定项目 ${index}`, index + 1)),
+    ]),
+  }], sourcePages, { mockData: [recordsDataSet("budget-data", recordCount)] });
+}
+
+function nestedExpansionBombFixture() {
+  const sourcePages = [{ pageId: "bp-bomb", regions: ["bomb"] }] as const;
+  const nested = repeaterNode(
+    "outer-repeater",
+    "bomb",
+    "outer-data",
+    "outerItem",
+    repeaterNode("inner-repeater", "bomb", "inner-data", "innerItem", textNode("bomb-leaf", "bomb", "叶子")),
+  );
+  return planWithBundle("expansion-bomb", [{
+    id: "bomb-page",
+    title: "嵌套展开",
+    purpose: "验证饱和乘积预算",
+    canvas: "desktop",
+    sourceBlueprintPageId: "bp-bomb",
+    sourceBlueprintRegionIds: ["bomb"],
+    initialStateIds: [],
+    root: layout("bomb-root", "bomb", "column", [nested]),
+  }], sourcePages, {
+    mockData: [recordsDataSet("outer-data", 100), recordsDataSet("inner-data", 100)],
+  });
+}
+
+function cumulativeExpansionFixture() {
+  const sourcePages = [
+    { pageId: "bp-one", regions: ["shared"] },
+    { pageId: "bp-two", regions: ["shared"] },
+  ] as const;
+  const repeatedRoot = (prefix: string) => layout(`${prefix}-root`, "shared", "grid", [
+    repeaterNode(`${prefix}-repeater`, "shared", "shared-data", `${prefix}Item`, textNode(`${prefix}-leaf`, "shared", prefix)),
+  ]);
+  return planWithBundle("cumulative-expansion", [
+    {
+      id: "page-one", title: "页面一", purpose: "累计页面一", canvas: "desktop",
+      sourceBlueprintPageId: "bp-one", sourceBlueprintRegionIds: ["shared"], initialStateIds: [], root: repeatedRoot("alpha"),
+    },
+    {
+      id: "page-two", title: "页面二", purpose: "累计页面二", canvas: "desktop",
+      sourceBlueprintPageId: "bp-two", sourceBlueprintRegionIds: ["shared"], initialStateIds: [], root: repeatedRoot("beta"),
+    },
+  ], sourcePages, {
+    mockData: [recordsDataSet("shared-data", 100)],
+    localState: [{ id: "budget-overlay-visible", purpose: "累计弹层", type: "boolean", initialValue: false }],
+    overlays: [{
+      id: "budget-overlay", title: "累计弹层", purpose: "累计弹层展开", presentation: "dialog",
+      hostPageId: "page-one", sourceBlueprintPageId: "bp-one", sourceBlueprintRegionIds: ["shared"],
+      visibleStateId: "budget-overlay-visible", dismissible: true, root: repeatedRoot("gamma"),
+    }],
+  });
+}
+
 function nativeControls(result: ReturnType<typeof compileFixture>) {
   return result.pages.flatMap((page) => page.compatibility === "native" ? page.controls : []);
+}
+
+function surfaceGroups(page: ReturnType<typeof compileFixture>["pages"][number]) {
+  if (page.compatibility !== "native") return [];
+  const children = new Map<string, typeof page.controls>();
+  page.controls.forEach((control) => {
+    if (control.parentId === undefined) return;
+    const siblings = children.get(control.parentId) ?? [];
+    siblings.push(control);
+    children.set(control.parentId, siblings);
+  });
+  const overlayGroups = page.controls.filter((control) => control.overlayHost !== undefined).map((root) => {
+    const controls = [root];
+    const pending = [...(children.get(root.id) ?? [])];
+    while (pending.length > 0) {
+      const control = pending.pop()!;
+      controls.push(control);
+      pending.push(...(children.get(control.id) ?? []));
+    }
+    return { id: `${page.id}:overlay:${root.overlayHost!.overlayId}`, kind: "overlay" as const, root, controls };
+  });
+  const overlayIds = new Set(overlayGroups.flatMap((group) => group.controls.map((control) => control.id)));
+  return [
+    { id: `${page.id}:page`, kind: "page" as const, controls: page.controls.filter((control) => !overlayIds.has(control.id)) },
+    ...overlayGroups,
+  ];
 }
 
 function severePeerOverlaps(result: ReturnType<typeof compileFixture>): string[] {
   return result.pages.flatMap((page) => {
     if (page.compatibility !== "native") return [];
-    const findings: string[] = [];
-    page.controls.forEach((left, leftIndex) => page.controls.slice(leftIndex + 1).forEach((right) => {
-      if (left.parentId !== right.parentId || left.zIndex >= 100_000 || right.zIndex >= 100_000) return;
-      const overlapWidth = Math.max(0, Math.min(left.geometry.x + left.geometry.width, right.geometry.x + right.geometry.width) - Math.max(left.geometry.x, right.geometry.x));
-      const overlapHeight = Math.max(0, Math.min(left.geometry.y + left.geometry.height, right.geometry.y + right.geometry.height) - Math.max(left.geometry.y, right.geometry.y));
-      const smallerArea = Math.min(left.geometry.width * left.geometry.height, right.geometry.width * right.geometry.height);
-      if (overlapWidth * overlapHeight > smallerArea * 0.5) findings.push(`${left.id}/${right.id}`);
-    }));
-    return findings;
+    return surfaceGroups(page).flatMap((surface) => {
+      const findings: string[] = [];
+      surface.controls.forEach((left, leftIndex) => surface.controls.slice(leftIndex + 1).forEach((right) => {
+        if (left.parentId !== right.parentId) return;
+        const overlapWidth = Math.max(0, Math.min(left.geometry.x + left.geometry.width, right.geometry.x + right.geometry.width) - Math.max(left.geometry.x, right.geometry.x));
+        const overlapHeight = Math.max(0, Math.min(left.geometry.y + left.geometry.height, right.geometry.y + right.geometry.height) - Math.max(left.geometry.y, right.geometry.y));
+        const smallerArea = Math.min(left.geometry.width * left.geometry.height, right.geometry.width * right.geometry.height);
+        if (overlapWidth * overlapHeight > smallerArea * 0.5) findings.push(`${surface.id}:${left.id}/${right.id}`);
+      }));
+      return findings;
+    });
   });
 }
 
 function excessiveUnusedVerticalSpace(result: ReturnType<typeof compileFixture>): string[] {
   return result.pages.flatMap((page) => {
     if (page.compatibility !== "native") return [];
-    const visibleRoots = page.controls.filter((control) => control.parentId === undefined && control.zIndex < 100_000);
-    const usedBottom = Math.max(...visibleRoots.map((control) => control.geometry.y + control.geometry.height));
-    return page.height - usedBottom > page.height * 0.35 ? [page.id] : [];
+    return surfaceGroups(page).flatMap((surface) => {
+      if (surface.kind === "page") {
+        const roots = surface.controls.filter((control) => control.parentId === undefined);
+        const usedBottom = Math.max(...roots.map((control) => control.geometry.y + control.geometry.height));
+        return page.height - usedBottom > page.height * 0.35 ? [surface.id] : [];
+      }
+      const contentRoots = surface.controls.filter((control) => control.parentId === surface.root.id);
+      const usedBottom = Math.max(...contentRoots.map((control) => control.geometry.y + control.geometry.height));
+      const rootBottom = surface.root.geometry.y + surface.root.geometry.height;
+      return rootBottom - usedBottom > surface.root.geometry.height * 0.35 ? [surface.id] : [];
+    });
+  });
+}
+
+function outOfPageControls(result: ReturnType<typeof compileFixture>): string[] {
+  return result.pages.flatMap((page) => {
+    if (page.compatibility !== "native") return [];
+    const byId = new Map(page.controls.map((control) => [control.id, control]));
+    const hasScrollAncestor = (control: typeof page.controls[number]): boolean => {
+      let parentId = control.parentId;
+      while (parentId !== undefined) {
+        const parent = byId.get(parentId);
+        if (parent === undefined) return false;
+        if (parent.compiledLayout?.kind === "scroll-region") return true;
+        parentId = parent.parentId;
+      }
+      return false;
+    };
+    return surfaceGroups(page).flatMap((surface) => surface.controls.flatMap((control) => {
+      if (hasScrollAncestor(control)) return [];
+      const geometry = control.geometry;
+      return geometry.x < 0 || geometry.y < 0
+        || geometry.x + geometry.width > page.width
+        || geometry.y + geometry.height > page.height
+        ? [`${surface.id}:${control.id}`]
+        : [];
+    }));
   });
 }
 
@@ -282,8 +470,8 @@ function errorFrom(run: () => void): SolutionCompileError {
     run();
     throw new Error("expected solution compilation to fail");
   } catch (error) {
-    expect(error).toBeInstanceOf(SolutionCompileError);
     if (!(error instanceof SolutionCompileError)) throw error;
+    expect(error).toBeInstanceOf(SolutionCompileError);
     return error;
   }
 }
@@ -308,10 +496,11 @@ describe("compileSolutionImplementation", () => {
     const roots = [portfolio, industrial, admin].map((result) => nativeControls(result).filter((control) => control.depth === 0).map((control) => control.compiledLayout?.kind));
     expect(roots).toEqual([["column", "column"], ["dock"], ["sidebar-content", "overlay-anchor"]]);
     expect(nativeControls(admin).some((control) => control.overlayHost?.initiallyVisible === false)).toBe(true);
-    expect(severePeerOverlaps(portfolio)).toEqual([]);
-    expect(severePeerOverlaps(industrial)).toEqual([]);
-    expect(excessiveUnusedVerticalSpace(portfolio)).toEqual([]);
-    expect(excessiveUnusedVerticalSpace(industrial)).toEqual([]);
+    for (const compiled of [portfolio, industrial, admin]) {
+      expect(severePeerOverlaps(compiled)).toEqual([]);
+      expect(excessiveUnusedVerticalSpace(compiled)).toEqual([]);
+      expect(outOfPageControls(compiled)).toEqual([]);
+    }
     expect([...portfolio.pages, ...industrial.pages, ...admin.pages].every((page) => page.height !== 900)).toBe(true);
     expect(canonicalServerHash(compileFixture(portfolioFixture()))).toBe(canonicalServerHash(portfolio));
     expect(Object.isFrozen(portfolio)).toBe(true);
@@ -333,7 +522,11 @@ describe("compileSolutionImplementation", () => {
     const scroll = nativeControls(admin).find((control) => control.compiledLayout?.kind === "scroll-region")!;
     expect(scroll.compiledStyle?.styleDataNew).toBe("#domId{overflow:auto}");
     expect(scroll.compiledStyle?.cssFragments).toContainEqual({
-      selectorToken: "root", state: "normal", declarations: { overflow: "auto" },
+      selectorToken: "root",
+      state: "normal",
+      declarations: { overflow: "auto" },
+      persistedSelector: "#domId",
+      persistedDeclarations: [{ property: "overflow", value: "auto" }],
     });
   });
 
@@ -463,5 +656,128 @@ describe("compileSolutionImplementation", () => {
     expect(first).toMatchObject({ code: "SOLUTION_COMPILE_FAILED", phase: "parse" });
     expect({ phase: first.phase, nodeId: first.nodeId, message: first.message, alternatives: first.alternatives })
       .toEqual({ phase: second.phase, nodeId: second.nodeId, message: second.message, alternatives: second.alternatives });
+  });
+
+  it("rejects saturated 100^n repeater fanout before allocating the expanded tree", () => {
+    const error = errorFrom(() => compileFixture(nestedExpansionBombFixture()));
+    expect(error).toMatchObject({
+      code: "SOLUTION_COMPILE_FAILED",
+      phase: "expansion",
+      reasonCode: "EXPANSION_BUDGET_EXCEEDED",
+    });
+  });
+
+  it("shares one expansion budget across pages and overlays", () => {
+    const error = errorFrom(() => compileFixture(cumulativeExpansionFixture()));
+    expect(error).toMatchObject({ phase: "expansion", reasonCode: "EXPANSION_BUDGET_EXCEEDED" });
+  });
+
+  it("accepts the exact global expansion boundary and rejects the next node", () => {
+    expect(nativeControls(compileFixture(exactExpansionBudgetFixture(49)))).toHaveLength(500);
+    const error = errorFrom(() => compileFixture(exactExpansionBudgetFixture(50)));
+    expect(error).toMatchObject({ phase: "expansion", reasonCode: "EXPANSION_BUDGET_EXCEEDED" });
+  });
+
+  it("rejects cyclic and excessively deep raw plans before recursive schema parsing", () => {
+    const cyclicFixture = portfolioFixture();
+    const cyclicRoot = cyclicFixture.plan.pages[0]!.root;
+    if (cyclicRoot.kind !== "layout") throw new Error("fixture drift");
+    cyclicRoot.children.push(cyclicRoot);
+    const cyclic = errorFrom(() => compileSolutionImplementation(compileInput(cyclicFixture)));
+    expect(cyclic).toMatchObject({ phase: "parse", reasonCode: "INPUT_CYCLE" });
+
+    const deepFixture = portfolioFixture();
+    const deepRoot = deepFixture.plan.pages[0]!.root;
+    if (deepRoot.kind !== "layout" || deepRoot.children[0]?.kind !== "layout"
+      || deepRoot.children[0].children[1]?.kind !== "layout"
+      || deepRoot.children[0].children[1].children[0]?.kind !== "control") throw new Error("fixture drift");
+    let deepValue: object = { terminal: null };
+    for (let depth = 0; depth < 100; depth += 1) deepValue = { nested: deepValue };
+    Object.defineProperty(deepRoot.children[0].children[1].children[0], "content", {
+      configurable: true,
+      enumerable: true,
+      value: deepValue,
+    });
+    const deep = errorFrom(() => compileSolutionImplementation(compileInput(deepFixture)));
+    expect(deep).toMatchObject({ phase: "parse", reasonCode: "INPUT_DEPTH_EXCEEDED" });
+  });
+
+  it("contains accessors and hostile proxy traps at the public structured boundary", () => {
+    const fixture = portfolioFixture();
+    const accessorInput: SolutionCompileInput = {
+      get plan(): SolutionImplementationPlan {
+        throw new RangeError("accessor executed");
+      },
+      candidateBundle: fixture.bundle,
+      moduleRegistry: createDefaultModuleRegistry(),
+      approvedAssets: [approvedAsset],
+      activeCatalogVersion: CATALOG_VERSION,
+    };
+    const accessor = errorFrom(() => compileSolutionImplementation(accessorInput));
+    expect(accessor).toMatchObject({ phase: "parse", reasonCode: "INPUT_ACCESSOR_FORBIDDEN" });
+
+    const proxyInput = compileInput(fixture);
+    const hostilePlan = new Proxy(proxyInput.plan, {
+      ownKeys() {
+        throw new TypeError("proxy trap executed");
+      },
+    });
+    const proxy = errorFrom(() => compileSolutionImplementation({ ...proxyInput, plan: hostilePlan }));
+    expect(proxy).toMatchObject({ phase: "parse", reasonCode: "INPUT_INSPECTION_FAILED" });
+
+    const nonPlainFixture = portfolioFixture();
+    Object.defineProperty(nonPlainFixture.plan, "theme", {
+      configurable: true,
+      enumerable: true,
+      value: new Map<string, string>(),
+    });
+    const nonPlain = errorFrom(() => compileSolutionImplementation(compileInput(nonPlainFixture)));
+    expect(nonPlain).toMatchObject({ phase: "parse", reasonCode: "INPUT_NON_PLAIN_DATA" });
+
+    const functionFixture = portfolioFixture();
+    Object.defineProperty(functionFixture.plan, "theme", {
+      configurable: true,
+      enumerable: true,
+      value: () => "not structured data",
+    });
+    const functionValue = errorFrom(() => compileSolutionImplementation(compileInput(functionFixture)));
+    expect(functionValue).toMatchObject({ phase: "parse", reasonCode: "INPUT_NON_PLAIN_DATA" });
+
+    const sparseFixture = portfolioFixture();
+    const sparseAssets: typeof approvedAsset[] = [];
+    sparseAssets.length = 1_000_000;
+    const sparse = errorFrom(() => compileSolutionImplementation({
+      ...compileInput(sparseFixture),
+      approvedAssets: sparseAssets,
+    }));
+    expect(sparse).toMatchObject({ phase: "parse", reasonCode: "INPUT_SIZE_EXCEEDED" });
+  });
+
+  it("deduplicates one shared native/style asset and rejects two component-wide assets", () => {
+    const sharedFixture = portfolioFixture();
+    const sharedRoot = sharedFixture.plan.pages[0]!.root;
+    if (sharedRoot.kind !== "layout" || sharedRoot.children[0]?.kind !== "layout"
+      || sharedRoot.children[0].children[0]?.kind !== "control") throw new Error("fixture drift");
+    sharedRoot.children[0].children[0].styleOverride = {
+      declarations: { advanced: [{ kind: "background-image", assetId: MODEL_ASSET_ID }] },
+      states: {},
+    };
+    const shared = compileFixture(sharedFixture);
+    const sharedImage = nativeControls(shared).find((control) => control.id === "hero-image")!;
+    expect(sharedImage.assetIds).toEqual([MODEL_ASSET_ID]);
+
+    const twoAssetFixture = portfolioFixture();
+    const twoAssetRoot = twoAssetFixture.plan.pages[0]!.root;
+    if (twoAssetRoot.kind !== "layout" || twoAssetRoot.children[0]?.kind !== "layout"
+      || twoAssetRoot.children[0].children[0]?.kind !== "control") throw new Error("fixture drift");
+    twoAssetRoot.children[0].children[0].styleOverride = {
+      declarations: { advanced: [{ kind: "background-image", assetId: SECOND_MODEL_ASSET_ID }] },
+      states: {},
+    };
+    const error = errorFrom(() => compileSolutionImplementation({
+      ...compileInput(twoAssetFixture),
+      approvedAssets: [approvedAsset, secondApprovedAsset],
+    }));
+    expect(error).toMatchObject({ phase: "style", reasonCode: "COMPONENT_ASSET_BUDGET_EXCEEDED" });
   });
 });

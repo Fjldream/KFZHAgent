@@ -638,20 +638,13 @@ const CompiledLayoutMetadataSchema = z.discriminatedUnion("overflow", [
   }).strict(),
 ]);
 
-const CompiledStyleFragmentSchema = z.object({
-  selectorToken: z.string().regex(/^(?:root|part:[A-Za-z][A-Za-z0-9_-]*)$/),
-  state: z.enum(["normal", "hover", "active", "focus", "disabled", "selected", "error"]),
-  declarations: StyleDeclarationV2Schema,
-}).strict();
-
 const CompiledStyleWarningSchema = z.object({
   code: z.string().trim().min(1).max(100).regex(/^[A-Z][A-Z0-9_]*$/),
   message: z.string().trim().min(1).max(500),
 }).strict();
 
 const MAX_PERSISTED_STYLE_BYTES = 32_768;
-const persistedSelector = /^#domId(?:[ A-Za-z0-9_.:>-]{0,300})$/;
-const persistedProperty = new Set([
+const persistedProperties = [
   "background-color", "background-image", "border-color", "border-top-color", "border-right-color",
   "border-bottom-color", "border-left-color", "border-top-width", "border-right-width",
   "border-bottom-width", "border-left-width", "border-radius", "border-top-left-radius",
@@ -660,45 +653,184 @@ const persistedProperty = new Set([
   "margin", "object-fit", "opacity", "outline", "outline-offset", "overflow", "padding",
   "padding-left", "padding-right", "padding-top", "padding-bottom", "text-align", "text-overflow",
   "transform", "transition", "white-space",
-]);
+] as const;
+type PersistedProperty = typeof persistedProperties[number];
 
-function isBoundedPersistedStyleData(value: string): boolean {
-  if (value.length > MAX_PERSISTED_STYLE_BYTES) return false;
-  let cursor = 0;
-  while (cursor < value.length) {
-    const open = value.indexOf("{", cursor);
-    const close = value.indexOf("}", open + 1);
-    if (open <= cursor || close < 0 || value.indexOf("{", open + 1) !== -1 && value.indexOf("{", open + 1) < close) return false;
-    const selector = value.slice(cursor, open);
-    if (!selector.split(", ").every((entry) => persistedSelector.test(entry))) return false;
-    const body = value.slice(open + 1, close);
-    if (body.length === 0 || body.endsWith(";") || /[{}@<>]|!important|javascript\s*:|vbscript\s*:|expression\s*\(|behavior\s*:|\/\*|\*\//i.test(body)) return false;
-    const declarations = body.split(";");
-    if (declarations.length > 64 || declarations.some((declaration) => {
-      const colon = declaration.indexOf(":");
-      if (colon <= 0 || colon === declaration.length - 1) return true;
-      const property = declaration.slice(0, colon);
-      const cssValue = declaration.slice(colon + 1);
-      if (!persistedProperty.has(property) || cssValue.length > 2_048 || /[{};]/.test(cssValue)) return true;
-      const withoutApprovedAsset = cssValue.replace(
-        /url\("project\/res\/images\/[0-9a-f]{64}\.(?:png|jpg|webp)"\)/g,
-        "approved-asset",
-      );
-      return /\burl\s*\(/i.test(withoutApprovedAsset);
-    })) return false;
-    cursor = close + 1;
-  }
-  return cursor === value.length;
+const canonicalNumber = /^(?:0|[1-9]\d*)(?:\.\d+)?$/;
+const canonicalSignedNumber = /^(?:0|-?[1-9]\d*)(?:\.\d+)?$/;
+const persistedSelectorBranch = /^#domId(?:\.[A-Za-z_][A-Za-z0-9_-]*)?(?:(?: | > )(?:\.[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*(?::[A-Za-z-]+|::[A-Za-z-]+)?|option(?::checked)?))*$/;
+
+function isCanonicalNumber(value: string, signed = false): boolean {
+  return (signed ? canonicalSignedNumber : canonicalNumber).test(value) && Number.isFinite(Number(value));
 }
+
+function isCanonicalPx(value: string, signed = false): boolean {
+  return value.endsWith("px") && isCanonicalNumber(value.slice(0, -2), signed);
+}
+
+function isCompiledColor(value: string): boolean {
+  if (value.startsWith("{theme.")) return false;
+  const parsed = nativeStyleColor.safeParse(value);
+  return parsed.success && parsed.data === value;
+}
+
+function splitTopLevelCssList(value: string): string[] | undefined {
+  const output: string[] = [];
+  let depth = 0;
+  let quoted = false;
+  let start = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]!;
+    if (character === "\\" || character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127) return undefined;
+    if (character === "\"") {
+      quoted = !quoted;
+      continue;
+    }
+    if (quoted) continue;
+    if (character === "(") depth += 1;
+    else if (character === ")") {
+      depth -= 1;
+      if (depth < 0) return undefined;
+    } else if (character === "," && depth === 0) {
+      output.push(value.slice(start, index));
+      start = index + 1;
+    }
+  }
+  if (depth !== 0 || quoted) return undefined;
+  output.push(value.slice(start));
+  return output.every((entry) => entry.length > 0) ? output : undefined;
+}
+
+function isCanonicalGradient(value: string): boolean {
+  if (!value.startsWith("linear-gradient(") || !value.endsWith(")")) return false;
+  const entries = splitTopLevelCssList(value.slice(16, -1));
+  if (entries === undefined || entries.length < 3 || entries.length > 6) return false;
+  const angle = entries[0]!;
+  if (!angle.endsWith("deg") || !isCanonicalNumber(angle.slice(0, -3)) || Number(angle.slice(0, -3)) > 360) return false;
+  return entries.slice(1).every((stop) => {
+    const separator = stop.lastIndexOf(" ");
+    if (separator <= 0) return false;
+    const color = stop.slice(0, separator);
+    const offset = stop.slice(separator + 1);
+    return isCompiledColor(color)
+      && offset.endsWith("%")
+      && isCanonicalNumber(offset.slice(0, -1))
+      && Number(offset.slice(0, -1)) <= 100;
+  });
+}
+
+function isCanonicalBackgroundImage(value: string): boolean {
+  const layers = splitTopLevelCssList(value);
+  if (layers === undefined || layers.length > 8) return false;
+  let assetCount = 0;
+  return layers.every((layer) => {
+    if (/^url\("project\/res\/images\/[0-9a-f]{64}\.(?:png|jpg|webp)"\)$/.test(layer)) {
+      assetCount += 1;
+      return assetCount <= 1;
+    }
+    return isCanonicalGradient(layer);
+  });
+}
+
+function isCanonicalTransform(value: string): boolean {
+  const operations = value.split(" ");
+  if (operations.length === 0 || operations.length > 4) return false;
+  const names = new Set<string>();
+  return operations.every((operation) => {
+    const match = /^(translateX|translateY|scale|rotate)\(([^()]+)\)$/.exec(operation);
+    if (match === null || names.has(match[1]!)) return false;
+    names.add(match[1]!);
+    const argument = match[2]!;
+    if (match[1] === "scale") return isCanonicalNumber(argument);
+    if (match[1] === "rotate") return argument.endsWith("deg") && isCanonicalNumber(argument.slice(0, -3), true);
+    return isCanonicalPx(argument, true);
+  });
+}
+
+function hasNonCanonicalCssCharacter(value: string): boolean {
+  for (const character of value) {
+    const code = character.charCodeAt(0);
+    if (character === "\\" || character === "{" || character === "}" || character === ";"
+      || code < 32 || code === 127) return true;
+  }
+  return false;
+}
+
+function isCanonicalPersistedValue(property: PersistedProperty, value: string): boolean {
+  if (value.length === 0 || value.length > 2_048 || value.trim() !== value
+    || hasNonCanonicalCssCharacter(value)) return false;
+  if (property.endsWith("color") || property === "color" || property === "background-color") {
+    return isCompiledColor(value);
+  }
+  if ([
+    "border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
+    "border-radius", "border-top-left-radius", "border-top-right-radius", "border-bottom-right-radius",
+    "border-bottom-left-radius", "column-gap", "font-size", "gap", "letter-spacing", "margin", "outline-offset",
+    "padding", "padding-left", "padding-right", "padding-top", "padding-bottom",
+  ].includes(property)) return isCanonicalPx(value, property === "letter-spacing");
+  if (property === "font-weight") return canonicalNumber.test(value) && Number.isInteger(Number(value));
+  if (property === "line-height" || property === "opacity") return isCanonicalNumber(value);
+  if (property === "box-shadow") {
+    return ["none", "0 2px 8px rgba(0,0,0,.12)", "0 8px 24px rgba(0,0,0,.18)", "0 16px 40px rgba(0,0,0,.24)"].includes(value);
+  }
+  if (property === "text-align") return ["left", "center", "right"].includes(value);
+  if (property === "object-fit") return ["fill", "contain", "cover", "none", "scale-down"].includes(value);
+  if (property === "overflow") return ["visible", "hidden", "auto"].includes(value);
+  if (property === "text-overflow") return ["clip", "ellipsis"].includes(value);
+  if (property === "white-space") return ["normal", "nowrap"].includes(value);
+  if (property === "background-image") return isCanonicalBackgroundImage(value);
+  if (property === "transform") return isCanonicalTransform(value);
+  if (property === "outline") {
+    const separator = value.indexOf(" solid ");
+    return separator > 0 && isCanonicalPx(value.slice(0, separator)) && isCompiledColor(value.slice(separator + 7));
+  }
+  if (property === "transition") {
+    return /^(?:opacity|transform|background-color|border-color|box-shadow|color) (?:0|[1-9]\d*)ms (?:linear|ease|ease-in|ease-out|ease-in-out)$/.test(value);
+  }
+  return false;
+}
+
+const PersistedStyleDeclarationSchema = z.object({
+  property: z.enum(persistedProperties),
+  value: z.string().min(1).max(2_048),
+}).strict().superRefine((declaration, ctx) => {
+  if (!isCanonicalPersistedValue(declaration.property, declaration.value)) {
+    ctx.addIssue({ code: "custom", path: ["value"], message: "persisted declaration must use canonical compiler serialization" });
+  }
+});
+
+const CompiledStyleFragmentSchema = z.object({
+  selectorToken: z.string().regex(/^(?:root|part:[A-Za-z][A-Za-z0-9_-]*)$/),
+  state: z.enum(["normal", "hover", "active", "focus", "disabled", "selected", "error"]),
+  declarations: StyleDeclarationV2Schema,
+  persistedSelector: z.string().min(6).max(300).refine((selector) =>
+    selector.split(", ").every((branch) => persistedSelectorBranch.test(branch)),
+  "persisted selector must use canonical evidence-owned #domId syntax"),
+  persistedDeclarations: z.array(PersistedStyleDeclarationSchema).min(1).max(64).superRefine((declarations, ctx) => {
+    const properties = declarations.map((declaration) => declaration.property);
+    if (new Set(properties).size !== properties.length) {
+      ctx.addIssue({ code: "custom", message: "persisted declaration properties must be unique" });
+    }
+    const sorted = [...properties].sort((left, right) => left.localeCompare(right));
+    if (properties.some((property, index) => property !== sorted[index])) {
+      ctx.addIssue({ code: "custom", message: "persisted declarations must use compiler property order" });
+    }
+  }),
+}).strict();
 
 export const CompiledStyleSpecSchema = z.object({
   nativeFields: ImplementationDataRecordSchema,
   cssFragments: z.array(CompiledStyleFragmentSchema).max(128),
-  styleDataNew: z.string().max(MAX_PERSISTED_STYLE_BYTES)
-    .refine(isBoundedPersistedStyleData, "persisted styleDataNew must be bounded compiler-owned #domId CSS")
-    .default(""),
+  styleDataNew: z.string().max(MAX_PERSISTED_STYLE_BYTES).default(""),
   warnings: z.array(CompiledStyleWarningSchema).max(64),
-}).strict();
+}).strict().superRefine((compiledStyle, ctx) => {
+  const canonical = compiledStyle.cssFragments.map((fragment) =>
+    `${fragment.persistedSelector}{${fragment.persistedDeclarations
+      .map((declaration) => `${declaration.property}:${declaration.value}`).join(";")}}`).join("");
+  if (compiledStyle.styleDataNew !== canonical) {
+    ctx.addIssue({ code: "custom", path: ["styleDataNew"], message: "persisted styleDataNew must equal canonical cssFragments serialization" });
+  }
+});
 
 const DataBindingSpecSchema = z.object({
   mockDataId: boundedId,
