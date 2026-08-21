@@ -13,4 +13,6 @@ export * from "./module-delivery.js";
 export * from "./module-compilation.js";
 export * from "./design-knowledge.js";
 export * from "./capability-candidates.js";
+export * from "./action-graph.js";
+export * from "./script-program.js";
 export * from "./solution-implementation-plan.js";

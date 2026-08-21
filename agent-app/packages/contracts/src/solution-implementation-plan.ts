@@ -1,6 +1,17 @@
 import { z } from "zod";
 import { projectKeySchema } from "./solution.js";
 import {
+  ActionPlanSchema,
+  SemanticEventBindingSchema,
+  type ActionPlan,
+  type SemanticEventBinding,
+} from "./action-graph.js";
+import { ScriptPlanSchema, type ScriptPlan } from "./script-program.js";
+export { ActionPlanSchema, SemanticEventBindingSchema, ValueExpressionSchema } from "./action-graph.js";
+export type { ActionPlan, SemanticEventBinding } from "./action-graph.js";
+export { ScriptPlanSchema } from "./script-program.js";
+export type { ScriptPlan } from "./script-program.js";
+import {
   isImplementationOwnedFieldName as isForbiddenSemanticName,
   NativeThemeSpecSchema,
   normalizeImplementationOwnedFieldName as normalizeName,
@@ -252,21 +263,6 @@ const templateVersionSchema = z
 
 const semanticTextSchema = z.string().trim().min(1).max(2_000);
 const shortTextSchema = z.string().trim().min(1).max(400);
-const declarativeStepTextSchema = semanticTextSchema.superRefine((value, ctx) => {
-  if (
-    /[{};]/.test(value)
-    || /\b(?:if|else|for|while|switch|try|catch|throw|async|await)\s*\(/.test(value)
-    || /(?:^|[\s(])[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.[A-Za-z_$][A-Za-z0-9_$]*)|(?:\[[^\]]+\]))*\s*(?:\|\|=|&&=|\?\?=|>>>=|<<=|>>=|\+=|-=|\*\*=|\*=|\/=|%=|&=|\|=|\^=|=|\+\+|--)/.test(value)
-    || /\bdelete\s+[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.[A-Za-z_$][A-Za-z0-9_$]*)|(?:\[[^\]]+\]))+/.test(value)
-    || /^(?:return|throw|await|yield)(?:\s+(?:[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.[A-Za-z_$][A-Za-z0-9_$]*)|(?:\[[^\]]+\]))*|-?\d+(?:\.\d+)?|true|false|null|undefined|["'][^"'\n]*["']))?$/.test(value.trim())
-    || /^(?:(?:break|continue)(?:\s+[A-Za-z_$][A-Za-z0-9_$]*)?|debugger)$/.test(value.trim())
-    || /\b[A-Za-z_$][A-Za-z0-9_$]*\s*(?:\[[^\]]+\]|\.[A-Za-z_$][A-Za-z0-9_$]*)\s*(?:\(|\[)/.test(value)
-    || containsJavascriptCall(value)
-    || /\b(?:alert|setTimeout|setInterval|eval|Function)\s+\(/.test(value)
-  ) {
-    ctx.addIssue({ code: "custom", message: "custom-script steps must be declarative prose, not executable syntax" });
-  }
-});
 const hashSchema = z.string().regex(/^[0-9a-f]{64}$/);
 export const LEGACY_MODULE_PLAN_CANDIDATE_BUNDLE_HASH = "3e147b2b8351b526f10dd9dfc47c4c93bbfc29814d791400e3e5b02c38220840";
 
@@ -417,41 +413,6 @@ export const NodeIntentSchema = z
   .strict();
 
 export type NodeIntent = z.infer<typeof NodeIntentSchema>;
-
-export const SemanticEventSchema = z.enum([
-  "blur",
-  "change",
-  "clear",
-  "click",
-  "edit",
-  "error",
-  "filter",
-  "focus",
-  "input",
-  "load",
-  "navigate",
-  "open-modal",
-  "remove-tag",
-  "row-click",
-  "row-select",
-  "scroll",
-  "select",
-  "submit",
-  "tab-add",
-  "tab-click",
-  "tab-remove",
-  "toggle",
-  "visible-change",
-]);
-
-export const SemanticEventBindingSchema = z
-  .object({
-    semanticEvent: SemanticEventSchema,
-    actionIds: z.array(stableIdSchema).min(1).max(16),
-  })
-  .strict();
-
-export type SemanticEventBinding = z.infer<typeof SemanticEventBindingSchema>;
 
 interface SolutionNodeBase {
   id: string;
@@ -796,109 +757,6 @@ export const OverlayPlanSchema = z
   })
   .strict();
 
-const actionBaseShape = {
-  id: stableIdSchema,
-  afterActionIds: z.array(stableIdSchema).max(16).default([]),
-};
-
-export const ValueExpressionSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("literal"), value: LegacySemanticValueSchema }).strict(),
-  z.object({ kind: z.literal("local-state"), stateId: stableIdSchema }).strict(),
-  z.object({ kind: z.literal("mock-data"), mockDataId: stableIdSchema }).strict(),
-]);
-
-export const ActionPlanSchema = z.discriminatedUnion("kind", [
-  z.object({ ...actionBaseShape, kind: z.literal("navigate-page"), targetPageId: stableIdSchema }).strict(),
-  z.object({ ...actionBaseShape, kind: z.literal("open-overlay"), overlayId: stableIdSchema }).strict(),
-  z.object({ ...actionBaseShape, kind: z.literal("close-overlay"), overlayId: stableIdSchema, result: SemanticScalarSchema.optional() }).strict(),
-  z.object({ ...actionBaseShape, kind: z.literal("set-visibility"), targetId: stableIdSchema, visible: z.boolean() }).strict(),
-  z.object({ ...actionBaseShape, kind: z.literal("switch-tab"), targetId: stableIdSchema, tabId: stableIdSchema }).strict(),
-  z.object({ ...actionBaseShape, kind: z.literal("set-state"), stateId: stableIdSchema, value: LegacySemanticValueSchema }).strict(),
-  z.object({ ...actionBaseShape, kind: z.literal("set-control-value"), targetId: stableIdSchema, value: ValueExpressionSchema }).strict(),
-  z.object({ ...actionBaseShape, kind: z.literal("show-feedback"), level: z.enum(["success", "info", "warning", "error"]), message: shortTextSchema }).strict(),
-  z.object({ ...actionBaseShape, kind: z.literal("run-script"), scriptId: stableIdSchema }).strict(),
-]);
-
-const ScriptPortSchema = z
-  .object({
-    name: semanticNameSchema,
-    description: shortTextSchema,
-    refKind: z.enum(["mock-data", "local-state", "control"]),
-    refId: stableIdSchema,
-  })
-  .strict();
-
-const ScriptParameterSchema = z
-  .object({
-    name: semanticNameSchema,
-    value: SemanticScalarSchema.optional(),
-    refKind: z.enum(["mock-data", "local-state", "control"]).optional(),
-    refId: stableIdSchema.optional(),
-  })
-  .strict()
-  .superRefine((parameter, ctx) => {
-    const hasValue = parameter.value !== undefined;
-    const hasReference = parameter.refKind !== undefined || parameter.refId !== undefined;
-    if (hasValue === hasReference || (parameter.refKind === undefined) !== (parameter.refId === undefined)) {
-      ctx.addIssue({ code: "custom", message: "script parameter requires exactly one literal value or complete semantic reference" });
-    }
-  });
-
-const scriptBaseShape = {
-  id: stableIdSchema,
-  purpose: semanticTextSchema,
-  inputs: z.array(ScriptPortSchema).max(32),
-  outputs: z.array(ScriptPortSchema).max(32),
-};
-
-const TemplateScriptPlanSchema = z
-  .object({
-    ...scriptBaseShape,
-    kind: z.literal("template"),
-    template: stableIdSchema,
-    parameters: z.array(ScriptParameterSchema).max(32),
-  })
-  .strict();
-
-const CustomScriptPlanSchema = z
-  .object({
-    ...scriptBaseShape,
-    kind: z.literal("custom"),
-    steps: z
-      .array(
-        z
-          .object({
-            order: z.number().int().min(1).max(100),
-            intent: declarativeStepTextSchema,
-            inputNames: z.array(semanticNameSchema).max(32),
-            outputNames: z.array(semanticNameSchema).max(32),
-          })
-          .strict(),
-      )
-      .min(1)
-      .max(100),
-  })
-  .strict()
-  .superRefine((script, ctx) => {
-    const inputNames = new Set(script.inputs.map((input) => input.name));
-    const outputNames = new Set(script.outputs.map((output) => output.name));
-    script.steps.forEach((step, index) => {
-      if (step.order !== index + 1) {
-        ctx.addIssue({ code: "custom", path: ["steps", index, "order"], message: "custom-script steps must be consecutively ordered from one" });
-      }
-      step.inputNames.forEach((name, nameIndex) => {
-        if (!inputNames.has(name)) ctx.addIssue({ code: "custom", path: ["steps", index, "inputNames", nameIndex], message: `unknown script input: ${name}` });
-      });
-      step.outputNames.forEach((name, nameIndex) => {
-        if (!outputNames.has(name)) ctx.addIssue({ code: "custom", path: ["steps", index, "outputNames", nameIndex], message: `unknown script output: ${name}` });
-      });
-    });
-  });
-
-export const ScriptPlanSchema = z
-  .discriminatedUnion("kind", [TemplateScriptPlanSchema, CustomScriptPlanSchema])
-  .superRefine((script, ctx) => validateImplementationFree(script, ctx));
-
 const LegacySolutionPageSchema = z
   .object({
     id: legacyStableIdSchema,
@@ -962,8 +820,6 @@ export type MockDataSet = z.infer<typeof MockDataSetSchema>;
 export type LocalStateDefinition = z.infer<typeof LocalStateDefinitionSchema>;
 export type SolutionPage = z.infer<typeof SolutionPageSchema>;
 export type OverlayPlan = z.infer<typeof OverlayPlanSchema>;
-export type ActionPlan = z.infer<typeof ActionPlanSchema>;
-export type ScriptPlan = z.infer<typeof ScriptPlanSchema>;
 export type ThemeIntent = z.infer<typeof ThemeSpecSchema>;
 export type SolutionImplementationPlan = z.infer<typeof SolutionImplementationPlanObjectSchema>;
 
@@ -1031,6 +887,7 @@ function implementationTextIssue(value: string, path: Array<string | number>): s
 
 function validateImplementationFree(value: unknown, ctx: z.RefinementCtx, path: Array<string | number> = []): void {
   if (typeof value === "string") {
+    if (path.length === 3 && path[0] === "scripts" && typeof path[1] === "number" && path[2] === "source") return;
     const issue = implementationTextIssue(value, path);
     if (issue !== undefined) ctx.addIssue({ code: "custom", path, message: issue });
     return;
@@ -1164,6 +1021,7 @@ function validatePlanReferences(plan: SolutionImplementationPlan, ctx: z.Refinem
   const controlIds = new Set<string>();
   const roleIds = new Set<string>();
   const boundActionIds = new Set<string>();
+  const triggerOwnersByActionId = new Map<string, Set<string>>();
   const dataSets = new Map(plan.mockData.map((dataSet) => [dataSet.id, dataSet]));
   const statesById = new Map(plan.localState.map((state) => [state.id, state]));
   const pagesById = new Map(plan.pages.map((page) => [page.id, page]));
@@ -1268,14 +1126,20 @@ function validatePlanReferences(plan: SolutionImplementationPlan, ctx: z.Refinem
     scriptIds.add(script.id);
   });
 
-  validateNodeReferences(nodeEntries, roleIds, mockDataIds, dataSets, actionIds, boundActionIds, nodeIds, ctx);
+  validateNodeReferences(nodeEntries, roleIds, mockDataIds, dataSets, actionIds, boundActionIds, triggerOwnersByActionId, nodeIds, ctx);
   const controlsById = new Map(
     nodeEntries
       .filter((entry): entry is typeof entry & { node: ControlNode } => entry.node.kind === "control")
       .map((entry) => [entry.node.id, entry.node]),
   );
-  validateActions(plan.actions, pageIds, overlayIds, statesById, dataSets, nodeIds, controlsById, mockDataIds, actionIds, boundActionIds, scriptIds, ctx);
+  validateActions(plan.actions, pageIds, overlayIds, statesById, dataSets, nodeIds, controlsById, mockDataIds, actionIds, boundActionIds, triggerOwnersByActionId, scriptIds, ctx);
   validateScripts(plan.scripts, mockDataIds, stateIds, controlIds, ctx);
+  const executableScriptIds = new Set(plan.actions.flatMap((action) => action.kind === "run-script" ? [action.scriptId] : []));
+  plan.scripts.forEach((script, scriptIndex) => {
+    if ((script.kind === "template" || script.programVersion === "semantic-js/v1") && !executableScriptIds.has(script.id)) {
+      ctx.addIssue({ code: "custom", path: ["scripts", scriptIndex, "id"], message: `SCRIPT_ORPHANED: ${script.id}` });
+    }
+  });
 }
 
 function recordKeyDomain(
@@ -1399,6 +1263,7 @@ function validateNodeReferences(
   dataSets: Map<string, MockDataSet>,
   actionIds: Set<string>,
   boundActionIds: Set<string>,
+  triggerOwnersByActionId: Map<string, Set<string>>,
   nodeIds: Set<string>,
   ctx: z.RefinementCtx,
 ): void {
@@ -1418,7 +1283,7 @@ function validateNodeReferences(
     if (node.kind === "control") {
       if (!roleIds.has(node.styleRole)) ctx.addIssue({ code: "custom", path: [...path, "styleRole"], message: `unknown style role: ${node.styleRole}` });
       if (node.mockDataId !== undefined && !mockDataIds.has(node.mockDataId)) ctx.addIssue({ code: "custom", path: [...path, "mockDataId"], message: `unknown mock-data id: ${node.mockDataId}` });
-      validateEventBindings(node.eventBindings, [...path, "eventBindings"], actionIds, boundActionIds, ctx);
+      validateEventBindings(node.id, node.eventBindings, [...path, "eventBindings"], actionIds, boundActionIds, triggerOwnersByActionId, ctx);
       const propertyNames = new Set<string>();
       node.properties.forEach((property, index) => {
         if (propertyNames.has(property.name)) ctx.addIssue({ code: "custom", path: [...path, "properties", index, "name"], message: `duplicate control property: ${property.name}` });
@@ -1427,7 +1292,7 @@ function validateNodeReferences(
       if (new Set(node.tabIds).size !== node.tabIds.length) ctx.addIssue({ code: "custom", path: [...path, "tabIds"], message: "control tab ids must be unique" });
     }
     if (node.kind === "registered-module") {
-      validateEventBindings(node.eventBindings, [...path, "eventBindings"], actionIds, boundActionIds, ctx);
+      validateEventBindings(node.id, node.eventBindings, [...path, "eventBindings"], actionIds, boundActionIds, triggerOwnersByActionId, ctx);
     }
     if (node.kind === "repeater") {
       const dataSet = dataSets.get(node.mockDataId);
@@ -1456,10 +1321,12 @@ function validateNodeReferences(
 }
 
 function validateEventBindings(
+  ownerId: string,
   bindings: SemanticEventBinding[],
   path: Array<string | number>,
   actionIds: Set<string>,
   boundActionIds: Set<string>,
+  triggerOwnersByActionId: Map<string, Set<string>>,
   ctx: z.RefinementCtx,
 ): void {
   const events = new Set<string>();
@@ -1478,6 +1345,9 @@ function validateEventBindings(
         ctx.addIssue({ code: "custom", path: [...path, bindingIndex, "actionIds", actionIndex], message: `unknown action id: ${actionId}` });
       } else {
         boundActionIds.add(actionId);
+        const owners = triggerOwnersByActionId.get(actionId) ?? new Set<string>();
+        owners.add(`${ownerId}\u0000${binding.semanticEvent}`);
+        triggerOwnersByActionId.set(actionId, owners);
       }
     });
   });
@@ -1494,10 +1364,18 @@ function validateActions(
   mockDataIds: Set<string>,
   actionIds: Set<string>,
   boundActionIds: Set<string>,
+  triggerOwnersByActionId: Map<string, Set<string>>,
   scriptIds: Set<string>,
   ctx: z.RefinementCtx,
 ): void {
   actions.forEach((action, index) => {
+    action.conditions?.forEach((condition, conditionIndex) => {
+      [condition.left, condition.right].forEach((operand, operandIndex) => {
+        const operandPath = ["actions", index, "conditions", conditionIndex, operandIndex === 0 ? "left" : "right"];
+        if (operand.kind === "local-state" && !statesById.has(operand.stateId)) ctx.addIssue({ code: "custom", path: operandPath, message: `unknown state id: ${operand.stateId}` });
+        if (operand.kind === "control-value" && !controlsById.has(operand.controlId)) ctx.addIssue({ code: "custom", path: operandPath, message: `unknown control id: ${operand.controlId}` });
+      });
+    });
     const chainedActionIds = new Set<string>();
     action.afterActionIds.forEach((actionId, refIndex) => {
       if (chainedActionIds.has(actionId)) {
@@ -1554,9 +1432,25 @@ function validateActions(
     entry.action.afterActionIds.forEach(markReachable);
   };
   boundActionIds.forEach(markReachable);
+  const ownershipByActionId = new Map<string, Set<string>>();
+  const ownershipPending = Array.from(triggerOwnersByActionId, ([actionId, owners]) => ({ actionId, owners: Array.from(owners) }));
+  while (ownershipPending.length > 0) {
+    const current = ownershipPending.pop()!;
+    const owners = ownershipByActionId.get(current.actionId) ?? new Set<string>();
+    const before = owners.size;
+    current.owners.forEach((owner) => owners.add(owner));
+    ownershipByActionId.set(current.actionId, owners);
+    if (owners.size === before) continue;
+    actionsById.get(current.actionId)?.action.afterActionIds.forEach((dependencyId) => {
+      ownershipPending.push({ actionId: dependencyId, owners: Array.from(owners) });
+    });
+  }
   actions.forEach((action, index) => {
     if (!reachableActionIds.has(action.id)) {
       ctx.addIssue({ code: "custom", path: ["actions", index, "id"], message: `action is unreachable from any semantic event binding: ${action.id}` });
+    }
+    if ((ownershipByActionId.get(action.id)?.size ?? 0) > 1) {
+      ctx.addIssue({ code: "custom", path: ["actions", index, "id"], message: `ACTION_TRIGGER_OWNERSHIP_MISMATCH: ${action.id}` });
     }
   });
 }

@@ -93,6 +93,38 @@ describe("design knowledge contracts", () => {
     expect(ScriptCapabilityProfileSchema.safeParse(missingEvidence).success).toBe(false);
   });
 
+  it("requires evidence and explicit access for supported runtime properties", () => {
+    const profile = {
+      schema: "kf-script-capability-profile/v1",
+      capabilityId: "select",
+      version: "1.0.0",
+      availability: "supported",
+      actions: [],
+      events: [],
+      methods: [],
+      properties: [{
+        semanticProperty: "value",
+        kfProperty: "Value",
+        readable: true,
+        writable: true,
+        availability: "supported",
+        evidence: [{ kind: "product-source", ref: "KingFusion3.6_Node/pages/select.json#Value" }],
+      }],
+      initialization: { supportsConfigureData: false, lifecycleEvents: [] },
+      limitations: [],
+    };
+
+    expect(ScriptCapabilityProfileSchema.safeParse(profile).success).toBe(true);
+    expect(ScriptCapabilityProfileSchema.safeParse({
+      ...profile,
+      properties: [{ ...profile.properties[0], evidence: [] }],
+    }).success).toBe(false);
+    expect(ScriptCapabilityProfileSchema.safeParse({
+      ...profile,
+      properties: [{ ...profile.properties[0], readable: false, writable: false }],
+    }).success).toBe(false);
+  });
+
   it("requires evidence references to be repository-relative paths", () => {
     const profile = {
       schema: "kf-script-capability-profile/v1",

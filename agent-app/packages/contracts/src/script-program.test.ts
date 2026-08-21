@@ -1,0 +1,251 @@
+import { describe, expect, it } from "vitest";
+import {
+  CompiledEventBindingSchema,
+  CompiledScriptModuleSchema,
+  ScriptPlanSchema,
+} from "./script-program.js";
+import { SolutionImplementationPlanSchema } from "./solution-implementation-plan.js";
+import {
+  adaptUiImplementationV1,
+  UIImplementationSpecSchema,
+  UIImplementationSpecV2Schema,
+} from "./ui-style.js";
+
+const theme = {
+  background: "#f4f7fb",
+  surface: "#ffffff",
+  primary: "#163a5f",
+  accent: "#e47b32",
+  textPrimary: "#14212b",
+  textSecondary: "#52616d",
+  fontFamily: "Inter",
+  spacingUnit: 8,
+  radiusScale: { small: 4, medium: 8, large: 16 },
+};
+
+const sourcePlan = {
+  schema: "kf-solution-implementation/v1",
+  projectKey: "script-demo",
+  blueprintHash: "a".repeat(64),
+  candidateBundleHash: "b".repeat(64),
+  theme,
+  roleStyles: [{ role: "action", declarations: {}, states: {} }],
+  mockData: [],
+  localState: [{ id: "submitted", purpose: "记录本地模拟提交结果", type: "boolean", initialValue: false }],
+  pages: [{
+    id: "home",
+    title: "脚本演示",
+    purpose: "演示本地提交闭环",
+    canvas: "responsive",
+    sourceBlueprintPageId: "home-blueprint",
+    sourceBlueprintRegionIds: ["main-region"],
+    initialStateIds: ["submitted"],
+    root: {
+      kind: "control",
+      id: "submit-button",
+      sourceBlueprintRegionIds: ["main-region"],
+      intent: {
+        importance: "primary",
+        visualWeight: 5,
+        readingOrder: 0,
+        density: "comfortable",
+        groupWith: [],
+        width: { mode: "content" },
+        height: { mode: "content" },
+        align: "start",
+      },
+      capabilityId: "button",
+      content: "提交",
+      properties: [],
+      tabIds: [],
+      styleRole: "action",
+      eventBindings: [{ semanticEvent: "click", actionIds: ["submit"] }],
+    },
+  }],
+  overlays: [],
+  actions: [{ id: "submit", kind: "run-script", scriptId: "submit-script", afterActionIds: [] }],
+  scripts: [{
+    id: "submit-script",
+    kind: "custom",
+    programVersion: "semantic-js/v1",
+    purpose: "设置本地模拟提交状态",
+    inputs: [],
+    outputs: [{ name: "result", description: "本地提交状态", refKind: "local-state", refId: "submitted" }],
+    source: "$state.set(\"submitted\", true);",
+  }],
+};
+
+const compiledBinding = {
+  id: "kf$binding:submit-click",
+  ownerInstanceName: "Button1",
+  kfEvent: "Click",
+  phase: "event",
+  scriptModuleIds: ["kf$script:submit-script"],
+  nativeActionIds: [],
+};
+
+const compiledScript = {
+  id: "kf$script:submit-script",
+  sourceScriptId: "submit-script",
+  placement: "event",
+  ownerInstanceName: "Button1",
+  instanceReferences: [{ semanticId: "submit-button", instanceName: "Button1" }],
+  pageReferences: [{ semanticId: "home", pageGuid: "00000000-0000-4000-8000-000000000001" }],
+  source: "KFPage.State.set(\"submitted\",true);",
+  sourceHash: "a".repeat(64),
+  validation: { kind: "ast-allowlist/v1", sourceHash: "a".repeat(64) },
+};
+
+describe("script program contracts", () => {
+  it("keeps declarative-v1 and semantic-js-v1 mutually exclusive", () => {
+    const declarative = ScriptPlanSchema.parse({
+      id: "describe",
+      kind: "custom",
+      purpose: "形成客户可读摘要",
+      inputs: [],
+      outputs: [],
+      steps: [{ order: 1, intent: "形成摘要", inputNames: [], outputNames: [] }],
+    });
+    expect(declarative.kind).toBe("custom");
+    if (declarative.kind === "custom") expect(declarative.programVersion).toBe("declarative-steps/v1");
+
+    expect(ScriptPlanSchema.safeParse(sourcePlan.scripts[0]).success).toBe(true);
+    expect(ScriptPlanSchema.safeParse({ ...sourcePlan.scripts[0], steps: [] }).success).toBe(false);
+    expect(ScriptPlanSchema.safeParse({
+      ...sourcePlan.scripts[0],
+      purpose: "document.querySelector('#app')",
+    }).success).toBe(false);
+  });
+
+  it.each([
+    "fetch('/api')",
+    "XMLHttpRequest()",
+    "new WebSocket('ws://host')",
+    "eval('1')",
+    "Function('return 1')",
+    "document.querySelector('#app')",
+    "window.location.reload()",
+    "globalThis.value = 1",
+    "import('pkg')",
+    "require('pkg')",
+    "const transport = fetch;",
+  ])("rejects obvious forbidden semantic source token %s", (source) => {
+    expect(ScriptPlanSchema.safeParse({ ...sourcePlan.scripts[0], source }).success).toBe(false);
+  });
+
+  it("bounds semantic source before AST validation", () => {
+    expect(ScriptPlanSchema.safeParse({ ...sourcePlan.scripts[0], source: "" }).success).toBe(false);
+    expect(ScriptPlanSchema.safeParse({ ...sourcePlan.scripts[0], source: "x".repeat(8_001) }).success).toBe(false);
+  });
+
+  it("allows the exact bounded semantic source path in a whole native plan only", () => {
+    expect(SolutionImplementationPlanSchema.safeParse(sourcePlan).success).toBe(true);
+
+    const poisonedPurpose = structuredClone(sourcePlan);
+    poisonedPurpose.scripts[0]!.purpose = "$state.set(\"submitted\", true);";
+    expect(SolutionImplementationPlanSchema.safeParse(poisonedPurpose).success).toBe(false);
+
+    const poisonedContent = structuredClone(sourcePlan);
+    poisonedContent.pages[0]!.root.content = "document.querySelector('#app')";
+    expect(SolutionImplementationPlanSchema.safeParse(poisonedContent).success).toBe(false);
+  });
+
+  it("rejects mismatched trigger ownership and orphan executable scripts in a whole plan", () => {
+    const mismatchedOwner = structuredClone(sourcePlan);
+    mismatchedOwner.pages[0]!.root.eventBindings.push({ semanticEvent: "change", actionIds: ["submit"] });
+    const ownerResult = SolutionImplementationPlanSchema.safeParse(mismatchedOwner);
+    expect(ownerResult.success).toBe(false);
+    if (!ownerResult.success) expect(ownerResult.error.issues.some((issue) => issue.message === "ACTION_TRIGGER_OWNERSHIP_MISMATCH: submit")).toBe(true);
+
+    const orphan = structuredClone(sourcePlan);
+    orphan.pages[0]!.root.eventBindings = [];
+    orphan.actions = [];
+    const orphanResult = SolutionImplementationPlanSchema.safeParse(orphan);
+    expect(orphanResult.success).toBe(false);
+    if (!orphanResult.success) expect(orphanResult.error.issues.some((issue) => issue.message === "SCRIPT_ORPHANED: submit-script")).toBe(true);
+  });
+
+  it("accepts strict compiler output and rejects semantic ids masquerading as runtime identities", () => {
+    expect(CompiledEventBindingSchema.safeParse(compiledBinding).success).toBe(true);
+    expect(CompiledScriptModuleSchema.safeParse(compiledScript).success).toBe(true);
+    expect(CompiledEventBindingSchema.safeParse({ ...compiledBinding, ownerInstanceName: "submit-button" }).success).toBe(false);
+    expect(CompiledEventBindingSchema.safeParse({
+      ...compiledBinding,
+      scriptModuleIds: ["kf$action:submit-script"],
+    }).success).toBe(false);
+    expect(CompiledScriptModuleSchema.safeParse({
+      ...compiledScript,
+      pageReferences: [{ semanticId: "home", pageGuid: "home" }],
+    }).success).toBe(false);
+    expect(CompiledScriptModuleSchema.safeParse({
+      ...compiledScript,
+      source: "document.querySelector('#app').click();",
+    }).success).toBe(false);
+  });
+
+  it("types native UI v2 compiled slots while adapted-v1 remains empty", () => {
+    const native = {
+      schema: "kf-ui-implementation/v2",
+      compatibility: "native",
+      theme,
+      compiledRoleStyles: {},
+      pages: [{
+        compatibility: "native",
+        id: "home",
+        width: 800,
+        height: 600,
+        sourceBlueprintPageId: "home-blueprint",
+        controls: [{
+          id: "submit-button",
+          role: "action",
+          capabilityId: "button",
+          depth: 0,
+          zIndex: 0,
+          geometry: { x: 10, y: 10, width: 100, height: 40 },
+          nativeProperties: {},
+          sourceSolutionNodeId: "submit-control",
+          sourceBlueprintPageId: "home-blueprint",
+          sourceBlueprintRegionIds: ["main-region"],
+          eventBindings: [compiledBinding],
+        }],
+      }],
+      compiledActions: [],
+      compiledScripts: [compiledScript],
+    };
+    expect(UIImplementationSpecV2Schema.safeParse(native).success).toBe(true);
+
+    const disguised = structuredClone(native);
+    disguised.pages[0]!.controls[0]!.eventBindings[0]!.ownerInstanceName = "submit-button";
+    expect(UIImplementationSpecV2Schema.safeParse(disguised).success).toBe(false);
+
+    const contextualDisguise = structuredClone(native);
+    contextualDisguise.pages[0]!.controls[0]!.id = "Button1";
+    contextualDisguise.compiledScripts[0]!.instanceReferences[0]!.semanticId = "Button1";
+    const contextualResult = UIImplementationSpecV2Schema.safeParse(contextualDisguise);
+    expect(contextualResult.success).toBe(false);
+    if (!contextualResult.success) {
+      expect(contextualResult.error.issues.some((issue) => issue.message === "compiler instance name cannot reuse a semantic id")).toBe(true);
+    }
+
+    const v1 = UIImplementationSpecSchema.parse({
+      schema: "kf-ui-implementation/v1",
+      theme,
+      pages: [{
+        id: "home",
+        width: 800,
+        height: 600,
+        components: [{
+          id: "submit-button",
+          role: "action",
+          capabilityId: "button",
+          geometry: { x: 10, y: 10, width: 100, height: 40 },
+          properties: {},
+          style: { declarations: {}, states: {} },
+        }],
+      }],
+    });
+    const adapted = adaptUiImplementationV1(v1);
+    const forgedAdapted = { ...adapted, compiledScripts: [compiledScript] };
+    expect(UIImplementationSpecV2Schema.safeParse(forgedAdapted).success).toBe(false);
+  });
+});

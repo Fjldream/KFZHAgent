@@ -96,6 +96,22 @@ const method = z.object({
   }
 });
 
+const runtimeProperty = z.object({
+  semanticProperty: id,
+  kfProperty: z.string().trim().min(1).max(100).regex(/^[A-Za-z_$][A-Za-z0-9_$.-]*$/),
+  readable: z.boolean(),
+  writable: z.boolean(),
+  availability,
+  evidence: z.array(evidence).max(8),
+}).strict().superRefine((value, ctx) => {
+  if (!value.readable && !value.writable) {
+    ctx.addIssue({ code: "custom", message: "script runtime property must be readable or writable" });
+  }
+  if (value.availability === "supported" && value.evidence.length === 0) {
+    ctx.addIssue({ code: "custom", path: ["evidence"], message: "supported script property requires evidence" });
+  }
+});
+
 const action = z.object({
   semanticAction: id,
   implementation: z.enum(["restricted-action", "event-script", "configure-data"]),
@@ -115,9 +131,22 @@ export const ScriptCapabilityProfileSchema = z.object({
   actions: z.array(action).max(16),
   events: z.array(supportedMember).max(32),
   methods: z.array(method).max(32),
+  properties: z.array(runtimeProperty).max(32).default([]),
   initialization: z.object({ supportsConfigureData: z.boolean(), lifecycleEvents: z.array(id).max(12) }).strict(),
   limitations: textList,
-}).strict();
+}).strict().superRefine((profile, ctx) => {
+  const categories = [
+    ["actions", profile.actions.map((member) => member.semanticAction)],
+    ["events", profile.events.map((member) => member.semanticEvent)],
+    ["methods", profile.methods.map((member) => member.semanticMethod)],
+    ["properties", profile.properties.map((member) => member.semanticProperty)],
+  ] as const;
+  categories.forEach(([field, names]) => {
+    if (new Set(names).size !== names.length) {
+      ctx.addIssue({ code: "custom", path: [field], message: `duplicate script capability ${field}` });
+    }
+  });
+});
 
 const recipeRole = z.object({ role: id, capabilityCandidates: z.array(id).min(1).max(16) }).strict();
 export const CompositionRecipeSchema = z.object({

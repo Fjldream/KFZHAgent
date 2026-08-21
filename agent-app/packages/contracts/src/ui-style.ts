@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { CompiledNativeActionSchema } from "./action-graph.js";
+import { CompiledEventBindingSchema, CompiledScriptModuleSchema } from "./script-program.js";
 
 export const CapabilityStatusSchema = z.enum([
   "full",
@@ -694,7 +696,7 @@ export const UIImplementationControlV2Schema = z.object({
   sourceRepeaterId: boundedId.optional(),
   sourceBlueprintPageId: boundedId,
   sourceBlueprintRegionIds: z.array(boundedId).min(1).max(12),
-  eventBindings: z.array(z.never()).max(0),
+  eventBindings: z.array(CompiledEventBindingSchema).max(32),
 }).strict();
 
 const UIImplementationPageV2Schema = z.object({
@@ -786,8 +788,8 @@ export const UIImplementationSpecV2Schema = z.object({
   theme: z.union([ThemeSpecSchema, NativeThemeSpecSchema]),
   compiledRoleStyles: z.record(stableId, ComponentStyleSpecV2Schema),
   pages: z.array(UIImplementationPageAnyV2Schema).min(1),
-  compiledActions: z.array(z.never()).max(0),
-  compiledScripts: z.array(z.never()).max(0),
+  compiledActions: z.array(CompiledNativeActionSchema).max(3_200),
+  compiledScripts: z.array(CompiledScriptModuleSchema).max(200),
 }).strict().superRefine((implementation, ctx) => {
   implementation.pages.forEach((page, pageIndex) => {
     if (page.compatibility !== implementation.compatibility) {
@@ -797,6 +799,12 @@ export const UIImplementationSpecV2Schema = z.object({
   if (implementation.compatibility === "adapted-v1") {
     if (Object.keys(implementation.compiledRoleStyles).length > 0) {
       ctx.addIssue({ code: "custom", path: ["compiledRoleStyles"], message: "adapted v1 implementations cannot invent compiled role styles" });
+    }
+    if (implementation.compiledActions.length > 0) {
+      ctx.addIssue({ code: "custom", path: ["compiledActions"], message: "adapted v1 implementations cannot contain compiled actions" });
+    }
+    if (implementation.compiledScripts.length > 0) {
+      ctx.addIssue({ code: "custom", path: ["compiledScripts"], message: "adapted v1 implementations cannot contain compiled scripts" });
     }
     return;
   }
@@ -811,6 +819,7 @@ export const UIImplementationSpecV2Schema = z.object({
   }
   const pageIds = new Set<string>();
   const controlIds = new Set<string>();
+  const semanticIds = new Set<string>();
   implementation.pages.forEach((page, pageIndex) => {
     if (page.compatibility !== "native") {
       return;
@@ -819,11 +828,16 @@ export const UIImplementationSpecV2Schema = z.object({
       ctx.addIssue({ code: "custom", path: ["pages", pageIndex, "id"], message: `duplicate implementation page id: ${page.id}` });
     }
     pageIds.add(page.id);
+    semanticIds.add(page.id);
+    semanticIds.add(page.sourceBlueprintPageId);
     type NativeControl = z.infer<typeof UIImplementationControlV2Schema>;
     const controlsById = new Map(page.controls.map((control) => [control.id, control]));
     const controlIndexById = new Map<string, number>();
     const childrenByParent = new Map<string, NativeControl[]>();
     page.controls.forEach((control, controlIndex) => {
+      semanticIds.add(control.id);
+      semanticIds.add(control.sourceSolutionNodeId);
+      semanticIds.add(control.sourceBlueprintPageId);
       controlIndexById.set(control.id, controlIndex);
       if (control.parentId === undefined) return;
       const siblings = childrenByParent.get(control.parentId) ?? [];
@@ -975,6 +989,58 @@ export const UIImplementationSpecV2Schema = z.object({
         }
       });
     });
+  });
+  const compiledActionIds = new Set<string>();
+  implementation.compiledActions.forEach((action, actionIndex) => {
+    if (compiledActionIds.has(action.id)) ctx.addIssue({ code: "custom", path: ["compiledActions", actionIndex, "id"], message: `duplicate compiled action id: ${action.id}` });
+    compiledActionIds.add(action.id);
+    if (semanticIds.has(action.ownerInstanceName)) ctx.addIssue({ code: "custom", path: ["compiledActions", actionIndex, "ownerInstanceName"], message: "compiler instance name cannot reuse a semantic id" });
+    if ("targetInstanceName" in action && semanticIds.has(action.targetInstanceName)) ctx.addIssue({ code: "custom", path: ["compiledActions", actionIndex, "targetInstanceName"], message: "compiler target instance cannot reuse a semantic id" });
+  });
+  const compiledScriptIds = new Set<string>();
+  implementation.compiledScripts.forEach((module, moduleIndex) => {
+    if (compiledScriptIds.has(module.id)) ctx.addIssue({ code: "custom", path: ["compiledScripts", moduleIndex, "id"], message: `duplicate compiled script id: ${module.id}` });
+    compiledScriptIds.add(module.id);
+    if (semanticIds.has(module.ownerInstanceName)) ctx.addIssue({ code: "custom", path: ["compiledScripts", moduleIndex, "ownerInstanceName"], message: "compiler instance name cannot reuse a semantic id" });
+    module.instanceReferences.forEach((reference, referenceIndex) => {
+      if (!controlIds.has(reference.semanticId)) ctx.addIssue({ code: "custom", path: ["compiledScripts", moduleIndex, "instanceReferences", referenceIndex, "semanticId"], message: `unknown compiled control reference: ${reference.semanticId}` });
+      if (semanticIds.has(reference.instanceName)) ctx.addIssue({ code: "custom", path: ["compiledScripts", moduleIndex, "instanceReferences", referenceIndex, "instanceName"], message: "compiler instance name cannot reuse a semantic id" });
+    });
+    module.pageReferences.forEach((reference, referenceIndex) => {
+      if (!pageIds.has(reference.semanticId)) ctx.addIssue({ code: "custom", path: ["compiledScripts", moduleIndex, "pageReferences", referenceIndex, "semanticId"], message: `unknown compiled page reference: ${reference.semanticId}` });
+    });
+  });
+  const bindingIds = new Set<string>();
+  const referencedEventScripts = new Set<string>();
+  const referencedNativeActions = new Set<string>();
+  implementation.pages.forEach((page, pageIndex) => {
+    if (page.compatibility !== "native") return;
+    page.controls.forEach((control, controlIndex) => {
+      const eventPhases = new Set<string>();
+      control.eventBindings.forEach((binding, bindingIndex) => {
+        const path = ["pages", pageIndex, "controls", controlIndex, "eventBindings", bindingIndex];
+        if (bindingIds.has(binding.id)) ctx.addIssue({ code: "custom", path: [...path, "id"], message: `duplicate compiled binding id: ${binding.id}` });
+        bindingIds.add(binding.id);
+        if (semanticIds.has(binding.ownerInstanceName)) ctx.addIssue({ code: "custom", path: [...path, "ownerInstanceName"], message: "compiler instance name cannot reuse a semantic id" });
+        const eventPhase = `${binding.kfEvent}\u0000${binding.phase}`;
+        if (eventPhases.has(eventPhase)) ctx.addIssue({ code: "custom", path, message: `duplicate compiled event phase: ${binding.kfEvent}/${binding.phase}` });
+        eventPhases.add(eventPhase);
+        binding.scriptModuleIds.forEach((moduleId, moduleIdIndex) => {
+          if (!compiledScriptIds.has(moduleId)) ctx.addIssue({ code: "custom", path: [...path, "scriptModuleIds", moduleIdIndex], message: `unknown compiled script id: ${moduleId}` });
+          referencedEventScripts.add(moduleId);
+        });
+        binding.nativeActionIds.forEach((actionId, actionIdIndex) => {
+          if (!compiledActionIds.has(actionId)) ctx.addIssue({ code: "custom", path: [...path, "nativeActionIds", actionIdIndex], message: `unknown compiled action id: ${actionId}` });
+          referencedNativeActions.add(actionId);
+        });
+      });
+    });
+  });
+  implementation.compiledScripts.forEach((module, moduleIndex) => {
+    if (module.placement === "event" && !referencedEventScripts.has(module.id)) ctx.addIssue({ code: "custom", path: ["compiledScripts", moduleIndex, "id"], message: `event script is not bound: ${module.id}` });
+  });
+  implementation.compiledActions.forEach((action, actionIndex) => {
+    if (!referencedNativeActions.has(action.id)) ctx.addIssue({ code: "custom", path: ["compiledActions", actionIndex, "id"], message: `compiled action is not bound: ${action.id}` });
   });
   Object.entries(implementation.compiledRoleStyles).forEach(([role, style]) => {
     const backgroundAssetIds = backgroundAssetIdsFromStyle(style);
