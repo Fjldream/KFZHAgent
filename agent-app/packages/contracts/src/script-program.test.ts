@@ -166,6 +166,27 @@ describe("script program contracts", () => {
     }
   });
 
+  it("screens string literals without treating comments, colors, or hashtags as selectors", () => {
+    const validSources = [
+      "// .comment-class #comment-id [data-secret] body{color:red}\nconst message = \"正常业务消息\"; $feedback.show(\"info\", message);",
+      "const shortColor = \"#fff\"; const color = \"#ffffff\"; const alpha = \"#ffffffff\";",
+      "const topic = \"#产品动态\"; const release = \"#release-notes\";",
+      "const quote = \"他说：\\\"The function is ready\\\"\";",
+      "const message = `第一行中文\n第二行 function is ready`; $feedback.show(\"info\", message);",
+    ];
+    validSources.forEach((source) => expect(ScriptPlanSchema.safeParse({ ...sourcePlan.scripts[0], source }).success, source).toBe(true));
+
+    const forbiddenLiterals = [
+      "const selector = \".class\";",
+      "const selector = '#id';",
+      "const selector = `[data-secret]`;",
+      "const selector = \"body{color:red}\";",
+      "const selector = \".a,.b\";",
+      "const selector = \"button:hover\";",
+    ];
+    forbiddenLiterals.forEach((source) => expect(ScriptPlanSchema.safeParse({ ...sourcePlan.scripts[0], source }).success, source).toBe(false));
+  });
+
   it("canonicalizes page GUIDs so case aliases cannot create distinct runtime identities", () => {
     const upper = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
     expect(CompilerPageGuidSchema.parse(upper)).toBe(upper.toLowerCase());

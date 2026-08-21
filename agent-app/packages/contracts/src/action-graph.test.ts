@@ -193,6 +193,29 @@ describe("ActionGraph contracts", () => {
     expect(descriptorReads).toBe(0);
   });
 
+  it("clones only safe own data properties into prototype-free values", () => {
+    const parsedJson = JSON.parse('{"kind":"record","fields":[{"name":"profile","value":{"kind":"list","items":["访客",1,null]}}]}') as unknown;
+    expect(ActionValueSchema.safeParse(parsedJson).success).toBe(true);
+
+    const described: Record<string, unknown> = {};
+    Object.defineProperties(described, {
+      kind: { value: "list", enumerable: false },
+      items: { value: ["safe"], enumerable: false },
+    });
+    expect(ActionValueSchema.parse(described)).toEqual({ kind: "list", items: ["safe"] });
+
+    for (const sensitive of ["__proto__", "prototype", "constructor"]) {
+      const poisoned = JSON.parse(`{"kind":"list","items":[],"${sensitive}":"polluted"}`) as unknown;
+      const result = ActionValueSchema.safeParse(poisoned);
+      expect(result.success, sensitive).toBe(false);
+      if (!result.success) expect(result.error.issues.some((issue) => issue.message === `ACTION_VALUE_PROTOTYPE_KEY_FORBIDDEN: ${sensitive}`)).toBe(true);
+    }
+
+    const inherited = Object.create({ kind: "list", items: [] }) as object;
+    expect(ActionValueSchema.safeParse(inherited).success).toBe(false);
+    expect(Object.prototype).not.toHaveProperty("polluted");
+  });
+
   it("rejects ActionGraph script references without a run-script effect", () => {
     const orphan = structuredClone(graphFixture);
     orphan.actions = orphan.actions.filter((action) => action.id !== "filter");

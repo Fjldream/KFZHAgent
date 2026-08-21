@@ -14,6 +14,7 @@ const implementationPropertyNames = new Set([
   "paddingtop", "position", "rect", "right", "textalign", "textcolor", "top", "transform", "transformorigin", "transition",
   "transitionduration", "width", "xpos", "ypos", "zindex",
 ]);
+const prototypeSensitiveKeys = new Set(["__proto__", "prototype", "constructor"]);
 
 function normalizedName(value: string): string {
   return value.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
@@ -45,16 +46,18 @@ const cssPseudoNames = new Set([
   "only-child", "placeholder", "required", "root", "selected", "visited",
 ]);
 
-function javascriptCodeView(value: string): string {
+function javascriptLexicalView(value: string): { codeView: string; literals: string[] } {
   const characters = [...value];
+  const literals: string[] = [];
+  let literal = "";
   let state: "code" | "single" | "double" | "template" | "line-comment" | "block-comment" = "code";
   for (let index = 0; index < characters.length; index += 1) {
     const character = characters[index]!;
     const next = characters[index + 1];
     if (state === "code") {
-      if (character === "'") state = "single";
-      else if (character === "\"") state = "double";
-      else if (character === "`") state = "template";
+      if (character === "'") { state = "single"; literal = ""; characters[index] = " "; continue; }
+      else if (character === "\"") { state = "double"; literal = ""; characters[index] = " "; continue; }
+      else if (character === "`") { state = "template"; literal = ""; characters[index] = " "; continue; }
       else if (character === "/" && next === "/") state = "line-comment";
       else if (character === "/" && next === "*") state = "block-comment";
       else continue;
@@ -70,17 +73,23 @@ function javascriptCodeView(value: string): string {
     } else if ((state === "single" && character === "'")
       || (state === "double" && character === "\"")
       || (state === "template" && character === "`")) {
+      literals.push(literal);
       state = "code";
       characters[index] = " ";
       continue;
     } else if ((state === "single" || state === "double" || state === "template") && character === "\\") {
       characters[index] = " ";
-      if (index + 1 < characters.length) characters[++index] = " ";
+      if (index + 1 < characters.length) {
+        literal += characters[index + 1]!;
+        characters[++index] = " ";
+      }
       continue;
     }
+    if (state === "single" || state === "double" || state === "template") literal += character;
     if (character !== "\n") characters[index] = " ";
   }
-  return characters.join("");
+  if (state === "single" || state === "double" || state === "template") literals.push(literal);
+  return { codeView: characters.join(""), literals };
 }
 
 function containsUnsafeCall(value: string): boolean {
@@ -107,9 +116,12 @@ function isRawJsonText(value: string): boolean {
   }
 }
 
-function cssSelectorOrRuleIssue(value: string, strictSelectors: boolean): string | undefined {
+function cssSelectorOrRuleIssue(value: string, strictSelectors: boolean, allowHashtag = false): string | undefined {
   const trimmed = value.trim();
-  if (/^#[0-9a-f]{3,8}$/i.test(trimmed)) return undefined;
+  if (/^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(trimmed)) return undefined;
+  if (allowHashtag && (/^#[\u3400-\u9fff][\u3400-\u9fffA-Za-z0-9_-]*$/.test(trimmed)
+    || /^#[A-Z][A-Za-z0-9_]*$/.test(trimmed)
+    || /^#[A-Za-z][A-Za-z0-9]*-[A-Za-z0-9-]+$/.test(trimmed))) return undefined;
   if (/(?:^|["'`\s])(?:\.[A-Za-z_-][A-Za-z0-9_-]*|#[A-Za-z_-][A-Za-z0-9_-]*|\[[A-Za-z_-][^\]\n]*\])\s*,\s*(?:\.[A-Za-z_-][A-Za-z0-9_-]*|#[A-Za-z_-][A-Za-z0-9_-]*|\[[A-Za-z_-][^\]\n]*\])/.test(value)) return "CSS selector lists are not allowed";
   const selectorAtom = /^(?:[A-Za-z][A-Za-z0-9-]*|[.#][A-Za-z_-][A-Za-z0-9_-]*|\[[^\]\n]+\])$/;
   const selectorParts = trimmed.split(/\s*[>+~]\s*/);
@@ -150,11 +162,14 @@ export function semanticImplementationTextIssue(
     || /^urn:[A-Za-z0-9][A-Za-z0-9:._-]*$/i.test(trimmed)
     || /^(?:[A-Za-z0-9-]+\.)+(?:com|org|net|io|cn|com\.cn|gov\.cn)$/i.test(trimmed)) return undefined;
   if (/^\{theme\.[A-Za-z][A-Za-z0-9]*\}$/.test(trimmed)) return undefined;
-  if (/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/i.test(value)) return "GUID values are not allowed";
-  if (/<\/?(?:script|style|iframe|object|embed)\b|\b(?:javascript|vbscript)\s*:/i.test(value)) return "executable markup is not allowed";
-  const codeView = mode === "semantic-js-source" ? javascriptCodeView(value) : value;
+  const lexical = mode === "semantic-js-source" ? javascriptLexicalView(value) : undefined;
+  const codeView = lexical?.codeView ?? value;
+  const screenedText = lexical === undefined ? value : `${codeView}\n${lexical.literals.join("\n")}`;
+  if (/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/i.test(screenedText)) return "GUID values are not allowed";
+  if (/<\/?(?:script|style|iframe|object|embed)\b|\b(?:javascript|vbscript)\s*:/i.test(screenedText)) return "executable markup is not allowed";
   const selectorIssue = mode === "semantic-js-source"
-    ? cssSelectorOrRuleIssue(value, false) ?? cssSelectorOrRuleIssue(codeView, true)
+    ? lexical!.literals.map((literalValue) => cssSelectorOrRuleIssue(literalValue, false, true)).find((issue) => issue !== undefined)
+      ?? cssSelectorOrRuleIssue(codeView, true)
     : cssSelectorOrRuleIssue(value, options.strictSelectors ?? false);
   if (selectorIssue !== undefined) return selectorIssue;
   const identifiers = codeView.match(/[A-Za-z_$][A-Za-z0-9_$]*/g) ?? [];
@@ -164,7 +179,7 @@ export function semanticImplementationTextIssue(
     if (rawRuntimeNames.has(normalized)) return `implementation runtime name: ${identifier}`;
   }
   if (mode === "semantic-js-source") {
-    const literalAndCodeIdentifiers = value.match(/[A-Za-z_$][A-Za-z0-9_$]*/g) ?? [];
+    const literalAndCodeIdentifiers = screenedText.match(/[A-Za-z_$][A-Za-z0-9_$]*/g) ?? [];
     for (const identifier of literalAndCodeIdentifiers) {
       if (rawRuntimeNames.has(normalizedName(identifier))) return `implementation runtime name: ${identifier}`;
     }
@@ -273,6 +288,11 @@ function cloneActionValueDescriptorSafe(value: unknown, ctx: z.RefinementCtx): A
       ctx.addIssue({ code: "custom", message: "ACTION_VALUE_SYMBOL_KEY_FORBIDDEN" });
       return undefined;
     }
+    const sensitiveKey = keys.find((key) => prototypeSensitiveKeys.has(String(key)));
+    if (sensitiveKey !== undefined) {
+      ctx.addIssue({ code: "custom", message: `ACTION_VALUE_PROTOTYPE_KEY_FORBIDDEN: ${String(sensitiveKey)}` });
+      return undefined;
+    }
     if (prototype !== Object.prototype && prototype !== Array.prototype && prototype !== null) {
       ctx.addIssue({ code: "custom", message: "ACTION_VALUE_PROTOTYPE_FORBIDDEN" });
       return undefined;
@@ -312,7 +332,7 @@ function cloneActionValueDescriptorSafe(value: unknown, ctx: z.RefinementCtx): A
         return undefined;
       }
       const kind = descriptors["kind"]?.value as unknown;
-      const clone: Record<string, unknown> = {};
+      const clone = Object.create(null) as Record<string, unknown>;
       current.assign(clone);
       keys.forEach((key) => {
         const nextDepth = (kind === "list" && key === "items") || (kind === "record" && key === "fields")
@@ -320,7 +340,13 @@ function cloneActionValueDescriptorSafe(value: unknown, ctx: z.RefinementCtx): A
           : current.depth;
         const name = String(key);
         const source = descriptors[name]!.value as unknown;
-        pending.push({ source, depth: nextDepth, assign: (child) => { clone[name] = child; } });
+        pending.push({
+          source,
+          depth: nextDepth,
+          assign: (child) => {
+            Object.defineProperty(clone, name, { value: child, enumerable: true, configurable: true, writable: true });
+          },
+        });
       });
     }
   }
