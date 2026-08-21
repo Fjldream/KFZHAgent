@@ -244,6 +244,8 @@ export interface CompiledLayoutTree {
 }
 ```
 
+`CompiledLayoutNode.geometry` is the visible viewport geometry. A `scroll-region` additionally emits a bounded `scrollContentExtent: { width; height }`; its descendants may exceed the viewport only within that extent. Scroll content never increases global `pageHeight`. `UIImplementationControlV2` carries the same compiler-owned metadata so native v2 validation can distinguish a page-bounded viewport from its internal scroll coordinate space; Task 4 must map it to KF overflow/clipping rather than flattening or dropping descendants.
+
 - [ ] **Step 1: Write failing layout behavior tests**
 
 ```ts
@@ -263,7 +265,7 @@ Run: `pnpm --dir agent-app --filter @kf/domain-client exec vitest run src/soluti
 
 Support all eleven layout kinds. Invalid `groupWith` references fail. Build sibling group connected-components, sort groups by their minimum `(readingOrder, stableId)`, then sort members by `(readingOrder, stableId)` so grouped nodes are adjacent without changing their internal reading order. Columns and rows allocate content first, then fixed, minmax, ratio, and fill. Grid derives the largest fitting column count from child minimum widths, capped at 12, and reduces it deterministically when necessary because the semantic contract intentionally contains no model-authored column count. `visualWeight` controls ratio allocation; `importance` wins scarce-space allocation; `align` controls cross-axis placement.
 
-Ordered composite semantics are compiler-owned: `split`, `sidebar-content`, and `master-detail` require exactly two children, with the first child acting as the leading/sidebar/master region and the second as content/detail. `dock` accepts two to five children; the last child is center and preceding children map in order to north, west, east, then south. `asymmetric-grid` uses `visualWeight` to derive track ratios. Stack and `overlay-anchor` intentionally share geometry and increment z-order. `scroll-region` is the only layout allowed to introduce local scrolling. The solver rejects ambiguous child counts rather than guessing.
+Ordered composite semantics are compiler-owned: `split`, `sidebar-content`, and `master-detail` require exactly two children, with the first child acting as the leading/sidebar/master region and the second as content/detail. `dock` accepts two to five children; the last child is center and preceding children map in order to north, west, east, then south. `asymmetric-grid` uses `visualWeight` to derive track ratios. Stack and `overlay-anchor` intentionally share geometry and increment z-order. `scroll-region` is the only layout allowed to introduce local scrolling: it separates viewport geometry from scroll-content extent, and descendants outside the viewport remain bounded by that extent without expanding the page. The solver rejects ambiguous child counts rather than guessing.
 
 Map `responsive` and `desktop` pages to 1440 px and `large-display` pages to 1920 px. Density page padding is applied once at the page root, not once per nested layout.
 
@@ -318,6 +320,8 @@ export interface ComponentCompileInput {
   readonly approvedAssets: readonly ApprovedAssetFacts[];
 }
 ```
+
+The component compiler must preserve `scrollContentExtent` on the emitted native v2 layout control and compile the corresponding KF container overflow/clipping fields; it must not expand page geometry or discard off-viewport scroll descendants.
 
 - [ ] **Step 1: Write failing component expansion tests**
 
