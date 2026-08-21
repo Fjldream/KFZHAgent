@@ -11,6 +11,7 @@ import { buildBlueprintRegionQueries } from "./blueprint-region-query.js";
 import {
   __capabilityRetrievalTestHooks,
   assertSolutionPlanUsesCandidates,
+  layoutCapabilityIdsFor,
   retrieveCapabilities,
 } from "./capability-retrieval.js";
 
@@ -278,6 +279,24 @@ describe("deterministic capability retrieval", () => {
 });
 
 describe("solution plan candidate validation", () => {
+  it.each([
+    ["row", ["layout.2"]],
+    ["column", ["layout.4"]],
+    ["grid", ["layout.2", "layout.4"]],
+    ["asymmetric-grid", ["layout.2", "layout.4"]],
+    ["split", ["layout.2", "layout.4"]],
+    ["stack", ["layout.4"]],
+    ["dock", ["layout.5"]],
+    ["sidebar-content", ["layout.5"]],
+    ["master-detail", ["layout.2", "layout.5"]],
+    ["scroll-region", ["layout.4"]],
+    ["overlay-anchor", ["layout.5"]],
+  ] as const)("publishes the single reviewed %s compatibility lookup", (kind, expected) => {
+    const actual = layoutCapabilityIdsFor(kind);
+    expect(actual).toEqual(expected);
+    expect(Object.isFrozen(actual)).toBe(true);
+  });
+
   it("accepts candidate-backed controls, layouts, recipes, and exact registered modules", () => {
     const bundle = retrieveCapabilities({ blueprint: portfolioBlueprint, knowledge: getDesignKnowledgeSnapshot() });
     expect(() => assertSolutionPlanUsesCandidates(planFor(bundle), bundle)).not.toThrow();

@@ -7,6 +7,7 @@ import {
   type ControlDesignProfile,
   type CustomerSolutionBlueprint,
   type ScriptCapabilityProfile,
+  type LayoutNode,
   type SolutionImplementationPlan,
   type SolutionNode,
 } from "@kf/contracts";
@@ -401,7 +402,7 @@ export function retrieveCapabilities(input: CapabilityRetrievalInput): Capabilit
   });
 }
 
-const LAYOUT_CAPABILITIES: Readonly<Record<string, readonly string[]>> = Object.freeze({
+const LAYOUT_CAPABILITIES: Readonly<Record<LayoutNode["layout"], readonly string[]>> = Object.freeze({
   row: Object.freeze(["layout.2"]),
   column: Object.freeze(["layout.4"]),
   grid: Object.freeze(["layout.2", "layout.4"]),
@@ -414,6 +415,11 @@ const LAYOUT_CAPABILITIES: Readonly<Record<string, readonly string[]>> = Object.
   "scroll-region": Object.freeze(["layout.4"]),
   "overlay-anchor": Object.freeze(["layout.5"]),
 });
+
+/** The single reviewed semantic-layout compatibility lookup shared by retrieval and compilation. */
+export function layoutCapabilityIdsFor(kind: LayoutNode["layout"]): readonly string[] {
+  return LAYOUT_CAPABILITIES[kind];
+}
 
 function unmatchedSourcePageRegions(
   sourcePageId: string,
@@ -461,7 +467,7 @@ function walkNode(
     return;
   }
 
-  const acceptedLayouts = new Set(LAYOUT_CAPABILITIES[node.layout] ?? []);
+  const acceptedLayouts = new Set(layoutCapabilityIdsFor(node.layout));
   const unmatchedLayouts = unmatchedSourcePageRegions(sourcePageId, node.sourceBlueprintRegionIds, bundle, "layouts", acceptedLayouts);
   if (unmatchedLayouts.length > 0) {
     issues.push(`layout ${node.id}: ${node.layout} is not backed by a layout candidate for page-regions [${unmatchedLayouts.join(", ")}]`);
