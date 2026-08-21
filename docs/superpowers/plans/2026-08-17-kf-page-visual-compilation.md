@@ -323,7 +323,7 @@ export interface ComponentCompileInput {
 }
 ```
 
-The component compiler must preserve the compiled layout metadata and `scrollContentExtent` on the emitted native v2 layout control, compile the corresponding KF container overflow/clipping fields, and call `assertImplementationMatchesCompiledLayout(...)` against the trusted layout tree; it must not expand page geometry or discard off-viewport scroll descendants.
+The component compiler must preserve the compiled layout metadata and `scrollContentExtent` on the emitted native v2 layout control, express scrolling through the reviewed structured declaration `style.overflow = "auto"`, and call `assertImplementationMatchesCompiledLayout(...)` against the trusted layout tree; it must not invent template-native overflow fields, expand page geometry, or discard off-viewport scroll descendants. Task 5 must compile this structured overflow declaration into the actual scoped KF container CSS. Overlay hidden state is represented by compiler-owned `overlayHost.initiallyVisible = false`, verified against the referenced boolean state's initial value; do not append unsupported `visible` or `closed` native properties.
 
 - [ ] **Step 1: Write failing component expansion tests**
 
@@ -348,7 +348,7 @@ Resolve each `ControlNode.capabilityId` against the exact page-region candidate 
 
 Every `LayoutNode` emits a compiler-owned KF layout/container control selected deterministically from the signed layout candidates returned by the same exported `layoutCapabilityIdsFor()` lookup used by retrieval; ties use candidate order then code-point capability ID. Its children receive that layout control as `parentId`. A semantic layout with no compatible signed layout candidate is a blocking error, not a geometry-only phantom container. Do not duplicate the semantic-layout compatibility table in a second compiler file.
 
-Expand Repeaters with stable IDs `${repeaterId}--${normalizedKey}--${templateNodeId}` and fail on duplicate/missing keys, unresolved `repeater-field` references, or `maxItems` overflow. Compile Overlay roots under an explicit host/page relation with hidden initial state and higher z-order. Preserve exact source blueprint page/region IDs; journey coverage remains semantic-plan validation and is not fabricated at this layer.
+Expand Repeaters with stable IDs `${repeaterId}--${normalizedKey}--${templateNodeId}` and fail on duplicate/missing keys, unresolved `repeater-field` references, or `maxItems` overflow. Carry the immutable current-record alias map into both control and registered-module compilation, including nested alias shadowing. Compile Overlay roots under an explicit host/page relation with hidden initial state and higher z-order. Preserve exact source blueprint page/region IDs; journey coverage remains semantic-plan validation and is not fabricated at this layer.
 
 - [ ] **Step 4: Bridge registered modules**
 
