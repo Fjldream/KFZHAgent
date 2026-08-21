@@ -285,7 +285,9 @@ describe("compileComponents", () => {
     const controls = compileComponents(compileInput(repeaterPlan(records), repeaterTree(records)));
     const expanded = controls.filter((item) => item.sourceRepeaterId === "visitor-cards");
 
-    expect(expanded).toHaveLength(12);
+    expect(expanded).toHaveLength(24);
+    expect(expanded.filter((item) => item.role === "repeater-item")).toHaveLength(12);
+    expect(expanded.filter((item) => item.role !== "repeater-item")).toHaveLength(12);
     expect(new Set(controls.map((item) => item.id)).size).toBe(controls.length);
     expect(controls.find((item) => item.id === "visitor-cards--chen-jianing--name")).toMatchObject({
       parentId: "visitor-cards--chen-jianing", content: "陈佳宁",
@@ -313,6 +315,10 @@ describe("compileComponents", () => {
     const tree = compiledTree(compiledNode("root", "layout", geometry(40, 40, 1_360, 80), [outerHost], "column"), 160);
 
     const controls = compileComponents(compileInput(inputPlan, tree));
+    expect(controls.find((item) => item.id === "outer--outer-key"))
+      .toMatchObject({ role: "repeater-item", sourceRepeaterId: "outer" });
+    expect(controls.find((item) => item.id === "outer--outer-key--inner--inner-key"))
+      .toMatchObject({ role: "repeater-item", sourceRepeaterId: "inner" });
     expect(controls.find((item) => item.id.endsWith("--value"))).toMatchObject({ content: "内层值", sourceRepeaterId: "inner" });
   });
 

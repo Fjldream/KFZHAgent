@@ -1,5 +1,6 @@
 import {
   NativeThemeSpecSchema,
+  StyleDeclarationV2Schema,
   type ApprovedAssetFacts,
   type StyleDeclaration,
   type StyleDeclarationV2,
@@ -157,6 +158,38 @@ const HEX_COLOR = /^#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i;
 const LEGACY_KEYWORD_COLORS = new Set(["transparent", "currentcolor"]);
 const COMPONENT_SCOPE = /^kf36-[A-Za-z][A-Za-z0-9_-]{0,63}-[a-f0-9]{16,64}$/;
 const MAX_SERIALIZED_STYLE_BYTES = 32_768;
+const TRUSTED_SCOPED_STYLE_FRAGMENTS = new WeakMap<CompiledScopedStyleFragment, string>();
+
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    Reflect.ownKeys(value).forEach((key) => {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (descriptor !== undefined && "value" in descriptor) deepFreeze(descriptor.value);
+    });
+    Object.freeze(value);
+  }
+  return value;
+}
+
+function fragmentIntegrity(fragment: CompiledScopedStyleFragment): string {
+  return JSON.stringify({
+    componentScopeToken: fragment.componentScopeToken,
+    componentCorrelationId: fragment.componentCorrelationId,
+    selectorToken: fragment.selectorToken,
+    state: fragment.state,
+    declarations: fragment.declarations,
+    persistedSelector: fragment.persistedSelector,
+    persistedCssText: fragment.persistedCssText,
+    resolvedAssets: fragment.resolvedAssets,
+  });
+}
+
+/** Accepts only the immutable snapshot issued by compileScopedStyleFragment. */
+export function assertCompiledScopedStyleFragmentComplete(fragment: CompiledScopedStyleFragment): void {
+  const expected = TRUSTED_SCOPED_STYLE_FRAGMENTS.get(fragment);
+  if (expected === undefined) throw new Error("UNTRUSTED_SCOPED_STYLE_FRAGMENT");
+  if (fragmentIntegrity(fragment) !== expected) throw new Error("SCOPED_STYLE_FRAGMENT_INTEGRITY_MISMATCH");
+}
 
 function invalidLegacyValue(): never {
   throw new Error("INVALID_STYLE_VALUE: invalid style value");
@@ -329,20 +362,23 @@ export function compileScopedStyleFragment(
   if (selector === undefined) {
     throw new Error(`STYLE_STATE_UNSUPPORTED: ${partSelector.semanticPart}.${state}`);
   }
-  const serialized = serializeStyleDeclarations(declarations, approvedAssets);
+  const frozenDeclarations = deepFreeze(StyleDeclarationV2Schema.parse(declarations));
+  const serialized = serializeStyleDeclarations(frozenDeclarations, approvedAssets);
+  const frozenAssets = deepFreeze(serialized.resolvedAssets.map((asset) => ({ ...asset })));
   const selectorToken = partSelector.semanticPart === "root"
     ? "root" as const
     : `part:${partSelector.semanticPart}` as const;
-  const fragment: CompiledScopedStyleFragment = Object.freeze({
+  const fragment: CompiledScopedStyleFragment = deepFreeze({
     componentScopeToken,
     componentCorrelationId,
     selectorToken,
     state,
-    declarations,
+    declarations: frozenDeclarations,
     persistedSelector: selector,
     persistedCssText: serialized.body === "" ? "" : `${selector}{${serialized.body}}`,
-    resolvedAssets: serialized.resolvedAssets,
+    resolvedAssets: frozenAssets,
   });
+  TRUSTED_SCOPED_STYLE_FRAGMENTS.set(fragment, fragmentIntegrity(fragment));
   return fragment;
 }
 

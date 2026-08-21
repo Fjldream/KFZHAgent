@@ -24,10 +24,10 @@ const SURFACE_PROPERTIES = Object.freeze([
   "borderBottomRightRadius", "borderBottomLeftRadius", "boxShadow", "opacity",
 ] as const satisfies readonly StyleDeclarationKey[]);
 const TYPE_PROPERTIES = Object.freeze([
-  "textColor", "fontSize", "fontWeight", "lineHeight", "letterSpacing", "textAlign", "truncate",
+  "textColor", "fontSize", "fontWeight", "lineHeight", "textAlign", "truncate",
 ] as const satisfies readonly StyleDeclarationKey[]);
-const SPACE_PROPERTIES = Object.freeze([
-  "padding", "paddingHorizontal", "paddingVertical", "margin", "gap",
+const ROOT_GEOMETRY_PROPERTIES = Object.freeze([
+  "letterSpacing", "padding", "paddingHorizontal", "paddingVertical",
 ] as const satisfies readonly StyleDeclarationKey[]);
 const EFFECT_PROPERTIES = Object.freeze([
   "focusRing", "transition", "advanced",
@@ -38,7 +38,7 @@ const ICON_PROPERTIES = Object.freeze([
 const ROOT_CSS_PROPERTIES = Object.freeze([
   ...SURFACE_PROPERTIES,
   ...TYPE_PROPERTIES,
-  ...SPACE_PROPERTIES,
+  ...ROOT_GEOMETRY_PROPERTIES,
   ...EFFECT_PROPERTIES,
   "overflow",
 ] as const satisfies readonly StyleDeclarationKey[]);
@@ -47,24 +47,23 @@ const PRESERVE_ONLY_EVIDENCE_ADAPTERS = new Set([
   "easyui.1", "easyui.12", "easyui.19", "list", "navmenu", "tree",
 ]);
 
-function partProperties(capabilityId: string, semanticPart: string): readonly StyleDeclarationKey[] {
+function partProperties(semanticPart: string): readonly StyleDeclarationKey[] {
   if (semanticPart === "root") return ROOT_CSS_PROPERTIES;
   if (semanticPart === "media") {
     return Object.freeze(["objectFit", "opacity", "borderRadius", "transition", "advanced"] as const);
   }
   if (semanticPart === "icon" || semanticPart === "indicator") return ICON_PROPERTIES;
   if (semanticPart === "placeholder") {
-    return Object.freeze(["textColor", "fontSize", "fontWeight", "lineHeight", "letterSpacing", "opacity"] as const);
+    return Object.freeze(["textColor", "fontSize", "fontWeight", "lineHeight", "opacity"] as const);
   }
   if (semanticPart === "active-indicator") {
     return Object.freeze(["backgroundColor", "opacity", "transition", "advanced"] as const);
   }
   if (semanticPart === "input") {
-    return Object.freeze([...SURFACE_PROPERTIES, ...TYPE_PROPERTIES, ...SPACE_PROPERTIES, ...EFFECT_PROPERTIES] as const);
+    return Object.freeze([...SURFACE_PROPERTIES, ...TYPE_PROPERTIES, ...EFFECT_PROPERTIES] as const);
   }
-  if (capabilityId === "tabs" && semanticPart === "tab") return ROOT_CSS_PROPERTIES;
-  if (semanticPart === "label") return Object.freeze([...TYPE_PROPERTIES, ...SPACE_PROPERTIES] as const);
-  return ROOT_CSS_PROPERTIES;
+  if (semanticPart === "label") return TYPE_PROPERTIES;
+  return Object.freeze([...SURFACE_PROPERTIES, ...TYPE_PROPERTIES, ...EFFECT_PROPERTIES] as const);
 }
 
 function createPartAdapter(
@@ -83,7 +82,7 @@ function createPartAdapter(
         ? ["backgroundColor" as const]
         : [],
     ),
-    cssProperties: partProperties(capabilityId, selectorMapping.semanticPart),
+    cssProperties: partProperties(selectorMapping.semanticPart),
     supportedStates: Object.freeze(Object.keys(selectorMapping.stateSelectors)),
   });
 }

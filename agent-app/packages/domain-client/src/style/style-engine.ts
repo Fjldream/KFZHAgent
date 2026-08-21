@@ -10,6 +10,7 @@ import {
 import type { z } from "zod";
 import { assertStyleAdapterRegistry, getStyleAdapter } from "./adapters/base-adapters.js";
 import {
+  assertCompiledScopedStyleFragmentComplete,
   compileScopedCss,
   compileScopedStyleFragment,
   serializeStyleColor,
@@ -72,6 +73,9 @@ const EMPTY_STYLE_V2: ComponentStyleSpecV2 = Object.freeze({
 const STYLE_STATE_ORDER: readonly StyleState[] = [
   "normal", "hover", "active", "focus", "disabled", "selected", "error",
 ];
+const ROOT_NORMAL_GEOMETRY_PROPERTIES = new Set<StyleDeclarationKey>([
+  "letterSpacing", "padding", "paddingHorizontal", "paddingVertical",
+]);
 const TRUSTED_PERSISTED_STYLE_HANDOFFS = new WeakSet<PersistedStyleHandoff>();
 
 const EMPTY_STYLE: ComponentStyleSpec = Object.freeze({
@@ -143,6 +147,7 @@ function validatePersistedStyleHandoff(handoff: PersistedStyleHandoff): void {
     fragment.componentCorrelationId !== handoff.componentCorrelationId)) {
     throw new Error("STYLE_PERSISTED_HANDOFF_CORRELATION_MISMATCH");
   }
+  handoff.fragments.forEach(assertCompiledScopedStyleFragmentComplete);
   if (handoff.fragments.some((fragment) =>
     !fragment.persistedSelector.split(", ").every((selector) => selector.startsWith("#domId")))) {
     throw new Error("STYLE_PERSISTED_HANDOFF_SELECTOR_INVALID");
@@ -194,6 +199,12 @@ function declarationsForState(
 
 function declarationKeys(declarations: StyleDeclarationV2): StyleDeclarationKey[] {
   return Object.keys(declarations) as StyleDeclarationKey[];
+}
+
+function hasExplicitStyleIntent(style: ComponentStyleSpecV2): boolean {
+  if (Object.keys(style.declarations).length > 0) return true;
+  if (Object.values(style.states).some((declarations) => declarations !== undefined)) return true;
+  return style.parts !== undefined;
 }
 
 function selectDeclarations(
@@ -273,7 +284,10 @@ function compileResolvedPart(
     const nativeKeys = state === "normal" && semanticPart === "root"
       ? keys.filter((key) => adapterPart.nativeProperties.includes(key))
       : [];
-    const cssKeys = keys.filter((key) => !nativeKeys.includes(key) && adapterPart.cssProperties.includes(key));
+    const cssKeys = keys.filter((key) =>
+      !nativeKeys.includes(key)
+      && adapterPart.cssProperties.includes(key)
+      && (!ROOT_NORMAL_GEOMETRY_PROPERTIES.has(key) || (semanticPart === "root" && state === "normal")));
     const unsupportedKeys = keys.filter((key) => !nativeKeys.includes(key) && !cssKeys.includes(key));
     if (unsupportedKeys.length > 0) {
       throw new Error(
@@ -294,7 +308,7 @@ function compileResolvedPart(
     context.cssFragments.push(Object.freeze({
       selectorToken: scoped.selectorToken,
       state,
-      declarations: cssDeclarations,
+      declarations: scoped.declarations,
     }));
     context.scopedFragments.push(scoped);
   }
@@ -311,11 +325,6 @@ export function compileResolvedStyle(input: CompileResolvedStyleInput): Compiled
   }
   const capability = getControlCapability(input.capabilityId);
   if (capability === undefined) throw new Error(`STYLE_CAPABILITY_UNAVAILABLE: ${input.capabilityId}`);
-  if (capability.style.status === "preserve-only" || capability.style.status === "unsupported") {
-    throw new Error(`STYLE_CAPABILITY_${capability.style.status.replace("-", "_").toUpperCase()}: ${input.capabilityId}`);
-  }
-  const adapter = getStyleAdapter(input.capabilityId);
-  if (adapter === undefined) throw new Error(`STYLE_ADAPTER_UNAVAILABLE: ${input.capabilityId}`);
   const roleStyle = ComponentStyleSpecV2Schema.parse(input.roleStyle);
   const instanceOverride = ComponentStyleSpecV2Schema.parse(input.instanceOverride ?? EMPTY_STYLE_V2);
   if (roleStyle.role !== input.styleRole) {
@@ -324,8 +333,30 @@ export function compileResolvedStyle(input: CompileResolvedStyleInput): Compiled
   if (instanceOverride.role !== undefined && instanceOverride.role !== input.styleRole) {
     throw new Error(`STYLE_ROLE_MISMATCH: ${instanceOverride.role} != ${input.styleRole}`);
   }
-  const resolved = resolveStyle(input.theme, roleStyle, instanceOverride);
   const scopeToken = componentScopeToken(input.componentId);
+  if (capability.style.status === "unsupported") {
+    throw new Error(`STYLE_CAPABILITY_UNSUPPORTED: ${input.capabilityId}`);
+  }
+  if (capability.style.status === "preserve-only") {
+    if (hasExplicitStyleIntent(roleStyle) || hasExplicitStyleIntent(instanceOverride)) {
+      throw new Error(`STYLE_CAPABILITY_PRESERVE_ONLY: ${input.capabilityId}`);
+    }
+    const persistedStyleHandoff = createPersistedStyleHandoff(input.componentId, []);
+    const reason = `Capability ${input.capabilityId} style is preserve-only; existing appearance is retained`;
+    return {
+      nativeFields: {},
+      styleDataNew: "",
+      unsupported: [],
+      warnings: [{ code: "STYLE_CAPABILITY_PRESERVE_ONLY", message: reason }],
+      scopeToken,
+      cssFragments: [],
+      scopedFragments: persistedStyleHandoff.fragments,
+      persistedStyleHandoff,
+    };
+  }
+  const adapter = getStyleAdapter(input.capabilityId);
+  if (adapter === undefined) throw new Error(`STYLE_ADAPTER_UNAVAILABLE: ${input.capabilityId}`);
+  const resolved = resolveStyle(input.theme, roleStyle, instanceOverride);
   const nativeFields: NativeStyleFields = {};
   const cssFragments: CompiledStyleFragment[] = [];
   const scopedFragments: CompiledScopedStyleFragment[] = [];

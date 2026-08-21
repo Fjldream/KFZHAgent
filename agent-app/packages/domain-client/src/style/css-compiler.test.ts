@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ApprovedAssetFacts, StyleDeclarationV2 } from "@kf/contracts";
 import * as cssCompilerModule from "./css-compiler.js";
 import {
+  assertCompiledScopedStyleFragmentComplete,
   compileScopedCss,
   compileScopedStyleFragment,
   serializeStyleColor,
@@ -172,6 +173,43 @@ describe("compileScopedCss", () => {
       persistedSelector: "#domId .el-tabs__item.is-active",
       persistedCssText: "#domId .el-tabs__item.is-active{background-color:#ffffff;color:#111111}",
     });
+  });
+
+  it("deep-copies and deep-freezes fragment declarations and resolved assets", () => {
+    const declarations: StyleDeclarationV2 = {
+      borderRadius: 8,
+      advanced: [
+        { kind: "gradient", angle: 90, stops: [{ offset: 0, color: "#000000" }, { offset: 1, color: "#ffffff" }] },
+        { kind: "background-image", assetId: modelAssetId },
+      ],
+    };
+    const fragment = compileScopedStyleFragment(
+      KF36_RUNTIME_PROFILE.selectors.button!.parts.root!,
+      "kf36-deep-copy-0123456789abcdef",
+      "deep-copy",
+      "normal",
+      declarations,
+      [approvedAsset],
+    );
+
+    declarations.borderRadius = 99;
+    const gradient = declarations.advanced?.[0];
+    if (gradient?.kind === "gradient") gradient.stops[0]!.color = "#ff0000";
+
+    expect(fragment.declarations.borderRadius).toBe(8);
+    expect(fragment.declarations.advanced?.[0]).toMatchObject({
+      kind: "gradient",
+      stops: [{ offset: 0, color: "#000000" }, { offset: 1, color: "#ffffff" }],
+    });
+    expect(Object.isFrozen(fragment)).toBe(true);
+    expect(Object.isFrozen(fragment.declarations)).toBe(true);
+    expect(Object.isFrozen(fragment.declarations.advanced)).toBe(true);
+    expect(Object.isFrozen(fragment.declarations.advanced?.[0])).toBe(true);
+    expect(Object.isFrozen(fragment.resolvedAssets)).toBe(true);
+    expect(Object.isFrozen(fragment.resolvedAssets[0])).toBe(true);
+    expect(() => Object.assign(fragment.declarations, { borderRadius: 99 })).toThrow();
+    expect(() => assertCompiledScopedStyleFragmentComplete(fragment)).not.toThrow();
+    expect(() => assertCompiledScopedStyleFragmentComplete({ ...fragment })).toThrow(/UNTRUSTED_SCOPED_STYLE_FRAGMENT/);
   });
 
   it("rejects untrusted part mappings, malformed scopes, and unsupported evidence states", () => {

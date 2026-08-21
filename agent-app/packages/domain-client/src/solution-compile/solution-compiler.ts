@@ -534,8 +534,21 @@ function widthConstraint(node: SolutionNode, available: number) {
   };
 }
 
-function roleDeclarations(plan: SolutionImplementationPlan, role: string) {
-  return plan.roleStyles.find((candidate) => candidate.role === role)?.declarations ?? {};
+function resolvedRootDeclarations(
+  plan: SolutionImplementationPlan,
+  node: Extract<SolutionNode, { kind: "control" }>,
+) {
+  return resolveStyle(
+    plan.theme,
+    styleSpecForRole(plan, node.styleRole),
+    node.styleOverride === undefined
+      ? EMPTY_STYLE
+      : {
+          role: node.styleRole,
+          declarations: node.styleOverride.declarations,
+          states: node.styleOverride.states,
+        },
+  ).declarations;
 }
 
 function measureTreeUnsafe(
@@ -546,7 +559,7 @@ function measureTreeUnsafe(
   output: Map<string, IntrinsicSize>,
 ): IntrinsicSize {
   const declarations = node.kind === "control"
-    ? { ...roleDeclarations(plan, node.styleRole), ...(node.styleOverride?.declarations ?? {}) }
+    ? resolvedRootDeclarations(plan, node)
     : {};
   const fontSize = typeof declarations.fontSize === "number" ? declarations.fontSize : 16;
   const lineHeight = typeof declarations.lineHeight === "number" ? declarations.lineHeight : 1.5;
@@ -566,6 +579,7 @@ function measureTreeUnsafe(
     font: {
       fontSize,
       lineHeight,
+      ...(typeof declarations.letterSpacing === "number" ? { letterSpacing: declarations.letterSpacing } : {}),
       padding: { horizontal: paddingHorizontal, vertical: paddingVertical },
       border: { horizontal: borderHorizontal, vertical: borderVertical },
     },
@@ -619,10 +633,6 @@ function compilePageLayout(
   const intrinsic = new Map<string, IntrinsicSize>();
   boundary("measurement", expandedRoot.id, () => measureTree(expandedRoot, plan, moduleRegistry, available, intrinsic));
   return boundary("layout", expandedRoot.id, () => compileLayout({ page: { ...page, root: expandedRoot }, expandedRoot, intrinsicByNodeId: intrinsic }));
-}
-
-function withPageHeight(layout: CompiledLayoutTree, pageHeight: number): CompiledLayoutTree {
-  return pageHeight === layout.pageHeight ? layout : Object.freeze({ ...layout, pageHeight });
 }
 
 function styleSpecForRole(plan: SolutionImplementationPlan, role: string): ComponentStyleSpecV2 {
@@ -748,8 +758,18 @@ export function compileSolutionImplementation(input: SolutionCompileInput): UIIm
 
   const pages: MutableNativePage[] = pageCompilations.map((compiledPage) => {
     const ownedOverlays = overlayCompilations.filter((entry) => entry.overlay.hostPageId === compiledPage.page.id);
-    const pageHeight = Math.max(compiledPage.layout.pageHeight, ...ownedOverlays.map((entry) => entry.layout.pageHeight));
-    const pageLayout = withPageHeight(compiledPage.layout, pageHeight);
+    ownedOverlays.forEach((entry) => {
+      if (entry.layout.pageHeight > compiledPage.layout.pageHeight) {
+        fail(
+          "layout",
+          entry.overlay.id,
+          "OVERLAY_EXCEEDS_HOST_VIEWPORT",
+          `${entry.layout.pageHeight} > ${compiledPage.layout.pageHeight}; use a bounded overlay scroll-region`,
+        );
+      }
+    });
+    const pageHeight = compiledPage.layout.pageHeight;
+    const pageLayout = compiledPage.layout;
     const controls = boundary("component", compiledPage.page.root.id, () => compileComponents({
       plan: parsed.plan,
       ...(parsed.bundle === undefined ? {} : { bundle: parsed.bundle }),
@@ -760,7 +780,7 @@ export function compileSolutionImplementation(input: SolutionCompileInput): UIIm
     const overlayControls = ownedOverlays.flatMap((entry) => boundary("component", entry.overlay.id, () => compileOverlay({
       plan: parsed.plan,
       ...(parsed.bundle === undefined ? {} : { bundle: parsed.bundle }),
-      layout: withPageHeight(entry.layout, pageHeight),
+      layout: entry.layout,
       moduleRegistry: safeInput.moduleRegistry,
       approvedAssets: parsed.approvedAssets,
       overlayId: entry.overlay.id,
@@ -797,10 +817,10 @@ export function compileSolutionImplementation(input: SolutionCompileInput): UIIm
   pageCompilations.forEach((compiledPage) => {
     const overlays = overlayCompilations
       .filter((entry) => entry.overlay.hostPageId === compiledPage.page.id)
-      .map((entry) => withPageHeight(entry.layout, implementation.pages.find((page) => page.id === compiledPage.page.id)!.height));
+      .map((entry) => entry.layout);
     const page = implementation.pages.find((entry) => entry.id === compiledPage.page.id);
     if (page === undefined) fail("validation", compiledPage.page.id, "IMPLEMENTATION_PAGE_MISSING", compiledPage.page.id);
-    const correlated = mergeLayoutTrees(withPageHeight(compiledPage.layout, page.height), overlays);
+    const correlated = mergeLayoutTrees(compiledPage.layout, overlays);
     boundary("validation", compiledPage.page.id, () => assertImplementationMatchesCompiledLayout(implementation, compiledPage.page.id, correlated));
   });
   return deepFreeze(implementation);

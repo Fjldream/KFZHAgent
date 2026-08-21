@@ -491,7 +491,9 @@ describe("compileSolutionImplementation", () => {
 
     expect(industrial.pages[0]!.width).toBe(1920);
     expect(nativeControls(industrial).some((control) => control.sourceModuleId === "kpi-grid")).toBe(true);
-    expect(nativeControls(admin).filter((control) => control.sourceRepeaterId === "people-list").map((control) => control.content)).toEqual(["陈妍", "赵衡"]);
+    expect(nativeControls(admin)
+      .filter((control) => control.sourceRepeaterId === "people-list" && control.content !== undefined)
+      .map((control) => control.content)).toEqual(["陈妍", "赵衡"]);
 
     const roots = [portfolio, industrial, admin].map((result) => nativeControls(result).filter((control) => control.depth === 0).map((control) => control.compiledLayout?.kind));
     expect(roots).toEqual([["column", "column"], ["dock"], ["sidebar-content", "overlay-anchor"]]);
@@ -561,6 +563,53 @@ describe("compileSolutionImplementation", () => {
     expect(result.compiledActions).toEqual([]);
   });
 
+  it("preserves the mature legacy data.table chain when it carries no style intent", () => {
+    const legacy = createPortalPlan();
+    legacy.assets = [];
+    legacy.pages[0]!.mode = "vertical-flow";
+    legacy.pages[0]!.modules = [{
+      id: "admin-table",
+      kind: "data.table",
+      templateVersion: "1.0.0",
+      variant: "default",
+      title: "设备台账",
+      content: JSON.stringify({
+        table: {
+          columns: [{ key: "name", label: "设备" }, { key: "temperature", label: "温度", align: "right" }],
+          rows: [{ name: "泵 A", temperature: 42 }],
+        },
+      }),
+      sourceBlueprintModuleIds: ["admin-table"],
+      placement: {
+        region: "main",
+        order: 0,
+        columnSpan: 12,
+        preferredHeight: "small",
+        alignment: "stretch",
+        emphasis: "primary",
+      },
+      interactions: [],
+    }];
+
+    const result = compileSolutionImplementation({
+      plan: adaptLegacyModulePlan(legacy),
+      moduleRegistry: createDefaultModuleRegistry(),
+      approvedAssets: [],
+      activeCatalogVersion: CATALOG_VERSION,
+    });
+    const datagrid = nativeControls(result).find((control) => control.id === "admin-table--datagrid");
+
+    expect(datagrid).toMatchObject({
+      sourceModuleId: "admin-table",
+      capabilityId: "easyui.1",
+      compiledStyle: {
+        nativeFields: {},
+        cssFragments: [],
+        warnings: [{ code: "STYLE_CAPABILITY_PRESERVE_ONLY" }],
+      },
+    });
+  });
+
   it("derives page height from measured content instead of a fixed canvas", () => {
     const shortFixture = portfolioFixture();
     const longFixture = portfolioFixture();
@@ -570,6 +619,46 @@ describe("compileSolutionImplementation", () => {
     const shortPage = compileFixture(shortFixture).pages[1]!;
     const longPage = compileFixture(longFixture).pages[1]!;
     expect(longPage.height).toBeGreaterThan(shortPage.height);
+  });
+
+  it("uses the resolved root padding and letter spacing for both measurement and compiled style", () => {
+    const fixtureFor = (declarations: { padding?: number; letterSpacing?: number }) => {
+      const fixture = portfolioFixture();
+      const aboutRoot = fixture.plan.pages[1]!.root;
+      if (aboutRoot.kind !== "layout" || aboutRoot.children[0]?.kind !== "control") throw new Error("fixture drift");
+      aboutRoot.children[0].intent.width = { mode: "content" };
+      aboutRoot.children[0].intent.align = "start";
+      const body = fixture.plan.roleStyles.find((style) => style.role === "body")!;
+      body.declarations = { ...body.declarations, ...declarations };
+      return compileFixture(fixture);
+    };
+    const baseline = nativeControls(fixtureFor({})).find((control) => control.id === "about-title")!;
+    const padded = nativeControls(fixtureFor({ padding: 10 })).find((control) => control.id === "about-title")!;
+    const spaced = nativeControls(fixtureFor({ padding: 10, letterSpacing: 4 })).find((control) => control.id === "about-title")!;
+
+    expect(padded.geometry.height).toBeGreaterThan(baseline.geometry.height);
+    expect(spaced.geometry.width).toBeGreaterThan(padded.geometry.width);
+    expect(spaced.compiledStyle?.cssFragments).toContainEqual({
+      selectorToken: "root",
+      state: "normal",
+      declarations: expect.objectContaining({ padding: 10, letterSpacing: 4 }),
+    });
+  });
+
+  it("rejects a tall overlay instead of raising its host page height", () => {
+    const fixture = adminFixture();
+    const overlay = fixture.plan.overlays[0]!;
+    if (overlay.root.kind !== "layout" || overlay.root.children[0]?.kind !== "layout") throw new Error("fixture drift");
+    overlay.root.children[0].children.push(...Array.from({ length: 20 }, (_entry, index) =>
+      textNode(`tall-overlay-row-${index}`, "workspace", `详情 ${index}`, index + 2)));
+
+    const error = errorFrom(() => compileFixture(fixture));
+
+    expect(error).toMatchObject({
+      phase: "layout",
+      nodeId: "employee-overlay",
+      reasonCode: "OVERLAY_EXCEEDS_HOST_VIEWPORT",
+    });
   });
 
   it("rejects stale, missing, mismatched, or wrong-catalog candidate evidence deterministically", () => {

@@ -250,6 +250,61 @@ describe("compileResolvedStyle", () => {
     states: { hover: { backgroundColor: "#1d4ed8" } },
   });
 
+  it.each([
+    "easyui.1",
+    "tree",
+    "list",
+    "navmenu",
+    "easyui.12",
+    "easyui.19",
+  ])("preserves %s when role and instance carry no visual intent", (capabilityId) => {
+    const compiled = compileResolvedStyle({
+      componentId: `preserved-${capabilityId}`,
+      capabilityId,
+      theme: themeFixture,
+      styleRole: "native-surface",
+      roleStyle: styleV2({ role: "native-surface" }),
+      instanceOverride: styleV2({ role: "native-surface" }),
+      approvedAssets: [],
+      runtimeProfile: KF36_RUNTIME_PROFILE,
+    });
+
+    expect(compiled).toMatchObject({
+      nativeFields: {},
+      styleDataNew: "",
+      unsupported: [],
+      warnings: [{ code: "STYLE_CAPABILITY_PRESERVE_ONLY" }],
+      cssFragments: [],
+      scopedFragments: [],
+      persistedStyleHandoff: {
+        expectedFragmentCount: 0,
+        expectedFragmentKeys: [],
+        styleDataNew: "",
+        fragments: [],
+      },
+    });
+    expect(() => assertPersistedStyleHandoffComplete(compiled.persistedStyleHandoff)).not.toThrow();
+  });
+
+  it.each([
+    ["role declaration", styleV2({ role: "native-surface", declarations: { opacity: 0 } }), styleV2({ role: "native-surface" })],
+    ["role state", styleV2({ role: "native-surface", states: { selected: { truncate: false } } }), styleV2({ role: "native-surface" })],
+    ["instance declaration", styleV2({ role: "native-surface" }), styleV2({ role: "native-surface", declarations: { advanced: [] } })],
+    ["empty instance parts field", styleV2({ role: "native-surface" }), styleV2({ role: "native-surface", parts: {} })],
+    ["instance part", styleV2({ role: "native-surface" }), styleV2({ role: "native-surface", parts: { row: { declarations: {}, states: {} } } })],
+  ] as const)("fails closed for preserve-only %s intent", (_label, preservedRole, instanceOverride) => {
+    expect(() => compileResolvedStyle({
+      componentId: "styled-preserved-table",
+      capabilityId: "easyui.1",
+      theme: themeFixture,
+      styleRole: "native-surface",
+      roleStyle: preservedRole,
+      instanceOverride,
+      approvedAssets: [],
+      runtimeProfile: KF36_RUNTIME_PROFILE,
+    })).toThrow(/STYLE_CAPABILITY_PRESERVE_ONLY/);
+  });
+
   it("does not publish a runtime-DOM materializer at the Task 6 project boundary", () => {
     expect(Reflect.has(styleEngineModule, "materializeScopedStyleCollection")).toBe(false);
     expect(Reflect.has(styleEngineModule, "materializeScopedStyleFragment")).toBe(false);
@@ -295,6 +350,39 @@ describe("compileResolvedStyle", () => {
       .toThrow(/UNTRUSTED_PERSISTED_STYLE_HANDOFF/);
     expect(() => assertPersistedStyleHandoffComplete({ ...handoff }))
       .toThrow(/UNTRUSTED_PERSISTED_STYLE_HANDOFF/);
+  });
+
+  it("keeps the persisted handoff independent from nested caller declarations", () => {
+    const declarations: StyleV2["declarations"] = {
+      borderRadius: 8,
+      advanced: [{
+        kind: "gradient",
+        angle: 90,
+        stops: [{ offset: 0, color: "#000000" }, { offset: 1, color: "#ffffff" }],
+      }],
+    };
+    const compiled = compileResolvedStyle({
+      componentId: "immutable-style-handoff",
+      capabilityId: "button",
+      theme: themeFixture,
+      styleRole: "immutable",
+      roleStyle: styleV2({ role: "immutable", declarations }),
+      approvedAssets: [],
+      runtimeProfile: KF36_RUNTIME_PROFILE,
+    });
+    const originalCss = compiled.persistedStyleHandoff.styleDataNew;
+
+    declarations.borderRadius = 99;
+    const gradient = declarations.advanced?.[0];
+    if (gradient?.kind === "gradient") gradient.stops[0]!.color = "#ff0000";
+
+    expect(compiled.persistedStyleHandoff.styleDataNew).toBe(originalCss);
+    expect(compiled.persistedStyleHandoff.fragments[0]!.declarations).toMatchObject({ borderRadius: 8 });
+    expect(() => Object.assign(
+      compiled.persistedStyleHandoff.fragments[0]!.declarations,
+      { borderRadius: 99 },
+    )).toThrow();
+    expect(() => assertPersistedStyleHandoffComplete(compiled.persistedStyleHandoff)).not.toThrow();
   });
 
   it("resolves theme tokens, the matched role, and instance overrides before splitting ownership", () => {
@@ -380,6 +468,38 @@ describe("compileResolvedStyle", () => {
       "part:active-indicator:normal",
     ]);
     expect(() => assertPersistedStyleHandoffComplete(compiled.persistedStyleHandoff)).not.toThrow();
+  });
+
+  it.each([
+    ["margin", { margin: 8 }],
+    ["gap", { gap: 8 }],
+  ] as const)("rejects layout-owned %s at the style boundary", (_property, declarations) => {
+    expect(() => compileResolvedStyle({
+      componentId: `layout-owned-${_property}`,
+      capabilityId: "button",
+      theme: themeFixture,
+      styleRole: "action",
+      roleStyle: styleV2({ role: "action", declarations }),
+      approvedAssets: [],
+      runtimeProfile: KF36_RUNTIME_PROFILE,
+    })).toThrow(/STYLE_PROPERTY_UNSUPPORTED/);
+  });
+
+  it.each([
+    ["state padding", styleV2({ role: "action", states: { hover: { padding: 8 } } })],
+    ["state letter spacing", styleV2({ role: "action", states: { hover: { letterSpacing: 2 } } })],
+    ["part padding", styleV2({ role: "navigation", parts: { panel: { declarations: { paddingHorizontal: 8 }, states: {} } } })],
+    ["part letter spacing", styleV2({ role: "navigation", parts: { tab: { declarations: { letterSpacing: 2 }, states: {} } } })],
+  ] as const)("rejects geometry-affecting %s outside root normal", (_label, constrainedStyle) => {
+    expect(() => compileResolvedStyle({
+      componentId: `geometry-context-${_label.replaceAll(" ", "-")}`,
+      capabilityId: _label.startsWith("state") ? "button" : "tabs",
+      theme: themeFixture,
+      styleRole: constrainedStyle.role!,
+      roleStyle: constrainedStyle,
+      approvedAssets: [],
+      runtimeProfile: KF36_RUNTIME_PROFILE,
+    })).toThrow(/STYLE_PROPERTY_UNSUPPORTED/);
   });
 
   it.each([
@@ -564,6 +684,7 @@ describe("compileResolvedStyle", () => {
     expect(() => compileResolvedStyle({
       ...base,
       capabilityId: "easyui.1",
+      instanceOverride: styleV2({ declarations: { opacity: 1 } }),
     })).toThrow(/STYLE_CAPABILITY_PRESERVE_ONLY/);
     expect(() => compileResolvedStyle({
       ...base,

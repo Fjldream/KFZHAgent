@@ -87,6 +87,19 @@ describe("base style adapters", () => {
     expect(root.nativeProperties).toEqual(["backgroundColor"]);
   });
 
+  it("leaves margin and gap exclusively owned by semantic layout", () => {
+    for (const adapter of listStyleAdapters()) {
+      for (const part of adapter.parts) {
+        expect(part.cssProperties, `${adapter.capabilityId}.${part.semanticPart}`).not.toContain("margin");
+        expect(part.cssProperties, `${adapter.capabilityId}.${part.semanticPart}`).not.toContain("gap");
+      }
+    }
+    const buttonRoot = getStyleAdapter("button")!.parts.find((part) => part.semanticPart === "root")!;
+    expect(buttonRoot.cssProperties).toEqual(expect.arrayContaining([
+      "padding", "paddingHorizontal", "paddingVertical", "letterSpacing",
+    ]));
+  });
+
   it("keeps unsupported semantic parts absent instead of falling back to root", () => {
     expect(getStyleAdapter("tabs")!.parts.some((part) => part.semanticPart === "label")).toBe(false);
     expect(getStyleAdapter("easyui.1")!.parts.some((part) => part.semanticPart === "empty")).toBe(false);

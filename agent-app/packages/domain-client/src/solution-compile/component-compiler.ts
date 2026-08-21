@@ -481,6 +481,7 @@ function emitRepeater(context: CompileContext, node: RepeaterNode, walk: WalkCon
       geometry: { ...compiled.geometry },
       compiledLayout: compiledLayoutMetadata(itemNode, compiled),
       nativeProperties: reviewedLayoutNativeProperties(capabilityId, walk.parentId),
+      sourceRepeaterId: node.id,
       ...sourceFields(itemNode, context),
     }, [itemId]);
     const records = new Map(walk.currentRecords);
