@@ -8,7 +8,11 @@ import {
 } from "@kf/contracts";
 import { createDefaultModuleRegistry } from "../modules/module-registry.js";
 import { compileSolutionImplementation } from "../solution-compile/solution-compiler.js";
-import { ActionGraphNormalizationError, normalizeActionGraph } from "./action-graph.js";
+import {
+  ActionGraphNormalizationError,
+  normalizeActionGraph,
+  type NormalizeActionGraphInput,
+} from "./action-graph.js";
 
 const validTheme = {
   background: "#f4f7fb", surface: "#ffffff", primary: "#163a5f", accent: "#e47b32",
@@ -165,6 +169,110 @@ describe("normalizeActionGraph", () => {
       .toThrowError(expect.objectContaining({ code: "ACTION_INPUT_INVALID" } satisfies Partial<ActionGraphNormalizationError>));
   });
 
+  it("rejects accessors and proxy traps without invoking getters", () => {
+    let topLevelGetterCalls = 0;
+    const topLevelAccessor = { plan: plan() } as { plan: SolutionImplementationPlan; implementation?: UIImplementationSpecV2 };
+    Object.defineProperty(topLevelAccessor, "implementation", {
+      enumerable: true,
+      get() { topLevelGetterCalls += 1; return implementation(); },
+    });
+    expect(() => normalizeActionGraph(topLevelAccessor as NormalizeActionGraphInput))
+      .toThrowError(expect.objectContaining({ code: "ACTION_INPUT_INVALID", nodeId: "input" }));
+    expect(topLevelGetterCalls).toBe(0);
+
+    let implementationGetterCalls = 0;
+    const accessorImplementation = implementation();
+    const nativePage = accessorImplementation.pages[0]!;
+    if (nativePage.compatibility !== "native") throw new Error("native fixture required");
+    Object.defineProperty(nativePage.controls[0]!, "capabilityId", {
+      enumerable: true,
+      get() { implementationGetterCalls += 1; return "button"; },
+    });
+    expect(() => normalizeActionGraph({ plan: plan(), implementation: accessorImplementation }))
+      .toThrowError(expect.objectContaining({ code: "ACTION_IMPLEMENTATION_INVALID", nodeId: "implementation" }));
+    expect(implementationGetterCalls).toBe(0);
+
+    let planGetterCalls = 0;
+    const accessorPlan = plan();
+    Object.defineProperty(accessorPlan.pages[0]!, "title", {
+      enumerable: true,
+      get() { planGetterCalls += 1; return "首页"; },
+    });
+    expect(() => normalizeActionGraph({ plan: accessorPlan, implementation: implementation() }))
+      .toThrowError(expect.objectContaining({ code: "ACTION_INPUT_INVALID" }));
+    expect(planGetterCalls).toBe(0);
+
+    const trappedImplementation = new Proxy(implementation(), { getOwnPropertyDescriptor() { throw new Error("trap"); } });
+    expect(() => normalizeActionGraph({ plan: plan(), implementation: trappedImplementation }))
+      .toThrowError(expect.objectContaining({ code: "ACTION_IMPLEMENTATION_INVALID" }));
+
+    const trappedPrototype = new Proxy(implementation(), { getPrototypeOf() { throw new Error("trap"); } });
+    expect(() => normalizeActionGraph({ plan: plan(), implementation: trappedPrototype }))
+      .toThrowError(expect.objectContaining({ code: "ACTION_IMPLEMENTATION_INVALID" }));
+  });
+
+  it("rejects non-pure implementation graphs before schema parsing", () => {
+    const sparse = implementation();
+    sparse.pages = new Array(1);
+    expect(() => normalizeActionGraph({ plan: plan(), implementation: sparse }))
+      .toThrowError(expect.objectContaining({ code: "ACTION_IMPLEMENTATION_INVALID" }));
+
+    const cyclic = implementation() as UIImplementationSpecV2 & { self?: unknown };
+    cyclic.self = cyclic;
+    expect(() => normalizeActionGraph({ plan: plan(), implementation: cyclic }))
+      .toThrowError(expect.objectContaining({ code: "ACTION_IMPLEMENTATION_INVALID" }));
+
+    const dated = implementation() as UIImplementationSpecV2 & { generatedAt?: unknown };
+    dated.generatedAt = new Date(0);
+    expect(() => normalizeActionGraph({ plan: plan(), implementation: dated }))
+      .toThrowError(expect.objectContaining({ code: "ACTION_IMPLEMENTATION_INVALID" }));
+
+    const symbolic = implementation() as UIImplementationSpecV2 & { [key: symbol]: unknown };
+    symbolic[Symbol("hidden")] = true;
+    expect(() => normalizeActionGraph({ plan: plan(), implementation: symbolic }))
+      .toThrowError(expect.objectContaining({ code: "ACTION_IMPLEMENTATION_INVALID" }));
+
+    const nullPrototype = implementation();
+    nullPrototype.compiledRoleStyles = Object.create(null) as UIImplementationSpecV2["compiledRoleStyles"];
+    expect(normalizeActionGraph({ plan: plan(), implementation: nullPrototype }).graph.actions).toHaveLength(2);
+  });
+
+  it("enforces depth, node, array, and object budgets at their boundaries", () => {
+    const failure = (value: unknown): ActionGraphNormalizationError => {
+      const probed = implementation() as UIImplementationSpecV2 & { budgetProbe?: unknown };
+      probed.budgetProbe = value;
+      try {
+        normalizeActionGraph({ plan: plan(), implementation: probed });
+      } catch (error) {
+        if (error instanceof ActionGraphNormalizationError) return error;
+        throw error;
+      }
+      throw new Error("budget fixture must fail strict UI parsing");
+    };
+    const denseArrayBoundary = Array.from({ length: 10_000 }, () => null);
+    expect(failure(denseArrayBoundary)).toMatchObject({ code: "ACTION_IMPLEMENTATION_INVALID" });
+    expect(failure(new Array(10_001).fill(null)).message).toContain("input array budget exceeds 10000");
+
+    const objectBoundary = Object.fromEntries(Array.from({ length: 1_000 }, (_, index) => [`k${index}`, null]));
+    expect(failure(objectBoundary)).toMatchObject({ code: "ACTION_IMPLEMENTATION_INVALID" });
+    const objectOverflow = { ...objectBoundary, overflow: null };
+    expect(failure(objectOverflow).message).toContain("input object budget exceeds 1000");
+
+    const nested = (objectCount: number): unknown => {
+      let value: unknown = null;
+      for (let index = 0; index < objectCount; index += 1) value = { value };
+      return value;
+    };
+    expect(failure(nested(127))).toMatchObject({ code: "ACTION_IMPLEMENTATION_INVALID" });
+    expect(failure(nested(128)).message).toContain("input depth exceeds 128");
+
+    const nodeProbe = (arrayCount: number) => Object.fromEntries(Array.from(
+      { length: arrayCount }, (_, index) => [`a${index}`, new Array(9_999).fill(null)],
+    ));
+    expect(failure(nodeProbe(24))).toMatchObject({ code: "ACTION_IMPLEMENTATION_INVALID" });
+    expect(failure(nodeProbe(26)).message).toContain("input node budget exceeds 250000");
+  });
+
   it("wraps canonical graph reference failures as stable normalization errors", () => {
     const invalid = plan({
       actions: [{ id: "open-detail", kind: "set-visibility", targetId: "missing", visible: true, afterActionIds: [] }],
@@ -275,6 +383,17 @@ describe("normalizeActionGraph", () => {
       controls: nativePage.controls.map((control, index) => ({ semanticControlId: control.id, instanceName: `Button${index + 1}` })),
       pages: [{ semanticPageId: nativePage.id, pageGuid: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }],
     };
+    const pending: object[] = [compiledPlan, phase3];
+    const seen = new WeakSet<object>();
+    while (pending.length > 0) {
+      const value = pending.pop()!;
+      if (seen.has(value)) continue;
+      seen.add(value);
+      Object.values(value).forEach((child) => {
+        if (child !== null && typeof child === "object") pending.push(child);
+      });
+      Object.freeze(value);
+    }
 
     expect(normalizeActionGraph({ plan: compiledPlan, implementation: phase3 }).graph.actions)
       .toEqual([expect.objectContaining({ id: "stay", trigger: { controlId: "go", semanticEvent: "click" } })]);

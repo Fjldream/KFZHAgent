@@ -254,12 +254,160 @@ function resolveTriggerControl(
   return candidate;
 }
 
-function cloneInput(input: NormalizeActionGraphInput): NormalizeActionGraphInput {
+const MAX_INPUT_DEPTH = 128;
+const MAX_INPUT_NODES = 250_000;
+const MAX_INPUT_ARRAY_LENGTH = 10_000;
+const MAX_INPUT_OBJECT_PROPERTIES = 1_000;
+
+type PureData = null | string | number | boolean | object;
+type RejectInput = (detail: string) => never;
+type CloneFrame =
+  | { readonly kind: "visit"; readonly source: unknown; readonly depth: number; readonly assign: (value: unknown) => void }
+  | { readonly kind: "exit"; readonly source: object };
+
+function inspectPureObject(source: object, reject: RejectInput): Readonly<{
+  prototype: object | null;
+  keys: readonly PropertyKey[];
+  descriptors: PropertyDescriptorMap;
+}> {
   try {
-    return structuredClone(input);
-  } catch (error) {
-    throw new ActionGraphNormalizationError("ACTION_INPUT_INVALID", "input", undefined, { cause: error });
+    const prototype = Object.getPrototypeOf(source) as object | null;
+    const keys = Reflect.ownKeys(source);
+    const descriptors = Object.getOwnPropertyDescriptors(source);
+    const descriptorKeys = Reflect.ownKeys(descriptors);
+    const descriptorKeySet = new Set(descriptorKeys);
+    if (descriptorKeys.length !== keys.length || keys.some((key) => !descriptorKeySet.has(key))) {
+      return reject("input descriptor keys changed during inspection");
+    }
+    return { prototype, keys, descriptors };
+  } catch {
+    return reject("input descriptor inspection failed");
   }
+}
+
+function descriptorFor(
+  descriptors: PropertyDescriptorMap,
+  key: PropertyKey,
+  reject: RejectInput,
+): PropertyDescriptor {
+  const descriptor = Object.getOwnPropertyDescriptor(descriptors, key)?.value as PropertyDescriptor | undefined;
+  if (descriptor === undefined) return reject("input property disappeared during inspection");
+  if (!("value" in descriptor)) return reject("input accessors are forbidden");
+  return descriptor;
+}
+
+function clonePureData(root: unknown, budget: { nodes: number }, reject: RejectInput): PureData {
+  const holder: { value?: unknown } = {};
+  const clones = new WeakMap<object, object>();
+  const states = new WeakMap<object, "active" | "done">();
+  const pending: CloneFrame[] = [{ kind: "visit", source: root, depth: 0, assign: (value) => { holder.value = value; } }];
+  while (pending.length > 0) {
+    const frame = pending.pop()!;
+    if (frame.kind === "exit") {
+      states.set(frame.source, "done");
+      continue;
+    }
+    budget.nodes += 1;
+    if (budget.nodes > MAX_INPUT_NODES) reject(`input node budget exceeds ${MAX_INPUT_NODES}`);
+    if (frame.depth > MAX_INPUT_DEPTH) reject(`input depth exceeds ${MAX_INPUT_DEPTH}`);
+    const source = frame.source;
+    if (source === null || typeof source === "string" || typeof source === "boolean") {
+      frame.assign(source);
+      continue;
+    }
+    if (typeof source === "number") {
+      if (!Number.isFinite(source)) reject("input numbers must be finite");
+      frame.assign(source);
+      continue;
+    }
+    if (typeof source !== "object") reject("input contains a non-JSON value");
+    const sourceObject = source;
+    const state = states.get(sourceObject);
+    if (state === "active") reject("input contains a cycle");
+    if (state === "done") {
+      frame.assign(clones.get(sourceObject)!);
+      continue;
+    }
+    const inspected = inspectPureObject(sourceObject, reject);
+    const isArray = Array.isArray(sourceObject);
+    if ((isArray && inspected.prototype !== Array.prototype)
+      || (!isArray && inspected.prototype !== Object.prototype && inspected.prototype !== null)) {
+      reject("input contains a non-plain prototype");
+    }
+    if (inspected.keys.some((key) => typeof key === "symbol")) reject("input contains a symbol property");
+
+    if (isArray) {
+      const lengthDescriptor = descriptorFor(inspected.descriptors, "length", reject);
+      const length = lengthDescriptor.value as unknown;
+      if (typeof length !== "number" || !Number.isSafeInteger(length) || length < 0) reject("input array length is invalid");
+      if (length > MAX_INPUT_ARRAY_LENGTH) reject(`input array budget exceeds ${MAX_INPUT_ARRAY_LENGTH}`);
+      const elementKeys = inspected.keys.filter((key) => key !== "length");
+      if (elementKeys.length !== length || elementKeys.some((key) =>
+        typeof key !== "string" || !/^(?:0|[1-9]\d*)$/.test(key) || Number(key) >= length)) {
+        reject("input arrays must be dense and index-only");
+      }
+      const clone: unknown[] = new Array(length);
+      frame.assign(clone);
+      clones.set(sourceObject, clone);
+      states.set(sourceObject, "active");
+      pending.push({ kind: "exit", source: sourceObject });
+      for (let index = length - 1; index >= 0; index -= 1) {
+        const descriptor = descriptorFor(inspected.descriptors, String(index), reject);
+        if (descriptor.enumerable !== true) reject("input properties must be enumerable");
+        pending.push({
+          kind: "visit", source: descriptor.value, depth: frame.depth + 1,
+          assign: (value) => { clone[index] = value; },
+        });
+      }
+      continue;
+    }
+
+    if (inspected.keys.length > MAX_INPUT_OBJECT_PROPERTIES) {
+      reject(`input object budget exceeds ${MAX_INPUT_OBJECT_PROPERTIES}`);
+    }
+    const clone = inspected.prototype === null ? Object.create(null) as Record<string, unknown> : {} as Record<string, unknown>;
+    frame.assign(clone);
+    clones.set(sourceObject, clone);
+    states.set(sourceObject, "active");
+    pending.push({ kind: "exit", source: sourceObject });
+    for (let index = inspected.keys.length - 1; index >= 0; index -= 1) {
+      const key = inspected.keys[index]!;
+      if (typeof key !== "string") reject("input contains a symbol property");
+      const descriptor = descriptorFor(inspected.descriptors, key, reject);
+      if (descriptor.enumerable !== true) reject("input properties must be enumerable");
+      pending.push({
+        kind: "visit", source: descriptor.value, depth: frame.depth + 1,
+        assign: (value) => Object.defineProperty(clone, key, { value, enumerable: true, configurable: true, writable: true }),
+      });
+    }
+  }
+  return holder.value as PureData;
+}
+
+function cloneInput(input: NormalizeActionGraphInput): NormalizeActionGraphInput {
+  const rejectInput: RejectInput = (detail) => {
+    throw new ActionGraphNormalizationError("ACTION_INPUT_INVALID", "input", detail);
+  };
+  if (input === null || typeof input !== "object" || Array.isArray(input)) rejectInput("normalize input must be a plain object");
+  const inspected = inspectPureObject(input, rejectInput);
+  if (inspected.prototype !== Object.prototype && inspected.prototype !== null) rejectInput("normalize input must be a plain object");
+  if (inspected.keys.length !== 2
+    || !inspected.keys.includes("plan")
+    || !inspected.keys.includes("implementation")
+    || inspected.keys.some((key) => typeof key === "symbol")) {
+    rejectInput("normalize input must contain only plan and implementation");
+  }
+  const planDescriptor = descriptorFor(inspected.descriptors, "plan", rejectInput);
+  const implementationDescriptor = descriptorFor(inspected.descriptors, "implementation", rejectInput);
+  if (planDescriptor.enumerable !== true || implementationDescriptor.enumerable !== true) rejectInput("normalize input fields must be enumerable");
+  const budget = { nodes: 1 };
+  const plan = clonePureData(planDescriptor.value, budget, (detail) => {
+    throw new ActionGraphNormalizationError("ACTION_INPUT_INVALID", "plan", detail);
+  }) as SolutionImplementationPlan;
+  const implementation = clonePureData(implementationDescriptor.value, budget, (detail) => {
+    throw new ActionGraphNormalizationError("ACTION_IMPLEMENTATION_INVALID", "implementation", detail);
+  });
+  return { plan, implementation };
 }
 
 function deepFreeze<T>(value: T): T {
