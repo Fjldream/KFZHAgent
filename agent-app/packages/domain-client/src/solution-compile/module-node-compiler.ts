@@ -5,6 +5,7 @@ import {
   UIImplementationControlV2Schema,
   modelAssetIdToWorkspaceAssetId,
   type ApprovedAssetFacts,
+  type ControlCapability,
   type ModulePlanModule,
   type RegisteredModuleNode,
   type ResolvedAsset,
@@ -16,7 +17,7 @@ import {
 import { validateCreateComponentProperties } from "../implementation/component-properties.js";
 import type { ModuleRegistry } from "../modules/module-registry.js";
 import type { ModuleDefinition } from "../modules/types.js";
-import { listControlCapabilities } from "../style/control-capability-registry.js";
+import { getControlCapability, listControlCapabilities } from "../style/control-capability-registry.js";
 import type { CompiledLayoutNode } from "./layout-compiler.js";
 
 export type SemanticData = string | number | boolean | null | SemanticData[] | SemanticDataRecord;
@@ -59,6 +60,7 @@ const MAX_DATA_ITEMS = 100;
 const SAFE_DATA_KEY = /^[A-Za-z][A-Za-z0-9_-]{0,99}$/;
 const SAFE_LOCAL_ID = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 const FORBIDDEN_KEYS = new Set(["__proto__", "prototype", "constructor"]);
+const CONFIGURATION_ONLY_NATIVE_CAPABILITIES = new Set(["easyui.1"]);
 const CONTENT_FIELDS: Readonly<Record<string, string>> = Object.freeze({
   button: "text",
   text: "text",
@@ -228,10 +230,35 @@ function registryDefinition(input: RegisteredModuleNodeCompileInput): ModuleDefi
   return definition;
 }
 
+function unavailableNativeCreateDimension(
+  capability: ControlCapability,
+): Readonly<{ dimension: "generation" | "style"; status: "preserve-only" | "unsupported" }> | undefined {
+  if (CONFIGURATION_ONLY_NATIVE_CAPABILITIES.has(capability.id)) return undefined;
+  if (capability.generation.status === "unsupported" || capability.generation.status === "preserve-only") {
+    return { dimension: "generation", status: capability.generation.status };
+  }
+  if (capability.style.status === "unsupported" || capability.style.status === "preserve-only") {
+    return { dimension: "style", status: capability.style.status };
+  }
+  return undefined;
+}
+
 function technicallyAvailableCapabilityIds(): ReadonlySet<string> {
   return new Set(listControlCapabilities()
-    .filter((capability) => capability.generation.status !== "unsupported" && capability.generation.status !== "preserve-only")
+    .filter((capability) => unavailableNativeCreateDimension(capability) === undefined)
     .map((capability) => capability.id));
+}
+
+function assertOutputCapability(nodeId: string, outputId: string, capabilityId: string): void {
+  const path: CompilePath = [nodeId, "components", outputId, "capabilityId", capabilityId];
+  const capability = getControlCapability(capabilityId);
+  if (capability === undefined) fail("MODULE_COMPONENT_CAPABILITY_MISSING", path, capabilityId);
+  const unavailable = unavailableNativeCreateDimension(capability);
+  if (unavailable === undefined) return;
+  const code = unavailable.status === "preserve-only"
+    ? "MODULE_COMPONENT_CAPABILITY_PRESERVE_ONLY"
+    : "MODULE_COMPONENT_CAPABILITY_UNSUPPORTED";
+  fail(code, path, `${unavailable.dimension} is ${unavailable.status}`);
 }
 
 function assertRequiredCapabilities(definition: ModuleDefinition, nodeId: string): void {
@@ -405,6 +432,7 @@ export function compileRegisteredModuleNode(input: RegisteredModuleNodeCompileIn
   const components = output.components.map((component, index) => {
     const parsed = UIComponentSpecSchema.safeParse(component);
     if (!parsed.success) fail("MODULE_COMPONENT_INVALID", [input.node.id, "components", index], parsed.error.issues[0]?.message ?? "schema rejected component");
+    assertOutputCapability(input.node.id, parsed.data.id, parsed.data.capabilityId);
     return parsed.data;
   });
   const localById = new Map<string, (typeof components)[number]>();

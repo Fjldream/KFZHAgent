@@ -219,6 +219,46 @@ describe("compileRegisteredModuleNode", () => {
     expect(error).toMatchObject({ code: "MODULE_KF_CAPABILITY_MISSING", path: ["profile-module", "requiredKfCapabilities"] });
   });
 
+  it.each([
+    ["layout.0 local parent", "accordion", "layout.0", "MODULE_COMPONENT_CAPABILITY_PRESERVE_ONLY", true],
+    ["layout.3 local parent", "tabs", "layout.3", "MODULE_COMPONENT_CAPABILITY_PRESERVE_ONLY", true],
+    ["preserve-only local leaf", "legacy-table", "table", "MODULE_COMPONENT_CAPABILITY_PRESERVE_ONLY", false],
+    ["unsupported local leaf", "external-page", "webcontainer", "MODULE_COMPONENT_CAPABILITY_UNSUPPORTED", false],
+    ["missing local leaf", "invented", "missing.capability", "MODULE_COMPONENT_CAPABILITY_MISSING", false],
+  ] as const)("rejects a %s returned by the registered compiler", (_label, outputId, capabilityId, code, parent) => {
+    const invalidOutput = definition({
+      requiredKfCapabilities: ["text"],
+      compile: () => ({
+        components: [{
+          id: outputId, role: "surface", capabilityId, critical: true,
+          geometry: { x: 0, y: 0, width: 300, height: 80 }, properties: {},
+          style: { declarations: {}, states: {} },
+        }, ...(parent ? [{
+          id: "child", role: "body", capabilityId: "text", critical: true, content: "子节点",
+          geometry: { x: 8, y: 8, width: 200, height: 24 }, properties: { parentId: outputId },
+          style: { declarations: {}, states: {} },
+        }] : [])],
+        deliveryGaps: [],
+      }),
+    });
+
+    const error = readCompileError(() => compileRegisteredModuleNode(
+      compileInput(moduleNode(), registryFor(invalidOutput)),
+    ));
+    expect(error.code).toBe(code);
+    expect(error.path).toEqual(["profile-module", "components", outputId, "capabilityId", capabilityId]);
+  });
+
+  it("accepts a technically available layout.2 parent and supported child even when only the child is required", () => {
+    const supportedOutput = definition({ requiredKfCapabilities: ["text"] });
+    const controls = compileRegisteredModuleNode(compileInput(moduleNode(), registryFor(supportedOutput)));
+
+    expect(controls.map((control) => [control.id, control.capabilityId, control.parentId])).toEqual([
+      ["profile-module--surface", "layout.2", "root"],
+      ["profile-module--title", "text", "profile-module--surface"],
+    ]);
+  });
+
   it("resolves an approved image exactly and rejects missing asset integrity", () => {
     const imageDefinition = definition({
       assetSlots: [{ id: "portrait", required: true, allowedKinds: ["image"] }],
