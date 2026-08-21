@@ -1,6 +1,20 @@
 import { describe, expect, it } from "vitest";
-import type { SolutionImplementationPlan, UIImplementationSpecV2 } from "@kf/contracts";
+import {
+  CapabilityCandidateBundleSchema,
+  SolutionImplementationPlanSchema,
+  canonicalServerHash,
+  type SolutionImplementationPlan,
+  type UIImplementationSpecV2,
+} from "@kf/contracts";
+import { createDefaultModuleRegistry } from "../modules/module-registry.js";
+import { compileSolutionImplementation } from "../solution-compile/solution-compiler.js";
 import { ActionGraphNormalizationError, normalizeActionGraph } from "./action-graph.js";
+
+const validTheme = {
+  background: "#f4f7fb", surface: "#ffffff", primary: "#163a5f", accent: "#e47b32",
+  textPrimary: "#14212b", textSecondary: "#52616d", fontFamily: "Inter", spacingUnit: 8,
+  radiusScale: { small: 4, medium: 8, large: 16 },
+} as const;
 
 function node(id: string, eventBindings: Array<{ semanticEvent: string; actionIds: string[] }> = []) {
   return {
@@ -48,7 +62,7 @@ function implementation(extraControls: Array<Record<string, unknown>> = []): UII
     ...control,
   }));
   return {
-    schema: "kf-ui-implementation/v2", compatibility: "native", theme: {} as never, compiledRoleStyles: {},
+    schema: "kf-ui-implementation/v2", compatibility: "native", theme: validTheme, compiledRoleStyles: {},
     pages: [{ compatibility: "native", id: "home", width: 1280, height: 720, sourceBlueprintPageId: "bp-home", controls }],
     compiledActions: [], compiledScripts: [],
     runtimeCorrelation: {
@@ -157,5 +171,84 @@ describe("normalizeActionGraph", () => {
     });
     expect(() => normalizeActionGraph({ plan: invalid, implementation: implementation() }))
       .toThrowError(expect.objectContaining({ code: "ACTION_INPUT_INVALID", nodeId: "open-detail" }));
+  });
+
+  it("authoritatively parses typed-cast implementations and rejects correlation aliases", () => {
+    const invalid = implementation() as unknown as Record<string, unknown>;
+    invalid["rogueRuntimeField"] = true;
+    expect(() => normalizeActionGraph({ plan: plan(), implementation: invalid }))
+      .toThrowError(expect.objectContaining({ code: "ACTION_IMPLEMENTATION_INVALID", nodeId: "implementation" }));
+
+    const aliased = implementation([{ id: "alias-control", capabilityId: "text", sourceSolutionNodeId: "alias-control" }]);
+    aliased.runtimeCorrelation!.controls.find((entry) => entry.semanticControlId === "alias-control")!.instanceName = "button1";
+    expect(() => normalizeActionGraph({ plan: plan(), implementation: aliased }))
+      .toThrowError(expect.objectContaining({ code: "ACTION_RUNTIME_CORRELATION_ALIAS", nodeId: "alias-control" }));
+
+    const duplicateIdentity = implementation([{ id: "open-button", capabilityId: "button", sourceSolutionNodeId: "duplicate" }]);
+    expect(() => normalizeActionGraph({ plan: plan(), implementation: duplicateIdentity }))
+      .toThrowError(expect.objectContaining({ code: "ACTION_IMPLEMENTATION_INVALID", nodeId: "implementation" }));
+
+    const extraPage = implementation();
+    const home = extraPage.pages[0]!;
+    if (home.compatibility !== "native") throw new Error("native fixture required");
+    extraPage.pages.push({
+      compatibility: "native", id: "rogue-page", width: 1280, height: 720, sourceBlueprintPageId: "bp-rogue",
+      controls: [{
+        ...home.controls[1]!, id: "rogue-control", sourceSolutionNodeId: "rogue-control",
+        sourceBlueprintPageId: "bp-rogue",
+      }],
+    });
+    extraPage.runtimeCorrelation!.controls.push({ semanticControlId: "rogue-control", instanceName: "Input9" });
+    extraPage.runtimeCorrelation!.pages.push({ semanticPageId: "rogue-page", pageGuid: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" });
+    expect(() => normalizeActionGraph({ plan: plan(), implementation: extraPage }))
+      .toThrowError(expect.objectContaining({ code: "ACTION_RUNTIME_CORRELATION_EXTRA", nodeId: "rogue-page" }));
+  });
+
+  it("accepts a real Phase3 implementation after compiler-owned correlation is attached", () => {
+    const sourcePages = [{ pageId: "bp-home", regions: ["main"] }] as const;
+    const blueprintHash = canonicalServerHash({ projectKey: "phase3-positive", sourcePages });
+    const ranked = (id: string) => ({ id, score: 100, reasons: ["reviewed fixture"], limitations: [], knowledgeVersion: "1.0.0" });
+    const bundle = CapabilityCandidateBundleSchema.parse({
+      schema: "kf-capability-candidates/v1", knowledgeCatalogVersion: "1.0.0", blueprintHash,
+      regions: [{
+        pageId: "bp-home", regionId: "main",
+        controls: [ranked("button"), ranked("text"), ranked("input")],
+        layouts: [ranked("layout.2")], recipes: [ranked("portal-composition")],
+      }],
+      detailedCapabilityIds: ["button", "input", "layout.2", "text"], generatedAtPolicy: "deterministic-no-timestamp",
+    });
+    const compiledPlan = SolutionImplementationPlanSchema.parse({
+      schema: "kf-solution-implementation/v1", projectKey: "phase3-positive", blueprintHash,
+      candidateBundleHash: canonicalServerHash(bundle), theme: validTheme,
+      roleStyles: [{ role: "action", declarations: { backgroundColor: "{theme.primary}" }, states: {} }],
+      mockData: [], localState: [], overlays: [], scripts: [],
+      pages: [{
+        id: "home", title: "首页", purpose: "验证 Phase3 产物", canvas: "desktop",
+        sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["main"], initialStateIds: [],
+        root: {
+          kind: "control", id: "go", sourceBlueprintRegionIds: ["main"],
+          intent: {
+            importance: "primary", visualWeight: 5, readingOrder: 0, density: "comfortable",
+            groupWith: [], width: { mode: "content" }, height: { mode: "content" }, align: "stretch",
+          },
+          capabilityId: "button", content: "进入", properties: [], tabIds: [], styleRole: "action",
+          eventBindings: [{ semanticEvent: "click", actionIds: ["stay"] }],
+        },
+      }],
+      actions: [{ id: "stay", kind: "navigate-page", targetPageId: "home", afterActionIds: [] }],
+    });
+    const phase3 = structuredClone(compileSolutionImplementation({
+      plan: compiledPlan, candidateBundle: bundle, moduleRegistry: createDefaultModuleRegistry(),
+      approvedAssets: [], activeCatalogVersion: "1.0.0",
+    }));
+    const nativePage = phase3.pages[0];
+    if (nativePage?.compatibility !== "native") throw new Error("native Phase3 fixture required");
+    phase3.runtimeCorrelation = {
+      controls: nativePage.controls.map((control, index) => ({ semanticControlId: control.id, instanceName: `Button${index + 1}` })),
+      pages: [{ semanticPageId: nativePage.id, pageGuid: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }],
+    };
+
+    expect(normalizeActionGraph({ plan: compiledPlan, implementation: phase3 }).graph.actions)
+      .toEqual([expect.objectContaining({ id: "stay", trigger: { controlId: "go", semanticEvent: "click" } })]);
   });
 });

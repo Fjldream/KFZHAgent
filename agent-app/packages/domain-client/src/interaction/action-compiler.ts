@@ -21,6 +21,7 @@ export type ScriptRequestReason =
   | "ACTION_CONDITIONS_REQUIRE_SCRIPT"
   | "ACTION_VALUE_REQUIRES_SCRIPT"
   | "BINDING_CAPACITY_EXCEEDED"
+  | "EVENT_ALIAS_EVIDENCE_CONFLICT"
   | "RUN_SCRIPT_REQUIRES_VALIDATION"
   | "TARGET_CAPABILITY_UNSUPPORTED"
   | "TRIGGER_EVENT_UNSUPPORTED";
@@ -231,29 +232,51 @@ export function compileNativeActions(input: CompileNativeActionsInput): NativeAc
   const actions: CompiledNativeAction[] = [];
   const requests: TypedScriptRequest[] = [];
   const bindings: CompiledEventBinding[] = [];
-  const groups = new Map<string, Array<(typeof context.graph.actions)[number]>>();
+  type GraphAction = (typeof context.graph.actions)[number];
+  type RuntimeControl = ReturnType<typeof runtimeIndexes>["controls"] extends Map<string, infer T> ? T : never;
+  type RuntimeEvent = ScriptCapabilityProfile["events"][number];
+  type ResolvedAction = { action: GraphAction; owner: RuntimeControl; profile: ScriptCapabilityProfile; event: RuntimeEvent };
+  const groups = new Map<string, ResolvedAction[]>();
   for (const action of context.graph.actions) {
-    const key = `${action.trigger.controlId}\u0000${action.trigger.semanticEvent}`;
+    const owner = indexes.controls.get(action.trigger.controlId);
+    if (owner === undefined) {
+      requests.push(request(action, "TRIGGER_EVENT_UNSUPPORTED", scriptsById));
+      continue;
+    }
+    let profile;
+    try {
+      profile = requireScriptCapabilityProfile(owner.capabilityId);
+    } catch {
+      requests.push(request(action, "ACTION_CAPABILITY_UNSUPPORTED", scriptsById));
+      continue;
+    }
+    if (profile.availability !== "supported") {
+      requests.push(request(action, "ACTION_CAPABILITY_UNSUPPORTED", scriptsById));
+      continue;
+    }
+    const event = profile.events.find((candidate) => candidate.semanticEvent === action.trigger.semanticEvent);
+    if (!supported(event)) {
+      requests.push(request(action, "TRIGGER_EVENT_UNSUPPORTED", scriptsById));
+      continue;
+    }
+    const key = `${owner.instanceName}\u0000${event.kfEvent}\u0000${event.linkId === undefined ? "none" : event.linkId}\u0000event`;
     const group = groups.get(key) ?? [];
-    group.push(action);
+    group.push({ action, owner, profile, event });
     groups.set(key, group);
   }
 
   for (const group of groups.values()) {
     if (group.length > 16) {
-      group.forEach((action) => requests.push(request(action, "BINDING_CAPACITY_EXCEEDED", scriptsById)));
+      group.forEach(({ action }) => requests.push(request(action, "BINDING_CAPACITY_EXCEEDED", scriptsById)));
+      continue;
+    }
+    const aliasSignatures = new Set(group.map(({ event }) => JSON.stringify({ arguments: event.arguments, evidence: event.evidence })));
+    if (aliasSignatures.size !== 1) {
+      group.forEach(({ action }) => requests.push(request(action, "EVENT_ALIAS_EVIDENCE_CONFLICT", scriptsById)));
       continue;
     }
     const groupActions: CompiledNativeAction[] = [];
-    let groupEvent: { kfEvent: string; linkId?: number } | undefined;
-    let ownerInstanceName: string | undefined;
-    for (const action of group) {
-      const owner = indexes.controls.get(action.trigger.controlId);
-      if (owner === undefined) {
-        requests.push(request(action, "TRIGGER_EVENT_UNSUPPORTED", scriptsById));
-        continue;
-      }
-      ownerInstanceName = owner.instanceName;
+    for (const { action, owner, profile } of group) {
       if (action.effects.some((effect) => effect.kind === "run-script")) {
         requests.push(request(action, "RUN_SCRIPT_REQUIRES_VALIDATION", scriptsById));
         continue;
@@ -262,23 +285,6 @@ export function compileNativeActions(input: CompileNativeActionsInput): NativeAc
         requests.push(request(action, "ACTION_CONDITIONS_REQUIRE_SCRIPT", scriptsById));
         continue;
       }
-      let profile;
-      try {
-        profile = requireScriptCapabilityProfile(owner.capabilityId);
-      } catch {
-        requests.push(request(action, "ACTION_CAPABILITY_UNSUPPORTED", scriptsById));
-        continue;
-      }
-      if (profile.availability !== "supported") {
-        requests.push(request(action, "ACTION_CAPABILITY_UNSUPPORTED", scriptsById));
-        continue;
-      }
-      const event = profile.events.find((candidate) => candidate.semanticEvent === action.trigger.semanticEvent);
-      if (!supported(event)) {
-        requests.push(request(action, "TRIGGER_EVENT_UNSUPPORTED", scriptsById));
-        continue;
-      }
-      groupEvent = { kfEvent: event.kfEvent, ...(event.linkId === undefined ? {} : { linkId: event.linkId }) };
       const effect = action.effects[0]!;
       if (!staysInOwnerPage(effect, owner.pageId, indexes)) {
         requests.push(request(action, "ACTION_CONTEXT_CROSS_PAGE", scriptsById));
@@ -304,13 +310,14 @@ export function compileNativeActions(input: CompileNativeActionsInput): NativeAc
       }
       groupActions.push(compiled);
     }
-    if (groupActions.length > 0 && groupEvent !== undefined && ownerInstanceName !== undefined) {
+    if (groupActions.length > 0) {
+      const first = group[0]!;
       actions.push(...groupActions);
       bindings.push(parseBinding({
-        id: compilerId("binding", group[0]!.id), ownerInstanceName, kfEvent: groupEvent.kfEvent,
-        ...(groupEvent.linkId === undefined ? {} : { linkId: groupEvent.linkId }),
+        id: compilerId("binding", first.action.id), ownerInstanceName: first.owner.instanceName, kfEvent: first.event.kfEvent,
+        ...(first.event.linkId === undefined ? {} : { linkId: first.event.linkId }),
         phase: "event", scriptModuleIds: [], nativeActionIds: groupActions.map((action) => action.id),
-      }, group[0]!.id));
+      }, first.action.id));
     }
   }
   return {

@@ -6,14 +6,24 @@ import {
   type SolutionImplementationPlan,
   type SolutionNode,
   type UIImplementationSpecV2,
+  UIImplementationSpecV2Schema,
 } from "@kf/contracts";
 
 export type ActionGraphErrorCode =
   | "ACTION_DEPENDENCY_CYCLE"
   | "ACTION_DEPENDENCY_UNKNOWN"
   | "ACTION_INPUT_INVALID"
+  | "ACTION_IMPLEMENTATION_INVALID"
   | "ACTION_OVERLAY_HOST_OWNERSHIP_MISMATCH"
+  | "ACTION_OVERLAY_HOST_DUPLICATE"
+  | "ACTION_OVERLAY_HOST_EXTRA"
+  | "ACTION_OVERLAY_HOST_METADATA_MISMATCH"
+  | "ACTION_OVERLAY_HOST_MISSING"
+  | "ACTION_OVERLAY_HOST_PROVENANCE_MISMATCH"
+  | "ACTION_OVERLAY_PLAN_DUPLICATE"
+  | "ACTION_RUNTIME_CORRELATION_EXTRA"
   | "ACTION_RUNTIME_CORRELATION_MISSING"
+  | "ACTION_RUNTIME_CORRELATION_ALIAS"
   | "ACTION_SCRIPT_ORPHANED"
   | "ACTION_TRIGGER_MISSING"
   | "ACTION_TRIGGER_OWNERSHIP_MISMATCH"
@@ -72,7 +82,7 @@ export function getTrustedActionCompilationContext(
 
 export interface NormalizeActionGraphInput {
   readonly plan: SolutionImplementationPlan;
-  readonly implementation: UIImplementationSpecV2;
+  readonly implementation: unknown;
 }
 
 type NativeControl = Extract<UIImplementationSpecV2["pages"][number], { compatibility: "native" }>["controls"][number];
@@ -147,10 +157,25 @@ function validateRuntimeCorrelation(
       throw new ActionGraphNormalizationError("ACTION_RUNTIME_CORRELATION_MISSING", entry.semanticControlId, "unknown correlated control");
     }
   }
+  const controlByNormalizedInstance = new Map<string, string>();
+  for (const entry of correlation.controls) {
+    const normalizedInstance = entry.instanceName.toLocaleLowerCase("en-US");
+    const prior = controlByNormalizedInstance.get(normalizedInstance);
+    if (prior !== undefined) {
+      throw new ActionGraphNormalizationError("ACTION_RUNTIME_CORRELATION_ALIAS", entry.semanticControlId, `${prior}/${entry.instanceName}`);
+    }
+    controlByNormalizedInstance.set(normalizedInstance, entry.semanticControlId);
+  }
   const correlatedPages = new Set(correlation.pages.map((entry) => entry.semanticPageId));
+  const plannedPageIds = new Set(plan.pages.map((page) => page.id));
   for (const page of plan.pages) {
     if (!correlatedPages.has(page.id)) {
       throw new ActionGraphNormalizationError("ACTION_RUNTIME_CORRELATION_MISSING", page.id, "page GUID");
+    }
+  }
+  for (const entry of correlation.pages) {
+    if (!plannedPageIds.has(entry.semanticPageId)) {
+      throw new ActionGraphNormalizationError("ACTION_RUNTIME_CORRELATION_EXTRA", entry.semanticPageId, "unplanned implementation page");
     }
   }
 }
@@ -159,25 +184,52 @@ function validateOverlayOwnership(
   plan: SolutionImplementationPlan,
   implementation: UIImplementationSpecV2,
 ): void {
-  const plannedHosts = new Map(plan.overlays.map((overlay) => [overlay.id, overlay.hostPageId]));
-  const seen = new Set<string>();
+  type NativePage = Extract<UIImplementationSpecV2["pages"][number], { compatibility: "native" }>;
+  type NativeControl = NativePage["controls"][number];
+  const plannedOverlays = new Map(plan.overlays.map((overlay) => [overlay.id, overlay]));
+  if (plannedOverlays.size !== plan.overlays.length) {
+    const seen = new Set<string>();
+    const duplicate = plan.overlays.find((overlay) => seen.has(overlay.id) || !seen.add(overlay.id));
+    throw new ActionGraphNormalizationError("ACTION_OVERLAY_PLAN_DUPLICATE", duplicate?.id ?? "overlay");
+  }
+  const hosts = new Map<string, Array<{ pageId: string; control: NativeControl }>>();
   for (const page of implementation.pages) {
     if (page.compatibility !== "native") continue;
     for (const control of page.controls) {
       const host = control.overlayHost;
       if (host === undefined) continue;
-      const plannedHost = plannedHosts.get(host.overlayId);
-      if (seen.has(host.overlayId)
-        || plannedHost === undefined
-        || host.hostPageId !== page.id
-        || plannedHost !== page.id) {
-        throw new ActionGraphNormalizationError(
-          "ACTION_OVERLAY_HOST_OWNERSHIP_MISMATCH",
-          host.overlayId,
-          `${page.id}/${host.hostPageId}/${plannedHost ?? "unknown"}`,
-        );
-      }
-      seen.add(host.overlayId);
+      const entries = hosts.get(host.overlayId) ?? [];
+      entries.push({ pageId: page.id, control });
+      hosts.set(host.overlayId, entries);
+    }
+  }
+  for (const [overlayId, entries] of hosts) {
+    if (!plannedOverlays.has(overlayId)) throw new ActionGraphNormalizationError("ACTION_OVERLAY_HOST_EXTRA", overlayId);
+    if (entries.length !== 1) throw new ActionGraphNormalizationError("ACTION_OVERLAY_HOST_DUPLICATE", overlayId, String(entries.length));
+  }
+  for (const overlay of plan.overlays) {
+    const entry = hosts.get(overlay.id)?.[0];
+    if (entry === undefined) throw new ActionGraphNormalizationError("ACTION_OVERLAY_HOST_MISSING", overlay.id);
+    const host = entry.control.overlayHost!;
+    if (entry.control.sourceSolutionNodeId !== overlay.root.id) {
+      throw new ActionGraphNormalizationError(
+        "ACTION_OVERLAY_HOST_PROVENANCE_MISMATCH",
+        overlay.id,
+        `${entry.control.sourceSolutionNodeId}/${overlay.root.id}`,
+      );
+    }
+    if (entry.pageId !== overlay.hostPageId || host.hostPageId !== overlay.hostPageId) {
+      throw new ActionGraphNormalizationError(
+        "ACTION_OVERLAY_HOST_OWNERSHIP_MISMATCH",
+        overlay.id,
+        `${entry.pageId}/${host.hostPageId}/${overlay.hostPageId}`,
+      );
+    }
+    if (host.presentation !== overlay.presentation
+      || host.visibleStateId !== overlay.visibleStateId
+      || host.dismissible !== overlay.dismissible
+      || host.initiallyVisible !== false) {
+      throw new ActionGraphNormalizationError("ACTION_OVERLAY_HOST_METADATA_MISMATCH", overlay.id);
     }
   }
 }
@@ -228,7 +280,18 @@ function deepFreeze<T>(value: T): T {
 }
 
 export function normalizeActionGraph(input: NormalizeActionGraphInput): NormalizedActionGraph {
-  const { plan, implementation } = cloneInput(input);
+  const cloned = cloneInput(input);
+  const plan = cloned.plan;
+  const implementationResult = UIImplementationSpecV2Schema.safeParse(cloned.implementation);
+  if (!implementationResult.success) {
+    throw new ActionGraphNormalizationError(
+      "ACTION_IMPLEMENTATION_INVALID",
+      "implementation",
+      implementationResult.error.issues[0]?.message,
+      { cause: implementationResult.error },
+    );
+  }
+  const implementation = implementationResult.data;
   const controls = nativeControlsOf(implementation);
   validateRuntimeCorrelation(plan, implementation, controls);
   validateOverlayOwnership(plan, implementation);

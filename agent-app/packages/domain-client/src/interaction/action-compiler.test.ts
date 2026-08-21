@@ -2,6 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SolutionImplementationPlan, UIImplementationSpecV2 } from "@kf/contracts";
 import { compileAction } from "../compile/control-compiler.js";
 
+const validTheme = {
+  background: "#f4f7fb", surface: "#ffffff", primary: "#163a5f", accent: "#e47b32",
+  textPrimary: "#14212b", textSecondary: "#52616d", fontFamily: "Inter", spacingUnit: 8,
+  radiusScale: { small: 4, medium: 8, large: 16 },
+} as const;
+
 function fixture() {
   const plan = {
     schema: "kf-solution-implementation/v1", projectKey: "demo", blueprintHash: "a".repeat(64), candidateBundleHash: "b".repeat(64),
@@ -20,7 +26,7 @@ function fixture() {
     actions: [{ id: "navigate", kind: "navigate-page", targetPageId: "detail-page", afterActionIds: [] }], scripts: [],
   } as unknown as SolutionImplementationPlan;
   const implementation = {
-    schema: "kf-ui-implementation/v2", compatibility: "native", theme: {}, compiledRoleStyles: {}, compiledActions: [], compiledScripts: [],
+    schema: "kf-ui-implementation/v2", compatibility: "native", theme: validTheme, compiledRoleStyles: {}, compiledActions: [], compiledScripts: [],
     pages: [
       { compatibility: "native", id: "home", width: 1280, height: 720, sourceBlueprintPageId: "bp-home", controls: [{ id: "go", role: "action", capabilityId: "button", depth: 0, zIndex: 0, geometry: { x: 0, y: 0, width: 120, height: 40 }, nativeProperties: {}, sourceSolutionNodeId: "go", sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region"], eventBindings: [] }] },
       { compatibility: "native", id: "detail-page", width: 1280, height: 720, sourceBlueprintPageId: "bp-detail", controls: [{ id: "detail", role: "body", capabilityId: "text", depth: 0, zIndex: 0, geometry: { x: 0, y: 0, width: 120, height: 40 }, nativeProperties: {}, sourceSolutionNodeId: "detail", sourceBlueprintPageId: "bp-detail", sourceBlueprintRegionIds: ["detail-region"], eventBindings: [] }] },
@@ -159,14 +165,26 @@ describe("compileNativeActions", () => {
     const { normalizeActionGraph } = await import("./action-graph.js");
     const data = fixture();
     data.implementation.runtimeCorrelation!.controls[0]!.semanticControlId = "stale-go";
-    expect(() => normalizeActionGraph(data)).toThrowError(expect.objectContaining({ code: "ACTION_RUNTIME_CORRELATION_MISSING", nodeId: "go" }));
+    expect(() => normalizeActionGraph(data)).toThrowError(expect.objectContaining({ code: "ACTION_IMPLEMENTATION_INVALID", nodeId: "implementation" }));
 
     const missingPage = fixture();
     missingPage.implementation.runtimeCorrelation!.pages = missingPage.implementation.runtimeCorrelation!.pages.filter((entry) => entry.semanticPageId !== "detail-page");
-    expect(() => normalizeActionGraph(missingPage)).toThrowError(expect.objectContaining({ code: "ACTION_RUNTIME_CORRELATION_MISSING", nodeId: "detail-page" }));
+    expect(() => normalizeActionGraph(missingPage)).toThrowError(expect.objectContaining({ code: "ACTION_IMPLEMENTATION_INVALID", nodeId: "implementation" }));
+
+    const guidAlias = fixture();
+    guidAlias.implementation.runtimeCorrelation!.pages[0]!.pageGuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    guidAlias.implementation.runtimeCorrelation!.pages[1]!.pageGuid = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
+    expect(() => normalizeActionGraph(guidAlias)).toThrowError(expect.objectContaining({ code: "ACTION_IMPLEMENTATION_INVALID", nodeId: "implementation" }));
   });
 
   it("routes conditions and run-script through bounded requests and never marks script closure complete", async () => {
+    vi.doMock("../design-knowledge/script-capability-registry.js", () => ({
+      requireScriptCapabilityProfile: () => ({
+        schema: "kf-script-capability-profile/v1", capabilityId: "button", version: "1.0.0", availability: "supported",
+        actions: [], events: [{ semanticEvent: "click", kfEvent: "Click", availability: "supported", arguments: [], evidence: [{ kind: "template", ref: "reviewed#click" }] }],
+        methods: [], properties: [], initialization: { supportsConfigureData: false, lifecycleEvents: [] }, limitations: [],
+      }),
+    }));
     const { normalizeActionGraph } = await import("./action-graph.js");
     const { compileNativeActions } = await import("./action-compiler.js");
     const data = fixture();
@@ -304,7 +322,46 @@ describe("compileNativeActions", () => {
 
     detailPage.controls[1]!.overlayHost!.hostPageId = "home";
     expect(() => normalizeActionGraph(data)).toThrowError(expect.objectContaining({
-      code: "ACTION_OVERLAY_HOST_OWNERSHIP_MISMATCH", nodeId: "detail-overlay",
+      code: "ACTION_IMPLEMENTATION_INVALID", nodeId: "implementation",
+    }));
+    detailPage.controls[1]!.overlayHost!.hostPageId = "detail-page";
+
+    data.plan.overlays[0]!.presentation = "drawer";
+    expect(() => normalizeActionGraph(data)).toThrowError(expect.objectContaining({
+      code: "ACTION_OVERLAY_HOST_METADATA_MISMATCH", nodeId: "detail-overlay",
+    }));
+    data.plan.overlays[0]!.presentation = "dialog";
+
+    detailPage.controls[1]!.sourceSolutionNodeId = "wrong-overlay-root";
+    expect(() => normalizeActionGraph(data)).toThrowError(expect.objectContaining({
+      code: "ACTION_OVERLAY_HOST_PROVENANCE_MISMATCH", nodeId: "detail-overlay",
+    }));
+    detailPage.controls[1]!.sourceSolutionNodeId = "overlay-content";
+
+    const hostControl = detailPage.controls.pop()!;
+    const hostCorrelation = data.implementation.runtimeCorrelation!.controls.pop()!;
+    expect(() => normalizeActionGraph(data)).toThrowError(expect.objectContaining({
+      code: "ACTION_OVERLAY_HOST_MISSING", nodeId: "detail-overlay",
+    }));
+    detailPage.controls.push(hostControl);
+    data.implementation.runtimeCorrelation!.controls.push(hostCorrelation);
+
+    const overlayPlan = data.plan.overlays.pop()!;
+    expect(() => normalizeActionGraph(data)).toThrowError(expect.objectContaining({
+      code: "ACTION_OVERLAY_HOST_EXTRA", nodeId: "detail-overlay",
+    }));
+    data.plan.overlays.push(overlayPlan);
+
+    data.plan.overlays.push(structuredClone(overlayPlan));
+    expect(() => normalizeActionGraph(data)).toThrowError(expect.objectContaining({
+      code: "ACTION_OVERLAY_PLAN_DUPLICATE", nodeId: "detail-overlay",
+    }));
+    data.plan.overlays.pop();
+
+    detailPage.controls.push({ ...hostControl, id: "overlay-host-duplicate" });
+    data.implementation.runtimeCorrelation!.controls.push({ semanticControlId: "overlay-host-duplicate", instanceName: "Dialog2" });
+    expect(() => normalizeActionGraph(data)).toThrowError(expect.objectContaining({
+      code: "ACTION_OVERLAY_HOST_DUPLICATE", nodeId: "detail-overlay",
     }));
   });
 
@@ -365,5 +422,75 @@ describe("compileNativeActions", () => {
     const data = fixture();
     expect(() => compileNativeActions({ normalized: normalizeActionGraph(data) }))
       .toThrowError(expect.objectContaining({ code: "NATIVE_ACTION_CONTRACT_INVALID", nodeId: "navigate" }));
+  });
+
+  it("merges semantic aliases by actual KF event identity before capacity checks", async () => {
+    vi.doMock("../design-knowledge/script-capability-registry.js", () => ({
+      requireScriptCapabilityProfile: () => ({
+        schema: "kf-script-capability-profile/v1", capabilityId: "button", version: "1.0.0", availability: "supported",
+        actions: [{ semanticAction: "show-feedback", implementation: "restricted-action", availability: "supported", evidence: [{ kind: "compiler", ref: "reviewed#feedback" }] }],
+        events: ["click", "change"].map((semanticEvent) => ({ semanticEvent, kfEvent: "Click", linkId: 7, availability: "supported", arguments: [], evidence: [{ kind: "template", ref: "reviewed#click" }] })),
+        methods: [], properties: [], initialization: { supportsConfigureData: false, lifecycleEvents: [] }, limitations: [],
+      }),
+    }));
+    const { normalizeActionGraph } = await import("./action-graph.js");
+    const { compileNativeActions } = await import("./action-compiler.js");
+    const compileAliases = (leftCount: number, rightCount: number) => {
+      const data = fixture();
+      const root = data.plan.pages[0]!.root;
+      if (root.kind !== "control") throw new Error("control fixture required");
+      root.eventBindings = [
+        { semanticEvent: "click", actionIds: ["left-0"] },
+        { semanticEvent: "change", actionIds: ["right-0"] },
+      ];
+      const chain = (prefix: string, count: number) => Array.from({ length: count }, (_, index) => ({
+        id: `${prefix}-${index}`, kind: "show-feedback" as const, level: "info" as const, message: `${prefix} ${index}`,
+        afterActionIds: index + 1 < count ? [`${prefix}-${index + 1}`] : [],
+      }));
+      data.plan.actions = [...chain("left", leftCount), ...chain("right", rightCount)];
+      return compileNativeActions({ normalized: normalizeActionGraph(data) });
+    };
+    const sixteen = compileAliases(8, 8);
+    expect(sixteen.bindings).toHaveLength(1);
+    expect(sixteen.bindings[0]).toMatchObject({ ownerInstanceName: "Button1", kfEvent: "Click", linkId: 7 });
+    expect(sixteen.bindings[0]!.nativeActionIds).toHaveLength(16);
+
+    const seventeen = compileAliases(9, 8);
+    expect(seventeen.actions).toEqual([]);
+    expect(seventeen.bindings).toEqual([]);
+    expect(seventeen.scriptRequests).toHaveLength(17);
+    expect(seventeen.scriptRequests.every((item) => item.reason === "BINDING_CAPACITY_EXCEEDED")).toBe(true);
+  });
+
+  it("fails closed when semantic aliases disagree on actual event evidence semantics", async () => {
+    vi.doMock("../design-knowledge/script-capability-registry.js", () => ({
+      requireScriptCapabilityProfile: () => ({
+        schema: "kf-script-capability-profile/v1", capabilityId: "button", version: "1.0.0", availability: "supported",
+        actions: [{ semanticAction: "show-feedback", implementation: "restricted-action", availability: "supported", evidence: [{ kind: "compiler", ref: "reviewed#feedback" }] }],
+        events: [
+          { semanticEvent: "click", kfEvent: "Click", availability: "supported", arguments: [], evidence: [{ kind: "template", ref: "reviewed#click" }] },
+          { semanticEvent: "change", kfEvent: "Click", availability: "supported", arguments: [{ name: "value" }], evidence: [{ kind: "template", ref: "reviewed#change" }] },
+        ],
+        methods: [], properties: [], initialization: { supportsConfigureData: false, lifecycleEvents: [] }, limitations: [],
+      }),
+    }));
+    const { normalizeActionGraph } = await import("./action-graph.js");
+    const { compileNativeActions } = await import("./action-compiler.js");
+    const data = fixture();
+    const root = data.plan.pages[0]!.root;
+    if (root.kind !== "control") throw new Error("control fixture required");
+    root.eventBindings = [
+      { semanticEvent: "click", actionIds: ["left"] },
+      { semanticEvent: "change", actionIds: ["right"] },
+    ];
+    data.plan.actions = [
+      { id: "left", kind: "show-feedback", level: "info", message: "左", afterActionIds: [] },
+      { id: "right", kind: "show-feedback", level: "info", message: "右", afterActionIds: [] },
+    ];
+    const result = compileNativeActions({ normalized: normalizeActionGraph(data) });
+    expect(result.actions).toEqual([]);
+    expect(result.bindings).toEqual([]);
+    expect(result.scriptRequests).toHaveLength(2);
+    expect(result.scriptRequests.every((item) => item.reason === "EVENT_ALIAS_EVIDENCE_CONFLICT")).toBe(true);
   });
 });
