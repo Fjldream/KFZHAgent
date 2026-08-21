@@ -106,6 +106,7 @@ const v2Fixture = {
           presentation: "dialog",
           visibleStateId: "detail-visible",
           dismissible: true,
+          initiallyVisible: false,
         },
         sourceSolutionNodeId: "visitor-detail-root",
         sourceBlueprintPageId: "home-blueprint",
@@ -642,6 +643,22 @@ describe("KF UI style contracts", () => {
         controls: [{ ...v2Fixture.pages[0]!.controls[0]!, eventBindings: [{ event: "click" }] }],
       }],
     }).success).toBe(false);
+  });
+
+  it("requires overlay hosts to declare a compiler-verified hidden initial state", () => {
+    const parsedPage = UIImplementationSpecV2Schema.parse(v2Fixture).pages[0]!;
+    expect(parsedPage.compatibility).toBe("native");
+    if (parsedPage.compatibility !== "native") return;
+    expect(parsedPage.controls[2]!.overlayHost).toMatchObject({ initiallyVisible: false });
+
+    const missing = structuredClone(v2Fixture);
+    const missingHost: { initiallyVisible?: boolean } = missing.pages[0]!.controls[2]!.overlayHost!;
+    delete missingHost.initiallyVisible;
+    expect(UIImplementationSpecV2Schema.safeParse(missing).success).toBe(false);
+
+    const visible = structuredClone(v2Fixture);
+    visible.pages[0]!.controls[2]!.overlayHost!.initiallyVisible = true;
+    expect(UIImplementationSpecV2Schema.safeParse(visible).success).toBe(false);
   });
 
   it("accepts scroll descendants outside the viewport and page only within compiler-owned content extent", () => {

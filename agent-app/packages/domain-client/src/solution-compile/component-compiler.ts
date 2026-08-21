@@ -241,21 +241,11 @@ function compiledLayoutMetadata(node: LayoutNode, compiled: CompiledLayoutNode) 
   return { kind: node.layout, overflow: "visible" as const };
 }
 
-function layoutNativeProperties(
+function reviewedLayoutNativeProperties(
   capabilityId: string,
   parentId: string | undefined,
-  compiled: CompiledLayoutNode,
 ): UIImplementationControlV2["nativeProperties"] {
-  const reviewed = adaptReviewedComponentProperties(capabilityId, {}, undefined, parentId, undefined).nativeProperties;
-  if (compiled.overflow !== "local-scroll") return reviewed;
-  if (compiled.scrollContentExtent === undefined) fail("COMPILED_SCROLL_EXTENT_MISSING", [compiled.id, "scrollContentExtent"], compiled.id);
-  return {
-    ...reviewed,
-    overflow: "auto",
-    clipContent: true,
-    scrollContentWidth: compiled.scrollContentExtent.width,
-    scrollContentHeight: compiled.scrollContentExtent.height,
-  };
+  return adaptReviewedComponentProperties(capabilityId, {}, undefined, parentId, undefined).nativeProperties;
 }
 
 function sourceFields(node: SolutionNode, context: CompileContext) {
@@ -280,7 +270,8 @@ function emitLayout(context: CompileContext, node: LayoutNode, walk: WalkContext
     zIndex: compiled.zIndex + (context.overlay === undefined ? 0 : OVERLAY_Z_BASE),
     geometry: { ...compiled.geometry },
     compiledLayout: compiledLayoutMetadata(node, compiled),
-    nativeProperties: layoutNativeProperties(capabilityId, walk.parentId, compiled),
+    nativeProperties: reviewedLayoutNativeProperties(capabilityId, walk.parentId),
+    ...(node.layout === "scroll-region" ? { style: { declarations: { overflow: "auto" as const }, states: {} } } : {}),
     ...(walk.sourceRepeaterId === undefined ? {} : { sourceRepeaterId: walk.sourceRepeaterId }),
     ...sourceFields({ ...node, id }, context),
   }, [id]);
@@ -489,7 +480,7 @@ function emitRepeater(context: CompileContext, node: RepeaterNode, walk: WalkCon
       zIndex: compiled.zIndex + (context.overlay === undefined ? 0 : OVERLAY_Z_BASE),
       geometry: { ...compiled.geometry },
       compiledLayout: compiledLayoutMetadata(itemNode, compiled),
-      nativeProperties: layoutNativeProperties(capabilityId, walk.parentId, compiled),
+      nativeProperties: reviewedLayoutNativeProperties(capabilityId, walk.parentId),
       ...sourceFields(itemNode, context),
     }, [itemId]);
     const records = new Map(walk.currentRecords);
@@ -514,6 +505,7 @@ function emitModule(context: CompileContext, node: Extract<SolutionNode, { kind:
     layoutNode: compiled,
     moduleRegistry: context.input.moduleRegistry,
     approvedAssets: context.input.approvedAssets,
+    currentRecords: walk.currentRecords,
     ...(walk.parentId === undefined ? {} : { parentId: walk.parentId }),
     depth: walk.depth,
   });
@@ -584,11 +576,7 @@ function compileRoot(
       presentation: overlay.presentation,
       visibleStateId: overlay.visibleStateId,
       dismissible: overlay.dismissible,
-    };
-    rootControl.nativeProperties = {
-      ...rootControl.nativeProperties,
-      visible: false,
-      closed: true,
+      initiallyVisible: false,
     };
   }
   return validateNativePage(context, context.controls);

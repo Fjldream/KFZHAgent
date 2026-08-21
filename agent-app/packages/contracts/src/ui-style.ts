@@ -668,6 +668,7 @@ const OverlayHostMetadataSchema = z.object({
   presentation: z.enum(["dialog", "window", "drawer", "confirmation"]),
   visibleStateId: boundedId,
   dismissible: z.boolean(),
+  initiallyVisible: z.literal(false),
 }).strict();
 
 export const UIImplementationControlV2Schema = z.object({

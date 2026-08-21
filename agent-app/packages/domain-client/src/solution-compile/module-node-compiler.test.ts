@@ -8,10 +8,12 @@ import {
 } from "@kf/contracts";
 import { z } from "zod";
 import { describe, expect, it } from "vitest";
+import { validateCreateComponentProperties } from "../implementation/component-properties.js";
 import { ModuleRegistry, type ModuleDefinition } from "../modules/module-registry.js";
 import {
   ModuleNodeCompileError,
   compileRegisteredModuleNode,
+  type SemanticDataRecord,
 } from "./module-node-compiler.js";
 import type { CompiledLayoutNode } from "./layout-compiler.js";
 
@@ -125,6 +127,7 @@ function compileInput(
   registry: ModuleRegistry = registryFor(definition()),
   legacy = false,
   approvedAssets: readonly ApprovedAssetFacts[] = [],
+  currentRecords: ReadonlyMap<string, SemanticDataRecord> = new Map(),
 ) {
   const inputPlan = plan(node, legacy);
   return {
@@ -134,6 +137,7 @@ function compileInput(
     layoutNode: allocatedNode(),
     moduleRegistry: registry,
     approvedAssets,
+    currentRecords,
     parentId: "root",
     depth: 1,
   };
@@ -157,6 +161,9 @@ describe("compileRegisteredModuleNode", () => {
 
     expect(controls).toHaveLength(2);
     expect(controls.every((item) => UIImplementationControlV2Schema.safeParse(item).success)).toBe(true);
+    controls.forEach((item) => {
+      expect(validateCreateComponentProperties(item.capabilityId, item.nativeProperties)).toEqual(item.nativeProperties);
+    });
     expect(controls[0]).toMatchObject({
       id: "profile-module--surface", parentId: "root", sourceModuleId: "profile-module",
       capabilityId: "layout.2", depth: 1, geometry: { x: 100, y: 80, width: 640, height: 220 },
@@ -180,6 +187,21 @@ describe("compileRegisteredModuleNode", () => {
   it("does not require module capability ids to appear in a candidate bundle", () => {
     const node = moduleNode();
     expect(() => compileRegisteredModuleNode(compileInput(node))).not.toThrow();
+  });
+
+  it("resolves native module content against the explicit current record only", () => {
+    const node = moduleNode({
+      content: { kind: "record", fields: [{
+        name: "label", value: { kind: "repeater-field", itemAlias: "item", field: "name" },
+      }] },
+    });
+    const currentRecords = new Map<string, SemanticDataRecord>([["item", { name: "当前访客" }]]);
+
+    const controls = compileRegisteredModuleNode(compileInput(node, registryFor(definition()), false, [], currentRecords));
+    expect(controls[1]).toMatchObject({ content: "当前访客", nativeProperties: { text: "当前访客" } });
+
+    const unresolved = readCompileError(() => compileRegisteredModuleNode(compileInput(node)));
+    expect(unresolved).toMatchObject({ code: "REPEATER_FIELD_UNRESOLVED", path: ["profile-module", "content", "fields", 0, "value"] });
   });
 
   it("requires exact kind, version, and variant", () => {
@@ -253,6 +275,51 @@ describe("compileRegisteredModuleNode", () => {
       const invalid = definition({ compile: () => ({ components: [...components], deliveryGaps: [] }) });
       expect(() => compileRegisteredModuleNode(compileInput(moduleNode(), registryFor(invalid))), label).toThrow(code);
     }
+  });
+
+  it("requires every local parent to be a reviewed layout capability", () => {
+    const invalidParent = definition({
+      requiredKfCapabilities: ["text"],
+      compile: () => ({
+        components: [{
+          id: "parent", role: "body", capabilityId: "text", critical: true, content: "错误父节点",
+          geometry: { x: 0, y: 0, width: 300, height: 80 }, properties: {}, style: { declarations: {}, states: {} },
+        }, {
+          id: "child", role: "body", capabilityId: "text", critical: true, content: "子节点",
+          geometry: { x: 8, y: 8, width: 200, height: 24 }, properties: { parentId: "parent" },
+          style: { declarations: {}, states: {} },
+        }],
+        deliveryGaps: [],
+      }),
+    });
+
+    const error = readCompileError(() => compileRegisteredModuleNode(compileInput(moduleNode(), registryFor(invalidParent))));
+    expect(error).toMatchObject({
+      code: "MODULE_COMPONENT_PARENT_NOT_LAYOUT",
+      path: ["profile-module", "components", 1, "properties", "parentId"],
+    });
+  });
+
+  it("reports a direct module parent cycle with its exact structured code", () => {
+    const cyclic = definition({
+      requiredKfCapabilities: ["layout.2"],
+      compile: () => ({
+        components: [{
+          id: "first", role: "layout", capabilityId: "layout.2", critical: true,
+          geometry: { x: 0, y: 0, width: 300, height: 80 }, properties: { parentId: "second" },
+          style: { declarations: {}, states: {} },
+        }, {
+          id: "second", role: "layout", capabilityId: "layout.2", critical: true,
+          geometry: { x: 0, y: 0, width: 300, height: 80 }, properties: { parentId: "first" },
+          style: { declarations: {}, states: {} },
+        }],
+        deliveryGaps: [],
+      }),
+    });
+
+    const error = readCompileError(() => compileRegisteredModuleNode(compileInput(moduleNode(), registryFor(cyclic))));
+    expect(error.code).toBe("MODULE_COMPONENT_PARENT_CYCLE");
+    expect(error.path.slice(0, 2)).toEqual(["profile-module", "components"]);
   });
 
   it("routes compiler properties through the reviewed validator", () => {

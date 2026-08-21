@@ -13,7 +13,7 @@ import {
   type SolutionPage,
   type UIImplementationControlV2,
 } from "@kf/contracts";
-import { validateGeneratedComponentProperties } from "../implementation/component-properties.js";
+import { validateCreateComponentProperties } from "../implementation/component-properties.js";
 import type { ModuleRegistry } from "../modules/module-registry.js";
 import type { ModuleDefinition } from "../modules/types.js";
 import { listControlCapabilities } from "../style/control-capability-registry.js";
@@ -43,6 +43,7 @@ export interface RegisteredModuleNodeCompileInput {
   readonly layoutNode: CompiledLayoutNode;
   readonly moduleRegistry: ModuleRegistry;
   readonly approvedAssets: readonly ApprovedAssetFacts[];
+  readonly currentRecords: ReadonlyMap<string, SemanticDataRecord>;
   readonly parentId?: string;
   readonly depth: number;
 }
@@ -208,7 +209,7 @@ function moduleContent(input: RegisteredModuleNodeCompileInput): SemanticDataRec
     return dataRecord(parsed, "MODULE_CONTENT_INVALID", path);
   }
   if (typeof content === "string") fail("MODULE_CONTENT_INVALID", path, "native module content must be a semantic record");
-  return dataRecord(semanticValueToData(content, new Map(), path), "MODULE_CONTENT_INVALID", path);
+  return dataRecord(semanticValueToData(content, input.currentRecords, path), "MODULE_CONTENT_INVALID", path);
 }
 
 function registryDefinition(input: RegisteredModuleNodeCompileInput): ModuleDefinition {
@@ -350,7 +351,7 @@ export function adaptReviewedComponentProperties(
   let nativeProperties: UIImplementationControlV2["nativeProperties"];
   try {
     nativeProperties = UIImplementationControlV2Schema.shape.nativeProperties.parse(
-      validateGeneratedComponentProperties(capabilityId, candidate),
+      validateCreateComponentProperties(capabilityId, candidate),
     );
   } catch (error) {
     const detail = error instanceof Error ? error.message : "property validation failed";
@@ -420,6 +421,9 @@ export function compileRegisteredModuleNode(input: RegisteredModuleNodeCompileIn
     const parent = component.properties.parentId;
     if (parent !== undefined && typeof parent !== "string") fail("MODULE_COMPONENT_PARENT_INVALID", [input.node.id, "components", index, "properties", "parentId"], component.id);
     if (typeof parent === "string" && !localById.has(parent)) fail("MODULE_COMPONENT_PARENT_MISSING", [input.node.id, "components", index, "properties", "parentId"], parent);
+    if (typeof parent === "string" && !localById.get(parent)!.capabilityId.startsWith("layout.")) {
+      fail("MODULE_COMPONENT_PARENT_NOT_LAYOUT", [input.node.id, "components", index, "properties", "parentId"], parent);
+    }
     localParentById.set(component.id, typeof parent === "string" ? parent : undefined);
   });
 

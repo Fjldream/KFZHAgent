@@ -11,9 +11,11 @@ import {
   type SolutionImplementationPlan,
   type SolutionNode,
 } from "@kf/contracts";
+import { z } from "zod";
 import { describe, expect, it } from "vitest";
 import { getDesignKnowledgeSnapshot } from "../design-knowledge/design-knowledge-catalog.js";
-import { createDefaultModuleRegistry } from "../modules/module-registry.js";
+import { validateCreateComponentProperties } from "../implementation/component-properties.js";
+import { createDefaultModuleRegistry, ModuleRegistry, type ModuleDefinition } from "../modules/module-registry.js";
 import { retrieveCapabilities } from "../planning/capability-retrieval.js";
 import {
   ComponentCompileError,
@@ -122,8 +124,52 @@ function compileInput(
   inputPlan: SolutionImplementationPlan,
   layoutTree: CompiledLayoutTree,
   bundle: CapabilityCandidateBundle = realBundle,
+  moduleRegistry: ModuleRegistry = registry,
 ) {
-  return { plan: inputPlan, bundle, layout: layoutTree, moduleRegistry: registry, approvedAssets: [] };
+  return { plan: inputPlan, bundle, layout: layoutTree, moduleRegistry, approvedAssets: [] };
+}
+
+function repeaterModuleRegistry(): ModuleRegistry {
+  const moduleRegistry = new ModuleRegistry();
+  const definition: ModuleDefinition = {
+    kind: "test.repeater-label",
+    version: "1.0.0",
+    category: "test",
+    maturity: "stable",
+    variants: ["default"],
+    contentSchema: z.object({ label: z.string().min(1).max(200) }).strict(),
+    assetSlots: [],
+    requiredKfCapabilities: ["layout.4", "text"],
+    compilerFingerprint: "test-repeater-label-v1",
+    layoutFingerprint: "test-repeater-label-layout-v1",
+    layout: {
+      regions: ["main"], minColumnSpan: 1, maxColumnSpan: 12, preferredHeights: ["compact"], interactions: [],
+      height: { min: 40, preferred: { compact: 40, small: 48, medium: 56, large: 64, full: 72 }, max: 80 },
+    },
+    compile: ({ context }) => ({
+      components: [{
+        id: "surface", role: "surface", capabilityId: "layout.4", critical: true,
+        geometry: { x: 0, y: 0, width: context.bounds.width, height: context.bounds.height },
+        properties: {}, style: { declarations: {}, states: {} },
+      }, {
+        id: "value", role: "body", capabilityId: "text", critical: true,
+        content: String(context.content.label), geometry: { x: 8, y: 8, width: 200, height: 24 },
+        properties: { parentId: "surface" }, style: { declarations: {}, states: {} },
+      }],
+      deliveryGaps: [],
+    }),
+  };
+  moduleRegistry.register(definition);
+  return moduleRegistry;
+}
+
+function repeaterModule(id: string, alias: string, field = "name"): SolutionNode {
+  return {
+    kind: "registered-module", id, sourceBlueprintRegionIds: ["main"], intent: intent(),
+    moduleKind: "test.repeater-label", templateVersion: "1.0.0", variant: "default", title: "访客资料",
+    content: { kind: "record", fields: [{ name: "label", value: { kind: "repeater-field", itemAlias: alias, field } }] },
+    eventBindings: [], slots: [],
+  };
 }
 
 function dataSet(id: string, values: readonly Readonly<{ key: string; name: string }>[]): MockDataSet {
@@ -174,6 +220,9 @@ describe("compileComponents", () => {
 
     expect(controls).toHaveLength(2);
     expect(controls.every((item) => UIImplementationControlV2Schema.safeParse(item).success)).toBe(true);
+    controls.forEach((item) => {
+      expect(validateCreateComponentProperties(item.capabilityId, item.nativeProperties)).toEqual(item.nativeProperties);
+    });
     expect(controls[0]).toMatchObject({
       id: "root", capabilityId: "layout.4", depth: 0,
       compiledLayout: { kind: "column", overflow: "visible" },
@@ -210,6 +259,22 @@ describe("compileComponents", () => {
     stale.regions[0]!.controls.find((candidate) => candidate.id === "text")!.knowledgeVersion = "9.9.9";
     expect(() => compileComponents(compileInput(plan(layout("root", "column", [control("title")]), stale), basicTree(), stale)))
       .toThrow(/CANDIDATE_VERSION_MISMATCH.*text/);
+  });
+
+  it("reports exact wrong-region evidence and a stale canonical bundle hash", () => {
+    const wrongRegionRoot = layout("root", "column", [control("title")]);
+    wrongRegionRoot.children[0]!.sourceBlueprintRegionIds = ["other-region"];
+    const wrongRegion = readCompileError(() => compileComponents(compileInput(plan(wrongRegionRoot), basicTree())));
+    expect(wrongRegion).toMatchObject({ code: "CANDIDATE_PROVENANCE_MISMATCH", path: ["title", "capabilityId"] });
+
+    const mutatedBundle = structuredClone(realBundle);
+    mutatedBundle.regions[0]!.controls[0]!.reasons[0] = "Canonical bundle changed after plan acceptance.";
+    const staleHash = readCompileError(() => compileComponents(compileInput(
+      plan(layout("root", "column", [control("title")])),
+      basicTree(),
+      mutatedBundle,
+    )));
+    expect(staleHash).toMatchObject({ code: "CANDIDATE_BUNDLE_HASH_MISMATCH", path: ["plan", "candidateBundleHash"] });
   });
 
   it("expands twelve records with normalized stable ids and exact parent links", () => {
@@ -251,6 +316,70 @@ describe("compileComponents", () => {
     expect(controls.find((item) => item.id.endsWith("--value"))).toMatchObject({ content: "内层值", sourceRepeaterId: "inner" });
   });
 
+  it("resolves registered-module content from its repeater record and fails unresolved fields", () => {
+    const module = repeaterModule("profile", "item");
+    const repeater: SolutionNode = {
+      kind: "repeater", id: "modules", sourceBlueprintRegionIds: ["main"], intent: intent(),
+      mockDataId: "module-data", itemAlias: "item", keyField: "key", maxItems: 4, template: module,
+    };
+    const inputPlan = plan(layout("root", "column", [repeater]), realBundle, [
+      dataSet("module-data", [{ key: "one", name: "模块值" }]),
+    ]);
+    const allocated = compiledNode("modules--one--profile", "registered-module", geometry(56, 56, 300, 40), [], undefined, 2);
+    const itemHost = compiledNode("modules--one", "layout", geometry(48, 52, 500, 48), [allocated], "column", 1);
+    const tree = compiledTree(compiledNode("root", "layout", geometry(40, 40, 1_360, 80), [itemHost], "column"), 160);
+    const moduleRegistry = repeaterModuleRegistry();
+
+    const controls = compileComponents(compileInput(inputPlan, tree, realBundle, moduleRegistry));
+    expect(controls.find((item) => item.id === "modules--one--profile--value"))
+      .toMatchObject({ content: "模块值", sourceRepeaterId: "modules" });
+
+    if (module.kind !== "registered-module") throw new Error("invalid module fixture");
+    module.content = { kind: "record", fields: [{
+      name: "label", value: { kind: "repeater-field", itemAlias: "item", field: "missing" },
+    }] };
+    expect(() => compileComponents(compileInput(inputPlan, tree, realBundle, moduleRegistry)))
+      .toThrow(/REPEATER_FIELD_UNRESOLVED.*item\.missing/);
+  });
+
+  it("shadows a same-name outer alias for registered modules in a nested real plan", () => {
+    const module = repeaterModule("profile", "item");
+    const inner: SolutionNode = {
+      kind: "repeater", id: "inner", sourceBlueprintRegionIds: ["main"], intent: intent(),
+      mockDataId: "inner-data", itemAlias: "item", keyField: "key", maxItems: 4, template: module,
+    };
+    const outer: SolutionNode = {
+      kind: "repeater", id: "outer", sourceBlueprintRegionIds: ["main"], intent: intent(),
+      mockDataId: "outer-data", itemAlias: "item", keyField: "key", maxItems: 4, template: inner,
+    };
+    const inputPlan = plan(layout("root", "column", [outer]), realBundle, [
+      dataSet("outer-data", [{ key: "outer-key", name: "外层模块值" }]),
+      dataSet("inner-data", [{ key: "inner-key", name: "内层模块值" }]),
+    ]);
+    const allocated = compiledNode(
+      "outer--outer-key--inner--inner-key--profile",
+      "registered-module",
+      geometry(64, 60, 300, 40),
+      [],
+      undefined,
+      3,
+    );
+    const innerHost = compiledNode(
+      "outer--outer-key--inner--inner-key",
+      "layout",
+      geometry(56, 56, 420, 56),
+      [allocated],
+      "column",
+      2,
+    );
+    const outerHost = compiledNode("outer--outer-key", "layout", geometry(48, 52, 500, 72), [innerHost], "column", 1);
+    const tree = compiledTree(compiledNode("root", "layout", geometry(40, 40, 1_360, 104), [outerHost], "column"), 184);
+
+    const controls = compileComponents(compileInput(inputPlan, tree, realBundle, repeaterModuleRegistry()));
+    expect(controls.find((item) => item.id.endsWith("--profile--value")))
+      .toMatchObject({ content: "内层模块值", sourceRepeaterId: "inner" });
+  });
+
   it.each([
     ["max items", Array.from({ length: 13 }, (_entry, index) => ({ key: `key-${index}`, name: `访客${index}` })), "REPEATER_MAX_ITEMS_EXCEEDED"],
     ["duplicate key", [{ key: "same", name: "甲" }, { key: "same", name: "乙" }], "REPEATER_KEY_DUPLICATE"],
@@ -260,6 +389,21 @@ describe("compileComponents", () => {
     const error = readCompileError(() => compileComponents(compileInput(repeaterPlan(records), repeaterTree(records))));
     expect(error.code).toBe(code);
     expect(error.path[0]).toBe("visitor-cards");
+  });
+
+  it("rejects Unicode repeater keys and NFKC normalization collisions with exact codes", () => {
+    const unsafe = readCompileError(() => compileComponents(compileInput(
+      repeaterPlan([{ key: "访客一", name: "甲" }]),
+      repeaterTree([{ key: "访客一", name: "甲" }]),
+    )));
+    expect(unsafe).toMatchObject({ code: "REPEATER_KEY_UNSAFE", path: ["visitor-cards", "records", 0, "key"] });
+
+    const collisionPlan = repeaterPlan([{ key: "Ｓａｍｅ", name: "甲" }, { key: "same", name: "乙" }]);
+    const collision = readCompileError(() => compileComponents(compileInput(
+      collisionPlan,
+      repeaterTree([{ key: "same", name: "甲" }]),
+    )));
+    expect(collision).toMatchObject({ code: "REPEATER_KEY_COLLISION", path: ["visitor-cards", "records", 1, "key"] });
   });
 
   it("rejects missing keys and unresolved current-record fields with structured paths", () => {
@@ -291,7 +435,7 @@ describe("compileComponents", () => {
       .toThrow(/SEMANTIC_DATA_CYCLE/);
   });
 
-  it("preserves trusted scroll metadata and compiler-owned KF overflow fields", () => {
+  it("preserves trusted scroll metadata while expressing overflow only as reviewed style", () => {
     const root = layout("root", "scroll-region", [control("first", "第一项"), control("second", "第二项")]);
     const first = compiledNode("first", "control", geometry(40, 40, 400, 40), [], undefined, 1);
     const second = compiledNode("second", "control", geometry(40, 120, 400, 40), [], undefined, 1);
@@ -300,8 +444,10 @@ describe("compileComponents", () => {
     const controls = compileComponents(compileInput(plan(root), tree));
     expect(controls[0]).toMatchObject({
       compiledLayout: { kind: "scroll-region", overflow: "local-scroll", scrollContentExtent: { width: 1_360, height: 120 } },
-      nativeProperties: { overflow: "auto", clipContent: true, scrollContentWidth: 1_360, scrollContentHeight: 120 },
+      style: { declarations: { overflow: "auto" }, states: {} },
     });
+    expect(controls[0]!.nativeProperties).toEqual({});
+    expect(validateCreateComponentProperties(controls[0]!.capabilityId, controls[0]!.nativeProperties)).toEqual({});
     const secondGeometry = controls.find((item) => item.id === "second")!.geometry;
     expect(secondGeometry.y + secondGeometry.height).toBeGreaterThan(controls[0]!.geometry.y + controls[0]!.geometry.height);
   });
@@ -344,10 +490,15 @@ describe("compileOverlay", () => {
       id: "dialog-root",
       overlayHost: {
         overlayId: "approval-dialog", hostPageId: "visitor-page", presentation: "dialog",
-        visibleStateId: "dialog-visible", dismissible: true,
+        visibleStateId: "dialog-visible", dismissible: true, initiallyVisible: false,
       },
-      nativeProperties: { visible: false, closed: true }, sourceBlueprintPageId: "bp-page",
+      sourceBlueprintPageId: "bp-page",
     });
+    expect(compiled.controls[0]!.nativeProperties).toEqual({});
+    expect(validateCreateComponentProperties(
+      compiled.controls[0]!.capabilityId,
+      compiled.controls[0]!.nativeProperties,
+    )).toEqual({});
     expect(compiled.controls[0]!.zIndex).toBeGreaterThan(Math.max(...normal.map((item) => item.zIndex)));
     expect(compiled.controls.slice(1).every((item) => item.parentId === "dialog-root" && item.overlayHost === undefined)).toBe(true);
   });
