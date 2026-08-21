@@ -73,8 +73,8 @@ const appendRecord = {
   purpose: "向本地访客集合追加记录",
   inputs: [
     { name: "records", description: "访客记录", refKind: "mock-data", refId: "visitor-records" },
-    { name: "field-1", description: "记录编号", refKind: "control", refId: "visitor-code" },
-    { name: "field-2", description: "访客姓名", refKind: "control", refId: "visitor-name" },
+    { name: "key", description: "记录编号", refKind: "control", refId: "visitor-code" },
+    { name: "field-1", description: "访客姓名", refKind: "control", refId: "visitor-name" },
   ],
   outputs: [
     { name: "updated", description: "更新后的记录", refKind: "mock-data", refId: "updated-records" },
@@ -82,8 +82,8 @@ const appendRecord = {
   ],
   parameters: [
     { name: "operation", value: "append" },
-    { name: "field-1-name", value: "code" },
-    { name: "field-2-name", value: "name" },
+    { name: "key-field", value: "code" },
+    { name: "field-1-name", value: "name" },
     { name: "success-message", value: "已在本地追加访客记录" },
   ],
 } as const;
@@ -164,7 +164,8 @@ describe("reviewed script template registry", () => {
     expect(renderScriptTemplate("record-mutate", appendRecord)).toBe([
       "const records = $data.get(\"visitor-records\");",
       "const nextRecords = records.slice(0, 100);",
-      "const nextRecord = { \"code\": $control.getValue(\"visitor-code\"), \"name\": $control.getValue(\"visitor-name\") };",
+      "const recordKey = $control.getValue(\"visitor-code\");",
+      "const nextRecord = { \"code\": recordKey, \"name\": $control.getValue(\"visitor-name\") };",
       "if (nextRecords.length < 100) { nextRecords.push(nextRecord); }",
       "$data.set(\"updated-records\", nextRecords);",
       "$control.setData(\"records-table\", nextRecords);",
@@ -192,7 +193,7 @@ describe("reviewed script template registry", () => {
       "const records = $data.get(\"visitor-records\");",
       "const nextRecords = records.slice(0, 100);",
       "const recordKey = $state.get(\"selected-code\");",
-      "for (let index = 0; index < 100 && index < nextRecords.length; index += 1) { if (nextRecords[index][\"code\"] === recordKey) { nextRecords[index] = { \"code\": recordKey, \"name\": $control.getValue(\"visitor-name\") }; } }",
+      "for (let index = 0; index < 100 && index < nextRecords.length; index += 1) { if (nextRecords[index][\"code\"] === recordKey) { nextRecords[index] = { ...nextRecords[index], \"name\": $control.getValue(\"visitor-name\"), \"code\": recordKey }; } }",
       "$data.set(\"updated-records\", nextRecords);",
       "$control.setData(\"records-table\", nextRecords);",
       "$feedback.show(\"success\", \"已在本地更新访客记录\");",
@@ -230,6 +231,62 @@ describe("reviewed script template registry", () => {
       "$data.set(\"filtered-records\", resetData3);",
       "$feedback.show(\"info\", \"演示状态已重置\");",
     ].join("\n"));
+  });
+
+  it("revalidates generated source and never truncates the 8000-character contract", () => {
+    const longValue = "值".repeat(2_000);
+    const bounded = {
+      ...reset,
+      inputs: [],
+      outputs: [1, 2, 3].map((index) => ({ name: `target-${index}`, description: `重置项${index}`, refKind: "control" as const, refId: `reset-control-${index}` })),
+      parameters: [
+        ...[1, 2, 3].map((index) => ({ name: `target-${index}-value`, value: longValue })),
+        { name: "success-message", value: "重置完成" },
+      ],
+    };
+    const exact = [
+      ...[1, 2, 3].map((index) => `$control.setValue("reset-control-${index}", ${JSON.stringify(longValue)});`),
+      "$feedback.show(\"info\", \"重置完成\");",
+    ].join("\n");
+    const source = renderScriptTemplate("reset-controls", bounded);
+    expect(source).toBe(exact);
+    expect(source.length).toBeLessThanOrEqual(8_000);
+
+    const oversized = {
+      ...bounded,
+      outputs: [...bounded.outputs, { name: "target-4", description: "重置项4", refKind: "control" as const, refId: "reset-control-4" }],
+      parameters: [
+        ...bounded.parameters.slice(0, -1),
+        { name: "target-4-value", value: longValue },
+        bounded.parameters.at(-1)!,
+      ],
+    };
+    expect(() => renderScriptTemplate("reset-controls", oversized)).toThrow(/SCRIPT_TEMPLATE_OUTPUT_INVALID: reset-controls/);
+  });
+
+  it("keeps record-mutate maximum strings within the canonical source bound", () => {
+    const longKeyField = `a${"b".repeat(99)}`;
+    const longValueField = `c${"d".repeat(99)}`;
+    const maximal = {
+      ...appendRecord,
+      inputs: appendRecord.inputs.map((input, index) => ({ ...input, refId: `${String.fromCharCode(97 + index)}${"x".repeat(99)}` })),
+      outputs: appendRecord.outputs.map((output, index) => ({ ...output, refId: `${String.fromCharCode(109 + index)}${"y".repeat(99)}` })),
+      parameters: appendRecord.parameters.map((parameter) => parameter.name === "key-field"
+        ? { ...parameter, value: longKeyField }
+        : parameter.name === "field-1-name" ? { ...parameter, value: longValueField }
+        : parameter.name === "success-message" ? { ...parameter, value: "完成".repeat(200) } : parameter),
+    };
+    const source = renderScriptTemplate("record-mutate", maximal);
+    expect(source.length).toBeLessThanOrEqual(8_000);
+    expect(ScriptPlanSchema.safeParse({
+      id: maximal.id,
+      kind: "custom",
+      programVersion: "semantic-js/v1",
+      purpose: maximal.purpose,
+      inputs: maximal.inputs,
+      outputs: maximal.outputs,
+      source,
+    }).success).toBe(true);
   });
 
   it("is byte-deterministic and remains accepted by the Task 1 semantic-source boundary", () => {
@@ -300,6 +357,54 @@ describe("reviewed script template registry", () => {
     Object.defineProperty(hostile, "parameters", { enumerable: true, value: [] });
     expect(() => renderScriptTemplate("multi-filter", hostile)).toThrow(/SCRIPT_TEMPLATE_PARAMETER_INVALID/);
     expect(reads).toBe(0);
+  });
+
+  it("rejects root and nested proxies without invoking a single reflection trap", () => {
+    for (const nested of [false, true]) {
+      let traps = 0;
+      const target = structuredClone(multiFilter);
+      const handler: ProxyHandler<object> = {
+        ownKeys(value) { traps += 1; return Reflect.ownKeys(value); },
+        getOwnPropertyDescriptor(value, key) { traps += 1; return Reflect.getOwnPropertyDescriptor(value, key); },
+        getPrototypeOf(value) { traps += 1; return Reflect.getPrototypeOf(value); },
+      };
+      const invocation = nested
+        ? { ...target, parameters: [new Proxy(target.parameters[0], handler), ...target.parameters.slice(1)] }
+        : new Proxy(target, handler);
+      expect(() => renderScriptTemplate("multi-filter", invocation)).toThrow(/SCRIPT_TEMPLATE_PARAMETER_INVALID/);
+      expect(traps).toBe(0);
+    }
+  });
+
+  it.each(["append", "update"] as const)("rejects normalized field aliases and key overwrites for %s", (operation) => {
+    const base = {
+      ...appendRecord,
+      inputs: [
+        appendRecord.inputs[0],
+        appendRecord.inputs[1],
+        appendRecord.inputs[2],
+        { name: "field-2", description: "别名字段", refKind: "control", refId: "visitor-alias" },
+      ],
+      parameters: [
+        { name: "operation", value: operation },
+        { name: "key-field", value: "record-id" },
+        { name: "field-1-name", value: "user-id" },
+        { name: "field-2-name", value: "user_id" },
+        { name: "success-message", value: "本地记录已更新" },
+      ],
+    };
+    expect(() => renderScriptTemplate("record-mutate", operation === "update"
+      ? { ...base, inputs: [base.inputs[0], { name: "key", description: "记录编号", refKind: "local-state", refId: "selected-record" }, ...base.inputs.slice(2)] }
+      : base)).toThrow(/SCRIPT_TEMPLATE_PARAMETER_INVALID: record-mutate \(fields\.1\.field\)/);
+
+    const keyCollision = {
+      ...appendRecord,
+      parameters: appendRecord.parameters.map((parameter) => parameter.name === "operation"
+        ? { ...parameter, value: operation }
+        : parameter.name === "field-1-name" ? { ...parameter, value: "CODE" } : parameter),
+      ...(operation === "update" ? { inputs: [appendRecord.inputs[0], { name: "key", description: "记录编号", refKind: "local-state", refId: "selected-record" }, appendRecord.inputs[2]] } : {}),
+    };
+    expect(() => renderScriptTemplate("record-mutate", keyCollision)).toThrow(/SCRIPT_TEMPLATE_PARAMETER_INVALID: record-mutate \(fields\.0\.field\)/);
   });
 
   it("rejects extended arrays instead of letting canonical parsing drop hidden input", () => {

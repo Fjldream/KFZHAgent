@@ -3,6 +3,7 @@ import {
   StableSemanticIdSchema,
   type ScriptPlan,
 } from "@kf/contracts";
+import { types as utilTypes } from "node:util";
 import { z } from "zod";
 
 export type ScriptTemplateId =
@@ -27,6 +28,17 @@ const scalar = z.union([z.string(), z.number().finite(), z.boolean(), z.null()])
 const fieldName = StableSemanticIdSchema;
 const feedbackMessage = z.string().trim().min(1).max(400);
 const matchMode = z.enum(["equals", "not-equals", "contains", "starts-with", "gte", "lte"]);
+const recordFields = z.array(z.object({ field: fieldName, controlId: StableSemanticIdSchema }).strict())
+  .min(1)
+  .max(8)
+  .superRefine((fields, ctx) => {
+    const names = new Set<string>();
+    fields.forEach((field, index) => {
+      const normalized = normalizedFieldName(field.field);
+      if (names.has(normalized)) ctx.addIssue({ code: "custom", path: [index, "field"], message: "record field aliases must be unique" });
+      names.add(normalized);
+    });
+  });
 
 const MultiFilterParametersSchema = z.object({
   combine: z.enum(["all", "any"]),
@@ -69,8 +81,10 @@ const RecordMutateParametersSchema = z.discriminatedUnion("operation", [
     updatedId: StableSemanticIdSchema,
     viewId: StableSemanticIdSchema.optional(),
     successMessage: feedbackMessage,
-    fields: z.array(z.object({ field: fieldName, controlId: StableSemanticIdSchema }).strict()).min(1).max(8),
-  }).strict(),
+    keyField: fieldName,
+    keySource: z.object({ kind: z.enum(["control", "local-state"]), id: StableSemanticIdSchema }).strict(),
+    fields: recordFields,
+  }).strict().superRefine(rejectKeyFieldOverwrite),
   z.object({
     operation: z.literal("update"),
     recordsId: StableSemanticIdSchema,
@@ -79,8 +93,8 @@ const RecordMutateParametersSchema = z.discriminatedUnion("operation", [
     successMessage: feedbackMessage,
     keyField: fieldName,
     keySource: z.object({ kind: z.enum(["control", "local-state"]), id: StableSemanticIdSchema }).strict(),
-    fields: z.array(z.object({ field: fieldName, controlId: StableSemanticIdSchema }).strict()).min(1).max(8),
-  }).strict(),
+    fields: recordFields,
+  }).strict().superRefine(rejectKeyFieldOverwrite),
   z.object({
     operation: z.literal("remove"),
     recordsId: StableSemanticIdSchema,
@@ -117,7 +131,11 @@ const descriptors: readonly ScriptTemplateDescriptor[] = deepFreeze([
 const descriptorById = new Map(descriptors.map((descriptor) => [descriptor.id, descriptor]));
 
 export class ScriptTemplateError extends Error {
-  constructor(readonly code: "SCRIPT_TEMPLATE_PARAMETER_INVALID" | "SCRIPT_TEMPLATE_UNKNOWN", readonly templateId: string, detail?: string) {
+  constructor(
+    readonly code: "SCRIPT_TEMPLATE_OUTPUT_INVALID" | "SCRIPT_TEMPLATE_PARAMETER_INVALID" | "SCRIPT_TEMPLATE_UNKNOWN",
+    readonly templateId: string,
+    detail?: string,
+  ) {
     super(`${code}: ${templateId}${detail === undefined ? "" : ` (${detail})`}`);
     this.name = "ScriptTemplateError";
   }
@@ -146,14 +164,16 @@ export function renderScriptTemplate(id: string, invocation: object): string {
   const plan = deepFreeze(parsed.data);
   if (plan.template !== id) invalid(id, "template");
   assertUnique(plan, id);
+  let source: string;
   switch (id) {
-    case "form-validate-submit": return renderFormValidate(parseFormValidate(plan, id));
-    case "master-detail-fill": return renderMasterDetail(parseMasterDetail(plan, id));
-    case "multi-filter": return renderMultiFilter(parseMultiFilter(plan, id));
-    case "record-mutate": return renderRecordMutate(parseRecordMutate(plan, id));
-    case "reset-controls": return renderReset(parseReset(plan, id));
+    case "form-validate-submit": source = renderFormValidate(parseFormValidate(plan, id)); break;
+    case "master-detail-fill": source = renderMasterDetail(parseMasterDetail(plan, id)); break;
+    case "multi-filter": source = renderMultiFilter(parseMultiFilter(plan, id)); break;
+    case "record-mutate": source = renderRecordMutate(parseRecordMutate(plan, id)); break;
+    case "reset-controls": source = renderReset(parseReset(plan, id)); break;
     default: throw new ScriptTemplateError("SCRIPT_TEMPLATE_UNKNOWN", id);
   }
+  return validateRenderedSource(plan, source, id);
 }
 
 class InvocationReader {
@@ -318,9 +338,7 @@ function parseRecordMutate(plan: TemplatePlan, id: string): z.infer<typeof Recor
     fields,
   };
   let candidate: object;
-  if (operation === "append") {
-    candidate = { operation, ...common };
-  } else if (operation === "update" || operation === "remove") {
+  if (operation === "append" || operation === "update" || operation === "remove") {
     const keyField = reader.literal("key-field");
     const key = reader.input("key", ["control", "local-state"]);
     candidate = {
@@ -418,18 +436,18 @@ function renderRecordMutate(parameters: z.infer<typeof RecordMutateParametersSch
     `const records = $data.get(${literal(parameters.recordsId)});`,
     "const nextRecords = records.slice(0, 100);",
   ];
+  const keyRead = parameters.keySource.kind === "control"
+    ? `$control.getValue(${literal(parameters.keySource.id)})`
+    : `$state.get(${literal(parameters.keySource.id)})`;
+  lines.push(`const recordKey = ${keyRead};`);
   if (parameters.operation === "append") {
-    lines.push(`const nextRecord = { ${parameters.fields.map((field) => `${literal(field.field)}: $control.getValue(${literal(field.controlId)})`).join(", ")} };`);
+    lines.push(`const nextRecord = { ${literal(parameters.keyField)}: recordKey, ${parameters.fields.map((field) => `${literal(field.field)}: $control.getValue(${literal(field.controlId)})`).join(", ")} };`);
     lines.push("if (nextRecords.length < 100) { nextRecords.push(nextRecord); }");
   } else {
-    const keyRead = parameters.keySource.kind === "control"
-      ? `$control.getValue(${literal(parameters.keySource.id)})`
-      : `$state.get(${literal(parameters.keySource.id)})`;
-    lines.push(`const recordKey = ${keyRead};`);
     if (parameters.operation === "remove") {
       lines.push(`const changedRecords = nextRecords.filter((record) => record[${literal(parameters.keyField)}] !== recordKey);`);
     } else {
-      const record = `{ ${literal(parameters.keyField)}: recordKey, ${parameters.fields.map((field) => `${literal(field.field)}: $control.getValue(${literal(field.controlId)})`).join(", ")} }`;
+      const record = `{ ...nextRecords[index], ${parameters.fields.map((field) => `${literal(field.field)}: $control.getValue(${literal(field.controlId)})`).join(", ")}, ${literal(parameters.keyField)}: recordKey }`;
       lines.push(`for (let index = 0; index < 100 && index < nextRecords.length; index += 1) { if (nextRecords[index][${literal(parameters.keyField)}] === recordKey) { nextRecords[index] = ${record}; } }`);
     }
   }
@@ -476,6 +494,25 @@ function parseTemplateParameters<Output>(schema: z.ZodType<Output>, candidate: o
   return deepFreeze(parsed.data);
 }
 
+function validateRenderedSource(plan: TemplatePlan, source: string, id: string): string {
+  const result = ScriptPlanSchema.safeParse({
+    id: plan.id,
+    kind: "custom",
+    programVersion: "semantic-js/v1",
+    purpose: plan.purpose,
+    inputs: plan.inputs,
+    outputs: plan.outputs,
+    source,
+  });
+  if (!result.success) {
+    throw new ScriptTemplateError("SCRIPT_TEMPLATE_OUTPUT_INVALID", id, issuePath(result.error.issues[0]?.path));
+  }
+  if (result.data.kind !== "custom" || result.data.programVersion !== "semantic-js/v1" || result.data.source === undefined) {
+    throw new ScriptTemplateError("SCRIPT_TEMPLATE_OUTPUT_INVALID", id, "source");
+  }
+  return result.data.source;
+}
+
 function asString(value: string | number | boolean | null, id: string, path: string): string {
   if (typeof value !== "string") invalid(id, `parameters.${path}`);
   return value;
@@ -511,6 +548,22 @@ function invalid(id: string, path: string): never {
   throw new ScriptTemplateError("SCRIPT_TEMPLATE_PARAMETER_INVALID", id, path);
 }
 
+function normalizedFieldName(value: string): string {
+  return value.replace(/[^A-Za-z0-9]/g, "").toLocaleLowerCase("en-US");
+}
+
+function rejectKeyFieldOverwrite(
+  value: { readonly keyField: string; readonly fields: readonly { readonly field: string }[] },
+  ctx: z.RefinementCtx,
+): void {
+  const key = normalizedFieldName(value.keyField);
+  value.fields.forEach((field, index) => {
+    if (normalizedFieldName(field.field) === key) {
+      ctx.addIssue({ code: "custom", path: ["fields", index, "field"], message: "record fields cannot overwrite the key field" });
+    }
+  });
+}
+
 function deepFreeze<Value>(value: Value): Value {
   if (value === null || typeof value !== "object") return value;
   const pending: object[] = [value];
@@ -542,6 +595,7 @@ function clonePlainData(root: object, id: string): DataValue {
     nodes += 1;
     if (nodes > 2_000 || current.depth > 16) invalid(id, "invocation-budget");
     if (completed.has(current.source) || active.has(current.source)) invalid(id, "invocation-shared-reference");
+    if (utilTypes.isProxy(current.source)) invalid(id, "invocation-proxy");
     let keys: PropertyKey[];
     let descriptors: PropertyDescriptorMap;
     let prototype: object | null;
