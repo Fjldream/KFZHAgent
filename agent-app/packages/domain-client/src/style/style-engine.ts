@@ -224,6 +224,7 @@ function compileResolvedPart(
     const scoped = compileScopedStyleFragment(
       mapping,
       context.scopeToken,
+      context.input.componentId,
       state,
       cssDeclarations,
       context.input.approvedAssets,
@@ -289,7 +290,7 @@ export function compileResolvedStyle(input: CompileResolvedStyleInput): Compiled
 
   return {
     nativeFields,
-    styleDataNew: scopedFragments.map((fragment) => fragment.cssText).join(""),
+    styleDataNew: scopedFragments.map((fragment) => fragment.persistedCssText).join(""),
     unsupported: [],
     warnings: [],
     scopeToken,

@@ -3,6 +3,7 @@ import type { ApprovedAssetFacts, StyleDeclarationV2 } from "@kf/contracts";
 import {
   compileScopedCss,
   compileScopedStyleFragment,
+  materializeScopedStyleFragment,
   serializeStyleColor,
   serializeStyleDeclarations,
 } from "./css-compiler.js";
@@ -154,25 +155,53 @@ describe("compileScopedCss", () => {
     expect(compileScopedStyleFragment(
       KF36_RUNTIME_PROFILE.selectors.tabs!.parts.tab!,
       "kf36-visitor-tabs-0123456789abcdef",
+      "visitor-tabs",
       "selected",
       { backgroundColor: "#ffffff", textColor: "#111111" },
       [],
     )).toMatchObject({
       componentScopeToken: "kf36-visitor-tabs-0123456789abcdef",
+      componentCorrelationId: "visitor-tabs",
       selectorToken: "part:tab",
       state: "selected",
-      selector: "#domId .el-tabs__item.is-active",
-      cssText: "#domId .el-tabs__item.is-active{background-color:#ffffff;color:#111111}",
+      persistedSelector: "#domId .el-tabs__item.is-active",
+      persistedCssText: "#domId .el-tabs__item.is-active{background-color:#ffffff;color:#111111}",
     });
+  });
+
+  it("materializes a persisted fragment only for its correlated runtime component", () => {
+    const fragment = compileScopedStyleFragment(
+      KF36_RUNTIME_PROFILE.selectors.tabs!.parts.tab!,
+      "kf36-visitor-tabs-0123456789abcdef",
+      "visitor-tabs",
+      "selected",
+      { textColor: "#111111" },
+      [],
+    );
+    expect(materializeScopedStyleFragment(fragment, {
+      componentCorrelationId: "visitor-tabs",
+      runtimeDomId: "k11111111-1111-4111-8111-111111111111",
+    })).toMatchObject({
+      selector: "#k11111111-1111-4111-8111-111111111111 .el-tabs__item.is-active",
+      cssText: "#k11111111-1111-4111-8111-111111111111 .el-tabs__item.is-active{color:#111111}",
+    });
+    expect(() => materializeScopedStyleFragment(fragment, {
+      componentCorrelationId: "other-tabs",
+      runtimeDomId: "k22222222-2222-4222-8222-222222222222",
+    })).toThrow(/STYLE_COMPONENT_CORRELATION_MISMATCH/);
+    expect(() => materializeScopedStyleFragment({ ...fragment }, {
+      componentCorrelationId: "visitor-tabs",
+      runtimeDomId: "k11111111-1111-4111-8111-111111111111",
+    })).toThrow(/UNTRUSTED_SCOPED_STYLE_FRAGMENT/);
   });
 
   it("rejects untrusted part mappings, malformed scopes, and unsupported evidence states", () => {
     const trusted = KF36_RUNTIME_PROFILE.selectors.tabs!.parts.tab!;
-    expect(() => compileScopedStyleFragment({ ...trusted }, "kf36-tabs-0123456789abcdef", "normal", {}, []))
+    expect(() => compileScopedStyleFragment({ ...trusted }, "kf36-tabs-0123456789abcdef", "tabs", "normal", {}, []))
       .toThrow(/UNTRUSTED_STYLE_PART_SELECTOR/);
-    expect(() => compileScopedStyleFragment(trusted, "tabs", "normal", {}, []))
+    expect(() => compileScopedStyleFragment(trusted, "tabs", "tabs", "normal", {}, []))
       .toThrow(/STYLE_SCOPE_INVALID/);
-    expect(() => compileScopedStyleFragment(trusted, "kf36-tabs-0123456789abcdef", "error", { textColor: "#ffffff" }, []))
+    expect(() => compileScopedStyleFragment(trusted, "kf36-tabs-0123456789abcdef", "tabs", "error", { textColor: "#ffffff" }, []))
       .toThrow(/STYLE_STATE_UNSUPPORTED/);
   });
 

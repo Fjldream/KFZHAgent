@@ -164,6 +164,10 @@ export function compileAdvancedStyles(
   if (declarations.length > MAX_ADVANCED_DECLARATIONS) {
     throw new Error(`STYLE_BUDGET_EXCEEDED: advanced declarations exceed ${MAX_ADVANCED_DECLARATIONS}`);
   }
+  const assetLayerCount = declarations.filter((declaration) => declaration.kind === "background-image").length;
+  if (assetLayerCount > 1) {
+    throw new Error("STYLE_ASSET_LAYER_BUDGET: KF setStyleFormat rewrites only one URL per declaration set");
+  }
   const parsed = declarations.map((declaration) => parseAdvancedStyle(declaration, approvedAssets));
   const backgroundLayers = [...new Set(
     parsed.filter((entry) => entry.cssProperty === "background-image").map((entry) => entry.cssValue),

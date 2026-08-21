@@ -5,6 +5,7 @@ import {
   KF36_RUNTIME_PROFILE,
   isTrustedKF36RuntimeProfile,
   isTrustedKF36StylePart,
+  materializeKF36StyleData,
 } from "./runtime-profile.js";
 
 const repositoryRoot = fileURLToPath(new URL("../../../../../", import.meta.url));
@@ -80,12 +81,96 @@ describe("KF 3.6 runtime style profile", () => {
     });
   });
 
+  it("maps form states to proved descendant hosts and fails closed for unproved states", () => {
+    expect(KF36_RUNTIME_PROFILE.selectors.checkbox!.parts.root!.selector)
+      .toBe("#domId .el-checkbox, #domId .el-checkbox-button");
+    expect(KF36_RUNTIME_PROFILE.selectors.radio!.parts.root!.selector)
+      .toBe("#domId .el-radio, #domId .el-radio-button");
+    expect(KF36_RUNTIME_PROFILE.selectors.checkbox!.parts.root!.stateSelectors).toEqual({
+      hover: "#domId .el-checkbox:hover, #domId .el-checkbox-button:hover",
+      focus: "#domId .el-checkbox__input.is-focus, #domId .el-checkbox-button.is-focus",
+      disabled: "#domId .el-checkbox.is-disabled, #domId .el-checkbox-button.is-disabled",
+      selected: "#domId .el-checkbox.is-checked, #domId .el-checkbox-button.is-checked",
+    });
+    expect(KF36_RUNTIME_PROFILE.selectors.radio!.parts.root!.stateSelectors).toEqual({
+      hover: "#domId .el-radio:hover, #domId .el-radio-button:hover",
+      focus: "#domId .el-radio.is-focus, #domId .el-radio-button.is-focus",
+      disabled: "#domId .el-radio.is-disabled, #domId .el-radio-button.is-disabled",
+      selected: "#domId .el-radio.is-checked, #domId .el-radio-button.is-active",
+    });
+    expect(KF36_RUNTIME_PROFILE.selectors.switch!.parts.root!.stateSelectors).toEqual({
+      disabled: "#domId .el-switch.is-disabled",
+      selected: "#domId .el-switch.is-checked",
+    });
+    expect(KF36_RUNTIME_PROFILE.selectors.datetimepicker!.parts.root!.stateSelectors).toEqual({
+      hover: "#domId .el-date-editor:hover",
+      disabled: "#domId .el-date-editor.is-disabled",
+    });
+    for (const capabilityId of ["text", "richtext"]) {
+      expect(KF36_RUNTIME_PROFILE.selectors[capabilityId]!.parts.root!.stateSelectors,
+        capabilityId).toEqual({});
+    }
+    for (const capabilityId of ["checkbox", "radio", "switch", "datetimepicker"]) {
+      for (const selector of Object.values(KF36_RUNTIME_PROFILE.selectors[capabilityId]!.parts.root!.stateSelectors)) {
+        expect(selector, capabilityId).toMatch(/^#domId\s+\./);
+      }
+    }
+  });
+
+  it("pins every state selector class to the same product source that proves its runtime host", () => {
+    for (const roles of Object.values(KF36_RUNTIME_PROFILE.selectors)) {
+      for (const part of Object.values(roles.parts)) {
+        const selectorSourcePath = `${repositoryRoot}${part.evidence.selectorSourcePath}`;
+        const selectorSource = readFileSync(selectorSourcePath, "utf8");
+        for (const [state, selector] of Object.entries(part.stateSelectors)) {
+          const classTokens = [...selector.matchAll(/\.([A-Za-z_-][A-Za-z0-9_-]*)/g)]
+            .map((match) => match[1]!);
+          for (const classToken of classTokens) {
+            expect(selectorSource, `${part.semanticPart}.${state} host .${classToken} in ${selectorSourcePath}`)
+              .toContain(classToken);
+          }
+        }
+      }
+    }
+  });
+
+  it("materializes persisted #domId CSS through the evidenced KF setStyleFormat isolation contract", () => {
+    expect(KF36_RUNTIME_PROFILE.styleMaterialization).toMatchObject({
+      mechanism: "setStyleFormat-dom-id-replacement",
+      persistedPlaceholder: "domId",
+      styleElementIdPrefix: "cssStyle",
+    });
+    expect(KF36_RUNTIME_PROFILE.styleMaterialization.evidence.map((entry) => entry.runtimePath)).toEqual([
+      "KingFusion3.6_Center/kingdevopscenter/kingclient/exe/public/javascripts/Common/Graphic/UI/kmui_uibase.js",
+      "KingFusion3.6_Center/kingdevopscenter/kingclient/exe/public/javascripts/Common/Graphic/Layout/kmui_layoutcomponentbase.js",
+      "KingFusion3.6_Center/kingdevopscenter/kingclient/exe/public/javascripts/Common/Graphic/Layout/kmui_componentbase.js",
+      "KingFusion3.6_Center/kingdevopscenter/kingclient/exe/public/javascripts/Common/Util/km_idmanage.js",
+    ]);
+    for (const sourceEvidence of KF36_RUNTIME_PROFILE.styleMaterialization.evidence) {
+      const sourcePath = `${repositoryRoot}${sourceEvidence.runtimePath}`;
+      expect(existsSync(sourcePath), sourcePath).toBe(true);
+      const source = readFileSync(sourcePath, "utf8");
+      sourceEvidence.runtimeMarkers.forEach((marker) =>
+        expect(source, `${sourcePath}#${marker}`).toContain(marker));
+    }
+    expect(materializeKF36StyleData(
+      "#domId .el-button{color:#ffffff}",
+      "k11111111-1111-4111-8111-111111111111",
+    )).toEqual({
+      runtimeDomId: "k11111111-1111-4111-8111-111111111111",
+      cssText: "#k11111111-1111-4111-8111-111111111111 .el-button{color:#ffffff}",
+    });
+    expect(() => materializeKF36StyleData("#domId{}", "forged selector"))
+      .toThrow(/KF_RUNTIME_DOM_ID_INVALID/);
+  });
+
   it("does not trust caller-created selector mappings", () => {
     expect(isTrustedKF36RuntimeProfile(KF36_RUNTIME_PROFILE)).toBe(true);
     expect(isTrustedKF36RuntimeProfile({
       runtimeFamily: "kingfusion-client",
       runtimeVersion: "3.6",
       selectors: KF36_RUNTIME_PROFILE.selectors,
+      styleMaterialization: KF36_RUNTIME_PROFILE.styleMaterialization,
     })).toBe(false);
     expect(isTrustedKF36StylePart({
       semanticPart: "root",

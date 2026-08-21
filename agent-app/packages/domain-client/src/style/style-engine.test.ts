@@ -13,6 +13,7 @@ import {
   compileResolvedStyle,
   listStyleCompilationIssues,
 } from "./style-engine.js";
+import { materializeScopedStyleFragment } from "./css-compiler.js";
 
 const themeFixture: ThemeSpec = {
   background: "#0b1220",
@@ -150,6 +151,7 @@ describe("compileControlStyle", () => {
         runtimeFamily: "kingfusion-client",
         runtimeVersion: "3.6",
         selectors: { button: { root: "#domId", parts: {} } },
+        styleMaterialization: KF36_RUNTIME_PROFILE.styleMaterialization,
       },
     })).toThrow(/UNTRUSTED_SELECTOR_ROLES/);
   });
@@ -166,6 +168,7 @@ describe("compileControlStyle", () => {
         runtimeFamily: "kingfusion-client",
         runtimeVersion: "3.6",
         selectors: {},
+        styleMaterialization: KF36_RUNTIME_PROFILE.styleMaterialization,
       },
     });
 
@@ -302,13 +305,33 @@ describe("compileResolvedStyle", () => {
       { selectorToken: "part:tab", state: "selected", declarations: { textColor: "#111111" } },
       { selectorToken: "part:active-indicator", state: "normal", declarations: { backgroundColor: "#2563eb" } },
     ]);
-    expect(compiled.scopedFragments?.map((fragment) => fragment.selector)).toEqual([
+    expect(compiled.scopedFragments?.map((fragment) => fragment.persistedSelector)).toEqual([
       "#domId .el-tabs__item.is-active",
       "#domId .el-tabs__active-bar",
     ]);
   });
 
-  it("creates deterministic collision-resistant component scopes without cross-component leakage", () => {
+  it.each([
+    ["checkbox", "active"],
+    ["radio", "active"],
+    ["switch", "focus"],
+    ["datetimepicker", "focus"],
+  ] as const)("fails closed for %s.%s when the state has no proved runtime host", (capabilityId, state) => {
+    expect(() => compileResolvedStyle({
+      componentId: `unproved-${capabilityId}`,
+      capabilityId,
+      theme: themeFixture,
+      styleRole: "field-choice",
+      roleStyle: styleV2({
+        role: "field-choice",
+        states: { [state]: { textColor: "#111111" } },
+      }),
+      approvedAssets: [],
+      runtimeProfile: KF36_RUNTIME_PROFILE,
+    })).toThrow(new RegExp(`STYLE_STATE_UNSUPPORTED: ${capabilityId}\\.root\\.${state}`));
+  });
+
+  it("correlates persisted #domId CSS to distinct executable runtime DOM selectors", () => {
     const compile = (componentId: string) => compileResolvedStyle({
       componentId,
       capabilityId: "button",
@@ -325,9 +348,34 @@ describe("compileResolvedStyle", () => {
     expect(first.scopeToken).toBe(repeated.scopeToken);
     expect(first.scopeToken).not.toBe(second.scopeToken);
     expect(first.scopeToken).toMatch(/^kf36-[A-Za-z][A-Za-z0-9_-]*-[a-f0-9]{32}$/);
+    expect(first.styleDataNew).toContain("#domId");
+    expect(first.styleDataNew).not.toContain(first.scopeToken!);
     expect(first.scopedFragments?.every((fragment) => fragment.componentScopeToken === first.scopeToken)).toBe(true);
-    expect(first.styleDataNew).not.toContain(second.scopeToken!);
-    expect(second.styleDataNew).not.toContain(first.scopeToken!);
+    expect(first.scopedFragments?.[0]?.componentCorrelationId).toBe("visitor/action one");
+    expect(second.scopedFragments?.[0]?.componentCorrelationId).toBe("visitor/action-one");
+
+    const firstRuntime = materializeScopedStyleFragment(first.scopedFragments![0]!, {
+      componentCorrelationId: "visitor/action one",
+      runtimeDomId: "k11111111-1111-4111-8111-111111111111",
+    });
+    const secondRuntime = materializeScopedStyleFragment(second.scopedFragments![0]!, {
+      componentCorrelationId: "visitor/action-one",
+      runtimeDomId: "k22222222-2222-4222-8222-222222222222",
+    });
+    expect(firstRuntime.selector).toBe(
+      "#k11111111-1111-4111-8111-111111111111 .el-button",
+    );
+    expect(secondRuntime.selector).toBe(
+      "#k22222222-2222-4222-8222-222222222222 .el-button",
+    );
+    expect(firstRuntime.cssText).toContain("#k11111111-1111-4111-8111-111111111111");
+    expect(firstRuntime.cssText).not.toContain(secondRuntime.runtimeDomId);
+    expect(secondRuntime.cssText).toContain("#k22222222-2222-4222-8222-222222222222");
+    expect(secondRuntime.cssText).not.toContain(firstRuntime.runtimeDomId);
+    expect(() => materializeScopedStyleFragment(first.scopedFragments![0]!, {
+      componentCorrelationId: "visitor/action-one",
+      runtimeDomId: "k22222222-2222-4222-8222-222222222222",
+    })).toThrow(/STYLE_COMPONENT_CORRELATION_MISMATCH/);
   });
 
   it("compiles Task 4 scroll overflow through layout CSS ownership and never a native unknown field", () => {
@@ -421,6 +469,7 @@ describe("compileResolvedStyle", () => {
         runtimeFamily: "kingfusion-client",
         runtimeVersion: "3.6",
         selectors: KF36_RUNTIME_PROFILE.selectors,
+        styleMaterialization: KF36_RUNTIME_PROFILE.styleMaterialization,
       },
     })).toThrow(/UNTRUSTED_RUNTIME_PROFILE/);
   });

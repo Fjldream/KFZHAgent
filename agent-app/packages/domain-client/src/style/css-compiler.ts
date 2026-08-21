@@ -8,6 +8,7 @@ import { compileAdvancedStyles, type ResolvedStyleAsset } from "./advanced-style
 import {
   isTrustedKF36SelectorRoles,
   isTrustedKF36StylePart,
+  materializeKF36StyleData,
   type KFStylePartSelector,
   type SelectorRoles,
 } from "./runtime-profile.js";
@@ -21,14 +22,37 @@ export interface SerializedStyleDeclarations {
 }
 
 export interface CompiledScopedStyleFragment {
+  /** Deterministic metadata used to correlate compiler output; it is not a DOM selector. */
   readonly componentScopeToken: string;
+  /** Exact plan component identity required when binding the eventual KF runtime DOM id. */
+  readonly componentCorrelationId: string;
   readonly selectorToken: "root" | `part:${string}`;
   readonly state: StyleState;
   readonly declarations: StyleDeclarationV2;
+  /** Evidence-owned selector persisted before KF setStyleFormat replaces domId. */
+  readonly persistedSelector: string;
+  /** Evidence-owned CSS persisted before KF setStyleFormat replaces domId. */
+  readonly persistedCssText: string;
+  readonly resolvedAssets: readonly ResolvedStyleAsset[];
+}
+
+export interface RuntimeStyleComponentBinding {
+  readonly componentCorrelationId: string;
+  readonly runtimeDomId: string;
+}
+
+export interface MaterializedScopedStyleFragment {
+  readonly componentCorrelationId: string;
+  readonly componentScopeToken: string;
+  readonly runtimeDomId: string;
+  readonly selectorToken: "root" | `part:${string}`;
+  readonly state: StyleState;
   readonly selector: string;
   readonly cssText: string;
   readonly resolvedAssets: readonly ResolvedStyleAsset[];
 }
+
+const TRUSTED_SCOPED_STYLE_FRAGMENTS = new WeakSet<CompiledScopedStyleFragment>();
 
 const STATE_ORDER: readonly StyleState[] = [
   "normal", "hover", "active", "focus", "disabled", "selected", "error",
@@ -309,12 +333,17 @@ export function serializeStyleDeclarations(
 export function compileScopedStyleFragment(
   partSelector: KFStylePartSelector,
   componentScopeToken: string,
+  componentCorrelationId: string,
   state: StyleState,
   declarations: StyleDeclarationV2,
   approvedAssets: readonly ApprovedAssetFacts[],
 ): CompiledScopedStyleFragment {
   if (!isTrustedKF36StylePart(partSelector)) throw new Error("UNTRUSTED_STYLE_PART_SELECTOR");
   if (!COMPONENT_SCOPE.test(componentScopeToken)) throw new Error("STYLE_SCOPE_INVALID");
+  const normalizedCorrelationId = componentCorrelationId.normalize("NFKC").trim();
+  if (normalizedCorrelationId.length === 0 || normalizedCorrelationId.length > 100) {
+    throw new Error("STYLE_COMPONENT_CORRELATION_INVALID");
+  }
   const selector = state === "normal" ? partSelector.selector : partSelector.stateSelectors[state];
   if (selector === undefined) {
     throw new Error(`STYLE_STATE_UNSUPPORTED: ${partSelector.semanticPart}.${state}`);
@@ -323,14 +352,42 @@ export function compileScopedStyleFragment(
   const selectorToken = partSelector.semanticPart === "root"
     ? "root" as const
     : `part:${partSelector.semanticPart}` as const;
-  return Object.freeze({
+  const fragment: CompiledScopedStyleFragment = Object.freeze({
     componentScopeToken,
+    componentCorrelationId,
     selectorToken,
     state,
     declarations,
-    selector,
-    cssText: serialized.body === "" ? "" : `${selector}{${serialized.body}}`,
+    persistedSelector: selector,
+    persistedCssText: serialized.body === "" ? "" : `${selector}{${serialized.body}}`,
     resolvedAssets: serialized.resolvedAssets,
+  });
+  TRUSTED_SCOPED_STYLE_FRAGMENTS.add(fragment);
+  return fragment;
+}
+
+/** Correlates compiler output with a concrete KF component, then mirrors setStyleFormat's domId replacement. */
+export function materializeScopedStyleFragment(
+  fragment: CompiledScopedStyleFragment,
+  binding: RuntimeStyleComponentBinding,
+): MaterializedScopedStyleFragment {
+  if (!TRUSTED_SCOPED_STYLE_FRAGMENTS.has(fragment)) {
+    throw new Error("UNTRUSTED_SCOPED_STYLE_FRAGMENT");
+  }
+  if (binding.componentCorrelationId !== fragment.componentCorrelationId) {
+    throw new Error("STYLE_COMPONENT_CORRELATION_MISMATCH");
+  }
+  const selector = materializeKF36StyleData(fragment.persistedSelector, binding.runtimeDomId);
+  const cssText = materializeKF36StyleData(fragment.persistedCssText, binding.runtimeDomId);
+  return Object.freeze({
+    componentCorrelationId: fragment.componentCorrelationId,
+    componentScopeToken: fragment.componentScopeToken,
+    runtimeDomId: binding.runtimeDomId,
+    selectorToken: fragment.selectorToken,
+    state: fragment.state,
+    selector: selector.cssText,
+    cssText: cssText.cssText,
+    resolvedAssets: fragment.resolvedAssets,
   });
 }
 

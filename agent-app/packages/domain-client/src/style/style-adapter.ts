@@ -20,11 +20,11 @@ export interface CompiledControlStyle {
   styleDataNew: string;
   unsupported: UnsupportedStyle[];
   warnings: StyleWarning[];
-  /** Deterministic compiler-owned identity; legacy v1 compilation omits it. */
+  /** Deterministic compiler-owned correlation metadata; never used as a DOM selector. */
   scopeToken?: string;
   /** Contract-safe semantic fragments consumed by native UI v2. */
   cssFragments?: CompiledStyleFragment[];
-  /** Evidence-owned selectors and serialized CSS used at the KF runtime boundary. */
+  /** Evidence-owned persisted selectors plus the component correlation required for runtime DOM-id binding. */
   scopedFragments?: CompiledScopedStyleFragment[];
 }
 

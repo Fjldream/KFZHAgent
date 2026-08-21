@@ -24,10 +24,26 @@ export interface SelectorRoles {
   readonly parts: Readonly<Record<string, KFStylePartSelector>>;
 }
 
+export interface KFStyleMaterializationEvidence {
+  readonly mechanism: "setStyleFormat-dom-id-replacement";
+  readonly persistedPlaceholder: "domId";
+  readonly styleElementIdPrefix: "cssStyle";
+  readonly evidence: readonly {
+    readonly runtimePath: string;
+    readonly runtimeMarkers: readonly string[];
+  }[];
+}
+
+export interface MaterializedKFStyleData {
+  readonly runtimeDomId: string;
+  readonly cssText: string;
+}
+
 export interface KFRuntimeProfile {
   readonly runtimeFamily: "kingfusion-client";
   readonly runtimeVersion: "3.6";
   readonly selectors: Readonly<Record<string, SelectorRoles>>;
+  readonly styleMaterialization: KFStyleMaterializationEvidence;
 }
 
 const TEMPLATE = "agent-app/packages/domain-client/src/templates/control-templates/";
@@ -35,7 +51,9 @@ const GRAPHIC = "KingFusion3.6_Center/kingdevopscenter/kingclient/exe/public/jav
 const ELEMENT = `${GRAPHIC}ElementUI/`;
 const UI = `${GRAPHIC}UI/`;
 const LAYOUT = `${GRAPHIC}Layout/`;
+const UTIL = "KingFusion3.6_Center/kingdevopscenter/kingclient/exe/public/javascripts/Common/Util/";
 const ELEMENT_LIB = "KingFusion3.6_Center/kingdevopscenter/kingclient/exe/public/javascripts/ThirdParty/element-ui/lib/";
+const ELEMENT_THEME = `${ELEMENT_LIB}theme-chalk/`;
 const EASYUI_THEME = "KingFusion3.6_Center/kingdevopscenter/kingclient/exe/public/javascripts/ThirdParty/jquery-easyui-1.6.4/themes/default/";
 
 const TRUSTED_STYLE_PARTS = new WeakSet<KFStylePartSelector>();
@@ -90,7 +108,6 @@ function rootOnly(
   templateFields: Readonly<Record<string, EvidenceScalar>>,
   runtimePath: string,
   runtimeMarkers: readonly string[],
-  stateSelectors: Readonly<Partial<Record<KFStyleState, string>>> = {},
 ): SelectorRoles {
   const rootEvidence = evidence(
     templateName,
@@ -100,7 +117,7 @@ function rootOnly(
     `${LAYOUT}kmui_layoutcomponentbase.js`,
     ["replace(/domId/g"],
   );
-  return roles([part("root", "#domId", rootEvidence, stateSelectors)]);
+  return roles([part("root", "#domId", rootEvidence)]);
 }
 
 const buttonEvidence = evidence(
@@ -121,12 +138,38 @@ const inputNumberEvidence = evidence(
 const inputNumberInputEvidence = evidence(
   "inputnumber", { showUiExtendType: "ElementUI_InputNumber", uiModelType: 49 },
   `${ELEMENT}kmui_elementui_inputnumber.js`, ["<el-input-number", "ElementUI_InputNumber"],
-  `${ELEMENT_LIB}input.js`, ["el-input__inner"],
+  `${ELEMENT_THEME}input-number.css`, [".el-input-number .el-input__inner"],
 );
 const selectEvidence = evidence(
   "select", { showUiExtendType: "ElementUI_Select", uiModelType: 44 },
   `${ELEMENT}kmui_elementui_select.js`, ["<el-select", "ElementUI_Select"],
   `${ELEMENT_LIB}select.js`, ["el-select__caret", "el-input"],
+);
+const checkboxEvidence = evidence(
+  "checkbox", { showUiExtendType: "ElementUI_Checkbox", uiModelType: 37 },
+  `${ELEMENT}kmui_elementui_checkbox.js`, ["<el-checkbox", "<el-checkbox-button", ":disabled", "v-model"],
+  `${ELEMENT_LIB}element-ui.common.js`, [
+    "staticClass:\"el-checkbox\"", "staticClass:\"el-checkbox__input\"",
+    "staticClass:\"el-checkbox-button\"", "is-focus", "is-disabled", "is-checked",
+  ],
+);
+const radioEvidence = evidence(
+  "radio", { showUiExtendType: "ElementUI_Radio", uiModelType: 36 },
+  `${ELEMENT}kmui_elementui_radio.js`, ["<el-radio", "<el-radio-button", ":disabled", "v-model"],
+  `${ELEMENT_LIB}element-ui.common.js`, [
+    "staticClass:\"el-radio\"", "staticClass:\"el-radio-button\"",
+    "is-focus", "is-disabled", "is-checked", "is-active",
+  ],
+);
+const switchEvidence = evidence(
+  "switch", { showUiExtendType: "ElementUI_Switch", uiModelType: 48 },
+  `${ELEMENT}kmui_elementui_switch.js`, ["<el-switch", ":disabled", "v-model"],
+  `${ELEMENT_LIB}switch.js`, ["staticClass:\"el-switch\"", "is-disabled", "is-checked"],
+);
+const datetimePickerEvidence = evidence(
+  "datetimepicker", { showUiExtendType: "ElementUI_Datetimepicker", uiModelType: 40 },
+  `${ELEMENT}kmui_elementui_datetimepicker.js`, ["<el-date-picker", ":disabled", "@focus", "@blur"],
+  `${ELEMENT_LIB}date-picker.js`, ["staticClass:\"el-date-editor\"", "pickerDisabled?\"is-disabled\""],
 );
 const tabsEvidence = evidence(
   "tabs", { showUiExtendType: "ElementUI_Tabs", uiModelType: 47 },
@@ -183,6 +226,11 @@ const windowEvidence = evidence(
   `${UI}kmui_extwindows.js`, [".window(\"options\")", "setStyleFormat"],
   `${EASYUI_THEME}window.css`, ["window-header", "window-body"],
 );
+const linkButtonEvidence = evidence(
+  "easyui-linkbutton", { uiExtendType: 2 },
+  `${UI}kmui_ext_linkbutton.js`, ["this.thisElement.appendChild(this.linkButton.thisElement)", ".linkbutton("],
+  `${EASYUI_THEME}linkbutton.css`, [".l-btn", ".l-btn-disabled"],
+);
 
 function layoutRoles(runtimeName: string, runtimeMarker: string): SelectorRoles {
   return rootOnly("layout", { objectType: 2 }, `${LAYOUT}${runtimeName}`, [runtimeMarker, "setStyleFormat"]);
@@ -191,14 +239,10 @@ function layoutRoles(runtimeName: string, runtimeMarker: string): SelectorRoles 
 const SELECTOR_ROLES = Object.freeze({
   button: roles([part("root", "#domId .el-button", buttonEvidence, {
     hover: "#domId .el-button:hover", active: "#domId .el-button:active",
-    focus: "#domId .el-button:focus", disabled: "#domId .el-button.is-disabled",
+    focus: "#domId .el-button:focus",
   })]),
-  text: rootOnly("text", { prototypeName: "Label", uiModelType: 6 }, `${UI}kmui_textbox.js`, ["prototypeName=\"Label\"", "kmUIModeTypeEnum.TEXTBOX"], {
-    hover: "#domId:hover", active: "#domId:active",
-  }),
-  richtext: rootOnly("richtext", { prototypeName: "RichText", uiModelType: 7 }, `${UI}kmui_richtext.js`, ["RichText"], {
-    hover: "#domId:hover", active: "#domId:active", focus: "#domId:focus",
-  }),
+  text: rootOnly("text", { prototypeName: "Label", uiModelType: 6 }, `${UI}kmui_textbox.js`, ["prototypeName=\"Label\"", "kmUIModeTypeEnum.TEXTBOX"]),
+  richtext: rootOnly("richtext", { prototypeName: "RichText", uiModelType: 7 }, `${UI}kmui_richtext.js`, ["RichText"]),
   image: roles([
     part("root", "#domId .el-image", imageEvidence, {
       hover: "#domId .el-image:hover", active: "#domId .el-image:active",
@@ -212,7 +256,7 @@ const SELECTOR_ROLES = Object.freeze({
   ]),
   input: roles([
     part("root", "#domId .el-input", inputEvidence, {
-      hover: "#domId .el-input:hover", focus: "#domId .el-input.is-focus", disabled: "#domId .el-input.is-disabled",
+      hover: "#domId .el-input:hover", disabled: "#domId .el-input.is-disabled",
     }),
     part("input", "#domId .el-input__inner", inputEvidence, {
       hover: "#domId .el-input__inner:hover", focus: "#domId .el-input__inner:focus",
@@ -236,18 +280,24 @@ const SELECTOR_ROLES = Object.freeze({
     part("indicator", "#domId .el-select__caret", selectEvidence),
     part("placeholder", "#domId .el-select .el-input__inner::placeholder", selectEvidence),
   ]),
-  checkbox: rootOnly("checkbox", { showUiExtendType: "ElementUI_Checkbox", uiModelType: 37 }, `${ELEMENT}kmui_elementui_checkbox.js`, ["<el-checkbox"], {
-    hover: "#domId:hover", focus: "#domId:focus", disabled: "#domId.is-disabled", selected: "#domId.is-checked",
-  }),
-  radio: rootOnly("radio", { showUiExtendType: "ElementUI_Radio", uiModelType: 36 }, `${ELEMENT}kmui_elementui_radio.js`, ["<el-radio"], {
-    hover: "#domId:hover", focus: "#domId:focus", disabled: "#domId.is-disabled", selected: "#domId.is-checked",
-  }),
-  switch: rootOnly("switch", { showUiExtendType: "ElementUI_Switch", uiModelType: 48 }, `${ELEMENT}kmui_elementui_switch.js`, ["<el-switch"], {
-    focus: "#domId:focus", disabled: "#domId.is-disabled", selected: "#domId.is-checked",
-  }),
-  datetimepicker: rootOnly("datetimepicker", { showUiExtendType: "ElementUI_Datetimepicker", uiModelType: 40 }, `${ELEMENT}kmui_elementui_datetimepicker.js`, ["dateTimePicker"], {
-    hover: "#domId:hover", focus: "#domId:focus", disabled: "#domId.is-disabled",
-  }),
+  checkbox: roles([part("root", "#domId .el-checkbox, #domId .el-checkbox-button", checkboxEvidence, {
+    hover: "#domId .el-checkbox:hover, #domId .el-checkbox-button:hover",
+    focus: "#domId .el-checkbox__input.is-focus, #domId .el-checkbox-button.is-focus",
+    disabled: "#domId .el-checkbox.is-disabled, #domId .el-checkbox-button.is-disabled",
+    selected: "#domId .el-checkbox.is-checked, #domId .el-checkbox-button.is-checked",
+  })]),
+  radio: roles([part("root", "#domId .el-radio, #domId .el-radio-button", radioEvidence, {
+    hover: "#domId .el-radio:hover, #domId .el-radio-button:hover",
+    focus: "#domId .el-radio.is-focus, #domId .el-radio-button.is-focus",
+    disabled: "#domId .el-radio.is-disabled, #domId .el-radio-button.is-disabled",
+    selected: "#domId .el-radio.is-checked, #domId .el-radio-button.is-active",
+  })]),
+  switch: roles([part("root", "#domId .el-switch", switchEvidence, {
+    disabled: "#domId .el-switch.is-disabled", selected: "#domId .el-switch.is-checked",
+  })]),
+  datetimepicker: roles([part("root", "#domId .el-date-editor", datetimePickerEvidence, {
+    hover: "#domId .el-date-editor:hover", disabled: "#domId .el-date-editor.is-disabled",
+  })]),
   tabs: roles([
     part("root", "#domId .el-tabs", tabsEvidence),
     part("tab", "#domId .el-tabs__item", tabsEvidence, {
@@ -257,10 +307,10 @@ const SELECTOR_ROLES = Object.freeze({
     part("panel", "#domId .el-tabs__content", tabsEvidence),
   ]),
   spacer: rootOnly("spacer", { prototypeName: "VerticalSpacer", uiModelType: 14 }, `${UI}kmui_vertical_spacer.js`, ["VerticalSpacer"]),
-  "easyui.2": rootOnly("easyui-linkbutton", { uiExtendType: 2 }, `${UI}kmui_ext_linkbutton.js`, ["linkbutton"], {
+  "easyui.2": roles([part("root", "#domId .l-btn", linkButtonEvidence, {
     hover: "#domId .l-btn:hover", active: "#domId .l-btn:active",
     focus: "#domId .l-btn:focus", disabled: "#domId .l-btn-disabled",
-  }),
+  })]),
   "easyui.1": roles([
     part("root", "#domId .datagrid", datagridEvidence),
     part("header", "#domId .datagrid-header", datagridEvidence),
@@ -318,10 +368,52 @@ export function isTrustedKF36RuntimeProfile(runtimeProfile: KFRuntimeProfile): b
   return TRUSTED_RUNTIME_PROFILES.has(runtimeProfile);
 }
 
+const RUNTIME_DOM_ID = /^k[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+/** Mirrors the selector-isolation step performed by the evidenced KF 3.6 setStyleFormat runtime. */
+export function materializeKF36StyleData(
+  persistedCssText: string,
+  runtimeDomId: string,
+): MaterializedKFStyleData {
+  if (!RUNTIME_DOM_ID.test(runtimeDomId)) throw new Error("KF_RUNTIME_DOM_ID_INVALID");
+  return Object.freeze({
+    runtimeDomId,
+    cssText: persistedCssText.replace(/domId/g, runtimeDomId),
+  });
+}
+
+const STYLE_MATERIALIZATION: KFStyleMaterializationEvidence = Object.freeze({
+  mechanism: "setStyleFormat-dom-id-replacement",
+  persistedPlaceholder: "domId",
+  styleElementIdPrefix: "cssStyle",
+  evidence: Object.freeze([
+    Object.freeze({
+      runtimePath: `${UI}kmui_uibase.js`,
+      runtimeMarkers: Object.freeze([
+        "this.thisElement.id=idBuilder.generateUUID()", "getDomId=function()",
+        "setStyleFormat=function(e)", "replace(/domId/g", "id=\"cssStyle\"+",
+      ]),
+    }),
+    Object.freeze({
+      runtimePath: `${LAYOUT}kmui_layoutcomponentbase.js`,
+      runtimeMarkers: Object.freeze(["setStyleFormat=function(e)", "replace(/domId/g", "id=\"cssStyle\"+"]),
+    }),
+    Object.freeze({
+      runtimePath: `${LAYOUT}kmui_componentbase.js`,
+      runtimeMarkers: Object.freeze(["this.thisElement.id=idBuilder.generateUUID()"]),
+    }),
+    Object.freeze({
+      runtimePath: `${UTIL}km_idmanage.js`,
+      runtimeMarkers: Object.freeze(["generateUUID=function()", "return\"k\"+e"]),
+    }),
+  ]),
+});
+
 const runtimeProfile: KFRuntimeProfile = Object.freeze({
   runtimeFamily: "kingfusion-client",
   runtimeVersion: "3.6",
   selectors: SELECTOR_ROLES,
+  styleMaterialization: STYLE_MATERIALIZATION,
 });
 TRUSTED_RUNTIME_PROFILES.add(runtimeProfile);
 

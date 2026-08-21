@@ -59,6 +59,26 @@ describe("base style adapters", () => {
       .toBe(KF36_RUNTIME_PROFILE.selectors.tabs!.parts["active-indicator"]!.selector);
   });
 
+  it("derives root state support only from proved runtime hosts", () => {
+    for (const capabilityId of ["text", "richtext"]) {
+      expect(getStyleAdapter(capabilityId)!.parts.find((part) => part.semanticPart === "root")!.supportedStates,
+        capabilityId).toEqual([]);
+    }
+    expect(getStyleAdapter("checkbox")!.parts[0]!.supportedStates)
+      .toEqual(["hover", "focus", "disabled", "selected"]);
+    expect(getStyleAdapter("radio")!.parts[0]!.supportedStates)
+      .toEqual(["hover", "focus", "disabled", "selected"]);
+    expect(getStyleAdapter("switch")!.parts[0]!.supportedStates)
+      .toEqual(["disabled", "selected"]);
+    expect(getStyleAdapter("datetimepicker")!.parts[0]!.supportedStates)
+      .toEqual(["hover", "disabled"]);
+    expect(getStyleAdapter("easyui.2")!.parts[0]).toMatchObject({
+      semanticPart: "root",
+      selector: "#domId .l-btn",
+      supportedStates: ["hover", "active", "focus", "disabled"],
+    });
+  });
+
   it("assigns overflow to CSS ownership on the evidenced layout surface and never to native patches", () => {
     const root = getStyleAdapter("layout.4")!.parts.find((part) => part.semanticPart === "root")!;
 
