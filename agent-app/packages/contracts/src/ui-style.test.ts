@@ -5,6 +5,7 @@ import {
   AnyUIImplementationSpecSchema,
   ComponentStyleSpecV2Schema,
   ControlCapabilitySchema,
+  UIImplementationControlV2Schema,
   UIImplementationSpecV2Schema,
   UIImplementationSpecSchema,
 } from "./ui-style.js";
@@ -659,6 +660,36 @@ describe("KF UI style contracts", () => {
       .toBeGreaterThan(parsedPage.height);
   });
 
+  it("requires scroll extents at compiler two-decimal precision", () => {
+    const root = scrollV2Fixture().pages[0]!.controls[0]!;
+    const withHeight = (height: number) => ({
+      ...root,
+      geometry: { x: 0, y: 0, width: 100, height: 100 },
+      compiledLayout: {
+        kind: "scroll-region",
+        overflow: "local-scroll",
+        scrollContentExtent: { width: 100, height },
+      },
+    });
+
+    expect(UIImplementationControlV2Schema.safeParse(withHeight(100)).success).toBe(true);
+    expect(UIImplementationControlV2Schema.safeParse(withHeight(100.01)).success).toBe(true);
+    expect(UIImplementationControlV2Schema.safeParse(withHeight(100.004)).success).toBe(false);
+
+    const imprecise = scrollV2Fixture();
+    const impreciseRoot = imprecise.pages[0]!.controls[0]!;
+    if (!("compiledLayout" in impreciseRoot)) throw new Error("expected scroll metadata");
+    impreciseRoot.compiledLayout.scrollContentExtent.height = 332.004;
+    expect(UIImplementationSpecV2Schema.safeParse(imprecise).success).toBe(false);
+
+    const hundredth = scrollV2Fixture();
+    const hundredthRoot = hundredth.pages[0]!.controls[0]!;
+    if (!("compiledLayout" in hundredthRoot)) throw new Error("expected scroll metadata");
+    hundredthRoot.compiledLayout.scrollContentExtent.height = 332.01;
+    hundredth.pages[0]!.controls[2]!.geometry.y = 212.01;
+    expect(UIImplementationSpecV2Schema.safeParse(hundredth).success).toBe(true);
+  });
+
   it("accepts every visible layout kind only with visible overflow and no scroll extent", () => {
     for (const kind of ["row", "column", "grid", "asymmetric-grid", "split", "stack", "dock", "sidebar-content", "master-detail", "overlay-anchor"] as const) {
       const page = v2Fixture.pages[0]!;
@@ -791,6 +822,48 @@ describe("KF UI style contracts", () => {
           : control),
       }],
     }).success).toBe(false);
+  });
+
+  it("returns a structured parent-cycle issue", () => {
+    const page = v2Fixture.pages[0]!;
+    const result = UIImplementationSpecV2Schema.safeParse({
+      ...v2Fixture,
+      pages: [{
+        ...page,
+        controls: page.controls.map((control) => control.id === "hero"
+          ? { ...control, parentId: "hero-title", depth: 2 }
+          : control),
+      }],
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.some((issue) => issue.message.includes("parent cycle"))).toBe(true);
+  });
+
+  it("rejects a 5000-control malformed parent chain without throwing or recursive overflow", () => {
+    const fixture = scrollV2Fixture();
+    const page = fixture.pages[0]!;
+    const root = page.controls[0]!;
+    const child = page.controls[1]!;
+    const controls = [
+      root,
+      ...Array.from({ length: 4_999 }, (_value, index) => ({
+        ...child,
+        id: `chain-${index}`,
+        parentId: index === 0 ? root.id : `chain-${index - 1}`,
+        depth: 1,
+        zIndex: index + 1,
+        geometry: { ...root.geometry },
+        sourceSolutionNodeId: `chain-node-${index}`,
+      })),
+    ];
+
+    const result = UIImplementationSpecV2Schema.safeParse({
+      ...fixture,
+      pages: [{ ...page, controls }],
+    });
+    expect(result.success).toBe(false);
   });
 
   it("dispatches v1 and v2 snapshots without changing the v1 export", () => {

@@ -604,9 +604,13 @@ const GeometrySchema = z.object({
   height: z.number().positive(),
 }).strict();
 
+export const MAX_COMPILED_LAYOUT_EXTENT = 100_000;
+
 const ScrollContentExtentSchema = z.object({
-  width: z.number().finite().positive().max(100_000),
-  height: z.number().finite().positive().max(100_000),
+  width: z.number().finite().positive().max(MAX_COMPILED_LAYOUT_EXTENT)
+    .refine(hasCompilerLayoutPrecision, "scroll content extent must use at most two decimal places"),
+  height: z.number().finite().positive().max(MAX_COMPILED_LAYOUT_EXTENT)
+    .refine(hasCompilerLayoutPrecision, "scroll content extent must use at most two decimal places"),
 }).strict();
 
 const VisibleLayoutKindSchema = z.enum([
@@ -740,6 +744,10 @@ function containsGeometry(
     && inner.y + inner.height <= outer.y + outer.height;
 }
 
+function hasCompilerLayoutPrecision(value: number): boolean {
+  return value === Math.round(value * 100) / 100;
+}
+
 function backgroundAssetIdsFromStyle(
   style: z.infer<typeof ComponentStyleSpecV2Schema> | undefined,
 ): string[] {
@@ -810,35 +818,73 @@ export const UIImplementationSpecV2Schema = z.object({
       ctx.addIssue({ code: "custom", path: ["pages", pageIndex, "id"], message: `duplicate implementation page id: ${page.id}` });
     }
     pageIds.add(page.id);
+    type NativeControl = z.infer<typeof UIImplementationControlV2Schema>;
     const controlsById = new Map(page.controls.map((control) => [control.id, control]));
-    const childrenByParent = new Map<string, Array<z.infer<typeof UIImplementationControlV2Schema>>>();
-    page.controls.forEach((control) => {
+    const controlIndexById = new Map<string, number>();
+    const childrenByParent = new Map<string, NativeControl[]>();
+    page.controls.forEach((control, controlIndex) => {
+      controlIndexById.set(control.id, controlIndex);
       if (control.parentId === undefined) return;
       const siblings = childrenByParent.get(control.parentId) ?? [];
       siblings.push(control);
       childrenByParent.set(control.parentId, siblings);
     });
-    const isScrollOwner = (control: z.infer<typeof UIImplementationControlV2Schema>): boolean =>
+    const isScrollOwner = (control: NativeControl): boolean =>
       control.compiledLayout?.kind === "scroll-region";
-    const nearestScrollAncestor = (control: z.infer<typeof UIImplementationControlV2Schema>) => {
-      const visited = new Set<string>();
-      let parentId = control.parentId;
-      while (parentId !== undefined && !visited.has(parentId)) {
-        visited.add(parentId);
-        const parent = controlsById.get(parentId);
-        if (parent === undefined) return undefined;
-        if (isScrollOwner(parent)) return parent;
-        parentId = parent.parentId;
+
+    const parentGraphState = new Map<string, "active" | "done">();
+    page.controls.forEach((control, controlIndex) => {
+      if (parentGraphState.has(control.id)) return;
+      const path: NativeControl[] = [];
+      let current: NativeControl | undefined = control;
+      while (current !== undefined && !parentGraphState.has(current.id)) {
+        parentGraphState.set(current.id, "active");
+        path.push(current);
+        current = current.parentId === undefined ? undefined : controlsById.get(current.parentId);
       }
-      return undefined;
-    };
+      if (current !== undefined && parentGraphState.get(current.id) === "active") {
+        const cycleIndex = controlIndexById.get(current.id) ?? controlIndex;
+        ctx.addIssue({
+          code: "custom",
+          path: ["pages", pageIndex, "controls", cycleIndex, "parentId"],
+          message: `control parent cycle detected at ${current.id}`,
+        });
+      }
+      path.forEach((candidate) => parentGraphState.set(candidate.id, "done"));
+    });
+
+    const nearestScrollOwnerByControlId = new Map<string, NativeControl | null>();
+    page.controls.forEach((control) => {
+      if (nearestScrollOwnerByControlId.has(control.id)) return;
+      const path: NativeControl[] = [];
+      const pathIds = new Set<string>();
+      let current: NativeControl | undefined = control;
+      let resolved: NativeControl | null = null;
+      while (current !== undefined) {
+        if (nearestScrollOwnerByControlId.has(current.id)) {
+          resolved = nearestScrollOwnerByControlId.get(current.id) ?? null;
+          break;
+        }
+        if (pathIds.has(current.id)) break;
+        pathIds.add(current.id);
+        path.push(current);
+        const parent: NativeControl | undefined = current.parentId === undefined ? undefined : controlsById.get(current.parentId);
+        if (parent === undefined) break;
+        if (isScrollOwner(parent)) {
+          resolved = parent;
+          break;
+        }
+        current = parent;
+      }
+      path.forEach((candidate) => nearestScrollOwnerByControlId.set(candidate.id, resolved));
+    });
     page.controls.forEach((control, controlIndex) => {
       const path: Array<string | number> = ["pages", pageIndex, "controls", controlIndex];
       if (controlIds.has(control.id)) {
         ctx.addIssue({ code: "custom", path: [...path, "id"], message: `duplicate implementation control id: ${control.id}` });
       }
       controlIds.add(control.id);
-      const scrollAncestor = nearestScrollAncestor(control);
+      const scrollAncestor = nearestScrollOwnerByControlId.get(control.id) ?? undefined;
       if (scrollAncestor !== undefined) {
         const metadata = scrollAncestor.compiledLayout;
         if (metadata !== undefined && metadata.kind === "scroll-region") {
@@ -887,18 +933,20 @@ export const UIImplementationSpecV2Schema = z.object({
           }
           let maximumRight = control.geometry.x + control.geometry.width;
           let maximumBottom = control.geometry.y + control.geometry.height;
-          const visitOwnedSubtree = (ownerId: string): void => {
-            (childrenByParent.get(ownerId) ?? []).forEach((descendant) => {
-              maximumRight = Math.max(maximumRight, descendant.geometry.x + descendant.geometry.width);
-              maximumBottom = Math.max(maximumBottom, descendant.geometry.y + descendant.geometry.height);
-              if (!isScrollOwner(descendant)) visitOwnedSubtree(descendant.id);
-            });
-          };
-          visitOwnedSubtree(control.id);
+          const pending = [...(childrenByParent.get(control.id) ?? [])];
+          const visited = new Set<string>();
+          while (pending.length > 0) {
+            const descendant = pending.pop()!;
+            if (visited.has(descendant.id)) continue;
+            visited.add(descendant.id);
+            maximumRight = Math.max(maximumRight, descendant.geometry.x + descendant.geometry.width);
+            maximumBottom = Math.max(maximumBottom, descendant.geometry.y + descendant.geometry.height);
+            if (!isScrollOwner(descendant)) pending.push(...(childrenByParent.get(descendant.id) ?? []));
+          }
           const quantize = (value: number): number => Math.round(value * 100) / 100;
           const derivedWidth = quantize(maximumRight - control.geometry.x);
           const derivedHeight = quantize(maximumBottom - control.geometry.y);
-          if (quantize(extent.width) !== derivedWidth || quantize(extent.height) !== derivedHeight) {
+          if (extent.width !== derivedWidth || extent.height !== derivedHeight) {
             ctx.addIssue({ code: "custom", path: [...path, "compiledLayout", "scrollContentExtent"], message: "scroll content extent must equal the tight bounds of its owned scroll subtree" });
           }
         }

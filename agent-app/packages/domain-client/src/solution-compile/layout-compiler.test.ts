@@ -1,8 +1,18 @@
-import type { LayoutNode, NodeIntent, SolutionNode, SolutionPage } from "@kf/contracts";
+import {
+  UIImplementationSpecV2Schema,
+  type LayoutNode,
+  type NodeIntent,
+  type SolutionNode,
+  type SolutionPage,
+  type UIImplementationControlV2,
+  type UIImplementationSpecV2,
+} from "@kf/contracts";
 import { describe, expect, it } from "vitest";
 import { measureIntrinsic, type IntrinsicSize } from "./intrinsic-measure.js";
 import {
+  LayoutImplementationMismatchError,
   LayoutCompileError,
+  assertImplementationMatchesCompiledLayout,
   compileLayout,
   type CompiledLayoutNode,
   type LayoutCompileInput,
@@ -98,6 +108,67 @@ function compile(root: SolutionNode, overrides: ReadonlyMap<string, IntrinsicSiz
   return compileLayout({ page: page(root, canvas), expandedRoot: root, intrinsicByNodeId: intrinsicMap(root, overrides) });
 }
 
+function nativeImplementationFor(compiled: ReturnType<typeof compile>): UIImplementationSpecV2 {
+  const controls: UIImplementationControlV2[] = [];
+  const visit = (node: CompiledLayoutNode, parentId: string | undefined, depth: number): void => {
+    controls.push({
+      id: `implementation-${node.id}`,
+      ...(parentId === undefined ? {} : { parentId }),
+      role: node.layout === undefined ? "content" : "layout",
+      capabilityId: node.layout === undefined ? "text" : "layout.4",
+      depth,
+      zIndex: node.zIndex,
+      geometry: { ...node.geometry },
+      ...(node.layout === undefined
+        ? {}
+        : {
+          compiledLayout: node.layout === "scroll-region"
+            ? { kind: node.layout, overflow: "local-scroll" as const, scrollContentExtent: { ...node.scrollContentExtent! } }
+            : { kind: node.layout, overflow: "visible" as const },
+        }),
+      nativeProperties: {},
+      sourceSolutionNodeId: node.id,
+      sourceBlueprintPageId: "blueprint-page",
+      sourceBlueprintRegionIds: sourceIds,
+      eventBindings: [],
+    });
+    node.children.forEach((child) => visit(child, `implementation-${node.id}`, depth + 1));
+  };
+  visit(compiled.root, undefined, 0);
+  return UIImplementationSpecV2Schema.parse({
+    schema: "kf-ui-implementation/v2",
+    compatibility: "native",
+    theme: {
+      background: "#f4f7fb",
+      surface: "#ffffff",
+      primary: "#163a5f",
+      accent: "#e47b32",
+      textPrimary: "#14212b",
+      textSecondary: "#52616d",
+      fontFamily: "Inter",
+      spacingUnit: 8,
+      radiusScale: { small: 4, medium: 8, large: 16 },
+    },
+    compiledRoleStyles: {},
+    pages: [{
+      compatibility: "native",
+      id: "implementation-page",
+      width: compiled.pageWidth,
+      height: compiled.pageHeight,
+      sourceBlueprintPageId: "blueprint-page",
+      controls,
+    }],
+    compiledActions: [],
+    compiledScripts: [],
+  });
+}
+
+function nativePageFrom(implementation: UIImplementationSpecV2): Extract<UIImplementationSpecV2["pages"][number], { compatibility: "native" }> {
+  const page = implementation.pages[0]!;
+  if (page.compatibility !== "native") throw new Error("expected native test page");
+  return page;
+}
+
 function overlaps(left: CompiledLayoutNode, right: CompiledLayoutNode): boolean {
   const a = left.geometry;
   const b = right.geometry;
@@ -191,6 +262,197 @@ const visitorMeasures = new Map<string, IntrinsicSize>([
 ]);
 
 describe("compileLayout", () => {
+  it("rejects a schema-valid column relabeled as scroll at the trusted layout boundary", () => {
+    const compiled = compile(layout("trusted-column", "column", [control("trusted-column-child")]));
+    const implementation = nativeImplementationFor(compiled);
+    const targetPage = implementation.pages[0]!;
+    if (targetPage.compatibility !== "native") throw new Error("expected native test page");
+    const layoutControl = targetPage.controls[0]!;
+    layoutControl.compiledLayout = {
+      kind: "scroll-region",
+      overflow: "local-scroll",
+      scrollContentExtent: {
+        width: layoutControl.geometry.width,
+        height: layoutControl.geometry.height,
+      },
+    };
+
+    expect(UIImplementationSpecV2Schema.safeParse(implementation).success).toBe(true);
+    try {
+      assertImplementationMatchesCompiledLayout(implementation, targetPage.id, compiled);
+      throw new Error("expected trusted layout correlation to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(LayoutImplementationMismatchError);
+      if (!(error instanceof LayoutImplementationMismatchError)) return;
+      expect(error.code).toBe("LAYOUT_IMPLEMENTATION_MISMATCH");
+      expect(error.details).toEqual({
+        pageId: "implementation-page",
+        nodeId: "trusted-column",
+        field: "kind",
+        expected: "column",
+        actual: "scroll-region",
+      });
+    }
+  });
+
+  it("requires metadata on the unique control correlated to every trusted layout node", () => {
+    const compiled = compile(layout("metadata-column", "column", [control("metadata-child")]));
+    const implementation = nativeImplementationFor(compiled);
+    const targetPage = nativePageFrom(implementation);
+    delete targetPage.controls[0]!.compiledLayout;
+
+    expect(UIImplementationSpecV2Schema.safeParse(implementation).success).toBe(true);
+    expect(() => assertImplementationMatchesCompiledLayout(implementation, targetPage.id, compiled))
+      .toThrowError(/compiledLayout mismatch.*metadata-column/);
+
+    const duplicateImplementation = nativeImplementationFor(compiled);
+    const duplicatePage = nativePageFrom(duplicateImplementation);
+    duplicatePage.controls.push({
+      ...duplicatePage.controls[1]!,
+      id: "duplicate-layout-source",
+      sourceSolutionNodeId: "metadata-column",
+    });
+    expect(UIImplementationSpecV2Schema.safeParse(duplicateImplementation).success).toBe(true);
+    expect(() => assertImplementationMatchesCompiledLayout(duplicateImplementation, duplicatePage.id, compiled))
+      .toThrowError(/correlation mismatch.*metadata-column/);
+  });
+
+  it("rejects extra compiled-layout controls that do not correlate to a trusted layout node", () => {
+    const compiled = compile(layout("extra-column", "column", [control("extra-column-child")]));
+    const implementation = nativeImplementationFor(compiled);
+    const targetPage = nativePageFrom(implementation);
+    const child = targetPage.controls[1]!;
+    targetPage.controls.push({
+      ...child,
+      id: "extra-layout-control",
+      parentId: undefined,
+      role: "layout",
+      capabilityId: "layout.4",
+      depth: 0,
+      zIndex: 10,
+      geometry: { x: 0, y: 0, width: 10, height: 10 },
+      compiledLayout: { kind: "column", overflow: "visible" },
+      sourceSolutionNodeId: "extra-semantic-layout",
+    }, {
+      ...child,
+      id: "extra-layout-child",
+      parentId: "extra-layout-control",
+      depth: 1,
+      zIndex: 11,
+      geometry: { x: 0, y: 0, width: 10, height: 10 },
+      sourceSolutionNodeId: "extra-semantic-child",
+    });
+
+    expect(UIImplementationSpecV2Schema.safeParse(implementation).success).toBe(true);
+    expect(() => assertImplementationMatchesCompiledLayout(implementation, targetPage.id, compiled))
+      .toThrowError(/correlation mismatch.*extra-semantic-layout/);
+  });
+
+  it("rejects page and layout geometry that diverge from the trusted tree", () => {
+    const compiled = compile(layout("geometry-column", "column", [control("geometry-column-child")]));
+    const pageMismatch = nativeImplementationFor(compiled);
+    const mismatchedPage = nativePageFrom(pageMismatch);
+    mismatchedPage.width += 1;
+    expect(UIImplementationSpecV2Schema.safeParse(pageMismatch).success).toBe(true);
+    expect(() => assertImplementationMatchesCompiledLayout(pageMismatch, mismatchedPage.id, compiled))
+      .toThrowError(/page mismatch/);
+
+    const geometryMismatch = nativeImplementationFor(compiled);
+    const targetPage = nativePageFrom(geometryMismatch);
+    targetPage.controls.forEach((control) => {
+      control.geometry.x += 1;
+    });
+    expect(UIImplementationSpecV2Schema.safeParse(geometryMismatch).success).toBe(true);
+    expect(() => assertImplementationMatchesCompiledLayout(geometryMismatch, targetPage.id, compiled))
+      .toThrowError(/geometry mismatch.*geometry-column/);
+  });
+
+  it("checks overflow even when a runtime payload bypasses standalone schema parsing", () => {
+    const compiled = compile(layout("overflow-column", "column", [control("overflow-column-child")]));
+    const implementation = nativeImplementationFor(compiled);
+    const targetPage = nativePageFrom(implementation);
+    const metadata = targetPage.controls[0]!.compiledLayout;
+    if (metadata === undefined) throw new Error("expected compiled layout metadata");
+    Object.assign(metadata, { overflow: "local-scroll" });
+
+    expect(() => assertImplementationMatchesCompiledLayout(implementation, targetPage.id, compiled))
+      .toThrowError(/overflow mismatch.*overflow-column/);
+
+    const extentImplementation = nativeImplementationFor(compiled);
+    const extentPage = nativePageFrom(extentImplementation);
+    const visibleMetadata = extentPage.controls[0]!.compiledLayout;
+    if (visibleMetadata === undefined) throw new Error("expected compiled layout metadata");
+    Object.assign(visibleMetadata, {
+      scrollContentExtent: {
+        width: extentPage.controls[0]!.geometry.width,
+        height: extentPage.controls[0]!.geometry.height,
+      },
+    });
+    expect(() => assertImplementationMatchesCompiledLayout(extentImplementation, extentPage.id, compiled))
+      .toThrowError(/scrollContentExtent mismatch.*overflow-column/);
+  });
+
+  it("accepts a real scroll tree and rejects a schema-tight extent that differs from the trusted compiler", () => {
+    const item = intrinsic({ minHeight: 160, preferredHeight: 160, maxHeight: 160 });
+    const root = layout("correlated-scroll", "scroll-region", [
+      control("correlated-scroll-a"),
+      control("correlated-scroll-b", { readingOrder: 1 }),
+    ], { height: { mode: "fixed", value: 220 } });
+    const compiled = compile(root, new Map([
+      ["correlated-scroll-a", item],
+      ["correlated-scroll-b", item],
+    ]));
+    const implementation = nativeImplementationFor(compiled);
+    const targetPage = nativePageFrom(implementation);
+
+    expect(() => assertImplementationMatchesCompiledLayout(implementation, targetPage.id, compiled)).not.toThrow();
+
+    const second = targetPage.controls.find((candidate) => candidate.sourceSolutionNodeId === "correlated-scroll-b")!;
+    second.geometry.y -= 1;
+    const metadata = targetPage.controls[0]!.compiledLayout;
+    if (metadata === undefined || metadata.kind !== "scroll-region") throw new Error("expected scroll metadata");
+    metadata.scrollContentExtent.height -= 1;
+    expect(UIImplementationSpecV2Schema.safeParse(implementation).success).toBe(true);
+    expect(() => assertImplementationMatchesCompiledLayout(implementation, targetPage.id, compiled))
+      .toThrowError(/scrollContentExtent mismatch.*correlated-scroll/);
+  });
+
+  it("fails closed when computed scroll content exceeds the v2 extent ceiling", () => {
+    const exactRoot = layout("maximum-scroll", "scroll-region", [control("maximum-scroll-child")], {
+      height: { mode: "fixed", value: 220 },
+    });
+    const exact = compile(exactRoot, new Map([[
+      "maximum-scroll-child",
+      intrinsic({ minHeight: 100_000, preferredHeight: 100_000, maxHeight: 100_000 }),
+    ]]));
+    expect(exact.root.scrollContentExtent).toEqual({ width: 1_360, height: 100_000 });
+    const exactImplementation = nativeImplementationFor(exact);
+    expect(() => assertImplementationMatchesCompiledLayout(exactImplementation, "implementation-page", exact)).not.toThrow();
+
+    const children = Array.from({ length: 13 }, (_value, index) => control(`oversized-scroll-${index}`, { readingOrder: index }));
+    const root = layout("oversized-scroll", "scroll-region", children, { height: { mode: "fixed", value: 220 } });
+    const sizes = new Map(children.map((child) => [
+      child.id,
+      intrinsic({ minHeight: 8_192, preferredHeight: 8_192, maxHeight: 8_192 }),
+    ]));
+
+    try {
+      compile(root, sizes);
+      throw new Error("expected oversized scroll compilation to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(LayoutCompileError);
+      if (!(error instanceof LayoutCompileError)) return;
+      expect(error.code).toBe("LAYOUT_UNSATISFIABLE");
+      expect(error.details).toEqual({
+        nodeId: "oversized-scroll",
+        minimumRequired: { width: 1_360, height: 106_640 },
+        available: { width: 100_000, height: 100_000 },
+        attemptedColumns: [],
+        scrollAllowed: true,
+      });
+    }
+  });
+
   it("compiles a realistic visitor workspace with content-driven height and stable semantic order", () => {
     const compiled = compile(visitorWorkspaceRoot, visitorMeasures);
 

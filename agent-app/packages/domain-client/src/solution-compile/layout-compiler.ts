@@ -1,7 +1,14 @@
-import type { LayoutNode, NodeIntent, SolutionNode, SolutionPage } from "@kf/contracts";
+import {
+  MAX_COMPILED_LAYOUT_EXTENT,
+  type LayoutNode,
+  type NodeIntent,
+  type SolutionNode,
+  type SolutionPage,
+  type UIImplementationSpecV2,
+} from "@kf/contracts";
 import type { IntrinsicSize } from "./intrinsic-measure.js";
 
-const MAX_DIMENSION = 100_000;
+const MAX_DIMENSION = MAX_COMPILED_LAYOUT_EXTENT;
 const GRID_COLUMN_LIMIT = 12;
 const LAYOUT_KINDS: readonly LayoutKind[] = ["row", "column", "grid", "asymmetric-grid", "split", "stack", "dock", "sidebar-content", "master-detail", "scroll-region", "overlay-anchor"];
 const NODE_KINDS: readonly SolutionNode["kind"][] = ["layout", "registered-module", "control", "repeater"];
@@ -77,6 +84,93 @@ export class LayoutCompileError extends Error {
       attemptedColumns: Object.freeze([...details.attemptedColumns]),
     });
   }
+}
+
+export type LayoutImplementationMismatchField =
+  | "page"
+  | "correlation"
+  | "compiledLayout"
+  | "kind"
+  | "overflow"
+  | "geometry"
+  | "scrollContentExtent";
+
+export interface LayoutImplementationMismatchDetails {
+  readonly pageId: string;
+  readonly nodeId: string;
+  readonly field: LayoutImplementationMismatchField;
+  readonly expected: string;
+  readonly actual: string;
+}
+
+export class LayoutImplementationMismatchError extends Error {
+  readonly code = "LAYOUT_IMPLEMENTATION_MISMATCH" as const;
+  readonly details: LayoutImplementationMismatchDetails;
+
+  constructor(details: LayoutImplementationMismatchDetails) {
+    super(`${details.field} mismatch for ${details.nodeId} on page ${details.pageId}: expected ${details.expected}; actual ${details.actual}`);
+    this.name = "LayoutImplementationMismatchError";
+    this.details = Object.freeze({ ...details });
+  }
+}
+
+/** Correlates each compiled layout node id to exactly one control.sourceSolutionNodeId on the target page. */
+export function assertImplementationMatchesCompiledLayout(
+  implementation: UIImplementationSpecV2,
+  pageId: string,
+  layout: CompiledLayoutTree,
+): void {
+  const matchingPages = implementation.pages.filter((candidate) => candidate.id === pageId);
+  const page = matchingPages[0];
+  if (implementation.compatibility !== "native" || matchingPages.length !== 1 || page === undefined || page.compatibility !== "native") {
+    implementationMismatch(pageId, pageId, "page", "exactly one native implementation page", `${matchingPages.length} matching pages`);
+  }
+  if (page.width !== layout.pageWidth || page.height !== layout.pageHeight) {
+    implementationMismatch(pageId, pageId, "page", `${layout.pageWidth}x${layout.pageHeight}`, `${page.width}x${page.height}`);
+  }
+  const controlsBySourceNodeId = new Map<string, typeof page.controls>();
+  page.controls.forEach((control) => {
+    const controls = controlsBySourceNodeId.get(control.sourceSolutionNodeId) ?? [];
+    controls.push(control);
+    controlsBySourceNodeId.set(control.sourceSolutionNodeId, controls);
+  });
+  const trustedLayoutNodes = [...layout.byId.values()].filter((node) => node.layout !== undefined);
+  const trustedLayoutNodeIds = new Set(trustedLayoutNodes.map((node) => node.id));
+  page.controls.forEach((control) => {
+    if (control.compiledLayout !== undefined && !trustedLayoutNodeIds.has(control.sourceSolutionNodeId)) {
+      implementationMismatch(pageId, control.sourceSolutionNodeId, "correlation", "trusted semantic layout node", control.id);
+    }
+  });
+  trustedLayoutNodes.forEach((node) => {
+    const controls = controlsBySourceNodeId.get(node.id) ?? [];
+    if (controls.length !== 1) {
+      implementationMismatch(pageId, node.id, "correlation", "exactly one layout control", `${controls.length} controls`);
+    }
+    const metadata = controls[0]!.compiledLayout;
+    if (metadata === undefined) {
+      implementationMismatch(pageId, node.id, "compiledLayout", "compiler-owned metadata", "missing");
+    }
+    if (metadata.kind !== node.layout) {
+      implementationMismatch(pageId, node.id, "kind", node.layout!, metadata.kind);
+    }
+    if (metadata.overflow !== node.overflow) {
+      implementationMismatch(pageId, node.id, "overflow", node.overflow, metadata.overflow);
+    }
+    if (!sameGeometry(controls[0]!.geometry, node.geometry)) {
+      implementationMismatch(pageId, node.id, "geometry", formatGeometry(node.geometry), formatGeometry(controls[0]!.geometry));
+    }
+    if (node.scrollContentExtent !== undefined) {
+      if (metadata.kind !== "scroll-region") {
+        implementationMismatch(pageId, node.id, "scrollContentExtent", formatExtent(node.scrollContentExtent), "missing");
+      }
+      if (metadata.scrollContentExtent.width !== node.scrollContentExtent.width
+        || metadata.scrollContentExtent.height !== node.scrollContentExtent.height) {
+        implementationMismatch(pageId, node.id, "scrollContentExtent", formatExtent(node.scrollContentExtent), formatExtent(metadata.scrollContentExtent));
+      }
+    } else if ("scrollContentExtent" in metadata) {
+      implementationMismatch(pageId, node.id, "scrollContentExtent", "absent", "present");
+    }
+  });
 }
 
 interface CompileContext {
@@ -303,6 +397,18 @@ function compileNode(
   const scrollContentExtent = node.kind === "layout" && node.layout === "scroll-region"
     ? contentExtent(box, children)
     : undefined;
+  if (scrollContentExtent !== undefined
+    && (scrollContentExtent.width > MAX_COMPILED_LAYOUT_EXTENT || scrollContentExtent.height > MAX_COMPILED_LAYOUT_EXTENT)) {
+    unsatisfiable(
+      node.id,
+      scrollContentExtent.width,
+      scrollContentExtent.height,
+      MAX_COMPILED_LAYOUT_EXTENT,
+      MAX_COMPILED_LAYOUT_EXTENT,
+      [],
+      true,
+    );
+  }
   const compiled: CompiledLayoutNode = Object.freeze({
     id: node.id,
     kind: node.kind,
@@ -983,6 +1089,28 @@ function parentFailureId(parent: CompiledLayoutNode, left: CompiledLayoutNode, r
 
 function importanceWeight(importance: Importance): number {
   return importance === "primary" ? 4 : importance === "secondary" ? 2 : 1;
+}
+
+function sameGeometry(left: LayoutGeometry, right: LayoutGeometry): boolean {
+  return left.x === right.x && left.y === right.y && left.width === right.width && left.height === right.height;
+}
+
+function formatGeometry(value: LayoutGeometry): string {
+  return `${value.x},${value.y},${value.width},${value.height}`;
+}
+
+function formatExtent(value: Readonly<{ width: number; height: number }>): string {
+  return `${value.width}x${value.height}`;
+}
+
+function implementationMismatch(
+  pageId: string,
+  nodeId: string,
+  field: LayoutImplementationMismatchField,
+  expected: string,
+  actual: string,
+): never {
+  throw new LayoutImplementationMismatchError({ pageId, nodeId, field, expected, actual });
 }
 
 function inputInvalid(nodeId: string): never {
