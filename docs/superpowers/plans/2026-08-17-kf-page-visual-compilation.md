@@ -228,7 +228,7 @@ git commit -m "feat: measure KF solution content"
 
 **Interfaces:**
 - Consumes: expanded semantic tree and `measureIntrinsic()`.
-- Produces: `compileLayout(input: LayoutCompileInput): CompiledLayoutTree` and `LayoutCompileError`.
+- Produces: `compileLayout(input: LayoutCompileInput): CompiledLayoutTree`, `assertImplementationMatchesCompiledLayout(...)`, and `LayoutCompileError`.
 
 ```ts
 export interface LayoutCompileInput {
@@ -245,6 +245,8 @@ export interface CompiledLayoutTree {
 ```
 
 `CompiledLayoutNode.geometry` is the visible viewport geometry. A `scroll-region` additionally emits a bounded `scrollContentExtent: { width; height }`; its descendants may exceed the viewport only within that extent. Scroll content never increases global `pageHeight`. `UIImplementationControlV2` carries an explicit compiler-owned layout metadata discriminant `{ kind, overflow, scrollContentExtent? }`, with extent required exactly for `{ kind: "scroll-region", overflow: "local-scroll" }`, so native v2 validation does not infer scrolling from an ambiguous KF capability ID. The extent must be tightly derived from the owned scroll subtree. For nested scroll regions, the outer owner includes only the inner viewport and the inner owner accounts for its own descendants. Task 4 must map this metadata to KF overflow/clipping rather than flattening or dropping descendants.
+
+The standalone v2 schema validates structural self-consistency, but cannot prove that a self-declared layout kind came from the trusted semantic tree. `assertImplementationMatchesCompiledLayout(...)` is therefore a mandatory provenance boundary: it correlates compiler-emitted semantic layout controls with the trusted `CompiledLayoutTree` and rejects missing, relabeled, or mismatched `kind`, `overflow`, geometry, and extent. Task 4 and the Task 6 coordinator must call it before accepting native v2 output.
 
 - [ ] **Step 1: Write failing layout behavior tests**
 
@@ -321,7 +323,7 @@ export interface ComponentCompileInput {
 }
 ```
 
-The component compiler must preserve the compiled layout metadata and `scrollContentExtent` on the emitted native v2 layout control and compile the corresponding KF container overflow/clipping fields; it must not expand page geometry or discard off-viewport scroll descendants.
+The component compiler must preserve the compiled layout metadata and `scrollContentExtent` on the emitted native v2 layout control, compile the corresponding KF container overflow/clipping fields, and call `assertImplementationMatchesCompiledLayout(...)` against the trusted layout tree; it must not expand page geometry or discard off-viewport scroll descendants.
 
 - [ ] **Step 1: Write failing component expansion tests**
 
