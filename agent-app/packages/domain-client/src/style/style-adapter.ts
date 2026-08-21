@@ -23,12 +23,30 @@ export interface CompiledControlStyle {
   /** Deterministic compiler-owned correlation metadata; never used as a DOM selector. */
   scopeToken?: string;
   /** Contract-safe semantic fragments consumed by native UI v2. */
-  cssFragments?: CompiledStyleFragment[];
-  /**
-   * Evidence-owned persisted selectors plus component correlation metadata.
-   * Task 6 must submit the complete set to materializeScopedStyleCollection; fragments are not a standalone binding API.
-   */
-  scopedFragments?: CompiledScopedStyleFragment[];
+  cssFragments?: readonly CompiledStyleFragment[];
+  /** Evidence-owned persisted selectors plus compiler-owned correlation metadata. */
+  scopedFragments?: readonly CompiledScopedStyleFragment[];
+  /** Compiler-issued complete persisted payload; Task 6 must verify this before lossless persistence. */
+  persistedStyleHandoff?: PersistedStyleHandoff;
+}
+
+/**
+ * Complete project-time style payload for one native v2 component.
+ * It deliberately contains the persisted `#domId` placeholder and no runtime DOM identity.
+ */
+export interface PersistedStyleHandoff {
+  readonly componentCorrelationId: string;
+  readonly expectedFragmentCount: number;
+  readonly expectedFragmentKeys: readonly string[];
+  readonly styleDataNew: string;
+  readonly fragments: readonly CompiledScopedStyleFragment[];
+}
+
+export interface CompiledResolvedControlStyle extends CompiledControlStyle {
+  readonly scopeToken: string;
+  readonly cssFragments: readonly CompiledStyleFragment[];
+  readonly scopedFragments: readonly CompiledScopedStyleFragment[];
+  readonly persistedStyleHandoff: PersistedStyleHandoff;
 }
 
 export interface CompiledStyleFragment {

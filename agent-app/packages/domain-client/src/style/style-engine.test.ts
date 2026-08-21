@@ -9,11 +9,11 @@ import type { z } from "zod";
 import { KF36_RUNTIME_PROFILE } from "./runtime-profile.js";
 import * as styleEngineModule from "./style-engine.js";
 import {
+  assertPersistedStyleHandoffComplete,
   assertStyleCompilationAccepted,
   compileControlStyle,
   compileResolvedStyle,
   listStyleCompilationIssues,
-  materializeScopedStyleCollection,
 } from "./style-engine.js";
 
 const themeFixture: ThemeSpec = {
@@ -250,9 +250,51 @@ describe("compileResolvedStyle", () => {
     states: { hover: { backgroundColor: "#1d4ed8" } },
   });
 
-  it("publishes only the collection materialization gate at the Task 6 production boundary", () => {
-    expect(Reflect.has(styleEngineModule, "materializeScopedStyleCollection")).toBe(true);
+  it("does not publish a runtime-DOM materializer at the Task 6 project boundary", () => {
+    expect(Reflect.has(styleEngineModule, "materializeScopedStyleCollection")).toBe(false);
     expect(Reflect.has(styleEngineModule, "materializeScopedStyleFragment")).toBe(false);
+  });
+
+  it("publishes a compiler-issued persisted-style completeness handoff for Task 6", () => {
+    const compiled = compileResolvedStyle({
+      componentId: "visitor-primary-action",
+      capabilityId: "button",
+      theme: themeFixture,
+      styleRole: "primary-action",
+      roleStyle,
+      approvedAssets: [],
+      runtimeProfile: KF36_RUNTIME_PROFILE,
+    });
+
+    expect(Reflect.has(styleEngineModule, "assertPersistedStyleHandoffComplete")).toBe(true);
+    const handoff = compiled.persistedStyleHandoff;
+    expect(handoff).toMatchObject({
+      componentCorrelationId: "visitor-primary-action",
+      expectedFragmentCount: 2,
+      expectedFragmentKeys: ["root:normal", "root:hover"],
+      styleDataNew: compiled.styleDataNew,
+    });
+    expect(handoff.fragments).toBe(compiled.scopedFragments);
+    expect(Object.isFrozen(handoff)).toBe(true);
+    expect(Object.isFrozen(handoff.fragments)).toBe(true);
+    expect(Object.isFrozen(handoff.expectedFragmentKeys)).toBe(true);
+    expect(handoff.fragments.every((fragment) =>
+      fragment.componentCorrelationId === handoff.componentCorrelationId)).toBe(true);
+    expect(handoff.fragments.every((fragment) => fragment.persistedSelector.startsWith("#domId"))).toBe(true);
+    expect(handoff.styleDataNew).not.toContain(compiled.scopeToken);
+    expect(() => assertPersistedStyleHandoffComplete(handoff)).not.toThrow();
+
+    const callerOmittedFragment = {
+      ...handoff,
+      expectedFragmentCount: 1,
+      expectedFragmentKeys: handoff.expectedFragmentKeys.slice(0, 1),
+      styleDataNew: handoff.fragments[0]!.persistedCssText,
+      fragments: handoff.fragments.slice(0, 1),
+    };
+    expect(() => assertPersistedStyleHandoffComplete(callerOmittedFragment))
+      .toThrow(/UNTRUSTED_PERSISTED_STYLE_HANDOFF/);
+    expect(() => assertPersistedStyleHandoffComplete({ ...handoff }))
+      .toThrow(/UNTRUSTED_PERSISTED_STYLE_HANDOFF/);
   });
 
   it("resolves theme tokens, the matched role, and instance overrides before splitting ownership", () => {
@@ -296,6 +338,14 @@ describe("compileResolvedStyle", () => {
     });
 
     expect(compiled.nativeFields).toEqual({ backgroundColor: "rebeccapurple" });
+    expect(compiled.persistedStyleHandoff).toMatchObject({
+      componentCorrelationId: "named-color-action",
+      expectedFragmentCount: 0,
+      expectedFragmentKeys: [],
+      styleDataNew: "",
+      fragments: [],
+    });
+    expect(() => assertPersistedStyleHandoffComplete(compiled.persistedStyleHandoff)).not.toThrow();
     expect(() => assertStyleCompilationAccepted("button", compiled)).not.toThrow();
   });
 
@@ -325,6 +375,11 @@ describe("compileResolvedStyle", () => {
       "#domId .el-tabs__item.is-active",
       "#domId .el-tabs__active-bar",
     ]);
+    expect(compiled.persistedStyleHandoff.expectedFragmentKeys).toEqual([
+      "part:tab:selected",
+      "part:active-indicator:normal",
+    ]);
+    expect(() => assertPersistedStyleHandoffComplete(compiled.persistedStyleHandoff)).not.toThrow();
   });
 
   it.each([
@@ -347,7 +402,7 @@ describe("compileResolvedStyle", () => {
     })).toThrow(new RegExp(`STYLE_STATE_UNSUPPORTED: ${capabilityId}\\.root\\.${state}`));
   });
 
-  it("correlates persisted #domId CSS to distinct executable runtime DOM selectors", () => {
+  it("keeps deterministic correlation metadata out of persisted #domId selectors", () => {
     const compile = (componentId: string) => compileResolvedStyle({
       componentId,
       capabilityId: "button",
@@ -365,36 +420,13 @@ describe("compileResolvedStyle", () => {
     expect(first.scopeToken).not.toBe(second.scopeToken);
     expect(first.scopeToken).toMatch(/^kf36-[A-Za-z][A-Za-z0-9_-]*-[a-f0-9]{32}$/);
     expect(first.styleDataNew).toContain("#domId");
-    expect(first.styleDataNew).not.toContain(first.scopeToken!);
+    expect(first.styleDataNew).not.toContain(first.scopeToken);
     expect(first.scopedFragments?.every((fragment) => fragment.componentScopeToken === first.scopeToken)).toBe(true);
     expect(first.scopedFragments?.[0]?.componentCorrelationId).toBe("visitor/action one");
     expect(second.scopedFragments?.[0]?.componentCorrelationId).toBe("visitor/action-one");
 
-    const runtimeStyles = materializeScopedStyleCollection(
-      [first.scopedFragments![0]!, second.scopedFragments![0]!],
-      [
-        {
-          componentCorrelationId: "visitor/action one",
-          runtimeDomId: "k11111111-1111-4111-8111-111111111111",
-        },
-        {
-          componentCorrelationId: "visitor/action-one",
-          runtimeDomId: "k22222222-2222-4222-8222-222222222222",
-        },
-      ],
-    );
-    const firstRuntime = runtimeStyles.components[0]!;
-    const secondRuntime = runtimeStyles.components[1]!;
-    expect(firstRuntime.fragments[0]!.selector).toBe(
-      "#k11111111-1111-4111-8111-111111111111 .el-button",
-    );
-    expect(secondRuntime.fragments[0]!.selector).toBe(
-      "#k22222222-2222-4222-8222-222222222222 .el-button",
-    );
-    expect(firstRuntime.cssText).toContain("#k11111111-1111-4111-8111-111111111111");
-    expect(firstRuntime.cssText).not.toContain(secondRuntime.runtimeDomId);
-    expect(secondRuntime.cssText).toContain("#k22222222-2222-4222-8222-222222222222");
-    expect(secondRuntime.cssText).not.toContain(firstRuntime.runtimeDomId);
+    expect(first.scopedFragments?.every((fragment) => fragment.persistedSelector.startsWith("#domId"))).toBe(true);
+    expect(second.scopedFragments?.every((fragment) => fragment.persistedSelector.startsWith("#domId"))).toBe(true);
   });
 
   it("compiles Task 4 scroll overflow through layout CSS ownership and never a native unknown field", () => {

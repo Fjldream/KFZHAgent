@@ -25,6 +25,7 @@ import {
 } from "./runtime-profile.js";
 import type {
   CompiledControlStyle,
+  CompiledResolvedControlStyle,
   CompiledStyleFragment,
   NativeStyleFields,
   StyleAdapter,
@@ -32,16 +33,9 @@ import type {
   StylePartAdapter,
   StyleWarning,
   UnsupportedStyle,
+  PersistedStyleHandoff,
 } from "./style-adapter.js";
 import { resolveComponentStyle, resolveStyle } from "./theme-resolver.js";
-
-export {
-  materializeScopedStyleCollection,
-  type MaterializedComponentStyle,
-  type MaterializedScopedStyleCollection,
-  type MaterializedScopedStyleFragment,
-  type RuntimeStyleComponentBinding,
-} from "./css-compiler.js";
 
 export interface CompileControlStyleInput {
   capabilityId: string;
@@ -78,6 +72,7 @@ const EMPTY_STYLE_V2: ComponentStyleSpecV2 = Object.freeze({
 const STYLE_STATE_ORDER: readonly StyleState[] = [
   "normal", "hover", "active", "focus", "disabled", "selected", "error",
 ];
+const TRUSTED_PERSISTED_STYLE_HANDOFFS = new WeakSet<PersistedStyleHandoff>();
 
 const EMPTY_STYLE: ComponentStyleSpec = Object.freeze({
   declarations: Object.freeze({}),
@@ -128,6 +123,65 @@ function componentScopeToken(componentId: string): string {
   const safePrefix = /^[A-Za-z]/.test(escaped) ? escaped : `c_${escaped}`;
   const digest = createHash("sha256").update(componentId, "utf8").digest("hex").slice(0, 32);
   return `kf36-${safePrefix.slice(0, 40)}-${digest}`;
+}
+
+function persistedFragmentKey(fragment: CompiledScopedStyleFragment): string {
+  return `${fragment.selectorToken}:${fragment.state}`;
+}
+
+function validatePersistedStyleHandoff(handoff: PersistedStyleHandoff): void {
+  if (handoff.expectedFragmentCount !== handoff.fragments.length
+    || handoff.expectedFragmentKeys.length !== handoff.fragments.length) {
+    throw new Error("STYLE_PERSISTED_HANDOFF_INCOMPLETE");
+  }
+  const actualKeys = handoff.fragments.map(persistedFragmentKey);
+  if (new Set(actualKeys).size !== actualKeys.length
+    || actualKeys.some((key, index) => handoff.expectedFragmentKeys[index] !== key)) {
+    throw new Error("STYLE_PERSISTED_HANDOFF_FRAGMENT_MISMATCH");
+  }
+  if (handoff.fragments.some((fragment) =>
+    fragment.componentCorrelationId !== handoff.componentCorrelationId)) {
+    throw new Error("STYLE_PERSISTED_HANDOFF_CORRELATION_MISMATCH");
+  }
+  if (handoff.fragments.some((fragment) =>
+    !fragment.persistedSelector.split(", ").every((selector) => selector.startsWith("#domId")))) {
+    throw new Error("STYLE_PERSISTED_HANDOFF_SELECTOR_INVALID");
+  }
+  if (handoff.fragments.reduce((count, fragment) => count + fragment.resolvedAssets.length, 0) > 1) {
+    throw new Error(`STYLE_ASSET_LAYER_BUDGET: component ${handoff.componentCorrelationId}`);
+  }
+  const expectedStyleDataNew = handoff.fragments.map((fragment) => fragment.persistedCssText).join("");
+  if (handoff.styleDataNew !== expectedStyleDataNew) {
+    throw new Error("STYLE_PERSISTED_HANDOFF_CSS_MISMATCH");
+  }
+}
+
+function createPersistedStyleHandoff(
+  componentCorrelationId: string,
+  fragments: readonly CompiledScopedStyleFragment[],
+): PersistedStyleHandoff {
+  const frozenFragments = Object.freeze([...fragments]);
+  const handoff: PersistedStyleHandoff = Object.freeze({
+    componentCorrelationId,
+    expectedFragmentCount: frozenFragments.length,
+    expectedFragmentKeys: Object.freeze(frozenFragments.map(persistedFragmentKey)),
+    styleDataNew: frozenFragments.map((fragment) => fragment.persistedCssText).join(""),
+    fragments: frozenFragments,
+  });
+  validatePersistedStyleHandoff(handoff);
+  TRUSTED_PERSISTED_STYLE_HANDOFFS.add(handoff);
+  return handoff;
+}
+
+/**
+ * Task 6 project-time gate. Only a complete handoff issued by compileResolvedStyle is accepted;
+ * runtime `domId` replacement remains exclusively owned by KF setStyleFormat.
+ */
+export function assertPersistedStyleHandoffComplete(handoff: PersistedStyleHandoff): void {
+  if (!TRUSTED_PERSISTED_STYLE_HANDOFFS.has(handoff)) {
+    throw new Error("UNTRUSTED_PERSISTED_STYLE_HANDOFF");
+  }
+  validatePersistedStyleHandoff(handoff);
 }
 
 function declarationsForState(
@@ -250,7 +304,7 @@ function compileResolvedPart(
  * Compiles native v2 style intent through the evidence-pinned KF 3.6 profile.
  * The caller supplies semantic IDs and structured declarations, never selectors.
  */
-export function compileResolvedStyle(input: CompileResolvedStyleInput): CompiledControlStyle {
+export function compileResolvedStyle(input: CompileResolvedStyleInput): CompiledResolvedControlStyle {
   assertStyleAdapterRegistry();
   if (!isTrustedKF36RuntimeProfile(input.runtimeProfile)) {
     throw new Error("UNTRUSTED_RUNTIME_PROFILE");
@@ -302,15 +356,17 @@ export function compileResolvedStyle(input: CompileResolvedStyleInput): Compiled
   if (assetLayerCount > 1) {
     throw new Error(`STYLE_ASSET_LAYER_BUDGET: component ${input.componentId} contains ${assetLayerCount} asset layers`);
   }
+  const persistedStyleHandoff = createPersistedStyleHandoff(input.componentId, scopedFragments);
 
   return {
     nativeFields,
-    styleDataNew: scopedFragments.map((fragment) => fragment.persistedCssText).join(""),
+    styleDataNew: persistedStyleHandoff.styleDataNew,
     unsupported: [],
     warnings: [],
     scopeToken,
     cssFragments,
-    scopedFragments,
+    scopedFragments: persistedStyleHandoff.fragments,
+    persistedStyleHandoff,
   };
 }
 

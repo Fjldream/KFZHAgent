@@ -34,11 +34,6 @@ export interface KFStyleMaterializationEvidence {
   }[];
 }
 
-export interface MaterializedKFStyleData {
-  readonly runtimeDomId: string;
-  readonly cssText: string;
-}
-
 export interface KFRuntimeProfile {
   readonly runtimeFamily: "kingfusion-client";
   readonly runtimeVersion: "3.6";
@@ -366,20 +361,6 @@ export function isTrustedKF36StylePart(partSelector: KFStylePartSelector): boole
 /** True only for the immutable, evidence-pinned KF 3.6 runtime profile. */
 export function isTrustedKF36RuntimeProfile(runtimeProfile: KFRuntimeProfile): boolean {
   return TRUSTED_RUNTIME_PROFILES.has(runtimeProfile);
-}
-
-const RUNTIME_DOM_ID = /^k[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-
-/** Mirrors the selector-isolation step performed by the evidenced KF 3.6 setStyleFormat runtime. */
-export function materializeKF36StyleData(
-  persistedCssText: string,
-  runtimeDomId: string,
-): MaterializedKFStyleData {
-  if (!RUNTIME_DOM_ID.test(runtimeDomId)) throw new Error("KF_RUNTIME_DOM_ID_INVALID");
-  return Object.freeze({
-    runtimeDomId,
-    cssText: persistedCssText.replace(/domId/g, runtimeDomId),
-  });
 }
 
 const STYLE_MATERIALIZATION: KFStyleMaterializationEvidence = Object.freeze({

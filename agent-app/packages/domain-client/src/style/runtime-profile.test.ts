@@ -1,14 +1,18 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import * as runtimeProfileModule from "./runtime-profile.js";
 import {
   KF36_RUNTIME_PROFILE,
   isTrustedKF36RuntimeProfile,
   isTrustedKF36StylePart,
-  materializeKF36StyleData,
 } from "./runtime-profile.js";
 
 const repositoryRoot = fileURLToPath(new URL("../../../../../", import.meta.url));
+
+function simulateEvidencedKFSetStyleFormat(styleData: string, componentDomId: string): string {
+  return styleData.replace(/domId/g, componentDomId);
+}
 
 describe("KF 3.6 runtime style profile", () => {
   it("owns the exact reviewed semantic-part selector inventory", () => {
@@ -134,7 +138,8 @@ describe("KF 3.6 runtime style profile", () => {
     }
   });
 
-  it("materializes persisted #domId CSS through the evidenced KF setStyleFormat isolation contract", () => {
+  it("pins runtime-owned #domId replacement without exposing a project-time materializer", () => {
+    expect(Reflect.has(runtimeProfileModule, "materializeKF36StyleData")).toBe(false);
     expect(KF36_RUNTIME_PROFILE.styleMaterialization).toMatchObject({
       mechanism: "setStyleFormat-dom-id-replacement",
       persistedPlaceholder: "domId",
@@ -153,15 +158,13 @@ describe("KF 3.6 runtime style profile", () => {
       sourceEvidence.runtimeMarkers.forEach((marker) =>
         expect(source, `${sourcePath}#${marker}`).toContain(marker));
     }
-    expect(materializeKF36StyleData(
-      "#domId .el-button{color:#ffffff}",
-      "k11111111-1111-4111-8111-111111111111",
-    )).toEqual({
-      runtimeDomId: "k11111111-1111-4111-8111-111111111111",
-      cssText: "#k11111111-1111-4111-8111-111111111111 .el-button{color:#ffffff}",
-    });
-    expect(() => materializeKF36StyleData("#domId{}", "forged selector"))
-      .toThrow(/KF_RUNTIME_DOM_ID_INVALID/);
+    const persisted = "#domId .el-button{color:#ffffff}";
+    const first = simulateEvidencedKFSetStyleFormat(persisted, "k11111111-1111-4111-8111-111111111111");
+    const second = simulateEvidencedKFSetStyleFormat(persisted, "k22222222-2222-4222-8222-222222222222");
+    expect(first).toBe("#k11111111-1111-4111-8111-111111111111 .el-button{color:#ffffff}");
+    expect(second).toBe("#k22222222-2222-4222-8222-222222222222 .el-button{color:#ffffff}");
+    expect(first).not.toContain("k22222222-2222-4222-8222-222222222222");
+    expect(second).not.toContain("k11111111-1111-4111-8111-111111111111");
   });
 
   it("does not trust caller-created selector mappings", () => {

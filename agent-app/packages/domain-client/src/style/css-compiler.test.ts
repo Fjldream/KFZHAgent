@@ -4,7 +4,6 @@ import * as cssCompilerModule from "./css-compiler.js";
 import {
   compileScopedCss,
   compileScopedStyleFragment,
-  materializeScopedStyleCollection,
   serializeStyleColor,
   serializeStyleDeclarations,
 } from "./css-compiler.js";
@@ -20,26 +19,11 @@ const approvedAsset: ApprovedAssetFacts = {
 };
 const modelAssetId = "asset-00000000000040008000000000000001";
 
-function compileTabFragment(
-  componentCorrelationId: string,
-  componentScopeToken: string,
-  state: "normal" | "selected",
-) {
-  return compileScopedStyleFragment(
-    KF36_RUNTIME_PROFILE.selectors.tabs!.parts.tab!,
-    componentScopeToken,
-    componentCorrelationId,
-    state,
-    { textColor: state === "normal" ? "#111111" : "#222222" },
-    [],
-  );
-}
-
 describe("compileScopedCss", () => {
   const buttonSelectorRoles = KF36_RUNTIME_PROFILE.selectors.button!;
 
-  it("exports the collection materialization gate required by the Task 6 handoff", () => {
-    expect(Reflect.has(cssCompilerModule, "materializeScopedStyleCollection")).toBe(true);
+  it("does not publish a runtime-DOM materializer from the project compilation boundary", () => {
+    expect(Reflect.has(cssCompilerModule, "materializeScopedStyleCollection")).toBe(false);
     expect(Reflect.has(cssCompilerModule, "materializeScopedStyleFragment")).toBe(false);
   });
 
@@ -188,88 +172,6 @@ describe("compileScopedCss", () => {
       persistedSelector: "#domId .el-tabs__item.is-active",
       persistedCssText: "#domId .el-tabs__item.is-active{background-color:#ffffff;color:#111111}",
     });
-  });
-
-  it("materializes every fragment through a complete one-to-one component/DOM binding collection", () => {
-    const firstNormal = compileTabFragment("first-tabs", "kf36-first-tabs-0123456789abcdef", "normal");
-    const firstSelected = compileTabFragment("first-tabs", "kf36-first-tabs-0123456789abcdef", "selected");
-    const secondNormal = compileTabFragment("second-tabs", "kf36-second-tabs-fedcba9876543210", "normal");
-    const materialized = materializeScopedStyleCollection(
-      [firstNormal, firstSelected, secondNormal],
-      [
-        { componentCorrelationId: "second-tabs", runtimeDomId: "k22222222-2222-4222-8222-222222222222" },
-        { componentCorrelationId: "first-tabs", runtimeDomId: "k11111111-1111-4111-8111-111111111111" },
-      ],
-    );
-
-    expect(materialized.components).toHaveLength(2);
-    expect(materialized.components[0]).toMatchObject({
-      componentCorrelationId: "first-tabs",
-      runtimeDomId: "k11111111-1111-4111-8111-111111111111",
-    });
-    expect(materialized.components[0]!.fragments).toHaveLength(2);
-    expect(materialized.components[0]!.cssText).toContain("#k11111111-1111-4111-8111-111111111111");
-    expect(materialized.components[0]!.cssText).not.toContain("k22222222-2222-4222-8222-222222222222");
-    expect(materialized.components[1]).toMatchObject({
-      componentCorrelationId: "second-tabs",
-      runtimeDomId: "k22222222-2222-4222-8222-222222222222",
-    });
-    expect(materialized.components[1]!.cssText).not.toContain("k11111111-1111-4111-8111-111111111111");
-  });
-
-  it("rejects non-bijective, incomplete, duplicate, forged, or invalid runtime binding collections", () => {
-    const first = compileTabFragment("first-tabs", "kf36-first-tabs-0123456789abcdef", "normal");
-    const second = compileTabFragment("second-tabs", "kf36-second-tabs-fedcba9876543210", "normal");
-    const firstBinding = {
-      componentCorrelationId: "first-tabs",
-      runtimeDomId: "k11111111-1111-4111-8111-111111111111",
-    };
-    const secondBinding = {
-      componentCorrelationId: "second-tabs",
-      runtimeDomId: "k22222222-2222-4222-8222-222222222222",
-    };
-
-    expect(() => materializeScopedStyleCollection([first, second], [
-      firstBinding,
-      { ...secondBinding, runtimeDomId: firstBinding.runtimeDomId },
-    ])).toThrow(/STYLE_RUNTIME_DOM_BINDING_NOT_ONE_TO_ONE/);
-    expect(() => materializeScopedStyleCollection([first], [
-      firstBinding,
-      { ...firstBinding, runtimeDomId: secondBinding.runtimeDomId },
-    ])).toThrow(/STYLE_COMPONENT_BINDING_NOT_ONE_TO_ONE/);
-    expect(() => materializeScopedStyleCollection([first], [firstBinding, firstBinding]))
-      .toThrow(/STYLE_COMPONENT_BINDING_DUPLICATE/);
-    expect(() => materializeScopedStyleCollection([first, second], [firstBinding]))
-      .toThrow(/STYLE_COMPONENT_BINDING_MISSING/);
-    expect(() => materializeScopedStyleCollection([first], [firstBinding, secondBinding]))
-      .toThrow(/STYLE_COMPONENT_BINDING_EXTRA/);
-    expect(() => materializeScopedStyleCollection([first, first], [firstBinding]))
-      .toThrow(/STYLE_SCOPED_FRAGMENT_DUPLICATE/);
-    expect(() => materializeScopedStyleCollection([{ ...first }], [firstBinding]))
-      .toThrow(/UNTRUSTED_SCOPED_STYLE_FRAGMENT/);
-    expect(() => materializeScopedStyleCollection([first], [{
-      ...firstBinding,
-      runtimeDomId: "forged selector",
-    }])).toThrow(/KF_RUNTIME_DOM_ID_INVALID/);
-  });
-
-  it("rechecks component asset-layer metadata at the runtime collection gate", () => {
-    const compileAssetFragment = (state: "normal" | "selected") => compileScopedStyleFragment(
-      KF36_RUNTIME_PROFILE.selectors.tabs!.parts.tab!,
-      "kf36-asset-tabs-0123456789abcdef",
-      "asset-tabs",
-      state,
-      { advanced: [{ kind: "background-image", assetId: modelAssetId }] },
-      [approvedAsset],
-    );
-
-    expect(() => materializeScopedStyleCollection(
-      [compileAssetFragment("normal"), compileAssetFragment("selected")],
-      [{
-        componentCorrelationId: "asset-tabs",
-        runtimeDomId: "k11111111-1111-4111-8111-111111111111",
-      }],
-    )).toThrow(/STYLE_ASSET_LAYER_BUDGET: component asset-tabs/);
   });
 
   it("rejects untrusted part mappings, malformed scopes, and unsupported evidence states", () => {
