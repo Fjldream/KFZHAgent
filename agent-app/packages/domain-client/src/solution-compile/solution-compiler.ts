@@ -6,7 +6,6 @@ import {
   UIImplementationSpecV2Schema,
   type ApprovedAssetFacts,
   type CapabilityCandidateBundle,
-  type CompiledStyleSpec,
   type MockDataSet,
   type SemanticScalar,
   type SemanticValue,
@@ -633,29 +632,6 @@ function styleSpecForRole(plan: SolutionImplementationPlan, role: string): Compo
     : { role, declarations: style.declarations, states: style.states };
 }
 
-function persistedDeclarations(
-  selector: string,
-  cssText: string,
-  nodeId: string,
-): CompiledStyleSpec["cssFragments"][number]["persistedDeclarations"] {
-  const prefix = `${selector}{`;
-  if (!cssText.startsWith(prefix) || !cssText.endsWith("}")) {
-    fail("style", nodeId, "PERSISTED_STYLE_FRAGMENT_INVALID", "trusted fragment is not its selector-wrapped CSS text");
-  }
-  const body = cssText.slice(prefix.length, -1);
-  if (body.length === 0) fail("style", nodeId, "PERSISTED_STYLE_FRAGMENT_EMPTY", selector);
-  return body.split(";").map((declaration) => {
-    const separator = declaration.indexOf(":");
-    if (separator <= 0 || separator === declaration.length - 1) {
-      fail("style", nodeId, "PERSISTED_STYLE_DECLARATION_INVALID", declaration);
-    }
-    return {
-      property: declaration.slice(0, separator) as CompiledStyleSpec["cssFragments"][number]["persistedDeclarations"][number]["property"],
-      value: declaration.slice(separator + 1),
-    };
-  });
-}
-
 function styleControl(
   control: UIImplementationControlV2,
   plan: SolutionImplementationPlan,
@@ -697,26 +673,11 @@ function styleControl(
     },
     compiledStyle: {
       nativeFields: { ...compiled.nativeFields },
-      cssFragments: compiled.cssFragments.map((fragment, index) => {
-        const persisted = compiled.persistedStyleHandoff.fragments[index];
-        if (persisted === undefined
-          || persisted.selectorToken !== fragment.selectorToken
-          || persisted.state !== fragment.state) {
-          fail("style", control.id, "PERSISTED_STYLE_FRAGMENT_MISMATCH", `${fragment.selectorToken}:${fragment.state}`);
-        }
-        return {
-          selectorToken: fragment.selectorToken,
-          state: fragment.state,
-          declarations: fragment.declarations,
-          persistedSelector: persisted.persistedSelector,
-          persistedDeclarations: persistedDeclarations(
-            persisted.persistedSelector,
-            persisted.persistedCssText,
-            control.id,
-          ),
-        };
-      }),
-      styleDataNew: compiled.persistedStyleHandoff.styleDataNew,
+      cssFragments: compiled.cssFragments.map((fragment) => ({
+        selectorToken: fragment.selectorToken,
+        state: fragment.state,
+        declarations: fragment.declarations,
+      })),
       warnings: compiled.warnings.map((warning) => ({ code: warning.code, message: warning.message })),
     },
     ...(assetIds.length === 0 ? {} : { assetIds }),

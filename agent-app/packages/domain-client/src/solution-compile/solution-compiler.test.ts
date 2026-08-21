@@ -508,26 +508,33 @@ describe("compileSolutionImplementation", () => {
     expect(Object.isFrozen(nativeControls(portfolio)[0]!.nativeProperties)).toBe(true);
   });
 
-  it("persists every compiler-issued style handoff without runtime materialization", () => {
+  it("publishes only Task5-validated semantic style fragments", () => {
     const result = compileFixture(portfolioFixture());
     const controls = nativeControls(result);
-    expect(controls.every((control) => typeof control.compiledStyle?.styleDataNew === "string")).toBe(true);
-    expect(controls.every((control) => control.compiledStyle!.styleDataNew.includes("#domId") || control.compiledStyle!.styleDataNew === "")).toBe(true);
-    expect(controls.some((control) => control.compiledStyle!.styleDataNew.includes("#domId"))).toBe(true);
     expect(controls.every((control) => control.compiledStyle !== undefined)).toBe(true);
     expect(controls.every((control) => !Object.hasOwn(control.nativeProperties, "styleDataNew"))).toBe(true);
     expect(JSON.stringify(result)).not.toContain("kf36-");
+    expect(JSON.stringify(result)).not.toContain("#domId");
 
     const admin = compileFixture(adminFixture());
     const scroll = nativeControls(admin).find((control) => control.compiledLayout?.kind === "scroll-region")!;
-    expect(scroll.compiledStyle?.styleDataNew).toBe("#domId{overflow:auto}");
     expect(scroll.compiledStyle?.cssFragments).toContainEqual({
       selectorToken: "root",
       state: "normal",
       declarations: { overflow: "auto" },
-      persistedSelector: "#domId",
-      persistedDeclarations: [{ property: "overflow", value: "auto" }],
     });
+  });
+
+  it("keeps executable CSS witnesses out of the public v2 style program", () => {
+    const result = compileFixture(portfolioFixture());
+    for (const control of nativeControls(result)) {
+      expect(control.compiledStyle).toBeDefined();
+      expect(Object.hasOwn(control.compiledStyle!, "styleDataNew")).toBe(false);
+      for (const fragment of control.compiledStyle!.cssFragments) {
+        expect(Object.hasOwn(fragment, "persistedSelector")).toBe(false);
+        expect(Object.hasOwn(fragment, "persistedDeclarations")).toBe(false);
+      }
+    }
   });
 
   it("keeps v2 action and script slots structurally empty", () => {
@@ -635,7 +642,7 @@ describe("compileSolutionImplementation", () => {
     const compiled = compileFixture(adminFixture());
     const layoutControl = nativeControls(compiled).find((control) => control.compiledLayout !== undefined)!;
     expect(() => Object.assign(layoutControl.compiledLayout!, { kind: "row" })).toThrow();
-    expect(() => Object.assign(layoutControl.compiledStyle!, { styleDataNew: "#domId{opacity:0}" })).toThrow();
+    expect(() => Object.assign(layoutControl.compiledStyle!, { warnings: [] })).toThrow();
   });
 
   it("reports stable structured errors instead of dependency exceptions", () => {

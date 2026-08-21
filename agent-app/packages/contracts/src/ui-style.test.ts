@@ -84,10 +84,7 @@ const v2Fixture = {
             selectorToken: "root",
             state: "normal",
             declarations: { fontSize: 24 },
-            persistedSelector: "#domId",
-            persistedDeclarations: [{ property: "font-size", value: "24px" }],
           }],
-          styleDataNew: "#domId{font-size:24px}",
           warnings: [],
         },
         dataBinding: { mockDataId: "visitor-data", field: "name" },
@@ -922,7 +919,39 @@ describe("KF UI style contracts", () => {
     }).success).toBe(false);
   });
 
-  it("accepts only the canonical persisted serialization of compiler-owned CSS fragments", () => {
+  it("rejects a simultaneously forged but internally consistent executable CSS witness", () => {
+    const forged = mutableNativeV2Fixture();
+    forged.pages[0]!.controls[1]!.compiledStyle = {
+      nativeFields: {},
+      cssFragments: [{
+        selectorToken: "root",
+        state: "normal",
+        declarations: { textColor: "#ffffff" },
+        persistedSelector: "#domId .el-button",
+        persistedDeclarations: [{ property: "color", value: "#ffffff" }],
+      }],
+      styleDataNew: "#domId .el-button{color:#ffffff}",
+      warnings: [],
+    };
+
+    expect(UIImplementationSpecV2Schema.safeParse(forged).success).toBe(false);
+
+    const rawStyleData = mutableNativeV2Fixture();
+    rawStyleData.pages[0]!.controls[1]!.compiledStyle!.styleDataNew = "#domId{color:#ffffff}";
+    expect(UIImplementationSpecV2Schema.safeParse(rawStyleData).success).toBe(false);
+
+    const rawSelector = mutableNativeV2Fixture();
+    rawSelector.pages[0]!.controls[1]!.compiledStyle!.cssFragments[0]!.persistedSelector = "#domId";
+    expect(UIImplementationSpecV2Schema.safeParse(rawSelector).success).toBe(false);
+
+    const rawDeclarations = mutableNativeV2Fixture();
+    rawDeclarations.pages[0]!.controls[1]!.compiledStyle!.cssFragments[0]!.persistedDeclarations = [
+      { property: "font-size", value: "24px" },
+    ];
+    expect(UIImplementationSpecV2Schema.safeParse(rawDeclarations).success).toBe(false);
+  });
+
+  it("accepts a closed semantic style program with parts, states, gradients, and approved assets", () => {
     const valid = mutableNativeV2Fixture();
     valid.pages[0]!.controls[1]!.compiledStyle = {
       nativeFields: {},
@@ -930,86 +959,21 @@ describe("KF UI style contracts", () => {
         {
           selectorToken: "root",
           state: "normal",
-          declarations: { borderRadius: 8, textColor: "#ffffff", gap: 8 },
-          persistedSelector: "#domId .el-button",
-          persistedDeclarations: [
-            { property: "border-radius", value: "8px" },
-            { property: "color", value: "#ffffff" },
-            { property: "gap", value: "8px" },
-          ],
+          declarations: { advanced: [
+            { kind: "gradient", angle: 135, stops: [{ offset: 0, color: "#163a5f" }, { offset: 1, color: "#e47b32" }] },
+            { kind: "background-image", assetId: "portrait-asset" },
+          ] },
         },
         {
-          selectorToken: "root",
+          selectorToken: "part:icon",
           state: "hover",
-          declarations: { backgroundColor: "#1d4ed8" },
-          persistedSelector: "#domId .el-button:hover",
-          persistedDeclarations: [{ property: "background-color", value: "#1d4ed8" }],
+          declarations: { iconColor: "#ffffff", iconSize: 20 },
         },
       ],
-      styleDataNew: "#domId .el-button{border-radius:8px;color:#ffffff;gap:8px}" +
-        "#domId .el-button:hover{background-color:#1d4ed8}",
       warnings: [],
     };
     const validResult = UIImplementationSpecV2Schema.safeParse(valid);
     expect(validResult.success, validResult.success ? "" : JSON.stringify(validResult.error.issues)).toBe(true);
-
-    const poisonedCases: Array<readonly [string, string, string]> = [
-      ["body", "color", "red"],
-      ["#other .el-button", "color", "red"],
-      ["#domId", "position", "fixed"],
-      ["#domId", "color", "red!important"],
-      ["#domId", "background-image", "u\\72l(https://external.example/x.png)"],
-      ["#domId", "background-image", "u\\72l(javascript:alert(1))"],
-      ["#domId .el\\2d button", "color", "red"],
-      ["#domId", "c\\6flor", "red"],
-      ["#domId", "color", "red/*comment*/"],
-      ["#domId", "color", " red"],
-    ];
-    for (const [selector, property, value] of poisonedCases) {
-      const poisoned = mutableNativeV2Fixture();
-      poisoned.pages[0]!.controls[1]!.compiledStyle = {
-        nativeFields: {},
-        cssFragments: [{
-          selectorToken: "root",
-          state: "normal",
-          declarations: { textColor: "red" },
-          persistedSelector: selector,
-          persistedDeclarations: [{ property, value }],
-        }],
-        styleDataNew: `${selector}{${property}:${value}}`,
-        warnings: [],
-      };
-      expect(UIImplementationSpecV2Schema.safeParse(poisoned).success).toBe(false);
-    }
-
-    const forgedIndependentPayload = structuredClone(valid);
-    forgedIndependentPayload.pages[0]!.controls[1]!.compiledStyle!.styleDataNew = "#domId{color:red}";
-    expect(UIImplementationSpecV2Schema.safeParse(forgedIndependentPayload).success).toBe(false);
-
-    const approvedLayers = mutableNativeV2Fixture();
-    const background = "linear-gradient(135deg,#163a5f 0%,#e47b32 100%)," +
-      `url("project/res/images/${"a".repeat(64)}.png")`;
-    approvedLayers.pages[0]!.controls[1]!.compiledStyle = {
-      nativeFields: {},
-      cssFragments: [{
-        selectorToken: "root",
-        state: "normal",
-        declarations: { advanced: [
-          { kind: "gradient", angle: 135, stops: [{ offset: 0, color: "#163a5f" }, { offset: 1, color: "#e47b32" }] },
-          { kind: "background-image", assetId: "portrait-asset" },
-        ] },
-        persistedSelector: "#domId",
-        persistedDeclarations: [{ property: "background-image", value: background }],
-      }],
-      styleDataNew: `#domId{background-image:${background}}`,
-      warnings: [],
-    };
-    expect(UIImplementationSpecV2Schema.safeParse(approvedLayers).success).toBe(true);
-
-    const overBudget = mutableNativeV2Fixture();
-    overBudget.pages[0]!.controls[1]!.compiledStyle!.styleDataNew =
-      `#domId{color:#${"a".repeat(32_769)}}`;
-    expect(UIImplementationSpecV2Schema.safeParse(overBudget).success).toBe(false);
   });
 
   it("rejects controls outside pages or parents and overlay hosts on unknown pages", () => {
