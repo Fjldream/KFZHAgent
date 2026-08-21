@@ -4,6 +4,7 @@ import {
   CompiledScriptModuleSchema,
   ScriptPlanSchema,
 } from "./script-program.js";
+import { CompilerPageGuidSchema } from "./action-graph.js";
 import { SolutionImplementationPlanSchema } from "./solution-implementation-plan.js";
 import {
   adaptUiImplementationV1,
@@ -141,13 +142,14 @@ describe("script program contracts", () => {
     const validSources = [
       "const records = $data.get(\"records\"); const active = records.filter((record) => record.status === \"active\"); $data.set(\"filtered-records\", active);",
       "const message = \"操作完成\"; $feedback.show(\"success\", message);",
+      "const visitor1 = $control.getValue(\"visitor1\"); const detail2 = $state.get(\"detail2\"); $page.navigate(\"p1\");",
+      "const message = \"The function is ready\"; $feedback.show(\"info\", message);",
+      "const state = \"input:ready\"; const status = \"status:active\"; const urn = \"urn:kingfusion:visitor1\";",
     ];
     validSources.forEach((source) => expect(ScriptPlanSchema.safeParse({ ...sourcePlan.scripts[0], source }).success, source).toBe(true));
 
     const forbiddenSources = [
       "const id = \"00000000-0000-4000-8000-000000000001\";",
-      "const value = Select1.Value;",
-      "const value = input1.Value;",
       "const value = linkId;",
       "const selector = \".a,.b\";",
       "const selector = \"[data-secret]\";",
@@ -158,6 +160,20 @@ describe("script program contracts", () => {
       "const raw = configureData;",
     ];
     forbiddenSources.forEach((source) => expect(ScriptPlanSchema.safeParse({ ...sourcePlan.scripts[0], source }).success, source).toBe(false));
+
+    for (const source of ["const value = Button1.Value;", "const value = visitor1;"]) {
+      expect(ScriptPlanSchema.safeParse({ ...sourcePlan.scripts[0], source }).success, source).toBe(true);
+    }
+  });
+
+  it("canonicalizes page GUIDs so case aliases cannot create distinct runtime identities", () => {
+    const upper = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
+    expect(CompilerPageGuidSchema.parse(upper)).toBe(upper.toLowerCase());
+    const parsed = CompiledScriptModuleSchema.parse({
+      ...compiledScript,
+      pageReferences: [{ semanticId: "home", pageGuid: upper }],
+    });
+    expect(parsed.pageReferences[0]?.pageGuid).toBe(upper.toLowerCase());
   });
 
   it("allows the exact bounded semantic source path in a whole native plan only", () => {
@@ -264,6 +280,23 @@ describe("script program contracts", () => {
     const wrongPageGuid = structuredClone(native);
     wrongPageGuid.compiledScripts[0]!.pageReferences[0]!.pageGuid = "00000000-0000-4000-8000-000000000002";
     expect(UIImplementationSpecV2Schema.safeParse(wrongPageGuid).success).toBe(false);
+
+    const guidCaseAlias = structuredClone(native);
+    guidCaseAlias.pages.push({
+      ...structuredClone(native.pages[0]!),
+      id: "settings",
+      sourceBlueprintPageId: "settings-blueprint",
+      controls: [{
+        ...structuredClone(native.pages[0]!.controls[0]!),
+        id: "settings-root",
+        sourceSolutionNodeId: "settings-control",
+        sourceBlueprintPageId: "settings-blueprint",
+        eventBindings: [],
+      }],
+    });
+    guidCaseAlias.runtimeCorrelation.controls.push({ semanticControlId: "settings-root", instanceName: "Layout2" });
+    guidCaseAlias.runtimeCorrelation.pages.push({ semanticPageId: "settings", pageGuid: "00000000-0000-4000-8000-000000000001".toUpperCase() });
+    expect(UIImplementationSpecV2Schema.safeParse(guidCaseAlias).success).toBe(false);
 
     const v1 = UIImplementationSpecSchema.parse({
       schema: "kf-ui-implementation/v1",

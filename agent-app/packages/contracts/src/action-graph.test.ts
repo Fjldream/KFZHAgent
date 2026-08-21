@@ -167,6 +167,32 @@ describe("ActionGraph contracts", () => {
     expect(ActionValueSchema.safeParse({ kind: "list", items: Array.from({ length: 33 }, () => null) }).success).toBe(false);
   });
 
+  it("parses only a descriptor-cloned value and never executes accessors or proxy get traps", () => {
+    let reads = 0;
+    const getTrap = new Proxy({ kind: "list", items: ["safe"] }, {
+      get() {
+        reads += 1;
+        throw new Error("get trap must not execute");
+      },
+    });
+    expect(() => ActionValueSchema.safeParse(getTrap)).not.toThrow();
+    expect(reads).toBe(0);
+
+    let descriptorReads = 0;
+    const hostile = new Proxy({}, {
+      get() {
+        descriptorReads += 1;
+        throw new Error("get trap must not execute");
+      },
+      getOwnPropertyDescriptor() {
+        throw new Error("hostile descriptor trap");
+      },
+    });
+    expect(() => ActionValueSchema.safeParse(hostile)).not.toThrow();
+    expect(ActionValueSchema.safeParse(hostile).success).toBe(false);
+    expect(descriptorReads).toBe(0);
+  });
+
   it("rejects ActionGraph script references without a run-script effect", () => {
     const orphan = structuredClone(graphFixture);
     orphan.actions = orphan.actions.filter((action) => action.id !== "filter");

@@ -39,6 +39,49 @@ const htmlTagNames = new Set([
   "a", "article", "body", "button", "div", "footer", "form", "header", "input", "label", "main", "nav",
   "section", "select", "span", "table", "td", "textarea", "tr",
 ]);
+const cssPseudoNames = new Set([
+  "active", "after", "before", "checked", "disabled", "empty", "enabled", "first-child", "first-of-type",
+  "focus", "focus-visible", "hover", "last-child", "last-of-type", "not", "nth-child", "nth-of-type",
+  "only-child", "placeholder", "required", "root", "selected", "visited",
+]);
+
+function javascriptCodeView(value: string): string {
+  const characters = [...value];
+  let state: "code" | "single" | "double" | "template" | "line-comment" | "block-comment" = "code";
+  for (let index = 0; index < characters.length; index += 1) {
+    const character = characters[index]!;
+    const next = characters[index + 1];
+    if (state === "code") {
+      if (character === "'") state = "single";
+      else if (character === "\"") state = "double";
+      else if (character === "`") state = "template";
+      else if (character === "/" && next === "/") state = "line-comment";
+      else if (character === "/" && next === "*") state = "block-comment";
+      else continue;
+    } else if (state === "line-comment" && character === "\n") {
+      state = "code";
+      continue;
+    } else if (state === "block-comment" && character === "*" && next === "/") {
+      characters[index] = " ";
+      characters[index + 1] = " ";
+      index += 1;
+      state = "code";
+      continue;
+    } else if ((state === "single" && character === "'")
+      || (state === "double" && character === "\"")
+      || (state === "template" && character === "`")) {
+      state = "code";
+      characters[index] = " ";
+      continue;
+    } else if ((state === "single" || state === "double" || state === "template") && character === "\\") {
+      characters[index] = " ";
+      if (index + 1 < characters.length) characters[++index] = " ";
+      continue;
+    }
+    if (character !== "\n") characters[index] = " ";
+  }
+  return characters.join("");
+}
 
 function containsUnsafeCall(value: string): boolean {
   const calls = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\(([^()]*)\)/g;
@@ -83,7 +126,9 @@ function cssSelectorOrRuleIssue(value: string, strictSelectors: boolean): string
   const pseudo = /\b([A-Za-z][A-Za-z0-9-]*):{1,2}([A-Za-z-]+)(?:\([^)]*\))?/g;
   for (const match of value.matchAll(pseudo)) {
     const prefix = match[1]!.toLowerCase();
-    if (selectorTagNames.has(prefix) || (strictSelectors && (htmlTagNames.has(prefix) || prefix === "discard" || prefix === "unknown"))) return "CSS pseudo selectors are not allowed";
+    const pseudoName = match[2]!.toLowerCase();
+    if (cssPseudoNames.has(pseudoName)
+      && (selectorTagNames.has(prefix) || (strictSelectors && (htmlTagNames.has(prefix) || prefix === "discard" || prefix === "unknown")))) return "CSS pseudo selectors are not allowed";
   }
   if (/(?:^|["'`\s])(?:\.[A-Za-z_-][A-Za-z0-9_-]*|#[A-Za-z_-][A-Za-z0-9_-]*|\[[^\]\n]+\])\s*(?:[>+~]|\s)\s*(?:\.?[A-Za-z_-][A-Za-z0-9_-]*|#[A-Za-z_-][A-Za-z0-9_-]*|\[[^\]\n]+\])/.test(value)) return "CSS combinator selectors are not allowed";
   if (/^[A-Za-z][A-Za-z0-9-]*\s+(?:[.#]|\[)/.test(trimmed)) return "CSS descendant selectors are not allowed";
@@ -107,17 +152,25 @@ export function semanticImplementationTextIssue(
   if (/^\{theme\.[A-Za-z][A-Za-z0-9]*\}$/.test(trimmed)) return undefined;
   if (/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/i.test(value)) return "GUID values are not allowed";
   if (/<\/?(?:script|style|iframe|object|embed)\b|\b(?:javascript|vbscript)\s*:/i.test(value)) return "executable markup is not allowed";
-  const selectorIssue = cssSelectorOrRuleIssue(value, options.strictSelectors ?? mode === "semantic-js-source");
+  const codeView = mode === "semantic-js-source" ? javascriptCodeView(value) : value;
+  const selectorIssue = mode === "semantic-js-source"
+    ? cssSelectorOrRuleIssue(value, false) ?? cssSelectorOrRuleIssue(codeView, true)
+    : cssSelectorOrRuleIssue(value, options.strictSelectors ?? false);
   if (selectorIssue !== undefined) return selectorIssue;
-  const identifiers = value.match(/[A-Za-z_$][A-Za-z0-9_$]*/g) ?? [];
+  const identifiers = codeView.match(/[A-Za-z_$][A-Za-z0-9_$]*/g) ?? [];
   for (const identifier of identifiers) {
     const normalized = normalizedName(identifier);
     if (domAndNetworkNames.has(normalized)) return `forbidden runtime name: ${identifier}`;
     if (rawRuntimeNames.has(normalized)) return `implementation runtime name: ${identifier}`;
   }
   if (mode === "semantic-js-source") {
-    if (/\b[A-Za-z_$][A-Za-z0-9_$]*[0-9]+\b/.test(value)) return "KF instance-shaped identifiers are not allowed";
-    if (/\?\.\s*\[|\[\s*["'][^"']+["']\s*\]\s*(?:\?\.)?\s*\(/.test(value)) return "computed or optional bracket calls are not allowed";
+    const literalAndCodeIdentifiers = value.match(/[A-Za-z_$][A-Za-z0-9_$]*/g) ?? [];
+    for (const identifier of literalAndCodeIdentifiers) {
+      if (rawRuntimeNames.has(normalizedName(identifier))) return `implementation runtime name: ${identifier}`;
+    }
+  }
+  if (mode === "semantic-js-source") {
+    if (/\?\.\s*\[|\[\s*\]\s*(?:\?\.)?\s*\(/.test(codeView)) return "computed or optional bracket calls are not allowed";
     return undefined;
   }
   if (mode === "compiled-js") return undefined;
@@ -176,8 +229,13 @@ const ActionValueShapeSchema: z.ZodType<ActionValue> = z.lazy(() => z.union([
   }).strict(),
 ]));
 
-function preflightActionValue(value: ActionValue, ctx: z.RefinementCtx): void {
-  const pending: Array<{ value: ActionValue; depth: number }> = [{ value, depth: 0 }];
+function cloneActionValueDescriptorSafe(value: unknown, ctx: z.RefinementCtx): ActionValue | undefined {
+  const holder: { value?: unknown } = {};
+  const pending: Array<{ source: unknown; depth: number; assign: (clone: unknown) => void }> = [{
+    source: value,
+    depth: 0,
+    assign: (clone) => { holder.value = clone; },
+  }];
   const seen = new WeakSet<object>();
   let count = 0;
   while (pending.length > 0) {
@@ -185,78 +243,95 @@ function preflightActionValue(value: ActionValue, ctx: z.RefinementCtx): void {
     count += 1;
     if (count > 1_000) {
       ctx.addIssue({ code: "custom", message: "ACTION_VALUE_BUDGET_EXCEEDED" });
-      return;
+      return undefined;
     }
     if (current.depth > 8) {
       ctx.addIssue({ code: "custom", message: "ACTION_VALUE_DEPTH_EXCEEDED" });
-      return;
+      return undefined;
     }
-    if (current.value === null || typeof current.value !== "object") continue;
-    if (seen.has(current.value)) {
+    if (current.source === null || typeof current.source !== "object") {
+      current.assign(current.source);
+      continue;
+    }
+    if (seen.has(current.source)) {
       ctx.addIssue({ code: "custom", message: "ACTION_VALUE_CYCLE_OR_SHARED_REFERENCE" });
-      return;
+      return undefined;
     }
-    seen.add(current.value);
+    seen.add(current.source);
     let descriptors: PropertyDescriptorMap;
     let keys: PropertyKey[];
     let prototype: object | null;
     try {
-      descriptors = Object.getOwnPropertyDescriptors(current.value);
-      keys = Reflect.ownKeys(current.value);
-      prototype = Reflect.getPrototypeOf(current.value);
+      descriptors = Object.getOwnPropertyDescriptors(current.source);
+      keys = Reflect.ownKeys(current.source);
+      prototype = Reflect.getPrototypeOf(current.source);
     } catch {
       ctx.addIssue({ code: "custom", message: "ACTION_VALUE_DESCRIPTOR_UNSAFE" });
-      return;
+      return undefined;
     }
     if (keys.some((key) => typeof key === "symbol")) {
       ctx.addIssue({ code: "custom", message: "ACTION_VALUE_SYMBOL_KEY_FORBIDDEN" });
-      return;
+      return undefined;
     }
     if (prototype !== Object.prototype && prototype !== Array.prototype && prototype !== null) {
       ctx.addIssue({ code: "custom", message: "ACTION_VALUE_PROTOTYPE_FORBIDDEN" });
-      return;
+      return undefined;
     }
     for (const key of keys) {
       const descriptor = descriptors[String(key)];
       if (descriptor === undefined || descriptor.get !== undefined || descriptor.set !== undefined || !("value" in descriptor)) {
         ctx.addIssue({ code: "custom", message: "ACTION_VALUE_ACCESSOR_FORBIDDEN" });
-        return;
+        return undefined;
       }
     }
-    if (Array.isArray(current.value)) {
+    if (Array.isArray(current.source)) {
       const lengthDescriptor = descriptors["length"];
       const length = lengthDescriptor?.value as unknown;
       if (typeof length !== "number" || !Number.isSafeInteger(length) || length < 0 || length > 32) {
         ctx.addIssue({ code: "custom", message: "ACTION_VALUE_ARRAY_BOUND_EXCEEDED" });
-        return;
+        return undefined;
       }
+      if (keys.length !== length + 1) {
+        ctx.addIssue({ code: "custom", message: "ACTION_VALUE_ARRAY_PROPERTY_FORBIDDEN" });
+        return undefined;
+      }
+      const clone: unknown[] = new Array(length);
+      current.assign(clone);
       for (let index = 0; index < length; index += 1) {
         const descriptor = descriptors[String(index)];
         if (descriptor === undefined || !("value" in descriptor)) {
           ctx.addIssue({ code: "custom", message: "ACTION_VALUE_SPARSE_ARRAY_FORBIDDEN" });
-          return;
+          return undefined;
         }
-        pending.push({ value: descriptor.value as ActionValue, depth: current.depth });
+        const source = descriptor.value as unknown;
+        pending.push({ source, depth: current.depth, assign: (child) => { clone[index] = child; } });
       }
     } else {
       if (keys.length > 100) {
         ctx.addIssue({ code: "custom", message: "ACTION_VALUE_OBJECT_BOUND_EXCEEDED" });
-        return;
+        return undefined;
       }
       const kind = descriptors["kind"]?.value as unknown;
+      const clone: Record<string, unknown> = {};
+      current.assign(clone);
       keys.forEach((key) => {
         const nextDepth = (kind === "list" && key === "items") || (kind === "record" && key === "fields")
           ? current.depth + 1
           : current.depth;
-        pending.push({ value: descriptors[String(key)]!.value as ActionValue, depth: nextDepth });
+        const name = String(key);
+        const source = descriptors[name]!.value as unknown;
+        pending.push({ source, depth: nextDepth, assign: (child) => { clone[name] = child; } });
       });
     }
   }
+  return holder.value as ActionValue;
 }
 
 const ActionValuePreflightSchema = z.unknown()
-  .superRefine((value, ctx) => preflightActionValue(value as ActionValue, ctx))
-  .transform((value) => value as ActionValue);
+  .transform((value, ctx) => {
+    const clone = cloneActionValueDescriptorSafe(value, ctx);
+    return clone === undefined ? z.NEVER : clone;
+  });
 
 export const ActionValueSchema: z.ZodType<ActionValue> = ActionValuePreflightSchema
   .pipe(ActionValueShapeSchema as z.ZodType<ActionValue, ActionValue>)
@@ -448,7 +523,9 @@ export const ActionGraphSchema = z.object({
 
 export const CompilerInstanceNameSchema = z.string().trim().min(2).max(100)
   .regex(/^[A-Za-z_$][A-Za-z0-9_$]*[0-9]$/, "compiler instance names must use an evidence-backed KF instance shape");
-export const CompilerPageGuidSchema = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+export const CompilerPageGuidSchema = z.string()
+  .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
+  .transform((value) => value.toLowerCase());
 export const CompilerOwnedIdSchema = z.string().trim().min(1).max(100)
   .regex(/^kf\$(?:action|binding|script):[A-Za-z0-9][A-Za-z0-9_-]*$/);
 export const CompilerActionIdSchema = z.string().trim().min(1).max(100).regex(/^kf\$action:[A-Za-z0-9][A-Za-z0-9_-]*$/);
