@@ -39,11 +39,29 @@ afterEach(() => {
 });
 
 describe("compileNativeActions", () => {
+  it("accepts only the exact trusted normalized object and rejects clones or forgeries", async () => {
+    const { normalizeActionGraph } = await import("./action-graph.js");
+    const { compileNativeActions } = await import("./action-compiler.js");
+    const data = fixture();
+    const normalized = normalizeActionGraph(data);
+    expect(() => compileNativeActions({ normalized })).not.toThrow();
+    expect(() => compileNativeActions({ normalized: structuredClone(normalized) })).toThrowError(expect.objectContaining({ code: "ACTION_CONTEXT_UNTRUSTED" }));
+    expect(() => compileNativeActions({ normalized: { ...normalized } })).toThrowError(expect.objectContaining({ code: "ACTION_CONTEXT_UNTRUSTED" }));
+  });
+
   it("uses the trusted production registry and degrades unsupported trigger evidence to a source-free typed request", async () => {
     const { normalizeActionGraph } = await import("./action-graph.js");
     const { compileNativeActions } = await import("./action-compiler.js");
     const data = fixture();
-    const result = compileNativeActions({ normalized: normalizeActionGraph(data), implementation: data.implementation });
+    const normalized = normalizeActionGraph(data);
+    data.implementation.runtimeCorrelation!.pages[1]!.pageGuid = "00000000-0000-4000-8000-000000000099";
+    const homePage = data.implementation.pages[0]!;
+    if (homePage.compatibility !== "native") throw new Error("native fixture required");
+    homePage.controls[0]!.capabilityId = "text";
+    homePage.id = "mutated-home";
+    const swapped = fixture().implementation;
+    swapped.runtimeCorrelation!.pages[1]!.pageGuid = "00000000-0000-4000-8000-000000000088";
+    const result = compileNativeActions({ normalized, implementation: swapped } as unknown as Parameters<typeof compileNativeActions>[0]);
     expect(result.actions).toEqual([]);
     expect(result.bindings).toEqual([]);
     expect(result.scriptRequests).toEqual([expect.objectContaining({
@@ -64,7 +82,9 @@ describe("compileNativeActions", () => {
     const { normalizeActionGraph } = await import("./action-graph.js");
     const { compileNativeActions } = await import("./action-compiler.js");
     const data = fixture();
-    const result = compileNativeActions({ normalized: normalizeActionGraph(data), implementation: data.implementation });
+    const normalized = normalizeActionGraph(data);
+    data.implementation.runtimeCorrelation!.pages[1]!.pageGuid = "00000000-0000-4000-8000-000000000099";
+    const result = compileNativeActions({ normalized });
     expect(result.actions).toEqual([{
       id: "kf$action:navigate", sourceActionId: "navigate", ownerInstanceName: "Button1", kind: "navigate-page",
       targetPageGuid: "00000000-0000-4000-8000-000000000002",
@@ -88,7 +108,7 @@ describe("compileNativeActions", () => {
     const { normalizeActionGraph } = await import("./action-graph.js");
     const { compileNativeActions } = await import("./action-compiler.js");
     const data = fixture();
-    const result = compileNativeActions({ normalized: normalizeActionGraph(data), implementation: data.implementation });
+    const result = compileNativeActions({ normalized: normalizeActionGraph(data) });
     expect(result.actions).toEqual([]);
     expect(result.scriptRequests[0]).toMatchObject({ reason: "TRIGGER_EVENT_UNSUPPORTED" });
   });
@@ -107,7 +127,7 @@ describe("compileNativeActions", () => {
     const data = fixture();
     data.plan.localState.push({ id: "allowed", purpose: "允许", type: "boolean", initialValue: false });
     data.plan.actions = [{ id: "navigate", kind: "set-state", stateId: "allowed", value: true, afterActionIds: [] }];
-    const result = compileNativeActions({ normalized: normalizeActionGraph(data), implementation: data.implementation });
+    const result = compileNativeActions({ normalized: normalizeActionGraph(data) });
     expect(result.actions).toEqual([{
       id: "kf$action:navigate", sourceActionId: "navigate", ownerInstanceName: "Button1", kind: "set-state", stateId: "allowed", value: true,
     }]);
@@ -129,8 +149,8 @@ describe("compileNativeActions", () => {
     const { normalizeActionGraph } = await import("./action-graph.js");
     const { compileNativeActions } = await import("./action-compiler.js");
     const data = fixture();
-    data.plan.actions = [{ id: "navigate", kind: "set-visibility", targetId: "detail", visible: true, afterActionIds: [] }];
-    const result = compileNativeActions({ normalized: normalizeActionGraph(data), implementation: data.implementation });
+    data.plan.actions = [{ id: "navigate", kind: "set-visibility", targetId: "go", visible: true, afterActionIds: [] }];
+    const result = compileNativeActions({ normalized: normalizeActionGraph(data) });
     expect(result.actions).toEqual([]);
     expect(result.scriptRequests[0]).toMatchObject({ reason: "TARGET_CAPABILITY_UNSUPPORTED" });
   });
@@ -152,12 +172,12 @@ describe("compileNativeActions", () => {
     const data = fixture();
     data.plan.localState.push({ id: "allowed", purpose: "允许导航", type: "boolean", initialValue: true });
     data.plan.actions[0]!.conditions = [{ left: { kind: "local-state", stateId: "allowed" }, operator: "equals", right: { kind: "literal", value: true } }];
-    let result = compileNativeActions({ normalized: normalizeActionGraph(data), implementation: data.implementation });
+    let result = compileNativeActions({ normalized: normalizeActionGraph(data) });
     expect(result.scriptRequests[0]).toMatchObject({ reason: "ACTION_CONDITIONS_REQUIRE_SCRIPT", closureStatus: "unverified" });
 
     data.plan.actions = [{ id: "navigate", kind: "run-script", scriptId: "filter-script", afterActionIds: [] }];
     data.plan.scripts = [{ id: "filter-script", kind: "template", template: "multi-filter", purpose: "筛选", inputs: [], outputs: [{ name: "filtered", description: "结果", refKind: "control", refId: "go" }], parameters: [] }];
-    result = compileNativeActions({ normalized: normalizeActionGraph(data), implementation: data.implementation });
+    result = compileNativeActions({ normalized: normalizeActionGraph(data) });
     expect(result.scriptRequests[0]).toMatchObject({ requestedTier: "script-template", templateId: "multi-filter", reason: "RUN_SCRIPT_REQUIRES_VALIDATION", closureStatus: "unverified" });
   });
 
@@ -175,7 +195,7 @@ describe("compileNativeActions", () => {
       const data = fixture();
       data.plan.localState.push({ id: "allowed", purpose: "开关", type: "boolean", initialValue: false });
       data.plan.actions = [{ id: "navigate", ...effect, afterActionIds: [] }] as SolutionImplementationPlan["actions"];
-      const result = compileNativeActions({ normalized: normalizeActionGraph(data), implementation: data.implementation });
+      const result = compileNativeActions({ normalized: normalizeActionGraph(data) });
       expect(result.actions, effect.kind).toEqual([]);
       expect(result.scriptRequests, effect.kind).toHaveLength(1);
     }
@@ -190,5 +210,160 @@ describe("compileNativeActions", () => {
     };
     expect(compileAction({ kind: "navigate", pageId: "detail" }, context)).toEqual({ action: "navigatePage", pageId: "guid-detail" });
     expect(compileAction({ kind: "setVariable", variableId: "selected", value: 7 }, context)).toEqual({ action: "setVariable", variableId: "selected", value: 7 });
+  });
+
+  it("preflights the 16-action binding capacity and degrades 17 or 200 as a whole", async () => {
+    vi.doMock("../design-knowledge/script-capability-registry.js", () => ({
+      requireScriptCapabilityProfile: () => ({
+        schema: "kf-script-capability-profile/v1", capabilityId: "button", version: "1.0.0", availability: "supported",
+        actions: [{ semanticAction: "show-feedback", implementation: "restricted-action", availability: "supported", evidence: [{ kind: "compiler", ref: "reviewed#feedback" }] }],
+        events: [{ semanticEvent: "click", kfEvent: "Click", availability: "supported", arguments: [], evidence: [{ kind: "template", ref: "reviewed#click" }] }],
+        methods: [], properties: [], initialization: { supportsConfigureData: false, lifecycleEvents: [] }, limitations: [],
+      }),
+    }));
+    const { normalizeActionGraph } = await import("./action-graph.js");
+    const { compileNativeActions } = await import("./action-compiler.js");
+    const compileCount = (count: number) => {
+      const data = fixture();
+      const root = data.plan.pages[0]!.root;
+      if (root.kind !== "control") throw new Error("control fixture required");
+      root.eventBindings = count === 0 ? [] : [{ semanticEvent: "click", actionIds: ["action-0"] }];
+      data.plan.actions = Array.from({ length: count }, (_, index) => ({
+        id: `action-${index}`, kind: "show-feedback" as const, level: "info" as const, message: `步骤 ${index}`,
+        afterActionIds: index + 1 < count ? [`action-${index + 1}`] : [],
+      }));
+      const normalized = normalizeActionGraph(data);
+      return compileNativeActions({ normalized });
+    };
+    expect(compileCount(0)).toEqual({ actions: [], bindings: [], scriptRequests: [] });
+    const sixteen = compileCount(16);
+    expect(sixteen.actions).toHaveLength(16);
+    expect(sixteen.bindings).toHaveLength(1);
+    expect(sixteen.bindings[0]!.nativeActionIds).toHaveLength(16);
+    for (const count of [17, 200]) {
+      const overflow = compileCount(count);
+      expect(overflow.actions, String(count)).toEqual([]);
+      expect(overflow.bindings, String(count)).toEqual([]);
+      expect(overflow.scriptRequests, String(count)).toHaveLength(count);
+      expect(overflow.scriptRequests.every((item) => item.reason === "BINDING_CAPACITY_EXCEEDED"), String(count)).toBe(true);
+    }
+  });
+
+  it("rejects same-action cross-page targets even with supported member evidence", async () => {
+    vi.doMock("../design-knowledge/script-capability-registry.js", () => ({
+      requireScriptCapabilityProfile: (capabilityId: string) => capabilityId === "button" ? ({
+        schema: "kf-script-capability-profile/v1", capabilityId, version: "1.0.0", availability: "supported",
+        actions: [{ semanticAction: "set-visibility", implementation: "restricted-action", availability: "supported", evidence: [{ kind: "compiler", ref: "reviewed#visibility" }] }],
+        events: [{ semanticEvent: "click", kfEvent: "Click", availability: "supported", arguments: [], evidence: [{ kind: "template", ref: "reviewed#click" }] }],
+        methods: [], properties: [], initialization: { supportsConfigureData: false, lifecycleEvents: [] }, limitations: [],
+      }) : ({
+        schema: "kf-script-capability-profile/v1", capabilityId, version: "1.0.0", availability: "supported",
+        actions: [], events: [], methods: [], properties: [{ semanticProperty: "visible", kfProperty: "Visible", readable: true, writable: true, availability: "supported", evidence: [{ kind: "compiler", ref: "reviewed#visible" }] }],
+        initialization: { supportsConfigureData: false, lifecycleEvents: [] }, limitations: [],
+      }),
+    }));
+    const { normalizeActionGraph } = await import("./action-graph.js");
+    const { compileNativeActions } = await import("./action-compiler.js");
+    const data = fixture();
+    data.plan.actions = [{ id: "navigate", kind: "set-visibility", targetId: "detail", visible: true, afterActionIds: [] }];
+    const result = compileNativeActions({ normalized: normalizeActionGraph(data) });
+    expect(result.actions).toEqual([]);
+    expect(result.scriptRequests[0]).toMatchObject({ reason: "ACTION_CONTEXT_CROSS_PAGE" });
+
+  });
+
+  it("rejects an overlay whose host page differs from the trigger owner page", async () => {
+    vi.doMock("../design-knowledge/script-capability-registry.js", () => ({
+      requireScriptCapabilityProfile: (capabilityId: string) => ({
+        schema: "kf-script-capability-profile/v1", capabilityId, version: "1.0.0", availability: "supported",
+        actions: [{ semanticAction: "open-dialog", implementation: "restricted-action", availability: "supported", evidence: [{ kind: "compiler", ref: "reviewed#open" }] }],
+        events: capabilityId === "button" ? [{ semanticEvent: "click", kfEvent: "Click", availability: "supported", arguments: [], evidence: [{ kind: "template", ref: "reviewed#click" }] }] : [],
+        methods: [], properties: [], initialization: { supportsConfigureData: false, lifecycleEvents: [] }, limitations: [],
+      }),
+    }));
+    const { normalizeActionGraph } = await import("./action-graph.js");
+    const { compileNativeActions } = await import("./action-compiler.js");
+    const data = fixture();
+    data.plan.localState.push({ id: "overlay-visible", purpose: "弹层可见", type: "boolean", initialValue: false });
+    data.plan.overlays.push({
+      id: "detail-overlay", title: "详情弹层", purpose: "详情", presentation: "dialog", hostPageId: "detail-page",
+      sourceBlueprintPageId: "bp-detail", sourceBlueprintRegionIds: ["detail-region"], visibleStateId: "overlay-visible", dismissible: true,
+      root: { ...data.plan.pages[1]!.root, id: "overlay-content" },
+    });
+    data.plan.actions = [{ id: "navigate", kind: "open-overlay", overlayId: "detail-overlay", afterActionIds: [] }];
+    const detailPage = data.implementation.pages[1]!;
+    if (detailPage.compatibility !== "native") throw new Error("native fixture required");
+    detailPage.controls.push({
+      ...detailPage.controls[0]!, id: "overlay-host", capabilityId: "easyui.12", sourceSolutionNodeId: "overlay-content",
+      overlayHost: { overlayId: "detail-overlay", hostPageId: "detail-page", presentation: "dialog", visibleStateId: "overlay-visible", dismissible: true, initiallyVisible: false },
+    });
+    data.implementation.runtimeCorrelation!.controls.push({ semanticControlId: "overlay-host", instanceName: "Dialog1" });
+    const result = compileNativeActions({ normalized: normalizeActionGraph(data) });
+    expect(result.actions).toEqual([]);
+    expect(result.scriptRequests[0]).toMatchObject({ reason: "ACTION_CONTEXT_CROSS_PAGE" });
+
+    detailPage.controls[1]!.overlayHost!.hostPageId = "home";
+    expect(() => normalizeActionGraph(data)).toThrowError(expect.objectContaining({
+      code: "ACTION_OVERLAY_HOST_OWNERSHIP_MISMATCH", nodeId: "detail-overlay",
+    }));
+  });
+
+  it("does not trust supported members under a planned top-level profile", async () => {
+    vi.doMock("../design-knowledge/script-capability-registry.js", () => ({
+      requireScriptCapabilityProfile: () => ({
+        schema: "kf-script-capability-profile/v1", capabilityId: "button", version: "1.0.0", availability: "planned",
+        actions: [{ semanticAction: "navigate-page", implementation: "restricted-action", availability: "supported", evidence: [{ kind: "compiler", ref: "reviewed#navigate" }] }],
+        events: [{ semanticEvent: "click", kfEvent: "Click", availability: "supported", arguments: [], evidence: [{ kind: "template", ref: "reviewed#click" }] }],
+        methods: [], properties: [], initialization: { supportsConfigureData: false, lifecycleEvents: [] }, limitations: [],
+      }),
+    }));
+    const { normalizeActionGraph } = await import("./action-graph.js");
+    const { compileNativeActions } = await import("./action-compiler.js");
+    const data = fixture();
+    const result = compileNativeActions({ normalized: normalizeActionGraph(data) });
+    expect(result.actions).toEqual([]);
+    expect(result.scriptRequests[0]).toMatchObject({ reason: "ACTION_CAPABILITY_UNSUPPORTED" });
+  });
+
+  it("does not trust target members under a planned target profile", async () => {
+    vi.doMock("../design-knowledge/script-capability-registry.js", () => ({
+      requireScriptCapabilityProfile: (capabilityId: string) => capabilityId === "button" ? ({
+        schema: "kf-script-capability-profile/v1", capabilityId, version: "1.0.0", availability: "supported",
+        actions: [{ semanticAction: "set-visibility", implementation: "restricted-action", availability: "supported", evidence: [{ kind: "compiler", ref: "reviewed#visibility" }] }],
+        events: [{ semanticEvent: "click", kfEvent: "Click", availability: "supported", arguments: [], evidence: [{ kind: "template", ref: "reviewed#click" }] }],
+        methods: [], properties: [], initialization: { supportsConfigureData: false, lifecycleEvents: [] }, limitations: [],
+      }) : ({
+        schema: "kf-script-capability-profile/v1", capabilityId, version: "1.0.0", availability: "planned",
+        actions: [], events: [], methods: [], properties: [{ semanticProperty: "visible", kfProperty: "Visible", readable: true, writable: true, availability: "supported", evidence: [{ kind: "compiler", ref: "reviewed#visible" }] }],
+        initialization: { supportsConfigureData: false, lifecycleEvents: [] }, limitations: [],
+      }),
+    }));
+    const { normalizeActionGraph } = await import("./action-graph.js");
+    const { compileNativeActions } = await import("./action-compiler.js");
+    const data = fixture();
+    const homePage = data.implementation.pages[0]!;
+    if (homePage.compatibility !== "native") throw new Error("native fixture required");
+    homePage.controls.push({ ...homePage.controls[0]!, id: "same-page-target", capabilityId: "text", sourceSolutionNodeId: "same-page-target" });
+    data.implementation.runtimeCorrelation!.controls.push({ semanticControlId: "same-page-target", instanceName: "Text2" });
+    data.plan.actions = [{ id: "navigate", kind: "set-visibility", targetId: "same-page-target", visible: true, afterActionIds: [] }];
+    const result = compileNativeActions({ normalized: normalizeActionGraph(data) });
+    expect(result.actions).toEqual([]);
+    expect(result.scriptRequests[0]).toMatchObject({ reason: "TARGET_CAPABILITY_UNSUPPORTED" });
+  });
+
+  it("normalizes compiled binding contract failures instead of leaking Zod errors", async () => {
+    vi.doMock("../design-knowledge/script-capability-registry.js", () => ({
+      requireScriptCapabilityProfile: () => ({
+        schema: "kf-script-capability-profile/v1", capabilityId: "button", version: "1.0.0", availability: "supported",
+        actions: [{ semanticAction: "navigate-page", implementation: "restricted-action", availability: "supported", evidence: [{ kind: "compiler", ref: "reviewed#navigate" }] }],
+        events: [{ semanticEvent: "click", kfEvent: "bad event", availability: "supported", arguments: [], evidence: [{ kind: "template", ref: "reviewed#click" }] }],
+        methods: [], properties: [], initialization: { supportsConfigureData: false, lifecycleEvents: [] }, limitations: [],
+      }),
+    }));
+    const { normalizeActionGraph } = await import("./action-graph.js");
+    const { compileNativeActions } = await import("./action-compiler.js");
+    const data = fixture();
+    expect(() => compileNativeActions({ normalized: normalizeActionGraph(data) }))
+      .toThrowError(expect.objectContaining({ code: "NATIVE_ACTION_CONTRACT_INVALID", nodeId: "navigate" }));
   });
 });

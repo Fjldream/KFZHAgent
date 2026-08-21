@@ -12,6 +12,7 @@ export type ActionGraphErrorCode =
   | "ACTION_DEPENDENCY_CYCLE"
   | "ACTION_DEPENDENCY_UNKNOWN"
   | "ACTION_INPUT_INVALID"
+  | "ACTION_OVERLAY_HOST_OWNERSHIP_MISMATCH"
   | "ACTION_RUNTIME_CORRELATION_MISSING"
   | "ACTION_SCRIPT_ORPHANED"
   | "ACTION_TRIGGER_MISSING"
@@ -43,9 +44,30 @@ export interface ScriptClosureCandidate {
 export interface NormalizedActionGraph {
   readonly graph: ActionGraph;
   readonly executionOrder: readonly string[];
-  readonly ownerCapabilityIds: ReadonlyMap<string, string>;
   readonly scriptsById: ReadonlyMap<string, ScriptPlan>;
   readonly scriptClosures: ReadonlyMap<string, ScriptClosureCandidate>;
+}
+
+export interface TrustedActionCompilationContext {
+  readonly graph: ActionGraph;
+  readonly controls: readonly {
+    readonly semanticControlId: string;
+    readonly instanceName: string;
+    readonly capabilityId: string;
+    readonly pageId: string;
+  }[];
+  readonly pages: readonly { readonly semanticPageId: string; readonly pageGuid: string }[];
+  readonly overlayHosts: readonly { readonly overlayId: string; readonly controlId: string; readonly pageId: string }[];
+  readonly scripts: readonly ScriptPlan[];
+  readonly scriptClosures: readonly { readonly scriptId: string; readonly closure: ScriptClosureCandidate }[];
+}
+
+const trustedContexts = new WeakMap<NormalizedActionGraph, TrustedActionCompilationContext>();
+
+export function getTrustedActionCompilationContext(
+  normalized: NormalizedActionGraph,
+): TrustedActionCompilationContext | undefined {
+  return trustedContexts.get(normalized);
 }
 
 export interface NormalizeActionGraphInput {
@@ -133,6 +155,33 @@ function validateRuntimeCorrelation(
   }
 }
 
+function validateOverlayOwnership(
+  plan: SolutionImplementationPlan,
+  implementation: UIImplementationSpecV2,
+): void {
+  const plannedHosts = new Map(plan.overlays.map((overlay) => [overlay.id, overlay.hostPageId]));
+  const seen = new Set<string>();
+  for (const page of implementation.pages) {
+    if (page.compatibility !== "native") continue;
+    for (const control of page.controls) {
+      const host = control.overlayHost;
+      if (host === undefined) continue;
+      const plannedHost = plannedHosts.get(host.overlayId);
+      if (seen.has(host.overlayId)
+        || plannedHost === undefined
+        || host.hostPageId !== page.id
+        || plannedHost !== page.id) {
+        throw new ActionGraphNormalizationError(
+          "ACTION_OVERLAY_HOST_OWNERSHIP_MISMATCH",
+          host.overlayId,
+          `${page.id}/${host.hostPageId}/${plannedHost ?? "unknown"}`,
+        );
+      }
+      seen.add(host.overlayId);
+    }
+  }
+}
+
 function resolveTriggerControl(
   owner: SolutionNode,
   controls: readonly NativeControl[],
@@ -161,20 +210,36 @@ function cloneInput(input: NormalizeActionGraphInput): NormalizeActionGraphInput
   }
 }
 
+function deepFreeze<T>(value: T): T {
+  const pending: object[] = [];
+  if (value !== null && typeof value === "object") pending.push(value);
+  const seen = new WeakSet<object>();
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    if (seen.has(current)) continue;
+    seen.add(current);
+    Reflect.ownKeys(current).forEach((key) => {
+      const child = Reflect.get(current, key) as object | null;
+      if (child !== null && typeof child === "object") pending.push(child);
+    });
+    Object.freeze(current);
+  }
+  return value;
+}
+
 export function normalizeActionGraph(input: NormalizeActionGraphInput): NormalizedActionGraph {
   const { plan, implementation } = cloneInput(input);
   const controls = nativeControlsOf(implementation);
   validateRuntimeCorrelation(plan, implementation, controls);
+  validateOverlayOwnership(plan, implementation);
   const correlatedIds = new Set(implementation.runtimeCorrelation?.controls.map((entry) => entry.semanticControlId) ?? []);
   const actionById = new Map(plan.actions.map((action) => [action.id, action]));
   const owners = new Map<string, Map<string, TriggerOwner>>();
-  const ownerCapabilityIds = new Map<string, string>();
 
   for (const owner of nodesOf(plan)) {
     if (owner.kind !== "control" && owner.kind !== "registered-module") continue;
     if (owner.eventBindings.length === 0) continue;
     const runtimeControl = resolveTriggerControl(owner, controls, correlatedIds);
-    ownerCapabilityIds.set(runtimeControl.id, runtimeControl.capabilityId);
     for (const binding of owner.eventBindings) {
       for (const actionId of binding.actionIds) {
         if (!actionById.has(actionId)) throw new ActionGraphNormalizationError("ACTION_UNKNOWN", actionId, owner.id);
@@ -262,5 +327,30 @@ export function normalizeActionGraph(input: NormalizeActionGraphInput): Normaliz
     status: "unverified",
     candidateOutputRefs: script.outputs.map((output) => ({ refKind: output.refKind, refId: output.refId })),
   }));
-  return { graph, executionOrder: Object.freeze(executionOrder), ownerCapabilityIds, scriptsById, scriptClosures };
+  const normalized: NormalizedActionGraph = {
+    graph: deepFreeze(structuredClone(graph)),
+    executionOrder: Object.freeze([...executionOrder]),
+    scriptsById,
+    scriptClosures,
+  };
+  const controlCorrelation = new Map(implementation.runtimeCorrelation!.controls.map((entry) => [entry.semanticControlId, entry.instanceName]));
+  const controlSnapshots = implementation.pages.flatMap((page) => page.compatibility === "native" ? page.controls.map((control) => ({
+    semanticControlId: control.id,
+    instanceName: controlCorrelation.get(control.id)!,
+    capabilityId: control.capabilityId,
+    pageId: page.id,
+  })) : []);
+  const overlayHosts = implementation.pages.flatMap((page) => page.compatibility === "native" ? page.controls.flatMap((control) =>
+    control.overlayHost === undefined ? [] : [{ overlayId: control.overlayHost.overlayId, controlId: control.id, pageId: page.id }]) : []);
+  const context = deepFreeze({
+    graph: structuredClone(graph),
+    controls: controlSnapshots,
+    pages: implementation.runtimeCorrelation!.pages.map((entry) => ({ ...entry })),
+    overlayHosts,
+    scripts: plan.scripts.map((script) => structuredClone(script)),
+    scriptClosures: Array.from(scriptClosures, ([scriptId, closure]) => ({ scriptId, closure: structuredClone(closure) })),
+  } satisfies TrustedActionCompilationContext);
+  deepFreeze(normalized);
+  trustedContexts.set(normalized, context);
+  return normalized;
 }
