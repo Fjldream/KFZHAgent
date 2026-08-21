@@ -244,7 +244,7 @@ export interface CompiledLayoutTree {
 }
 ```
 
-`CompiledLayoutNode.geometry` is the visible viewport geometry. A `scroll-region` additionally emits a bounded `scrollContentExtent: { width; height }`; its descendants may exceed the viewport only within that extent. Scroll content never increases global `pageHeight`. `UIImplementationControlV2` carries the same compiler-owned metadata so native v2 validation can distinguish a page-bounded viewport from its internal scroll coordinate space; Task 4 must map it to KF overflow/clipping rather than flattening or dropping descendants.
+`CompiledLayoutNode.geometry` is the visible viewport geometry. A `scroll-region` additionally emits a bounded `scrollContentExtent: { width; height }`; its descendants may exceed the viewport only within that extent. Scroll content never increases global `pageHeight`. `UIImplementationControlV2` carries an explicit compiler-owned layout metadata discriminant `{ kind, overflow, scrollContentExtent? }`, with extent required exactly for `{ kind: "scroll-region", overflow: "local-scroll" }`, so native v2 validation does not infer scrolling from an ambiguous KF capability ID. The extent must be tightly derived from the owned scroll subtree. For nested scroll regions, the outer owner includes only the inner viewport and the inner owner accounts for its own descendants. Task 4 must map this metadata to KF overflow/clipping rather than flattening or dropping descendants.
 
 - [ ] **Step 1: Write failing layout behavior tests**
 
@@ -321,7 +321,7 @@ export interface ComponentCompileInput {
 }
 ```
 
-The component compiler must preserve `scrollContentExtent` on the emitted native v2 layout control and compile the corresponding KF container overflow/clipping fields; it must not expand page geometry or discard off-viewport scroll descendants.
+The component compiler must preserve the compiled layout metadata and `scrollContentExtent` on the emitted native v2 layout control and compile the corresponding KF container overflow/clipping fields; it must not expand page geometry or discard off-viewport scroll descendants.
 
 - [ ] **Step 1: Write failing component expansion tests**
 
