@@ -56,3 +56,4 @@ export {
   retrieveCapabilities,
   type CapabilityRetrievalInput,
 } from "./planning/capability-retrieval.js";
+export * from "./solution-compile/solution-compiler.js";

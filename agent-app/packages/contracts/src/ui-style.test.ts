@@ -234,6 +234,7 @@ type MutableNativeV2Fixture = {
       compiledStyle?: {
         nativeFields: Record<string, unknown>;
         cssFragments: Array<{ declarations: Record<string, unknown> }>;
+        styleDataNew?: string;
       };
       dataBinding?: { records?: Array<Record<string, unknown>> };
       style?: { declarations: Record<string, unknown>; parts?: Record<string, unknown> };
@@ -905,6 +906,33 @@ describe("KF UI style contracts", () => {
           control.id === "hero-title" ? { ...control, parentId: "missing-parent" } : control),
       }],
     }).success).toBe(false);
+  });
+
+  it("accepts only bounded compiler-owned #domId CSS in compiledStyle.styleDataNew", () => {
+    const valid = mutableNativeV2Fixture();
+    valid.pages[0]!.controls[1]!.compiledStyle!.styleDataNew =
+      "#domId .el-button{border-radius:8px;color:#ffffff}" +
+      "#domId .el-button:hover{background-color:#1d4ed8}";
+    expect(UIImplementationSpecV2Schema.safeParse(valid).success).toBe(true);
+
+    for (const payload of [
+      "body{display:none}",
+      "#other .el-button{color:red}",
+      "#domId{position:fixed}",
+      "#domId{color:red!important}",
+      "#domId{background:url(javascript:alert(1))}",
+      "#domId{color:red}@media all{body{display:none}}",
+      "#domId{color:red;}",
+    ]) {
+      const poisoned = mutableNativeV2Fixture();
+      poisoned.pages[0]!.controls[1]!.compiledStyle!.styleDataNew = payload;
+      expect(UIImplementationSpecV2Schema.safeParse(poisoned).success).toBe(false);
+    }
+
+    const overBudget = mutableNativeV2Fixture();
+    overBudget.pages[0]!.controls[1]!.compiledStyle!.styleDataNew =
+      `#domId{color:#${"a".repeat(32_769)}}`;
+    expect(UIImplementationSpecV2Schema.safeParse(overBudget).success).toBe(false);
   });
 
   it("rejects controls outside pages or parents and overlay hosts on unknown pages", () => {

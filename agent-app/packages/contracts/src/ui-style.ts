@@ -649,9 +649,54 @@ const CompiledStyleWarningSchema = z.object({
   message: z.string().trim().min(1).max(500),
 }).strict();
 
+const MAX_PERSISTED_STYLE_BYTES = 32_768;
+const persistedSelector = /^#domId(?:[ A-Za-z0-9_.:>-]{0,300})$/;
+const persistedProperty = new Set([
+  "background-color", "background-image", "border-color", "border-top-color", "border-right-color",
+  "border-bottom-color", "border-left-color", "border-top-width", "border-right-width",
+  "border-bottom-width", "border-left-width", "border-radius", "border-top-left-radius",
+  "border-top-right-radius", "border-bottom-right-radius", "border-bottom-left-radius", "box-shadow",
+  "color", "column-gap", "font-size", "font-weight", "gap", "letter-spacing", "line-height",
+  "margin", "object-fit", "opacity", "outline", "outline-offset", "overflow", "padding",
+  "padding-left", "padding-right", "padding-top", "padding-bottom", "text-align", "text-overflow",
+  "transform", "transition", "white-space",
+]);
+
+function isBoundedPersistedStyleData(value: string): boolean {
+  if (value.length > MAX_PERSISTED_STYLE_BYTES) return false;
+  let cursor = 0;
+  while (cursor < value.length) {
+    const open = value.indexOf("{", cursor);
+    const close = value.indexOf("}", open + 1);
+    if (open <= cursor || close < 0 || value.indexOf("{", open + 1) !== -1 && value.indexOf("{", open + 1) < close) return false;
+    const selector = value.slice(cursor, open);
+    if (!selector.split(", ").every((entry) => persistedSelector.test(entry))) return false;
+    const body = value.slice(open + 1, close);
+    if (body.length === 0 || body.endsWith(";") || /[{}@<>]|!important|javascript\s*:|vbscript\s*:|expression\s*\(|behavior\s*:|\/\*|\*\//i.test(body)) return false;
+    const declarations = body.split(";");
+    if (declarations.length > 64 || declarations.some((declaration) => {
+      const colon = declaration.indexOf(":");
+      if (colon <= 0 || colon === declaration.length - 1) return true;
+      const property = declaration.slice(0, colon);
+      const cssValue = declaration.slice(colon + 1);
+      if (!persistedProperty.has(property) || cssValue.length > 2_048 || /[{};]/.test(cssValue)) return true;
+      const withoutApprovedAsset = cssValue.replace(
+        /url\("project\/res\/images\/[0-9a-f]{64}\.(?:png|jpg|webp)"\)/g,
+        "approved-asset",
+      );
+      return /\burl\s*\(/i.test(withoutApprovedAsset);
+    })) return false;
+    cursor = close + 1;
+  }
+  return cursor === value.length;
+}
+
 export const CompiledStyleSpecSchema = z.object({
   nativeFields: ImplementationDataRecordSchema,
   cssFragments: z.array(CompiledStyleFragmentSchema).max(128),
+  styleDataNew: z.string().max(MAX_PERSISTED_STYLE_BYTES)
+    .refine(isBoundedPersistedStyleData, "persisted styleDataNew must be bounded compiler-owned #domId CSS")
+    .default(""),
   warnings: z.array(CompiledStyleWarningSchema).max(64),
 }).strict();
 
