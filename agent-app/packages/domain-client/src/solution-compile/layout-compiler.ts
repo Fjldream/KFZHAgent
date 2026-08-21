@@ -35,6 +35,7 @@ export interface CompiledLayoutNode {
   readonly geometry: LayoutGeometry;
   readonly zIndex: number;
   readonly overflow: "visible" | "local-scroll";
+  readonly scrollContentExtent?: Readonly<{ width: number; height: number }>;
   readonly children: readonly CompiledLayoutNode[];
 }
 
@@ -94,31 +95,37 @@ interface AxisAllocation {
   readonly sizes: readonly number[];
 }
 
+interface AxisBounds {
+  readonly minimum: number;
+  readonly preferred: number;
+  readonly maximum: number;
+}
+
 export function compileLayout(input: LayoutCompileInput): CompiledLayoutTree {
   const nodes = validateInput(input);
   const pageWidth = input.page.canvas === "large-display" ? 1920 : 1440;
   const density = densityTokens(input.expandedRoot.intent.density);
   const pageContentWidth = pageWidth - density.pagePadding * 2;
+  const pageContentHeight = MAX_DIMENSION - density.pagePadding * 2;
   const rootIntrinsic = requireIntrinsic(input.intrinsicByNodeId, input.expandedRoot.id);
+  const rootWidthBounds = axisBoundsFromMeasured(input.expandedRoot, rootIntrinsic, "width");
   const rootOwnsGridAttempts = input.expandedRoot.kind === "layout"
     && (input.expandedRoot.layout === "grid" || input.expandedRoot.layout === "asymmetric-grid");
-  if (rootIntrinsic.minWidth > pageContentWidth && !rootOwnsGridAttempts) {
-    unsatisfiable(input.expandedRoot.id, rootIntrinsic.minWidth, rootIntrinsic.minHeight, pageContentWidth, rootIntrinsic.preferredHeight, [], false);
+  if (rootWidthBounds.minimum > pageContentWidth && !rootOwnsGridAttempts) {
+    unsatisfiable(input.expandedRoot.id, rootWidthBounds.minimum, rootIntrinsic.minHeight, pageContentWidth, pageContentHeight, [], false);
   }
   const context: CompileContext = { intrinsic: input.intrinsicByNodeId, byId: new Map() };
-  const rootHeight = preferredHeight(context, input.expandedRoot, pageContentWidth, false);
+  const rootWidth = Math.min(pageContentWidth, rootUsesAvailableWidth(input.expandedRoot) ? rootWidthBounds.maximum : rootWidthBounds.preferred);
+  const rootHeight = preferredHeight(context, input.expandedRoot, rootWidth, false);
   const root = compileNode(context, input.expandedRoot, {
-    x: density.pagePadding,
+    x: alignedOffset(density.pagePadding, pageContentWidth, rootWidth, input.expandedRoot.intent.align),
     y: density.pagePadding,
-    width: pageContentWidth,
+    width: rootWidth,
     height: rootHeight,
   }, 0, false);
-  let pageHeight = round(root.geometry.y + root.geometry.height + density.pagePadding);
-  for (const node of context.byId.values()) {
-    pageHeight = Math.max(pageHeight, round(node.geometry.y + node.geometry.height + density.pagePadding));
-  }
+  const pageHeight = round(root.geometry.y + root.geometry.height + density.pagePadding);
   if (!finiteNonnegative(pageHeight) || pageHeight > MAX_DIMENSION) {
-    unsatisfiable(root.id, root.geometry.width, root.geometry.height, pageWidth, MAX_DIMENSION, [], root.overflow === "local-scroll");
+    unsatisfiable(root.id, root.geometry.width, root.geometry.height, pageContentWidth, pageContentHeight, [], root.overflow === "local-scroll");
   }
   const result: CompiledLayoutTree = Object.freeze({ pageWidth, pageHeight, root, byId: context.byId });
   auditResult(result, nodes.length);
@@ -150,6 +157,7 @@ function validateInput(input: LayoutCompileInput): readonly SolutionNode[] {
         const duplicate = node.children.find((child, index) => node.children.findIndex((candidate) => candidate.id === child.id) !== index);
         inputInvalid(duplicate?.id ?? node.id);
       }
+      node.children.forEach(validateGroupShape);
       validateGroupCycles(node.children, childIds);
       node.children.forEach((child) => visit(child, childIds));
     } else if (node.kind === "registered-module" && node.slots.some((slot) => slot.children.length > 0)) {
@@ -210,8 +218,14 @@ function validateIntent(node: SolutionNode): void {
   if (!DENSITIES.includes(node.intent.density) || !IMPORTANCE.includes(node.intent.importance) || !ALIGNMENTS.includes(node.intent.align)) inputInvalid(node.id);
   if (!Number.isInteger(node.intent.visualWeight) || node.intent.visualWeight < 1 || node.intent.visualWeight > 5) inputInvalid(node.id);
   if (!Number.isInteger(node.intent.readingOrder) || node.intent.readingOrder < 0 || node.intent.readingOrder > 1_000) inputInvalid(node.id);
+  validateGroupShape(node);
   validateSizeIntent(node.id, node.intent.width, "width");
   validateSizeIntent(node.id, node.intent.height, "height");
+}
+
+function validateGroupShape(node: SolutionNode): void {
+  if (!Array.isArray(node.intent.groupWith)
+    || node.intent.groupWith.some((target) => typeof target !== "string" || target.length === 0 || target.length > 100)) inputInvalid(node.id);
 }
 
 function validateSizeIntent(nodeId: string, size: SizeIntent, axis: Axis): void {
@@ -236,23 +250,19 @@ function validateIntrinsic(nodeId: string, value: IntrinsicSize): void {
 }
 
 function validateIntentAgainstIntrinsic(node: SolutionNode, measured: IntrinsicSize): void {
-  const width = node.intent.width;
-  const height = node.intent.height;
-  const minimumWidth = Math.max(measured.minWidth, width.min ?? 0);
-  const minimumHeight = Math.max(measured.minHeight, height.min ?? 0);
-  if (width.mode === "fixed" && width.value !== undefined && (width.value < minimumWidth || (width.max !== undefined && width.value > width.max))) {
-    unsatisfiable(node.id, minimumWidth, minimumHeight, width.value, measured.preferredHeight, [], false);
+  const width = axisRangeFromMeasured(node, measured, "width");
+  const height = axisRangeFromMeasured(node, measured, "height");
+  if (width.minimum > width.maximum || height.minimum > height.maximum) {
+    unsatisfiable(node.id, width.minimum, height.minimum, width.maximum, height.maximum, [], false);
   }
-  if (height.mode === "fixed" && height.value !== undefined) {
-    const violatesDeclared = (height.min !== undefined && height.value < height.min) || (height.max !== undefined && height.value > height.max);
-    const violatesContent = height.value < measured.minHeight && !(node.kind === "layout" && node.layout === "scroll-region");
-    if (violatesDeclared || violatesContent) unsatisfiable(node.id, minimumWidth, minimumHeight, measured.preferredWidth, height.value, [], false);
-  }
-  if (width.max !== undefined && width.max < measured.minWidth) {
-    unsatisfiable(node.id, minimumWidth, minimumHeight, width.max, measured.preferredHeight, [], false);
-  }
-  if (height.max !== undefined && height.max < measured.minHeight && !(node.kind === "layout" && node.layout === "scroll-region")) {
-    unsatisfiable(node.id, minimumWidth, minimumHeight, measured.preferredWidth, height.max, [], false);
+  for (const axis of ["width", "height"] as const) {
+    const intent = node.intent[axis];
+    if ((intent.mode === "fixed" || intent.mode === "viewport") && intent.value !== undefined) {
+      const bounds = axis === "width" ? width : height;
+      if (intent.value < bounds.minimum || intent.value > bounds.maximum) {
+        unsatisfiable(node.id, width.minimum, height.minimum, axis === "width" ? intent.value : width.preferred, axis === "height" ? intent.value : height.preferred, [], false);
+      }
+    }
   }
 }
 
@@ -264,6 +274,7 @@ function compileNode(
   scrollAllowed: boolean,
 ): CompiledLayoutNode {
   const box = freezeGeometry(geometry);
+  assertGeometryWithinBounds(context, node, box, scrollAllowed);
   let children: readonly CompiledLayoutNode[] = Object.freeze([]);
   if (node.kind === "layout") {
     const ordered = orderedChildren(node);
@@ -275,11 +286,14 @@ function compileNode(
     } else if (node.layout === "grid" || node.layout === "asymmetric-grid") {
       children = compileGrid(context, node, ordered, box, zIndex, childScrollAllowed);
     } else if (node.layout === "stack" || node.layout === "overlay-anchor") {
-      children = Object.freeze(ordered.map((child, index) => compileNode(context, child, box, zIndex + index + 1, childScrollAllowed)));
+      children = compileStack(context, node, ordered, box, zIndex, childScrollAllowed);
     } else {
       children = compileDock(context, node, ordered, box, zIndex, childScrollAllowed);
     }
   }
+  const scrollContentExtent = node.kind === "layout" && node.layout === "scroll-region"
+    ? contentExtent(box, children)
+    : undefined;
   const compiled: CompiledLayoutNode = Object.freeze({
     id: node.id,
     kind: node.kind,
@@ -287,10 +301,99 @@ function compileNode(
     geometry: box,
     zIndex,
     overflow: node.kind === "layout" && node.layout === "scroll-region" ? "local-scroll" : "visible",
+    ...(scrollContentExtent === undefined ? {} : { scrollContentExtent }),
     children,
   });
   context.byId.set(node.id, compiled);
   return compiled;
+}
+
+function compileStack(
+  context: CompileContext,
+  parent: LayoutNode,
+  children: readonly SolutionNode[],
+  box: LayoutGeometry,
+  zIndex: number,
+  scrollAllowed: boolean,
+): readonly CompiledLayoutNode[] {
+  const width = sharedAxisSize(context, parent, children, "width", box, scrollAllowed);
+  const heightBounds = stackHeightBounds(context, parent, children, width, scrollAllowed);
+  const height = Math.min(box.height, heightBounds.maximum);
+  if (height < heightBounds.minimum) {
+    unsatisfiable(parent.id, width, heightBounds.minimum, width, box.height, [], scrollAllowed);
+  }
+  const shared = {
+    x: alignedOffset(box.x, box.width, width, parent.intent.align),
+    y: alignedOffset(box.y, box.height, height, parent.intent.align),
+    width,
+    height,
+  };
+  return Object.freeze(children.map((child, index) => compileNode(context, child, shared, zIndex + index + 1, scrollAllowed)));
+}
+
+function stackHeightBounds(
+  context: CompileContext,
+  parent: LayoutNode,
+  children: readonly SolutionNode[],
+  width: number,
+  scrollAllowed: boolean,
+): AxisBounds {
+  const minimum = Math.max(...children.map((child) => minimumHeight(context, child, width, scrollAllowed)));
+  const maximum = Math.min(...children.map((child) => axisMaximum(context, child, "height")));
+  if (minimum > maximum) {
+    unsatisfiable(parent.id, width, minimum, width, maximum, [], scrollAllowed);
+  }
+  const preferred = clamp(Math.max(...children.map((child) => preferredHeight(context, child, width, scrollAllowed))), minimum, maximum);
+  return Object.freeze({ minimum, preferred, maximum });
+}
+
+function sharedWidthForMeasurement(
+  context: CompileContext,
+  parent: LayoutNode,
+  children: readonly SolutionNode[],
+  availableWidth: number,
+  scrollAllowed: boolean,
+): number {
+  const bounds = children.map((child) => axisBounds(context, child, "width"));
+  const minimum = Math.max(...bounds.map((value) => value.minimum));
+  const maximum = Math.min(availableWidth, ...bounds.map((value) => value.maximum));
+  if (minimum > maximum) {
+    unsatisfiable(parent.id, minimum, axisMinimum(context, parent, "height"), maximum, axisPreferred(context, parent, "height"), [], scrollAllowed);
+  }
+  return round(maximum);
+}
+
+function sharedAxisSize(
+  context: CompileContext,
+  parent: LayoutNode,
+  children: readonly SolutionNode[],
+  axis: Axis,
+  box: LayoutGeometry,
+  scrollAllowed: boolean,
+): number {
+  const available = axis === "width" ? box.width : box.height;
+  const bounds = children.map((child) => axisBounds(context, child, axis));
+  const minimum = Math.max(...bounds.map((value) => value.minimum));
+  const maximum = Math.min(available, ...bounds.map((value) => value.maximum));
+  if (minimum > maximum) {
+    unsatisfiable(parent.id, axis === "width" ? minimum : axisMinimum(context, parent, "width"), axis === "height" ? minimum : axisMinimum(context, parent, "height"), axis === "width" ? maximum : box.width, axis === "height" ? maximum : box.height, [], scrollAllowed);
+  }
+  return round(maximum);
+}
+
+function contentExtent(
+  viewport: LayoutGeometry,
+  children: readonly CompiledLayoutNode[],
+): Readonly<{ width: number; height: number }> {
+  let right = viewport.x + viewport.width;
+  let bottom = viewport.y + viewport.height;
+  const visit = (node: CompiledLayoutNode): void => {
+    right = Math.max(right, node.geometry.x + node.geometry.width);
+    bottom = Math.max(bottom, node.geometry.y + node.geometry.height);
+    node.children.forEach(visit);
+  };
+  children.forEach(visit);
+  return Object.freeze({ width: round(right - viewport.x), height: round(bottom - viewport.y) });
 }
 
 function compileRow(
@@ -308,7 +411,9 @@ function compileRow(
     const minimum = axisMinimum(context, child, "height");
     const natural = preferredHeight(context, child, width, scrollAllowed);
     if (minimum > box.height && !scrollAllowed) unsatisfiable(child.id, width, minimum, width, box.height, [], false);
-    const height = child.intent.align === "stretch" ? box.height : Math.min(box.height, natural);
+    const height = child.intent.align === "stretch"
+      ? Math.min(box.height, axisMaximum(context, child, "height"))
+      : Math.min(box.height, natural);
     const y = alignedOffset(box.y, box.height, height, child.intent.align);
     const compiled = compileNode(context, child, { x, y, width, height }, zIndex, scrollAllowed);
     x = round(x + width + allocation.gap);
@@ -378,11 +483,13 @@ function compileGrid(
     const cellWidth = tracks.widths[column]!;
     const rowHeight = rowHeights[row]!;
     const width = child.intent.align === "stretch" || child.intent.width.mode === "fill"
-      ? cellWidth
+      ? Math.min(cellWidth, axisMaximum(context, child, "width"))
       : Math.min(cellWidth, axisPreferred(context, child, "width"));
     const x = alignedOffset(cellX, cellWidth, width, child.intent.align);
     const naturalHeight = preferredHeight(context, child, width, scrollAllowed);
-    const height = child.intent.align === "stretch" ? rowHeight : Math.min(rowHeight, naturalHeight);
+    const height = child.intent.align === "stretch"
+      ? Math.min(rowHeight, axisMaximum(context, child, "height"))
+      : Math.min(rowHeight, naturalHeight);
     return compileNode(context, child, { x, y: alignedOffset(rowY[row]!, rowHeight, height, child.intent.align), width, height }, zIndex, scrollAllowed);
   }));
 }
@@ -401,15 +508,16 @@ function compileDock(
   const south = children.length === 5 ? children[3] : undefined;
   const center = children[children.length - 1]!;
   const middle = [west, center, east].filter((child): child is SolutionNode => child !== undefined);
+  const horizontal = allocateAxis(context, parent, middle, "width", box.width, box.height, scrollAllowed);
   const verticalGapCount = south === undefined ? 1 : 2;
   const bandMinimums = [
     minimumHeight(context, north, box.width, scrollAllowed),
-    Math.max(...middle.map((child) => minimumHeight(context, child, box.width, scrollAllowed))),
+    Math.max(...middle.map((child, index) => minimumHeight(context, child, horizontal.sizes[index]!, scrollAllowed))),
     ...(south === undefined ? [] : [minimumHeight(context, south, box.width, scrollAllowed)]),
   ];
   const bandPreferred = [
     preferredHeight(context, north, box.width, scrollAllowed),
-    Math.max(...middle.map((child) => preferredHeight(context, child, box.width, scrollAllowed))),
+    Math.max(...middle.map((child, index) => preferredHeight(context, child, horizontal.sizes[index]!, scrollAllowed))),
     ...(south === undefined ? [] : [preferredHeight(context, south, box.width, scrollAllowed)]),
   ];
   const gap = box.height - preferredGap(parent) * verticalGapCount >= sum(bandMinimums)
@@ -427,20 +535,28 @@ function compileDock(
     Math.max(...middle.map((child) => child.intent.visualWeight * importanceWeight(child.intent.importance))),
     ...(south === undefined ? [] : [south.intent.visualWeight * importanceWeight(south.intent.importance)]),
   ];
-  const undistributed = distribute(bandHeights, bandHeights.map((_height, index) => index), usableHeight - sum(bandMinimums), bandPreferred, bandWeights);
-  bandHeights[1] = bandHeights[1]! + undistributed;
+  distribute(bandHeights, bandHeights.map((_height, index) => index), usableHeight - sum(bandMinimums), bandPreferred, bandWeights);
   const northHeight = bandHeights[0]!;
-  const middleHeight = bandHeights[1];
+  const middleHeight = bandHeights[1]!;
   const southHeight = south === undefined ? 0 : bandHeights[2]!;
-  const horizontal = allocateAxis(context, parent, middle, "width", box.width, middleHeight, scrollAllowed);
   const rectangles = new Map<string, LayoutGeometry>();
-  rectangles.set(north.id, { x: box.x, y: box.y, width: box.width, height: northHeight });
+  const northWidth = crossAxisWidth(context, north, box.width, northHeight, scrollAllowed);
+  rectangles.set(north.id, { x: alignedOffset(box.x, box.width, northWidth, north.intent.align), y: box.y, width: northWidth, height: northHeight });
   let x = box.x;
   middle.forEach((child, index) => {
-    rectangles.set(child.id, { x, y: box.y + northHeight + gap, width: horizontal.sizes[index]!, height: middleHeight });
-    x = round(x + horizontal.sizes[index]! + horizontal.gap);
+    const width = horizontal.sizes[index]!;
+    const naturalHeight = preferredHeight(context, child, width, scrollAllowed);
+    const height = child.intent.align === "stretch"
+      ? Math.min(middleHeight, axisMaximum(context, child, "height"))
+      : Math.min(middleHeight, naturalHeight);
+    const bandY = box.y + northHeight + gap;
+    rectangles.set(child.id, { x, y: alignedOffset(bandY, middleHeight, height, child.intent.align), width, height });
+    x = round(x + width + horizontal.gap);
   });
-  if (south !== undefined) rectangles.set(south.id, { x: box.x, y: box.y + box.height - southHeight, width: box.width, height: southHeight });
+  if (south !== undefined) {
+    const southWidth = crossAxisWidth(context, south, box.width, southHeight, scrollAllowed);
+    rectangles.set(south.id, { x: alignedOffset(box.x, box.width, southWidth, south.intent.align), y: box.y + box.height - southHeight, width: southWidth, height: southHeight });
+  }
   return Object.freeze(children.map((child) => compileNode(context, child, requireRectangle(rectangles, child.id), zIndex, scrollAllowed)));
 }
 
@@ -454,7 +570,9 @@ function preferredHeight(context: CompileContext, node: SolutionNode, availableW
       const widths = allocateAxis(context, node, children, "width", availableWidth, measured.preferredHeight, scrollAllowed).sizes;
       contentHeight = Math.max(measured.preferredHeight, ...children.map((child, index) => preferredHeight(context, child, widths[index]!, scrollAllowed)));
     } else if (node.layout === "column" || node.layout === "scroll-region") {
-      contentHeight = Math.max(measured.preferredHeight, sum(children.map((child) => preferredHeight(context, child, availableWidth, scrollAllowed || node.layout === "scroll-region"))) + gap * (children.length - 1));
+      const childScrollAllowed = scrollAllowed || node.layout === "scroll-region";
+      const widths = children.map((child) => crossAxisWidth(context, child, availableWidth, axisPreferred(context, child, "height"), childScrollAllowed));
+      contentHeight = Math.max(measured.preferredHeight, sum(children.map((child, index) => preferredHeight(context, child, widths[index]!, childScrollAllowed))) + gap * (children.length - 1));
     } else if (node.layout === "grid" || node.layout === "asymmetric-grid") {
       const tracks = gridTracks(context, node, children, availableWidth, scrollAllowed);
       const rows: number[] = [];
@@ -465,14 +583,16 @@ function preferredHeight(context: CompileContext, node: SolutionNode, availableW
       });
       contentHeight = Math.max(measured.preferredHeight, sum(rows) + tracks.gap * Math.max(0, rows.length - 1));
     } else if (node.layout === "stack" || node.layout === "overlay-anchor") {
-      contentHeight = Math.max(measured.preferredHeight, ...children.map((child) => preferredHeight(context, child, availableWidth, scrollAllowed)));
+      const sharedWidth = sharedWidthForMeasurement(context, node, children, availableWidth, scrollAllowed);
+      contentHeight = Math.max(measured.preferredHeight, stackHeightBounds(context, node, children, sharedWidth, scrollAllowed).preferred);
     } else {
       contentHeight = Math.max(measured.preferredHeight, dockPreferredHeight(context, node, children, availableWidth, scrollAllowed));
     }
   }
-  const resolved = resolveHeightIntent(node.intent.height, measured, contentHeight);
+  const bounds = axisBoundsFromMeasured(node, measured, "height");
+  const resolved = resolveHeightIntent(node.intent.height, bounds, contentHeight);
   const minimum = minimumHeight(context, node, availableWidth, scrollAllowed || (node.kind === "layout" && node.layout === "scroll-region"));
-  if (resolved < minimum && !(node.kind === "layout" && node.layout === "scroll-region")) {
+  if ((resolved < minimum || minimum > bounds.maximum) && !(node.kind === "layout" && node.layout === "scroll-region")) {
     unsatisfiable(node.id, axisMinimum(context, node, "width"), minimum, availableWidth, resolved, [], scrollAllowed);
   }
   return round(resolved);
@@ -486,7 +606,9 @@ function minimumHeight(context: CompileContext, node: SolutionNode, availableWid
   if (node.layout === "row" || node.layout === "split" || node.layout === "sidebar-content" || node.layout === "master-detail") {
     required = Math.max(...children.map((child) => minimumHeight(context, child, availableWidth, scrollAllowed)));
   } else if (node.layout === "column" || node.layout === "scroll-region") {
-    required = sum(children.map((child) => minimumHeight(context, child, availableWidth, scrollAllowed))) + gap * (children.length - 1);
+    const childScrollAllowed = scrollAllowed || node.layout === "scroll-region";
+    const widths = children.map((child) => crossAxisWidth(context, child, availableWidth, axisMinimum(context, child, "height"), childScrollAllowed));
+    required = sum(children.map((child, index) => minimumHeight(context, child, widths[index]!, childScrollAllowed))) + gap * (children.length - 1);
   } else if (node.layout === "grid" || node.layout === "asymmetric-grid") {
     const tracks = gridTracks(context, node, children, availableWidth, scrollAllowed);
     const rows: number[] = [];
@@ -496,7 +618,8 @@ function minimumHeight(context: CompileContext, node: SolutionNode, availableWid
     });
     required = sum(rows) + minimumGap(node) * Math.max(0, rows.length - 1);
   } else if (node.layout === "stack" || node.layout === "overlay-anchor") {
-    required = Math.max(...children.map((child) => minimumHeight(context, child, availableWidth, scrollAllowed)));
+    const sharedWidth = sharedWidthForMeasurement(context, node, children, availableWidth, scrollAllowed);
+    required = stackHeightBounds(context, node, children, sharedWidth, scrollAllowed).minimum;
   } else {
     required = dockMinimumHeight(context, node, children, availableWidth, scrollAllowed);
   }
@@ -507,15 +630,19 @@ function minimumHeight(context: CompileContext, node: SolutionNode, availableWid
 function dockPreferredHeight(context: CompileContext, parent: LayoutNode, children: readonly SolutionNode[], width: number, scrollAllowed: boolean): number {
   const north = preferredHeight(context, children[0]!, width, scrollAllowed);
   const south = children.length === 5 ? preferredHeight(context, children[3]!, width, scrollAllowed) : 0;
-  const middle = dockMiddle(children).map((child) => preferredHeight(context, child, width, scrollAllowed));
-  return north + Math.max(...middle) + south + preferredGap(parent) * (south === 0 ? 1 : 2);
+  const middle = dockMiddle(children);
+  const widths = allocateAxis(context, parent, middle, "width", width, axisPreferred(context, parent, "height"), scrollAllowed).sizes;
+  const heights = middle.map((child, index) => preferredHeight(context, child, widths[index]!, scrollAllowed));
+  return north + Math.max(...heights) + south + preferredGap(parent) * (south === 0 ? 1 : 2);
 }
 
 function dockMinimumHeight(context: CompileContext, parent: LayoutNode, children: readonly SolutionNode[], width: number, scrollAllowed: boolean): number {
   const north = minimumHeight(context, children[0]!, width, scrollAllowed);
   const south = children.length === 5 ? minimumHeight(context, children[3]!, width, scrollAllowed) : 0;
-  const middle = dockMiddle(children).map((child) => minimumHeight(context, child, width, scrollAllowed));
-  return north + Math.max(...middle) + south + minimumGap(parent) * (south === 0 ? 1 : 2);
+  const middle = dockMiddle(children);
+  const widths = allocateAxis(context, parent, middle, "width", width, axisMinimum(context, parent, "height"), scrollAllowed).sizes;
+  const heights = middle.map((child, index) => minimumHeight(context, child, widths[index]!, scrollAllowed));
+  return north + Math.max(...heights) + south + minimumGap(parent) * (south === 0 ? 1 : 2);
 }
 
 function dockMiddle(children: readonly SolutionNode[]): readonly SolutionNode[] {
@@ -535,8 +662,11 @@ function allocateAxis(
 ): AxisAllocation {
   const preferred = preferredGap(parent);
   const minimum = minimumGap(parent);
-  const minima = children.map((child) => axis === "height"
-    ? minimumHeight(context, child, crossAvailable, scrollAllowed)
+  const crossSizes = children.map((child) => axis === "height"
+    ? crossAxisWidth(context, child, crossAvailable, axisPreferred(context, child, "height"), scrollAllowed)
+    : crossAvailable);
+  const minima = children.map((child, index) => axis === "height"
+    ? minimumHeight(context, child, crossSizes[index]!, scrollAllowed)
     : axisMinimum(context, child, axis));
   const minimumTotal = sum(minima);
   const preferredSpaces = preferred * Math.max(0, children.length - 1);
@@ -562,13 +692,13 @@ function allocateAxis(
     for (const importance of ["primary", "secondary", "supporting"] as const) {
       const indexes = children.map((_child, index) => index).filter((index) => children[index]!.intent[axis].mode === mode && children[index]!.intent.importance === importance);
       remaining = distribute(sizes, indexes, remaining, indexes.map((index) => axis === "height"
-        ? preferredHeight(context, children[index]!, crossAvailable, scrollAllowed)
+        ? preferredHeight(context, children[index]!, crossSizes[index]!, scrollAllowed)
         : axisPreferred(context, children[index]!, axis)), indexes.map(() => 1));
     }
   }
   for (const mode of ["ratio", "fill"] as const) {
     const indexes = children.map((_child, index) => index).filter((index) => children[index]!.intent[axis].mode === mode);
-    const targets = indexes.map(() => usable);
+    const targets = indexes.map((index) => axisMaximum(context, children[index]!, axis));
     const weights = indexes.map((index) => {
       const child = children[index]!;
       const ratio = mode === "ratio" ? child.intent[axis].value ?? 1 : 1;
@@ -617,7 +747,10 @@ function gridTracks(
       if (parent.layout === "grid") {
         const width = trackSpace / columns;
         if (children.every((child) => axisMinimum(context, child, "width") <= width)) {
-          return Object.freeze({ columns, gap, widths: Object.freeze(Array.from({ length: columns }, () => round(width))) });
+          const widths = cumulativeRoundedSizes(Array.from({ length: columns }, () => width), trackSpace);
+          if (children.every((child, index) => axisMinimum(context, child, "width") <= widths[index % columns]! + 0.01)) {
+            return Object.freeze({ columns, gap, widths });
+          }
         }
       } else {
         const minima = Array.from({ length: columns }, (_value, column) => Math.max(...children.filter((_child, index) => index % columns === column).map((child) => axisMinimum(context, child, "width"))));
@@ -625,7 +758,7 @@ function gridTracks(
           const weights = Array.from({ length: columns }, (_value, column) => Math.max(...children.filter((_child, index) => index % columns === column).map((child) => child.intent.visualWeight)));
           const widths = [...minima];
           distribute(widths, widths.map((_value, index) => index), trackSpace - sum(minima), widths.map(() => trackSpace), weights);
-          return Object.freeze({ columns, gap, widths: Object.freeze(widths.map(round)) });
+          return Object.freeze({ columns, gap, widths: cumulativeRoundedSizes(widths, trackSpace) });
         }
       }
     }
@@ -683,35 +816,67 @@ function compareCodePoints(left: string, right: string): number {
 function crossAxisWidth(context: CompileContext, node: SolutionNode, available: number, height: number, scrollAllowed: boolean): number {
   const minimum = axisMinimum(context, node, "width");
   if (minimum > available) unsatisfiable(node.id, minimum, axisMinimum(context, node, "height"), available, height, [], scrollAllowed);
-  if (node.intent.align === "stretch" || node.intent.width.mode === "fill") return available;
+  if (node.intent.align === "stretch" || node.intent.width.mode === "fill") return Math.min(available, axisMaximum(context, node, "width"));
   return Math.min(available, axisPreferred(context, node, "width"));
 }
 
 function axisMinimum(context: CompileContext, node: SolutionNode, axis: Axis): number {
-  const measured = requireIntrinsic(context.intrinsic, node.id);
-  const size = node.intent[axis];
-  const intrinsicMinimum = axis === "width" ? measured.minWidth : measured.minHeight;
-  if (size.mode === "fixed" && size.value !== undefined) return size.value;
-  const declaredMinimum = Math.max(intrinsicMinimum, size.min ?? 0);
-  if (size.mode === "viewport" && size.value !== undefined) return Math.max(declaredMinimum, size.value);
-  return declaredMinimum;
+  return axisBounds(context, node, axis).minimum;
 }
 
 function axisPreferred(context: CompileContext, node: SolutionNode, axis: Axis): number {
-  const measured = requireIntrinsic(context.intrinsic, node.id);
-  const size = node.intent[axis];
-  const intrinsicPreferred = axis === "width" ? measured.preferredWidth : measured.preferredHeight;
-  if (size.mode === "fixed" && size.value !== undefined) return size.value;
-  if (size.mode === "viewport" && size.value !== undefined) return size.value;
-  const maximum = size.max ?? (axis === "width" ? measured.maxWidth : measured.maxHeight);
-  return clamp(intrinsicPreferred, axisMinimum(context, node, axis), maximum);
+  return axisBounds(context, node, axis).preferred;
 }
 
-function resolveHeightIntent(size: NodeIntent["height"], measured: IntrinsicSize, contentHeight: number): number {
-  if (size.mode === "fixed" && size.value !== undefined) return size.value;
-  if (size.mode === "minmax" && size.min !== undefined && size.max !== undefined) return clamp(Math.max(measured.preferredHeight, contentHeight), size.min, size.max);
-  if (size.mode === "viewport" && size.value !== undefined) return size.value;
-  return Math.max(measured.preferredHeight, contentHeight);
+function axisMaximum(context: CompileContext, node: SolutionNode, axis: Axis): number {
+  return axisBounds(context, node, axis).maximum;
+}
+
+function axisBounds(context: CompileContext, node: SolutionNode, axis: Axis): AxisBounds {
+  return axisBoundsFromMeasured(node, requireIntrinsic(context.intrinsic, node.id), axis);
+}
+
+function axisBoundsFromMeasured(node: SolutionNode, measured: IntrinsicSize, axis: Axis): AxisBounds {
+  const size = node.intent[axis];
+  const intrinsicPreferred = axis === "width" ? measured.preferredWidth : measured.preferredHeight;
+  const range = axisRangeFromMeasured(node, measured, axis);
+  if ((size.mode === "fixed" || size.mode === "viewport") && size.value !== undefined) {
+    return Object.freeze({ minimum: size.value, preferred: size.value, maximum: size.value });
+  }
+  return Object.freeze({ minimum: range.minimum, preferred: clamp(intrinsicPreferred, range.minimum, range.maximum), maximum: range.maximum });
+}
+
+function axisRangeFromMeasured(node: SolutionNode, measured: IntrinsicSize, axis: Axis): AxisBounds {
+  const size = node.intent[axis];
+  const intrinsicMinimum = axis === "width" ? measured.minWidth : measured.minHeight;
+  const intrinsicPreferred = axis === "width" ? measured.preferredWidth : measured.preferredHeight;
+  const intrinsicMaximum = axis === "width" ? measured.maxWidth : measured.maxHeight;
+  const minimum = Math.max(intrinsicMinimum, size.min ?? 0);
+  const maximum = Math.min(intrinsicMaximum, size.max ?? intrinsicMaximum);
+  return Object.freeze({ minimum, preferred: clamp(intrinsicPreferred, minimum, maximum), maximum });
+}
+
+function resolveHeightIntent(size: NodeIntent["height"], bounds: AxisBounds, contentHeight: number): number {
+  if ((size.mode === "fixed" || size.mode === "viewport") && size.value !== undefined) return size.value;
+  return clamp(Math.max(bounds.preferred, contentHeight), bounds.minimum, bounds.maximum);
+}
+
+function rootUsesAvailableWidth(node: SolutionNode): boolean {
+  return node.intent.width.mode === "fill" || node.intent.width.mode === "ratio";
+}
+
+function assertGeometryWithinBounds(
+  context: CompileContext,
+  node: SolutionNode,
+  geometry: LayoutGeometry,
+  scrollAllowed: boolean,
+): void {
+  const width = axisBounds(context, node, "width");
+  const height = axisBounds(context, node, "height");
+  if (geometry.width < width.minimum - 0.01 || geometry.width > width.maximum + 0.01
+    || geometry.height < height.minimum - 0.01 || geometry.height > height.maximum + 0.01) {
+    unsatisfiable(node.id, width.minimum, height.minimum, geometry.width, geometry.height, [], scrollAllowed);
+  }
 }
 
 function preferredGap(parent: LayoutNode): number {
@@ -753,25 +918,48 @@ function freezeGeometry(value: LayoutGeometry): LayoutGeometry {
 
 function auditResult(result: CompiledLayoutTree, expectedNodeCount: number): void {
   if (result.byId.size !== expectedNodeCount || result.byId.get(result.root.id) !== result.root) inputInvalid(result.root.id);
-  for (const node of result.byId.values()) {
+  const visit = (node: CompiledLayoutNode, nearestScroll: CompiledLayoutNode | undefined): void => {
     const box = node.geometry;
-    if (![box.x, box.y, box.width, box.height, node.zIndex].every(finiteNonnegative)
-      || box.x + box.width > result.pageWidth + 0.01 || box.y + box.height > result.pageHeight + 0.01) inputInvalid(node.id);
-    if (node.overflow === "local-scroll" && node.layout !== "scroll-region") inputInvalid(node.id);
+    if (![box.x, box.y, box.width, box.height, node.zIndex].every(finiteNonnegative)) inputInvalid(node.id);
+    if (nearestScroll === undefined) {
+      if (box.x + box.width > result.pageWidth + 0.01 || box.y + box.height > result.pageHeight + 0.01) inputInvalid(node.id);
+    } else {
+      const extent = nearestScroll.scrollContentExtent;
+      if (extent === undefined || !contains({
+        x: nearestScroll.geometry.x,
+        y: nearestScroll.geometry.y,
+        width: extent.width,
+        height: extent.height,
+      }, box)) inputInvalid(node.id);
+    }
+    const isScroll = node.layout === "scroll-region";
+    if ((node.overflow === "local-scroll") !== isScroll) inputInvalid(node.id);
+    if (isScroll) {
+      const extent = node.scrollContentExtent;
+      if (extent === undefined || ![extent.width, extent.height].every((value) => Number.isFinite(value) && value > 0)
+        || extent.width < box.width || extent.height < box.height) inputInvalid(node.id);
+    } else if (node.scrollContentExtent !== undefined) {
+      inputInvalid(node.id);
+    }
     if (node.layout !== "stack" && node.layout !== "overlay-anchor") {
       node.children.forEach((child, index) => node.children.slice(index + 1).forEach((other) => {
         if (overlaps(child.geometry, other.geometry)) inputInvalid(parentFailureId(node, child, other));
       }));
     }
-    if (node.overflow !== "local-scroll") {
+    if (!isScroll) {
       node.children.forEach((child) => {
-        const childBox = child.geometry;
-        if (childBox.x < box.x - 0.01 || childBox.y < box.y - 0.01
-          || childBox.x + childBox.width > box.x + box.width + 0.01
-          || childBox.y + childBox.height > box.y + box.height + 0.01) inputInvalid(child.id);
+        if (!contains(box, child.geometry)) inputInvalid(child.id);
       });
     }
-  }
+    node.children.forEach((child) => visit(child, isScroll ? node : nearestScroll));
+  };
+  visit(result.root, undefined);
+}
+
+function contains(outer: LayoutGeometry, inner: LayoutGeometry): boolean {
+  return inner.x >= outer.x - 0.01 && inner.y >= outer.y - 0.01
+    && inner.x + inner.width <= outer.x + outer.width + 0.01
+    && inner.y + inner.height <= outer.y + outer.height + 0.01;
 }
 
 function overlaps(left: LayoutGeometry, right: LayoutGeometry): boolean {
@@ -838,6 +1026,19 @@ function fitRoundedSizes(values: readonly number[], minima: readonly number[], m
   }
   if (excess > 0 && fitted.length > 0) fitted[fitted.length - 1] = Math.max(0, round(fitted[fitted.length - 1]! - excess));
   return fitted;
+}
+
+function cumulativeRoundedSizes(values: readonly number[], exactTotal: number): readonly number[] {
+  const fitted: number[] = [];
+  let rawBoundary = 0;
+  let fittedBoundary = 0;
+  values.forEach((value, index) => {
+    rawBoundary += value;
+    const nextBoundary = index === values.length - 1 ? round(exactTotal) : round(rawBoundary);
+    fitted.push(round(nextBoundary - fittedBoundary));
+    fittedBoundary = nextBoundary;
+  });
+  return Object.freeze(fitted);
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

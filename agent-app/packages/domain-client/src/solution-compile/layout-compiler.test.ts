@@ -106,11 +106,24 @@ function overlaps(left: CompiledLayoutNode, right: CompiledLayoutNode): boolean 
 }
 
 function expectGeometrySafe(compiled: ReturnType<typeof compile>): void {
-  for (const node of compiled.byId.values()) {
+  const contains = (outer: CompiledLayoutNode["geometry"], inner: CompiledLayoutNode["geometry"]): boolean =>
+    inner.x >= outer.x - 0.01 && inner.y >= outer.y - 0.01
+    && inner.x + inner.width <= outer.x + outer.width + 0.01
+    && inner.y + inner.height <= outer.y + outer.height + 0.01;
+  const visit = (node: CompiledLayoutNode, nearestScroll: CompiledLayoutNode | undefined): void => {
     const values = [node.geometry.x, node.geometry.y, node.geometry.width, node.geometry.height, node.zIndex];
     expect(values.every((value) => Number.isFinite(value) && value >= 0)).toBe(true);
-    expect(node.geometry.x + node.geometry.width).toBeLessThanOrEqual(compiled.pageWidth);
-    expect(node.geometry.y + node.geometry.height).toBeLessThanOrEqual(compiled.pageHeight);
+    if (nearestScroll === undefined) {
+      expect(node.geometry.x + node.geometry.width).toBeLessThanOrEqual(compiled.pageWidth + 0.01);
+      expect(node.geometry.y + node.geometry.height).toBeLessThanOrEqual(compiled.pageHeight + 0.01);
+    } else {
+      expect(contains({
+        x: nearestScroll.geometry.x,
+        y: nearestScroll.geometry.y,
+        width: nearestScroll.scrollContentExtent!.width,
+        height: nearestScroll.scrollContentExtent!.height,
+      }, node.geometry)).toBe(true);
+    }
     if (node.layout !== "stack" && node.layout !== "overlay-anchor") {
       node.children.forEach((child, index) => {
         node.children.slice(index + 1).forEach((other) => expect(overlaps(child, other)).toBe(false));
@@ -118,13 +131,17 @@ function expectGeometrySafe(compiled: ReturnType<typeof compile>): void {
     }
     if (node.overflow !== "local-scroll") {
       node.children.forEach((child) => {
-        expect(child.geometry.x).toBeGreaterThanOrEqual(node.geometry.x);
-        expect(child.geometry.y).toBeGreaterThanOrEqual(node.geometry.y);
-        expect(child.geometry.x + child.geometry.width).toBeLessThanOrEqual(node.geometry.x + node.geometry.width);
-        expect(child.geometry.y + child.geometry.height).toBeLessThanOrEqual(node.geometry.y + node.geometry.height);
+        expect(contains(node.geometry, child.geometry)).toBe(true);
       });
+      expect(node.scrollContentExtent).toBeUndefined();
+    } else {
+      expect(node.layout).toBe("scroll-region");
+      expect(node.scrollContentExtent!.width).toBeGreaterThanOrEqual(node.geometry.width);
+      expect(node.scrollContentExtent!.height).toBeGreaterThanOrEqual(node.geometry.height);
     }
-  }
+    node.children.forEach((child) => visit(child, node.overflow === "local-scroll" ? node : nearestScroll));
+  };
+  visit(compiled.root, undefined);
   expect(compiled.byId.get(compiled.root.id)).toBe(compiled.root);
   expect(compiled.byId.size).toBe([...compiled.byId.values()].length);
 }
@@ -295,6 +312,91 @@ describe("compileLayout", () => {
       .toEqual([200, 150, 180, 682, 100]);
   });
 
+  it("redistributes ratio and fill space after a sibling reaches its effective maximum", () => {
+    const root = layout("bounded-fill-root", "row", [
+      control("bounded-fill", { width: { mode: "fill" } }),
+      control("open-fill", { readingOrder: 1, width: { mode: "fill" } }),
+    ]);
+    const sizes = new Map<string, IntrinsicSize>([
+      ["bounded-fill", intrinsic({ maxWidth: 200 })],
+      ["open-fill", intrinsic()],
+    ]);
+
+    const compiled = compile(root, sizes);
+    expect(compiled.byId.get("bounded-fill")!.geometry.width).toBe(200);
+    expect(compiled.byId.get("open-fill")!.geometry.width).toBe(1_148);
+  });
+
+  it("keeps the root and cross-axis stretch within effective intrinsic and intent bounds", () => {
+    const root = layout("bounded-root", "column", [
+      control("fixed-cross-axis", { align: "stretch", width: { mode: "fixed", value: 240 } }),
+    ], { align: "center" });
+    const sizes = new Map<string, IntrinsicSize>([
+      ["bounded-root", intrinsic({ minWidth: 320, preferredWidth: 640, maxWidth: 640 })],
+    ]);
+
+    const compiled = compile(root, sizes);
+    expect(compiled.root.geometry).toMatchObject({ x: 400, width: 640 });
+    expect(compiled.byId.get("fixed-cross-axis")!.geometry).toMatchObject({ x: 400, width: 240 });
+  });
+
+  it("measures column content height at the child's bounded cross-axis width", () => {
+    const gridChildren = Array.from({ length: 6 }, (_value, index) => control(`column-narrow-${index + 1}`, { readingOrder: index }));
+    const narrowGrid = layout("column-narrow-grid", "grid", gridChildren, { width: { mode: "fixed", value: 300 } });
+    const root = layout("column-narrow-root", "column", [narrowGrid]);
+    const compiled = compile(root);
+
+    expect(compiled.root.geometry.height).toBe(108);
+    expect(compiled.byId.get("column-narrow-grid")!.geometry).toMatchObject({ width: 300, height: 108 });
+    expect(compiled.byId.get("column-narrow-4")!.geometry.y)
+      .toBeGreaterThan(compiled.byId.get("column-narrow-1")!.geometry.y);
+  });
+
+  it("fails closed when a fixed value exceeds the intrinsic maximum", () => {
+    const root = layout("fixed-maximum-root", "row", [
+      control("fixed-maximum-child", { width: { mode: "fixed", value: 500 } }),
+    ]);
+
+    expect(() => compile(root, new Map([
+      ["fixed-maximum-child", intrinsic({ maxWidth: 400 })],
+    ]))).toThrowError(/LAYOUT_UNSATISFIABLE:.*fixed-maximum-child/);
+  });
+
+  it("uses the shared effective-interval intersection for stack and overlay geometry", () => {
+    for (const kind of ["stack", "overlay-anchor"] as const) {
+      const root = layout(`${kind}-bounds-root`, kind, [
+        control(`${kind}-fixed`, { width: { mode: "fixed", value: 400 } }),
+        control(`${kind}-range`, { readingOrder: 1, width: { mode: "minmax", min: 300, max: 500 } }),
+      ]);
+      const compiled = compile(root);
+      expect(compiled.root.children[0]!.geometry).toEqual(compiled.root.children[1]!.geometry);
+      expect(compiled.root.children[0]!.geometry.width).toBe(400);
+
+      const impossible = layout(`${kind}-impossible-root`, kind, [
+        control(`${kind}-three-hundred`, { width: { mode: "fixed", value: 300 } }),
+        control(`${kind}-four-hundred`, { readingOrder: 1, width: { mode: "fixed", value: 400 } }),
+      ]);
+      expect(() => compile(impossible)).toThrowError(/LAYOUT_UNSATISFIABLE:.*impossible-root/);
+    }
+  });
+
+  it("measures shared stack and overlay height at the resolved narrow width", () => {
+    for (const kind of ["stack", "overlay-anchor"] as const) {
+      const gridChildren = Array.from({ length: 6 }, (_value, index) => control(`${kind}-narrow-${index + 1}`, { readingOrder: index }));
+      const narrowGrid = layout(`${kind}-narrow-grid`, "grid", gridChildren, { width: { mode: "fixed", value: 300 } });
+      const root = layout(`${kind}-narrow-root`, kind, [
+        narrowGrid,
+        control(`${kind}-narrow-peer`, { readingOrder: 1 }),
+      ]);
+      const compiled = compile(root);
+
+      expect(compiled.root.children[0]!.geometry).toEqual(compiled.root.children[1]!.geometry);
+      expect(compiled.root.children[0]!.geometry).toMatchObject({ width: 300, height: 108 });
+      expect(compiled.byId.get(`${kind}-narrow-4`)!.geometry.y)
+        .toBeGreaterThan(compiled.byId.get(`${kind}-narrow-1`)!.geometry.y);
+    }
+  });
+
   it("keeps remainder-rounded siblings inside their parent", () => {
     const children = Array.from({ length: 24 }, (_value, index) => control(`fraction-${index + 1}`, { readingOrder: index }));
     const root = layout("fraction-root", "row", children);
@@ -315,7 +417,7 @@ describe("compileLayout", () => {
     const sizes = new Map<string, IntrinsicSize>([[`aligned-${align}`, intrinsic({ minWidth: 100, preferredWidth: 120, maxWidth: 120 })]]);
     const child = compile(root, sizes).byId.get(`aligned-${align}`)!;
     expect(child.geometry.x).toBe(expectedX);
-    expect(child.geometry.width).toBe(align === "stretch" ? 1_360 : 120);
+    expect(child.geometry.width).toBe(120);
   });
 
   it("reduces grid columns deterministically from the largest candidate that child minima cannot fit", () => {
@@ -335,6 +437,46 @@ describe("compileLayout", () => {
     const compiled = compile(layout("capped-grid", "grid", children));
     expect(compiled.byId.get("cap-12")!.geometry.y).toBe(compiled.byId.get("cap-1")!.geometry.y);
     expect(compiled.byId.get("cap-13")!.geometry.y).toBeGreaterThan(compiled.byId.get("cap-1")!.geometry.y);
+  });
+
+  it.each([
+    ["compact", "desktop"],
+    ["comfortable", "desktop"],
+    ["spacious", "desktop"],
+    ["comfortable", "large-display"],
+  ] as const)("absorbs eleven-column rounding at cumulative %s boundaries on %s", (density, canvas) => {
+    const children = Array.from({ length: 11 }, (_value, index) => control(`round-${density}-${canvas}-${index + 1}`, {
+      density,
+      readingOrder: index,
+    }));
+    const root = layout(`round-${density}-${canvas}-root`, "grid", children, { density });
+    const compiled = compile(root, new Map([
+      [root.id, intrinsic({ maxWidth: 3_000 })],
+      ...children.map((child) => [child.id, intrinsic({ minWidth: 1 })] as const),
+    ]), canvas);
+    const last = compiled.root.children[10]!.geometry;
+    expect(last.x + last.width).toBeLessThanOrEqual(compiled.root.geometry.x + compiled.root.geometry.width + 0.01);
+    expect(last.x + last.width).toBeCloseTo(compiled.root.geometry.x + compiled.root.geometry.width, 2);
+  });
+
+  it("keeps a fractional nested grid inside its allocated parent track", () => {
+    const gridChildren = Array.from({ length: 11 }, (_value, index) => control(`nested-round-${index + 1}`, { readingOrder: index }));
+    const nestedGrid = layout("nested-round-grid", "grid", gridChildren, { width: { mode: "ratio", value: 1 } });
+    const root = layout("nested-round-root", "row", [
+      nestedGrid,
+      control("nested-round-side-a", { readingOrder: 1, width: { mode: "ratio", value: 1 } }),
+      control("nested-round-side-b", { readingOrder: 2, width: { mode: "ratio", value: 1 } }),
+    ]);
+    const compiled = compile(root, new Map([
+      [nestedGrid.id, intrinsic({ minWidth: 1 })],
+      ...gridChildren.map((child) => [child.id, intrinsic({ minWidth: 1 })] as const),
+      ["nested-round-side-a", intrinsic({ minWidth: 1 })],
+      ["nested-round-side-b", intrinsic({ minWidth: 1 })],
+    ]));
+    const parentBox = compiled.byId.get("nested-round-grid")!.geometry;
+    const last = compiled.byId.get("nested-round-11")!.geometry;
+    expect(last.x + last.width).toBeLessThanOrEqual(parentBox.x + parentBox.width + 0.01);
+    expect(last.x + last.width).toBeCloseTo(parentBox.x + parentBox.width, 2);
   });
 
   it("compresses grid spacing and row heights before failing a fixed-height grid", () => {
@@ -408,6 +550,37 @@ describe("compileLayout", () => {
     expect(centerBox.y - (northBox.y + northBox.height)).toBe(6);
   });
 
+  it("grows dock height from a center grid measured at its actual 300px track width", () => {
+    const gridChildren = Array.from({ length: 6 }, (_value, index) => control(`dock-grid-${index + 1}`, { readingOrder: index }));
+    const center = layout("dock-grid-center", "grid", gridChildren, { readingOrder: 1, width: { mode: "fixed", value: 300 } });
+    const root = layout("dock-grid-root", "dock", [control("dock-grid-north"), center]);
+
+    const compiled = compile(root);
+    const centerBox = compiled.byId.get("dock-grid-center")!.geometry;
+    expect(centerBox.width).toBe(300);
+    expect(centerBox.height).toBe(108);
+    expect(compiled.root.geometry.height).toBe(180);
+    expect(compiled.byId.get("dock-grid-4")!.geometry.y).toBeGreaterThan(compiled.byId.get("dock-grid-1")!.geometry.y);
+    expectGeometrySafe(compiled);
+  });
+
+  it("keeps dock middle cross-axis stretch within each child's maximum", () => {
+    const gridChildren = Array.from({ length: 6 }, (_value, index) => control(`dock-west-grid-${index + 1}`, { readingOrder: index }));
+    const west = layout("dock-west-grid", "grid", gridChildren, { readingOrder: 1, width: { mode: "fixed", value: 300 } });
+    const root = layout("dock-middle-bounds-root", "dock", [
+      control("dock-middle-bounds-north"),
+      west,
+      control("dock-middle-bounds-center", { readingOrder: 2 }),
+    ]);
+    const compiled = compile(root, new Map([
+      ["dock-middle-bounds-center", intrinsic({ maxHeight: 60 })],
+    ]));
+
+    expect(compiled.byId.get("dock-west-grid")!.geometry.height).toBe(108);
+    expect(compiled.byId.get("dock-middle-bounds-center")!.geometry.height).toBe(60);
+    expectGeometrySafe(compiled);
+  });
+
   it("shares geometry and increments z-order only for stack and overlay-anchor", () => {
     for (const kind of ["stack", "overlay-anchor"] as const) {
       const root = layout(`${kind}-root`, kind, [control(`${kind}-back`), control(`${kind}-front`, { readingOrder: 1 })]);
@@ -429,7 +602,39 @@ describe("compileLayout", () => {
     const plainRoot = layout("plain-root", "column", [control("plain-a"), control("plain-b", { readingOrder: 1 })], { height: { mode: "fixed", value: 220 } });
     const scrolled = compile(scrollRoot, childSizes);
     expect([...scrolled.byId.values()].filter((node) => node.overflow === "local-scroll").map((node) => node.id)).toEqual(["scroll-root"]);
+    expect(scrolled.pageHeight).toBe(300);
+    expect(scrolled.root.geometry).toEqual({ x: 40, y: 40, width: 1_360, height: 220 });
+    expect(scrolled.root.scrollContentExtent).toEqual({ width: 1_360, height: 326 });
+    expect(scrolled.byId.get("scroll-b")!.geometry.y + scrolled.byId.get("scroll-b")!.geometry.height)
+      .toBeGreaterThan(scrolled.root.geometry.y + scrolled.root.geometry.height);
+    expect(scrolled.byId.get("scroll-b")!.geometry.y + scrolled.byId.get("scroll-b")!.geometry.height)
+      .toBeLessThanOrEqual(scrolled.root.geometry.y + scrolled.root.scrollContentExtent!.height);
+    expect([...scrolled.byId.values()].filter((node) => node.scrollContentExtent !== undefined).map((node) => node.id))
+      .toEqual(["scroll-root"]);
+    expectGeometrySafe(scrolled);
     expect(() => compile(plainRoot, childSizes)).toThrowError(/LAYOUT_UNSATISFIABLE:.*plain-root/);
+  });
+
+  it("bounds every scrolling descendant while keeping deeper children inside their direct parent", () => {
+    const nested = layout("scroll-nested", "column", [
+      control("scroll-nested-a"),
+      control("scroll-nested-b", { readingOrder: 1 }),
+    ]);
+    const root = layout("scroll-nested-root", "scroll-region", [nested], { height: { mode: "fixed", value: 150 } });
+    const sizes = new Map<string, IntrinsicSize>([
+      ["scroll-nested-a", intrinsic({ minHeight: 100, preferredHeight: 100 })],
+      ["scroll-nested-b", intrinsic({ minHeight: 100, preferredHeight: 100 })],
+    ]);
+    const compiled = compile(root, sizes);
+    const nestedBox = compiled.byId.get("scroll-nested")!.geometry;
+    const leaf = compiled.byId.get("scroll-nested-b")!.geometry;
+
+    expect(compiled.pageHeight).toBe(230);
+    expect(compiled.root.scrollContentExtent).toEqual({ width: 1_360, height: 206 });
+    expect(nestedBox.y + nestedBox.height).toBeGreaterThan(compiled.root.geometry.y + compiled.root.geometry.height);
+    expect(leaf.y + leaf.height).toBeLessThanOrEqual(nestedBox.y + nestedBox.height);
+    expect(leaf.y + leaf.height).toBeLessThanOrEqual(compiled.root.geometry.y + compiled.root.scrollContentExtent!.height);
+    expectGeometrySafe(compiled);
   });
 
   it("returns node-specific structured details for an impossible grid", () => {
@@ -453,6 +658,26 @@ describe("compileLayout", () => {
         minimumRequired: { width: 1_500, height: 32 },
         available: { width: 1_360, height: 48 },
         attemptedColumns: [2, 1],
+        scrollAllowed: false,
+      });
+    }
+  });
+
+  it("reports the padded page content box for an oversized root", () => {
+    const root = layout("oversized-page-root", "column", [control("oversized-page-child")]);
+    try {
+      compile(root, new Map([
+        [root.id, intrinsic({ minWidth: 1_500, preferredWidth: 1_500 })],
+      ]));
+      throw new Error("expected compileLayout to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(LayoutCompileError);
+      if (!(error instanceof LayoutCompileError)) return;
+      expect(error.details).toEqual({
+        nodeId: "oversized-page-root",
+        minimumRequired: { width: 1_500, height: 32 },
+        available: { width: 1_360, height: 99_920 },
+        attemptedColumns: [],
         scrollAllowed: false,
       });
     }
@@ -518,6 +743,22 @@ describe("compileLayout", () => {
       compile(root);
       throw new Error("expected compileLayout to fail");
     } catch (error) {
+      if (error instanceof LayoutCompileError) expect(error.code).toBe("LAYOUT_INPUT_INVALID");
+    }
+  });
+
+  it.each([
+    ["null", null],
+    ["non-array string", "runtime-b"],
+    ["non-iterable object", { target: "runtime-b" }],
+  ] as const)("returns a structured input error for runtime groupWith %s", (_name, invalidGroup) => {
+    const root = layout("runtime-group-root", "row", [control("runtime-a"), control("runtime-b", { readingOrder: 1 })]);
+    Object.defineProperty(root.children[0]!.intent, "groupWith", { value: invalidGroup });
+    try {
+      compile(root);
+      throw new Error("expected compileLayout to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(LayoutCompileError);
       if (error instanceof LayoutCompileError) expect(error.code).toBe("LAYOUT_INPUT_INVALID");
     }
   });

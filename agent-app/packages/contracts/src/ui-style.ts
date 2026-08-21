@@ -604,6 +604,11 @@ const GeometrySchema = z.object({
   height: z.number().positive(),
 }).strict();
 
+const ScrollContentExtentSchema = z.object({
+  width: z.number().finite().positive(),
+  height: z.number().finite().positive(),
+}).strict();
+
 const CompiledStyleFragmentSchema = z.object({
   selectorToken: z.string().regex(/^(?:root|part:[A-Za-z][A-Za-z0-9_-]*)$/),
   state: z.enum(["normal", "hover", "active", "focus", "disabled", "selected", "error"]),
@@ -648,6 +653,7 @@ export const UIImplementationControlV2Schema = z.object({
   depth: z.number().int().min(0).max(32),
   zIndex: z.number().int().min(0).max(1_000_000),
   geometry: GeometrySchema,
+  scrollContentExtent: ScrollContentExtentSchema.optional(),
   nativeProperties: ImplementationDataRecordSchema,
   style: ComponentStyleSpecV2Schema.optional(),
   compiledStyle: CompiledStyleSpecSchema.optional(),
@@ -780,13 +786,38 @@ export const UIImplementationSpecV2Schema = z.object({
     }
     pageIds.add(page.id);
     const controlsById = new Map(page.controls.map((control) => [control.id, control]));
+    const nearestScrollAncestor = (control: z.infer<typeof UIImplementationControlV2Schema>) => {
+      const visited = new Set<string>();
+      let parentId = control.parentId;
+      while (parentId !== undefined && !visited.has(parentId)) {
+        visited.add(parentId);
+        const parent = controlsById.get(parentId);
+        if (parent === undefined) return undefined;
+        if (parent.scrollContentExtent !== undefined) return parent;
+        parentId = parent.parentId;
+      }
+      return undefined;
+    };
     page.controls.forEach((control, controlIndex) => {
       const path: Array<string | number> = ["pages", pageIndex, "controls", controlIndex];
       if (controlIds.has(control.id)) {
         ctx.addIssue({ code: "custom", path: [...path, "id"], message: `duplicate implementation control id: ${control.id}` });
       }
       controlIds.add(control.id);
-      if (!containsGeometry({ x: 0, y: 0, width: page.width, height: page.height }, control.geometry)) {
+      const scrollAncestor = nearestScrollAncestor(control);
+      if (scrollAncestor !== undefined) {
+        const extent = scrollAncestor.scrollContentExtent!;
+        if (!containsGeometry({
+          x: scrollAncestor.geometry.x,
+          y: scrollAncestor.geometry.y,
+          width: extent.width,
+          height: extent.height,
+        }, control.geometry)) {
+          ctx.addIssue({ code: "custom", path: [...path, "geometry"], message: `control geometry exceeds scroll content extent: ${control.id}` });
+        }
+      }
+      if ((scrollAncestor === undefined || control.scrollContentExtent !== undefined)
+        && !containsGeometry({ x: 0, y: 0, width: page.width, height: page.height }, control.geometry)) {
         ctx.addIssue({ code: "custom", path: [...path, "geometry"], message: `control geometry exceeds page bounds: ${control.id}` });
       }
       const parent = control.parentId === undefined ? undefined : controlsById.get(control.parentId);
@@ -801,8 +832,21 @@ export const UIImplementationSpecV2Schema = z.object({
         if (control.depth !== parent.depth + 1) {
           ctx.addIssue({ code: "custom", path: [...path, "depth"], message: "control depth must be exactly one greater than its parent" });
         }
-        if (!containsGeometry(parent.geometry, control.geometry)) {
+        if ((parent.scrollContentExtent === undefined || control.scrollContentExtent !== undefined)
+          && !containsGeometry(parent.geometry, control.geometry)) {
           ctx.addIssue({ code: "custom", path: [...path, "geometry"], message: `control geometry exceeds parent bounds: ${control.id}` });
+        }
+      }
+      if (control.scrollContentExtent !== undefined) {
+        if (!control.capabilityId.startsWith("layout.")) {
+          ctx.addIssue({ code: "custom", path: [...path, "scrollContentExtent"], message: "scroll content extent is compiler-owned layout metadata" });
+        }
+        if (!page.controls.some((candidate) => candidate.parentId === control.id)) {
+          ctx.addIssue({ code: "custom", path: [...path, "scrollContentExtent"], message: "scroll content extent requires child controls" });
+        }
+        if (control.scrollContentExtent.width < control.geometry.width
+          || control.scrollContentExtent.height < control.geometry.height) {
+          ctx.addIssue({ code: "custom", path: [...path, "scrollContentExtent"], message: "scroll content extent cannot be smaller than its viewport" });
         }
       }
       if (control.overlayHost !== undefined && control.overlayHost.hostPageId !== page.id) {

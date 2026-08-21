@@ -117,6 +117,51 @@ const v2Fixture = {
   compiledScripts: [],
 };
 
+function scrollV2Fixture() {
+  const sourcePage = v2Fixture.pages[0]!;
+  const root = sourcePage.controls[0]!;
+  const child = sourcePage.controls[1]!;
+  return {
+    ...v2Fixture,
+    pages: [{
+      ...sourcePage,
+      height: 300,
+      controls: [
+        {
+          ...root,
+          id: "scroll-root",
+          capabilityId: "layout.4",
+          geometry: { x: 40, y: 40, width: 1_360, height: 220 },
+          scrollContentExtent: { width: 1_360, height: 326 },
+          sourceSolutionNodeId: "scroll-layout",
+        },
+        {
+          ...child,
+          id: "scroll-first",
+          parentId: "scroll-root",
+          geometry: { x: 40, y: 40, width: 1_360, height: 160 },
+          sourceSolutionNodeId: "scroll-first",
+        },
+        {
+          ...child,
+          id: "scroll-second",
+          parentId: "scroll-root",
+          geometry: { x: 40, y: 206, width: 1_360, height: 160 },
+          sourceSolutionNodeId: "scroll-second",
+        },
+        {
+          ...child,
+          id: "scroll-leaf",
+          parentId: "scroll-second",
+          depth: 2,
+          geometry: { x: 60, y: 340, width: 100, height: 20 },
+          sourceSolutionNodeId: "scroll-leaf",
+        },
+      ],
+    }],
+  };
+}
+
 type MutableNativeV2Fixture = {
   pages: Array<{
     sourceBlueprintPageId?: string;
@@ -532,6 +577,74 @@ describe("KF UI style contracts", () => {
       pages: [{
         ...v2Fixture.pages[0],
         controls: [{ ...v2Fixture.pages[0]!.controls[0]!, eventBindings: [{ event: "click" }] }],
+      }],
+    }).success).toBe(false);
+  });
+
+  it("accepts scroll descendants outside the viewport and page only within compiler-owned content extent", () => {
+    const fixture = scrollV2Fixture();
+    const parsed = UIImplementationSpecV2Schema.parse(fixture);
+    const parsedPage = parsed.pages[0]!;
+    expect(parsedPage.compatibility).toBe("native");
+    if (parsedPage.compatibility !== "native") return;
+
+    expect(parsedPage.height).toBe(300);
+    expect(parsedPage.controls[0]!.scrollContentExtent).toEqual({ width: 1_360, height: 326 });
+    expect(parsedPage.controls[2]!.geometry.y + parsedPage.controls[2]!.geometry.height)
+      .toBeGreaterThan(parsedPage.height);
+  });
+
+  it("rejects invalid or misused scroll content extents and out-of-extent descendants", () => {
+    const fixture = scrollV2Fixture();
+    const page = fixture.pages[0]!;
+    const root = page.controls[0]!;
+
+    expect(UIImplementationSpecV2Schema.safeParse({
+      ...fixture,
+      pages: [{ ...page, controls: [{ ...root, scrollContentExtent: { width: 1_359, height: 326 } }, ...page.controls.slice(1)] }],
+    }).success).toBe(false);
+    expect(UIImplementationSpecV2Schema.safeParse({
+      ...fixture,
+      pages: [{ ...page, controls: [{ ...root, capabilityId: "text" }, ...page.controls.slice(1)] }],
+    }).success).toBe(false);
+    expect(UIImplementationSpecV2Schema.safeParse({
+      ...fixture,
+      pages: [{ ...page, controls: [{ ...root }] }],
+    }).success).toBe(false);
+    expect(UIImplementationSpecV2Schema.safeParse({
+      ...fixture,
+      pages: [{
+        ...page,
+        controls: page.controls.map((control) => control.id === "scroll-second"
+          ? { ...control, geometry: { ...control.geometry, y: 207 } }
+          : control),
+      }],
+    }).success).toBe(false);
+    expect(UIImplementationSpecV2Schema.safeParse({
+      ...fixture,
+      pages: [{
+        ...page,
+        controls: page.controls.map((control) => control.id === "scroll-second"
+          ? { ...control, capabilityId: "layout.4", scrollContentExtent: { width: 1_360, height: 160 } }
+          : control),
+      }],
+    }).success).toBe(false);
+    expect(UIImplementationSpecV2Schema.safeParse({
+      ...fixture,
+      pages: [{
+        ...page,
+        controls: page.controls.map((control) => control.id === "scroll-leaf"
+          ? { ...control, geometry: { ...control.geometry, y: 200 } }
+          : control),
+      }],
+    }).success).toBe(false);
+    expect(UIImplementationSpecV2Schema.safeParse({
+      ...fixture,
+      pages: [{
+        ...page,
+        controls: page.controls.map((control) => control.id === "scroll-root"
+          ? { ...control, geometry: { ...control.geometry, y: 100 } }
+          : control),
       }],
     }).success).toBe(false);
   });
