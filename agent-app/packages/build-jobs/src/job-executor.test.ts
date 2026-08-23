@@ -23,6 +23,19 @@ function stored(plan: ChangePlan, semanticOperations: TrustedSemanticOperationIn
 }
 
 describe("resolveStoredPlan", () => {
+  it("fails closed for a verified creative envelope until the creative materializer is wired", () => {
+    const creativePlan = {
+      schema: "kf-change-plan/v1" as const,
+      workspaceId: "w",
+      operations: [],
+      creative: { artifactHash: "a".repeat(64), materializationHash: "b".repeat(64) },
+    };
+    const verifier = { verify: () => ({ plan: creativePlan, semanticOperations: [] }) };
+    expect(() => resolveStoredPlan({ schema: "kf-server-plan-envelope/v1" }, {
+      expectedPlanHash: "c".repeat(64), expectedRevisionId: "rev-1",
+    }, verifier as never)).toThrow(/creative materializer/i);
+  });
+
   it.each([
     ["create", {
       schema: "kf-change-plan/v1" as const,

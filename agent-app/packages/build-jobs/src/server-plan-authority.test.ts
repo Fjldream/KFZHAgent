@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   SERVER_PLAN_RAW_LIMITS,
   canonicalChangePlanHash,
+  canonicalServerPlanSigningBytes,
   canonicalModuleCompilationHash,
   semanticPayloadHash,
   type ChangePlan,
@@ -118,6 +119,10 @@ function expectRawBudgetFailure(value: unknown): void {
 }
 
 describe("HMAC server plan authority", () => {
+  it("does not expose a standalone raw creative trust issuer", () => {
+    expect(moduleAuthorityExports).not.toHaveProperty("createTrustedCreativePayload");
+  });
+
   it("rejects a plain object pretending to be a trusted creative payload", () => {
     expect(() => createHmacServerPlanAuthority(decodeServerPlanHmacKey(keyA)).sign({
       plan, revisionId: "revision-1", semanticOperations: [{
@@ -190,6 +195,12 @@ describe("HMAC server plan authority", () => {
     };
     expect(createHmacServerPlanAuthority(decodeServerPlanHmacKey(keyA)).verify(reordered))
       .toEqual(envelope);
+  });
+
+  it("preserves the fixed legacy signing bytes and HMAC golden fixture", () => {
+    const envelope = signedUpdate();
+    expect(Buffer.from(canonicalServerPlanSigningBytes(envelope)).toString("hex")).toBe("7b0a202022706c616e223a207b0a20202020226f7065726174696f6e73223a205b0a2020202020207b0a2020202020202020226368616e676573223a205b0a202020202020202020207b0a2020202020202020202020202270617468223a20222f74657874222c0a2020202020202020202020202276616c7565223a20225265766965776564220a202020202020202020207d0a20202020202020205d2c0a202020202020202022656e746974794964223a2022627574746f6e2d67756964222c0a2020202020202020226f70223a2022757064617465220a2020202020207d0a202020205d2c0a2020202022736368656d61223a20226b662d6368616e67652d706c616e2f7631222c0a2020202022776f726b73706163654964223a202277220a20207d2c0a202022706c616e48617368223a202232326464633236393861373762646366613736363561346363303366303032346337353731613239396465396437313262643061363635383566633538353231222c0a2020227265766973696f6e4964223a20227265766973696f6e2d31222c0a202022736368656d61223a20226b662d7365727665722d706c616e2d656e76656c6f70652f7631222c0a20202273656d616e7469634f7065726174696f6e73223a205b5d0a7d");
+    expect(envelope.signature).toBe("abbeec744ec30dd8549b5de4a490c8cc4ff3ee6a27dc6a9819222323ad37fa16");
   });
 
   it("rejects a valid envelope signed by another server key", () => {
@@ -275,6 +286,18 @@ describe("HMAC server plan authority", () => {
     expect(() => createHmacServerPlanAuthority(decodeServerPlanHmacKey(keyA)).verify(value))
       .toThrow(/accessor|raw|schema/i);
     expect(reads).toBe(0);
+  });
+
+  it("rejects nested proxies before any reflection trap executes", () => {
+    const value = structuredClone(signedUpdate());
+    let trapped = false;
+    value.plan = new Proxy(value.plan, {
+      getPrototypeOf() { trapped = true; return Object.prototype; },
+      ownKeys() { trapped = true; return []; },
+    });
+    expect(() => createHmacServerPlanAuthority(decodeServerPlanHmacKey(keyA)).verify(value))
+      .toThrow(/proxy|raw/i);
+    expect(trapped).toBe(false);
   });
 
   it.each([

@@ -6,11 +6,14 @@ import { inspectClientProject } from "../inspect/client-inspector.js";
 import { attachRuntimeCorrelation, verifyExistingRuntimeCorrelation } from "./runtime-correlation.js";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { createHash } from "node:crypto";
 import { createHmacServerPlanAuthority } from "@kf/build-jobs";
+import { compileInteractions } from "../interaction/interaction-compiler.js";
+import { createDefaultModuleRegistry } from "../modules/module-registry.js";
+import { solutionModuleRegistryHash } from "../solution-compile/solution-provenance.js";
 
 const theme = { background: "#fff", surface: "#fff", primary: "#123456", accent: "#654321", textPrimary: "#111", textSecondary: "#555", fontFamily: "Inter", spacingUnit: 8, radiusScale: { small: 4, medium: 8, large: 16 } } as const;
 const intent = { importance: "primary" as const, visualWeight: 3, readingOrder: 0, density: "comfortable" as const, groupWith: [], width: { mode: "fixed" as const, value: 120 }, height: { mode: "fixed" as const, value: 40 }, align: "start" as const };
+const authority = createHmacServerPlanAuthority(Buffer.alloc(32, 0x41));
 
 function input() {
   const blueprint = {
@@ -31,22 +34,24 @@ function input() {
     schema: "kf-solution-implementation/v1" as const, projectKey: "creative", blueprintHash, candidateBundleHash, theme,
     roleStyles: [{ role: "content", declarations: {}, states: {} }], mockData: [{ id: "records", purpose: "记录", fields: [{ key: "id", label: "编号", type: "text" as const }], records: [{ values: [{ field: "id", value: "1" }] }] }], localState: [], overlays: [], scripts: [],
     pages: [
-      { id: "home", title: "首页", purpose: "首页", canvas: "desktop" as const, sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region-home"], initialStateIds: [], root: { id: "root", kind: "layout" as const, layout: "column" as const, sourceBlueprintRegionIds: ["region-home"], intent, children: [{ id: "open", kind: "control" as const, capabilityId: "button", content: "打开", properties: [], tabIds: [], styleRole: "content", sourceBlueprintRegionIds: ["region-home"], intent, eventBindings: [{ semanticEvent: "click", actionIds: ["navigate"] }] }] } },
-      { id: "detail", title: "详情", purpose: "详情", canvas: "desktop" as const, sourceBlueprintPageId: "bp-detail", sourceBlueprintRegionIds: ["region-detail"], initialStateIds: [], root: { id: "grid", kind: "control" as const, capabilityId: "easyui.1", content: null, properties: [], tabIds: [], styleRole: "content", sourceBlueprintRegionIds: ["region-detail"], intent, mockDataId: "records", eventBindings: [] } },
+      { id: "home", title: "首页", purpose: "首页", canvas: "desktop" as const, sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region-home"], initialStateIds: [], root: { id: "root", kind: "layout" as const, layout: "column" as const, sourceBlueprintRegionIds: ["region-home"], intent: structuredClone(intent), children: [{ id: "open", kind: "control" as const, capabilityId: "button", content: "打开", properties: [], tabIds: [], styleRole: "content", sourceBlueprintRegionIds: ["region-home"], intent: structuredClone(intent), eventBindings: [{ semanticEvent: "click", actionIds: ["navigate"] }] }] } },
+      { id: "detail", title: "详情", purpose: "详情", canvas: "desktop" as const, sourceBlueprintPageId: "bp-detail", sourceBlueprintRegionIds: ["region-detail"], initialStateIds: [], root: { id: "grid", kind: "control" as const, capabilityId: "easyui.1", content: null, properties: [], tabIds: [], styleRole: "content", sourceBlueprintRegionIds: ["region-detail"], intent: structuredClone(intent), mockDataId: "records", eventBindings: [] } },
     ],
     actions: [{ id: "navigate", kind: "navigate-page" as const, targetPageId: "detail", afterActionIds: [], journeyStepRefs: [{ journeyId: "open-detail", stepIndex: 0 }] }],
   };
   const planHash = canonicalServerHash(semanticPlan);
-  const implementation: UIImplementationSpecV2 = {
-    schema: "kf-ui-implementation/v2", compatibility: "native", sourceSolutionPlanHash: planHash, theme, compiledRoleStyles: {},
+  let implementation: UIImplementationSpecV2 = {
+    schema: "kf-ui-implementation/v2", compatibility: "native", sourceSolutionPlanHash: planHash,
+    sourceModuleRegistryHash: solutionModuleRegistryHash(semanticPlan, createDefaultModuleRegistry()),
+    theme: structuredClone(theme), compiledRoleStyles: { content: { role: "content", declarations: {}, states: {} } },
     pages: [
       { compatibility: "native", id: "home", width: 1440, height: 900, sourceBlueprintPageId: "bp-home", controls: [
-        { id: "open", parentId: "root", role: "content", capabilityId: "button", content: "打开", depth: 1, zIndex: 1, geometry: { x: 20, y: 20, width: 120, height: 40 }, nativeProperties: {}, compiledStyle: { nativeFields: {}, cssFragments: [], warnings: [] }, sourceSolutionNodeId: "open", sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region-home"], eventBindings: [{ id: "kf$binding:navigate", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001, phase: "event", scriptModuleIds: [], nativeActionIds: ["kf$action:navigate"] }] },
+        { id: "open", parentId: "root", role: "content", capabilityId: "button", content: "打开", depth: 1, zIndex: 1, geometry: { x: 20, y: 20, width: 120, height: 40 }, nativeProperties: {}, compiledStyle: { nativeFields: {}, cssFragments: [], warnings: [] }, sourceSolutionNodeId: "open", sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region-home"], eventBindings: [] },
         { id: "root", role: "content", capabilityId: "layout.4", depth: 0, zIndex: 0, geometry: { x: 0, y: 0, width: 1440, height: 900 }, compiledLayout: { kind: "column", overflow: "visible" }, nativeProperties: {}, compiledStyle: { nativeFields: {}, cssFragments: [], warnings: [] }, sourceSolutionNodeId: "root", sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region-home"], eventBindings: [] },
       ] },
       { compatibility: "native", id: "detail", width: 1280, height: 760, sourceBlueprintPageId: "bp-detail", controls: [{ id: "grid", role: "content", capabilityId: "easyui.1", depth: 0, zIndex: 0, geometry: { x: 0, y: 0, width: 900, height: 500 }, nativeProperties: { pagination: true }, compiledStyle: { nativeFields: {}, cssFragments: [], warnings: [{ code: "STYLE_CAPABILITY_PRESERVE_ONLY", message: "Capability easyui.1 style is preserve-only; existing appearance is retained" }] }, dataBinding: { mockDataId: "records", records: [{ id: "1" }] }, sourceSolutionNodeId: "grid", sourceBlueprintPageId: "bp-detail", sourceBlueprintRegionIds: ["region-detail"], eventBindings: [] }] },
     ],
-    compiledActions: [{ id: "kf$action:navigate", sourceActionId: "navigate", ownerInstanceName: "Button1", kind: "navigate-page", targetPageGuid: "k00000000-0000-4000-8000-000000000002" }], compiledScripts: [],
+    compiledActions: [], compiledScripts: [],
     runtimeCorrelation: { controls: [{ semanticControlId: "open", instanceName: "Button1" }, { semanticControlId: "root", instanceName: "Layout1" }, { semanticControlId: "grid", instanceName: "Datagrid1" }], pages: [{ semanticPageId: "home", pageGuid: "k00000000-0000-4000-8000-000000000001" }, { semanticPageId: "detail", pageGuid: "k00000000-0000-4000-8000-000000000002" }] },
   };
   const correlationInput = structuredClone(implementation);
@@ -56,14 +61,10 @@ function input() {
   correlationInput.pages.forEach((page) => { if (page.compatibility === "native") page.controls.forEach((control) => { control.eventBindings = []; }); });
   const correlation = attachRuntimeCorrelation({ workspaceId: "workspace", baseRevisionId: "revision", implementation: correlationInput }).runtimeCorrelation!;
   implementation.runtimeCorrelation = structuredClone(correlation);
-  const instanceById = new Map(correlation.controls.map((entry) => [entry.semanticControlId, entry.instanceName]));
-  const pageById = new Map(correlation.pages.map((entry) => [entry.semanticPageId, entry.pageGuid]));
-  const navigate = implementation.compiledActions[0]!; if (navigate.kind !== "navigate-page") throw new Error("navigate fixture required");
-  navigate.ownerInstanceName = instanceById.get("open")!;
-  navigate.targetPageGuid = pageById.get("detail")!;
-  const home = implementation.pages[0]!; if (home.compatibility !== "native") throw new Error("native fixture required");
-  home.controls[0]!.eventBindings[0]!.ownerInstanceName = instanceById.get("open")!;
-  return { workspaceId: "workspace", baseRevisionId: "revision", blueprint, candidateBundle, semanticPlan, implementation, compilerVersion: "1.0.0", evidenceVersion: "1.0.0", approvedAssets: [] as unknown[] };
+  const compiled = compileInteractions({ blueprint, plan: semanticPlan, implementation });
+  if (compiled.diagnostics.errors.length > 0 || compiled.diagnostics.requests.length > 0) throw new Error(JSON.stringify(compiled.diagnostics));
+  implementation = structuredClone(compiled.implementation);
+  return { workspaceId: "workspace", baseRevisionId: "revision", blueprint, candidateBundle, semanticPlan, implementation, compilerVersion: "1.0.0", evidenceVersion: "1.0.0", approvedAssets: [] as unknown[], trustedPayloadIssuer: authority.creativePayloadIssuer };
 }
 
 function reattachCorrelation(source: ReturnType<typeof input>): void {
@@ -74,22 +75,29 @@ function reattachCorrelation(source: ReturnType<typeof input>): void {
   correlationInput.pages.forEach((page) => { if (page.compatibility === "native") page.controls.forEach((control) => { control.eventBindings = []; }); });
   const correlation = attachRuntimeCorrelation({ workspaceId: source.workspaceId, baseRevisionId: source.baseRevisionId, implementation: correlationInput }).runtimeCorrelation!;
   source.implementation.runtimeCorrelation = structuredClone(correlation);
-  const instanceById = new Map(correlation.controls.map((entry) => [entry.semanticControlId, entry.instanceName]));
-  const pageById = new Map(correlation.pages.map((entry) => [entry.semanticPageId, entry.pageGuid]));
-  const navigate = source.implementation.compiledActions[0]!; if (navigate.kind !== "navigate-page") throw new Error("navigate fixture required");
-  navigate.ownerInstanceName = instanceById.get("open")!;
-  navigate.targetPageGuid = pageById.get("detail")!;
-  const home = source.implementation.pages[0]!; if (home.compatibility !== "native") throw new Error("native fixture required");
-  home.controls[0]!.eventBindings[0]!.ownerInstanceName = instanceById.get("open")!;
+  compileFixtureInteractions(source);
+}
+
+function compileFixtureInteractions(source: ReturnType<typeof input>): void {
+  const uncompiled = structuredClone(source.implementation);
+  uncompiled.compiledActions = [];
+  uncompiled.compiledScripts = [];
+  uncompiled.pages.forEach((page) => { if (page.compatibility === "native") page.controls.forEach((control) => { control.eventBindings = []; }); });
+  uncompiled.sourceSolutionPlanHash = canonicalServerHash(source.semanticPlan);
+  uncompiled.sourceModuleRegistryHash = solutionModuleRegistryHash(source.semanticPlan, createDefaultModuleRegistry());
+  const compiled = compileInteractions({ blueprint: source.blueprint, plan: source.semanticPlan, implementation: uncompiled });
+  if (compiled.diagnostics.errors.length > 0 || compiled.diagnostics.requests.length > 0) throw new Error(JSON.stringify(compiled.diagnostics));
+  source.implementation = structuredClone(compiled.implementation);
+}
+
+function cloneInput(source: ReturnType<typeof input>): ReturnType<typeof input> {
+  const { trustedPayloadIssuer, ...plain } = source;
+  return { ...structuredClone(plain), trustedPayloadIssuer };
 }
 
 describe("creative UI implementation v2 compiler", () => {
   it("lowers pages before parent-first controls with exact dimensions and runtime identities", () => {
-    const source = input(); const homePage = source.implementation.pages[0]!; if (homePage.compatibility !== "native") throw new Error("native fixture required");
-    homePage.controls.find((control) => control.id === "root")!.overlayHost = {
-      overlayId: "detail-dialog", hostPageId: "home", presentation: "dialog", visibleStateId: "dialog-visible", dismissible: true, initiallyVisible: false,
-    };
-    const before = structuredClone(source);
+    const source = input(); const before = cloneInput(source);
     const result = compileCreativeUIImplementationV2(source);
     const instanceById = new Map(source.implementation.runtimeCorrelation!.controls.map((entry) => [entry.semanticControlId, entry.instanceName]));
     expect(source).toEqual(before);
@@ -97,22 +105,24 @@ describe("creative UI implementation v2 compiler", () => {
     expect(result.materialization.controls.map((control) => control.semanticControlId)).toEqual(["grid", "root", "open"]);
     expect(result.materialization.controls.find((control) => control.semanticControlId === "open")).toMatchObject({ instanceName: instanceById.get("open"), parentInstanceName: instanceById.get("root") });
     expect(result.materialization.controls.find((control) => control.semanticControlId === "root")).toMatchObject({
-      zIndex: 0, compiledLayout: { kind: "column", overflow: "visible" }, overlayHost: { presentation: "dialog", initiallyVisible: false },
+      zIndex: 0, compiledLayout: { kind: "column", overflow: "visible" },
     });
     expect(result.materialization.controls.find((control) => control.semanticControlId === "grid")).toMatchObject({ capabilityId: "easyui.1", instanceName: instanceById.get("grid") });
     expect(result.materialization.stylesData.find((entry) => entry.semanticControlId === "grid")?.dataBinding?.records).toEqual([{ id: "1" }]);
     expect(result.plan.operations.slice(0, 2).every((operation) => operation.op === "create" && operation.entityType === "page")).toBe(true);
     expect(result.plan.operations.map((operation) => operation.entityId)).toEqual(["detail", "home", "grid", "root", "open"]);
     expect(JSON.stringify(result.plan.operations)).not.toContain(instanceById.get("open"));
-    const authority = createHmacServerPlanAuthority(Buffer.alloc(32, 0x41));
     const envelope = authority.sign({ plan: result.plan, revisionId: "revision", semanticOperations: [], creative: result.trustedCreativePayload });
     expect(authority.verify(JSON.parse(JSON.stringify(envelope))).nativeMaterializationHash).toBe(result.plan.creative?.materializationHash);
+    const otherAuthority = createHmacServerPlanAuthority(Buffer.alloc(32, 0x41));
+    expect(() => otherAuthority.sign({ plan: result.plan, revisionId: "revision", semanticOperations: [], creative: result.trustedCreativePayload }))
+      .toThrow(/UNTRUSTED_CREATIVE_PAYLOAD/);
     expect(Object.isFrozen(result)).toBe(true);
     expect(result.capabilityReport).toMatchObject({ status: "warning", unsupported: [], partial: ["button", "easyui.1", "layout.4"] });
   });
 
   it("is deterministic and rejects missing correlation, unapproved assets, proxies and aliases", () => {
-    const first = input(); expect(compileCreativeUIImplementationV2(first)).toEqual(compileCreativeUIImplementationV2(structuredClone(first)));
+    const first = input(); expect(compileCreativeUIImplementationV2(first)).toEqual(compileCreativeUIImplementationV2(cloneInput(first)));
     const missing = input(); delete missing.implementation.runtimeCorrelation;
     expect(() => compileCreativeUIImplementationV2(missing)).toThrow(/RUNTIME_CORRELATION_REQUIRED/);
     const asset = input(); const modelId = workspaceAssetIdToModelId("00000000-0000-4000-8000-000000000001");
@@ -131,8 +141,8 @@ describe("creative UI implementation v2 compiler", () => {
     expect(() => compileCreativeUIImplementationV2(cyclic)).toThrow(/CYCLE_FORBIDDEN/);
     const deep = input(); let cursor = deep.blueprint as unknown as Record<string, unknown>; for (let index = 0; index < 100; index += 1) { const next = {}; cursor[`deep${index}`] = next; cursor = next; }
     expect(() => compileCreativeUIImplementationV2(deep)).toThrow(/BUDGET_EXCEEDED/);
-    const alias = input(); (alias as unknown as { shared?: unknown }).shared = alias.blueprint;
-    expect(() => compileCreativeUIImplementationV2(alias as never)).toThrow(/UNKNOWN|ALIAS|INVALID/);
+    const alias = input(); alias.implementation.theme = alias.semanticPlan.theme;
+    expect(() => compileCreativeUIImplementationV2(alias)).toThrow(/ALIAS/);
     const unsupported = input(); const unsupportedPage = unsupported.implementation.pages[0]!; if (unsupportedPage.compatibility !== "native") throw new Error("native fixture required");
     unsupportedPage.controls[0]!.capabilityId = "unknown.99";
     const unsupportedRoot = unsupported.semanticPlan.pages[0]!.root; if (unsupportedRoot.kind !== "layout" || unsupportedRoot.children[0]!.kind !== "control") throw new Error("control fixture required");
@@ -141,11 +151,17 @@ describe("creative UI implementation v2 compiler", () => {
     const forgedStyle = input(); const forgedPage = forgedStyle.implementation.pages[0]!; if (forgedPage.compatibility !== "native") throw new Error("native fixture required");
     forgedPage.controls[0]!.compiledStyle!.warnings.push({ code: "FORGED_STYLE", message: "伪造" });
     expect(() => compileCreativeUIImplementationV2(forgedStyle)).toThrow(/COMPILED_STYLE_MISMATCH/);
+    const forgedRole = input(); forgedRole.implementation.compiledRoleStyles.content!.declarations.textColor = "#ffffff";
+    expect(() => compileCreativeUIImplementationV2(forgedRole)).toThrow(/COMPILED_ROLE_STYLE_MISMATCH/);
     const forgedRuntime = input(); forgedRuntime.implementation.runtimeCorrelation!.controls.find((entry) => entry.semanticControlId === "open")!.instanceName = "Button999";
     forgedRuntime.implementation.compiledActions[0]!.ownerInstanceName = "Button999";
     const forgedRuntimePage = forgedRuntime.implementation.pages[0]!; if (forgedRuntimePage.compatibility !== "native") throw new Error("native fixture required");
     forgedRuntimePage.controls[0]!.eventBindings[0]!.ownerInstanceName = "Button999";
     expect(() => compileCreativeUIImplementationV2(forgedRuntime)).toThrow(/RUNTIME_CORRELATION_PROVENANCE/);
+    const forgedAction = input(); const forgedNavigate = forgedAction.implementation.compiledActions[0]!;
+    if (forgedNavigate.kind !== "navigate-page") throw new Error("navigate fixture required");
+    forgedNavigate.targetPageGuid = forgedAction.implementation.runtimeCorrelation!.pages.find((entry) => entry.semanticPageId === "home")!.pageGuid;
+    expect(() => compileCreativeUIImplementationV2(forgedAction)).toThrow(/INTERACTION_PROVENANCE/);
   });
 
   it("preserves exact opaque uploaded page identity and emits allowlisted semantic deltas only", async () => {
@@ -197,11 +213,8 @@ describe("creative UI implementation v2 compiler", () => {
     gridPlan.eventBindings = [{ semanticEvent: "row-click", actionIds: ["refresh-grid"] }];
     source.semanticPlan.scripts.push({ id: "refresh", purpose: "刷新记录", kind: "custom", programVersion: "semantic-js/v1", source: '$control.setData("grid", []);', inputs: [], outputs: [{ name: "records", description: "记录", refKind: "control", refId: "grid" }] });
     source.semanticPlan.actions.push({ id: "refresh-grid", kind: "run-script", scriptId: "refresh", afterActionIds: [], journeyStepRefs: [] });
-    source.implementation.sourceSolutionPlanHash = canonicalServerHash(source.semanticPlan);
-    const scriptSource = `${datagridName}.SetData([]);\n`;
-    source.implementation.compiledScripts = [{ id: "kf$script:refresh", sourceScriptId: "refresh", placement: "event", ownerInstanceName: datagridName, instanceReferences: [{ semanticId: "grid", instanceName: datagridName }], pageReferences: [], source: scriptSource, sourceHash: createHash("sha256").update(scriptSource).digest("hex") }];
-    const detail = source.implementation.pages[1]!; if (detail.compatibility !== "native") throw new Error("native fixture required");
-    detail.controls[0]!.eventBindings = [{ id: "kf$binding:refresh", ownerInstanceName: datagridName, kfEvent: "onClickRow", linkId: 200024, phase: "event", scriptModuleIds: ["kf$script:refresh"], nativeActionIds: [] }];
+    compileFixtureInteractions(source);
+    const scriptSource = source.implementation.compiledScripts[0]!.source;
     const result = compileCreativeUIImplementationV2(source);
     expect(result.materialization.interactions.eventBindings).toContainEqual(expect.objectContaining({ ownerInstanceName: datagridName, kfEvent: "onClickRow", linkId: 200024 }));
     expect(result.materialization.interactions.scripts[0]).toMatchObject({ ownerInstanceName: datagridName, source: scriptSource });
@@ -218,16 +231,20 @@ describe("creative UI implementation v2 compiler", () => {
     expect(result.verifiedAssets).toHaveLength(1);
     expect(result.plan.assetBindings).toBeUndefined();
     expect(result.materialization.stylesData.find((style) => style.semanticControlId === "open")?.approvedAssets[0]?.approvedAsset.sha256).toBe(sha256);
-    const image = input(); const imagePage = image.implementation.pages[0]!; if (imagePage.compatibility !== "native") throw new Error("native fixture required");
+    const image = input(); const imagePage = image.implementation.pages[1]!; if (imagePage.compatibility !== "native") throw new Error("native fixture required");
     imagePage.controls[0]!.capabilityId = "image"; imagePage.controls[0]!.assetIds = [assetId];
-    const imageRoot = image.semanticPlan.pages[0]!.root;
-    if (imageRoot.kind !== "layout" || imageRoot.children[0]!.kind !== "control") throw new Error("control fixture required");
-    imageRoot.children[0]!.capabilityId = "image";
+    delete imagePage.controls[0]!.dataBinding; imagePage.controls[0]!.nativeProperties = {};
+    imagePage.controls[0]!.compiledStyle = { nativeFields: {}, cssFragments: [], warnings: [] };
+    const imageRoot = image.semanticPlan.pages[1]!.root;
+    if (imageRoot.kind !== "control") throw new Error("control fixture required");
+    imageRoot.capabilityId = "image"; delete imageRoot.mockDataId;
     image.implementation.sourceSolutionPlanHash = canonicalServerHash(image.semanticPlan);
     image.approvedAssets.push({ assetId, approvedAsset: { workspaceAssetId, targetPath: `project/res/images/${sha256}.png`, mediaType: "image/png", sha256, sizeBytes: 100 } });
     reattachCorrelation(image);
-    expect(compileCreativeUIImplementationV2(image).plan.assetBindings?.[0]).toMatchObject({ assetId, entityId: "open", controlId: "open" });
+    expect(compileCreativeUIImplementationV2(image).plan.assetBindings?.[0]).toMatchObject({ assetId, entityId: "grid", controlId: "grid" });
     const forged = input(); forged.approvedAssets.push({ assetId, approvedAsset: { workspaceAssetId: "00000000-0000-4000-8000-000000000002", targetPath: `project/res/images/${sha256}.png`, mediaType: "image/png", sha256, sizeBytes: 100 } });
     expect(() => compileCreativeUIImplementationV2(forged)).toThrow(/ASSET_INVALID/);
+    const unused = input(); unused.approvedAssets.push({ assetId, approvedAsset: { workspaceAssetId, targetPath: `project/res/images/${sha256}.png`, mediaType: "image/png", sha256, sizeBytes: 100 } });
+    expect(() => compileCreativeUIImplementationV2(unused)).toThrow(/ASSET_UNUSED/);
   });
 });

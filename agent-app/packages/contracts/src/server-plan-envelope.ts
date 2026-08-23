@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { types as utilTypes } from "node:util";
 import { z } from "zod";
 import { internalChangePlanSchema, type InternalChangePlan } from "./change-plan.js";
 import {
@@ -6,6 +7,7 @@ import {
   TrustedNativeMaterializationSchema,
   canonicalCreativeBuildArtifactHash,
   canonicalTrustedNativeMaterializationHash,
+  compareCreativeIdentifiers,
   validateCreativeArtifactMaterializationProjection,
 } from "./creative-build-artifact.js";
 
@@ -248,8 +250,8 @@ export function validateCreativePlanMaterializationProjection(plan: InternalChan
     ? style.approvedAssets.map((asset) => ({
     assetId: asset.assetId, ...asset.approvedAsset, entityId: style.semanticControlId,
     controlId: style.semanticControlId, capabilityId: "image" as const,
-  })) : []).sort((left, right) => left.assetId.localeCompare(right.assetId) || left.controlId.localeCompare(right.controlId));
-  const actualAssets = [...(plan.assetBindings ?? [])].sort((left, right) => left.assetId.localeCompare(right.assetId) || left.controlId.localeCompare(right.controlId));
+  })) : []).sort((left, right) => compareCreativeIdentifiers(left.assetId, right.assetId) || compareCreativeIdentifiers(left.controlId, right.controlId));
+  const actualAssets = [...(plan.assetBindings ?? [])].sort((left, right) => compareCreativeIdentifiers(left.assetId, right.assetId) || compareCreativeIdentifiers(left.controlId, right.controlId));
   if (stableJson(actualAssets) !== stableJson(expectedAssets)) throw new Error("SERVER_PLAN_CREATIVE_MISMATCH: plan assets differ from materialization");
 }
 
@@ -344,6 +346,7 @@ function assertDescriptorSafeJson(value: unknown): void {
       rawInvalid(`non-finite number at ${current.path}`);
     }
     if (typeof nested !== "object") rawInvalid(`non-JSON value at ${current.path}`);
+    if (utilTypes.isProxy(nested)) rawInvalid(`proxy at ${current.path}`);
     if (seen.has(nested)) rawInvalid(`cyclic or shared object at ${current.path}`);
     seen.add(nested);
     if (Array.isArray(nested)) {

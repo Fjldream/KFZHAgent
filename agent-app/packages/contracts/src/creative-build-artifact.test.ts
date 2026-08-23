@@ -8,6 +8,7 @@ import {
   canonicalServerHash,
   canonicalChangePlanHash,
   canonicalServerPlanSigningBytes,
+  compareCreativeIdentifiers,
   validateCreativeArtifactMaterializationProjection,
   validateServerPlanEnvelopeData,
 } from "./index.js";
@@ -60,12 +61,18 @@ const implementation = {
 };
 
 function artifact() {
+  const evidence = {
+    pages: [{ source: "workspace-derived" as const, semanticPageId: "home", pageGuid: "k00000000-0000-4000-8000-000000000001" }],
+    controls: [{ source: "workspace-derived" as const, semanticControlId: "open", semanticPageId: "home", pageGuid: "k00000000-0000-4000-8000-000000000001", instanceName: "Button1" }],
+    stylesData: [{ semanticControlId: "open", structuredStyle: { role: "action", declarations: {}, states: {} }, approvedAssets: [] }],
+    verifiedAssets: [],
+  };
   const hashes = {
     blueprintHash: canonicalServerHash(blueprint), candidateBundleHash: canonicalServerHash(candidates),
-    semanticPlanHash: canonicalServerHash(plan), implementationHash: canonicalServerHash(implementation),
+    semanticPlanHash: canonicalServerHash(plan), implementationHash: canonicalServerHash(implementation), evidenceHash: canonicalServerHash(evidence),
   };
   return { schema: "kf-creative-build-artifact/v1", blueprint, candidateBundle: candidates, semanticPlan: plan, implementation,
-    compilerVersion: "1.0.0", evidenceVersion: "1.0.0", hashes };
+    evidence, compilerVersion: "1.0.0", evidenceVersion: "1.0.0", hashes };
 }
 
 function materialization() {
@@ -81,6 +88,12 @@ function materialization() {
 }
 
 describe("creative build contracts", () => {
+  it("uses one code-point comparator for creative identity ordering", () => {
+    expect(compareCreativeIdentifiers("A", "a")).toBeLessThan(0);
+    expect(["a_", "😀", "a", "A", "a-", "á"].sort(compareCreativeIdentifiers))
+      .toEqual(["A", "a", "a-", "a_", "á", "😀"]);
+  });
+
   it("binds every exact creative input to canonical hashes", () => {
     const parsed = CreativeBuildArtifactSchema.parse(artifact());
     expect(canonicalCreativeBuildArtifactHash(parsed)).toMatch(/^[a-f0-9]{64}$/);
@@ -108,7 +121,36 @@ describe("creative build contracts", () => {
     forgedExisting.pages[0]!.source = "uploaded-existing";
     forgedExisting.controls[0]!.source = "uploaded-existing";
     Object.assign(forgedExisting.controls[0]!, { nativeGuid: "arbitrary-guid", existingDeltas: [{ path: "/forbidden", value: true }] });
-    expect(() => validateCreativeArtifactMaterializationProjection(artifact(), forgedExisting)).toThrow(/existing delta/);
+    expect(() => validateCreativeArtifactMaterializationProjection(artifact(), forgedExisting)).toThrow(/pages|controls/);
+  });
+
+  it("rejects substituted uploaded native identity, partial deltas, and asset facts", () => {
+    const uploadedArtifact = structuredClone(CreativeBuildArtifactSchema.parse(artifact()));
+    uploadedArtifact.evidence.pages[0]!.source = "uploaded-existing";
+    const runtimeEvidence = uploadedArtifact.evidence.controls[0]!;
+    runtimeEvidence.source = "uploaded-existing";
+    Object.assign(runtimeEvidence, { nativeGuid: "native-button-guid", existingDeltas: [{ path: "/x", value: 10 }, { path: "/width", value: 120 }] });
+    uploadedArtifact.hashes.evidenceHash = canonicalServerHash(uploadedArtifact.evidence);
+    const uploadedMaterialization = TrustedNativeMaterializationSchema.parse(materialization());
+    uploadedMaterialization.pages[0]!.source = "uploaded-existing";
+    uploadedMaterialization.controls[0]!.source = "uploaded-existing";
+    Object.assign(uploadedMaterialization.controls[0]!, { nativeGuid: "native-button-guid", existingDeltas: [{ path: "/x", value: 10 }, { path: "/width", value: 120 }] });
+    uploadedMaterialization.creativeArtifactHash = canonicalCreativeBuildArtifactHash(uploadedArtifact);
+    expect(() => validateCreativeArtifactMaterializationProjection(uploadedArtifact, uploadedMaterialization)).not.toThrow();
+    const forgedGuid = structuredClone(uploadedMaterialization); forgedGuid.controls[0]!.nativeGuid = "substituted-guid";
+    expect(() => validateCreativeArtifactMaterializationProjection(uploadedArtifact, forgedGuid)).toThrow(/controls/);
+    const partial = structuredClone(uploadedMaterialization); partial.controls[0]!.existingDeltas!.pop();
+    expect(() => validateCreativeArtifactMaterializationProjection(uploadedArtifact, partial)).toThrow(/controls/);
+
+    const assetArtifact = structuredClone(CreativeBuildArtifactSchema.parse(artifact()));
+    const asset = { assetId: "asset-1", approvedAsset: { workspaceAssetId: "00000000-0000-4000-8000-000000000001", targetPath: `project/res/images/${"a".repeat(64)}.png`, mediaType: "image/png" as const, sha256: "a".repeat(64), sizeBytes: 10 } };
+    assetArtifact.evidence.verifiedAssets = [asset]; assetArtifact.evidence.stylesData[0]!.approvedAssets = [asset];
+    assetArtifact.hashes.evidenceHash = canonicalServerHash(assetArtifact.evidence);
+    const assetMaterialization = TrustedNativeMaterializationSchema.parse(materialization()); assetMaterialization.stylesData[0]!.approvedAssets = [asset];
+    assetMaterialization.creativeArtifactHash = canonicalCreativeBuildArtifactHash(assetArtifact);
+    expect(() => validateCreativeArtifactMaterializationProjection(assetArtifact, assetMaterialization)).not.toThrow();
+    const substituted = structuredClone(assetMaterialization); substituted.stylesData[0]!.approvedAssets[0]!.approvedAsset.sizeBytes += 1;
+    expect(() => validateCreativeArtifactMaterializationProjection(assetArtifact, substituted)).toThrow(/styles-data|approved assets/);
   });
 
   it("binds a complete creative payload into envelope validation and signing bytes while keeping legacy compatible", () => {

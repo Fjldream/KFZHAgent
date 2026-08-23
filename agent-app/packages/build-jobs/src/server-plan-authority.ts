@@ -38,10 +38,18 @@ export interface ServerPlanSignInput {
 
 declare const trustedCreativePayloadBrand: unique symbol;
 export interface TrustedCreativePayloadHandle { readonly [trustedCreativePayloadBrand]: true }
-const creativePayloads = new WeakMap<object, Readonly<{ planHash: string; artifact: CreativeBuildArtifact; materialization: TrustedNativeMaterialization }>>();
+const creativePayloads = new WeakMap<object, Readonly<{ authorityIdentity: object; planHash: string; artifact: CreativeBuildArtifact; materialization: TrustedNativeMaterialization }>>();
+
+export interface TrustedCreativePayloadIssuer {
+  issue(input: {
+    readonly plan: InternalChangePlan;
+    readonly artifact: CreativeBuildArtifact;
+    readonly materialization: TrustedNativeMaterialization;
+  }): TrustedCreativePayloadHandle;
+}
 
 /** Server-only brand issued after the complete plan/artifact/materialization projection is verified. */
-export function createTrustedCreativePayload(input: {
+function issueTrustedCreativePayload(authorityIdentity: object, input: {
   readonly plan: InternalChangePlan;
   readonly artifact: CreativeBuildArtifact;
   readonly materialization: TrustedNativeMaterialization;
@@ -57,7 +65,7 @@ export function createTrustedCreativePayload(input: {
   }
   validateCreativePlanMaterializationProjection(plan, materialization);
   const handle = Object.freeze(Object.create(null)) as TrustedCreativePayloadHandle;
-  creativePayloads.set(handle, Object.freeze({ planHash, artifact, materialization }));
+  creativePayloads.set(handle, Object.freeze({ authorityIdentity, planHash, artifact, materialization }));
   return handle;
 }
 
@@ -73,6 +81,7 @@ function deepFreeze<T>(value: T): T {
 }
 
 export interface ServerPlanAuthority {
+  readonly creativePayloadIssuer: TrustedCreativePayloadIssuer;
   sign(input: ServerPlanSignInput): ServerPlanEnvelope;
   verify(input: unknown, expected?: ServerPlanEnvelopeExpectations): ServerPlanEnvelope;
 }
@@ -200,14 +209,20 @@ export function decodeServerPlanHmacKey(raw: string | undefined): Uint8Array {
 export function createHmacServerPlanAuthority(key: Uint8Array): ServerPlanAuthority {
   if (key.byteLength < 32) throw new Error("server plan HMAC key must contain at least 32 bytes");
   const ownedKey = Buffer.from(key);
+  const authorityIdentity = Object.freeze(Object.create(null)) as object;
+  const creativePayloadIssuer: TrustedCreativePayloadIssuer = Object.freeze({
+    issue: (input: Parameters<TrustedCreativePayloadIssuer["issue"]>[0]) => issueTrustedCreativePayload(authorityIdentity, input),
+  });
   const digest = (envelope: ServerPlanEnvelope): Buffer => createHmac("sha256", ownedKey)
     .update(canonicalServerPlanSigningBytes(envelope))
     .digest();
 
   return Object.freeze({
+    creativePayloadIssuer,
     sign(input: ServerPlanSignInput): ServerPlanEnvelope {
       const creative = input.creative === undefined ? undefined : creativePayloads.get(input.creative);
       if (input.creative !== undefined && creative === undefined) throw new Error("UNTRUSTED_CREATIVE_PAYLOAD");
+      if (creative !== undefined && creative.authorityIdentity !== authorityIdentity) throw new Error("UNTRUSTED_CREATIVE_PAYLOAD");
       if (creative !== undefined && creative.planHash !== canonicalChangePlanHash(input.plan)) throw new Error("CREATIVE_PLAN_BINDING_MISMATCH");
       const unsigned = ServerPlanEnvelopeSchema.parse({
         schema: "kf-server-plan-envelope/v1",

@@ -81,6 +81,9 @@ export function resolveStoredPlan(
   if (record?.["schema"] === "kf-server-plan-envelope/v1") {
     if (verifier === undefined) throw new Error("server plan verifier is not configured");
     const envelope = verifier.verify(input, expected);
+    if (envelope.plan.creative !== undefined) {
+      throw new Error("creative materializer is not configured; refusing legacy patch fallback");
+    }
     return { plan: envelope.plan, semanticOperations: envelope.semanticOperations };
   }
   const parsed = changePlanSchema.safeParse(input);

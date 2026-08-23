@@ -36,7 +36,15 @@ function publicChangePlan(
   const record = asRecord(storedPlan);
   try {
     if (record["schema"] === "kf-server-plan-envelope/v1") {
-      return authority.verify(storedPlan, { expectedPlanHash }).plan;
+      const internalPlan = authority.verify(storedPlan, { expectedPlanHash }).plan;
+      if (internalPlan.creative !== undefined) {
+        throw new Error("creative confirmation surface is not available");
+      }
+      return changePlanSchema.parse({
+        schema: internalPlan.schema,
+        workspaceId: internalPlan.workspaceId,
+        operations: internalPlan.operations,
+      });
     }
     const schema = record["schema"];
     const internalKeys = ["signature", "semanticOperations", "revisionId", "planHash", "plan"];

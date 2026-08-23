@@ -28,12 +28,50 @@ const geometry = z.object({
 }).strict();
 const dataRecord = ImplementationDataRecordSchema;
 
+export const VerifiedCreativeAssetSchema = z.object({
+  assetId: boundedId,
+  approvedAsset: ApprovedAssetFactsSchema,
+}).strict();
+
+const ExistingDeltaSchema = z.object({
+  path: z.string().regex(/^\/[A-Za-z0-9_/-]+$/),
+  value: z.unknown(),
+}).strict();
+
+const CreativeBuildEvidenceSchema = z.object({
+  pages: z.array(z.object({
+    source: z.enum(["uploaded-existing", "workspace-derived"]),
+    semanticPageId: boundedId,
+    pageGuid: pageIdentity,
+  }).strict()).min(1).max(32),
+  controls: z.array(z.object({
+    source: z.enum(["uploaded-existing", "workspace-derived"]),
+    semanticControlId: boundedId,
+    semanticPageId: boundedId,
+    pageGuid: pageIdentity,
+    instanceName,
+    nativeGuid: boundedId.optional(),
+    existingDeltas: z.array(ExistingDeltaSchema).max(256).optional(),
+  }).strict().superRefine((control, ctx) => {
+    if ((control.source === "uploaded-existing") !== (control.nativeGuid !== undefined && control.existingDeltas !== undefined)) {
+      ctx.addIssue({ code: "custom", path: ["nativeGuid"], message: "runtime evidence source mismatch" });
+    }
+  })).min(1).max(5_000),
+  stylesData: z.array(z.object({
+    semanticControlId: boundedId,
+    structuredStyle: ComponentStyleSpecV2Schema,
+    approvedAssets: z.array(VerifiedCreativeAssetSchema).max(64),
+  }).strict()).max(5_000),
+  verifiedAssets: z.array(VerifiedCreativeAssetSchema).max(256),
+}).strict();
+
 export const CreativeBuildArtifactSchema = z.object({
   schema: z.literal("kf-creative-build-artifact/v1"),
   blueprint: CustomerSolutionBlueprintSchema,
   candidateBundle: CapabilityCandidateBundleSchema,
   semanticPlan: SolutionImplementationPlanSchema,
   implementation: UIImplementationSpecV2Schema,
+  evidence: CreativeBuildEvidenceSchema,
   compilerVersion: version,
   evidenceVersion: version,
   hashes: z.object({
@@ -41,6 +79,7 @@ export const CreativeBuildArtifactSchema = z.object({
     candidateBundleHash: hash,
     semanticPlanHash: hash,
     implementationHash: hash,
+    evidenceHash: hash,
   }).strict(),
 }).strict().superRefine((artifact, ctx) => {
   const actual = {
@@ -48,6 +87,7 @@ export const CreativeBuildArtifactSchema = z.object({
     candidateBundleHash: canonicalJsonHash(artifact.candidateBundle),
     semanticPlanHash: canonicalJsonHash(artifact.semanticPlan),
     implementationHash: canonicalJsonHash(artifact.implementation),
+    evidenceHash: canonicalJsonHash(artifact.evidence),
   };
   (Object.keys(actual) as Array<keyof typeof actual>).forEach((key) => {
     if (artifact.hashes[key] !== actual[key]) ctx.addIssue({ code: "custom", path: ["hashes", key], message: `${key} mismatch` });
@@ -65,11 +105,6 @@ export const CreativeBuildArtifactSchema = z.object({
     ctx.addIssue({ code: "custom", path: ["implementation"], message: "native interaction implementation provenance mismatch" });
   }
 });
-
-export const VerifiedCreativeAssetSchema = z.object({
-  assetId: boundedId,
-  approvedAsset: ApprovedAssetFactsSchema,
-}).strict();
 
 const MaterializedPageSchema = z.object({
   source: z.enum(["uploaded-existing", "workspace-derived"]),
@@ -99,7 +134,7 @@ const MaterializedControlSchema = z.object({
   nativeProperties: dataRecord,
   nativeGuid: boundedId.optional(),
   content: z.string().max(2_000).optional(),
-  existingDeltas: z.array(z.object({ path: z.string().regex(/^\/[A-Za-z0-9_/-]+$/), value: z.unknown() }).strict()).max(256).optional(),
+  existingDeltas: z.array(ExistingDeltaSchema).max(256).optional(),
 }).strict().superRefine((control, ctx) => {
   if ((control.parentSemanticControlId === undefined) !== (control.parentInstanceName === undefined)) {
     ctx.addIssue({ code: "custom", path: ["parentInstanceName"], message: "parent provenance must be complete" });
@@ -200,19 +235,39 @@ export function validateCreativeArtifactMaterializationProjection(
   const pageGuid = new Map(implementation.runtimeCorrelation!.pages.map((entry) => [entry.semanticPageId, entry.pageGuid]));
   const instanceName = new Map(implementation.runtimeCorrelation!.controls.map((entry) => [entry.semanticControlId, entry.instanceName]));
   const pages = implementation.pages.filter((page): page is Extract<typeof page, { compatibility: "native" }> => page.compatibility === "native")
-    .slice().sort((left, right) => compare(left.id, right.id));
-  const expectedPages = pages.map((page, order) => ({ semanticPageId: page.id, pageGuid: pageGuid.get(page.id), width: page.width, height: page.height, order }));
-  const actualPages = materialization.pages.map(({ semanticPageId, pageGuid: guid, width, height, order }) => ({ semanticPageId, pageGuid: guid, width, height, order }));
+    .slice().sort((left, right) => compareCreativeIdentifiers(left.id, right.id));
+  const pageEvidence = new Map(artifact.evidence.pages.map((page) => [page.semanticPageId, page]));
+  const expectedPageEvidenceIdentity = pages.map((page) => ({ semanticPageId: page.id, pageGuid: pageGuid.get(page.id) }));
+  const actualPageEvidenceIdentity = artifact.evidence.pages.map(({ semanticPageId, pageGuid: guid }) => ({ semanticPageId, pageGuid: guid }));
+  if (stableJson(expectedPageEvidenceIdentity) !== stableJson(actualPageEvidenceIdentity)) {
+    throw new Error("CREATIVE_MATERIALIZATION_PROJECTION_MISMATCH: page evidence");
+  }
+  const expectedPages = pages.map((page, order) => ({
+    source: pageEvidence.get(page.id)?.source, semanticPageId: page.id, pageGuid: pageGuid.get(page.id), width: page.width, height: page.height, order,
+  }));
+  const actualPages = materialization.pages.map(({ source, semanticPageId, pageGuid: guid, width, height, order }) => ({ source, semanticPageId, pageGuid: guid, width, height, order }));
   if (stableJson(expectedPages) !== stableJson(actualPages)) throw new Error("CREATIVE_MATERIALIZATION_PROJECTION_MISMATCH: pages");
   const pageIndex = new Map(pages.map((page, index) => [page.id, index]));
   const pageByControl = new Map(pages.flatMap((page) => page.controls.map((control) => [control.id, page] as const)));
   const controls = pages.flatMap((page) => page.controls).slice().sort((left, right) =>
     pageIndex.get(pageByControl.get(left.id)!.id)! - pageIndex.get(pageByControl.get(right.id)!.id)!
-      || left.depth - right.depth || compare(left.id, right.id));
+      || left.depth - right.depth || compareCreativeIdentifiers(left.id, right.id));
+  const controlEvidence = new Map(artifact.evidence.controls.map((control) => [control.semanticControlId, control]));
+  const expectedControlEvidenceIdentity = controls.map((control) => {
+    const page = pageByControl.get(control.id)!;
+    return { semanticControlId: control.id, semanticPageId: page.id, pageGuid: pageGuid.get(page.id), instanceName: instanceName.get(control.id) };
+  });
+  const actualControlEvidenceIdentity = artifact.evidence.controls.map(({ semanticControlId, semanticPageId, pageGuid: guid, instanceName: runtimeName }) => ({
+    semanticControlId, semanticPageId, pageGuid: guid, instanceName: runtimeName,
+  }));
+  if (stableJson(expectedControlEvidenceIdentity) !== stableJson(actualControlEvidenceIdentity)) {
+    throw new Error("CREATIVE_MATERIALIZATION_PROJECTION_MISMATCH: control evidence");
+  }
   const expectedControls = controls.map((control, order) => {
     const page = pageByControl.get(control.id)!;
+    const evidence = controlEvidence.get(control.id);
     return {
-      semanticControlId: control.id, sourceSolutionNodeId: control.sourceSolutionNodeId, semanticPageId: page.id,
+      source: evidence?.source, semanticControlId: control.id, sourceSolutionNodeId: control.sourceSolutionNodeId, semanticPageId: page.id,
       pageGuid: pageGuid.get(page.id), instanceName: instanceName.get(control.id), capabilityId: control.capabilityId,
       ...(control.parentId === undefined ? {} : { parentSemanticControlId: control.parentId, parentInstanceName: instanceName.get(control.parentId) }),
       depth: control.depth, zIndex: control.zIndex, order, geometry: control.geometry,
@@ -220,10 +275,12 @@ export function validateCreativeArtifactMaterializationProjection(
       ...(control.overlayHost === undefined ? {} : { overlayHost: control.overlayHost }),
       nativeProperties: control.nativeProperties,
       ...(control.content === undefined ? {} : { content: control.content }),
+      ...(evidence?.nativeGuid === undefined ? {} : { nativeGuid: evidence.nativeGuid }),
+      ...(evidence?.existingDeltas === undefined ? {} : { existingDeltas: evidence.existingDeltas }),
     };
   });
   const actualControls = materialization.controls.map((control) => ({
-    semanticControlId: control.semanticControlId, sourceSolutionNodeId: control.sourceSolutionNodeId,
+    source: control.source, semanticControlId: control.semanticControlId, sourceSolutionNodeId: control.sourceSolutionNodeId,
     semanticPageId: control.semanticPageId, pageGuid: control.pageGuid, instanceName: control.instanceName,
     capabilityId: control.capabilityId,
     ...(control.parentSemanticControlId === undefined ? {} : { parentSemanticControlId: control.parentSemanticControlId, parentInstanceName: control.parentInstanceName }),
@@ -232,45 +289,33 @@ export function validateCreativeArtifactMaterializationProjection(
     ...(control.overlayHost === undefined ? {} : { overlayHost: control.overlayHost }),
     nativeProperties: control.nativeProperties,
     ...(control.content === undefined ? {} : { content: control.content }),
+    ...(control.nativeGuid === undefined ? {} : { nativeGuid: control.nativeGuid }),
+    ...(control.existingDeltas === undefined ? {} : { existingDeltas: control.existingDeltas }),
   }));
   if (stableJson(expectedControls) !== stableJson(actualControls)) throw new Error("CREATIVE_MATERIALIZATION_PROJECTION_MISMATCH: controls");
-  materialization.controls.forEach((control) => {
-    if (control.source !== "uploaded-existing") return;
-    const implementationControl = controls.find((candidate) => candidate.id === control.semanticControlId)!;
-    const candidateValues = new Map<string, unknown>([
-      ["/x", implementationControl.geometry.x], ["/y", implementationControl.geometry.y],
-      ["/width", implementationControl.geometry.width], ["/height", implementationControl.geometry.height],
-      ...Object.entries(implementationControl.nativeProperties).map(([key, value]) => [`/${key}`, value] as const),
-      ...(implementationControl.content === undefined ? [] : [["/text", implementationControl.content] as const]),
-    ]);
-    const seen = new Set<string>();
-    control.existingDeltas!.forEach((delta) => {
-      if (seen.has(delta.path) || !candidateValues.has(delta.path)
-        || stableJson(candidateValues.get(delta.path)) !== stableJson(delta.value)) {
-        throw new Error(`CREATIVE_MATERIALIZATION_PROJECTION_MISMATCH: existing delta ${control.semanticControlId}`);
-      }
-      seen.add(delta.path);
-    });
-  });
+  const styleEvidence = new Map(artifact.evidence.stylesData.map((style) => [style.semanticControlId, style]));
   const expectedStyles = controls.map((control) => {
-    const styleRole = control.style?.role ?? control.role;
-    const semanticRoleStyle = artifact.semanticPlan.roleStyles.find((style) => style.role === styleRole)
-      ?? { role: styleRole, declarations: {}, states: {} };
+    const evidence = styleEvidence.get(control.id);
     return {
       semanticControlId: control.id, instanceName: instanceName.get(control.id),
-      structuredStyle: control.style ?? implementation.compiledRoleStyles[control.role] ?? semanticRoleStyle,
+      structuredStyle: evidence?.structuredStyle,
       compiledStyle: control.compiledStyle ?? { nativeFields: {}, cssFragments: [], warnings: [] },
       ...(control.dataBinding === undefined ? {} : { dataBinding: control.dataBinding }),
-      assetIds: [...(control.assetIds ?? [])].sort(compare),
+      approvedAssets: evidence?.approvedAssets,
     };
   });
   const actualStyles = materialization.stylesData.map((style) => ({
     semanticControlId: style.semanticControlId, instanceName: style.instanceName,
     structuredStyle: style.structuredStyle, compiledStyle: style.compiledStyle,
     ...(style.dataBinding === undefined ? {} : { dataBinding: style.dataBinding }),
-    assetIds: style.approvedAssets.map((asset) => asset.assetId).sort(compare),
+    approvedAssets: style.approvedAssets,
   }));
   if (stableJson(expectedStyles) !== stableJson(actualStyles)) throw new Error("CREATIVE_MATERIALIZATION_PROJECTION_MISMATCH: styles-data");
+  const materializedAssets = new Map<string, VerifiedCreativeAsset>();
+  materialization.stylesData.flatMap((style) => style.approvedAssets).forEach((asset) => materializedAssets.set(asset.assetId, asset));
+  const expectedAssets = [...artifact.evidence.verifiedAssets].sort((left, right) => compareCreativeIdentifiers(left.assetId, right.assetId));
+  const actualAssets = [...materializedAssets.values()].sort((left, right) => compareCreativeIdentifiers(left.assetId, right.assetId));
+  if (stableJson(expectedAssets) !== stableJson(actualAssets)) throw new Error("CREATIVE_MATERIALIZATION_PROJECTION_MISMATCH: approved assets");
   const expectedBindings = implementation.pages.flatMap((page) => page.compatibility === "native"
     ? page.controls.flatMap((control) => control.eventBindings) : []);
   if (stableJson(materialization.interactions.actions) !== stableJson(implementation.compiledActions)
@@ -295,4 +340,12 @@ function sortJson(input: unknown): unknown {
   return input;
 }
 
-function compare(left: string, right: string): number { return left < right ? -1 : left > right ? 1 : 0; }
+export function compareCreativeIdentifiers(left: string, right: string): number {
+  const leftPoints = Array.from(left);
+  const rightPoints = Array.from(right);
+  for (let index = 0; index < Math.min(leftPoints.length, rightPoints.length); index += 1) {
+    const difference = leftPoints[index]!.codePointAt(0)! - rightPoints[index]!.codePointAt(0)!;
+    if (difference !== 0) return difference;
+  }
+  return leftPoints.length - rightPoints.length;
+}
