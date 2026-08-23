@@ -38,6 +38,21 @@ const ExistingDeltaSchema = z.object({
   value: z.unknown(),
 }).strict();
 
+const DeltaAllowlistPolicySchema = z.object({
+  capabilityId: boundedId,
+  allowedFields: z.array(z.string().regex(/^[A-Za-z0-9_-]+$/)).max(512),
+  policyHash: hash,
+}).strict().superRefine((policy, ctx) => {
+  const sorted = [...policy.allowedFields].sort(compareCreativeIdentifiers);
+  if (new Set(policy.allowedFields).size !== policy.allowedFields.length
+    || stableJson(sorted) !== stableJson(policy.allowedFields)) {
+    ctx.addIssue({ code: "custom", path: ["allowedFields"], message: "delta allowlist fields must be unique and canonically ordered" });
+  }
+  if (policy.policyHash !== canonicalJsonHash({ capabilityId: policy.capabilityId, allowedFields: policy.allowedFields })) {
+    ctx.addIssue({ code: "custom", path: ["policyHash"], message: "delta allowlist policy hash mismatch" });
+  }
+});
+
 const CreativeBuildEvidenceSchema = z.object({
   pages: z.array(z.object({
     source: z.enum(["uploaded-existing", "workspace-derived"]),
@@ -52,8 +67,10 @@ const CreativeBuildEvidenceSchema = z.object({
     instanceName,
     nativeGuid: boundedId.optional(),
     existingDeltas: z.array(ExistingDeltaSchema).max(256).optional(),
+    deltaAllowlistPolicy: DeltaAllowlistPolicySchema.optional(),
   }).strict().superRefine((control, ctx) => {
-    if ((control.source === "uploaded-existing") !== (control.nativeGuid !== undefined && control.existingDeltas !== undefined)) {
+    if ((control.source === "uploaded-existing") !== (control.nativeGuid !== undefined
+      && control.existingDeltas !== undefined && control.deltaAllowlistPolicy !== undefined)) {
       ctx.addIssue({ code: "custom", path: ["nativeGuid"], message: "runtime evidence source mismatch" });
     }
   })).min(1).max(5_000),
@@ -329,14 +346,19 @@ export function validateCreativeArtifactMaterializationProjection(
   materialization.controls.forEach((control) => {
     if (control.source !== "uploaded-existing") return;
     const implementationControl = controls.find((candidate) => candidate.id === control.semanticControlId)!;
+    const policy = controlEvidence.get(control.semanticControlId)?.deltaAllowlistPolicy;
+    if (policy === undefined || policy.capabilityId !== implementationControl.capabilityId) {
+      throw new Error(`CREATIVE_MATERIALIZATION_PROJECTION_MISMATCH: delta allowlist policy ${control.semanticControlId}`);
+    }
+    const allowedFields = new Set(policy.allowedFields);
     const candidates: Array<{ path: string; value: unknown }> = [
       { path: "/x", value: implementationControl.geometry.x }, { path: "/y", value: implementationControl.geometry.y },
       { path: "/width", value: implementationControl.geometry.width }, { path: "/height", value: implementationControl.geometry.height },
       ...Object.entries(implementationControl.nativeProperties).map(([key, value]) => ({ path: `/${key}`, value })),
       ...(implementationControl.content === undefined ? [] : [{ path: "/text", value: implementationControl.content }]),
-    ];
+    ].filter((candidate) => allowedFields.has(candidate.path.slice(1)));
     if (stableJson(control.existingDeltas) !== stableJson(candidates)) {
-      throw new Error(`CREATIVE_MATERIALIZATION_PROJECTION_MISMATCH: existing delta ${control.semanticControlId}`);
+      throw new Error(`CREATIVE_MATERIALIZATION_PROJECTION_MISMATCH: delta allowlist policy ${control.semanticControlId}`);
     }
   });
   const styleEvidence = new Map(artifact.evidence.stylesData.map((style) => [style.semanticControlId, style]));

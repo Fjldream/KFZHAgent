@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalServerHash, workspaceAssetIdToModelId, type SolutionImplementationPlan, type UIImplementationSpecV2 } from "@kf/contracts";
+import { TrustedNativeMaterializationSchema, canonicalServerHash, workspaceAssetIdToModelId, type SolutionImplementationPlan, type UIImplementationSpecV2 } from "@kf/contracts";
 import { createCreativeUIImplementationV2Compiler } from "./ui-implementation-v2-compiler.js";
 import { compileClientProject } from "../compile/client-compiler.js";
 import { inspectClientProject } from "../inspect/client-inspector.js";
@@ -217,6 +217,10 @@ describe("creative UI implementation v2 compiler", () => {
     expect(deltaPaths("grid")).toEqual(["/x", "/y", "/width", "/height", "/pagination"]);
     expect(deltaPaths("root")).toEqual(["/x", "/y", "/width", "/height"]);
     expect(deltaPaths("open")).toEqual(["/x", "/y", "/width", "/height", "/text"]);
+    expect(result.artifact.evidence.controls.find((control) => control.semanticControlId === "grid")?.deltaAllowlistPolicy?.allowedFields)
+      .toContain("pagination");
+    expect(result.artifact.evidence.controls.find((control) => control.semanticControlId === "open")?.deltaAllowlistPolicy?.allowedFields)
+      .toContain("text");
     expect(result.materialization.controls.find((control) => control.semanticControlId === "grid")?.nativeGuid).toEqual(expect.any(String));
   });
 
@@ -246,6 +250,15 @@ describe("creative UI implementation v2 compiler", () => {
     expect(result.verifiedAssets).toHaveLength(1);
     expect(result.plan.assetBindings).toBeUndefined();
     expect(result.materialization.stylesData.find((style) => style.semanticControlId === "open")?.approvedAssets[0]?.approvedAsset.sha256).toBe(sha256);
+    const shared = input();
+    const sharedHome = shared.implementation.pages[0]!; const sharedDetail = shared.implementation.pages[1]!;
+    if (sharedHome.compatibility !== "native" || sharedDetail.compatibility !== "native") throw new Error("native fixture required");
+    sharedHome.controls[0]!.assetIds = [assetId]; sharedDetail.controls[0]!.assetIds = [assetId];
+    const sharedResult = compiler.compile({ ...shared, verifiedAssets: assetResolver.attestResolvedAssets({ workspaceId: "workspace", assets: [assetFacts] }) });
+    expect(sharedResult.materialization.stylesData.filter((style) => style.approvedAssets.some((asset) => asset.assetId === assetId))).toHaveLength(2);
+    const conflictingStyles = structuredClone(sharedResult.materialization);
+    conflictingStyles.stylesData.find((style) => style.semanticControlId === "grid")!.approvedAssets[0]!.approvedAsset.sizeBytes += 1;
+    expect(TrustedNativeMaterializationSchema.safeParse(conflictingStyles).success).toBe(false);
     const image = input(); const imagePage = image.implementation.pages[1]!; if (imagePage.compatibility !== "native") throw new Error("native fixture required");
     imagePage.controls[0]!.capabilityId = "image"; imagePage.controls[0]!.assetIds = [assetId];
     delete imagePage.controls[0]!.dataBinding; imagePage.controls[0]!.nativeProperties = {};

@@ -87,6 +87,11 @@ function materialization() {
   };
 }
 
+function buttonDeltaPolicy() {
+  const projection = { capabilityId: "button", allowedFields: ["height", "text", "width", "x", "y"] };
+  return { ...projection, policyHash: canonicalServerHash(projection) };
+}
+
 describe("creative build contracts", () => {
   it("uses one code-point comparator for creative identity ordering", () => {
     expect(compareCreativeIdentifiers("A", "a")).toBeLessThan(0);
@@ -130,7 +135,7 @@ describe("creative build contracts", () => {
     const runtimeEvidence = uploadedArtifact.evidence.controls[0]!;
     runtimeEvidence.source = "uploaded-existing";
     const completeDeltas = [{ path: "/x", value: 10 }, { path: "/y", value: 10 }, { path: "/width", value: 120 }, { path: "/height", value: 40 }, { path: "/text", value: "打开" }];
-    Object.assign(runtimeEvidence, { nativeGuid: "native-button-guid", existingDeltas: completeDeltas });
+    Object.assign(runtimeEvidence, { nativeGuid: "native-button-guid", existingDeltas: completeDeltas, deltaAllowlistPolicy: buttonDeltaPolicy() });
     uploadedArtifact.hashes.evidenceHash = canonicalServerHash(uploadedArtifact.evidence);
     const uploadedMaterialization = TrustedNativeMaterializationSchema.parse(materialization());
     uploadedMaterialization.pages[0]!.source = "uploaded-existing";
@@ -156,18 +161,27 @@ describe("creative build contracts", () => {
 
   it("independently rejects synchronized forbidden deltas and duplicate asset dictionaries", () => {
     const synchronizedArtifact = structuredClone(CreativeBuildArtifactSchema.parse(artifact()));
+    const synchronizedControl = synchronizedArtifact.implementation.pages[0]!.controls[0]!;
+    synchronizedControl.nativeProperties.forbidden = true;
+    synchronizedArtifact.hashes.implementationHash = canonicalServerHash(synchronizedArtifact.implementation);
     synchronizedArtifact.evidence.pages[0]!.source = "uploaded-existing";
+    const synchronizedDeltas = [
+      { path: "/x", value: 10 }, { path: "/y", value: 10 }, { path: "/width", value: 120 },
+      { path: "/height", value: 40 }, { path: "/forbidden", value: true }, { path: "/text", value: "打开" },
+    ];
     Object.assign(synchronizedArtifact.evidence.controls[0]!, {
-      source: "uploaded-existing", nativeGuid: "native-button-guid", existingDeltas: [{ path: "/forbidden", value: true }],
+      source: "uploaded-existing", nativeGuid: "native-button-guid", existingDeltas: synchronizedDeltas, deltaAllowlistPolicy: buttonDeltaPolicy(),
     });
     synchronizedArtifact.hashes.evidenceHash = canonicalServerHash(synchronizedArtifact.evidence);
     const synchronizedMaterialization = TrustedNativeMaterializationSchema.parse(materialization());
     synchronizedMaterialization.pages[0]!.source = "uploaded-existing";
+    synchronizedMaterialization.controls[0]!.nativeProperties.forbidden = true;
+    synchronizedMaterialization.implementationHash = synchronizedArtifact.hashes.implementationHash;
     Object.assign(synchronizedMaterialization.controls[0]!, {
-      source: "uploaded-existing", nativeGuid: "native-button-guid", existingDeltas: [{ path: "/forbidden", value: true }],
+      source: "uploaded-existing", nativeGuid: "native-button-guid", existingDeltas: structuredClone(synchronizedDeltas),
     });
     synchronizedMaterialization.creativeArtifactHash = canonicalCreativeBuildArtifactHash(synchronizedArtifact);
-    expect(() => validateCreativeArtifactMaterializationProjection(synchronizedArtifact, synchronizedMaterialization)).toThrow(/existing delta/);
+    expect(() => validateCreativeArtifactMaterializationProjection(synchronizedArtifact, synchronizedMaterialization)).toThrow(/allowlist policy/);
 
     const synchronizedMutations = [
       [{ path: "/x", value: 10 }, { path: "/y", value: 10 }, { path: "/width", value: 120 }, { path: "/height", value: 40 }],
@@ -179,7 +193,7 @@ describe("creative build contracts", () => {
       evidenceMutation.hashes.evidenceHash = canonicalServerHash(evidenceMutation.evidence);
       const materializationMutation = structuredClone(synchronizedMaterialization); materializationMutation.controls[0]!.existingDeltas = structuredClone(deltas);
       materializationMutation.creativeArtifactHash = canonicalCreativeBuildArtifactHash(evidenceMutation);
-      expect(() => validateCreativeArtifactMaterializationProjection(evidenceMutation, materializationMutation)).toThrow(/existing delta/);
+      expect(() => validateCreativeArtifactMaterializationProjection(evidenceMutation, materializationMutation)).toThrow(/delta allowlist policy/);
     }
 
     const duplicate = structuredClone(CreativeBuildArtifactSchema.parse(artifact()));

@@ -167,15 +167,23 @@ function controlVariant(capabilityId: string): { type: string; proto?: number; l
   return { type: capabilityId };
 }
 
-function existingDeltas(control: UIImplementationControlV2): Array<{ path: string; value: unknown }> {
+function existingDeltaProjection(control: UIImplementationControlV2): {
+  existingDeltas: Array<{ path: string; value: unknown }>;
+  deltaAllowlistPolicy: { capabilityId: string; allowedFields: string[]; policyHash: string };
+} {
   const variant = controlVariant(control.capabilityId);
   const allowed = allowedFieldsFor({ kind: "control", controlType: variant.type,
     ...(variant.proto === undefined ? {} : { easyuiProto: variant.proto }),
     ...(variant.prototypeName === undefined ? {} : { prototypeName: variant.prototypeName }) });
+  const allowedFields = [...allowed].sort(compareCreativeIdentifiers);
   const candidates: Array<[string, unknown]> = [["x", control.geometry.x], ["y", control.geometry.y], ["width", control.geometry.width], ["height", control.geometry.height]];
   for (const [key, value] of Object.entries(control.nativeProperties)) candidates.push([key, value]);
   if (control.content !== undefined) candidates.push(["text", control.content]);
-  return candidates.filter(([key]) => allowed.has(key)).map(([key, value]) => ({ path: `/${key}`, value }));
+  const policyProjection = { capabilityId: control.capabilityId, allowedFields };
+  return {
+    existingDeltas: candidates.filter(([key]) => allowed.has(key)).map(([key, value]) => ({ path: `/${key}`, value })),
+    deltaAllowlistPolicy: { ...policyProjection, policyHash: canonicalServerHash(policyProjection) },
+  };
 }
 
 function topologicalControls(pages: readonly Extract<UIImplementationSpecV2["pages"][number], { compatibility: "native" }>[]): UIImplementationControlV2[] {
@@ -269,6 +277,7 @@ function compileCreativeUIImplementationV2(
   const nativePages = implementation.pages.filter((page): page is Extract<typeof page, { compatibility: "native" }> => page.compatibility === "native")
     .slice().sort((left, right) => compareCreativeIdentifiers(left.id, right.id));
   const controls = topologicalControls(nativePages);
+  const deltaProjectionByControl = new Map(controls.map((control) => [control.id, existingDeltaProjection(control)]));
   const usedAssetIds = new Set(controls.flatMap((control) => control.assetIds ?? []));
   for (const assetId of assets.keys()) {
     if (!usedAssetIds.has(assetId)) fail("CREATIVE_ASSET_UNUSED", assetId);
@@ -311,7 +320,7 @@ function compileCreativeUIImplementationV2(
       return {
         source, semanticControlId: control.id, semanticPageId: page.id,
         pageGuid: correlationPage.get(page.id)!, instanceName: correlationControl.get(control.id)!,
-        ...(source === "uploaded-existing" ? { nativeGuid: verified!.nativeGuid!, existingDeltas: existingDeltas(control) } : {}),
+        ...(source === "uploaded-existing" ? { nativeGuid: verified!.nativeGuid!, ...deltaProjectionByControl.get(control.id)! } : {}),
       };
     }),
     stylesData: controls.map((control) => ({
@@ -357,7 +366,7 @@ function compileCreativeUIImplementationV2(
       ...(control.overlayHost === undefined ? {} : { overlayHost: control.overlayHost }),
       ...nativeProperties, ...(control.content === undefined ? {} : { text: control.content }),
     } });
-    else operations.push({ op: "update", entityType: "control", entityId: control.id, changes: existingDeltas(control) });
+    else operations.push({ op: "update", entityType: "control", entityId: control.id, changes: deltaProjectionByControl.get(control.id)!.existingDeltas });
     for (const assetId of control.assetIds ?? []) {
       const asset = assets.get(assetId); if (asset === undefined) fail("CREATIVE_ASSET_NOT_APPROVED", assetId);
       if (control.capabilityId === "image") {
@@ -370,7 +379,7 @@ function compileCreativeUIImplementationV2(
       ...(control.compiledLayout === undefined ? {} : { compiledLayout: control.compiledLayout }),
       ...(control.overlayHost === undefined ? {} : { overlayHost: control.overlayHost }),
       nativeProperties, ...(control.content === undefined ? {} : { content: control.content }),
-      ...(source === "uploaded-existing" ? { nativeGuid: verified!.nativeGuid, existingDeltas: existingDeltas(control) } : {}) };
+      ...(source === "uploaded-existing" ? { nativeGuid: verified!.nativeGuid, existingDeltas: deltaProjectionByControl.get(control.id)!.existingDeltas } : {}) };
   });
   const stylesData = controls.map((control) => {
     const styleRecord = styleRecords.get(control.id)!;
