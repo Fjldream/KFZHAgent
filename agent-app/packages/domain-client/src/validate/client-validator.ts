@@ -69,7 +69,34 @@ async function listJsonFiles(versionRoot: string): Promise<string[]> {
   return out.sort();
 }
 
-/** Recursively walks page trees, invoking cb on every object with a uiModelType. */
+type RuntimeControlType =
+  | { readonly kind: "ui-model"; readonly uiModelType: number }
+  | { readonly kind: "easyui"; readonly objectType: 3; readonly uiExtendType: number };
+
+function runtimeControlType(control: Readonly<Record<string, unknown>>): RuntimeControlType | undefined {
+  const uiModelType = control["uiModelType"];
+  const easyuiEnvelope = control["objectType"] === 3;
+  if (typeof uiModelType === "number" && easyuiEnvelope) return undefined;
+  if (typeof uiModelType === "number") return { kind: "ui-model", uiModelType };
+  if (easyuiEnvelope && typeof control["uiExtendType"] === "number") {
+    return { kind: "easyui", objectType: 3, uiExtendType: control["uiExtendType"] };
+  }
+  return undefined;
+}
+
+function sameRuntimeControlType(left: RuntimeControlType | undefined, right: RuntimeControlType | undefined): boolean {
+  if (left === undefined || right === undefined || left.kind !== right.kind) return false;
+  return left.kind === "ui-model"
+    ? left.uiModelType === (right as Extract<RuntimeControlType, { kind: "ui-model" }>).uiModelType
+    : left.uiExtendType === (right as Extract<RuntimeControlType, { kind: "easyui" }>).uiExtendType;
+}
+
+const isUiModel = (type: RuntimeControlType | undefined, uiModelType: number): boolean =>
+  type?.kind === "ui-model" && type.uiModelType === uiModelType;
+const isDatagrid = (type: RuntimeControlType | undefined): boolean =>
+  type?.kind === "easyui" && type.objectType === 3 && type.uiExtendType === 1;
+
+/** Recursively walks page trees, invoking cb on every static or EasyUI control object. */
 function walkControls(
   node: unknown,
   where: string,
@@ -81,7 +108,7 @@ function walkControls(
   }
   if (typeof node !== "object" || node === null) return;
   const record = node as Record<string, unknown>;
-  if (typeof record["uiModelType"] === "number") cb(record, where);
+  if (typeof record["uiModelType"] === "number" || record["objectType"] === 3) cb(record, where);
   for (const key of ["objects", "children", "layoutItems", "insiderObjects"]) {
     if (key in record) walkControls(record[key], `${where}/${key}`, cb);
   }
@@ -200,7 +227,7 @@ function compilerOwnedSegments(source: string): { readonly segments: readonly Co
   return { segments };
 }
 
-function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: ReadonlyMap<string, number>): string | undefined {
+function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: ReadonlyMap<string, RuntimeControlType>): string | undefined {
   const { body: source, metadata } = segment;
   if (!/^[0-9a-f]{64}$/.test(metadata.bodySha256)) return "compiled script bodySha256 is malformed";
   if (Buffer.byteLength(source, "utf8") !== metadata.bodyByteLength) return "compiled script bodyByteLength mismatch";
@@ -425,11 +452,11 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
   const isEventRecordAccess = (value: Record<string, unknown> | undefined): boolean => value?.["type"] === "MemberExpression"
     && identifierName(value["object"]) === "arguments" && value["computed"] === true
     && (value["property"] as Record<string, unknown> | undefined)?.["type"] === "Literal"
-    && (value["property"] as Record<string, unknown> | undefined)?.["value"] === 1
+    && (value["property"] as Record<string, unknown> | undefined)?.["value"] === 3
     && !resolvesLocal(scopeByNode.get(value["object"] as object), "arguments")
     && scopeByNode.get(value)?.functionOwner === "<program>"
-    && metadata.placement === "event" && instanceTypes.get(metadata.ownerInstanceName) === 31
-    && metadata.kfEvent === "Cell-click" && metadata.linkId === 200006;
+    && metadata.placement === "event" && isDatagrid(instanceTypes.get(metadata.ownerInstanceName))
+    && metadata.kfEvent === "onClickRow" && metadata.linkId === 200024;
   const factOf = (value: Record<string, unknown> | undefined, depth = 0): AbstractFact => {
     if (value == null || depth > 64) return unknownFact;
     const direct = identifierName(value);
@@ -676,7 +703,7 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
             || ((parentRecord?.["type"] === "FunctionDeclaration" || parentRecord?.["type"] === "FunctionExpression" || parentRecord?.["type"] === "ArrowFunctionExpression")
               && Array.isArray(parentRecord["params"]) && parentRecord["params"].includes(node));
           const allowedGlobal = ["String", "Number", "Boolean", "Math", "Date"].includes(name)
-            || (name === "arguments" && metadata.placement === "event" && instanceTypes.get(metadata.ownerInstanceName) === 31 && metadata.kfEvent === "Cell-click")
+            || (name === "arguments" && metadata.placement === "event" && isDatagrid(instanceTypes.get(metadata.ownerInstanceName)) && metadata.kfEvent === "onClickRow")
             || declaredInstances.has(name) && instanceTypes.has(name);
           if (!isProperty && !isObjectKey && !isDeclaration && !resolvesLocal(scopeByNode.get(node), name) && !allowedGlobal) {
             astIssue ??= `undeclared global "${name}"`;
@@ -714,8 +741,10 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
           const args = Array.isArray(record["arguments"]) ? record["arguments"] as Array<Record<string, unknown>> : [];
           const receiver = factOf(object);
           const standardGlobal = objectName !== undefined && !resolvesLocal(object === undefined ? undefined : scopeByNode.get(object), objectName);
+          const runtimeType = objectName === undefined ? undefined : instanceTypes.get(objectName);
           const runtimeCall = objectName !== undefined && declaredInstances.has(objectName) && member === "SetData"
-            && instanceTypes.get(objectName) === 31 && args.length === 1;
+            && (isUiModel(runtimeType, 31) && /^Table\d+$/.test(objectName) || isDatagrid(runtimeType) && /^Datagrid\d+$/.test(objectName))
+            && args.length === 1;
           const mathCall = standardGlobal && (objectName === "Math" && ["abs", "ceil", "floor", "round", "trunc"].includes(member ?? "") && args.length === 1
             || objectName === "Math" && ["max", "min"].includes(member ?? "") && args.length >= 1 && args.length <= 1_000);
           const dateCall = standardGlobal && (objectName === "Date" && member === "parse" && args.length === 1
@@ -860,9 +889,10 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
       if (!declaredInstances.has(name)) { undeclaredProjectInstance ??= name; return; }
       const written = parentRecord?.["type"] === "AssignmentExpression" && parentRecord["left"] === node
         || parentRecord?.["type"] === "UpdateExpression" && parentRecord["argument"] === node;
-      const uiModelType = instanceTypes.get(name);
-      const supported = (uiModelType === 38 && /^Input\d+$/.test(name) && member === "Value" && !called && !written)
-        || (uiModelType === 31 && /^Table\d+$/.test(name) && member === "SetData" && called);
+      const runtimeType = instanceTypes.get(name);
+      const supported = (isUiModel(runtimeType, 38) && /^Input\d+$/.test(name) && member === "Value" && !called && !written)
+        || (isUiModel(runtimeType, 31) && /^Table\d+$/.test(name) && member === "SetData" && called)
+        || (isDatagrid(runtimeType) && /^Datagrid\d+$/.test(name) && member === "SetData" && called);
       if (!supported) unsupportedRuntimeMember ??= `${name}.${member ?? "?"}`;
     },
     leave(node) {
@@ -1073,10 +1103,13 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
   }
   if (metadata.placement === "event") {
     const ownerType = instanceTypes.get(metadata.ownerInstanceName);
-    const reviewedEvent = (ownerType === 35 && /^Button\d+$/.test(metadata.ownerInstanceName) && metadata.kfEvent === "onClick" && metadata.linkId === 200001)
-      || (ownerType === 31 && /^Table\d+$/.test(metadata.ownerInstanceName) && metadata.kfEvent === "Cell-click" && metadata.linkId === 200006);
+    const reviewedEvent = (isUiModel(ownerType, 35) && /^Button\d+$/.test(metadata.ownerInstanceName) && metadata.kfEvent === "onClick" && metadata.linkId === 200001)
+      || (isUiModel(ownerType, 31) && /^Table\d+$/.test(metadata.ownerInstanceName) && metadata.kfEvent === "Cell-click" && metadata.linkId === 200006)
+      || (isDatagrid(ownerType) && /^Datagrid\d+$/.test(metadata.ownerInstanceName) && metadata.kfEvent === "onClickRow" && metadata.linkId === 200024);
     if (!reviewedEvent || metadata.phase === null) return "compiled script event is not in the evidence-backed allowlist";
-  } else if (instanceTypes.get(metadata.ownerInstanceName) !== 31 || !/^Table\d+$/.test(metadata.ownerInstanceName) || metadata.kfEvent !== null || metadata.linkId !== null || metadata.phase !== null) {
+  } else if (!(isUiModel(instanceTypes.get(metadata.ownerInstanceName), 31) && /^Table\d+$/.test(metadata.ownerInstanceName)
+      || isDatagrid(instanceTypes.get(metadata.ownerInstanceName)) && /^Datagrid\d+$/.test(metadata.ownerInstanceName))
+    || metadata.kfEvent !== null || metadata.linkId !== null || metadata.phase !== null) {
     return "compiled configureData placement is not in the evidence-backed allowlist";
   }
   const declaredPages = new Set(metadata.pageReferences.map((reference) => reference.pageGuid.toLowerCase()));
@@ -1297,27 +1330,28 @@ async function checkBusinessRules(
   } catch (err) {
     return fail([`candidate cannot be inspected: ${String(err)}`]);
   }
-  const instanceTypesByPage = new Map<string, Map<string, number>>();
+  const instanceTypesByPage = new Map<string, Map<string, RuntimeControlType>>();
   Object.entries(inspection.raw.pages).forEach(([pageGuid, tree]) => {
-    const pageInstances = new Map<string, Array<{ readonly uiModelType: number; readonly where: string }>>();
+    const pageInstances = new Map<string, Array<{ readonly runtimeType: RuntimeControlType; readonly where: string }>>();
     walkControls(tree, `page ${pageGuid}`, (control, where) => {
-      if (typeof control["name"] !== "string" || typeof control["uiModelType"] !== "number") return;
+      const runtimeType = runtimeControlType(control);
+      if (typeof control["name"] !== "string" || runtimeType === undefined) return;
       pageInstances.set(control["name"], [
         ...(pageInstances.get(control["name"]) ?? []),
-        { uiModelType: control["uiModelType"], where: `${pageGuid} ${where}` },
+        { runtimeType, where: `${pageGuid} ${where}` },
       ]);
     });
-    const pageTypes = new Map<string, number>();
+    const pageTypes = new Map<string, RuntimeControlType>();
     for (const [instanceName, entries] of pageInstances) {
       if (entries.length !== 1) issues.push(`duplicate page instance name "${instanceName}" at ${entries.map((entry) => entry.where).join(" and ")}`);
-      else pageTypes.set(instanceName, entries[0]!.uiModelType);
+      else pageTypes.set(instanceName, entries[0]!.runtimeType);
     }
     instanceTypesByPage.set(pageGuid, pageTypes);
   });
   const compilerModuleIds = new Set<string>();
 
   for (const [pageGuid, tree] of Object.entries(inspection.raw.pages)) {
-    const pageInstanceTypes = instanceTypesByPage.get(pageGuid) ?? new Map<string, number>();
+    const pageInstanceTypes = instanceTypesByPage.get(pageGuid) ?? new Map<string, RuntimeControlType>();
     const page = asRecord(tree);
     const pageProperty = asRecord(page["pageProperty"]);
     const pageSize = asRecord(pageProperty["pageSize"]);
@@ -1335,9 +1369,9 @@ async function checkBusinessRules(
           : undefined;
 
     walkControls(tree, `page ${pageGuid}`, (control, where) => {
-      const uiModelType = control["uiModelType"];
-      if (typeof uiModelType !== "number" || !(uiModelType in CONTROL_TYPE_BY_UIMODEL_TYPE)) {
-        issues.push(`unknown uiModelType ${String(uiModelType)} at ${pageGuid} ${where}`);
+      const runtimeType = runtimeControlType(control);
+      if (runtimeType === undefined || runtimeType.kind === "ui-model" && !(runtimeType.uiModelType in CONTROL_TYPE_BY_UIMODEL_TYPE)) {
+        issues.push(`unknown runtime control type at ${pageGuid} ${where}`);
         return;
       }
       const name = typeof control["name"] === "string" ? (control["name"]) : control["guid"];
@@ -1375,7 +1409,7 @@ async function checkBusinessRules(
             const metadata = segment.metadata;
             if (metadata.placement !== "event") issues.push(`control "${String(name)}" event contains a non-event compiled module`);
             if (metadata.ownerInstanceName !== name) issues.push(`control "${String(name)}" compiler-owned script owner mismatch`);
-            if (metadata.ownerInstanceName !== name || pageInstanceTypes.get(metadata.ownerInstanceName) !== uiModelType) {
+            if (metadata.ownerInstanceName !== name || !sameRuntimeControlType(pageInstanceTypes.get(metadata.ownerInstanceName), runtimeType)) {
               issues.push(`control "${String(name)}" compiler-owned script owner type mismatch`);
             }
             if (metadata.kfEvent !== link["name"] || metadata.linkId !== (link["linkId"] ?? null)) issues.push(`control "${String(name)}" compiler-owned event identity mismatch`);
@@ -1438,7 +1472,7 @@ async function checkBusinessRules(
             issues.push(`control "${String(name)}" configureData compiler identity mismatch`);
           }
           if (segment.metadata.ownerInstanceName !== name) issues.push(`control "${String(name)}" configureData owner mismatch`);
-          if (segment.metadata.ownerInstanceName !== name || pageInstanceTypes.get(segment.metadata.ownerInstanceName) !== uiModelType) {
+          if (segment.metadata.ownerInstanceName !== name || !sameRuntimeControlType(pageInstanceTypes.get(segment.metadata.ownerInstanceName), runtimeType)) {
             issues.push(`control "${String(name)}" configureData owner type mismatch`);
           }
         }

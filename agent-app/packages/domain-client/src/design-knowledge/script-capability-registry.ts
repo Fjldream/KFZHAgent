@@ -8,7 +8,8 @@ import { createKnowledgeRegistry } from "./registry.js";
 const TEMPLATE = (ref: string) => ({ kind: "template", ref });
 const PRODUCT_SOURCE = (ref: string, contentSha256: string) => ({ kind: "product-source", ref, contentSha256 });
 const CENTER_PROPERTY_PAGE = "KingFusion3.6_Center/sdb/c7f1771f-0c8f-4c75-9d71-3b8c4b6bd190/kingclient/9fdd3be0-2d91-11f1-b60a-4937cd79e5a1/pagerecord/recordpages/数据模型管理_属性定义20230511104433.json";
-const NODE_TEAM_PAGE = "KingFusion3.6_Node/sdb/kingclient/bbb85040-d19b-11f0-b646-250384722929/e91a8070-d94e-11f0-bc3d-dbe5f779bd94/pagerecord/recordpages/修改班组20230718142335.json";
+const NODE_DATAGRID_METHOD_PAGE = "KingFusion3.6_Node/sdb/kingclient/5dd3e6c0-d181-11f0-b646-250384722929/d6271f40-e165-11f0-bc3d-dbe5f779bd94/pagerecord/recordpages/数据网格_方法20250218173552.json";
+const NODE_DATAGRID_EVENT_PAGE = "KingFusion3.6_Node/sdb/kingclient/5dd3e6c0-d181-11f0-b646-250384722929/d6271f40-e165-11f0-bc3d-dbe5f779bd94/project/page/数据网格_事件.json";
 const ACTION_IR_EVIDENCE = [
   { kind: "compiler", ref: "agent-app/packages/domain-client/src/ir/client-project-ir.schema.ts#RestrictedAction" },
   { kind: "compiler", ref: "agent-app/packages/domain-client/src/compile/control-compiler.ts#compileAction" },
@@ -155,31 +156,30 @@ const REVIEWED_PROFILES: Readonly<Record<string, unknown>> = {
     actions: [],
     events: [{
       semanticEvent: "row-click",
-      kfEvent: "Cell-click",
-      linkId: 200006,
+      kfEvent: "onClickRow",
+      linkId: 200024,
       availability: "supported",
       arguments: [
-        { name: "record", position: 1, valueKind: "record" },
-        { name: "column", position: 2, valueKind: "scalar" },
+        { name: "record", position: 3, valueKind: "record" },
       ],
       evidence: [PRODUCT_SOURCE(
-        `${NODE_TEAM_PAGE}#objects.0.insiderObjects.0.insiderObjects.4.insiderObjects.0.linkMng.linkList.5.script`,
-        "072184556a411e261ab94ac4ed680937cdf7ceb8e2205b3f21ad7d340d4c3ce3",
+        `${NODE_DATAGRID_EVENT_PAGE}#objects.0.linkMng.linkList.23.script`,
+        "e8bea75b41aef0d8198a62257dfc515b18ba39774b3980868bee1ececf6671f6",
       )],
     }],
     methods: [
       {
         semanticMethod: "set-data", kfMethod: "SetData", availability: "supported", parameters: ["records"], returns: "void",
         evidence: [PRODUCT_SOURCE(
-          `${CENTER_PROPERTY_PAGE}#linkMng.linkList.3.script`,
-          "0aa6e00db6a2602b929db684aaf1095911ef7dea013620f2a4be21e5c067cb34",
+          `${NODE_DATAGRID_METHOD_PAGE}#objects.2.linkMng.linkList.0.script`,
+          "d3d08eba3792ec70be2c6f4819faba18c75c416f9625196276b32fcf423ec1cc",
         )],
       },
       { semanticMethod: "get-data", kfMethod: "GetData", availability: "planned", parameters: [], returns: "record-list", evidence: [] },
       { semanticMethod: "get-selected", kfMethod: "GetSelected", availability: "planned", parameters: [], returns: "record", evidence: [] },
     ],
     initialization: { supportsConfigureData: true, lifecycleEvents: [] },
-    limitations: ["仅 SetData 与 Cell-click 的 record 参数经过审核；GetData、GetSelected 和选择事件参数仍为 planned。"],
+    limitations: ["仅 Datagrid SetData 与 onClickRow 的 arguments[3] record 参数经过审核；onClickCell、GetData、GetSelected 和选择事件参数仍为 planned。"],
   },
 };
 

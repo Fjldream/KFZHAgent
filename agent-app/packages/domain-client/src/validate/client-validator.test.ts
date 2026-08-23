@@ -122,8 +122,16 @@ function reencodeMarker(source: string, transform: (metadata: Record<string, unk
   return `${prefix}${transform(metadata)}${source.slice(newline)}`;
 }
 
+function nativeDatagrid(name = "Datagrid1", guid = "native-datagrid-1"): Record<string, unknown> {
+  return {
+    name, guid, objectType: 3, uiExtendType: 1,
+    leftTopPt: { x: 0, y: 0 }, width: 20, height: 20,
+    linkMng: { linkList: [] }, configureData: "",
+  };
+}
+
 function compileReviewedSyntax(options: {
-  readonly cellClickSource?: string;
+  readonly rowClickSource?: string;
   readonly source?: string;
   readonly derivedRuntime?: { readonly workspaceId: string; readonly baseRevisionId: string };
   readonly captureImplementation?: (implementation: UIImplementationSpecV2) => void;
@@ -158,8 +166,8 @@ function compileReviewedSyntax(options: {
     "for (const entry of rows) { total += entry === made ? 1 : 0; }",
     "if (label === value) total = -total; else total = Math.max(total, 0);",
   ].join("\n");
-  const source = options.cellClickSource ?? options.source ?? reviewedSource;
-  const cellClick = options.cellClickSource !== undefined;
+  const source = options.rowClickSource ?? options.source ?? reviewedSource;
+  const rowClick = options.rowClickSource !== undefined;
   const script: ScriptPlan = {
     id: "reviewed-syntax", purpose: "覆盖已审阅语法", kind: "custom", programVersion: "semantic-js/v1", source,
     inputs: source.includes("$control.getValue") ? [{ name: "filter", description: "filter", refKind: "control" as const, refId: "status-filter" }] : [],
@@ -173,10 +181,10 @@ function compileReviewedSyntax(options: {
     actions: [{ id: "run-reviewed", kind: "run-script", scriptId: script.id, afterActionIds: [], journeyStepRefs: [{ journeyId: "review-records", stepIndex: 0 }] }],
     pages: [{ id: "home", title: "首页", purpose: "验证", canvas: "desktop", sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region"], initialStateIds: [], root: {
       id: "root", kind: "layout", layout: "column", sourceBlueprintRegionIds: ["region"], intent, children: [
-        { id: "go", kind: "control", capabilityId: "button", content: "执行", properties: [], tabIds: [], styleRole: "content", sourceBlueprintRegionIds: ["region"], intent, eventBindings: cellClick ? [] : [{ semanticEvent: "click", actionIds: ["run-reviewed"] }] },
+        { id: "go", kind: "control", capabilityId: "button", content: "执行", properties: [], tabIds: [], styleRole: "content", sourceBlueprintRegionIds: ["region"], intent, eventBindings: rowClick ? [] : [{ semanticEvent: "click", actionIds: ["run-reviewed"] }] },
         { id: "status-filter", kind: "control", capabilityId: "input", content: "筛选", properties: [], tabIds: [], styleRole: "content", sourceBlueprintRegionIds: ["region"], intent, eventBindings: [] },
         { id: "records", kind: "control", capabilityId: "easyui.1", content: "记录", properties: [], tabIds: [], styleRole: "content", sourceBlueprintRegionIds: ["region"], intent,
-          mockDataId: "visitor-records", eventBindings: cellClick ? [{ semanticEvent: "row-click", actionIds: ["run-reviewed"] }] : [] },
+          mockDataId: "visitor-records", eventBindings: rowClick ? [{ semanticEvent: "row-click", actionIds: ["run-reviewed"] }] : [] },
       ],
     } }],
   };
@@ -195,13 +203,13 @@ function compileReviewedSyntax(options: {
   };
   const implementation: UIImplementationSpecV2 = options.derivedRuntime === undefined
     ? { ...implementationBase, runtimeCorrelation: {
-      controls: [{ semanticControlId: "go", instanceName: "Button1" }, { semanticControlId: "status-filter", instanceName: "Input1" }, { semanticControlId: "records", instanceName: "Table1" }, { semanticControlId: "root", instanceName: "Layout1" }],
+      controls: [{ semanticControlId: "go", instanceName: "Button1" }, { semanticControlId: "status-filter", instanceName: "Input1" }, { semanticControlId: "records", instanceName: "Datagrid1" }, { semanticControlId: "root", instanceName: "Layout1" }],
       pages: [{ semanticPageId: "home", pageGuid: "00000000-0000-4000-8000-000000000001" }],
     } }
     : attachRuntimeCorrelation({ ...options.derivedRuntime, implementation: implementationBase });
   options.captureImplementation?.(implementation);
-  const ownerControlId = cellClick ? "records" : "go";
-  const semanticEvent = cellClick ? "row-click" : "click";
+  const ownerControlId = rowClick ? "records" : "go";
+  const semanticEvent = rowClick ? "row-click" : "click";
   const context = createSemanticScriptApiContext({ plan, implementation, ownerControlId, activeEvent: { controlId: ownerControlId, semanticEvent } });
   const identity = createSemanticScriptValidationIdentity(script, context);
   const validatedAst = validateCustomScript({ source, inputs: script.inputs, outputs: script.outputs, context, currentScriptIdentity: identity });
@@ -244,16 +252,18 @@ describe("client validator (Task 7 brief Step 2)", () => {
     expect(report.warnings.join("\n")).toMatch(/unknown compiler-owned instance reference/);
   });
 
-  it("accepts derived Button/Table identities and k page GUID through script compilation, materialization, marker scanning, and project validation", async () => {
+  it("accepts derived Button/Datagrid identities and k page GUID through real EasyUI materialization and validation", async () => {
     let correlated: UIImplementationSpecV2 | undefined;
     const module = compileReviewedSyntax({
-      source: 'const records = []; $control.setData("records", records);',
+      rowClickSource: 'const record = $event.record(); const id = record.id; const records = [{ "id": String(id) }]; $control.setData("records", records);',
       derivedRuntime: { workspaceId: "validator-k-page", baseRevisionId: "validator-base-revision" },
       captureImplementation: (implementation) => { correlated = implementation; },
     });
-    expect(module.ownerInstanceName).toMatch(/^Button\d+$/);
-    const tableName = module.instanceReferences.find((reference) => reference.semanticId === "records")!.instanceName;
-    expect(tableName).toMatch(/^Table\d+$/);
+    expect(module.ownerInstanceName).toMatch(/^Datagrid\d+$/);
+    const datagridName = module.instanceReferences.find((reference) => reference.semanticId === "records")!.instanceName;
+    expect(datagridName).toBe(module.ownerInstanceName);
+    expect(module.source).toContain("arguments[3]");
+    expect(module.source).toContain(`${datagridName}.SetData(records)`);
     const pageGuid = correlated?.runtimeCorrelation?.pages.find((entry) => entry.semanticPageId === "home")?.pageGuid;
     if (pageGuid === undefined) throw new Error("derived runtime correlation was not captured");
     expect(pageGuid).toMatch(/^k[0-9a-f-]{36}$/);
@@ -262,27 +272,33 @@ describe("client validator (Task 7 brief Step 2)", () => {
       variableGroupGuid: "kvariables", pageGroupGuid: "kpages",
       resolvePageGuid: () => pageGuid, resolveVariableName: (id) => id,
     };
+    const buttonName = correlated?.runtimeCorrelation?.controls.find((entry) => entry.semanticControlId === "go")?.instanceName;
+    if (buttonName === undefined) throw new Error("derived button correlation was not captured");
+    expect(buttonName).toMatch(/^Button\d+$/);
     const compiledButton = compileControl({ seed: "validator-k-page" }, {
-      id: module.ownerInstanceName, type: "button", x: 10, y: 10, width: 120, height: 60, text: "Run",
+      id: buttonName, type: "button", x: 10, y: 10, width: 120, height: 60, text: "Run",
       action: { kind: "navigate", pageId: "home" },
+    }, compileContext);
+    const compiledDatagrid = compileControl({ seed: "validator-k-page" }, {
+      id: datagridName, type: "easyui", proto: 1, x: 10, y: 100, width: 640, height: 240,
     }, compileContext, {
-      ownerInstanceName: module.ownerInstanceName, capabilityId: "button", modules: [module],
+      ownerInstanceName: datagridName, capabilityId: "easyui.1", modules: [module],
       bindings: [{
         id: "kf$binding:validator-derived", ownerInstanceName: module.ownerInstanceName,
-        kfEvent: "onClick", linkId: 200001, phase: "event", scriptModuleIds: [module.id], nativeActionIds: [],
+        kfEvent: "onClickRow", linkId: 200024, phase: "event", scriptModuleIds: [module.id], nativeActionIds: [],
       }],
     });
-    const compiledTable = compileControl({ seed: "validator-k-page" }, {
-      id: tableName, type: "table", x: 10, y: 100, width: 640, height: 240,
-    }, compileContext);
     expect((compiledButton.linkMng as { linkList: Array<Record<string, unknown>> }).linkList)
       .toContainEqual({ action: "navigatePage", pageId: pageGuid });
+    expect(compiledDatagrid).toMatchObject({ name: datagridName, objectType: 3, uiExtendType: 1 });
+    expect((compiledDatagrid.linkMng as { linkList: Array<Record<string, unknown>> }).linkList)
+      .toEqual(expect.arrayContaining([expect.objectContaining({ name: "onClickRow", linkId: 200024, enable: true })]));
 
     const base = await copyFixture("client-unknown-field");
     const candidate = await applyClientPatch(base, happyPlan());
     const page = await readPage(candidate) as PageFixture & Record<string, unknown>;
     page.guid = pageGuid;
-    page.objects = [compiledButton, compiledTable];
+    page.objects = [compiledButton, compiledDatagrid];
     await writePage(candidate, page);
     const managerPath = await pageManagerFile(candidate);
     const manager = JSON.parse(await readFile(managerPath, "utf8")) as { Pages: Array<Record<string, unknown>> };
@@ -293,6 +309,16 @@ describe("client validator (Task 7 brief Step 2)", () => {
     expect(report.checks.references, report.warnings.join("\n")).toBe("pass");
     expect(report.checks.businessRules, report.warnings.join("\n")).toBe("pass");
     expect(report.warnings.join("\n")).not.toMatch(/undeclared page reference|invalid schema|unknown compiler-owned page reference/);
+
+    const forgedPage = await readPage(candidate);
+    const datagridLink = ((forgedPage.objects[1]!.linkMng as { linkList: Array<Record<string, unknown>> }).linkList)
+      .find((link) => link.name === "onClickRow");
+    if (datagridLink === undefined) throw new Error("compiled Datagrid row event was not materialized");
+    datagridLink.name = "onClickCell";
+    datagridLink.linkId = 200026;
+    await writePage(candidate, forgedPage);
+    const forgedReport = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+    expect(forgedReport.checks.businessRules, "real EasyUI controls must not bypass compiler-owned event validation").toBe("fail");
   });
 
   it("treats a declared k page GUID as one full marker/source token rather than an inner bare UUID", async () => {
@@ -379,7 +405,7 @@ describe("client validator (Task 7 brief Step 2)", () => {
     expect(report.warnings.join("\n")).toMatch(/unsupported runtime member/);
   });
 
-  it("derives runtime capability from uiModelType rather than a forged instance name", async () => {
+  it("derives runtime capability from exact native type evidence rather than a forged instance name", async () => {
     const base = await copyFixture("client-unknown-field");
     const basePage = await readPage(base);
     basePage.objects.push({ name: "Table2", uiModelType: 35, guid: "forged-table-name", leftTopPt: { x: 0, y: 0 }, width: 20, height: 20 });
@@ -394,6 +420,23 @@ describe("client validator (Task 7 brief Step 2)", () => {
     const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
     expect(report.checks.businessRules).toBe("fail");
     expect(report.warnings.join("\n")).toMatch(/unsupported runtime member/);
+
+    const easyuiBase = await copyFixture("client-unknown-field");
+    const easyuiBasePage = await readPage(easyuiBase);
+    easyuiBasePage.objects.push(nativeDatagrid("Table3", "forged-static-table-alias"));
+    await writePage(easyuiBase, easyuiBasePage);
+    const easyuiCandidate = await applyClientPatch(easyuiBase, happyPlan());
+    const easyuiPage = await readPage(easyuiCandidate);
+    easyuiPage.objects[0]!.linkMng = { linkList: [{
+      linkId: 200001, enable: true, name: "onClick",
+      script: markedScript("Table3.SetData([]);", { instanceReferences: [
+        { semanticId: "go", instanceName: "Button1" }, { semanticId: "records", instanceName: "Table3" },
+      ] }),
+    }] };
+    await writePage(easyuiCandidate, easyuiPage);
+    const easyuiReport = await validateClientProject(easyuiBase, easyuiCandidate, happyPlan(), { skipRoundTrip: true });
+    expect(easyuiReport.checks.businessRules).toBe("fail");
+    expect(easyuiReport.warnings.join("\n")).toMatch(/unsupported runtime member/);
   });
 
   it("rejects compiler-owned payloads with escaped globals, dynamic calls, or unbounded work", async () => {
@@ -557,20 +600,20 @@ describe("client validator (Task 7 brief Step 2)", () => {
     expect(report.checks.businessRules, report.warnings.join("\n")).toBe("pass");
   });
 
-  it("rebuilds a read-only Cell-click event record fact for real Task6 output", async () => {
-    const module = compileReviewedSyntax({ cellClickSource: 'const record = $event.record(); const code = record["code"];' });
-    expect(module.source).toContain("arguments[1]");
+  it("rebuilds a read-only onClickRow event record fact for real Task6 output", async () => {
+    const module = compileReviewedSyntax({ rowClickSource: 'const record = $event.record(); const code = record["code"];' });
+    expect(module.source).toContain("arguments[3]");
     const base = await copyFixture("client-unknown-field");
     const basePage = await readPage(base);
-    basePage.objects.push({ name: "Table1", uiModelType: 31, guid: "record-table", leftTopPt: { x: 0, y: 0 }, width: 20, height: 20 });
+    basePage.objects.push(nativeDatagrid("Datagrid1", "record-datagrid"));
     await writePage(base, basePage);
     const candidate = await applyClientPatch(base, happyPlan());
     const page = await readPage(candidate);
     page.objects[1]!.linkMng = { linkList: [{
-      linkId: 200006, enable: true, name: "Cell-click",
+      linkId: 200024, enable: true, name: "onClickRow",
       script: markedScript(module.source, {
-        moduleId: module.id, sourceScriptId: module.sourceScriptId, ownerInstanceName: "Table1",
-        kfEvent: "Cell-click", linkId: 200006, instanceReferences: module.instanceReferences,
+        moduleId: module.id, sourceScriptId: module.sourceScriptId, ownerInstanceName: "Datagrid1",
+        kfEvent: "onClickRow", linkId: 200024, instanceReferences: module.instanceReferences,
       }),
     }] };
     await writePage(candidate, page);
@@ -578,29 +621,29 @@ describe("client validator (Task 7 brief Step 2)", () => {
     expect(report.checks.businessRules, report.warnings.join("\n")).toBe("pass");
   });
 
-  it("accepts a static dot field from a real Cell-click record and closes through Table SetData", async () => {
+  it("accepts a static dot field from a real onClickRow record and closes through Datagrid SetData", async () => {
     const module = compileReviewedSyntax({
-      cellClickSource: 'const record = $event.record(); const code = record.code; $control.setData("records", [{ "id": String(code) }]);',
+      rowClickSource: 'const record = $event.record(); const code = record.code; $control.setData("records", [{ "id": String(code) }]);',
     });
     const base = await copyFixture("client-unknown-field");
     const basePage = await readPage(base);
-    basePage.objects.push({ name: "Table1", uiModelType: 31, guid: "dot-record-table", leftTopPt: { x: 0, y: 0 }, width: 20, height: 20 });
+    basePage.objects.push(nativeDatagrid("Datagrid1", "dot-record-datagrid"));
     await writePage(base, basePage);
     const candidate = await applyClientPatch(base, happyPlan());
     const page = await readPage(candidate);
     page.objects[1]!.linkMng = { linkList: [{
-      linkId: 200006, enable: true, name: "Cell-click",
-      script: markedScript(module.source, { moduleId: module.id, sourceScriptId: module.sourceScriptId, ownerInstanceName: "Table1",
-        kfEvent: "Cell-click", linkId: 200006, instanceReferences: module.instanceReferences }),
+      linkId: 200024, enable: true, name: "onClickRow",
+      script: markedScript(module.source, { moduleId: module.id, sourceScriptId: module.sourceScriptId, ownerInstanceName: "Datagrid1",
+        kfEvent: "onClickRow", linkId: 200024, instanceReferences: module.instanceReferences }),
     }] };
     await writePage(candidate, page);
     const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
     expect(report.checks.businessRules, report.warnings.join("\n")).toBe("pass");
   });
 
-  it("rejects semantic Cell-click record scripts that shadow the reserved runtime arguments binding", () => {
+  it("rejects semantic onClickRow record scripts that shadow the reserved runtime arguments binding", () => {
     expect(() => compileReviewedSyntax({
-      cellClickSource: 'const arguments = [null, { "code": "forged" }]; const record = $event.record(); const code = record.code;',
+      rowClickSource: 'const arguments = [null, null, null, { "code": "forged" }]; const record = $event.record(); const code = record.code;',
     })).toThrow();
   });
 
@@ -608,7 +651,7 @@ describe("client validator (Task 7 brief Step 2)", () => {
     const module = compileReviewedSyntax({ source: 'const records = [{ "id": "a" }]; records.push({ "id": "b" }); $control.setData("records", records);' });
     const base = await copyFixture("client-unknown-field");
     const basePage = await readPage(base);
-    basePage.objects.push({ name: "Table1", uiModelType: 31, guid: "push-table", leftTopPt: { x: 0, y: 0 }, width: 20, height: 20 });
+    basePage.objects.push(nativeDatagrid("Datagrid1", "push-datagrid"));
     await writePage(base, basePage);
     const candidate = await applyClientPatch(base, happyPlan());
     const page = await readPage(candidate);
@@ -631,7 +674,7 @@ describe("client validator (Task 7 brief Step 2)", () => {
     ].join("\n") });
     const base = await copyFixture("client-unknown-field");
     const basePage = await readPage(base);
-    basePage.objects.push({ name: "Table1", uiModelType: 31, guid: "nested-push-table", leftTopPt: { x: 0, y: 0 }, width: 20, height: 20 });
+    basePage.objects.push(nativeDatagrid("Datagrid1", "nested-push-datagrid"));
     await writePage(base, basePage);
     const candidate = await applyClientPatch(base, happyPlan());
     const page = await readPage(candidate);
@@ -672,31 +715,31 @@ describe("client validator (Task 7 brief Step 2)", () => {
       expect(report.checks.businessRules, attack.body).toBe("fail");
     }
 
-    const tableBase = await copyFixture("client-unknown-field");
-    const tableBasePage = await readPage(tableBase);
-    tableBasePage.objects.push({ name: "Table1", uiModelType: 31, guid: "table-guid-event", leftTopPt: { x: 0, y: 0 }, width: 20, height: 20 });
-    await writePage(tableBase, tableBasePage);
-    const tableCandidate = await applyClientPatch(tableBase, happyPlan());
-    const tablePage = await readPage(tableCandidate);
+    const datagridBase = await copyFixture("client-unknown-field");
+    const datagridBasePage = await readPage(datagridBase);
+    datagridBasePage.objects.push(nativeDatagrid("Datagrid1", "datagrid-guid-event"));
+    await writePage(datagridBase, datagridBasePage);
+    const datagridCandidate = await applyClientPatch(datagridBase, happyPlan());
+    const datagridPage = await readPage(datagridCandidate);
     for (const eventBody of [
-      "const record = arguments[1]; const selected = record.items.filter((item) => true);",
-      "const record = arguments[1]; const made = { ...record };",
-      'const record = arguments[1]; record["code"] = "changed";',
-      'const record = arguments[1]; const field = "code"; const code = record[field];',
-      "const record = arguments[1]; const code = record.constructor;",
-      "const record = arguments[1]; record.trim();",
-      'function fake() { const record = arguments[1]; const code = record["code"]; } fake();',
-      'const arguments = [null, { "code": "forged" }]; const record = arguments[1]; const code = record.code;',
+      "const record = arguments[3]; const selected = record.items.filter((item) => true);",
+      "const record = arguments[3]; const made = { ...record };",
+      'const record = arguments[3]; record["code"] = "changed";',
+      'const record = arguments[3]; const field = "code"; const code = record[field];',
+      "const record = arguments[3]; const code = record.constructor;",
+      "const record = arguments[3]; record.trim();",
+      'function fake() { const record = arguments[3]; const code = record["code"]; } fake();',
+      'const arguments = [null, null, null, { "code": "forged" }]; const record = arguments[3]; const code = record.code;',
     ]) {
-      tablePage.objects[1]!.linkMng = { linkList: [{
-        linkId: 200006, enable: true, name: "Cell-click",
+      datagridPage.objects[1]!.linkMng = { linkList: [{
+        linkId: 200024, enable: true, name: "onClickRow",
         script: markedScript(eventBody, {
-          ownerInstanceName: "Table1", kfEvent: "Cell-click", linkId: 200006,
-          instanceReferences: [{ semanticId: "records", instanceName: "Table1" }],
+          ownerInstanceName: "Datagrid1", kfEvent: "onClickRow", linkId: 200024,
+          instanceReferences: [{ semanticId: "records", instanceName: "Datagrid1" }],
         }),
       }] };
-      await writePage(tableCandidate, tablePage);
-      expect((await validateClientProject(tableBase, tableCandidate, happyPlan(), { skipRoundTrip: true })).checks.businessRules, eventBody).toBe("fail");
+      await writePage(datagridCandidate, datagridPage);
+      expect((await validateClientProject(datagridBase, datagridCandidate, happyPlan(), { skipRoundTrip: true })).checks.businessRules, eventBody).toBe("fail");
     }
   });
 

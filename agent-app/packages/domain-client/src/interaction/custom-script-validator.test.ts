@@ -113,7 +113,7 @@ const recordFixture = () => {
     runtimeCorrelation: {
       ...implementation.runtimeCorrelation!,
       controls: [...implementation.runtimeCorrelation!.controls,
-        { semanticControlId: "visitor-table", instanceName: "Table1" }, { semanticControlId: "audit-table", instanceName: "Table2" }],
+        { semanticControlId: "visitor-table", instanceName: "Datagrid1" }, { semanticControlId: "audit-table", instanceName: "Datagrid2" }],
     },
   };
   return { plan, context: createSemanticScriptApiContext({ plan, implementation: withTables, ownerControlId: "go" }) };
@@ -244,6 +244,7 @@ describe("constrained custom script validation", () => {
     expect(() => validate('const selector = "." + "records";')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*selector/i);
     expect(() => validate('const css = `color:${"red"}`;')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*css/i);
     expect(() => validate('const instance = "Button" + 1;')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*runtime instance/i);
+    expect(() => validate('const instance = "Datagrid" + 1;')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*runtime instance/i);
     expect(() => validate('const prefix = "."; const selector = prefix + "records";')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*selector/i);
     expect(() => validate('let prefix = "."; const selector = prefix + "records";')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*selector/i);
   });

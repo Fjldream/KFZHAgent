@@ -148,10 +148,10 @@ describe("design knowledge contracts", () => {
       actions: [],
       events: [{
         semanticEvent: "row-click",
-        kfEvent: "Cell-click",
-        linkId: 200006,
+        kfEvent: "onClickRow",
+        linkId: 200024,
         availability: "supported",
-        arguments: [{ name: "record", position: 1, valueKind: "record" }],
+        arguments: [{ name: "record", position: 3, valueKind: "record" }],
         evidence: [{
           kind: "product-source",
           ref: "KingFusion3.6_Node/pages/table.json#linkMng.linkList.5.script",
@@ -170,7 +170,7 @@ describe("design knowledge contracts", () => {
     }).success).toBe(false);
     expect(ScriptCapabilityProfileSchema.safeParse({
       ...profile,
-      events: [{ ...profile.events[0], arguments: [{ name: "record", position: 1, valueKind: "object" }] }],
+      events: [{ ...profile.events[0], arguments: [{ name: "record", position: 3, valueKind: "object" }] }],
     }).success).toBe(false);
     expect(ScriptCapabilityProfileSchema.safeParse({
       ...profile,
@@ -178,7 +178,7 @@ describe("design knowledge contracts", () => {
     }).success).toBe(true);
     expect(ScriptCapabilityProfileSchema.safeParse({
       ...profile,
-      events: [{ ...profile.events[0], arguments: [{ name: "record", position: 1 }] }],
+      events: [{ ...profile.events[0], arguments: [{ name: "record", position: 3 }] }],
     }).success).toBe(true);
     expect(ScriptCapabilityProfileSchema.safeParse({
       ...profile,

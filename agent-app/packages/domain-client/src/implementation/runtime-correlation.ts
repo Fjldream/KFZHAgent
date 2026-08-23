@@ -147,7 +147,7 @@ function nonEmptyString(value: unknown, path: string, maximum = 200): string {
 }
 const RUNTIME_PREFIX_BY_CAPABILITY: Readonly<Record<string, string>> = Object.freeze({
   button: "Button", checkbox: "Checkbox", datetimepicker: "Datetimepicker",
-  "easyui.1": "Table", datagrid: "Table", "easyui.2": "LinkButton",
+  "easyui.1": "Datagrid", datagrid: "Datagrid", "easyui.2": "LinkButton",
   "easyui.6": "Searchbox", "easyui.12": "Dialog", "easyui.18": "Treegrid",
   "easyui.19": "Window", "easyui.22": "Pagination", image: "Image", input: "Input",
   inputnumber: "InputNumber", list: "List", navmenu: "Navmenu", radio: "Radio",

@@ -121,7 +121,7 @@ function fixtureForScript(
       controls: [
         { semanticControlId: "go", instanceName: "Button1" },
         { semanticControlId: "status-filter", instanceName: "Input1" },
-        { semanticControlId: "records", instanceName: "Table1" },
+        { semanticControlId: "records", instanceName: "Datagrid1" },
         { semanticControlId: "home-root", instanceName: "Layout1" },
       ],
       pages: [{ semanticPageId: "home", pageGuid: "00000000-0000-4000-8000-000000000001" }],
@@ -192,12 +192,12 @@ describe("compileScriptPlan", () => {
     })).toThrow(/SCRIPT_COMPILER_API_UNSUPPORTED.*\$control\.setValue/);
   });
 
-  it("emits reviewed SetData, conditional syntax, and the exact Cell-click record position", () => {
+  it("emits reviewed SetData, conditional syntax, and the exact onClickRow record position", () => {
     const setData = fixture('$control.setData("records", []);');
     expect(compileScriptPlan({
       script: setData.script, context: setData.context, validationIdentity: setData.identity,
       validatedAst: setData.validatedAst, binding: { controlId: "go", semanticEvent: "click" },
-    }).module.source).toBe("Table1.SetData([]);\n");
+    }).module.source).toBe("Datagrid1.SetData([]);\n");
 
     const conditional = fixture('const value = $control.getValue("status-filter");\nif (value === "open") { const copy = String(value); }');
     expect(compileScriptPlan({
@@ -210,8 +210,8 @@ describe("compileScriptPlan", () => {
       script: record.script, context: record.context, validationIdentity: record.identity,
       validatedAst: record.validatedAst, binding: { controlId: "records", semanticEvent: "row-click" },
     });
-    expect(compiled.module.source).toBe("const selectedRecord = arguments[1];\n");
-    expect(compiled.binding).toMatchObject({ ownerInstanceName: "Table1", kfEvent: "Cell-click", linkId: 200006 });
+    expect(compiled.module.source).toBe("const selectedRecord = arguments[3];\n");
+    expect(compiled.binding).toMatchObject({ ownerInstanceName: "Datagrid1", kfEvent: "onClickRow", linkId: 200024 });
   });
 
   it("requires explicit configure-data placement and its reviewed capability profile", () => {
@@ -221,7 +221,7 @@ describe("compileScriptPlan", () => {
       validatedAst: data.validatedAst, placement: "configure-data",
     });
     expect(compiled.binding).toBeUndefined();
-    expect(compiled.module).toMatchObject({ placement: "configure-data", ownerInstanceName: "Table1" });
+    expect(compiled.module).toMatchObject({ placement: "configure-data", ownerInstanceName: "Datagrid1" });
     expect(() => compileScriptPlan({
       script: data.script, context: data.context, validationIdentity: data.identity,
       validatedAst: data.validatedAst, placement: "configure-data",
@@ -289,22 +289,21 @@ describe("compileScriptPlan", () => {
     });
     expect(compiledRead.binding).toMatchObject({ kfEvent: buttonSlot.name, linkId: buttonSlot.linkId });
     expect(memberEvidence).toContain("input1.Value");
-    expect(memberEvidence).toContain("Table1.SetData(");
     expect(compiledRead.module.source).toContain("Input1.Value");
 
     const node: unknown = JSON.parse(readFileSync(path.join(
       repositoryRoot,
-      "KingFusion3.6_Node/sdb/kingclient/bbb85040-d19b-11f0-b646-250384722929/e91a8070-d94e-11f0-bc3d-dbe5f779bd94/pagerecord/recordpages/修改班组20230718142335.json",
+      "KingFusion3.6_Node/sdb/kingclient/5dd3e6c0-d181-11f0-b646-250384722929/d6271f40-e165-11f0-bc3d-dbe5f779bd94/project/page/数据网格_事件.json",
     ), "utf8"));
-    const cellSlot = at(node, ["objects", 0, "insiderObjects", 0, "insiderObjects", 4, "insiderObjects", 0, "linkMng", "linkList", 5]) as Record<string, unknown>;
+    const rowSlot = at(node, ["objects", 0, "linkMng", "linkList", 23]) as Record<string, unknown>;
     const record = fixture("const selectedRecord = $event.record();", { owner: "records", event: "row-click" });
     const compiledRecord = compileScriptPlan({
       script: record.script, context: record.context, validationIdentity: record.identity,
       validatedAst: record.validatedAst, binding: { controlId: "records", semanticEvent: "row-click" },
     });
-    expect(compiledRecord.binding).toMatchObject({ kfEvent: cellSlot.name, linkId: cellSlot.linkId });
-    expect(cellSlot["script"]).toEqual(expect.stringContaining("arg[1]"));
-    expect(compiledRecord.module.source).toContain("arguments[1]");
+    expect(compiledRecord.binding).toMatchObject({ kfEvent: rowSlot.name, linkId: rowSlot.linkId });
+    expect(rowSlot["script"]).toEqual(expect.stringContaining("arguments[3]"));
+    expect(compiledRecord.module.source).toContain("arguments[3]");
   });
 
   it("binds a validated AST to the exact context identity and authoritative ports", () => {

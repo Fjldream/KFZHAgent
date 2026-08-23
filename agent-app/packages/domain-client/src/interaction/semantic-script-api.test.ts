@@ -89,12 +89,12 @@ function implementation(): UIImplementationSpecV2 {
       controls: [
         { semanticControlId: "go", instanceName: "Button1" },
         { semanticControlId: "status-filter", instanceName: "Input1" },
-        { semanticControlId: "records", instanceName: "Table1" },
+        { semanticControlId: "records", instanceName: "Datagrid1" },
         { semanticControlId: "status-select", instanceName: "Select1" },
         { semanticControlId: "plain-text", instanceName: "Text1" },
         { semanticControlId: "overlay-content", instanceName: "Text2" },
         { semanticControlId: "detail-input", instanceName: "Input2" },
-        { semanticControlId: "detail-records", instanceName: "Table2" },
+        { semanticControlId: "detail-records", instanceName: "Datagrid2" },
         { semanticControlId: "home-root", instanceName: "Layout1" },
         { semanticControlId: "detail-root", instanceName: "Layout2" },
       ],
@@ -251,20 +251,19 @@ describe("semantic script API", () => {
 
   it("resolves only the product-evidenced datagrid SetData method", () => {
     expect(resolveSemanticApiCall(call("$control.setData", "records", []), context())).toMatchObject({
-      availability: "supported", kind: "method", semanticControlId: "records", instanceName: "Table1",
+      availability: "supported", kind: "method", semanticControlId: "records", instanceName: "Datagrid1",
       capabilityId: "easyui.1", pageId: "home", kfMethod: "SetData", parameterNames: ["records"],
     });
     expect(() => resolveSemanticApiCall(call("$control.setData", "status-select", []), context()))
       .toThrow(/SCRIPT_API_INPUT_INVALID.*not bound to mock data/);
   });
 
-  it("maps the reviewed semantic row-click alias to exact Cell-click evidence", () => {
+  it("maps the reviewed semantic row-click alias to exact onClickRow evidence", () => {
     expect(resolveEventBinding({ controlId: "records", semanticEvent: "row-click" }, context("records"))).toMatchObject({
-      availability: "supported", kind: "event", semanticControlId: "records", instanceName: "Table1",
-      kfEvent: "Cell-click", linkId: 200006,
+      availability: "supported", kind: "event", semanticControlId: "records", instanceName: "Datagrid1",
+      kfEvent: "onClickRow", linkId: 200024,
       arguments: [
-        { name: "record", position: 1, valueKind: "record" },
-        { name: "column", position: 2, valueKind: "scalar" },
+        { name: "record", position: 3, valueKind: "record" },
       ],
     });
     expect(() => resolveEventBinding({ controlId: "records", semanticEvent: "Row-click" }, context("records")))
@@ -278,8 +277,8 @@ describe("semantic script API", () => {
       plan: plan(), implementation: implementation(), ownerControlId: "records", activeEvent: { controlId: "records", semanticEvent: "row-click" },
     });
     expect(resolveSemanticApiCall(call("$event.record"), active)).toMatchObject({
-      availability: "supported", kind: "event-argument", instanceName: "Table1", kfEvent: "Cell-click",
-      argumentName: "record", argumentPosition: 1, valueKind: "record",
+      availability: "supported", kind: "event-argument", instanceName: "Datagrid1", kfEvent: "onClickRow",
+      argumentName: "record", argumentPosition: 3, valueKind: "record",
     });
     expect(resolveSemanticApiCall(call("$event.record"), context())).toEqual({
       availability: "planned", kind: "planned", api: "$event.record", reason: "SCRIPT_EVENT_RECORD_NOT_PROVEN",

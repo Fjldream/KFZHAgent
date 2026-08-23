@@ -97,7 +97,7 @@ describe("attachRuntimeCorrelation", () => {
     });
     const names = correlationMaps(result).controls;
     expect(names["open-detail"]).toMatch(/^Button\d+$/);
-    expect(names["detail-root"]).toMatch(/^Table\d+$/);
+    expect(names["detail-root"]).toMatch(/^Datagrid\d+$/);
     expect(names["home-root"]).toMatch(/^Text\d+$/);
     expect(UIImplementationSpecV2Schema.safeParse(result).success).toBe(true);
     expect(Object.isFrozen(result)).toBe(true);

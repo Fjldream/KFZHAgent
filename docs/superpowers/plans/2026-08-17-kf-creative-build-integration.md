@@ -82,7 +82,7 @@ The model owns customer-facing information architecture, page composition, inter
 - Preserve unrelated existing `linkMng`/`configureData`; replace only compiler-owned entries with matching provenance.
 - Make created pages honor compiled dimensions and the same `k`-prefixed GUID rule as fresh project compilation.
 - Validate marker hashes, owner/event bindings, referenced instances/pages, native-action targets, change scope, and absence of orphan compiled entries.
-- Prove actual patch → validate → package → import round trips for navigation and Cell-click → Table SetData.
+- Prove actual patch → validate → package → import round trips for navigation and Datagrid onClickRow → Datagrid SetData.
 
 ## Task 5: Add one creative compiler port and graph node
 
@@ -135,7 +135,7 @@ Phase 5 is complete only when:
 - CSS, native actions, and necessary constrained JavaScript exist in the packaged native project;
 - the Worker consumes the signed payload, patches a real KF workspace, validates it, packages it, stores the artifact, and creates the revision;
 - no creative build requires or advertises preview output;
-- navigation and Cell-click → Table SetData pass actual package/import validation;
+- navigation and Datagrid onClickRow → Datagrid SetData pass actual package/import validation;
 - all three golden projects are compositionally distinct rather than template-identical;
 - legacy/module workflows remain green;
 - full tests, typecheck, lint, and `git diff --check` pass.

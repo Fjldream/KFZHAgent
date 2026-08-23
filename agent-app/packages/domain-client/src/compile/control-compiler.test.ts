@@ -96,11 +96,11 @@ describe("control compiler — compiled scripts", () => {
   });
 
   it("uses configureData only for a capability that explicitly supports it", () => {
-    const configure = scriptModule("configure", "Table1.SetData([]);\n", "configure-data", "Table1");
+    const configure = scriptModule("configure", "Datagrid1.SetData([]);\n", "configure-data", "Datagrid1");
     const configureOutput = compileControl(build, {
-      id: "Table1", type: "easyui", proto: 1, x: 0, y: 0, width: 320, height: 200,
+      id: "Datagrid1", type: "easyui", proto: 1, x: 0, y: 0, width: 320, height: 200,
     }, ctx, {
-      ownerInstanceName: "Table1", capabilityId: "easyui.1", modules: [configure], bindings: [],
+      ownerInstanceName: "Datagrid1", capabilityId: "easyui.1", modules: [configure], bindings: [],
     })["configureData"] as string;
     const configureSerialized = decodedModules(configureOutput);
     expect(configureSerialized[0]!.body).toBe(configure.source);

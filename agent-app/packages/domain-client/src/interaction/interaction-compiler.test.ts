@@ -104,7 +104,7 @@ function fixture(kind: "native" | "script" | "planned" = "native") {
     runtimeCorrelation: {
       controls: [
         { semanticControlId: "go", instanceName: "Button1" }, { semanticControlId: "filter", instanceName: "Input1" },
-        { semanticControlId: "records", instanceName: "Table1" }, { semanticControlId: "home-root", instanceName: "Layout1" },
+        { semanticControlId: "records", instanceName: "Datagrid1" }, { semanticControlId: "home-root", instanceName: "Layout1" },
         { semanticControlId: "detail-text", instanceName: "Text1" },
       ],
       pages: [
@@ -143,19 +143,19 @@ describe("compileInteractions", () => {
     expect(compileInteractions(input).diagnostics.errors).toEqual([]);
   });
 
-  it("compiles an evidence-backed Input/Button event to Table SetData script", () => {
+  it("compiles an evidence-backed Input/Button event to Datagrid SetData script", () => {
     const result = compileInteractions(fixture("script"));
 
     expect(result.diagnostics.errors).toEqual([]);
     expect(result.implementation.compiledScripts).toHaveLength(1);
     const module = result.implementation.compiledScripts[0]!;
-    expect(module.source).toBe("Table1.SetData([]);\n");
+    expect(module.source).toBe("Datagrid1.SetData([]);\n");
     expect(module.sourceHash).toBe(createHash("sha256").update(module.source).digest("hex"));
     expect(module.source).not.toMatch(/\$control|load-records|visitor-records/);
     expect(traceInteraction(result, "go", "click")).toEqual(["run-load"]);
   });
 
-  it("closes the reviewed Cell-click record event through Input read and Table SetData", () => {
+  it("closes the reviewed onClickRow record event through Input read and Datagrid SetData", () => {
     const input = fixture("script");
     const script = input.plan.scripts[0]!;
     if (script.kind !== "custom") throw new Error("custom fixture required");
@@ -169,12 +169,12 @@ describe("compileInteractions", () => {
 
     const result = compileInteractions(input);
     const module = result.implementation.compiledScripts[0]!;
-    expect(module.source).toContain("arguments[1]");
+    expect(module.source).toContain("arguments[3]");
     expect(module.source).toContain("Input1.Value");
-    expect(module.source).toContain("Table1.SetData([])");
+    expect(module.source).toContain("Datagrid1.SetData([])");
     const page = result.implementation.pages[0]!;
     if (page.compatibility !== "native") throw new Error("native fixture required");
-    expect(page.controls.find((control) => control.id === "records")!.eventBindings[0]).toMatchObject({ kfEvent: "Cell-click", linkId: 200006 });
+    expect(page.controls.find((control) => control.id === "records")!.eventBindings[0]).toMatchObject({ kfEvent: "onClickRow", linkId: 200024 });
   });
 
   it("returns a deterministic blocking request for a planned API without inventing runtime", () => {
