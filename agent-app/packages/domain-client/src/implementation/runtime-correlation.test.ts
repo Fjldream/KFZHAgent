@@ -5,6 +5,8 @@ import {
 } from "@kf/contracts";
 import { describe, expect, it } from "vitest";
 import { beforeAll } from "vitest";
+import { readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { compileClientProject } from "../compile/client-compiler.js";
 import { deriveGuid } from "../compile/guid-factory.js";
 import { inspectClientProject, serverOwnedRuntimeIdentitySnapshot, type InspectResult } from "../inspect/client-inspector.js";
@@ -37,7 +39,8 @@ function implementation(
       .filter((_, controlIndex) => controlIndex % pageIds.length === pageIndex)
       .map((controlId) => ({
         id: controlId, role: "content",
-        capabilityId: controlId === "open-detail" ? "button" : controlId === "detail-root" ? "easyui.1" : controlId === "layout-host" ? "layout.4" : "text",
+        capabilityId: controlId === "open-detail" ? "button" : controlId === "detail-root" ? "easyui.1"
+          : controlId === "layout-host" ? "layout.4" : controlId === "layout-two" ? "layout.2" : "text",
         depth: 0, zIndex: 0,
         geometry: { x: 0, y: 0, width: 200, height: 40 }, nativeProperties: {},
         sourceSolutionNodeId: `solution-${controlId}`,
@@ -60,6 +63,8 @@ function correlationMaps(result: UIImplementationSpecV2) {
 
 describe("attachRuntimeCorrelation", () => {
   let realInspection: InspectResult;
+  let mixedEnvelopeInspection: InspectResult;
+  let legacyLayoutInspection: InspectResult;
   let uploadedPageGuid: string;
   beforeAll(async () => {
     const workspace = await compileClientProject({
@@ -74,6 +79,24 @@ describe("attachRuntimeCorrelation", () => {
     }, { seed: "uploaded-workspace" });
     realInspection = await inspectClientProject(workspace.path);
     uploadedPageGuid = Object.keys(realInspection.index.pages)[0]!;
+
+    const inspectMutated = async (seed: string, control: Record<string, unknown>, mutate: (native: Record<string, unknown>) => void) => {
+      const candidate = await compileClientProject({
+        schema: "kf-client-project-ir/v1", id: seed, name: seed, version: "1.0.0.1",
+        pages: [{ id: "existing-page", name: "Page1", width: 1280, height: 720, controls: [control] }], variables: [], scripts: [],
+      } as never, { seed });
+      const pageFile = path.join(candidate.path, "1.0.0.1", "project", "page", "Page1.json");
+      const page = JSON.parse(await readFile(pageFile, "utf8")) as { objects: Array<Record<string, unknown>> };
+      mutate(page.objects[0]!);
+      await writeFile(pageFile, JSON.stringify(page));
+      return inspectClientProject(candidate.path);
+    };
+    mixedEnvelopeInspection = await inspectMutated("mixed-envelope", {
+      id: "Button1", type: "button", x: 10, y: 10, width: 90, height: 40, text: "Existing",
+    }, (native) => { native.objectType = 3; native.uiExtendType = 1; });
+    legacyLayoutInspection = await inspectMutated("legacy-layout", {
+      id: "Layout1", type: "layout", layoutType: 4, x: 0, y: 0, width: 320, height: 480, children: [],
+    }, (native) => { delete native.objectType; });
   });
 
   function verified(correlations: ExistingRuntimeCorrelationDisposition): VerifiedExistingRuntimeCorrelationHandle {
@@ -202,6 +225,48 @@ describe("attachRuntimeCorrelation", () => {
     expect(correlationMaps(attachRuntimeCorrelation({
       workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: source, verifiedExisting: proof,
     })).controls["layout-host"]).toBe("Layout1");
+  });
+
+  it("rejects inspector-branded mixed envelopes before uploaded type binding", () => {
+    const source = implementation(["home"], ["open-detail"]);
+    const derived = correlationMaps(attachRuntimeCorrelation({ workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: source }));
+    const proof = verifyExistingRuntimeCorrelation({
+      workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, inspection: mixedEnvelopeInspection,
+      correlations: {
+        controls: [{ source: "uploaded-existing", semanticControlId: "open-detail", instanceName: "Button1" }],
+        pages: [{ source: "workspace-derived", semanticPageId: "home", pageGuid: derived.pages.home! }],
+      },
+    });
+    expect(() => attachRuntimeCorrelation({
+      workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: source, verifiedExisting: proof,
+    })).toThrowError(/UPLOADED_NATIVE_TYPE_MISMATCH.*open-detail/);
+  });
+
+  it("accepts only the confirmed objectType-less legacy envelope for matching layout types", () => {
+    const source = implementation(["home"], ["layout-host"]);
+    const derived = correlationMaps(attachRuntimeCorrelation({ workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: source }));
+    const proof = verifyExistingRuntimeCorrelation({
+      workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, inspection: legacyLayoutInspection,
+      correlations: {
+        controls: [{ source: "uploaded-existing", semanticControlId: "layout-host", instanceName: "Layout1" }],
+        pages: [{ source: "workspace-derived", semanticPageId: "home", pageGuid: derived.pages.home! }],
+      },
+    });
+    expect(correlationMaps(attachRuntimeCorrelation({
+      workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: source, verifiedExisting: proof,
+    })).controls["layout-host"]).toBe("Layout1");
+
+    for (const [semanticControlId, instanceName] of [["layout-two", "Layout1"], ["layout-host", "Button1"], ["layout-host", "Datagrid1"]] as const) {
+      const candidate = implementation(["home"], [semanticControlId]);
+      const candidateDerived = correlationMaps(attachRuntimeCorrelation({ workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: candidate }));
+      const mismatched = verified({
+        controls: [{ source: "uploaded-existing", semanticControlId, instanceName }],
+        pages: [{ source: "workspace-derived", semanticPageId: "home", pageGuid: candidateDerived.pages.home! }],
+      });
+      expect(() => attachRuntimeCorrelation({
+        workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: candidate, verifiedExisting: mismatched,
+      })).toThrowError(/UPLOADED_NATIVE_TYPE_MISMATCH/);
+    }
   });
 
   it("rejects forged workspace-derived values while uploaded page GUIDs may be non-derived", () => {

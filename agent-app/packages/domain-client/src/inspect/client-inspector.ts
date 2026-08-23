@@ -7,24 +7,9 @@ import {
   SpecialNodeIR,
   type ControlIR,
 } from "../ir/client-project-ir.js";
-import { EASYUI_PROTO_FIELDS, EASYUI_PROTO_TYPES } from "../ir/easyui-types.js";
+import { EASYUI_PROTO_FIELDS } from "../ir/easyui-types.js";
 import { parseTableData } from "../modules/definitions/native-data-adapters.js";
-
-/**
- * KF 特殊节点集合：这些节点没有 uiModelType/uiExtendType/layoutType，
- * KF 前端按顶层 `prototypeName` 特判创建实例（km_layer/kmui_layout
- * jsonToObject）。识别分支必须只匹配这 7 个名称——普通控件（如 Label）
- * 也可能携带 prototypeName="Label"（其本身有 uiModelType/objectType）。
- */
-const SPECIAL_PROTOTYPE_NAMES = new Set([
-  "CustomCharts",
-  "AlarmWindow",
-  "EventWindow",
-  "TrendChart",
-  "BarChart",
-  "PieChart",
-  "XYChart",
-]);
+import { classifyNativeRuntimeControl, type NativeRuntimeControlType } from "./native-runtime-type.js";
 
 /**
  * Lossless client project inspector.
@@ -192,12 +177,7 @@ export interface InspectResult {
   warnings: string[];
 }
 
-export type ServerOwnedNativeControlType =
-  | { readonly kind: "static"; readonly uiModelType: number }
-  | { readonly kind: "easyui"; readonly objectType: 3 | null; readonly uiExtendType: number }
-  | { readonly kind: "layout"; readonly objectType: 2 | null; readonly layoutType: number }
-  | { readonly kind: "prototype"; readonly prototypeName: string }
-  | { readonly kind: "malformed"; readonly reason: string };
+export type ServerOwnedNativeControlType = NativeRuntimeControlType | { readonly kind: "malformed"; readonly reason: string };
 
 export interface ServerOwnedRuntimeIdentitySnapshot {
   readonly controls: readonly { readonly name: string; readonly nativeType: ServerOwnedNativeControlType }[];
@@ -448,9 +428,9 @@ interface RawControl {
 /**
  * Recursively collects controls from a page JSON. KF layout containers nest
  * controls under `objects`/`children`/`layoutItems`/`insiderObjects`; any
- * object carrying a numeric `uiModelType` is treated as a static control
- * (priority dispatch). Container objects are recognized as well:
- * - easyui controls (`objectType === 3`, no `uiModelType`) — identified by
+ * object carrying exactly one valid native envelope is classified by the
+ * shared fail-closed discriminator. Container objects are recognized as well:
+ * - easyui controls (`objectType === 3` or confirmed legacy absence) — identified by
  *   `uiExtendType` (proto), geometry on the top level;
  * - layout containers (`objectType === 2` or absent, with `layoutType`) —
  *   geometry under `baseProperty`, children under `insiderObjects`;
@@ -467,8 +447,21 @@ function collectControls(node: unknown, rawPath: string, out: RawControl[]): voi
   }
   if (typeof node !== "object" || node === null) return;
   const record = node as Record<string, unknown>;
-  const uiModelType = record["uiModelType"];
-  if (typeof uiModelType === "number") {
+  const classification = classifyNativeRuntimeControl(record);
+  if (classification.kind === "malformed") {
+    const guid = typeof record["guid"] === "string" ? record["guid"] : "";
+    const name = typeof record["name"] === "string" ? record["name"] : "";
+    const baseProperty = asRecord(record["baseProperty"]);
+    const semanticId = name !== "" ? name : guid !== "" ? guid : `malformed-${out.length}`;
+    out.push({
+      guid, type: "malformed", capabilityId: "malformed", id: semanticId, ...(name !== "" ? { name } : {}),
+      x: asNumber(asRecord(record["leftTopPt"])["x"] ?? asRecord(baseProperty["leftTopPt"])["x"]),
+      y: asNumber(asRecord(record["leftTopPt"])["y"] ?? asRecord(baseProperty["leftTopPt"])["y"]),
+      width: asNumber(record["width"] ?? baseProperty["width"]), height: asNumber(record["height"] ?? baseProperty["height"]),
+      kfType: -1, nativeRuntimeType: { kind: "malformed", reason: classification.reason }, rawPath, unknownFields: [],
+    });
+  } else if (classification.kind === "valid" && classification.nativeType.kind === "static") {
+    const uiModelType = classification.nativeType.uiModelType;
     const guid = typeof record["guid"] === "string" ? (record["guid"]) : "";
     const name = typeof record["name"] === "string" ? (record["name"]) : "";
     const knownSet = knownControlFields(uiModelType);
@@ -489,12 +482,12 @@ function collectControls(node: unknown, rawPath: string, out: RawControl[]): voi
       width: asNumber(record["width"]),
       height: asNumber(record["height"]),
       kfType: uiModelType,
-      nativeRuntimeType: { kind: "static", uiModelType },
+      nativeRuntimeType: classification.nativeType,
       rawPath,
       unknownFields: unknownKeys(record, knownSet),
     });
-  } else if (record["objectType"] === 3) {
-    // easyui 控件：objectType=3，无 uiModelType；proto = uiExtendType。
+  } else if (classification.kind === "valid" && classification.nativeType.kind === "easyui") {
+    // easyui 控件：reviewed objectType=3 或确认过的 objectType-less legacy envelope。
     // 字段不丢（raw 完整保留），不报 unknownFields。
     const proto = asNumber(record["uiExtendType"]);
     const guid = typeof record["guid"] === "string" ? (record["guid"]) : "";
@@ -511,99 +504,69 @@ function collectControls(node: unknown, rawPath: string, out: RawControl[]): voi
       width: asNumber(record["width"]),
       height: asNumber(record["height"]),
       kfType: proto,
-      nativeRuntimeType: Object.prototype.hasOwnProperty.call(record, "uiModelType")
-        ? { kind: "malformed", reason: "easyui envelope carries uiModelType" }
-        : { kind: "easyui", objectType: 3, uiExtendType: proto },
+      nativeRuntimeType: classification.nativeType,
       rawPath,
       unknownFields: [],
     });
-  } else if (
-    typeof record["uiExtendType"] === "number" &&
-    EASYUI_PROTO_TYPES[record["uiExtendType"]] !== undefined
-  ) {
-    // DateBox（proto 11）等 KMUIExtendBase 系控件：KF 序列化不带 objectType，
-    // 只带 uiExtendType（参考工程 8 个 DateBox 均无 objectType 键）。
-    const proto = record["uiExtendType"];
-    const guid = typeof record["guid"] === "string" ? (record["guid"]) : "";
-    const name = typeof record["name"] === "string" ? (record["name"]) : "";
-    const semanticId = name !== "" ? name : guid !== "" ? guid : `easyui-${out.length}`;
+  } else if (classification.kind === "valid" && classification.nativeType.kind === "layout") {
+    // 布局容器：objectType=2 或确认过的 objectType-less legacy layout；几何在 baseProperty。
+    const layoutType = classification.nativeType.layoutType;
+    const baseProperty = asRecord(record["baseProperty"]);
+    const guid =
+      typeof record["guid"] === "string"
+        ? (record["guid"])
+        : typeof baseProperty["guid"] === "string"
+          ? (baseProperty["guid"])
+          : "";
+    const name =
+      typeof record["name"] === "string"
+        ? (record["name"])
+        : typeof baseProperty["name"] === "string"
+          ? (baseProperty["name"])
+          : "";
+    const semanticId = name !== "" ? name : guid !== "" ? guid : `layout-${out.length}`;
     out.push({
       guid,
-      type: "easyui",
-      capabilityId: `easyui.${proto}`,
+      type: "layout",
+      capabilityId: `layout.${layoutType}`,
       id: semanticId,
       ...(name !== "" ? { name } : {}),
-      x: asNumber((asRecord(record["leftTopPt"])["x"]) ?? 0),
-      y: asNumber((asRecord(record["leftTopPt"])["y"]) ?? 0),
-      width: asNumber(record["width"]),
-      height: asNumber(record["height"]),
-      kfType: proto,
-      nativeRuntimeType: { kind: "easyui", objectType: null, uiExtendType: proto },
+      x: asNumber((asRecord(baseProperty["leftTopPt"])["x"]) ?? 0),
+      y: asNumber((asRecord(baseProperty["leftTopPt"])["y"]) ?? 0),
+      width: asNumber(baseProperty["width"]),
+      height: asNumber(baseProperty["height"]),
+      kfType: layoutType,
+      nativeRuntimeType: classification.nativeType,
       rawPath,
       unknownFields: [],
     });
-  } else {
-    // 布局容器：objectType=2 或无 objectType + layoutType；几何在 baseProperty。
-    const layoutType = record["layoutType"];
-    const objectType = record["objectType"];
-    if (typeof layoutType === "number" && (objectType === 2 || objectType == null)) {
-      const baseProperty = asRecord(record["baseProperty"]);
-      const guid =
-        typeof record["guid"] === "string"
-          ? (record["guid"])
-          : typeof baseProperty["guid"] === "string"
-            ? (baseProperty["guid"])
-            : "";
-      const name =
-        typeof record["name"] === "string"
-          ? (record["name"])
-          : typeof baseProperty["name"] === "string"
-            ? (baseProperty["name"])
-            : "";
-      const semanticId = name !== "" ? name : guid !== "" ? guid : `layout-${out.length}`;
-      out.push({
-        guid,
-        type: "layout",
-        capabilityId: `layout.${layoutType}`,
-        id: semanticId,
-        ...(name !== "" ? { name } : {}),
-        x: asNumber((asRecord(baseProperty["leftTopPt"])["x"]) ?? 0),
-        y: asNumber((asRecord(baseProperty["leftTopPt"])["y"]) ?? 0),
-        width: asNumber(baseProperty["width"]),
-        height: asNumber(baseProperty["height"]),
-        kfType: layoutType,
-        nativeRuntimeType: { kind: "layout", objectType: objectType === 2 ? 2 : null, layoutType },
-        rawPath,
-        unknownFields: [],
-      });
-    } else if (typeof record["prototypeName"] === "string" && SPECIAL_PROTOTYPE_NAMES.has(record["prototypeName"])) {
-      // KF 特殊节点（优先级在容器之后）：prototypeName 特判，无数字类型码。
-      const prototypeName = record["prototypeName"];
-      const geometry = specialNodeGeometry(record, prototypeName);
-      const guid = typeof record["guid"] === "string" ? (record["guid"]) : "";
-      const name =
-        typeof record["name"] === "string" && record["name"] !== ""
-          ? (record["name"])
-          : prototypeName === "CustomCharts" && typeof asRecord(record["pageProperty"])["name"] === "string"
-            ? (asRecord(record["pageProperty"])["name"] as string)
-            : "";
-      const semanticId = name !== "" ? name : guid !== "" ? guid : `prototype-${prototypeName}`;
-      out.push({
-        guid,
-        type: "prototype",
-        capabilityId: `prototype.${prototypeName}`,
-        id: semanticId,
-        ...(name !== "" ? { name } : {}),
-        x: geometry.x,
-        y: geometry.y,
-        width: geometry.width,
-        height: geometry.height,
-        kfType: 0,
-        nativeRuntimeType: { kind: "prototype", prototypeName },
-        rawPath,
-        unknownFields: [],
-      });
-    }
+  } else if (classification.kind === "valid" && classification.nativeType.kind === "prototype") {
+    // KF 特殊节点（优先级在容器之后）：prototypeName 特判，无数字类型码。
+    const prototypeName = classification.nativeType.prototypeName;
+    const geometry = specialNodeGeometry(record, prototypeName);
+    const guid = typeof record["guid"] === "string" ? (record["guid"]) : "";
+    const name =
+      typeof record["name"] === "string" && record["name"] !== ""
+        ? (record["name"])
+        : prototypeName === "CustomCharts" && typeof asRecord(record["pageProperty"])["name"] === "string"
+          ? (asRecord(record["pageProperty"])["name"] as string)
+          : "";
+    const semanticId = name !== "" ? name : guid !== "" ? guid : `prototype-${prototypeName}`;
+    out.push({
+      guid,
+      type: "prototype",
+      capabilityId: `prototype.${prototypeName}`,
+      id: semanticId,
+      ...(name !== "" ? { name } : {}),
+      x: geometry.x,
+      y: geometry.y,
+      width: geometry.width,
+      height: geometry.height,
+      kfType: 0,
+      nativeRuntimeType: classification.nativeType,
+      rawPath,
+      unknownFields: [],
+    });
   }
   for (const [key, value] of Object.entries(record)) {
     if (key === "objects" || key === "children" || key === "layoutItems" || key === "insiderObjects") {
@@ -630,10 +593,10 @@ export interface KfObjectToIRResult {
 /**
  * 把单个 KF 控件对象反序列化为 IR（KF JSON → IR）。
  *
- * 判型顺序（优先级不变）：
- * 1. `uiModelType` 为数字 → 静态控件，由 index 层识别（此处返回 null）；
+ * 判型由共享判别器完成；互斥 envelope 混合时直接拒绝识别：
+ * 1. 单一 `uiModelType` 为数字 → 静态控件，由 index 层识别（此处返回 null）；
  * 2. `objectType === 3`，或 `uiExtendType` 为已知 easyui proto（含 DateBox 等
- *    **无 objectType** 的 KMUIExtendBase 系控件，见 EASYUI_PROTO_TYPES[11]）
+ *    **无 objectType** 的 KMUIExtendBase 系控件，由共享原生类型判别器识别）
  *    → easyui 控件（`type: "easyui"`，proto = `uiExtendType`，几何在顶层
  *    leftTopPt/width/height，`EASYUI_PROTO_FIELDS[proto]` 中存在的字段透传）；
  * 3. `objectType === 2`（或无 objectType）且含 `layoutType` → 布局容器
@@ -648,26 +611,11 @@ export interface KfObjectToIRResult {
  */
 export function kfObjectToControl(node: unknown): KfObjectToIRResult {
   const record = asRecord(node);
-  // 静态控件优先：uiModelType 判型优先，绝不落入容器分支。
-  if (typeof record["uiModelType"] === "number") {
-    return { control: null, unknownFields: [] };
-  }
-  if (record["objectType"] === 3) {
-    return easyuiToIR(record);
-  }
-  // DateBox（proto 11）等 KMUIExtendBase 系控件在 KF 序列化中不带 objectType，
-  // 只带 uiExtendType——只要 uiExtendType 是已知 easyui proto 即可判为 easyui。
-  if (typeof record["uiExtendType"] === "number" && EASYUI_PROTO_TYPES[record["uiExtendType"]] !== undefined) {
-    return easyuiToIR(record);
-  }
-  if (typeof record["layoutType"] === "number" && (record["objectType"] === 2 || record["objectType"] == null)) {
-    return layoutToIR(record);
-  }
-  // KF 特殊节点（优先级在容器之后）：顶层 prototypeName 特判。
-  const prototypeName = record["prototypeName"];
-  if (typeof prototypeName === "string" && SPECIAL_PROTOTYPE_NAMES.has(prototypeName)) {
-    return prototypeToIR(record);
-  }
+  const classification = classifyNativeRuntimeControl(record);
+  if (classification.kind !== "valid" || classification.nativeType.kind === "static") return { control: null, unknownFields: [] };
+  if (classification.nativeType.kind === "easyui") return easyuiToIR(record);
+  if (classification.nativeType.kind === "layout") return layoutToIR(record);
+  if (classification.nativeType.kind === "prototype") return prototypeToIR(record);
   return { control: null, unknownFields: [] };
 }
 

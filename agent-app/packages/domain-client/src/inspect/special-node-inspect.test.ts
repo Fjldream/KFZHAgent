@@ -324,7 +324,7 @@ describe("KF 特殊节点识别（prototypeName → SpecialNodeIR）", () => {
     expect(control).toBeNull(); // 静态控件由 index 层 uiModelType 分支识别
   });
 
-  it("容器优先级高于 prototype：objectType=2 + layoutType 的对象即使带特殊 prototypeName 也判为布局", () => {
+  it("拒绝同时声明布局与特殊 prototype 的互斥原生 envelope", () => {
     const kf = {
       prototypeName: "CustomCharts",
       layoutType: 5,
@@ -333,9 +333,7 @@ describe("KF 特殊节点识别（prototypeName → SpecialNodeIR）", () => {
       insiderObjects: [],
     };
     const { control } = kfObjectToControl(kf);
-    expect(control).not.toBeNull();
-    expect(control.type).toBe("layout");
-    expect(control.layoutType).toBe(5);
+    expect(control).toBeNull();
   });
 
   it("prototypeName 不在特殊节点集合内 → 不识别（返回 null）", () => {

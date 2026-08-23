@@ -7,8 +7,12 @@ import { parse } from "acorn";
 import { walk } from "estree-walker";
 import type { ValidationReport } from "@kf/contracts";
 import { inspectClientProject } from "../inspect/client-inspector.js";
+import {
+  classifyNativeRuntimeControl,
+  sameNativeRuntimeControlType,
+  type NativeRuntimeControlType,
+} from "../inspect/native-runtime-type.js";
 import { CONTROL_TYPE_BY_UIMODEL_TYPE } from "../ir/client-project-ir.js";
-import { EASYUI_PROTO_TYPES } from "../ir/easyui-types.js";
 import { importNativeClientPackage, packageNativeClientProject } from "../package/native-client-package.js";
 import { resolveVersionDirName, verifyChangeScope } from "../patch/change-scope.js";
 import { deleteOperationDigest, normalizeChangePlan, type NormalizedPlan } from "../patch/client-patcher.js";
@@ -70,36 +74,14 @@ async function listJsonFiles(versionRoot: string): Promise<string[]> {
   return out.sort();
 }
 
-type RuntimeControlType =
-  | { readonly kind: "ui-model"; readonly uiModelType: number }
-  | { readonly kind: "easyui"; readonly objectType: 3; readonly uiExtendType: number };
-
-function runtimeControlType(control: Readonly<Record<string, unknown>>): RuntimeControlType | undefined {
-  const uiModelType = control["uiModelType"];
-  const easyuiEnvelope = control["objectType"] === 3;
-  if (easyuiEnvelope && Object.prototype.hasOwnProperty.call(control, "uiModelType")) return undefined;
-  if (typeof uiModelType === "number") return { kind: "ui-model", uiModelType };
-  const uiExtendType = control["uiExtendType"];
-  if (easyuiEnvelope && typeof uiExtendType === "number" && Number.isInteger(uiExtendType)
-    && EASYUI_PROTO_TYPES[uiExtendType] !== undefined) {
-    return { kind: "easyui", objectType: 3, uiExtendType };
-  }
-  return undefined;
-}
-
-function sameRuntimeControlType(left: RuntimeControlType | undefined, right: RuntimeControlType | undefined): boolean {
-  if (left === undefined || right === undefined || left.kind !== right.kind) return false;
-  return left.kind === "ui-model"
-    ? left.uiModelType === (right as Extract<RuntimeControlType, { kind: "ui-model" }>).uiModelType
-    : left.uiExtendType === (right as Extract<RuntimeControlType, { kind: "easyui" }>).uiExtendType;
-}
+type RuntimeControlType = NativeRuntimeControlType;
 
 const isUiModel = (type: RuntimeControlType | undefined, uiModelType: number): boolean =>
-  type?.kind === "ui-model" && type.uiModelType === uiModelType;
+  type?.kind === "static" && type.uiModelType === uiModelType;
 const isDatagrid = (type: RuntimeControlType | undefined): boolean =>
   type?.kind === "easyui" && type.objectType === 3 && type.uiExtendType === 1;
 
-/** Recursively walks page trees, invoking cb on every static or EasyUI control object. */
+/** Recursively walks page trees, including malformed native control envelopes. */
 function walkControls(
   node: unknown,
   where: string,
@@ -111,7 +93,7 @@ function walkControls(
   }
   if (typeof node !== "object" || node === null) return;
   const record = node as Record<string, unknown>;
-  if (typeof record["uiModelType"] === "number" || record["objectType"] === 3) cb(record, where);
+  if (classifyNativeRuntimeControl(record).kind !== "non-control") cb(record, where);
   for (const key of ["objects", "children", "layoutItems", "insiderObjects"]) {
     if (key in record) walkControls(record[key], `${where}/${key}`, cb);
   }
@@ -1337,8 +1319,9 @@ async function checkBusinessRules(
   Object.entries(inspection.raw.pages).forEach(([pageGuid, tree]) => {
     const pageInstances = new Map<string, Array<{ readonly runtimeType: RuntimeControlType; readonly where: string }>>();
     walkControls(tree, `page ${pageGuid}`, (control, where) => {
-      const runtimeType = runtimeControlType(control);
-      if (typeof control["name"] !== "string" || runtimeType === undefined) return;
+      const classification = classifyNativeRuntimeControl(control);
+      if (typeof control["name"] !== "string" || classification.kind !== "valid") return;
+      const runtimeType = classification.nativeType;
       pageInstances.set(control["name"], [
         ...(pageInstances.get(control["name"]) ?? []),
         { runtimeType, where: `${pageGuid} ${where}` },
@@ -1372,8 +1355,17 @@ async function checkBusinessRules(
           : undefined;
 
     walkControls(tree, `page ${pageGuid}`, (control, where) => {
-      const runtimeType = runtimeControlType(control);
-      if (runtimeType === undefined || runtimeType.kind === "ui-model" && !(runtimeType.uiModelType in CONTROL_TYPE_BY_UIMODEL_TYPE)) {
+      const classification = classifyNativeRuntimeControl(control);
+      if (classification.kind === "malformed") {
+        issues.push(`malformed runtime control type at ${pageGuid} ${where}: ${classification.reason}`);
+        return;
+      }
+      if (classification.kind !== "valid") {
+        issues.push(`unknown runtime control type at ${pageGuid} ${where}`);
+        return;
+      }
+      const runtimeType = classification.nativeType;
+      if (runtimeType.kind === "static" && !(runtimeType.uiModelType in CONTROL_TYPE_BY_UIMODEL_TYPE)) {
         issues.push(`unknown runtime control type at ${pageGuid} ${where}`);
         return;
       }
@@ -1412,7 +1404,8 @@ async function checkBusinessRules(
             const metadata = segment.metadata;
             if (metadata.placement !== "event") issues.push(`control "${String(name)}" event contains a non-event compiled module`);
             if (metadata.ownerInstanceName !== name) issues.push(`control "${String(name)}" compiler-owned script owner mismatch`);
-            if (metadata.ownerInstanceName !== name || !sameRuntimeControlType(pageInstanceTypes.get(metadata.ownerInstanceName), runtimeType)) {
+            if (metadata.ownerInstanceName !== name || pageInstanceTypes.get(metadata.ownerInstanceName) === undefined
+              || !sameNativeRuntimeControlType(pageInstanceTypes.get(metadata.ownerInstanceName)!, runtimeType)) {
               issues.push(`control "${String(name)}" compiler-owned script owner type mismatch`);
             }
             if (metadata.kfEvent !== link["name"] || metadata.linkId !== (link["linkId"] ?? null)) issues.push(`control "${String(name)}" compiler-owned event identity mismatch`);
@@ -1475,7 +1468,8 @@ async function checkBusinessRules(
             issues.push(`control "${String(name)}" configureData compiler identity mismatch`);
           }
           if (segment.metadata.ownerInstanceName !== name) issues.push(`control "${String(name)}" configureData owner mismatch`);
-          if (segment.metadata.ownerInstanceName !== name || !sameRuntimeControlType(pageInstanceTypes.get(segment.metadata.ownerInstanceName), runtimeType)) {
+          if (segment.metadata.ownerInstanceName !== name || pageInstanceTypes.get(segment.metadata.ownerInstanceName) === undefined
+            || !sameNativeRuntimeControlType(pageInstanceTypes.get(segment.metadata.ownerInstanceName)!, runtimeType)) {
             issues.push(`control "${String(name)}" configureData owner type mismatch`);
           }
         }

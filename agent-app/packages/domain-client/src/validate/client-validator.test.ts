@@ -929,6 +929,37 @@ describe("client validator (Task 7 brief Step 2)", () => {
     expect((await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true })).checks.businessRules).toBe("fail");
   });
 
+  it.each([
+    { label: "static/easyui", envelope: { objectType: 3, uiExtendType: 1, uiModelType: 35 } },
+    { label: "static/layout", envelope: { objectType: 2, layoutType: 4, uiModelType: 35 } },
+  ])("rejects a mixed $label native envelope without requiring a script", async ({ label, envelope }) => {
+    const base = await copyFixture("client-unknown-field");
+    const candidate = await applyClientPatch(base, happyPlan());
+    const page = await readPage(candidate);
+    page.objects.push({
+      name: "MixedEnvelope1", guid: `mixed-${label}`, leftTopPt: { x: 0, y: 0 }, width: 20, height: 20,
+      ...envelope,
+    });
+    await writePage(candidate, page);
+    const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.businessRules).toBe("fail");
+    expect(report.warnings.join("\n")).toMatch(/malformed|conflict|unknown runtime control type/i);
+  });
+
+  it("accepts the real static KF objectType=3 and null EasyUI placeholder envelope", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const candidate = await applyClientPatch(base, happyPlan());
+    const page = await readPage(candidate);
+    page.objects.push({
+      name: "LabelRuntime1", guid: "static-runtime-envelope", uiModelType: 6,
+      objectType: 3, uiExtendType: null, prototypeName: "Label",
+      leftTopPt: { x: 0, y: 0 }, width: 20, height: 20,
+    });
+    await writePage(candidate, page);
+    const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.businessRules).toBe("pass");
+  });
+
   it("fails on page geometry outside bounds", async () => {
     const base = await copyFixture("client-unknown-field");
     const candidate = await applyClientPatch(base, happyPlan());

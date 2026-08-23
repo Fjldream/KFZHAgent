@@ -7,6 +7,7 @@ import {
   type InspectResult,
   type ServerOwnedNativeControlType,
 } from "../inspect/client-inspector.js";
+import { sameNativeRuntimeControlType, type NativeRuntimeControlType } from "../inspect/native-runtime-type.js";
 
 export type ExistingRuntimeSource = "uploaded-existing" | "workspace-derived";
 export interface ExistingControlRuntimeDisposition { readonly source: ExistingRuntimeSource; readonly semanticControlId: string; readonly instanceName: string }
@@ -152,14 +153,20 @@ function nonEmptyString(value: unknown, path: string, maximum = 200): string {
 }
 interface RuntimeCapabilityDescriptor {
   readonly prefix: string;
-  readonly nativeType: ServerOwnedNativeControlType;
+  readonly acceptedNativeTypes: readonly NativeRuntimeControlType[];
 }
 const staticDescriptor = (prefix: string, uiModelType: number): RuntimeCapabilityDescriptor =>
-  Object.freeze({ prefix, nativeType: Object.freeze({ kind: "static", uiModelType }) });
+  Object.freeze({ prefix, acceptedNativeTypes: Object.freeze([Object.freeze({ kind: "static" as const, uiModelType })]) });
 const easyuiDescriptor = (prefix: string, uiExtendType: number): RuntimeCapabilityDescriptor =>
-  Object.freeze({ prefix, nativeType: Object.freeze({ kind: "easyui", objectType: 3, uiExtendType }) });
+  Object.freeze({ prefix, acceptedNativeTypes: Object.freeze([Object.freeze({ kind: "easyui" as const, objectType: 3 as const, uiExtendType })]) });
 const layoutDescriptor = (layoutType: number): RuntimeCapabilityDescriptor =>
-  Object.freeze({ prefix: "Layout", nativeType: Object.freeze({ kind: "layout", objectType: 2, layoutType }) });
+  Object.freeze({
+    prefix: "Layout",
+    acceptedNativeTypes: Object.freeze([
+      Object.freeze({ kind: "layout" as const, objectType: 2 as const, layoutType }),
+      Object.freeze({ kind: "layout" as const, objectType: null, layoutType }),
+    ]),
+  });
 const RUNTIME_CAPABILITY_DESCRIPTORS: Readonly<Record<string, RuntimeCapabilityDescriptor>> = Object.freeze({
   button: staticDescriptor("Button", 35), checkbox: staticDescriptor("Checkbox", 37), datetimepicker: staticDescriptor("Datetimepicker", 40),
   "easyui.1": easyuiDescriptor("Datagrid", 1), datagrid: easyuiDescriptor("Datagrid", 1), "easyui.2": easyuiDescriptor("LinkButton", 2),
@@ -182,13 +189,9 @@ function runtimeInstanceName(workspaceId: string, semanticControlId: string, cap
     .update(semanticControlId, "utf8").update("\0", "utf8").update(capabilityId, "utf8").digest("hex");
   return `${runtimeDescriptor(capabilityId).prefix}${BigInt(`0x${digest}`).toString(10)}`;
 }
-function sameNativeType(actual: ServerOwnedNativeControlType, expected: ServerOwnedNativeControlType): boolean {
-  if (actual.kind !== expected.kind) return false;
-  if (actual.kind === "static" && expected.kind === "static") return actual.uiModelType === expected.uiModelType;
-  if (actual.kind === "easyui" && expected.kind === "easyui") return actual.objectType === expected.objectType && actual.uiExtendType === expected.uiExtendType;
-  if (actual.kind === "layout" && expected.kind === "layout") return actual.objectType === expected.objectType && actual.layoutType === expected.layoutType;
-  if (actual.kind === "prototype" && expected.kind === "prototype") return actual.prototypeName === expected.prototypeName;
-  return actual.kind === "malformed" && expected.kind === "malformed" && actual.reason === expected.reason;
+function acceptsNativeType(descriptor: RuntimeCapabilityDescriptor, actual: ServerOwnedNativeControlType): boolean {
+  if (actual.kind === "malformed") return false;
+  return descriptor.acceptedNativeTypes.some((expected) => sameNativeRuntimeControlType(actual, expected));
 }
 function runtimePageGuid(workspaceId: string, semanticPageId: string): string { return `k${deriveGuid({ seed: workspaceId }, semanticPageId)}`; }
 
@@ -319,8 +322,8 @@ export function attachRuntimeCorrelation(input: AttachRuntimeCorrelationInput): 
     assertExactSemanticDisposition(verified, controlIds, pageIds);
     verified.controls.filter((entry) => entry.source === "uploaded-existing").forEach((entry) => {
       const inspectedControl = verifiedPayload?.inspectedControls.find((control) => control.name === entry.instanceName);
-      const expected = runtimeDescriptor(capabilityByControlId.get(entry.semanticControlId)!).nativeType;
-      if (inspectedControl === undefined || !sameNativeType(inspectedControl.nativeType, expected)) {
+      const descriptor = runtimeDescriptor(capabilityByControlId.get(entry.semanticControlId)!);
+      if (inspectedControl === undefined || !acceptsNativeType(descriptor, inspectedControl.nativeType)) {
         fail("UPLOADED_NATIVE_TYPE_MISMATCH", entry.semanticControlId);
       }
     });
