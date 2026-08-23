@@ -52,14 +52,8 @@ function javascriptLexicalView(value: string): { codeView: string; literals: str
   let literal = "";
   let state: "code" | "single" | "double" | "template" | "regex" | "line-comment" | "block-comment" = "code";
   let regexCharacterClass = false;
-  const regexMayStart = (index: number): boolean => {
-    let previous = index - 1;
-    while (previous >= 0 && /\s/.test(characters[previous]!)) previous -= 1;
-    if (previous < 0) return true;
-    if (/[([{,:;=!?&|+*%^~<>-]/.test(characters[previous]!)) return true;
-    const prefix = characters.slice(0, previous + 1).join("");
-    return /\b(?:await|case|delete|in|instanceof|new|of|return|throw|typeof|void|yield)$/.test(prefix);
-  };
+  let expressionCanEnd = false;
+  const regexPrefixKeywords = new Set(["await", "case", "delete", "in", "instanceof", "new", "of", "return", "throw", "typeof", "void", "yield"]);
   for (let index = 0; index < characters.length; index += 1) {
     const character = characters[index]!;
     const next = characters[index + 1];
@@ -69,7 +63,26 @@ function javascriptLexicalView(value: string): { codeView: string; literals: str
       else if (character === "`") { state = "template"; literal = ""; characters[index] = " "; continue; }
       else if (character === "/" && next === "/") state = "line-comment";
       else if (character === "/" && next === "*") state = "block-comment";
-      else if (character === "/" && regexMayStart(index)) { state = "regex"; regexCharacterClass = false; characters[index] = " "; continue; }
+      else if (character === "/" && !expressionCanEnd) { state = "regex"; regexCharacterClass = false; characters[index] = " "; continue; }
+      else if (character === "/") { expressionCanEnd = false; continue; }
+      else if (/[A-Za-z_$]/.test(character) && (index === 0 || !/[A-Za-z0-9_$]/.test(characters[index - 1]!))) {
+        let end = index + 1;
+        while (end < characters.length && /[A-Za-z0-9_$]/.test(characters[end]!)) end += 1;
+        expressionCanEnd = !regexPrefixKeywords.has(characters.slice(index, end).join(""));
+        continue;
+      } else if (/\d/.test(character) && (index === 0 || !/[A-Za-z0-9_$]/.test(characters[index - 1]!))) {
+        expressionCanEnd = true;
+        continue;
+      } else if ((character === "+" || character === "-") && next === character) {
+        index += 1;
+        continue;
+      } else if (character === ")" || character === "]" || character === "}") {
+        expressionCanEnd = true;
+        continue;
+      } else if (/[([{,:;=!?&|+*%^~<>-]/.test(character)) {
+        expressionCanEnd = false;
+        continue;
+      }
       else continue;
     } else if (state === "line-comment" && character === "\n") {
       state = "code";
@@ -92,12 +105,14 @@ function javascriptLexicalView(value: string): { codeView: string; literals: str
       characters[index] = " ";
       while (index + 1 < characters.length && /[A-Za-z]/.test(characters[index + 1]!)) characters[++index] = " ";
       state = "code";
+      expressionCanEnd = true;
       continue;
     } else if ((state === "single" && character === "'")
       || (state === "double" && character === "\"")
       || (state === "template" && character === "`")) {
       literals.push(literal);
       state = "code";
+      expressionCanEnd = true;
       characters[index] = " ";
       continue;
     } else if ((state === "single" || state === "double" || state === "template") && character === "\\") {

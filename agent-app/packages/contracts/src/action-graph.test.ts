@@ -176,6 +176,31 @@ describe("ActionGraph contracts", () => {
     }
   });
 
+  it("distinguishes division after update operands from regex literal contexts", () => {
+    for (const source of [
+      String.raw`let count = 1; count++ / F\u0075nction('return 1');`,
+      String.raw`let count = 1; count-- / doc\u0075ment.value;`,
+      String.raw`let count = 1; ++count / F\u0075nction('return 1');`,
+      String.raw`let count = 1; --count / doc\u0075ment.value;`,
+      String.raw`const value = count /* postfix-looking ++ */ / F\u0075nction('return 1');`,
+    ]) {
+      expect(semanticImplementationTextIssue(source, "semantic-js-source"), source).toBeDefined();
+    }
+
+    for (const source of [
+      "const ratio = a + b / c;",
+      "function matcher(value) { return /x/.test(value); }",
+      "const matcher = /x/;",
+      "consume(/x/);",
+      "const patterns = [/x/];",
+      'const options = { "pattern": /x/ };',
+      "function matcher(value) { return /* reviewed */ /x/.test(value); }",
+      "const label = `template / F\\u0075nction text`;",
+    ]) {
+      expect(semanticImplementationTextIssue(source, "semantic-js-source"), source).toBeUndefined();
+    }
+  });
+
   it("preflights recursive values without getters, recursion overflow, or bare descriptor errors", () => {
     let getterCalls = 0;
     const accessor = { kind: "list" };

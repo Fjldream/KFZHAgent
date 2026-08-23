@@ -175,6 +175,8 @@ describe("script program contracts", () => {
       String.raw`doc\u0075ment.querySelector("main");`,
       String.raw`$contr\u{6f}l.getValue("status-filter");`,
       String.raw`doc\u{75}ment.querySelector("main");`,
+      String.raw`let count = 1; count++ / F\u0075nction('return 1');`,
+      String.raw`let count = 1; count-- / doc\u0075ment.value;`,
     ];
     forbiddenSources.forEach((source) => expect(ScriptPlanSchema.safeParse({ ...sourcePlan.scripts[0], source }).success, source).toBe(false));
 
