@@ -217,15 +217,18 @@ const label = "actual";`,
     forbiddenLiterals.forEach((source) => expect(ScriptPlanSchema.safeParse({ ...sourcePlan.scripts[0], source }).success, source).toBe(false));
   });
 
-  it("canonicalizes page GUIDs so case aliases cannot create distinct runtime identities", () => {
+  it("preserves exact uploaded page identities while schemas reject aliases at collection boundaries", () => {
     const upper = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
-    expect(CompilerPageGuidSchema.parse(upper)).toBe(upper.toLowerCase());
-    expect(CompilerPageGuidSchema.parse(`K${upper}`)).toBe(`k${upper.toLowerCase()}`);
+    expect(CompilerPageGuidSchema.parse(upper)).toBe(upper);
+    expect(CompilerPageGuidSchema.parse(`K${upper}`)).toBe(`K${upper}`);
+    expect(CompilerPageGuidSchema.parse("7UJ0lvKq8Q708A6Zl0C02")).toBe("7UJ0lvKq8Q708A6Zl0C02");
+    expect(CompilerPageGuidSchema.safeParse("bad page").success).toBe(false);
+    expect(CompilerPageGuidSchema.safeParse("../page").success).toBe(false);
     const parsed = CompiledScriptModuleSchema.parse({
       ...compiledScript,
       pageReferences: [{ semanticId: "home", pageGuid: upper }],
     });
-    expect(parsed.pageReferences[0]?.pageGuid).toBe(upper.toLowerCase());
+    expect(parsed.pageReferences[0]?.pageGuid).toBe(upper);
   });
 
   it("allows the exact bounded semantic source path in a whole native plan only", () => {

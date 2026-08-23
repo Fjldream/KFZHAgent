@@ -623,9 +623,12 @@ export const ActionGraphSchema = z.object({
 
 export const CompilerInstanceNameSchema = z.string().trim().min(2).max(100)
   .regex(/^[A-Za-z_$][A-Za-z0-9_$]*[0-9]$/, "compiler instance names must use an evidence-backed KF instance shape");
-export const CompilerPageGuidSchema = z.string()
-  .regex(/^k?[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
-  .transform((value) => value.toLowerCase());
+/** Exact KF page identity: legacy UUIDs and bounded opaque product ids. */
+export const CompilerPageIdentitySchema = z.string().min(1).max(100)
+  .regex(/^(?:k?[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|[A-Za-z0-9_-]{16,100})$/i,
+    "compiler page identities must be a KF UUID or bounded opaque KF identity");
+/** Compatibility export retained for existing compiler consumers. */
+export const CompilerPageGuidSchema = CompilerPageIdentitySchema;
 export const CompilerOwnedIdSchema = z.string().trim().min(1).max(100)
   .regex(/^kf\$(?:action|binding|script):[A-Za-z0-9][A-Za-z0-9_-]*$/);
 export const CompilerActionIdSchema = z.string().trim().min(1).max(100).regex(/^kf\$action:[A-Za-z0-9][A-Za-z0-9_-]*$/);

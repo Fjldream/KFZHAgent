@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import { types as utilTypes } from "node:util";
-import { CompilerInstanceNameSchema, UIImplementationSpecV2Schema, type UIImplementationSpecV2 } from "@kf/contracts";
+import {
+  CompilerInstanceNameSchema,
+  CompilerPageGuidSchema,
+  UIImplementationSpecV2Schema,
+  type UIImplementationSpecV2,
+} from "@kf/contracts";
 import { deriveGuid } from "../compile/guid-factory.js";
 import {
   serverOwnedRuntimeIdentitySnapshot,
@@ -43,7 +48,12 @@ interface VerifiedDispositionPayload {
   readonly workspaceId: string;
   readonly baseRevisionId: string;
   readonly inspectionIdentityHash: string;
-  readonly inspectedControls: readonly { readonly name: string; readonly nativeType: ServerOwnedNativeControlType }[];
+  readonly inspectedControls: readonly {
+    readonly guid: string;
+    readonly pageGuid: string;
+    readonly name: string;
+    readonly nativeType: ServerOwnedNativeControlType;
+  }[];
   readonly disposition: CanonicalDisposition;
 }
 const verifiedDispositionByHandle = new WeakMap<object, VerifiedDispositionPayload>();
@@ -217,7 +227,9 @@ function parseDisposition(raw: unknown): CanonicalDisposition {
     if (entry.source !== "uploaded-existing" && entry.source !== "workspace-derived") fail("INPUT_INVALID", `invalid page source at ${index}`);
     const semanticPageId = nonEmptyString(entry.semanticPageId, `correlations.pages[${index}].semanticPageId`, 100);
     const pageGuid = nonEmptyString(entry.pageGuid, `correlations.pages[${index}].pageGuid`, 100);
-    if (!KF_PAGE_GUID.test(pageGuid)) fail("INVALID_PAGE_GUID", semanticPageId);
+    if (entry.source === "workspace-derived") {
+      if (!KF_PAGE_GUID.test(pageGuid)) fail("INVALID_PAGE_GUID", semanticPageId);
+    } else if (!CompilerPageGuidSchema.safeParse(pageGuid).success) fail("INVALID_PAGE_GUID", semanticPageId);
     const foldedSemantic = semanticPageId.toLowerCase(); const foldedGuid = pageGuid.toLowerCase();
     if (semanticPages.has(foldedSemantic)) fail("DUPLICATE_CORRELATION", `page ${semanticPageId}`);
     if (pageGuids.has(foldedGuid)) fail("RUNTIME_IDENTITY_ALIAS", `page ${pageGuid}`);
@@ -237,6 +249,10 @@ export function verifyExistingRuntimeCorrelation(input: VerifyExistingRuntimeCor
   if (inspection === null || typeof inspection !== "object") fail("UNTRUSTED_INSPECTION", "inspection was not produced by inspectClientProject");
   const identitySnapshot = serverOwnedRuntimeIdentitySnapshot(inspection as InspectResult);
   if (identitySnapshot === undefined) fail("UNTRUSTED_INSPECTION", "inspection was not produced by inspectClientProject");
+  if (identitySnapshot.runtimeBinding?.workspaceId !== workspaceId
+    || identitySnapshot.runtimeBinding.baseRevisionId !== baseRevisionId) {
+    fail("INSPECTION_BINDING_MISMATCH", `${workspaceId}/${baseRevisionId}`);
+  }
   const disposition = parseDisposition(clonePlainData(values.get("correlations")));
   disposition.controls.filter((entry) => entry.source === "uploaded-existing").forEach((entry) => {
     const exact = identitySnapshot.controls.filter((control) => control.name === entry.instanceName);
@@ -307,6 +323,8 @@ export function attachRuntimeCorrelation(input: AttachRuntimeCorrelationInput): 
   if (parsed.data.compatibility !== "native") fail("NATIVE_IMPLEMENTATION_REQUIRED", "adapted-v1 is not supported");
   const implementation = parsed.data; const pageIds = implementation.pages.map((page) => page.id);
   const controlIds = implementation.pages.flatMap((page) => page.compatibility === "native" ? page.controls.map((control) => control.id) : []);
+  const pageByControlId = new Map(implementation.pages.flatMap((page) => page.compatibility === "native"
+    ? page.controls.map((control) => [control.id, page.id] as const) : []));
   const capabilityByControlId = new Map(implementation.pages.flatMap((page) => page.compatibility === "native"
     ? page.controls.map((control) => [control.id, control.capabilityId] as const) : []));
   capabilityByControlId.forEach((capabilityId) => { runtimeDescriptor(capabilityId); });
@@ -320,11 +338,17 @@ export function attachRuntimeCorrelation(input: AttachRuntimeCorrelationInput): 
     pages = [...pageIds].sort((a, b) => a.localeCompare(b, "en-US")).map((semanticPageId) => ({ semanticPageId, pageGuid: runtimePageGuid(workspaceId, semanticPageId) }));
   } else {
     assertExactSemanticDisposition(verified, controlIds, pageIds);
+    const pageDispositionById = new Map(verified.pages.map((entry) => [entry.semanticPageId, entry]));
     verified.controls.filter((entry) => entry.source === "uploaded-existing").forEach((entry) => {
       const inspectedControl = verifiedPayload?.inspectedControls.find((control) => control.name === entry.instanceName);
       const descriptor = runtimeDescriptor(capabilityByControlId.get(entry.semanticControlId)!);
       if (inspectedControl === undefined || !acceptsNativeType(descriptor, inspectedControl.nativeType)) {
         fail("UPLOADED_NATIVE_TYPE_MISMATCH", entry.semanticControlId);
+      }
+      const implementationPageId = pageByControlId.get(entry.semanticControlId)!;
+      const pageDisposition = pageDispositionById.get(implementationPageId);
+      if (pageDisposition?.source !== "uploaded-existing" || pageDisposition.pageGuid !== inspectedControl.pageGuid) {
+        fail("UPLOADED_CONTROL_PAGE_MISMATCH", entry.semanticControlId);
       }
     });
     verified.controls.filter((entry) => entry.source === "workspace-derived").forEach((entry) => {

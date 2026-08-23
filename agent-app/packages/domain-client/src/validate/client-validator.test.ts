@@ -134,6 +134,7 @@ function compileReviewedSyntax(options: {
   readonly rowClickSource?: string;
   readonly source?: string;
   readonly derivedRuntime?: { readonly workspaceId: string; readonly baseRevisionId: string };
+  readonly runtimeNames?: { readonly button: string; readonly input: string; readonly datagrid: string; readonly layout: string };
   readonly captureImplementation?: (implementation: UIImplementationSpecV2) => void;
 } = {}): ReturnType<typeof compileScriptPlan>["module"] {
   const theme = {
@@ -203,7 +204,12 @@ function compileReviewedSyntax(options: {
   };
   const implementation: UIImplementationSpecV2 = options.derivedRuntime === undefined
     ? { ...implementationBase, runtimeCorrelation: {
-      controls: [{ semanticControlId: "go", instanceName: "Button1" }, { semanticControlId: "status-filter", instanceName: "Input1" }, { semanticControlId: "records", instanceName: "Datagrid1" }, { semanticControlId: "root", instanceName: "Layout1" }],
+      controls: [
+        { semanticControlId: "go", instanceName: options.runtimeNames?.button ?? "Button1" },
+        { semanticControlId: "status-filter", instanceName: options.runtimeNames?.input ?? "Input1" },
+        { semanticControlId: "records", instanceName: options.runtimeNames?.datagrid ?? "Datagrid1" },
+        { semanticControlId: "root", instanceName: options.runtimeNames?.layout ?? "Layout1" },
+      ],
       pages: [{ semanticPageId: "home", pageGuid: "00000000-0000-4000-8000-000000000001" }],
     } }
     : attachRuntimeCorrelation({ ...options.derivedRuntime, implementation: implementationBase });
@@ -321,8 +327,10 @@ describe("client validator (Task 7 brief Step 2)", () => {
     expect(forgedReport.checks.businessRules, "real EasyUI controls must not bypass compiler-owned event validation").toBe("fail");
   });
 
-  it("treats a declared k page GUID as one full marker/source token rather than an inner bare UUID", async () => {
-    const pageGuid = `k${deriveGuid({ seed: "validator-marker-page" }, "home")}`;
+  it.each([
+    `k${deriveGuid({ seed: "validator-marker-page" }, "home")}`,
+    "7UJ0lvKq8Q708A6Zl0C02",
+  ])("treats declared exact page identity %s as one full marker/source token", async (pageGuid) => {
     const base = await copyFixture("client-unknown-field");
     const candidate = await applyClientPatch(base, happyPlan());
     const page = await readPage(candidate) as PageFixture & Record<string, unknown>;
@@ -405,7 +413,7 @@ describe("client validator (Task 7 brief Step 2)", () => {
     expect(report.warnings.join("\n")).toMatch(/unsupported runtime member/);
   });
 
-  it("derives runtime capability from exact native type evidence rather than a forged instance name", async () => {
+  it("derives runtime capability from exact native type evidence rather than the instance prefix", async () => {
     const base = await copyFixture("client-unknown-field");
     const basePage = await readPage(base);
     basePage.objects.push({ name: "Table2", uiModelType: 35, guid: "forged-table-name", leftTopPt: { x: 0, y: 0 }, width: 20, height: 20 });
@@ -435,8 +443,35 @@ describe("client validator (Task 7 brief Step 2)", () => {
     }] };
     await writePage(easyuiCandidate, easyuiPage);
     const easyuiReport = await validateClientProject(easyuiBase, easyuiCandidate, happyPlan(), { skipRoundTrip: true });
-    expect(easyuiReport.checks.businessRules).toBe("fail");
-    expect(easyuiReport.warnings.join("\n")).toMatch(/unsupported runtime member/);
+    expect(easyuiReport.checks.businessRules, easyuiReport.warnings.join("\n")).toBe("pass");
+  });
+
+  it("authorizes renamed runtime instances by exact inspected native type", async () => {
+    const module = compileReviewedSyntax({
+      source: 'const value = $control.getValue("status-filter"); $control.setData("records", []);',
+      runtimeNames: { button: "Trigger7", input: "input2", datagrid: "records9", layout: "shell4" },
+    });
+    expect(module.source).toBe("const value = input2.Value;\nrecords9.SetData([]);\n");
+    const base = await copyFixture("client-unknown-field");
+    const basePage = await readPage(base);
+    basePage.objects[0]!.name = "Trigger7";
+    basePage.objects.push({ name: "input2", uiModelType: 38, guid: "renamed-input", leftTopPt: { x: 0, y: 0 }, width: 20, height: 20 });
+    basePage.objects.push(nativeDatagrid("records9", "renamed-datagrid"));
+    await writePage(base, basePage);
+    const candidate = await applyClientPatch(base, happyPlan());
+    const page = await readPage(candidate);
+    page.objects[0]!.linkMng = { linkList: [{
+      linkId: 200001, enable: true, name: "onClick",
+      script: markedScript(module.source, {
+        moduleId: module.id,
+        sourceScriptId: module.sourceScriptId,
+        ownerInstanceName: module.ownerInstanceName,
+        instanceReferences: module.instanceReferences,
+      }),
+    }] };
+    await writePage(candidate, page);
+    const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.businessRules, report.warnings.join("\n")).toBe("pass");
   });
 
   it("rejects compiler-owned payloads with escaped globals, dynamic calls, or unbounded work", async () => {

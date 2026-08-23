@@ -63,9 +63,18 @@ function correlationMaps(result: UIImplementationSpecV2) {
 
 describe("attachRuntimeCorrelation", () => {
   let realInspection: InspectResult;
+  let unboundInspection: InspectResult;
+  let wrongWorkspaceInspection: InspectResult;
+  let oldRevisionInspection: InspectResult;
   let mixedEnvelopeInspection: InspectResult;
   let legacyLayoutInspection: InspectResult;
+  let ownershipInspection: InspectResult;
+  let opaqueInspection: InspectResult;
+  let realWorkspacePath: string;
   let uploadedPageGuid: string;
+  let legacyLayoutPageGuid: string;
+  let ownershipPageGuids: readonly string[];
+  const runtimeBinding = { workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID } as const;
   beforeAll(async () => {
     const workspace = await compileClientProject({
       schema: "kf-client-project-ir/v1", id: "existing-project", name: "Existing", version: "1.0.0.1",
@@ -77,7 +86,15 @@ describe("attachRuntimeCorrelation", () => {
         { id: "Layout1", type: "layout", layoutType: 4, x: 350, y: 10, width: 320, height: 480, children: [] },
       ] }], variables: [], scripts: [],
     }, { seed: "uploaded-workspace" });
-    realInspection = await inspectClientProject(workspace.path);
+    realWorkspacePath = workspace.path;
+    unboundInspection = await inspectClientProject(workspace.path);
+    wrongWorkspaceInspection = await inspectClientProject(workspace.path, {
+      runtimeBinding: { workspaceId: "workspace-2", baseRevisionId: BASE_REVISION_ID },
+    });
+    oldRevisionInspection = await inspectClientProject(workspace.path, {
+      runtimeBinding: { workspaceId: WORKSPACE_ID, baseRevisionId: "revision-0" },
+    });
+    realInspection = await inspectClientProject(workspace.path, { runtimeBinding });
     uploadedPageGuid = Object.keys(realInspection.index.pages)[0]!;
 
     const inspectMutated = async (seed: string, control: Record<string, unknown>, mutate: (native: Record<string, unknown>) => void) => {
@@ -89,7 +106,7 @@ describe("attachRuntimeCorrelation", () => {
       const page = JSON.parse(await readFile(pageFile, "utf8")) as { objects: Array<Record<string, unknown>> };
       mutate(page.objects[0]!);
       await writeFile(pageFile, JSON.stringify(page));
-      return inspectClientProject(candidate.path);
+      return inspectClientProject(candidate.path, { runtimeBinding });
     };
     mixedEnvelopeInspection = await inspectMutated("mixed-envelope", {
       id: "Button1", type: "button", x: 10, y: 10, width: 90, height: 40, text: "Existing",
@@ -97,6 +114,37 @@ describe("attachRuntimeCorrelation", () => {
     legacyLayoutInspection = await inspectMutated("legacy-layout", {
       id: "Layout1", type: "layout", layoutType: 4, x: 0, y: 0, width: 320, height: 480, children: [],
     }, (native) => { delete native.objectType; });
+    legacyLayoutPageGuid = Object.keys(legacyLayoutInspection.index.pages)[0]!;
+
+    const ownershipWorkspace = await compileClientProject({
+      schema: "kf-client-project-ir/v1", id: "ownership-project", name: "Ownership", version: "1.0.0.1",
+      pages: [
+        { id: "first-page", name: "FirstPage", width: 1280, height: 720, controls: [
+          { id: "Text1", type: "text", x: 0, y: 0, width: 100, height: 30, text: "First" },
+        ] },
+        { id: "second-page", name: "SecondPage", width: 1280, height: 720, controls: [
+          { id: "Text2", type: "text", x: 0, y: 0, width: 100, height: 30, text: "Second" },
+        ] },
+      ], variables: [], scripts: [],
+    }, { seed: "ownership-workspace" });
+    ownershipInspection = await inspectClientProject(ownershipWorkspace.path, { runtimeBinding });
+    ownershipPageGuids = Object.keys(ownershipInspection.index.pages);
+
+    const opaqueWorkspace = await compileClientProject({
+      schema: "kf-client-project-ir/v1", id: "opaque-project", name: "Opaque", version: "1.0.0.1",
+      pages: [{ id: "opaque-page", name: "OpaquePage", width: 1280, height: 720, controls: [
+        { id: "Text1", type: "text", x: 0, y: 0, width: 100, height: 30, text: "Opaque" },
+      ] }], variables: [], scripts: [],
+    }, { seed: "opaque-workspace" });
+    const opaquePagePath = path.join(opaqueWorkspace.path, "1.0.0.1", "project", "page", "OpaquePage.json");
+    const opaquePage = JSON.parse(await readFile(opaquePagePath, "utf8")) as Record<string, unknown>;
+    opaquePage.guid = "7UJ0lvKq8Q708A6Zl0C02";
+    await writeFile(opaquePagePath, JSON.stringify(opaquePage));
+    const managerPath = path.join(opaqueWorkspace.path, "1.0.0.1", "project", "pageManager.json");
+    const manager = JSON.parse(await readFile(managerPath, "utf8")) as { Pages: Array<Record<string, unknown>> };
+    manager.Pages[0]!.id = "7UJ0lvKq8Q708A6Zl0C02";
+    await writeFile(managerPath, JSON.stringify(manager));
+    opaqueInspection = await inspectClientProject(opaqueWorkspace.path, { runtimeBinding });
   });
 
   function verified(correlations: ExistingRuntimeCorrelationDisposition): VerifiedExistingRuntimeCorrelationHandle {
@@ -175,7 +223,9 @@ describe("attachRuntimeCorrelation", () => {
       controls: derived.controls.map((entry) => entry.semanticControlId === "detail-root"
         ? { source: "uploaded-existing" as const, semanticControlId: entry.semanticControlId, instanceName }
         : entry),
-      pages: derived.pages,
+      pages: derived.pages.map((entry) => entry.semanticPageId === "home"
+        ? { source: "uploaded-existing" as const, semanticPageId: entry.semanticPageId, pageGuid: uploadedPageGuid }
+        : entry),
     });
     for (const forgedName of ["Table1", "Button1"]) {
       expect(() => attachRuntimeCorrelation({
@@ -187,7 +237,9 @@ describe("attachRuntimeCorrelation", () => {
       controls: derived.controls.map((entry) => entry.semanticControlId === "home-root"
         ? { source: "uploaded-existing" as const, semanticControlId: entry.semanticControlId, instanceName: "Button1" }
         : entry),
-      pages: derived.pages,
+      pages: derived.pages.map((entry) => entry.semanticPageId === "home"
+        ? { source: "uploaded-existing" as const, semanticPageId: entry.semanticPageId, pageGuid: uploadedPageGuid }
+        : entry),
     });
     expect(() => attachRuntimeCorrelation({
       workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: implementation(), verifiedExisting: textAsButton,
@@ -208,19 +260,89 @@ describe("attachRuntimeCorrelation", () => {
       .toEqual({ kind: "easyui", objectType: 3, uiExtendType: 1 });
     expect(snapshot.controls.find((control) => control.name === "Layout1")?.nativeType)
       .toEqual({ kind: "layout", objectType: 2, layoutType: 4 });
+    expect(snapshot.runtimeBinding).toEqual(runtimeBinding);
+    expect(snapshot.controls.find((control) => control.name === "Button1")).toMatchObject({
+      guid: expect.any(String), pageGuid: uploadedPageGuid,
+    });
     expect(Object.isFrozen(snapshot)).toBe(true);
+    expect(Object.isFrozen(snapshot.runtimeBinding)).toBe(true);
     expect(Object.isFrozen(snapshot.controls)).toBe(true);
     expect(snapshot.controls.every((control) => Object.isFrozen(control) && Object.isFrozen(control.nativeType))).toBe(true);
   });
 
+  it("requires inspection-owned exact workspace and base revision provenance", () => {
+    const correlations = allDerived(WORKSPACE_ID);
+    for (const inspection of [unboundInspection, wrongWorkspaceInspection, oldRevisionInspection]) {
+      expect(() => verifyExistingRuntimeCorrelation({
+        workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, inspection, correlations,
+      })).toThrowError(/INSPECTION_BINDING_MISMATCH/);
+    }
+    expect(() => verifyExistingRuntimeCorrelation({
+      workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, inspection: realInspection, correlations,
+    })).not.toThrow();
+  });
+
+  it("rejects malformed or unbounded server runtime inspection bindings", async () => {
+    await expect(inspectClientProject(realWorkspacePath, {
+      runtimeBinding: { workspaceId: " workspace-1", baseRevisionId: BASE_REVISION_ID },
+    })).rejects.toThrow(/bounded exact/);
+    await expect(inspectClientProject(realWorkspacePath, {
+      runtimeBinding: { workspaceId: "x".repeat(201), baseRevisionId: BASE_REVISION_ID },
+    })).rejects.toThrow(/bounded exact/);
+    await expect(inspectClientProject(realWorkspacePath, {
+      runtimeBinding: { workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, extra: true } as never,
+    })).rejects.toThrow(/exactly workspaceId and baseRevisionId/);
+  });
+
+  it("binds uploaded controls to the exact uploaded implementation page", () => {
+    const source = implementation(["home"], ["home-root"]);
+    const [firstPageGuid, secondPageGuid] = ownershipPageGuids;
+    if (firstPageGuid === undefined || secondPageGuid === undefined) throw new Error("ownership pages missing");
+    const proof = (instanceName: string, pageGuid: string) => verifyExistingRuntimeCorrelation({
+      workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, inspection: ownershipInspection,
+      correlations: {
+        controls: [{ source: "uploaded-existing", semanticControlId: "home-root", instanceName }],
+        pages: [{ source: "uploaded-existing", semanticPageId: "home", pageGuid }],
+      },
+    });
+    expect(correlationMaps(attachRuntimeCorrelation({
+      workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: source,
+      verifiedExisting: proof("Text1", firstPageGuid),
+    })).controls["home-root"]).toBe("Text1");
+    expect(() => attachRuntimeCorrelation({
+      workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: source,
+      verifiedExisting: proof("Text2", firstPageGuid),
+    })).toThrowError(/UPLOADED_CONTROL_PAGE_MISMATCH.*home-root/);
+  });
+
+  it("round-trips an exact case-preserved opaque uploaded page identity", () => {
+    const source = implementation(["home"], ["home-root"]);
+    const pageGuid = "7UJ0lvKq8Q708A6Zl0C02";
+    const proof = verifyExistingRuntimeCorrelation({
+      workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, inspection: opaqueInspection,
+      correlations: {
+        controls: [{ source: "uploaded-existing", semanticControlId: "home-root", instanceName: "Text1" }],
+        pages: [{ source: "uploaded-existing", semanticPageId: "home", pageGuid }],
+      },
+    });
+    const attached = attachRuntimeCorrelation({
+      workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: source, verifiedExisting: proof,
+    });
+    expect(attached.runtimeCorrelation!.pages[0]!.pageGuid).toBe(pageGuid);
+    expect(UIImplementationSpecV2Schema.parse(attached).runtimeCorrelation!.pages[0]!.pageGuid).toBe(pageGuid);
+    for (const invalid of ["bad page", "../page"]) {
+      expect(() => verifyExistingRuntimeCorrelation({
+        workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, inspection: opaqueInspection,
+        correlations: { controls: [], pages: [{ source: "uploaded-existing", semanticPageId: "home", pageGuid: invalid }] },
+      })).toThrowError(/INVALID_PAGE_GUID/);
+    }
+  });
+
   it("accepts the exact compiler/template layout envelope for uploaded layout capabilities", () => {
     const source = implementation(["home"], ["layout-host"]);
-    const derived = correlationMaps(attachRuntimeCorrelation({
-      workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: source,
-    }));
     const proof = verified({
       controls: [{ source: "uploaded-existing", semanticControlId: "layout-host", instanceName: "Layout1" }],
-      pages: [{ source: "workspace-derived", semanticPageId: "home", pageGuid: derived.pages.home! }],
+      pages: [{ source: "uploaded-existing", semanticPageId: "home", pageGuid: uploadedPageGuid }],
     });
     expect(correlationMaps(attachRuntimeCorrelation({
       workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: source, verifiedExisting: proof,
@@ -244,12 +366,11 @@ describe("attachRuntimeCorrelation", () => {
 
   it("accepts only the confirmed objectType-less legacy envelope for matching layout types", () => {
     const source = implementation(["home"], ["layout-host"]);
-    const derived = correlationMaps(attachRuntimeCorrelation({ workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: source }));
     const proof = verifyExistingRuntimeCorrelation({
       workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, inspection: legacyLayoutInspection,
       correlations: {
         controls: [{ source: "uploaded-existing", semanticControlId: "layout-host", instanceName: "Layout1" }],
-        pages: [{ source: "workspace-derived", semanticPageId: "home", pageGuid: derived.pages.home! }],
+        pages: [{ source: "uploaded-existing", semanticPageId: "home", pageGuid: legacyLayoutPageGuid }],
       },
     });
     expect(correlationMaps(attachRuntimeCorrelation({
@@ -258,10 +379,9 @@ describe("attachRuntimeCorrelation", () => {
 
     for (const [semanticControlId, instanceName] of [["layout-two", "Layout1"], ["layout-host", "Button1"], ["layout-host", "Datagrid1"]] as const) {
       const candidate = implementation(["home"], [semanticControlId]);
-      const candidateDerived = correlationMaps(attachRuntimeCorrelation({ workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: candidate }));
       const mismatched = verified({
         controls: [{ source: "uploaded-existing", semanticControlId, instanceName }],
-        pages: [{ source: "workspace-derived", semanticPageId: "home", pageGuid: candidateDerived.pages.home! }],
+        pages: [{ source: "uploaded-existing", semanticPageId: "home", pageGuid: uploadedPageGuid }],
       });
       expect(() => attachRuntimeCorrelation({
         workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: candidate, verifiedExisting: mismatched,

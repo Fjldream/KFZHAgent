@@ -5,7 +5,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { parse } from "acorn";
 import { walk } from "estree-walker";
-import type { ValidationReport } from "@kf/contracts";
+import { CompilerPageGuidSchema, type ValidationReport } from "@kf/contracts";
 import { inspectClientProject } from "../inspect/client-inspector.js";
 import {
   classifyNativeRuntimeControl,
@@ -144,7 +144,7 @@ function compilerMetadata(value: unknown): CompilerOwnedScriptMetadata | undefin
     || !Array.isArray(pageReferences) || !pageReferences.every((entry) => {
       const candidate = asRecord(entry); return Object.keys(candidate).sort().join("\0") === "pageGuid\0semanticId"
         && typeof candidate["semanticId"] === "string" && stableId.test(candidate["semanticId"])
-        && typeof candidate["pageGuid"] === "string" && /^k?[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(candidate["pageGuid"]);
+        && typeof candidate["pageGuid"] === "string" && CompilerPageGuidSchema.safeParse(candidate["pageGuid"]).success;
     }) || instanceReferences.length > 128 || pageReferences.length > 32
     || new Set(instanceReferences.map((entry) => asRecord(entry)["semanticId"])).size !== instanceReferences.length
     || new Set(pageReferences.map((entry) => asRecord(entry)["semanticId"])).size !== pageReferences.length) return undefined;
@@ -728,7 +728,7 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
           const standardGlobal = objectName !== undefined && !resolvesLocal(object === undefined ? undefined : scopeByNode.get(object), objectName);
           const runtimeType = objectName === undefined ? undefined : instanceTypes.get(objectName);
           const runtimeCall = objectName !== undefined && declaredInstances.has(objectName) && member === "SetData"
-            && (isUiModel(runtimeType, 31) && /^Table\d+$/.test(objectName) || isDatagrid(runtimeType) && /^Datagrid\d+$/.test(objectName))
+            && (isUiModel(runtimeType, 31) || isDatagrid(runtimeType))
             && args.length === 1;
           const mathCall = standardGlobal && (objectName === "Math" && ["abs", "ceil", "floor", "round", "trunc"].includes(member ?? "") && args.length === 1
             || objectName === "Math" && ["max", "min"].includes(member ?? "") && args.length >= 1 && args.length <= 1_000);
@@ -875,9 +875,9 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
       const written = parentRecord?.["type"] === "AssignmentExpression" && parentRecord["left"] === node
         || parentRecord?.["type"] === "UpdateExpression" && parentRecord["argument"] === node;
       const runtimeType = instanceTypes.get(name);
-      const supported = (isUiModel(runtimeType, 38) && /^Input\d+$/.test(name) && member === "Value" && !called && !written)
-        || (isUiModel(runtimeType, 31) && /^Table\d+$/.test(name) && member === "SetData" && called)
-        || (isDatagrid(runtimeType) && /^Datagrid\d+$/.test(name) && member === "SetData" && called);
+      const supported = (isUiModel(runtimeType, 38) && member === "Value" && !called && !written)
+        || (isUiModel(runtimeType, 31) && member === "SetData" && called)
+        || (isDatagrid(runtimeType) && member === "SetData" && called);
       if (!supported) unsupportedRuntimeMember ??= `${name}.${member ?? "?"}`;
     },
     leave(node) {
@@ -1088,21 +1088,21 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
   }
   if (metadata.placement === "event") {
     const ownerType = instanceTypes.get(metadata.ownerInstanceName);
-    const reviewedEvent = (isUiModel(ownerType, 35) && /^Button\d+$/.test(metadata.ownerInstanceName) && metadata.kfEvent === "onClick" && metadata.linkId === 200001)
-      || (isUiModel(ownerType, 31) && /^Table\d+$/.test(metadata.ownerInstanceName) && metadata.kfEvent === "Cell-click" && metadata.linkId === 200006)
-      || (isDatagrid(ownerType) && /^Datagrid\d+$/.test(metadata.ownerInstanceName) && metadata.kfEvent === "onClickRow" && metadata.linkId === 200024);
+    const reviewedEvent = (isUiModel(ownerType, 35) && metadata.kfEvent === "onClick" && metadata.linkId === 200001)
+      || (isUiModel(ownerType, 31) && metadata.kfEvent === "Cell-click" && metadata.linkId === 200006)
+      || (isDatagrid(ownerType) && metadata.kfEvent === "onClickRow" && metadata.linkId === 200024);
     if (!reviewedEvent || metadata.phase === null) return "compiled script event is not in the evidence-backed allowlist";
-  } else if (!(isUiModel(instanceTypes.get(metadata.ownerInstanceName), 31) && /^Table\d+$/.test(metadata.ownerInstanceName)
-      || isDatagrid(instanceTypes.get(metadata.ownerInstanceName)) && /^Datagrid\d+$/.test(metadata.ownerInstanceName))
+  } else if (!(isUiModel(instanceTypes.get(metadata.ownerInstanceName), 31)
+      || isDatagrid(instanceTypes.get(metadata.ownerInstanceName)))
     || metadata.kfEvent !== null || metadata.linkId !== null || metadata.phase !== null) {
     return "compiled configureData placement is not in the evidence-backed allowlist";
   }
-  const declaredPages = new Set(metadata.pageReferences.map((reference) => reference.pageGuid.toLowerCase()));
+  const declaredPages = new Set(metadata.pageReferences.map((reference) => reference.pageGuid));
   for (const { pageGuid } of metadata.pageReferences) {
     if (!source.includes(JSON.stringify(pageGuid))) return `compiled script does not use declared page reference "${pageGuid}"`;
   }
   for (const pageGuid of source.match(/(?<![A-Za-z0-9])k?[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![A-Za-z0-9])/gi) ?? []) {
-    if (!declaredPages.has(pageGuid.toLowerCase())) return `compiled script uses undeclared page reference "${pageGuid}"`;
+    if (!declaredPages.has(pageGuid)) return `compiled script uses undeclared page reference "${pageGuid}"`;
   }
   return undefined;
 }

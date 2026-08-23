@@ -42,6 +42,8 @@ export const DEFAULT_SUMMARY_LIMITS: SummaryLimits = {
 
 export interface InspectOptions {
   summaryLimits?: Partial<SummaryLimits>;
+  /** Server-selected immutable identity for later runtime-correlation proof. */
+  runtimeBinding?: { readonly workspaceId: string; readonly baseRevisionId: string };
 }
 
 const VERSION_DIR_RE = /^\d+\.\d+\.\d+\.\d+$/;
@@ -180,7 +182,13 @@ export interface InspectResult {
 export type ServerOwnedNativeControlType = NativeRuntimeControlType | { readonly kind: "malformed"; readonly reason: string };
 
 export interface ServerOwnedRuntimeIdentitySnapshot {
-  readonly controls: readonly { readonly name: string; readonly nativeType: ServerOwnedNativeControlType }[];
+  readonly runtimeBinding?: Readonly<{ readonly workspaceId: string; readonly baseRevisionId: string }>;
+  readonly controls: readonly {
+    readonly guid: string;
+    readonly pageGuid: string;
+    readonly name: string;
+    readonly nativeType: ServerOwnedNativeControlType;
+  }[];
   readonly pageGuids: readonly string[];
 }
 
@@ -870,6 +878,20 @@ export async function inspectClientProject(
   rootDir: string,
   options?: InspectOptions,
 ): Promise<InspectResult> {
+  let runtimeBinding: Readonly<{ readonly workspaceId: string; readonly baseRevisionId: string }> | undefined;
+  if (options?.runtimeBinding !== undefined) {
+    const binding = options.runtimeBinding;
+    const keys = Object.keys(binding).sort();
+    if (keys.length !== 2 || keys[0] !== "baseRevisionId" || keys[1] !== "workspaceId") {
+      throw new Error("runtimeBinding must contain exactly workspaceId and baseRevisionId");
+    }
+    const valid = (value: unknown): value is string => typeof value === "string" && value.length > 0
+      && value.length <= 200 && value.trim() === value;
+    if (!valid(binding.workspaceId) || !valid(binding.baseRevisionId)) {
+      throw new Error("runtimeBinding identities must be bounded exact non-empty strings");
+    }
+    runtimeBinding = Object.freeze({ workspaceId: binding.workspaceId, baseRevisionId: binding.baseRevisionId });
+  }
   const limits: SummaryLimits = { ...DEFAULT_SUMMARY_LIMITS, ...options?.summaryLimits };
   const warnings: string[] = [];
   const projectRoot = await resolveProjectRoot(rootDir);
@@ -1111,10 +1133,16 @@ export async function inspectClientProject(
 
   const result: InspectResult = { raw, index, summary, provenance, warnings };
   const runtimeIdentitySnapshot: ServerOwnedRuntimeIdentitySnapshot = Object.freeze({
+    ...(runtimeBinding === undefined ? {} : { runtimeBinding }),
     controls: Object.freeze(Object.entries(controlsIndex).flatMap(([guid, control]) => {
       const nativeType = nativeRuntimeTypeByControlGuid.get(guid);
       if (control.name === undefined || nativeType === undefined) return [];
-      return [Object.freeze({ name: control.name, nativeType: Object.freeze({ ...nativeType }) })];
+      return [Object.freeze({
+        guid: control.guid,
+        pageGuid: control.pageGuid,
+        name: control.name,
+        nativeType: Object.freeze({ ...nativeType }),
+      })];
     }).sort((left, right) => left.name.localeCompare(right.name, "en-US"))),
     pageGuids: Object.freeze(Object.keys(pagesIndex).sort()),
   });

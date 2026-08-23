@@ -857,11 +857,12 @@ export const UIImplementationSpecV2Schema = z.object({
     controlByInstance.set(entry.instanceName, entry.semanticControlId);
   });
   implementation.runtimeCorrelation?.pages.forEach((entry, index) => {
+    const foldedGuid = entry.pageGuid.toLowerCase();
     if (!pageIds.has(entry.semanticPageId)) ctx.addIssue({ code: "custom", path: ["runtimeCorrelation", "pages", index, "semanticPageId"], message: `unknown correlated page: ${entry.semanticPageId}` });
     if (guidByPage.has(entry.semanticPageId)) ctx.addIssue({ code: "custom", path: ["runtimeCorrelation", "pages", index, "semanticPageId"], message: `duplicate correlated page: ${entry.semanticPageId}` });
-    if (pageByGuid.has(entry.pageGuid)) ctx.addIssue({ code: "custom", path: ["runtimeCorrelation", "pages", index, "pageGuid"], message: `compiler page GUID mapped to multiple pages: ${entry.pageGuid}` });
+    if (pageByGuid.has(foldedGuid)) ctx.addIssue({ code: "custom", path: ["runtimeCorrelation", "pages", index, "pageGuid"], message: `compiler page GUID mapped to multiple pages: ${entry.pageGuid}` });
     guidByPage.set(entry.semanticPageId, entry.pageGuid);
-    pageByGuid.set(entry.pageGuid, entry.semanticPageId);
+    pageByGuid.set(foldedGuid, entry.semanticPageId);
   });
   if (implementation.runtimeCorrelation !== undefined) {
     controlIds.forEach((controlId) => {

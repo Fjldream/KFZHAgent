@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { types as utilTypes } from "node:util";
 import { parse, type Node, type Program } from "acorn";
 import { walk, type Node as WalkerNode } from "estree-walker";
+import { CompilerInstanceNameSchema } from "@kf/contracts";
 import type { SemanticScriptApiContext, SemanticScriptValidationIdentity } from "./semantic-script-api.js";
 import {
   assertSemanticRecordListCompatibility,
@@ -367,7 +368,7 @@ function constantStringIssue(input: string): string | undefined {
   if (/^(?:#|\.|\[)[A-Za-z_-]/.test(value)
     || /^(?:a|button|div|form|input|label|option|select|span|table|td|textarea|tr)(?:\s+(?:(?:a|button|div|form|input|label|option|select|span|table|td|textarea|tr)\b|[.#]|\[)|\s*[>{+~:])/i.test(value)) return "selector";
   if (/^k?[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) return "GUID";
-  if (/^(?:Button|Datagrid|Input|Select|Text|Table|Layout)\d+$/i.test(value)) return "runtime instance";
+  if (CompilerInstanceNameSchema.safeParse(value).success) return "runtime instance";
   return undefined;
 }
 

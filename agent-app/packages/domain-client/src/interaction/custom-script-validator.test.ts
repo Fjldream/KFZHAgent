@@ -245,6 +245,7 @@ describe("constrained custom script validation", () => {
     expect(() => validate('const css = `color:${"red"}`;')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*css/i);
     expect(() => validate('const instance = "Button" + 1;')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*runtime instance/i);
     expect(() => validate('const instance = "Datagrid" + 1;')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*runtime instance/i);
+    expect(() => validate('const instance = "input" + 2;')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*runtime instance/i);
     expect(() => validate('const prefix = "."; const selector = prefix + "records";')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*selector/i);
     expect(() => validate('let prefix = "."; const selector = prefix + "records";')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*selector/i);
   });
