@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { UIImplementationSpecV2 } from "@kf/contracts";
+import type { SolutionImplementationPlan, UIImplementationSpecV2 } from "@kf/contracts";
 import {
   createSemanticScriptApiContext,
   resolveEventBinding,
@@ -66,11 +66,65 @@ function implementation(): UIImplementationSpecV2 {
         { semanticPageId: "detail-page", pageGuid: "00000000-0000-4000-8000-000000000002" },
       ],
     },
-  } as UIImplementationSpecV2;
+  };
+}
+
+const intent: SolutionImplementationPlan["pages"][number]["root"]["intent"] = {
+  importance: "primary", visualWeight: 3, readingOrder: 0, density: "comfortable", groupWith: [],
+  width: { mode: "fixed", value: 120 }, height: { mode: "fixed", value: 40 }, align: "start",
+};
+
+function planControl(
+  id: string,
+  capabilityId: string,
+  content = "控件",
+): Extract<SolutionImplementationPlan["pages"][number]["root"], { kind: "control" }> {
+  return {
+    id, kind: "control", capabilityId, content, properties: [], tabIds: [], styleRole: "content",
+    sourceBlueprintRegionIds: ["region"], intent, eventBindings: [],
+  };
+}
+
+function plan(): SolutionImplementationPlan {
+  return {
+    schema: "kf-solution-implementation/v1", projectKey: "demo", blueprintHash: "a".repeat(64), candidateBundleHash: "b".repeat(64),
+    theme, roleStyles: [{ role: "content", declarations: {}, states: {} }],
+    mockData: [{
+      id: "visitor-records", purpose: "访客记录", fields: [{ key: "name", label: "姓名", type: "text" }],
+      records: [{ values: [{ field: "name", value: "张三" }] }],
+    }],
+    localState: [
+      { id: "submitted", purpose: "是否提交", type: "boolean", initialValue: false },
+      { id: "detail-visible", purpose: "详情是否显示", type: "boolean", initialValue: false },
+    ],
+    pages: [
+      {
+        id: "home", title: "首页", purpose: "首页", canvas: "desktop", sourceBlueprintPageId: "bp-home",
+        sourceBlueprintRegionIds: ["region"], initialStateIds: ["submitted", "detail-visible"],
+        root: { id: "home-root", kind: "layout", layout: "column", sourceBlueprintRegionIds: ["region"], intent, children: [
+          planControl("go", "button", "前往详情"), planControl("status-filter", "input"), planControl("records", "easyui.1"),
+          planControl("status-select", "select"), planControl("plain-text", "text"),
+        ] },
+      },
+      {
+        id: "detail-page", title: "详情", purpose: "详情", canvas: "desktop", sourceBlueprintPageId: "bp-detail",
+        sourceBlueprintRegionIds: ["detail-region"], initialStateIds: [], root: {
+          ...planControl("detail-input", "input"), sourceBlueprintRegionIds: ["detail-region"],
+        },
+      },
+    ],
+    overlays: [{
+      id: "detail-overlay", title: "详情弹窗", purpose: "展示详情", presentation: "dialog", hostPageId: "home",
+      sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region"], visibleStateId: "detail-visible", dismissible: true,
+      root: planControl("overlay-content", "text", "详情"),
+    }],
+    actions: [],
+    scripts: [{ id: "refresh-script", purpose: "刷新数据", kind: "custom", programVersion: "declarative-steps/v1", inputs: [], outputs: [], steps: [{ order: 1, intent: "刷新访客数据", inputNames: [], outputNames: [] }] }],
+  };
 }
 
 const call = (api: string, ...args: readonly unknown[]) => ({ api, args });
-const context = () => createSemanticScriptApiContext({ implementation: implementation(), ownerControlId: "go" });
+const context = (ownerControlId = "go") => createSemanticScriptApiContext({ plan: plan(), implementation: implementation(), ownerControlId });
 
 describe("semantic script API", () => {
   it("resolves exact evidence-backed input reads through semantic-to-runtime correlation", () => {
@@ -105,7 +159,7 @@ describe("semantic script API", () => {
   });
 
   it("maps the reviewed semantic row-click alias to exact Cell-click evidence", () => {
-    expect(resolveEventBinding({ controlId: "records", semanticEvent: "row-click" }, context())).toMatchObject({
+    expect(resolveEventBinding({ controlId: "records", semanticEvent: "row-click" }, context("records"))).toMatchObject({
       availability: "supported", kind: "event", semanticControlId: "records", instanceName: "Table1",
       kfEvent: "Cell-click", linkId: 200006,
       arguments: [
@@ -113,15 +167,15 @@ describe("semantic script API", () => {
         { name: "column", position: 2, valueKind: "scalar" },
       ],
     });
-    expect(() => resolveEventBinding({ controlId: "records", semanticEvent: "Row-click" }, context()))
+    expect(() => resolveEventBinding({ controlId: "records", semanticEvent: "Row-click" }, context("records")))
       .toThrow(/SCRIPT_EVENT_NOT_SUPPORTED: records/);
-    expect(() => resolveEventBinding({ controlId: "records", semanticEvent: "selection-change" }, context()))
+    expect(() => resolveEventBinding({ controlId: "records", semanticEvent: "selection-change" }, context("records")))
       .toThrow(/SCRIPT_EVENT_NOT_SUPPORTED: records/);
   });
 
   it("exposes the record only from the exact active event argument profile", () => {
     const active = createSemanticScriptApiContext({
-      implementation: implementation(), ownerControlId: "records", activeEvent: { controlId: "records", semanticEvent: "row-click" },
+      plan: plan(), implementation: implementation(), ownerControlId: "records", activeEvent: { controlId: "records", semanticEvent: "row-click" },
     });
     expect(resolveSemanticApiCall(call("$event.record"), active)).toMatchObject({
       availability: "supported", kind: "event-argument", instanceName: "Table1", kfEvent: "Cell-click",
@@ -149,12 +203,12 @@ describe("semantic script API", () => {
     ["$overlay.open", ["detail-overlay"], "SCRIPT_OVERLAY_NOT_SERIALIZABLE"],
     ["$overlay.close", ["detail-overlay"], "SCRIPT_OVERLAY_NOT_SERIALIZABLE"],
     ["$state.get", ["submitted"], "SCRIPT_PAGE_LOCAL_RUNTIME_UNAVAILABLE"],
-    ["$state.set", ["submitted"], "SCRIPT_PAGE_LOCAL_RUNTIME_UNAVAILABLE"],
-    ["$data.get", ["records"], "SCRIPT_PAGE_LOCAL_RUNTIME_UNAVAILABLE"],
-    ["$data.set", ["records"], "SCRIPT_PAGE_LOCAL_RUNTIME_UNAVAILABLE"],
+    ["$state.set", ["submitted", true], "SCRIPT_PAGE_LOCAL_RUNTIME_UNAVAILABLE"],
+    ["$data.get", ["visitor-records"], "SCRIPT_PAGE_LOCAL_RUNTIME_UNAVAILABLE"],
+    ["$data.set", ["visitor-records", []], "SCRIPT_PAGE_LOCAL_RUNTIME_UNAVAILABLE"],
     ["$feedback.show", ["success", "完成"], "SCRIPT_FEEDBACK_NOT_SERIALIZABLE"],
-    ["$timer.after", [100], "SCRIPT_TIMER_NOT_SERIALIZABLE"],
-    ["$timer.repeat", [100, 2], "SCRIPT_TIMER_NOT_SERIALIZABLE"],
+    ["$timer.after", [100, "refresh-script"], "SCRIPT_TIMER_NOT_SERIALIZABLE"],
+    ["$timer.repeat", [100, 2, "refresh-script"], "SCRIPT_TIMER_NOT_SERIALIZABLE"],
   ])("keeps %s as a closed planned result", (api, args, reason) => {
     expect(resolveSemanticApiCall(call(api, ...args), context())).toEqual({ availability: "planned", kind: "planned", api, reason });
   });
@@ -176,7 +230,7 @@ describe("semantic script API", () => {
     expect(() => resolveSemanticApiCall(call("$page.navigate", "detail-page", "extra"), context()))
       .toThrow(/SCRIPT_API_INPUT_INVALID/);
     const active = createSemanticScriptApiContext({
-      implementation: implementation(), ownerControlId: "records", activeEvent: { controlId: "records", semanticEvent: "row-click" },
+      plan: plan(), implementation: implementation(), ownerControlId: "records", activeEvent: { controlId: "records", semanticEvent: "row-click" },
     });
     expect(() => resolveSemanticApiCall(call("$event.record", "extra"), active))
       .toThrow(/SCRIPT_API_INPUT_INVALID/);
@@ -194,22 +248,77 @@ describe("semantic script API", () => {
   it("rejects hostile descriptors without invoking accessors or accepting caller evidence", () => {
     let reads = 0;
     const hostile = Object.create(null) as Record<string, unknown>;
+    Object.defineProperty(hostile, "plan", { enumerable: true, value: plan() });
     Object.defineProperty(hostile, "implementation", { enumerable: true, get: () => { reads += 1; return implementation(); } });
     Object.defineProperty(hostile, "ownerControlId", { enumerable: true, value: "go" });
     expect(() => createSemanticScriptApiContext(hostile)).toThrow(/SCRIPT_API_CONTEXT_INVALID/);
     expect(reads).toBe(0);
 
     expect(() => createSemanticScriptApiContext({
-      implementation: implementation(), ownerControlId: "go", evidence: [{ kfEvent: "Click" }],
+      plan: plan(), implementation: implementation(), ownerControlId: "go", evidence: [{ kfEvent: "Click" }],
     })).toThrow(/SCRIPT_API_CONTEXT_INVALID/);
 
     let traps = 0;
-    const proxy = new Proxy({ implementation: implementation(), ownerControlId: "go" }, {
+    const proxy = new Proxy({ plan: plan(), implementation: implementation(), ownerControlId: "go" }, {
       getPrototypeOf(value) { traps += 1; return Reflect.getPrototypeOf(value); },
       ownKeys(value) { traps += 1; return Reflect.ownKeys(value); },
     });
     expect(() => createSemanticScriptApiContext(proxy)).toThrow(/SCRIPT_API_CONTEXT_INVALID/);
     expect(traps).toBe(0);
+  });
+
+  it("rejects reserved object keys at both descriptor-safe entry points without prototype mutation", () => {
+    const hostileContext = { plan: plan(), implementation: implementation(), ownerControlId: "go" } as Record<string, unknown>;
+    Object.defineProperty(hostileContext, "__proto__", { enumerable: true, value: { polluted: true } });
+    expect(() => createSemanticScriptApiContext(hostileContext)).toThrow(/SCRIPT_API_CONTEXT_INVALID.*reserved/);
+
+    const hostileCall = call("$feedback.show", "success", "完成") as Record<string, unknown>;
+    Object.defineProperty(hostileCall, "constructor", { enumerable: true, value: "forbidden" });
+    expect(() => resolveSemanticApiCall(hostileCall, context())).toThrow(/SCRIPT_API_INPUT_INVALID.*reserved/);
+    expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
+  });
+
+  it("binds event resolution to the trusted owner control, not merely the same page", () => {
+    expect(() => resolveEventBinding({ controlId: "records", semanticEvent: "row-click" }, context("go")))
+      .toThrow(/SCRIPT_EVENT_NOT_SUPPORTED.*owner/);
+  });
+
+  it("rejects plan hashes and UI provenance that drift from the authoritative context", () => {
+    const invalidHash = plan();
+    invalidHash.blueprintHash = "A".repeat(64);
+    expect(() => createSemanticScriptApiContext({ plan: invalidHash, implementation: implementation(), ownerControlId: "go" }))
+      .toThrow(/SCRIPT_API_CONTEXT_INVALID: plan/);
+
+    const wrongCapability = implementation();
+    const home = wrongCapability.pages[0];
+    if (home?.compatibility !== "native") throw new Error("native fixture required");
+    home.controls[0]!.capabilityId = "text";
+    expect(() => createSemanticScriptApiContext({ plan: plan(), implementation: wrongCapability, ownerControlId: "go" }))
+      .toThrow(/capability does not match/);
+
+    const wrongSource = implementation();
+    const wrongSourceHome = wrongSource.pages[0];
+    if (wrongSourceHome?.compatibility !== "native") throw new Error("native fixture required");
+    wrongSourceHome.controls[0]!.sourceSolutionNodeId = "missing-node";
+    expect(() => createSemanticScriptApiContext({ plan: plan(), implementation: wrongSource, ownerControlId: "go" }))
+      .toThrow(/provenance does not match/);
+  });
+
+  it.each([
+    ["$control.setVisible", ["plain-text", "yes"]],
+    ["$control.setEnabled", ["missing", true]],
+    ["$overlay.open", ["missing-overlay"]],
+    ["$overlay.close", ["detail-overlay", null, "extra"]],
+    ["$state.get", ["missing-state"]],
+    ["$state.set", ["submitted"]],
+    ["$data.get", ["missing-data"]],
+    ["$data.set", ["visitor-records"]],
+    ["$feedback.show", ["debug", "完成"]],
+    ["$timer.after", [99, "refresh-script"]],
+    ["$timer.after", [100, "missing-script"]],
+    ["$timer.repeat", [100, 11, "refresh-script"]],
+  ])("validates the full planned %s contract before reporting planned", (api, args) => {
+    expect(() => resolveSemanticApiCall(call(api, ...args), context())).toThrow(/SCRIPT_API_INPUT_INVALID|SCRIPT_CONTROL_NOT_FOUND/);
   });
 
   it("rejects hostile call descriptors without reading or reflecting through them", () => {

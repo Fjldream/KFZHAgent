@@ -1,5 +1,10 @@
 import { types as utilTypes } from "node:util";
-import { UIImplementationSpecV2Schema, type ScriptCapabilityProfile } from "@kf/contracts";
+import {
+  SolutionImplementationPlanSchema,
+  UIImplementationSpecV2Schema,
+  type ScriptCapabilityProfile,
+  type SolutionImplementationPlan,
+} from "@kf/contracts";
 import { requireScriptCapabilityProfile } from "../design-knowledge/script-capability-registry.js";
 
 const API_NAMES = [
@@ -46,10 +51,14 @@ interface TrustedContext {
   readonly controls: ReadonlyMap<string, RuntimeControl>;
   readonly pages: ReadonlyMap<string, string>;
   readonly overlays: ReadonlySet<string>;
+  readonly localState: ReadonlyMap<string, SolutionImplementationPlan["localState"][number]>;
+  readonly mockData: ReadonlySet<string>;
+  readonly scripts: ReadonlySet<string>;
   readonly activeEvent?: { readonly controlId: string; readonly semanticEvent: string };
 }
 
 const trustedContexts = new WeakMap<SemanticScriptApiContext, TrustedContext>();
+const RESERVED_DATA_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 
 function invalidContext(nodeId: string, detail: string, options?: ErrorOptions): never {
   throw new SemanticScriptApiError("SCRIPT_API_CONTEXT_INVALID", nodeId, detail, options);
@@ -101,14 +110,20 @@ function clonePureData(
   }
   if (prototype !== Object.prototype && prototype !== null) return invalidContext(nodeId, "input contains a non-plain prototype");
   if (keys.length > 1_000) return invalidContext(nodeId, "input object property budget exceeded");
-  const result: Record<string, JsonData> = {};
+  const result = Object.create(null) as Record<string, JsonData>;
   for (const key of keys) {
     if (typeof key !== "string") return invalidContext(nodeId, "symbol properties are forbidden");
+    if (RESERVED_DATA_KEYS.has(key)) return invalidContext(nodeId, `reserved object key is forbidden: ${key}`);
     const descriptor = descriptors[key];
     if (descriptor === undefined || !("value" in descriptor) || descriptor.enumerable !== true) {
       return invalidContext(nodeId, "input objects require enumerable data properties");
     }
-    result[key] = clonePureData(descriptor.value, nodeId, depth + 1, seen, budget);
+    Object.defineProperty(result, key, {
+      value: clonePureData(descriptor.value, nodeId, depth + 1, seen, budget),
+      enumerable: true,
+      configurable: false,
+      writable: false,
+    });
   }
   seen.delete(value);
   return result;
@@ -131,26 +146,59 @@ export function createSemanticScriptApiContext(input: unknown): SemanticScriptAp
   const cloned = ownRecord(clonePureData(input, "context"), "context");
   const keys = Object.keys(cloned).sort();
   const allowedKeys = cloned.activeEvent === undefined
-    ? ["implementation", "ownerControlId"]
-    : ["activeEvent", "implementation", "ownerControlId"];
+    ? ["implementation", "ownerControlId", "plan"]
+    : ["activeEvent", "implementation", "ownerControlId", "plan"];
   if (keys.length !== allowedKeys.length || keys.some((key, index) => key !== allowedKeys[index])) {
-    return invalidContext("context", "context must contain only implementation, ownerControlId, and optional activeEvent");
+    return invalidContext("context", "context must contain only plan, implementation, ownerControlId, and optional activeEvent");
   }
   if (typeof cloned.ownerControlId !== "string") return invalidContext("ownerControlId", "ownerControlId must be a semantic ID");
+  const parsedPlan = SolutionImplementationPlanSchema.safeParse(cloned.plan);
+  if (!parsedPlan.success) {
+    return invalidContext("plan", parsedPlan.error.issues[0]?.message ?? "invalid solution implementation plan", { cause: parsedPlan.error });
+  }
   const parsed = UIImplementationSpecV2Schema.safeParse(cloned.implementation);
   if (!parsed.success || parsed.data.compatibility !== "native" || parsed.data.runtimeCorrelation === undefined) {
     return invalidContext("implementation", parsed.success ? "native runtime correlation is required" : parsed.error.issues[0]?.message ?? "invalid UI implementation", parsed.success ? undefined : { cause: parsed.error });
   }
   const instances = new Map(parsed.data.runtimeCorrelation.controls.map((entry) => [entry.semanticControlId, entry.instanceName]));
+  const planPages = new Map(parsedPlan.data.pages.map((page) => [page.id, page]));
+  const planNodes = new Map<string, SolutionImplementationPlan["pages"][number]["root"]>();
+  const visitNode = (node: SolutionImplementationPlan["pages"][number]["root"]): void => {
+    planNodes.set(node.id, node);
+    if (node.kind === "layout") node.children.forEach(visitNode);
+    else if (node.kind === "registered-module") node.slots.forEach((slot) => slot.children.forEach(visitNode));
+    else if (node.kind === "repeater") visitNode(node.template);
+  };
+  parsedPlan.data.pages.forEach((page) => visitNode(page.root));
+  parsedPlan.data.overlays.forEach((overlay) => visitNode(overlay.root));
   const controls = new Map<string, RuntimeControl>();
-  const overlays = new Set<string>();
+  if (parsed.data.pages.length !== parsedPlan.data.pages.length) {
+    return invalidContext("implementation", "implementation page set does not match the authoritative plan");
+  }
+  const planOverlays = new Map(parsedPlan.data.overlays.map((overlay) => [overlay.id, overlay]));
   for (const page of parsed.data.pages) {
     if (page.compatibility !== "native") continue;
+    const planPage = planPages.get(page.id);
+    if (planPage === undefined || planPage.sourceBlueprintPageId !== page.sourceBlueprintPageId) {
+      return invalidContext(page.id, "implementation page provenance does not match the authoritative plan");
+    }
     for (const control of page.controls) {
       const instanceName = instances.get(control.id);
       if (instanceName === undefined) return invalidContext(control.id, "runtime correlation is missing");
+      const sourceNode = planNodes.get(control.sourceSolutionNodeId);
+      if (sourceNode === undefined || control.sourceBlueprintPageId !== page.sourceBlueprintPageId) {
+        return invalidContext(control.id, "implementation control provenance does not match the authoritative plan");
+      }
+      if (sourceNode.kind === "control" && sourceNode.capabilityId !== control.capabilityId) {
+        return invalidContext(control.id, "implementation control capability does not match the authoritative plan");
+      }
+      if (control.overlayHost !== undefined) {
+        const overlay = planOverlays.get(control.overlayHost.overlayId);
+        if (overlay === undefined || overlay.hostPageId !== page.id || overlay.sourceBlueprintPageId !== control.sourceBlueprintPageId) {
+          return invalidContext(control.id, "implementation overlay provenance does not match the authoritative plan");
+        }
+      }
       controls.set(control.id, deepFreeze({ semanticControlId: control.id, instanceName, capabilityId: control.capabilityId, pageId: page.id }));
-      if (control.overlayHost !== undefined) overlays.add(control.overlayHost.overlayId);
     }
   }
   const owner = controls.get(cloned.ownerControlId);
@@ -170,7 +218,10 @@ export function createSemanticScriptApiContext(input: unknown): SemanticScriptAp
     owner,
     controls,
     pages: new Map(parsed.data.runtimeCorrelation.pages.map((entry) => [entry.semanticPageId, entry.pageGuid])),
-    overlays,
+    overlays: new Set(planOverlays.keys()),
+    localState: new Map(parsedPlan.data.localState.map((state) => [state.id, state])),
+    mockData: new Set(parsedPlan.data.mockData.map((data) => data.id)),
+    scripts: new Set(parsedPlan.data.scripts.map((script) => script.id)),
     ...(activeEvent === undefined ? {} : { activeEvent }),
   });
   return context;
@@ -257,7 +308,23 @@ export function resolveEventBinding(input: unknown, context: SemanticScriptApiCo
   if (typeof record.controlId !== "string" || typeof record.semanticEvent !== "string") {
     throw new SemanticScriptApiError("SCRIPT_API_INPUT_INVALID", "event-binding", "controlId and semanticEvent must be strings");
   }
+  if (record.controlId !== trusted.owner.semanticControlId) {
+    throw new SemanticScriptApiError("SCRIPT_EVENT_NOT_SUPPORTED", record.controlId, "event binding must belong to the trusted owner control");
+  }
   return resolveEventInternal(record.controlId, record.semanticEvent, trusted);
+}
+
+function invalidCall(api: SemanticApiName, detail: string): never {
+  throw new SemanticScriptApiError("SCRIPT_API_INPUT_INVALID", api, detail);
+}
+
+function exactArity(api: SemanticApiName, args: readonly JsonData[], expected: number): void {
+  if (args.length !== expected) invalidCall(api, `expected ${expected} arguments, received ${args.length}`);
+}
+
+function stringId(api: SemanticApiName, value: JsonData | undefined, label: string): string {
+  if (typeof value !== "string" || value.trim() !== value || value.length === 0) invalidCall(api, `${label} must be a semantic ID`);
+  return value;
 }
 
 export function resolveSemanticApiCall(input: unknown, context: SemanticScriptApiContext) {
@@ -272,14 +339,14 @@ export function resolveSemanticApiCall(input: unknown, context: SemanticScriptAp
     throw new SemanticScriptApiError(code, record.api);
   }
   const args = record.args;
-  const exactArity: Partial<Record<SemanticApiName, number>> = {
+  const supportedArity: Partial<Record<SemanticApiName, number>> = {
     "$control.getValue": 1,
     "$control.setValue": 2,
     "$control.setData": 2,
     "$event.record": 0,
     "$page.navigate": 1,
   };
-  const requiredArity = exactArity[api];
+  const requiredArity = supportedArity[api];
   if (requiredArity !== undefined && args.length !== requiredArity) {
     throw new SemanticScriptApiError("SCRIPT_API_INPUT_INVALID", api, `expected ${requiredArity} arguments, received ${args.length}`);
   }
@@ -330,11 +397,57 @@ export function resolveSemanticApiCall(input: unknown, context: SemanticScriptAp
     return Object.freeze({ availability: "supported" as const, kind: "restricted-action" as const, api, semanticAction: "navigate-page" as const, targetPageId, targetPageGuid });
   }
   if (api === "$control.setVisible" || api === "$control.setEnabled") {
+    exactArity(api, args, 2);
     targetControl(args[0], trusted);
+    if (typeof args[1] !== "boolean") invalidCall(api, "second argument must be boolean");
     return planned(api, api === "$control.setVisible" ? "SCRIPT_CONTROL_VISIBILITY_NOT_SERIALIZABLE" : "SCRIPT_CONTROL_ENABLED_NOT_SERIALIZABLE");
   }
-  if (api === "$overlay.open" || api === "$overlay.close") return planned(api, "SCRIPT_OVERLAY_NOT_SERIALIZABLE");
-  if (api === "$state.get" || api === "$state.set" || api === "$data.get" || api === "$data.set") return planned(api, "SCRIPT_PAGE_LOCAL_RUNTIME_UNAVAILABLE");
-  if (api === "$feedback.show") return planned(api, "SCRIPT_FEEDBACK_NOT_SERIALIZABLE");
-  return planned(api, "SCRIPT_TIMER_NOT_SERIALIZABLE");
+  if (api === "$overlay.open" || api === "$overlay.close") {
+    if (api === "$overlay.open") exactArity(api, args, 1);
+    else if (args.length < 1 || args.length > 2) invalidCall(api, "expected overlay ID and optional result");
+    const overlayId = stringId(api, args[0], "overlay ID");
+    if (!trusted.overlays.has(overlayId)) invalidCall(api, `unknown overlay: ${overlayId}`);
+    return planned(api, "SCRIPT_OVERLAY_NOT_SERIALIZABLE");
+  }
+  if (api === "$state.get" || api === "$state.set") {
+    exactArity(api, args, api === "$state.get" ? 1 : 2);
+    const stateId = stringId(api, args[0], "state ID");
+    const state = trusted.localState.get(stateId);
+    if (state === undefined) invalidCall(api, `unknown local state: ${stateId}`);
+    if (api === "$state.set") {
+      const value = args[1];
+      const valid = (state.type === "boolean" && typeof value === "boolean")
+        || (state.type === "number" && typeof value === "number")
+        || (state.type === "text" && typeof value === "string")
+        || (state.type === "record-key" && (typeof value === "string" || value === null))
+        || (state.type === "record-key-list" && Array.isArray(value) && value.every((item) => typeof item === "string"));
+      if (!valid) invalidCall(api, `value does not match local state type: ${state.type}`);
+    }
+    return planned(api, "SCRIPT_PAGE_LOCAL_RUNTIME_UNAVAILABLE");
+  }
+  if (api === "$data.get" || api === "$data.set") {
+    exactArity(api, args, api === "$data.get" ? 1 : 2);
+    const dataId = stringId(api, args[0], "mock data ID");
+    if (!trusted.mockData.has(dataId)) invalidCall(api, `unknown mock data: ${dataId}`);
+    return planned(api, "SCRIPT_PAGE_LOCAL_RUNTIME_UNAVAILABLE");
+  }
+  if (api === "$feedback.show") {
+    exactArity(api, args, 2);
+    if (typeof args[0] !== "string" || !["success", "info", "warning", "error"].includes(args[0])) invalidCall(api, "level must be success, info, warning, or error");
+    if (typeof args[1] !== "string" || args[1].trim().length === 0 || args[1].length > 400) invalidCall(api, "message must contain 1..400 characters");
+    return planned(api, "SCRIPT_FEEDBACK_NOT_SERIALIZABLE");
+  }
+  if (api === "$timer.after" || api === "$timer.repeat") {
+    exactArity(api, args, api === "$timer.after" ? 2 : 3);
+    const delay = args[0];
+    if (typeof delay !== "number" || !Number.isInteger(delay) || delay < 100 || delay > 60_000) invalidCall(api, "delay must be an integer from 100 to 60000ms");
+    if (api === "$timer.repeat") {
+      const repetitions = args[1];
+      if (typeof repetitions !== "number" || !Number.isInteger(repetitions) || repetitions < 1 || repetitions > 10) invalidCall(api, "repeat count must be an integer from 1 to 10");
+    }
+    const scriptId = stringId(api, args[api === "$timer.after" ? 1 : 2], "script ID");
+    if (!trusted.scripts.has(scriptId)) invalidCall(api, `unknown script: ${scriptId}`);
+    return planned(api, "SCRIPT_TIMER_NOT_SERIALIZABLE");
+  }
+  return invalidCall(api, "unhandled semantic API");
 }

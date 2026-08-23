@@ -29,6 +29,16 @@ function readEvidenceContent(ref: string): string {
   return value;
 }
 
+function objectAt(value: unknown, pathSegments: readonly (string | number)[]): Record<string, unknown> {
+  let current = value;
+  for (const segment of pathSegments) {
+    if (current === null || typeof current !== "object") throw new Error(`object path not found: ${pathSegments.join(".")}`);
+    current = (current as Record<string | number, unknown>)[segment];
+  }
+  if (current === null || typeof current !== "object" || Array.isArray(current)) throw new Error(`object path is not a record: ${pathSegments.join(".")}`);
+  return current as Record<string, unknown>;
+}
+
 describe("script capability knowledge", () => {
   it("records every phase-one control even when behavior is only planned", () => {
     expect(listScriptCapabilityProfiles()).toHaveLength(26);
@@ -114,6 +124,48 @@ describe("script capability knowledge", () => {
     ]);
   });
 
+  it("pins input Value and Table SetData to exact real targets and their page event host", () => {
+    const inputEvidence = requireScriptCapabilityProfile("input").properties[0]!.evidence[0]!;
+    const tableEvidence = requireScriptCapabilityProfile("easyui.1").methods[0]!.evidence[0]!;
+    expect(inputEvidence).toEqual(tableEvidence);
+    const { file, fragment } = resolveEvidence(inputEvidence.ref);
+    expect(fragment).toBe("linkMng.linkList.3.script");
+    const page = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+    const inputPath = ["objects", 0, "insiderObjects", 0, "insiderObjects", 0, "insiderObjects", 3] as const;
+    const tablePath = ["objects", 0, "insiderObjects", 0, "insiderObjects", 1, "insiderObjects", 0] as const;
+
+    const matches = (candidate: Record<string, unknown>): boolean => {
+      const event = objectAt(candidate, ["linkMng", "linkList", 3]);
+      const input = objectAt(candidate, inputPath);
+      const table = objectAt(candidate, tablePath);
+      const script = event.script;
+      return event.name === "setValue"
+        && event.linkId === 1001
+        && input.name === "input1"
+        && input.uiModelType === 38
+        && table.name === "Table1"
+        && table.uiModelType === 31
+        && typeof script === "string"
+        && script.includes("var text = input1.Value;")
+        && script.includes("Table1.SetData(data.a);")
+        && createHash("sha256").update(script).digest("hex") === inputEvidence.contentSha256;
+    };
+    expect(matches(page)).toBe(true);
+    for (const mutate of [
+      (candidate: Record<string, unknown>) => { objectAt(candidate, inputPath).name = "Input1"; },
+      (candidate: Record<string, unknown>) => { objectAt(candidate, inputPath).uiModelType = 31; },
+      (candidate: Record<string, unknown>) => { objectAt(candidate, tablePath).name = "Table2"; },
+      (candidate: Record<string, unknown>) => { objectAt(candidate, tablePath).uiModelType = 38; },
+      (candidate: Record<string, unknown>) => { objectAt(candidate, ["linkMng", "linkList", 3]).name = "SetValue"; },
+      (candidate: Record<string, unknown>) => { objectAt(candidate, ["linkMng", "linkList", 3]).linkId = 1002; },
+      (candidate: Record<string, unknown>) => { objectAt(candidate, ["linkMng", "linkList", 3]).script = "input1.Value; Table1.SetData([]);"; },
+    ]) {
+      const candidate = structuredClone(page);
+      mutate(candidate);
+      expect(matches(candidate)).toBe(false);
+    }
+  });
+
   it("maps semantic row click only to the exact evidenced Cell-click record argument", () => {
     const event = requireScriptCapabilityProfile("easyui.1").events.find((candidate) => candidate.semanticEvent === "row-click");
     expect(event).toMatchObject({
@@ -128,6 +180,43 @@ describe("script capability knowledge", () => {
     expect(requireScriptCapabilityProfile("easyui.1").events.some((candidate) =>
       candidate.semanticEvent === "selection-change" || candidate.kfEvent === "Selection-change",
     )).toBe(false);
+  });
+
+  it("pins Cell-click record position and kind to the exact Table1 event host and script fragment", () => {
+    const eventProfile = requireScriptCapabilityProfile("easyui.1").events.find((candidate) => candidate.semanticEvent === "row-click")!;
+    const evidence = eventProfile.evidence[0]!;
+    const { file, fragment } = resolveEvidence(evidence.ref);
+    expect(fragment).toBe("objects.0.insiderObjects.0.insiderObjects.4.insiderObjects.0.linkMng.linkList.5.script");
+    const page = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+    const hostPath = ["objects", 0, "insiderObjects", 0, "insiderObjects", 4, "insiderObjects", 0] as const;
+    const matches = (candidate: Record<string, unknown>, position = 1, valueKind = "record"): boolean => {
+      const host = objectAt(candidate, hostPath);
+      const event = objectAt(host, ["linkMng", "linkList", 5]);
+      return host.name === "Table1"
+        && host.uiModelType === 31
+        && event.name === "Cell-click"
+        && event.linkId === 200006
+        && position === eventProfile.arguments[0]?.position
+        && valueKind === eventProfile.arguments[0]?.valueKind
+        && typeof event.script === "string"
+        && event.script.includes("var row = arg[1];")
+        && createHash("sha256").update(event.script).digest("hex") === evidence.contentSha256;
+    };
+    expect(matches(page)).toBe(true);
+    const mutations: Array<(candidate: Record<string, unknown>) => void> = [
+      (candidate) => { objectAt(candidate, hostPath).name = "Table2"; },
+      (candidate) => { objectAt(candidate, hostPath).uiModelType = 38; },
+      (candidate) => { objectAt(objectAt(candidate, hostPath), ["linkMng", "linkList", 5]).name = "Row-click"; },
+      (candidate) => { objectAt(objectAt(candidate, hostPath), ["linkMng", "linkList", 5]).linkId = 200005; },
+      (candidate) => { objectAt(objectAt(candidate, hostPath), ["linkMng", "linkList", 5]).script = "var row = arguments[0];"; },
+    ];
+    for (const mutate of mutations) {
+      const candidate = structuredClone(page);
+      mutate(candidate);
+      expect(matches(candidate)).toBe(false);
+    }
+    expect(matches(page, 0, "record")).toBe(false);
+    expect(matches(page, 1, "scalar")).toBe(false);
   });
 
   it("pins every new supported product claim to its exact matched string content", () => {

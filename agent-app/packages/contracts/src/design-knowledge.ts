@@ -25,7 +25,11 @@ const evidence = z.object({
   kind: z.enum(["template", "compiler", "fixture", "product-source"]),
   ref: repositoryRef,
   contentSha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
-}).strict();
+}).strict().superRefine((value, ctx) => {
+  if (value.kind === "product-source" && value.contentSha256 === undefined) {
+    ctx.addIssue({ code: "custom", path: ["contentSha256"], message: "product-source evidence requires an exact content hash" });
+  }
+});
 const availability = z.enum(["supported", "planned"]);
 
 export const DesignDensitySchema = z.enum(["compact", "comfortable", "spacious"]);
@@ -85,6 +89,13 @@ const supportedMember = z.object({
 }).strict().superRefine((value, ctx) => {
   if (value.availability === "supported" && value.evidence.length === 0) {
     ctx.addIssue({ code: "custom", path: ["evidence"], message: "supported script event requires evidence" });
+  }
+  if (value.availability === "supported") {
+    value.arguments.forEach((argument, index) => {
+      if (argument.position === undefined || argument.valueKind === undefined) {
+        ctx.addIssue({ code: "custom", path: ["arguments", index], message: "supported event arguments require exact position and valueKind" });
+      }
+    });
   }
 });
 

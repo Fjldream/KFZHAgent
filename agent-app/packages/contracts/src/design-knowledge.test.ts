@@ -108,7 +108,7 @@ describe("design knowledge contracts", () => {
         readable: true,
         writable: true,
         availability: "supported",
-        evidence: [{ kind: "product-source", ref: "KingFusion3.6_Node/pages/select.json#Value" }],
+        evidence: [{ kind: "product-source", ref: "KingFusion3.6_Node/pages/select.json#Value", contentSha256: "b".repeat(64) }],
       }],
       initialization: { supportsConfigureData: false, lifecycleEvents: [] },
       limitations: [],
@@ -171,6 +171,18 @@ describe("design knowledge contracts", () => {
     expect(ScriptCapabilityProfileSchema.safeParse({
       ...profile,
       events: [{ ...profile.events[0], arguments: [{ name: "record", position: 1, valueKind: "object" }] }],
+    }).success).toBe(false);
+    expect(ScriptCapabilityProfileSchema.safeParse({
+      ...profile,
+      events: [{ ...profile.events[0], arguments: [{ name: "record", valueKind: "record" }] }],
+    }).success).toBe(false);
+    expect(ScriptCapabilityProfileSchema.safeParse({
+      ...profile,
+      events: [{ ...profile.events[0], arguments: [{ name: "record", position: 1 }] }],
+    }).success).toBe(false);
+    expect(ScriptCapabilityProfileSchema.safeParse({
+      ...profile,
+      events: [{ ...profile.events[0], evidence: [{ kind: "product-source", ref: "KingFusion3.6_Node/pages/table.json#script" }] }],
     }).success).toBe(false);
   });
 
