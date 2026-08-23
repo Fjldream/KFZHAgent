@@ -55,7 +55,7 @@ describe("compileNativeActions", () => {
     expect(() => compileNativeActions({ normalized: { ...normalized } })).toThrowError(expect.objectContaining({ code: "ACTION_CONTEXT_UNTRUSTED" }));
   });
 
-  it("uses the trusted production registry and degrades unsupported trigger evidence to a source-free typed request", async () => {
+  it("uses exact product click evidence and the trusted normalized snapshot for native navigation", async () => {
     const { normalizeActionGraph } = await import("./action-graph.js");
     const { compileNativeActions } = await import("./action-compiler.js");
     const data = fixture();
@@ -68,12 +68,15 @@ describe("compileNativeActions", () => {
     const swapped = fixture().implementation;
     swapped.runtimeCorrelation!.pages[1]!.pageGuid = "00000000-0000-4000-8000-000000000088";
     const result = compileNativeActions({ normalized, implementation: swapped } as unknown as Parameters<typeof compileNativeActions>[0]);
-    expect(result.actions).toEqual([]);
-    expect(result.bindings).toEqual([]);
-    expect(result.scriptRequests).toEqual([expect.objectContaining({
-      actionId: "navigate", requestedTier: "custom-script", reason: "TRIGGER_EVENT_UNSUPPORTED", ownerControlId: "go",
-    })]);
-    expect(JSON.stringify(result.scriptRequests)).not.toMatch(/source|javascript|Button1|00000000-/i);
+    expect(result.actions).toEqual([{
+      id: "kf$action:navigate", sourceActionId: "navigate", ownerInstanceName: "Button1", kind: "navigate-page",
+      targetPageGuid: "00000000-0000-4000-8000-000000000002",
+    }]);
+    expect(result.bindings).toEqual([{
+      id: "kf$binding:navigate", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001, phase: "event",
+      scriptModuleIds: [], nativeActionIds: ["kf$action:navigate"],
+    }]);
+    expect(result.scriptRequests).toEqual([]);
   });
 
   it("compiles navigation only when the trusted registry reports supported event and action evidence", async () => {

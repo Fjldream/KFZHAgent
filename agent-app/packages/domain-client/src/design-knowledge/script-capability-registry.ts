@@ -6,8 +6,11 @@ import { listControlDesignProfiles } from "./control-design-registry.js";
 import { createKnowledgeRegistry } from "./registry.js";
 
 const TEMPLATE = (ref: string) => ({ kind: "template", ref });
+const PRODUCT_SOURCE = (ref: string, contentSha256: string) => ({ kind: "product-source", ref, contentSha256 });
+const CENTER_PROPERTY_PAGE = "KingFusion3.6_Center/sdb/c7f1771f-0c8f-4c75-9d71-3b8c4b6bd190/kingclient/9fdd3be0-2d91-11f1-b60a-4937cd79e5a1/pagerecord/recordpages/数据模型管理_属性定义20230511104433.json";
+const NODE_TEAM_PAGE = "KingFusion3.6_Node/sdb/kingclient/bbb85040-d19b-11f0-b646-250384722929/e91a8070-d94e-11f0-bc3d-dbe5f779bd94/pagerecord/recordpages/修改班组20230718142335.json";
 const ACTION_IR_EVIDENCE = [
-  { kind: "product-source", ref: "agent-app/packages/domain-client/src/ir/client-project-ir.schema.ts#RestrictedAction" },
+  { kind: "compiler", ref: "agent-app/packages/domain-client/src/ir/client-project-ir.schema.ts#RestrictedAction" },
   { kind: "compiler", ref: "agent-app/packages/domain-client/src/compile/control-compiler.ts#compileAction" },
 ] as const;
 
@@ -46,7 +49,17 @@ const REVIEWED_PROFILES: Readonly<Record<string, unknown>> = {
       { semanticAction: "set-variable", implementation: "restricted-action", availability: "supported", evidence: actionEvidence("setVariable") },
       { semanticAction: "open-dialog", implementation: "restricted-action", availability: "planned", evidence: [] },
     ],
-    events: [],
+    events: [{
+      semanticEvent: "click",
+      kfEvent: "onClick",
+      linkId: 200001,
+      availability: "supported",
+      arguments: [],
+      evidence: [PRODUCT_SOURCE(
+        `${CENTER_PROPERTY_PAGE}#objects.0.insiderObjects.0.insiderObjects.0.insiderObjects.4.linkMng.linkList.0.script`,
+        "5e1d9bef9570288238adbb8dfa6bfc2be3ec04c7105b11b4caedbd6fe35e2088",
+      )],
+    }],
     methods: [],
     initialization: { supportsConfigureData: false, lifecycleEvents: [] },
     limitations: ["当前受限动作 DSL 只可生成页面跳转和变量赋值，不能生成弹窗打开动作。"],
@@ -77,6 +90,28 @@ const REVIEWED_PROFILES: Readonly<Record<string, unknown>> = {
     methods: [],
     initialization: { supportsConfigureData: false, lifecycleEvents: ["load", "error"] },
     limitations: ["图片加载事件的脚本内容仍需要经过后续脚本编译与安全审核。"],
+  },
+  input: {
+    schema: "kf-script-capability-profile/v1",
+    capabilityId: "input",
+    version: "1.0.0",
+    availability: "supported",
+    actions: [],
+    events: [],
+    methods: [],
+    properties: [{
+      semanticProperty: "value",
+      kfProperty: "Value",
+      readable: true,
+      writable: false,
+      availability: "supported",
+      evidence: [PRODUCT_SOURCE(
+        `${CENTER_PROPERTY_PAGE}#linkMng.linkList.3.script`,
+        "0aa6e00db6a2602b929db684aaf1095911ef7dea013620f2a4be21e5c067cb34",
+      )],
+    }],
+    initialization: { supportsConfigureData: false, lifecycleEvents: [] },
+    limitations: ["仅有 Value 读取经过产品脚本证明；写入仍保持 planned。"],
   },
   select: {
     schema: "kf-script-capability-profile/v1",
@@ -116,16 +151,35 @@ const REVIEWED_PROFILES: Readonly<Record<string, unknown>> = {
     schema: "kf-script-capability-profile/v1",
     capabilityId: "easyui.1",
     version: "1.0.0",
-    availability: "planned",
+    availability: "supported",
     actions: [],
-    events: [],
+    events: [{
+      semanticEvent: "row-click",
+      kfEvent: "Cell-click",
+      linkId: 200006,
+      availability: "supported",
+      arguments: [
+        { name: "record", position: 1, valueKind: "record" },
+        { name: "column", position: 2, valueKind: "scalar" },
+      ],
+      evidence: [PRODUCT_SOURCE(
+        `${NODE_TEAM_PAGE}#objects.0.insiderObjects.0.insiderObjects.4.insiderObjects.0.linkMng.linkList.5.script`,
+        "072184556a411e261ab94ac4ed680937cdf7ceb8e2205b3f21ad7d340d4c3ce3",
+      )],
+    }],
     methods: [
-      { semanticMethod: "set-data", kfMethod: "SetData", availability: "planned", parameters: ["records"], returns: "void", evidence: [] },
+      {
+        semanticMethod: "set-data", kfMethod: "SetData", availability: "supported", parameters: ["records"], returns: "void",
+        evidence: [PRODUCT_SOURCE(
+          `${CENTER_PROPERTY_PAGE}#linkMng.linkList.3.script`,
+          "0aa6e00db6a2602b929db684aaf1095911ef7dea013620f2a4be21e5c067cb34",
+        )],
+      },
       { semanticMethod: "get-data", kfMethod: "GetData", availability: "planned", parameters: [], returns: "record-list", evidence: [] },
       { semanticMethod: "get-selected", kfMethod: "GetSelected", availability: "planned", parameters: [], returns: "record", evidence: [] },
     ],
     initialization: { supportsConfigureData: true, lifecycleEvents: [] },
-    limitations: ["数据表方法尚未由经过审核的 KF 实例接口和编译路径支持。"],
+    limitations: ["仅 SetData 与 Cell-click 的 record 参数经过审核；GetData、GetSelected 和选择事件参数仍为 planned。"],
   },
 };
 

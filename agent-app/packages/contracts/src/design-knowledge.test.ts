@@ -139,6 +139,41 @@ describe("design knowledge contracts", () => {
     }).success).toBe(false);
   });
 
+  it("accepts exact content hashes and typed event arguments without weakening strict evidence", () => {
+    const profile = {
+      schema: "kf-script-capability-profile/v1",
+      capabilityId: "easyui.1",
+      version: "1.0.0",
+      availability: "supported",
+      actions: [],
+      events: [{
+        semanticEvent: "row-click",
+        kfEvent: "Cell-click",
+        linkId: 200006,
+        availability: "supported",
+        arguments: [{ name: "record", position: 1, valueKind: "record" }],
+        evidence: [{
+          kind: "product-source",
+          ref: "KingFusion3.6_Node/pages/table.json#linkMng.linkList.5.script",
+          contentSha256: "a".repeat(64),
+        }],
+      }],
+      methods: [],
+      initialization: { supportsConfigureData: true, lifecycleEvents: [] },
+      limitations: [],
+    };
+
+    expect(ScriptCapabilityProfileSchema.safeParse(profile).success).toBe(true);
+    expect(ScriptCapabilityProfileSchema.safeParse({
+      ...profile,
+      events: [{ ...profile.events[0], evidence: [{ ...profile.events[0]!.evidence[0], contentSha256: "A".repeat(64) }] }],
+    }).success).toBe(false);
+    expect(ScriptCapabilityProfileSchema.safeParse({
+      ...profile,
+      events: [{ ...profile.events[0], arguments: [{ name: "record", position: 1, valueKind: "object" }] }],
+    }).success).toBe(false);
+  });
+
   it("requires evidence references to be repository-relative paths", () => {
     const profile = {
       schema: "kf-script-capability-profile/v1",

@@ -24,6 +24,7 @@ const repositoryRef = z.string().trim().min(1).max(300).superRefine((value, ctx)
 const evidence = z.object({
   kind: z.enum(["template", "compiler", "fixture", "product-source"]),
   ref: repositoryRef,
+  contentSha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
 }).strict();
 const availability = z.enum(["supported", "planned"]);
 
@@ -75,7 +76,11 @@ const supportedMember = z.object({
   kfEvent: text,
   linkId: z.number().int().min(0).max(2147483647).optional(),
   availability,
-  arguments: z.array(z.object({ name: id, position: z.number().int().min(0).max(32).optional() }).strict()).max(16),
+  arguments: z.array(z.object({
+    name: id,
+    position: z.number().int().min(0).max(32).optional(),
+    valueKind: z.enum(["scalar", "record", "record-list", "unknown"]).optional(),
+  }).strict()).max(16),
   evidence: z.array(evidence).max(8),
 }).strict().superRefine((value, ctx) => {
   if (value.availability === "supported" && value.evidence.length === 0) {
