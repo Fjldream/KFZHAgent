@@ -255,6 +255,12 @@ importers:
       '@kf/contracts':
         specifier: workspace:*
         version: link:../contracts
+      acorn:
+        specifier: 8.18.0
+        version: 8.18.0
+      estree-walker:
+        specifier: 3.0.3
+        version: 3.0.3
       fflate:
         specifier: ^0.8.3
         version: 0.8.3
