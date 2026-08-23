@@ -4,9 +4,15 @@ import { cp, mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { canonicalServerHash, type ScriptPlan, type SolutionImplementationPlan, type UIImplementationSpecV2 } from "@kf/contracts";
 import type { ClientWorkspace } from "../compile/client-compiler.js";
+import { validateCustomScript } from "../interaction/custom-script-validator.js";
+import { createSemanticScriptApiContext, createSemanticScriptValidationIdentity } from "../interaction/semantic-script-api.js";
+import { compileScriptPlan } from "../interaction/script-compiler.js";
+import { createDefaultModuleRegistry } from "../modules/module-registry.js";
 import { applyClientPatch, deleteOperationDigest } from "../patch/client-patcher.js";
 import { inspectClientProject } from "../inspect/client-inspector.js";
+import { solutionModuleRegistryHash } from "../solution-compile/solution-provenance.js";
 import { validateClientProject } from "./client-validator.js";
 
 const pkgDir = fileURLToPath(new URL(".", import.meta.url));
@@ -49,6 +55,22 @@ async function resolveVersionDir(root: Root): Promise<string> {
 async function pageFile(root: Root): Promise<string> {
   const projectRoot = await resolveVersionDir(root);
   return join(projectRoot, "project", "page", "Page1.json");
+}
+
+async function pageManagerFile(root: Root): Promise<string> {
+  const projectRoot = await resolveVersionDir(root);
+  return join(projectRoot, "project", "pageManager.json");
+}
+
+async function addSecondPage(root: Root, objects: Array<Record<string, unknown>>): Promise<void> {
+  const projectRoot = await resolveVersionDir(root);
+  const first = JSON.parse(await readFile(join(projectRoot, "project", "page", "Page1.json"), "utf8")) as Record<string, unknown>;
+  const second = { ...first, guid: "page-guid-2", objects };
+  await writeFile(join(projectRoot, "project", "page", "Page2.json"), JSON.stringify(second, null, 2));
+  const managerPath = await pageManagerFile(root);
+  const manager = JSON.parse(await readFile(managerPath, "utf8")) as { Pages: Array<Record<string, unknown>> };
+  manager.Pages.push({ ...manager.Pages[0], name: "Page2", id: "page-guid-2" });
+  await writeFile(managerPath, JSON.stringify(manager, null, 2));
 }
 
 interface PageFixture {
@@ -95,6 +117,72 @@ function reencodeMarker(source: string, transform: (metadata: Record<string, unk
   const newline = source.indexOf("\n");
   const metadata = JSON.parse(Buffer.from(source.slice(prefix.length, newline), "base64url").toString("utf8")) as Record<string, unknown>;
   return `${prefix}${transform(metadata)}${source.slice(newline)}`;
+}
+
+function compileReviewedSyntax(): ReturnType<typeof compileScriptPlan>["module"] {
+  const theme = {
+    background: "#f4f7fb", surface: "#ffffff", primary: "#163a5f", accent: "#e47b32",
+    textPrimary: "#14212b", textSecondary: "#52616d", fontFamily: "Inter", spacingUnit: 8,
+    radiusScale: { small: 4, medium: 8, large: 16 },
+  } as const;
+  const intent = {
+    importance: "primary" as const, visualWeight: 3, readingOrder: 0, density: "comfortable" as const, groupWith: [],
+    width: { mode: "fixed" as const, value: 120 }, height: { mode: "fixed" as const, value: 40 }, align: "start" as const,
+  };
+  const source = [
+    'const value = $control.getValue("status-filter");',
+    "let index = 0;",
+    'const rows = [{ "extra": true }];',
+    'const transformRecord = (item) => ({ 1: item, "label": item, ...rows[index] });',
+    "const normalizeText = (raw) => { return String(raw).trim(); };",
+    "const matcher = /a\\/b[你好]/gu;",
+    "const large = 9007199254740993n;",
+    "const mask = 0xFFn;",
+    "const preselected = chooseText(value);",
+    'function chooseText(input) { if (input !== "") return input; return "empty"; }',
+    "const made = transformRecord(value);",
+    "const selected = [value].filter((candidate) => candidate === value);",
+    "const label = `${value}-${selected.length}`;",
+    'const chosen = normalizeText(preselected) || "empty";',
+    "let total = (1 + 2) * 3;",
+    "total++;",
+    "for (let counter = 0; counter < 2; counter += 1) { total += counter; }",
+    "for (const entry of rows) { total += entry === made ? 1 : 0; }",
+    "if (label === value) total = -total; else total = Math.max(total, 0);",
+  ].join("\n");
+  const script: ScriptPlan = {
+    id: "reviewed-syntax", purpose: "覆盖已审阅语法", kind: "custom", programVersion: "semantic-js/v1", source,
+    inputs: [{ name: "filter", description: "filter", refKind: "control", refId: "status-filter" }], outputs: [],
+  };
+  const plan: SolutionImplementationPlan = {
+    schema: "kf-solution-implementation/v1", projectKey: "validator-e2e", blueprintHash: "a".repeat(64), candidateBundleHash: "b".repeat(64),
+    theme, roleStyles: [{ role: "content", declarations: {}, states: {} }], mockData: [], localState: [], overlays: [], scripts: [script],
+    actions: [{ id: "run-reviewed", kind: "run-script", scriptId: script.id, afterActionIds: [] }],
+    pages: [{ id: "home", title: "首页", purpose: "验证", canvas: "desktop", sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region"], initialStateIds: [], root: {
+      id: "root", kind: "layout", layout: "column", sourceBlueprintRegionIds: ["region"], intent, children: [
+        { id: "go", kind: "control", capabilityId: "button", content: "执行", properties: [], tabIds: [], styleRole: "content", sourceBlueprintRegionIds: ["region"], intent, eventBindings: [{ semanticEvent: "click", actionIds: ["run-reviewed"] }] },
+        { id: "status-filter", kind: "control", capabilityId: "input", content: "筛选", properties: [], tabIds: [], styleRole: "content", sourceBlueprintRegionIds: ["region"], intent, eventBindings: [] },
+      ],
+    } }],
+  };
+  const control = (id: string, capabilityId: string, parentId?: string) => ({
+    id, role: capabilityId.startsWith("layout.") ? "layout" : "content", capabilityId, ...(parentId === undefined ? {} : { parentId }),
+    depth: parentId === undefined ? 0 : 1, zIndex: 0, geometry: { x: 0, y: 0, width: 120, height: 40 }, nativeProperties: {},
+    sourceSolutionNodeId: id, sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region"], eventBindings: [],
+    ...(capabilityId.startsWith("layout.") ? { compiledLayout: { kind: "column" as const, overflow: "visible" as const } } : {}),
+  });
+  const implementation: UIImplementationSpecV2 = {
+    schema: "kf-ui-implementation/v2", compatibility: "native", sourceSolutionPlanHash: canonicalServerHash(plan),
+    sourceModuleRegistryHash: solutionModuleRegistryHash(plan, createDefaultModuleRegistry()),
+    theme, compiledRoleStyles: {}, compiledActions: [], compiledScripts: [], pages: [{ compatibility: "native", id: "home", width: 1280, height: 720,
+      sourceBlueprintPageId: "bp-home", controls: [control("go", "button", "root"), control("status-filter", "input", "root"), control("root", "layout.4")] }],
+    runtimeCorrelation: { controls: [{ semanticControlId: "go", instanceName: "Button1" }, { semanticControlId: "status-filter", instanceName: "Input1" }, { semanticControlId: "root", instanceName: "Layout1" }],
+      pages: [{ semanticPageId: "home", pageGuid: "00000000-0000-4000-8000-000000000001" }] },
+  };
+  const context = createSemanticScriptApiContext({ plan, implementation, ownerControlId: "go", activeEvent: { controlId: "go", semanticEvent: "click" } });
+  const identity = createSemanticScriptValidationIdentity(script, context);
+  const validatedAst = validateCustomScript({ source, inputs: script.inputs, outputs: script.outputs, context, currentScriptIdentity: identity });
+  return compileScriptPlan({ script, context, validationIdentity: identity, validatedAst, binding: { controlId: "go", semanticEvent: "click" } }).module;
 }
 
 describe("client validator (Task 7 brief Step 2)", () => {
@@ -271,7 +359,7 @@ describe("client validator (Task 7 brief Step 2)", () => {
       "const read = () => later; const later = 1; const value = read();",
       "const selected = [1].filter((value) => value === 1);",
       "const records = [1].slice(0, 1); for (const record of records) {}",
-      "const rows = [{ value: 1 }]; let index = 0; const made = { ...rows[index] };",
+      "const rows = [{ value: 1 }]; const made = { ...rows[0] };",
     ]) {
       const base = await copyFixture("client-unknown-field");
       const candidate = await applyClientPatch(base, happyPlan());
@@ -281,6 +369,84 @@ describe("client validator (Task 7 brief Step 2)", () => {
       const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
       expect(report.checks.businessRules, body).toBe("pass");
     }
+  });
+
+  it("validates standard member receiver kinds and exact reviewed arities", async () => {
+    const rejected = [
+      "const value = {}; value.trim();",
+      'const value = "x"; value.trim(1);',
+      'const value = "x"; value.includes();',
+      "const values = [1]; values.slice(0, 1, 2);",
+      "const values = [1]; values.filter((value) => true, 1);",
+      "const values = [1]; values.push();",
+      `const values = [${Array.from({ length: 1_000 }, () => "1").join(",")}]; values.push(1);`,
+      "const value = 1; const result = Math.abs(value, value);",
+      "const result = Math.max();",
+      "const Math = { abs: (value) => value }; const result = Math.abs(1);",
+      'const result = Date.parse("2026-01-01", "extra");',
+      "const result = Date.UTC();",
+    ];
+    for (const body of rejected) {
+      const base = await copyFixture("client-unknown-field");
+      const candidate = await applyClientPatch(base, happyPlan());
+      const page = await readPage(candidate);
+      page.objects[0]!.linkMng = { linkList: [{ linkId: 200001, enable: true, name: "onClick", script: markedScript(body) }] };
+      await writePage(candidate, page);
+      expect((await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true })).checks.businessRules, body).toBe("fail");
+    }
+  });
+
+  it("propagates bounded array, string, record, callback, and safe-index provenance", async () => {
+    const accepted = [
+      'const text = " ready "; const trimmed = text.trim(); const matches = trimmed.startsWith("r");',
+      "const left = [1]; const right = [2]; const chosen = true ? left : right; const count = chosen.length;",
+      "const left = [1]; const right = [2]; const chosen = left || right; const count = chosen.length;",
+      'const rows = [{ status: "open" }]; const selected = rows.filter((record) => record.status === "open"); const count = selected.length;',
+      "const holder = { records: [1] }; const copy = holder.records.slice(0, 1); const count = copy.length;",
+      "const rows = [{ value: 1 }]; const alias = rows; const made = { ...alias[0] };",
+      "const rows = [{ value: 1 }]; let index = 0; const made = { ...rows[index] };",
+      "const rows = [{ value: 1 }]; let index = 0; function unusedMutation() { index += 1; } const made = { ...rows[index] };",
+      "const holder = { rows: [{ value: 1 }] }; const made = { ...holder.rows[0] };",
+      "const rows = [{ value: 1 }]; for (let index = 0; index < 1; index += 1) { const made = { ...rows[index] }; }",
+      "const rows = [{ value: 1 }]; for (let index = 0; index < 1; index += 1) { rows[index] = { value: 2 }; }",
+    ];
+    const rejected = [
+      "const record = { value: 1 }; record.value = 2;",
+      "const rows = [{ value: 1 }]; let index = 0; index += 1; const made = { ...rows[index] };",
+      "const rows = [{ value: 1 }]; let index = 0; function mutate() { index += 1; } function wrapper() { mutate(); } wrapper(); const made = { ...rows[index] };",
+      "const rows = [{ value: 1 }]; let index = 0; [1].filter(() => { index += 1; return true; }); const made = { ...rows[index] };",
+      "const rows = [{ value: 1 }]; let index = 0; rows[index] = { value: 2 };",
+      "const unknown = true ? [1] : {}; unknown.push(1);",
+      "let values = [1]; values = true ? [1] : {}; values.push(1);",
+    ];
+    for (const [expected, sources] of [["pass", accepted], ["fail", rejected]] as const) for (const body of sources) {
+      const base = await copyFixture("client-unknown-field");
+      const candidate = await applyClientPatch(base, happyPlan());
+      const page = await readPage(candidate);
+      page.objects[0]!.linkMng = { linkList: [{ linkId: 200001, enable: true, name: "onClick", script: markedScript(body) }] };
+      await writePage(candidate, page);
+      expect((await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true })).checks.businessRules, body).toBe(expected);
+    }
+  });
+
+  it("accepts the real Task6 reviewed-syntax emitter output through marker and project validation", async () => {
+    const module = compileReviewedSyntax();
+    const base = await copyFixture("client-unknown-field");
+    const basePage = await readPage(base);
+    basePage.objects.push({ name: "Input1", uiModelType: 38, guid: "reviewed-input", leftTopPt: { x: 0, y: 0 }, width: 20, height: 20 });
+    await writePage(base, basePage);
+    const candidate = await applyClientPatch(base, happyPlan());
+    const page = await readPage(candidate);
+    page.objects[0]!.linkMng = { linkList: [{
+      linkId: 200001, enable: true, name: "onClick",
+      script: markedScript(module.source, {
+        moduleId: module.id, sourceScriptId: module.sourceScriptId,
+        instanceReferences: module.instanceReferences,
+      }),
+    }] };
+    await writePage(candidate, page);
+    const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.businessRules, report.warnings.join("\n")).toBe("pass");
   });
 
   it("rejects runtime writes, reserved members, unreviewed operators, and unbounded implicit work", async () => {
@@ -298,9 +464,6 @@ describe("client validator (Task 7 brief Step 2)", () => {
       { body: "const value = 1; const changed = ~value;" },
       { body: 'const changed = 1 == "1";' },
       { body: "let value = 1; value **= 2;" },
-      { body: "const holder = { records: [1] }; const selected = holder.records.filter((record) => true);" },
-      { body: "const holder = { records: [1] }; const copy = holder.records.slice(0, 1);" },
-      { body: "const holder = { records: [1] }; const copy = [...holder.records];" },
       { body: "const method = [1].filter;" },
       { body: "const copy = [...[1]];" },
     ];
@@ -325,6 +488,7 @@ describe("client validator (Task 7 brief Step 2)", () => {
     for (const eventBody of [
       "const record = arguments[1]; const selected = record.items.filter((item) => true);",
       "const record = arguments[1]; const secret = record.secret;",
+      "const record = arguments[1]; const made = { ...record };",
     ]) {
       tablePage.objects[1]!.linkMng = { linkList: [{
         linkId: 200006, enable: true, name: "Cell-click",
@@ -363,6 +527,28 @@ describe("client validator (Task 7 brief Step 2)", () => {
     report = await validateClientProject(moduleBase, moduleCandidate, happyPlan(), { skipRoundTrip: true });
     expect(report.checks.businessRules).toBe("fail");
     expect(report.warnings.join("\n")).toMatch(/duplicate compiled module identity/i);
+  });
+
+  it("indexes runtime instances per page while keeping module identities project-global", async () => {
+    const legacyBase = await copyFixture("client-unknown-field");
+    await addSecondPage(legacyBase, [{ name: "Button1", uiModelType: 35, guid: "page-2-button", leftTopPt: { x: 0, y: 0 }, width: 20, height: 20 }]);
+    const legacyCandidate = await applyClientPatch(legacyBase, happyPlan());
+    expect((await validateClientProject(legacyBase, legacyCandidate, happyPlan(), { skipRoundTrip: true })).checks.businessRules).toBe("pass");
+
+    const isolatedBase = await copyFixture("client-unknown-field");
+    await addSecondPage(isolatedBase, [{ name: "Input1", uiModelType: 38, guid: "page-2-input", leftTopPt: { x: 0, y: 0 }, width: 20, height: 20 }]);
+    const isolatedCandidate = await applyClientPatch(isolatedBase, happyPlan());
+    const page = await readPage(isolatedCandidate);
+    page.objects[0]!.linkMng = { linkList: [{
+      linkId: 200001, enable: true, name: "onClick",
+      script: markedScript("const value = Input1.Value;", {
+        instanceReferences: [{ semanticId: "go", instanceName: "Button1" }, { semanticId: "filter", instanceName: "Input1" }],
+      }),
+    }] };
+    await writePage(isolatedCandidate, page);
+    const report = await validateClientProject(isolatedBase, isolatedCandidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.businessRules).toBe("fail");
+    expect(report.warnings.join("\n")).toMatch(/undeclared instance|owner type|page/i);
   });
 
   it("uses the full KF field character limit while retaining UTF-8 body slicing", async () => {

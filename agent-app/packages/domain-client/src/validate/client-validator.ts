@@ -229,9 +229,8 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
   const boundaryNodes = new WeakSet<object>();
   const callableNames = new Set<string>();
   const boundedIterables = new Set<string>();
-  const arrayLikeNames = new Set<string>();
-  const exactObjectFields = new Map<string, Set<string>>();
   const mutableNames = new Set<string>();
+  const exactIntegerNames = new Map<string, number>();
   const declaredNames = new Set<string>();
   const initializedAt = new Map<string, number>();
   const declarationOwner = new Map<string, string>();
@@ -287,24 +286,14 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
           const callable = init?.["type"] === "ArrowFunctionExpression";
           declareLocal(name, record, callable);
           if ((parent as unknown as Record<string, unknown> | null)?.["kind"] === "let") mutableNames.add(name);
-          if (init?.["type"] === "ArrayExpression") {
-            arrayLikeNames.add(name);
-            if (Array.isArray(init["elements"]) && init["elements"].length <= 1_000) boundedIterables.add(name);
+          if (init?.["type"] === "Literal" && typeof init["value"] === "number" && Number.isInteger(init["value"]) && init["value"] >= 0) {
+            exactIntegerNames.set(name, init["value"]);
           }
-          if (init?.["type"] === "ObjectExpression" && Array.isArray(init["properties"])) {
-            const fields = new Set<string>();
-            for (const propertyValue of init["properties"] as Array<Record<string, unknown>>) {
-              const key = propertyValue["key"] as Record<string, unknown> | undefined;
-              const field = identifierName(key) ?? (key?.["type"] === "Literal" && typeof key["value"] === "string" ? key["value"] : undefined);
-              if (field !== undefined) fields.add(field);
-            }
-            exactObjectFields.set(name, fields);
-          }
+          if (init?.["type"] === "ArrayExpression" && Array.isArray(init["elements"]) && init["elements"].length <= 1_000) boundedIterables.add(name);
           if (init?.["type"] === "CallExpression") {
             const callee = init["callee"] as Record<string, unknown> | undefined;
             const property = callee?.["type"] === "MemberExpression" ? callee["property"] as Record<string, unknown> | undefined : undefined;
             const args = Array.isArray(init["arguments"]) ? init["arguments"] as Array<Record<string, unknown>> : [];
-            if (property?.["name"] === "slice" || property?.["name"] === "filter") arrayLikeNames.add(name);
             if (property?.["name"] === "slice" && args.length === 2 && args[0]?.["type"] === "Literal" && args[0]["value"] === 0
               && args[1]?.["type"] === "Literal" && typeof args[1]["value"] === "number"
               && args[1]["value"] >= 0 && args[1]["value"] <= 1_000) boundedIterables.add(name);
@@ -389,17 +378,134 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
   const aliasesIntersect = (name: string, roots: ReadonlySet<string>): boolean => [...resolvedAliasRoots(name)].some((root) => roots.has(root));
   const boundedIterable = (name: string): boolean => !unsafeIterableAliases.has(name)
     && [...resolvedAliasRoots(name)].every((root) => boundedIterables.has(root));
-  const boundedArrayExpression = (value: Record<string, unknown> | undefined, depth = 0): boolean => {
-    if (value == null || depth > 64) return false;
-    const direct = identifierName(value);
-    if (direct !== undefined) return boundedIterable(direct);
-    if (value["type"] === "ArrayExpression") return Array.isArray(value["elements"]) && value["elements"].length <= 1_000;
-    if (value["type"] === "ConditionalExpression") return boundedArrayExpression(value["consequent"] as Record<string, unknown> | undefined, depth + 1)
-      && boundedArrayExpression(value["alternate"] as Record<string, unknown> | undefined, depth + 1);
-    if (value["type"] === "LogicalExpression") return boundedArrayExpression(value["left"] as Record<string, unknown> | undefined, depth + 1)
-      && boundedArrayExpression(value["right"] as Record<string, unknown> | undefined, depth + 1);
-    return false;
+  type AbstractFact =
+    | { readonly kind: "bounded-array"; readonly element: AbstractFact; readonly maxLength: number }
+    | { readonly kind: "string" }
+    | { readonly kind: "record"; readonly fields: ReadonlyMap<string, AbstractFact> }
+    | { readonly kind: "scalar" }
+    | { readonly kind: "unknown" };
+  const unknownFact: AbstractFact = { kind: "unknown" };
+  const facts = new Map<string, AbstractFact>();
+  const factKey = (fact: AbstractFact): string => {
+    if (fact.kind === "bounded-array") return `array:${fact.maxLength}:${factKey(fact.element)}`;
+    if (fact.kind === "record") return `record:${[...fact.fields].map(([key, value]) => `${key}=${factKey(value)}`).join(",")}`;
+    return fact.kind;
   };
+  const mergeFacts = (left: AbstractFact, right: AbstractFact): AbstractFact => {
+    if (factKey(left) === factKey(right)) return left;
+    if (left.kind === "bounded-array" && right.kind === "bounded-array") {
+      return { kind: "bounded-array", element: mergeFacts(left.element, right.element), maxLength: Math.max(left.maxLength, right.maxLength) };
+    }
+    if (left.kind === "record" && right.kind === "record") {
+      const fields = new Map<string, AbstractFact>();
+      for (const [key, value] of left.fields) {
+        const other = right.fields.get(key);
+        if (other !== undefined) fields.set(key, mergeFacts(value, other));
+      }
+      return { kind: "record", fields };
+    }
+    return unknownFact;
+  };
+  const staticMember = (value: Record<string, unknown> | undefined): string | undefined => {
+    if (value?.["type"] === "Identifier" && typeof value["name"] === "string") return value["name"];
+    if (value?.["type"] === "Literal" && typeof value["value"] === "string") return value["value"];
+    return undefined;
+  };
+  const factOf = (value: Record<string, unknown> | undefined, depth = 0): AbstractFact => {
+    if (value == null || depth > 64) return unknownFact;
+    const direct = identifierName(value);
+    if (direct !== undefined) return facts.get(direct) ?? unknownFact;
+    if (value["type"] === "Literal") return typeof value["value"] === "string" ? { kind: "string" } : { kind: "scalar" };
+    if (value["type"] === "ArrayExpression") {
+      const elements = Array.isArray(value["elements"]) ? value["elements"] as Array<Record<string, unknown> | null> : [];
+      const elementFacts = elements.filter((item): item is Record<string, unknown> => item !== null).map((item) => factOf(item, depth + 1));
+      return { kind: "bounded-array", element: elementFacts.reduce(mergeFacts, elementFacts[0] ?? unknownFact), maxLength: elements.length };
+    }
+    if (value["type"] === "ObjectExpression") {
+      const fields = new Map<string, AbstractFact>();
+      for (const property of Array.isArray(value["properties"]) ? value["properties"] as Array<Record<string, unknown>> : []) {
+        if (property["type"] !== "Property" || property["computed"] === true) continue;
+        const key = staticMember(property["key"] as Record<string, unknown> | undefined);
+        if (key !== undefined) fields.set(key, factOf(property["value"] as Record<string, unknown> | undefined, depth + 1));
+      }
+      return { kind: "record", fields };
+    }
+    if (value["type"] === "ConditionalExpression" || value["type"] === "LogicalExpression") {
+      const left = factOf(value[value["type"] === "ConditionalExpression" ? "consequent" : "left"] as Record<string, unknown> | undefined, depth + 1);
+      const right = factOf(value[value["type"] === "ConditionalExpression" ? "alternate" : "right"] as Record<string, unknown> | undefined, depth + 1);
+      return mergeFacts(left, right);
+    }
+    if (value["type"] === "CallExpression") {
+      const callee = value["callee"] as Record<string, unknown> | undefined;
+      const directCall = identifierName(callee);
+      if (directCall === "String") return { kind: "string" };
+      if (["Number", "Boolean"].includes(directCall ?? "")) return { kind: "scalar" };
+      if (callee?.["type"] === "MemberExpression") {
+        const receiver = factOf(callee["object"] as Record<string, unknown> | undefined, depth + 1);
+        const method = staticMember(callee["property"] as Record<string, unknown> | undefined);
+        if (method === "slice" && receiver.kind === "bounded-array") {
+          const args = Array.isArray(value["arguments"]) ? value["arguments"] as Array<Record<string, unknown>> : [];
+          const limit = args[1]?.["type"] === "Literal" && typeof args[1]["value"] === "number" ? args[1]["value"] : receiver.maxLength;
+          return { ...receiver, maxLength: Math.min(receiver.maxLength, limit) };
+        }
+        if (method === "filter" && receiver.kind === "bounded-array") return receiver;
+        if (method === "trim" && receiver.kind === "string") return receiver;
+        if (method === "includes" || method === "startsWith") return { kind: "scalar" };
+        if (["Math", "Date"].includes(identifierName(callee["object"]) ?? "")) return { kind: "scalar" };
+      }
+      return unknownFact;
+    }
+    if (value["type"] === "MemberExpression") {
+      const receiver = factOf(value["object"] as Record<string, unknown> | undefined, depth + 1);
+      const member = staticMember(value["property"] as Record<string, unknown> | undefined);
+      if (member === "length" && (receiver.kind === "bounded-array" || receiver.kind === "string")) return { kind: "scalar" };
+      if (receiver.kind === "record" && member !== undefined) return receiver.fields.get(member) ?? unknownFact;
+      if (receiver.kind === "bounded-array" && value["computed"] === true) return receiver.element;
+    }
+    if (["BinaryExpression", "UnaryExpression"].includes(String(value["type"]))) return { kind: "scalar" };
+    return unknownFact;
+  };
+  // Binding names are globally unique in this restricted grammar, so a small
+  // fixed point is enough to propagate aliases, callback element facts, and
+  // call results without introducing flow-insensitive shadowing escapes.
+  for (let iteration = 0; iteration <= declaredNames.size + 1; iteration += 1) {
+    let changed = false;
+    walk(program as never, {
+      enter(node) {
+        const record = node as unknown as Record<string, unknown>;
+        if (record["type"] === "VariableDeclarator") {
+          const name = identifierName(record["id"]);
+          if (name !== undefined) {
+            const next = factOf(record["init"] as Record<string, unknown> | undefined);
+            if (next.kind !== "unknown" && factKey(facts.get(name) ?? unknownFact) !== factKey(next)) { facts.set(name, next); changed = true; }
+          }
+        }
+        if (record["type"] === "AssignmentExpression" && record["operator"] === "=") {
+          const name = identifierName(record["left"]);
+          if (name !== undefined) {
+            const assigned = factOf(record["right"] as Record<string, unknown> | undefined);
+            const existing = facts.get(name);
+            const next = existing === undefined ? assigned : mergeFacts(existing, assigned);
+            if (next.kind === "unknown") facts.delete(name);
+            else if (factKey(existing ?? unknownFact) !== factKey(next)) { facts.set(name, next); changed = true; }
+          }
+        }
+        if (record["type"] === "CallExpression") {
+          const callee = record["callee"] as Record<string, unknown> | undefined;
+          if (callee?.["type"] !== "MemberExpression" || staticMember(callee["property"] as Record<string, unknown> | undefined) !== "filter") return;
+          const receiver = factOf(callee["object"] as Record<string, unknown> | undefined);
+          const callback = (Array.isArray(record["arguments"]) ? record["arguments"] as Array<Record<string, unknown>> : [])[0];
+          const parameter = callback?.["type"] === "ArrowFunctionExpression" && Array.isArray(callback["params"])
+            ? identifierName((callback["params"] as Array<Record<string, unknown>>)[0]) : undefined;
+          if (parameter !== undefined && receiver.kind === "bounded-array"
+            && factKey(facts.get(parameter) ?? unknownFact) !== factKey(receiver.element)) {
+            facts.set(parameter, receiver.element); changed = true;
+          }
+        }
+      },
+    });
+    if (!changed) break;
+  }
   let undeclaredProjectInstance: string | undefined;
   let astIssue: string | undefined = syntaxIssue;
   const usedRuntimeRoots = new Set<string>();
@@ -411,8 +517,9 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
     readonly callee: string;
     readonly loops: readonly { readonly counter?: string; readonly iteratedRoots?: ReadonlySet<string> }[];
   }> = [];
-  const activeLoops: Array<{ readonly counter?: string; readonly iteratedRoots?: ReadonlySet<string> }> = [];
+  const activeLoops: Array<{ readonly counter?: string; readonly upperBound?: number; readonly iteratedRoots?: ReadonlySet<string> }> = [];
   const allowedLoopUpdates = new WeakSet<object>();
+  const exactIndexReads = new Set<string>();
   let currentFunction = "<program>";
   const functionStack: string[] = [];
   const resolvesLocal = (scope: LexicalScope | undefined, name: string): boolean => {
@@ -439,7 +546,7 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
         functionStack.push(currentFunction);
         const directName = identifierName(record["id"]);
         const parentName = parentRecord?.["type"] === "VariableDeclarator" ? identifierName(parentRecord["id"]) : undefined;
-        currentFunction = directName ?? parentName ?? `<anonymous:${functionStack.length}>`;
+        currentFunction = directName ?? parentName ?? `<anonymous:${String(record["start"])}>`;
         functionMutations.set(currentFunction, functionMutations.get(currentFunction) ?? new Set());
         functionCaptures.set(currentFunction, functionCaptures.get(currentFunction) ?? new Set());
       }
@@ -475,7 +582,8 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
             if (target === counter) astIssue ??= "loop body mutates its counter";
           },
         });
-        activeLoops.push(counter === undefined ? {} : { counter });
+        const upperBound = right?.["type"] === "Literal" && typeof right["value"] === "number" ? right["value"] : undefined;
+        activeLoops.push(counter === undefined ? {} : { counter, ...(upperBound === undefined ? {} : { upperBound }) });
       }
       if (type === "ForOfStatement") {
         const right = record["right"] as Record<string, unknown> | undefined;
@@ -542,31 +650,56 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
           const object = callee["object"] as Record<string, unknown> | undefined;
           const property = callee["property"] as Record<string, unknown> | undefined;
           const objectName = identifierName(object);
-          const member = identifierName(property);
-          const runtimeCall = objectName !== undefined && declaredInstances.has(objectName) && member === "SetData" && instanceTypes.get(objectName) === 31;
-          const standardCall = objectName === "Math" && ["abs", "ceil", "floor", "max", "min", "round", "trunc"].includes(member ?? "")
-            || objectName === "Date" && ["parse", "UTC"].includes(member ?? "")
-            || ["slice", "filter", "push", "trim", "includes", "startsWith"].includes(member ?? "");
+          const member = staticMember(property);
+          const args = Array.isArray(record["arguments"]) ? record["arguments"] as Array<Record<string, unknown>> : [];
+          const receiver = factOf(object);
+          const standardGlobal = objectName !== undefined && !resolvesLocal(object === undefined ? undefined : scopeByNode.get(object), objectName);
+          const runtimeCall = objectName !== undefined && declaredInstances.has(objectName) && member === "SetData"
+            && instanceTypes.get(objectName) === 31 && args.length === 1;
+          const mathCall = standardGlobal && (objectName === "Math" && ["abs", "ceil", "floor", "round", "trunc"].includes(member ?? "") && args.length === 1
+            || objectName === "Math" && ["max", "min"].includes(member ?? "") && args.length >= 1 && args.length <= 1_000);
+          const dateCall = standardGlobal && (objectName === "Date" && member === "parse" && args.length === 1
+            || objectName === "Date" && member === "UTC" && args.length >= 1 && args.length <= 7);
+          const arrayCall = receiver.kind === "bounded-array" && ["slice", "filter", "push"].includes(member ?? "");
+          const stringCall = receiver.kind === "string" && ["trim", "includes", "startsWith"].includes(member ?? "");
+          const standardCall = mathCall || dateCall || arrayCall || stringCall;
           if (!runtimeCall && !standardCall) astIssue ??= "dynamic or unknown member call";
           if (member === "slice") {
-            const args = Array.isArray(record["arguments"]) ? record["arguments"] as Array<Record<string, unknown>> : [];
             if (args.length !== 2 || args[0]?.["type"] !== "Literal" || args[0]["value"] !== 0
               || args[1]?.["type"] !== "Literal" || typeof args[1]["value"] !== "number"
-              || args[1]["value"] < 0 || args[1]["value"] > 1_000 || !boundedArrayExpression(object)) astIssue ??= "slice requires a bounded receiver and literal bounds from 0 to 1000";
+              || args[1]["value"] < 0 || args[1]["value"] > 1_000 || receiver.kind !== "bounded-array") astIssue ??= "slice requires a bounded receiver and literal bounds from 0 to 1000";
           }
           if (member === "filter") {
-            const args = Array.isArray(record["arguments"]) ? record["arguments"] as Array<Record<string, unknown>> : [];
-            if (!boundedArrayExpression(object) || args.length !== 1 || args[0]?.["type"] !== "ArrowFunctionExpression") {
+            if (receiver.kind !== "bounded-array" || args.length !== 1 || args[0]?.["type"] !== "ArrowFunctionExpression") {
               astIssue ??= "filter requires a bounded receiver and one inline arrow callback";
+            } else {
+              const callbackName = `<anonymous:${String(args[0]["start"])}>`;
+              const edges = functionCalls.get(currentFunction) ?? new Set<string>();
+              edges.add(callbackName); functionCalls.set(currentFunction, edges);
             }
+          }
+          if (member === "push" && (receiver.kind !== "bounded-array" || receiver.maxLength >= 1_000 || args.length !== 1)) {
+            astIssue ??= "push requires a bounded receiver below capacity and one value";
+          }
+          if (member === "trim" && (receiver.kind !== "string" || args.length !== 0)) astIssue ??= "trim requires a string receiver and no arguments";
+          if ((member === "includes" || member === "startsWith") && (receiver.kind !== "string" || args.length !== 1)) {
+            astIssue ??= `${member} requires a string receiver and one argument`;
           }
         } else astIssue ??= "dynamic or unknown call target";
       }
       if (type === "MemberExpression" && record["computed"] === true) {
         const property = record["property"] as Record<string, unknown> | undefined;
-        const safeBoundedIndex = identifierName(property) !== undefined && mutableNames.has(identifierName(property)!)
-          && boundedArrayExpression(record["object"] as Record<string, unknown> | undefined);
-        if (property?.["type"] !== "Literal" && !safeBoundedIndex) astIssue ??= "dynamic computed member access";
+        const receiver = factOf(record["object"] as Record<string, unknown> | undefined);
+        const literalIndex = property?.["type"] === "Literal" && typeof property["value"] === "number" && Number.isInteger(property["value"])
+          && property["value"] >= 0 && receiver.kind === "bounded-array" && property["value"] < receiver.maxLength;
+        const counter = identifierName(property);
+        const boundedCounter = counter !== undefined && receiver.kind === "bounded-array"
+          && activeLoops.some((loop) => loop.counter === counter && loop.upperBound !== undefined && loop.upperBound <= receiver.maxLength);
+        const exactIndex = counter === undefined ? undefined : exactIntegerNames.get(counter);
+        const boundedExactIndex = exactIndex !== undefined && receiver.kind === "bounded-array" && exactIndex < receiver.maxLength;
+        if (boundedExactIndex && !boundedCounter && counter !== undefined) exactIndexReads.add(counter);
+        const literalField = property?.["type"] === "Literal" && typeof property["value"] === "string";
+        if (!literalField && !literalIndex && !boundedCounter && !boundedExactIndex) astIssue ??= "dynamic computed member access";
       }
       if (type === "Property") {
         if (record["kind"] !== "init" || record["method"] === true || record["computed"] === true) astIssue ??= "getter, setter, method, or computed object property";
@@ -589,6 +722,18 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
           if (!allowedLoopUpdates.has(node) && activeLoops.some((loop) => loop.counter === targetName
             || loop.iteratedRoots !== undefined && aliasesIntersect(targetName, loop.iteratedRoots))) astIssue ??= "loop dependency is mutated";
         } else if (target?.["type"] === "MemberExpression") {
+          const targetObject = target["object"] as Record<string, unknown> | undefined;
+          const targetProperty = target["property"] as Record<string, unknown> | undefined;
+          const targetFact = factOf(targetObject);
+          const literalIndex = targetProperty?.["type"] === "Literal" && typeof targetProperty["value"] === "number"
+            && Number.isInteger(targetProperty["value"]) && targetProperty["value"] >= 0
+            && targetFact.kind === "bounded-array" && targetProperty["value"] < targetFact.maxLength;
+          const counter = identifierName(targetProperty);
+          const boundedCounter = counter !== undefined && targetFact.kind === "bounded-array"
+            && activeLoops.some((loop) => loop.counter === counter && loop.upperBound !== undefined && loop.upperBound <= targetFact.maxLength);
+          if (type !== "AssignmentExpression" || record["operator"] !== "=" || target["computed"] !== true || (!literalIndex && !boundedCounter)) {
+            astIssue ??= "member assignment requires a proven bounded-array index";
+          }
           const objectName = identifierName(target["object"]);
           if (objectName !== undefined) {
             recordMutation(objectName);
@@ -608,9 +753,9 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
       }
       if (type === "SpreadElement") {
         const argument = record["argument"] as Record<string, unknown> | undefined;
-        const boundedElement = argument?.["type"] === "MemberExpression" && argument["computed"] === true
-          && boundedArrayExpression(argument["object"] as Record<string, unknown> | undefined);
-        if (parentRecord?.["type"] !== "ObjectExpression" || !boundedElement) astIssue ??= "spread requires an object operand from a proven bounded-array element";
+        if (parentRecord?.["type"] !== "ObjectExpression" || factOf(argument).kind !== "record") {
+          astIssue ??= "spread requires a proven bounded record operand";
+        }
       }
       if (type !== "MemberExpression") return;
       const object = record["object"] as Record<string, unknown> | undefined;
@@ -624,10 +769,18 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
         astIssue ??= `method alias is forbidden: ${member}`;
       }
       if (name !== undefined && resolvesLocal(scopeByNode.get(node), name)) {
-        const safeBoundedIndex = record["computed"] === true && identifierName(property) !== undefined
-          && mutableNames.has(identifierName(property)!) && boundedArrayExpression(object);
-        const exactField = member !== undefined && exactObjectFields.get(name)?.has(member) === true;
-        if (!called && !safeBoundedIndex && !(member === "length" && arrayLikeNames.has(name)) && !exactField) {
+        const receiver = factOf(object);
+        const literalIndex = property?.["type"] === "Literal" && typeof property["value"] === "number" && Number.isInteger(property["value"])
+          && property["value"] >= 0 && receiver.kind === "bounded-array" && property["value"] < receiver.maxLength;
+        const counter = identifierName(property);
+        const boundedCounter = counter !== undefined && receiver.kind === "bounded-array"
+          && activeLoops.some((loop) => loop.counter === counter && loop.upperBound !== undefined && loop.upperBound <= receiver.maxLength);
+        const exactIndex = counter === undefined ? undefined : exactIntegerNames.get(counter);
+        const boundedExactIndex = exactIndex !== undefined && receiver.kind === "bounded-array" && exactIndex < receiver.maxLength;
+        if (boundedExactIndex && !boundedCounter && counter !== undefined) exactIndexReads.add(counter);
+        const exactField = receiver.kind === "record" && member !== undefined && receiver.fields.has(member);
+        if (!called && !literalIndex && !boundedCounter && !boundedExactIndex
+          && !(member === "length" && (receiver.kind === "bounded-array" || receiver.kind === "string")) && !exactField) {
           astIssue ??= `local member exactness is unproven: ${name}.${member ?? "?"}`;
         }
         return;
@@ -677,6 +830,11 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
       if (declarationOwner.get(capture) === callSite.caller && callSite.start < (initializedAt.get(capture) ?? -1)) {
         astIssue ??= `use before declaration through ${callSite.callee}: ${capture}`;
       }
+    }
+  }
+  for (const name of exactIndexReads) {
+    if ((functionMutations.get("<program>") ?? new Set<string>()).has(name)) {
+      astIssue ??= `exact integer index is mutated in the reachable call graph: ${name}`;
     }
   }
   // Project-instance evidence is more specific than the generic global/call
@@ -924,22 +1082,27 @@ async function checkBusinessRules(
   } catch (err) {
     return fail([`candidate cannot be inspected: ${String(err)}`]);
   }
-  const projectInstances = new Map<string, Array<{ readonly uiModelType: number; readonly where: string }>>();
-  Object.entries(inspection.raw.pages).forEach(([pageGuid, tree]) => walkControls(tree, `page ${pageGuid}`, (control, where) => {
-    if (typeof control["name"] !== "string" || typeof control["uiModelType"] !== "number") return;
-    projectInstances.set(control["name"], [
-      ...(projectInstances.get(control["name"]) ?? []),
-      { uiModelType: control["uiModelType"], where: `${pageGuid} ${where}` },
-    ]);
-  }));
-  const projectInstanceTypes = new Map<string, number>();
-  for (const [instanceName, entries] of projectInstances) {
-    if (entries.length !== 1) issues.push(`duplicate project instance name "${instanceName}" at ${entries.map((entry) => entry.where).join(" and ")}`);
-    else projectInstanceTypes.set(instanceName, entries[0]!.uiModelType);
-  }
+  const instanceTypesByPage = new Map<string, Map<string, number>>();
+  Object.entries(inspection.raw.pages).forEach(([pageGuid, tree]) => {
+    const pageInstances = new Map<string, Array<{ readonly uiModelType: number; readonly where: string }>>();
+    walkControls(tree, `page ${pageGuid}`, (control, where) => {
+      if (typeof control["name"] !== "string" || typeof control["uiModelType"] !== "number") return;
+      pageInstances.set(control["name"], [
+        ...(pageInstances.get(control["name"]) ?? []),
+        { uiModelType: control["uiModelType"], where: `${pageGuid} ${where}` },
+      ]);
+    });
+    const pageTypes = new Map<string, number>();
+    for (const [instanceName, entries] of pageInstances) {
+      if (entries.length !== 1) issues.push(`duplicate page instance name "${instanceName}" at ${entries.map((entry) => entry.where).join(" and ")}`);
+      else pageTypes.set(instanceName, entries[0]!.uiModelType);
+    }
+    instanceTypesByPage.set(pageGuid, pageTypes);
+  });
   const compilerModuleIds = new Set<string>();
 
   for (const [pageGuid, tree] of Object.entries(inspection.raw.pages)) {
+    const pageInstanceTypes = instanceTypesByPage.get(pageGuid) ?? new Map<string, number>();
     const page = asRecord(tree);
     const pageProperty = asRecord(page["pageProperty"]);
     const pageSize = asRecord(pageProperty["pageSize"]);
@@ -992,12 +1155,12 @@ async function checkBusinessRules(
           for (const segment of parsedCompilerSource.segments) {
             if (compilerModuleIds.has(segment.metadata.moduleId)) issues.push(`control "${String(name)}" duplicate compiled module identity`);
             compilerModuleIds.add(segment.metadata.moduleId);
-            const sourceIssue = compilerSourceIssue(segment, projectInstanceTypes);
+            const sourceIssue = compilerSourceIssue(segment, pageInstanceTypes);
             if (sourceIssue !== undefined) issues.push(`control "${String(name)}" ${sourceIssue}`);
             const metadata = segment.metadata;
             if (metadata.placement !== "event") issues.push(`control "${String(name)}" event contains a non-event compiled module`);
             if (metadata.ownerInstanceName !== name) issues.push(`control "${String(name)}" compiler-owned script owner mismatch`);
-            if (metadata.ownerInstanceName !== name || projectInstanceTypes.get(metadata.ownerInstanceName) !== uiModelType) {
+            if (metadata.ownerInstanceName !== name || pageInstanceTypes.get(metadata.ownerInstanceName) !== uiModelType) {
               issues.push(`control "${String(name)}" compiler-owned script owner type mismatch`);
             }
             if (metadata.kfEvent !== link["name"] || metadata.linkId !== (link["linkId"] ?? null)) issues.push(`control "${String(name)}" compiler-owned event identity mismatch`);
@@ -1053,14 +1216,14 @@ async function checkBusinessRules(
         for (const segment of parsedConfigure.segments) {
           if (compilerModuleIds.has(segment.metadata.moduleId)) issues.push(`control "${String(name)}" duplicate compiled module identity`);
           compilerModuleIds.add(segment.metadata.moduleId);
-          const sourceIssue = compilerSourceIssue(segment, projectInstanceTypes);
+          const sourceIssue = compilerSourceIssue(segment, pageInstanceTypes);
           if (sourceIssue !== undefined) issues.push(`control "${String(name)}" ${sourceIssue}`);
           if (segment.metadata.placement !== "configure-data" || segment.metadata.kfEvent !== null
             || segment.metadata.linkId !== null || segment.metadata.phase !== null) {
             issues.push(`control "${String(name)}" configureData compiler identity mismatch`);
           }
           if (segment.metadata.ownerInstanceName !== name) issues.push(`control "${String(name)}" configureData owner mismatch`);
-          if (segment.metadata.ownerInstanceName !== name || projectInstanceTypes.get(segment.metadata.ownerInstanceName) !== uiModelType) {
+          if (segment.metadata.ownerInstanceName !== name || pageInstanceTypes.get(segment.metadata.ownerInstanceName) !== uiModelType) {
             issues.push(`control "${String(name)}" configureData owner type mismatch`);
           }
         }
