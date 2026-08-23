@@ -940,6 +940,19 @@ describe("DeepSeekModelPort", () => {
     await expect(makePort(plan).createSolutionImplementationPlan(context)).resolves.toEqual(plan);
   });
 
+  it("rejects otherwise-valid create and revise outputs with a stale candidate-bundle hash", async () => {
+    const context = solutionPlanningContext();
+    const stale = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    stale.candidateBundleHash = "f".repeat(64);
+
+    await expect(makePort(stale).createSolutionImplementationPlan(context)).rejects.toThrow(/candidate.*hash/i);
+    await expect(makePort(stale).reviseSolutionImplementationSubtree({
+      ...context,
+      previousSolutionImplementationPlan: solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates),
+      solutionPlanRejectionReasons: ["修复候选能力绑定"],
+    })).rejects.toThrow(/candidate.*hash/i);
+  });
+
   it.each([
     ["catalog version", (candidates: CapabilityCandidateBundleFixture) => { candidates.knowledgeCatalogVersion = "9.9.9"; }, /catalog version.*9\.9\.9/i],
     ["candidate profile version", (candidates: CapabilityCandidateBundleFixture) => { candidates.regions[0].controls[0].knowledgeVersion = "9.9.9"; }, /candidate profile.*9\.9\.9/i],

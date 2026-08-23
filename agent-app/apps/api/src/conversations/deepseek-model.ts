@@ -1282,10 +1282,15 @@ function buildSolutionImplementationPrompt(input: ModelPortContext, revising: bo
 
 function validateSolutionJourneyCoverage(
   blueprint: CustomerSolutionBlueprint,
+  capabilityCandidates: unknown,
   plan: SolutionImplementationPlan,
 ): void {
   if (plan.blueprintHash !== canonicalServerHash(blueprint)) {
     throw new DeepSeekModelOutputError("solution plan blueprint hash does not match the confirmed blueprint");
+  }
+  const candidates = CapabilityCandidateBundleSchema.parse(capabilityCandidates);
+  if (plan.candidateBundleHash !== canonicalServerHash(candidates)) {
+    throw new DeepSeekModelOutputError("solution plan candidate bundle hash does not match the authoritative capability candidates");
   }
   const journeys = new Map(blueprint.journeys.map((journey) => [journey.id, journey]));
   const covered = new Set<string>();
@@ -1920,7 +1925,7 @@ export class DeepSeekModelPort implements ModelPort {
       );
     }
     const blueprint = CustomerSolutionBlueprintSchema.parse(input.confirmedSolutionBlueprint);
-    validateSolutionJourneyCoverage(blueprint, parsed.data);
+    validateSolutionJourneyCoverage(blueprint, input.capabilityCandidates, parsed.data);
     return parsed.data;
   }
 

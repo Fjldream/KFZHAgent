@@ -16,6 +16,7 @@ import { createDefaultModuleRegistry } from "../modules/module-registry.js";
 import { solutionModuleRegistryHash } from "../solution-compile/solution-provenance.js";
 import { compileNativeActions, type TypedScriptRequest } from "./action-compiler.js";
 import { normalizeActionGraph } from "./action-graph.js";
+import { analyzeObservableClosure } from "./observable-closure.js";
 import { validateCustomScript, type ValidatedSemanticCall } from "./custom-script-validator.js";
 import {
   createSemanticScriptApiContext,
@@ -479,16 +480,6 @@ export function compileInteractions(input: unknown): InteractionCompilationResul
     if (triggerKeys.size > 1) errors.push(diagnostic("JOURNEY_REFERENCE_AMBIGUOUS", stepKey, "journey step is mapped to more than one trigger closure"));
   });
   const reachable = new Set<string>();
-  const missingPath = (id: string, triggerKey: string, visible: boolean, active = new Set<string>()): boolean => {
-    if (active.has(id)) return true;
-    active.add(id); reachable.add(id);
-    const action = graphActionById.get(id);
-    if (action === undefined || triggerKeyByAction.get(id) !== triggerKey) return true;
-    const hasVisible = visible || visibleActionIds.has(id);
-    if (action.afterActionIds.length === 0) { active.delete(id); return !hasVisible; }
-    const missing = action.afterActionIds.some((successor) => missingPath(successor, triggerKey, hasVisible, active));
-    active.delete(id); return missing;
-  };
   const observableClosureByTrigger = new Map<string, boolean>();
   for (const [triggerKey, actionIds] of actionIdsByTrigger) {
     const incoming = new Map(Array.from(actionIds, (id) => [id, 0]));
@@ -496,13 +487,18 @@ export function compileInteractions(input: unknown): InteractionCompilationResul
       if (actionIds.has(successorId)) incoming.set(successorId, (incoming.get(successorId) ?? 0) + 1);
     }));
     const roots = normalized.executionOrder.filter((id) => actionIds.has(id) && incoming.get(id) === 0);
-    let observable = roots.length > 0;
-    roots.forEach((root) => {
-      if (missingPath(root, triggerKey, false)) {
-        observable = false;
-        errors.push(diagnostic("INTERACTION_CLOSURE_MISSING", root, "at least one trigger path has no visible terminal result"));
-      }
+    const closure = analyzeObservableClosure(new Map([...actionIds].map((id) => {
+      const action = graphActionById.get(id);
+      return [id, {
+        successors: (action?.afterActionIds ?? []).filter((successorId) => actionIds.has(successorId)),
+        visible: visibleActionIds.has(id),
+      }];
+    })), roots);
+    closure.reachable.forEach((id) => reachable.add(id));
+    closure.missingRoots.forEach((root) => {
+      errors.push(diagnostic("INTERACTION_CLOSURE_MISSING", root, "at least one trigger path has no visible terminal result"));
     });
+    const observable = roots.length > 0 && !closure.missingObservablePath;
     observableClosureByTrigger.set(triggerKey, observable);
   }
   triggersByJourneyStep.forEach((triggerKeys, stepKey) => {
