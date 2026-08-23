@@ -2,6 +2,9 @@ import { mkdtemp, readdir, readFile, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
+import { parse } from "acorn";
+import { walk } from "estree-walker";
 import type { ValidationReport } from "@kf/contracts";
 import { inspectClientProject } from "../inspect/client-inspector.js";
 import { CONTROL_TYPE_BY_UIMODEL_TYPE } from "../ir/client-project-ir.js";
@@ -86,6 +89,197 @@ function walkControls(
 
 function rootPath(candidate: string, versionDir: string): string {
   return versionDir === "." ? candidate : path.join(candidate, versionDir);
+}
+
+interface CompilerOwnedScriptMetadata {
+  readonly schema: "kf-compiled-event/v1";
+  readonly moduleId: string;
+  readonly sourceScriptId: string;
+  readonly bodySha256: string;
+  readonly bodyByteLength: number;
+  readonly ownerInstanceName: string;
+  readonly placement: "event" | "configure-data";
+  readonly kfEvent: string | null;
+  readonly linkId: number | null;
+  readonly phase: "event" | "after-event" | null;
+  readonly instanceReferences: readonly { readonly semanticId: string; readonly instanceName: string }[];
+  readonly pageReferences: readonly { readonly semanticId: string; readonly pageGuid: string }[];
+}
+
+function compilerMetadata(value: unknown): CompilerOwnedScriptMetadata | undefined {
+  const record = asRecord(value);
+  if (record["schema"] !== "kf-compiled-event/v1") return undefined;
+  const keys = Object.keys(record).sort();
+  const expected = ["bodyByteLength", "bodySha256", "instanceReferences", "kfEvent", "linkId", "moduleId", "ownerInstanceName", "pageReferences", "phase", "placement", "schema", "sourceScriptId"];
+  if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) return undefined;
+  const instanceReferences = record["instanceReferences"];
+  const pageReferences = record["pageReferences"];
+  if (typeof record["moduleId"] !== "string" || typeof record["sourceScriptId"] !== "string"
+    || typeof record["bodySha256"] !== "string" || !Number.isInteger(record["bodyByteLength"]) || Number(record["bodyByteLength"]) < 1
+    || typeof record["ownerInstanceName"] !== "string" || !["event", "configure-data"].includes(String(record["placement"]))
+    || (record["kfEvent"] !== null && typeof record["kfEvent"] !== "string")
+    || (record["linkId"] !== null && !Number.isInteger(record["linkId"]))
+    || (record["phase"] !== null && record["phase"] !== "event" && record["phase"] !== "after-event")
+    || !Array.isArray(instanceReferences) || !instanceReferences.every((entry) => {
+      const candidate = asRecord(entry); return Object.keys(candidate).sort().join("\0") === "instanceName\0semanticId" && typeof candidate["semanticId"] === "string" && typeof candidate["instanceName"] === "string";
+    })
+    || !Array.isArray(pageReferences) || !pageReferences.every((entry) => {
+      const candidate = asRecord(entry); return Object.keys(candidate).sort().join("\0") === "pageGuid\0semanticId" && typeof candidate["semanticId"] === "string" && typeof candidate["pageGuid"] === "string";
+    })) return undefined;
+  return record as unknown as CompilerOwnedScriptMetadata;
+}
+
+interface CompilerOwnedSegment { readonly metadata: CompilerOwnedScriptMetadata; readonly body: string; readonly encoded: string }
+
+function canonicalCompilerMetadata(metadata: CompilerOwnedScriptMetadata): string {
+  return JSON.stringify({
+    schema: metadata.schema,
+    moduleId: metadata.moduleId,
+    sourceScriptId: metadata.sourceScriptId,
+    bodySha256: metadata.bodySha256,
+    bodyByteLength: metadata.bodyByteLength,
+    ownerInstanceName: metadata.ownerInstanceName,
+    placement: metadata.placement,
+    kfEvent: metadata.kfEvent,
+    linkId: metadata.linkId,
+    phase: metadata.phase,
+    instanceReferences: [...metadata.instanceReferences].sort((left, right) => left.semanticId.localeCompare(right.semanticId, "en-US")),
+    pageReferences: [...metadata.pageReferences].sort((left, right) => left.semanticId.localeCompare(right.semanticId, "en-US")),
+  });
+}
+
+function compilerOwnedSegments(source: string): { readonly segments: readonly CompilerOwnedSegment[]; readonly issue?: string } {
+  const token = "kf-compiled-event/v1";
+  if (!source.includes(token)) return { segments: [] };
+  const marker = Buffer.from(`// ${token} `, "utf8");
+  const bytes = Buffer.from(source, "utf8");
+  const segments: CompilerOwnedSegment[] = [];
+  let searchFrom = 0;
+  let previousBodyEnd = -1;
+  while (true) {
+    const start = bytes.indexOf(marker, searchFrom);
+    if (start < 0) break;
+    if (start > 0 && bytes[start - 1] !== 0x0a) return { segments, issue: "compiler marker is not at the start of a line" };
+    if (segments.length === 0 && start > 0 && bytes.subarray(Math.max(0, start - 3), start).toString("utf8") !== "\n;\n") {
+      return { segments, issue: "legacy/compiler boundary is not the canonical ASI-safe boundary" };
+    }
+    if (previousBodyEnd >= 0 && bytes.subarray(previousBodyEnd, start).toString("utf8") !== "\n;\n") {
+      return { segments, issue: "compiler module boundary is malformed" };
+    }
+    const newline = bytes.indexOf(0x0a, start + marker.length);
+    if (newline < 0) return { segments, issue: "compiler marker has no body newline" };
+    const encoded = bytes.subarray(start + marker.length, newline).toString("ascii");
+    if (!/^[A-Za-z0-9_-]+$/.test(encoded)) return { segments, issue: "compiler marker payload is not base64url" };
+    let decoded: unknown;
+    try { decoded = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")); } catch { return { segments, issue: "compiler marker payload is invalid JSON" }; }
+    const metadata = compilerMetadata(decoded);
+    if (metadata === undefined) return { segments, issue: "compiler marker payload has an invalid schema" };
+    const canonicalEncoded = Buffer.from(canonicalCompilerMetadata(metadata), "utf8").toString("base64url");
+    if (encoded !== canonicalEncoded) return { segments, issue: "compiler marker payload is not canonical" };
+    const bodyStart = newline + 1;
+    const bodyEnd = bodyStart + metadata.bodyByteLength;
+    if (bodyEnd > bytes.length) return { segments, issue: "compiled script bodyByteLength exceeds field bytes" };
+    const bodyBytes = bytes.subarray(bodyStart, bodyEnd);
+    if (Buffer.byteLength(bodyBytes.toString("utf8"), "utf8") !== metadata.bodyByteLength) return { segments, issue: "compiled script bodyByteLength splits invalid UTF-8" };
+    segments.push({ metadata, body: bodyBytes.toString("utf8"), encoded });
+    previousBodyEnd = bodyEnd;
+    searchFrom = bodyEnd;
+  }
+  if (segments.length === 0) return { segments, issue: "compiler marker token is malformed" };
+  if (previousBodyEnd !== bytes.length) return { segments, issue: "unexpected bytes follow the final compiled module" };
+  return { segments };
+}
+
+function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: ReadonlyMap<string, number>): string | undefined {
+  const { body: source, metadata } = segment;
+  if (!/^[0-9a-f]{64}$/.test(metadata.bodySha256)) return "compiled script bodySha256 is malformed";
+  if (Buffer.byteLength(source, "utf8") !== metadata.bodyByteLength) return "compiled script bodyByteLength mismatch";
+  if (createHash("sha256").update(source, "utf8").digest("hex") !== metadata.bodySha256) return "compiled script hash mismatch";
+  try { parse(source, { ecmaVersion: 2022, sourceType: "script" }); } catch (error) { return `compiled script is not ECMAScript 2022: ${String(error)}`; }
+  if (/\$(?:control|event|page|overlay|state|data|feedback|timer)\b/.test(source)) return "compiled script retains a semantic API";
+  if (/\b(?:window|document|globalThis|fetch|XMLHttpRequest|WebSocket|eval|Function)\b/.test(source)) return "compiled script contains a forbidden global";
+  const declaredInstances = new Set(metadata.instanceReferences.map((reference) => reference.instanceName));
+  const program = parse(source, { ecmaVersion: 2022, sourceType: "script" }) as unknown as Record<string, unknown>;
+  interface LexicalScope { readonly parent?: LexicalScope; readonly names: Set<string> }
+  const rootScope: LexicalScope = { names: new Set() };
+  const scopeByNode = new WeakMap<object, LexicalScope>();
+  let currentScope = rootScope;
+  const boundaryNodes = new WeakSet<object>();
+  const identifierName = (value: unknown): string | undefined => {
+    const record = value as Record<string, unknown> | undefined;
+    return record?.["type"] === "Identifier" && typeof record["name"] === "string" ? record["name"] : undefined;
+  };
+  walk(program as never, {
+    enter(node) {
+      const record = node as unknown as Record<string, unknown>;
+      const type = record["type"];
+      if (type === "FunctionDeclaration") {
+        const name = identifierName(record["id"]); if (name !== undefined) currentScope.names.add(name);
+      }
+      if (type === "FunctionDeclaration" || type === "FunctionExpression" || type === "ArrowFunctionExpression" || type === "BlockStatement" || type === "CatchClause") {
+        currentScope = { parent: currentScope, names: new Set() };
+        boundaryNodes.add(node);
+      }
+      scopeByNode.set(node, currentScope);
+      if (type === "FunctionExpression") {
+        const name = identifierName(record["id"]); if (name !== undefined) currentScope.names.add(name);
+      }
+      if (type === "FunctionDeclaration" || type === "FunctionExpression" || type === "ArrowFunctionExpression") {
+        const params = Array.isArray(record["params"]) ? record["params"] as Array<Record<string, unknown>> : [];
+        params.forEach((param) => { const name = identifierName(param); if (name !== undefined) currentScope.names.add(name); });
+      }
+      if (type === "VariableDeclarator") { const name = identifierName(record["id"]); if (name !== undefined) currentScope.names.add(name); }
+      if (type === "CatchClause") { const name = identifierName(record["param"]); if (name !== undefined) currentScope.names.add(name); }
+    },
+    leave(node) { if (boundaryNodes.has(node)) currentScope = currentScope.parent ?? rootScope; },
+  });
+  let undeclaredProjectInstance: string | undefined;
+  let unsupportedRuntimeMember: string | undefined;
+  const usedRuntimeRoots = new Set<string>();
+  const resolvesLocal = (scope: LexicalScope | undefined, name: string): boolean => {
+    for (let current = scope; current !== undefined; current = current.parent) if (current.names.has(name)) return true;
+    return false;
+  };
+  walk(program as never, {
+    enter(node, parent) {
+      const record = node as unknown as Record<string, unknown>;
+      if (record["type"] !== "MemberExpression") return;
+      const object = record["object"] as Record<string, unknown> | undefined;
+      const name = object?.["type"] === "Identifier" && typeof object["name"] === "string" ? object["name"] : undefined;
+      if (name === undefined || resolvesLocal(scopeByNode.get(node), name) || !instanceTypes.has(name)) return;
+      usedRuntimeRoots.add(name);
+      if (!declaredInstances.has(name)) { undeclaredProjectInstance ??= name; return; }
+      const property = record["property"] as Record<string, unknown> | undefined;
+      const member = property?.["type"] === "Identifier" && typeof property["name"] === "string" ? property["name"] : undefined;
+      const parentRecord = parent as unknown as Record<string, unknown> | null;
+      const called = parentRecord?.["type"] === "CallExpression" && parentRecord["callee"] === node;
+      const uiModelType = instanceTypes.get(name);
+      const supported = (uiModelType === 38 && /^Input\d+$/.test(name) && member === "Value" && !called)
+        || (uiModelType === 31 && /^Table\d+$/.test(name) && member === "SetData" && called);
+      if (!supported) unsupportedRuntimeMember ??= `${name}.${member ?? "?"}`;
+    },
+  });
+  if (undeclaredProjectInstance !== undefined) return `compiled script uses undeclared instance reference "${undeclaredProjectInstance}"`;
+  if (unsupportedRuntimeMember !== undefined) return `compiled script uses unsupported runtime member "${unsupportedRuntimeMember}"`;
+  for (const { instanceName } of metadata.instanceReferences) {
+    if (instanceName !== metadata.ownerInstanceName && !usedRuntimeRoots.has(instanceName)) return `compiled script does not use declared instance reference "${instanceName}"`;
+  }
+  if (metadata.placement === "event") {
+    const ownerType = instanceTypes.get(metadata.ownerInstanceName);
+    const reviewedEvent = (ownerType === 35 && /^Button\d+$/.test(metadata.ownerInstanceName) && metadata.kfEvent === "onClick" && metadata.linkId === 200001)
+      || (ownerType === 31 && /^Table\d+$/.test(metadata.ownerInstanceName) && metadata.kfEvent === "Cell-click" && metadata.linkId === 200006);
+    if (!reviewedEvent || metadata.phase === null) return "compiled script event is not in the evidence-backed allowlist";
+  } else if (instanceTypes.get(metadata.ownerInstanceName) !== 31 || !/^Table\d+$/.test(metadata.ownerInstanceName) || metadata.kfEvent !== null || metadata.linkId !== null || metadata.phase !== null) {
+    return "compiled configureData placement is not in the evidence-backed allowlist";
+  }
+  const declaredPages = new Set(metadata.pageReferences.map((reference) => reference.pageGuid.toLowerCase()));
+  for (const { pageGuid } of metadata.pageReferences) {
+    if (!source.includes(JSON.stringify(pageGuid))) return `compiled script does not use declared page reference "${pageGuid}"`;
+  }
+  for (const pageGuid of source.match(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi) ?? []) {
+    if (!declaredPages.has(pageGuid.toLowerCase())) return `compiled script uses undeclared page reference "${pageGuid}"`;
+  }
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -176,14 +370,38 @@ async function checkReferences(candidate: string): Promise<CheckOutcome> {
   } catch (err) {
     return fail([`candidate cannot be inspected: ${String(err)}`]);
   }
-
   const rawPages = inspection.raw.pages;
   const pageGuids = new Set(Object.keys(rawPages));
+  const instanceNames = new Set<string>();
+  for (const tree of Object.values(rawPages)) {
+    walkControls(tree, "instances", (control) => {
+      if (typeof control["name"] === "string") instanceNames.add(control["name"]);
+    });
+  }
 
   const versionDir = await resolveVersionDirName(candidate);
   const versionRoot = versionDir === "." ? candidate : path.join(candidate, versionDir);
   for (const [pageGuid, tree] of Object.entries(rawPages)) {
     walkControls(tree, `page ${pageGuid}`, (control, where) => {
+      const checkSourceReferences = (source: unknown): void => {
+        if (typeof source !== "string") return;
+        const parsed = compilerOwnedSegments(source);
+        if (parsed.issue !== undefined) {
+          issues.push(`${where}: ${parsed.issue}`);
+          return;
+        }
+        for (const { metadata } of parsed.segments) {
+          for (const reference of metadata.instanceReferences) {
+            if (!instanceNames.has(reference.instanceName)) issues.push(`${where}: unknown compiler-owned instance reference "${reference.instanceName}"`);
+          }
+          for (const reference of metadata.pageReferences) {
+            if (!pageGuids.has(reference.pageGuid)) issues.push(`${where}: unknown compiler-owned page reference "${reference.pageGuid}"`);
+          }
+        }
+      };
+      const links = asRecord(control["linkMng"])["linkList"];
+      if (Array.isArray(links)) links.forEach((rawLink) => checkSourceReferences(asRecord(rawLink)["script"]));
+      checkSourceReferences(control["configureData"]);
       const src = control["src"];
       if (typeof src !== "string" || !/^[0-9a-f]{64}\.(?:png|jpg|webp)$/.test(src)) return;
       if (!existsSync(path.join(versionRoot, "project", "res", "images", src))) {
@@ -272,6 +490,10 @@ async function checkBusinessRules(
   } catch (err) {
     return fail([`candidate cannot be inspected: ${String(err)}`]);
   }
+  const projectInstanceTypes = new Map<string, number>();
+  Object.values(inspection.raw.pages).forEach((tree) => walkControls(tree, "runtime-types", (control) => {
+    if (typeof control["name"] === "string" && typeof control["uiModelType"] === "number") projectInstanceTypes.set(control["name"], control["uiModelType"]);
+  }));
 
   for (const [pageGuid, tree] of Object.entries(inspection.raw.pages)) {
     const page = asRecord(tree);
@@ -320,6 +542,21 @@ async function checkBusinessRules(
       for (const rawLink of links) {
         const link = asRecord(rawLink);
         const action = link["action"];
+        const script = link["script"];
+        const parsedCompilerSource = typeof script === "string" ? compilerOwnedSegments(script) : { segments: [] as readonly CompilerOwnedSegment[] };
+        if (parsedCompilerSource.issue !== undefined || parsedCompilerSource.segments.length > 0) {
+          if (parsedCompilerSource.issue !== undefined) issues.push(`control "${String(name)}" ${parsedCompilerSource.issue}`);
+          for (const segment of parsedCompilerSource.segments) {
+            const sourceIssue = compilerSourceIssue(segment, projectInstanceTypes);
+            if (sourceIssue !== undefined) issues.push(`control "${String(name)}" ${sourceIssue}`);
+            const metadata = segment.metadata;
+            if (metadata.placement !== "event") issues.push(`control "${String(name)}" event contains a non-event compiled module`);
+            if (metadata.ownerInstanceName !== name) issues.push(`control "${String(name)}" compiler-owned script owner mismatch`);
+            if (metadata.kfEvent !== link["name"] || metadata.linkId !== (link["linkId"] ?? null)) issues.push(`control "${String(name)}" compiler-owned event identity mismatch`);
+            if (metadata.phase === null) issues.push(`control "${String(name)}" compiler-owned event phase is missing`);
+          }
+          continue;
+        }
         // ElementUI controls persist disabled native event slots (for example
         // Image Load/Error) in the same link list. They are inert metadata,
         // not executable restricted actions.
@@ -332,6 +569,11 @@ async function checkBusinessRules(
         if (nativeImageEvent) {
           continue;
         }
+        // Existing KF products also persist executable event scripts without
+        // an `action` discriminator. They are outside this compiler's trust
+        // boundary and must remain preserve-only, not be reclassified as an
+        // invalid restricted action.
+        if (action === undefined && typeof script === "string" && typeof link["name"] === "string") continue;
         if (typeof action !== "string") {
           issues.push(`control "${String(name)}" has a link without an action`);
           continue;
@@ -345,6 +587,20 @@ async function checkBusinessRules(
         }
         if (action === "setVariable" && (typeof link["variableId"] !== "string" || !("value" in link))) {
           issues.push(`control "${String(name)}" setVariable action is missing variableId/value`);
+        }
+      }
+      const configureData = control["configureData"];
+      if (typeof configureData === "string") {
+        const parsedConfigure = compilerOwnedSegments(configureData);
+        if (parsedConfigure.issue !== undefined) issues.push(`control "${String(name)}" ${parsedConfigure.issue}`);
+        for (const segment of parsedConfigure.segments) {
+          const sourceIssue = compilerSourceIssue(segment, projectInstanceTypes);
+          if (sourceIssue !== undefined) issues.push(`control "${String(name)}" ${sourceIssue}`);
+          if (segment.metadata.placement !== "configure-data" || segment.metadata.kfEvent !== null
+            || segment.metadata.linkId !== null || segment.metadata.phase !== null) {
+            issues.push(`control "${String(name)}" configureData compiler identity mismatch`);
+          }
+          if (segment.metadata.ownerInstanceName !== name) issues.push(`control "${String(name)}" configureData owner mismatch`);
         }
       }
     });

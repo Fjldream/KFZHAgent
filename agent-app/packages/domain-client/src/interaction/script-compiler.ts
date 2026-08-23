@@ -481,6 +481,9 @@ export function compileScriptPlan(input: CompileScriptPlanInput): CompiledScript
   if (validated.sourceHash !== sourceHash) return fail("SCRIPT_COMPILER_UNTRUSTED_AST", script.id, "source hash differs from branded AST");
   const emitter = new ReviewedAstEmitter(validated, snapshot.context);
   const compiledSource = emitter.program(program);
+  if (compiledSource.includes("kf-compiled-event/v1")) {
+    return fail("SCRIPT_COMPILER_OUTPUT_INVALID", script.id, "emitted body contains the reserved compiler marker token");
+  }
   emitter.instanceReferences.set(owner.semanticControlId, owner.instanceName);
   const artifactIdentity = JSON.stringify({
     scriptId: script.id,

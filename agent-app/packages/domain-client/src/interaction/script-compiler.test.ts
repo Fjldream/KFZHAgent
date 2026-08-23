@@ -252,6 +252,14 @@ describe("compileScriptPlan", () => {
     })).toThrow(/SCRIPT_COMPILER_API_UNSUPPORTED.*restricted actions must remain native actions/);
   });
 
+  it("reserves the compiler envelope marker token from emitted bodies", () => {
+    const data = fixture('const marker = "kf-compiled-event/v1";');
+    expect(() => compileScriptPlan({
+      script: data.script, context: data.context, validationIdentity: data.identity,
+      validatedAst: data.validatedAst, binding: { controlId: "go", semanticEvent: "click" },
+    })).toThrow(/SCRIPT_COMPILER_OUTPUT_INVALID.*reserved compiler marker/);
+  });
+
   it("rejects ScriptPlan drift and hostile compile-input descriptors before reading them", () => {
     const data = fixture();
     expect(() => compileScriptPlan({

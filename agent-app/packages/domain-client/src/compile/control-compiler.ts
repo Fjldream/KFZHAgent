@@ -403,6 +403,29 @@ function appendScript(existing: string, additions: readonly string[]): string {
   return result;
 }
 
+const COMPILED_EVENT_MARKER = "// kf-compiled-event/v1 ";
+
+function serializedCompiledModule(module: CompiledScriptModule, binding?: CompiledEventBinding): string {
+  if (module.source.includes("kf-compiled-event/v1")) {
+    throw new ModelOutputInvalidError(`compiled script body contains the reserved marker token: ${module.id}`);
+  }
+  const payload = {
+    schema: "kf-compiled-event/v1",
+    moduleId: module.id,
+    sourceScriptId: module.sourceScriptId,
+    bodySha256: module.sourceHash,
+    bodyByteLength: Buffer.byteLength(module.source, "utf8"),
+    ownerInstanceName: module.ownerInstanceName,
+    placement: module.placement,
+    kfEvent: binding?.kfEvent ?? null,
+    linkId: binding?.linkId ?? null,
+    phase: binding?.phase ?? null,
+    instanceReferences: [...module.instanceReferences].sort((left, right) => left.semanticId.localeCompare(right.semanticId, "en-US")),
+    pageReferences: [...module.pageReferences].sort((left, right) => left.semanticId.localeCompare(right.semanticId, "en-US")),
+  };
+  return `${COMPILED_EVENT_MARKER}${Buffer.from(JSON.stringify(payload), "utf8").toString("base64url")}\n${module.source}`;
+}
+
 /** Serializes compiler-owned script modules into the two reviewed KF 3.6 script fields. */
 function serializeCompiledControlScripts(
   compiledControl: TemplateJson,
@@ -484,7 +507,7 @@ function serializeCompiledControlScripts(
   for (const [, group] of [...eventGroups].sort(([left], [right]) => left.localeCompare(right, "en-US"))) {
     group.sort((left, right) => (left.phase === right.phase ? 0 : left.phase === "event" ? -1 : 1));
     const first = group[0]!;
-    const sources = group.flatMap((binding) => binding.scriptModuleIds.map((id) => moduleById.get(id)!.source));
+    const sources = group.flatMap((binding) => binding.scriptModuleIds.map((id) => serializedCompiledModule(moduleById.get(id)!, binding)));
     const matchingIndexes = links.flatMap((link, index) => {
       const sameId = first.linkId !== undefined && link["linkId"] === first.linkId;
       const sameName = link["name"] === first.kfEvent;
@@ -531,7 +554,7 @@ function serializeCompiledControlScripts(
     }
     const existing = result["configureData"];
     if (typeof existing !== "string") throw new ModelOutputInvalidError("compiled control configureData must be a string");
-    const configured = appendScript(existing, configureModules.map((module) => module.source));
+    const configured = appendScript(existing, configureModules.map((module) => serializedCompiledModule(module)));
     if (configured.length > 32_000) throw new ModelOutputInvalidError("compiled configureData exceeds 32000 characters");
     result["configureData"] = configured;
   }

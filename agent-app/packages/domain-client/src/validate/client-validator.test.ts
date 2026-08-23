@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import { cp, mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -79,7 +80,139 @@ async function writeVariables(root: Root, doc: VariablesFixture): Promise<void> 
   await writeFile(await variableGroupFile(root), JSON.stringify(doc, null, 2));
 }
 
+function markedScript(body: string, overrides: Record<string, unknown> = {}): string {
+  const metadata = {
+    schema: "kf-compiled-event/v1", moduleId: "kf$script:validator-test", sourceScriptId: "validator-test",
+    bodySha256: createHash("sha256").update(body).digest("hex"), bodyByteLength: Buffer.byteLength(body),
+    ownerInstanceName: "Button1", placement: "event", kfEvent: "onClick", linkId: 200001, phase: "event",
+    instanceReferences: [{ semanticId: "go", instanceName: "Button1" }], pageReferences: [], ...overrides,
+  };
+  return `// kf-compiled-event/v1 ${Buffer.from(JSON.stringify(metadata)).toString("base64url")}\n${body}`;
+}
+
+function reencodeMarker(source: string, transform: (metadata: Record<string, unknown>) => string): string {
+  const prefix = "// kf-compiled-event/v1 ";
+  const newline = source.indexOf("\n");
+  const metadata = JSON.parse(Buffer.from(source.slice(prefix.length, newline), "base64url").toString("utf8")) as Record<string, unknown>;
+  return `${prefix}${transform(metadata)}${source.slice(newline)}`;
+}
+
 describe("client validator (Task 7 brief Step 2)", () => {
+  it("validates explicitly compiler-owned event script metadata without rejecting unrelated legacy scripts", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const legacyCandidate = await applyClientPatch(base, happyPlan());
+    const legacyPage = await readPage(legacyCandidate);
+    legacyPage.objects[0]!.linkMng = { linkList: [{ linkId: 200001, enable: true, name: "Click", script: "LegacyControl.DoThing();" }] };
+    await writePage(legacyCandidate, legacyPage);
+    expect((await validateClientProject(base, legacyCandidate, happyPlan(), { skipRoundTrip: true })).checks.businessRules).toBe("pass");
+
+    const candidate = await applyClientPatch(base, happyPlan());
+    const page = await readPage(candidate);
+    const source = markedScript("Button1.Value;", { bodySha256: "0".repeat(64) });
+    page.objects[0]!.linkMng = { linkList: [{
+      linkId: 200001, enable: true, name: "onClick", script: source,
+    }] };
+    await writePage(candidate, page);
+    const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.businessRules).toBe("fail");
+    expect(report.warnings.join("\n")).toMatch(/compiled script hash mismatch/);
+  });
+
+  it("reports compiler-owned target reference failures in the references layer", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const candidate = await applyClientPatch(base, happyPlan());
+    const page = await readPage(candidate);
+    const body = "Missing1.Value;";
+    const source = markedScript(body, { instanceReferences: [{ semanticId: "missing", instanceName: "Missing1" }] });
+    page.objects[0]!.linkMng = { linkList: [{
+      linkId: 200001, enable: true, name: "onClick", script: source,
+    }] };
+    await writePage(candidate, page);
+    const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.references).toBe("fail");
+    expect(report.warnings.join("\n")).toMatch(/unknown compiler-owned instance reference/);
+  });
+
+  it("rejects non-canonical marker payloads and non-ASI-safe legacy boundaries", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const candidate = await applyClientPatch(base, happyPlan());
+    const page = await readPage(candidate);
+    const canonical = markedScript("Button1.Value;");
+    const nonCanonical = reencodeMarker(canonical, (metadata) => Buffer.from(JSON.stringify(metadata, null, 1)).toString("base64url"));
+    page.objects[0]!.linkMng = { linkList: [{ linkId: 200001, enable: true, name: "onClick", script: nonCanonical }] };
+    await writePage(candidate, page);
+    let report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.businessRules).toBe("fail");
+    expect(report.warnings.join("\n")).toMatch(/canonical/);
+
+    page.objects[0]!.linkMng = { linkList: [{ linkId: 200001, enable: true, name: "onClick", script: `legacyCall();\n${canonical}` }] };
+    await writePage(candidate, page);
+    report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.businessRules).toBe("fail");
+    expect(report.warnings.join("\n")).toMatch(/boundary/);
+  });
+
+  it("rejects an undeclared project instance root but ignores a shadowing local identifier", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const basePage = await readPage(base);
+    basePage.objects.push({ name: "OddWidget7", uiModelType: 0, guid: "odd-widget-guid-7", leftTopPt: { x: 0, y: 0 }, width: 20, height: 20 });
+    await writePage(base, basePage);
+    const candidate = await applyClientPatch(base, happyPlan());
+    const page = await readPage(candidate);
+    page.objects[0]!.linkMng = { linkList: [{ linkId: 200001, enable: true, name: "onClick", script: markedScript("OddWidget7.Value;") }] };
+    await writePage(candidate, page);
+    let report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.businessRules).toBe("fail");
+    expect(report.warnings.join("\n")).toMatch(/undeclared instance/);
+
+    page.objects[0]!.linkMng = { linkList: [{ linkId: 200001, enable: true, name: "onClick", script: markedScript("const OddWidget7 = { Value: 1 }; OddWidget7.Value;") }] };
+    await writePage(candidate, page);
+    report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.businessRules).toBe("pass");
+
+    page.objects[0]!.linkMng = { linkList: [{ linkId: 200001, enable: true, name: "onClick", script: markedScript("{ const OddWidget7 = { Value: 1 }; OddWidget7.Value; } OddWidget7.Value;") }] };
+    await writePage(candidate, page);
+    report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.businessRules).toBe("fail");
+  });
+
+  it("uses AST runtime references and an evidence allowlist instead of marker labels", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const basePage = await readPage(base);
+    basePage.objects.push({ name: "Table1", uiModelType: 31, guid: "table-guid-1", leftTopPt: { x: 0, y: 0 }, width: 20, height: 20 });
+    await writePage(base, basePage);
+    const candidate = await applyClientPatch(base, happyPlan());
+    const page = await readPage(candidate);
+    const refs = { instanceReferences: [{ semanticId: "go", instanceName: "Button1" }, { semanticId: "records", instanceName: "Table1" }] };
+    page.objects[0]!.linkMng = { linkList: [{ linkId: 200001, enable: true, name: "onClick", script: markedScript('const spoof = "Table1";', refs) }] };
+    await writePage(candidate, page);
+    let report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.businessRules).toBe("fail");
+    expect(report.warnings.join("\n")).toMatch(/does not use declared instance/);
+
+    page.objects[0]!.linkMng = { linkList: [{ linkId: 200001, enable: true, name: "onClick", script: markedScript("Table1.UnknownMethod();", refs) }] };
+    await writePage(candidate, page);
+    report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.businessRules).toBe("fail");
+    expect(report.warnings.join("\n")).toMatch(/unsupported runtime member/);
+  });
+
+  it("derives runtime capability from uiModelType rather than a forged instance name", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const basePage = await readPage(base);
+    basePage.objects.push({ name: "Table2", uiModelType: 35, guid: "forged-table-name", leftTopPt: { x: 0, y: 0 }, width: 20, height: 20 });
+    await writePage(base, basePage);
+    const candidate = await applyClientPatch(base, happyPlan());
+    const page = await readPage(candidate);
+    page.objects[0]!.linkMng = { linkList: [{
+      linkId: 200001, enable: true, name: "onClick",
+      script: markedScript("Table2.SetData([]);", { instanceReferences: [{ semanticId: "go", instanceName: "Button1" }, { semanticId: "records", instanceName: "Table2" }] }),
+    }] };
+    await writePage(candidate, page);
+    const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.businessRules).toBe("fail");
+    expect(report.warnings.join("\n")).toMatch(/unsupported runtime member/);
+  });
   it("accepts disabled native image Load/Error event slots as inert metadata", async () => {
     const base = await copyFixture("client-unknown-field");
     const page = await readPage(base);

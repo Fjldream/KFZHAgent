@@ -30,6 +30,23 @@ const scriptModule = (id: string, source: string, placement: "event" | "configur
 const buttonControl: ControlIR = { id: "Button1", type: "button", x: 0, y: 0, width: 120, height: 40, text: "Go" };
 const compileButtonScripts = (scripts: Parameters<typeof compileControl>[3]) => compileControl(build, buttonControl, ctx, scripts);
 
+function decodedModules(source: string) {
+  const marker = "// kf-compiled-event/v1 ";
+  const result: Array<{ metadata: Record<string, unknown>; body: string }> = [];
+  let cursor = 0;
+  while (true) {
+    const start = source.indexOf(marker, cursor);
+    if (start < 0) return result;
+    const newline = source.indexOf("\n", start);
+    const metadata = JSON.parse(Buffer.from(source.slice(start + marker.length, newline), "base64url").toString("utf8")) as Record<string, unknown>;
+    const bodyStartBytes = Buffer.byteLength(source.slice(0, newline + 1));
+    const all = Buffer.from(source, "utf8");
+    const body = all.subarray(bodyStartBytes, bodyStartBytes + Number(metadata["bodyByteLength"])).toString("utf8");
+    result.push({ metadata, body });
+    cursor = Buffer.from(source, "utf8").subarray(0, bodyStartBytes + Number(metadata["bodyByteLength"])).toString("utf8").length;
+  }
+}
+
 describe("control compiler — compiled scripts", () => {
   it("keeps raw script serialization module-private", () => {
     expect(controlCompilerModule).not.toHaveProperty("serializeCompiledControlScripts");
@@ -49,10 +66,17 @@ describe("control compiler — compiled scripts", () => {
       }],
     });
 
-    expect(out["linkMng"]).toEqual({ linkList: [
-      { action: "navigatePage", pageId: "kdetail" },
-      { linkId: 200001, enable: true, script: "const first = 1;\n\n;\nconst second = 2;\n", name: "onClick" },
-    ] });
+    const links = (out["linkMng"] as { linkList: Array<Record<string, unknown>> }).linkList;
+    expect(links[0]).toEqual({ action: "navigatePage", pageId: "kdetail" });
+    expect(links[1]).toMatchObject({ linkId: 200001, enable: true, name: "onClick" });
+    const serialized = decodedModules(String(links[1]!["script"]));
+    expect(serialized.map((entry) => entry.body)).toEqual([first.source, second.source]);
+    expect(serialized[0]!.metadata).toEqual({
+      schema: "kf-compiled-event/v1", moduleId: first.id, sourceScriptId: first.sourceScriptId,
+      bodySha256: first.sourceHash, bodyByteLength: Buffer.byteLength(first.source), ownerInstanceName: "Button1",
+      placement: "event", kfEvent: "onClick", linkId: 200001, phase: "event",
+      instanceReferences: first.instanceReferences, pageReferences: [],
+    });
   });
 
   it("updates a reviewed native event slot in place without discarding its identity or sibling slot", () => {
@@ -65,19 +89,22 @@ describe("control compiler — compiled scripts", () => {
         phase: "event", scriptModuleIds: [first.id], nativeActionIds: [],
       }],
     });
-    expect(out["linkMng"]).toEqual({ linkList: [
-      { linkId: 200001, enable: true, script: first.source, name: "Load" },
-      { linkId: 200002, enable: false, script: "", name: "Error" },
-    ] });
+    const links = (out["linkMng"] as { linkList: Array<Record<string, unknown>> }).linkList;
+    expect(links[0]).toMatchObject({ linkId: 200001, enable: true, name: "Load" });
+    expect(decodedModules(String(links[0]!["script"]))[0]!.body).toBe(first.source);
+    expect(links[1]).toEqual({ linkId: 200002, enable: false, script: "", name: "Error" });
   });
 
   it("uses configureData only for a capability that explicitly supports it", () => {
     const configure = scriptModule("configure", "Table1.SetData([]);\n", "configure-data", "Table1");
-    expect(compileControl(build, {
+    const configureOutput = compileControl(build, {
       id: "Table1", type: "easyui", proto: 1, x: 0, y: 0, width: 320, height: 200,
     }, ctx, {
       ownerInstanceName: "Table1", capabilityId: "easyui.1", modules: [configure], bindings: [],
-    })["configureData"]).toBe("Table1.SetData([]);\n");
+    })["configureData"] as string;
+    const configureSerialized = decodedModules(configureOutput);
+    expect(configureSerialized[0]!.body).toBe(configure.source);
+    expect(configureSerialized[0]!.metadata).toMatchObject({ placement: "configure-data", kfEvent: null, linkId: null, phase: null });
     const buttonConfigure = scriptModule("button-configure", "Button1.SetData([]);\n", "configure-data");
     expect(() => compileButtonScripts({
       ownerInstanceName: "Button1", capabilityId: "button", modules: [buttonConfigure], bindings: [],
@@ -156,8 +183,7 @@ describe("control compiler — compiled scripts", () => {
         }],
       });
       const source = ((out["linkMng"] as { linkList: Array<{ script: string }> }).linkList[0]!).script;
-      expect(source.startsWith(existing)).toBe(true);
-      expect(source.slice(existing.length)).toBe("\n;\nconst first = 1;\n");
+      expect(decodedModules(source).map((entry) => entry.body)).toEqual([existing, first.source]);
       expect(() => parse(source, { ecmaVersion: 2022 })).not.toThrow();
     }
   });

@@ -57,3 +57,4 @@ export {
   type CapabilityRetrievalInput,
 } from "./planning/capability-retrieval.js";
 export * from "./solution-compile/solution-compiler.js";
+export * from "./interaction/interaction-compiler.js";
