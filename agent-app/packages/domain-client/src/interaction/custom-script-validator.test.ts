@@ -287,6 +287,16 @@ describe("constrained custom script validation", () => {
       .toThrow(/CUSTOM_SCRIPT_FORBIDDEN/);
   });
 
+  it("tracks every possible array alias root across joins and helper boundaries", () => {
+    for (const source of [
+      "const first = [1]; const second = [2]; let alias = []; alias = first; alias = second; for (const value of alias) { first.push(value); }",
+      "const first = [1]; const second = [2]; let alias = []; alias = true ? first : second; for (const value of alias) { first.push(value); }",
+      "const first = [1]; const second = [2]; let alias = []; alias = first || second; for (const value of alias) { second.push(value); }",
+      "const first = [1]; function choose() { return first; } let alias = []; alias = choose(); for (const value of alias) {}",
+      "const first = [1]; const second = [2]; let alias = []; alias = true ? first : second; function mutate() { second.push(3); } for (const value of alias) { mutate(); }",
+    ]) expect(() => validate(source)).toThrow(/CUSTOM_SCRIPT_FORBIDDEN|CUSTOM_SCRIPT_LIMIT/);
+  });
+
   it("rejects recursive functions and reports static timer dependencies without allowing self-scheduling", () => {
     expect(() => validate('function recurse() { recurse(); } recurse();')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*recursion/i);
     expect(() => validate("const f = () => [1].filter(() => f()); f();")).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*recursion/i);
@@ -333,6 +343,13 @@ describe("constrained custom script validation", () => {
     expect(() => createSemanticScriptValidationIdentity(hostile, context)).toThrow(/SCRIPT_API_INPUT_INVALID/);
     expect(getterCalls).toBe(0);
     expect(() => createSemanticScriptValidationIdentity(new Proxy({}, {}), context)).toThrow(/SCRIPT_API_INPUT_INVALID/);
+  });
+
+  it("uses saturated call counts instead of enumerating exponential call paths", () => {
+    const functions = Array.from({ length: 24 }, (_, index) => index === 23
+      ? `function f${index}() { const value = 1; }`
+      : `function f${index}() { f${index + 1}(); f${index + 1}(); }`);
+    expect(() => validate(`${functions.join("\n")}\nf0();`)).toThrow(/CUSTOM_SCRIPT_FORBIDDEN|CUSTOM_SCRIPT_LIMIT/);
   });
 
   it("enforces AST node/depth budgets and script parsing mode", () => {
@@ -400,6 +417,19 @@ describe("constrained custom script validation", () => {
     })).toThrow(/CUSTOM_SCRIPT_FORBIDDEN|SCRIPT_API_INPUT_INVALID/);
   });
 
+  it("models logical expressions with JavaScript operand-return semantics", () => {
+    expect(() => validate("const value = null ?? 'fallback';")).toThrow(/CUSTOM_SCRIPT_FORBIDDEN/);
+    expect(() => validate('const visible = "yes" || false; $control.setVisible("go", visible);', {
+      context: trustedContext(), outputs: [port("go", "control")],
+    })).toThrow(/SCRIPT_API_INPUT_INVALID|CUSTOM_SCRIPT_FORBIDDEN/);
+    expect(() => validate('const visible = Boolean(1) && Boolean(0); $control.setVisible("go", visible);', {
+      context: trustedContext(), outputs: [port("go", "control")],
+    })).not.toThrow();
+    expect(() => validate('const message = "" || "fallback"; $feedback.show("info", message);', {
+      context: trustedContext(),
+    })).not.toThrow();
+  });
+
   it("preserves record-list provenance instead of treating dynamic data as an empty array", () => {
     const { context } = recordFixture();
     expect(() => validate('const records = $data.get("visitor-records"); $data.set("visitor-records", records.slice(0, 100));', {
@@ -447,6 +477,11 @@ describe("constrained custom script validation", () => {
     });
     expect(branched.outputWrites).toEqual(["submitted"]);
     expect(branched.calls.map((call) => call.execution)).toEqual(["conditional", "conditional"]);
+    const helper = validate('function write() { $state.set("submitted", true); } if (true) { write(); } else { write(); }', {
+      outputs: [port("submitted", "local-state")],
+    });
+    expect(helper.outputWrites).toEqual(["submitted"]);
+    expect(helper.calls[0]?.execution).toBeUndefined();
   });
 });
 

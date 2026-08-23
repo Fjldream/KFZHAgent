@@ -99,7 +99,7 @@ type AbstractValue =
 
 interface ActiveLoop {
   readonly counter?: string;
-  readonly iteratedRoot?: string;
+  readonly iteratedRoots?: ReadonlySet<string>;
 }
 
 interface FunctionCallSite {
@@ -107,12 +107,14 @@ interface FunctionCallSite {
   readonly callee: string;
   readonly start: number;
   readonly conditional: boolean;
+  readonly conditionalPath: readonly string[];
   readonly repeated: boolean;
 }
 
 interface SemanticEffect {
   readonly call: ValidatedSemanticCall;
   readonly api: string;
+  readonly start: number;
   readonly targetId?: string;
   readonly inputId?: string;
   readonly outputId?: string;
@@ -434,6 +436,11 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
   let conditionalDepth = 0;
   const conditionalPath: string[] = [];
   let nextScopeId = 1;
+  let analysisSteps = 0;
+  const chargeAnalysis = (steps = 1): void => {
+    analysisSteps += steps;
+    if (analysisSteps > 50_000) fail("CUSTOM_SCRIPT_LIMIT", "static analysis exceeds 50000 steps");
+  };
   functionCalls.set(currentFunction, new Set());
   functionMutations.set(currentFunction, new Set());
   functionCaptures.set(currentFunction, new Set());
@@ -533,15 +540,28 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
     }
     return binding;
   };
-  const bindingRoots = (name: string, seen = new Set<string>()): ReadonlySet<string> => {
-    if (seen.has(name)) return new Set([name]);
-    seen.add(name);
-    const aliases = bindings.get(name)?.aliasRoots;
-    if (aliases === undefined || aliases.size === 0) return new Set([name]);
-    return new Set([...aliases].flatMap((alias) => [...bindingRoots(alias, new Set(seen))]));
+  const bindingRoots = (name: string): ReadonlySet<string> => {
+    const roots = new Set<string>();
+    const seen = new Set<string>();
+    const pending = [name];
+    while (pending.length > 0) {
+      chargeAnalysis();
+      const current = pending.pop()!;
+      if (seen.has(current)) continue;
+      seen.add(current);
+      const aliases = bindings.get(current)?.aliasRoots;
+      if (aliases === undefined || aliases.size === 0 || aliases.has(current)) roots.add(current);
+      for (const alias of aliases ?? []) if (alias !== current) pending.push(alias);
+    }
+    if (roots.size === 0) seen.forEach((candidate) => roots.add(candidate));
+    return roots;
   };
-  const bindingRoot = (name: string): string => [...bindingRoots(name)][0] ?? name;
-  const mayAlias = (name: string, root: string): boolean => bindingRoots(name).has(root);
+  const rootsIntersect = (left: ReadonlySet<string>, right: ReadonlySet<string>): boolean => {
+    chargeAnalysis(Math.min(left.size, right.size));
+    for (const root of left) if (right.has(root)) return true;
+    return false;
+  };
+  const mayAlias = (name: string, roots: ReadonlySet<string>): boolean => rootsIntersect(bindingRoots(name), roots);
   const recordMutation = (name: string): void => {
     functionMutations.get(currentFunction)?.add(name);
   };
@@ -575,6 +595,16 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
     if (node.type === "ObjectExpression") return "record";
     if (node.type === "Literal") return typeof node.value === "string" ? "string" : "scalar";
     if (node.type === "Identifier") return bindings.get(identifierName(node) ?? "")?.kind ?? "unknown";
+    if (node.type === "ConditionalExpression") {
+      const consequent = expressionKind(childNode(node.consequent));
+      const alternate = expressionKind(childNode(node.alternate));
+      return consequent === alternate ? consequent : "unknown";
+    }
+    if (node.type === "LogicalExpression") {
+      const left = expressionKind(childNode(node.left));
+      const right = expressionKind(childNode(node.right));
+      return left === right ? left : "unknown";
+    }
     if (node.type === "CallExpression") {
       const callee = childNode(node.callee);
       const name = identifierName(callee);
@@ -595,12 +625,37 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
   const boundedArrayExpression = (node: AstNode | undefined): boolean => {
     if (node?.type === "ArrayExpression") return true;
     if (node?.type === "Identifier") return bindings.get(identifierName(node) ?? "")?.boundedArray === true;
+    if (node?.type === "ConditionalExpression") return boundedArrayExpression(childNode(node.consequent)) && boundedArrayExpression(childNode(node.alternate));
+    if (node?.type === "LogicalExpression") return boundedArrayExpression(childNode(node.left)) && boundedArrayExpression(childNode(node.right));
     if (node?.type !== "CallExpression") return false;
     const member = memberParts(childNode(node.callee));
     if (member?.property !== "slice") return false;
     const args = nodeArray(node.arguments);
     return args.length === 2 && literalValue(args[0]) === 0 && typeof literalValue(args[1]) === "number"
       && (literalValue(args[1]) as number) >= 0 && (literalValue(args[1]) as number) <= 1000;
+  };
+
+  const arrayIdentityRoots = (node: AstNode | undefined): ReadonlySet<string> | undefined => {
+    if (node === undefined) return undefined;
+    if (node.type === "Identifier") {
+      const name = identifierName(node)!;
+      return expressionKind(node) === "array" ? bindingRoots(name) : undefined;
+    }
+    if (node.type === "ConditionalExpression" || node.type === "LogicalExpression") {
+      const candidates = node.type === "ConditionalExpression"
+        ? [childNode(node.consequent), childNode(node.alternate)]
+        : [childNode(node.left), childNode(node.right)];
+      const roots = new Set<string>();
+      for (const candidate of candidates) {
+        const candidateRoots = arrayIdentityRoots(candidate);
+        if (candidateRoots === undefined) return undefined;
+        candidateRoots.forEach((root) => roots.add(root));
+      }
+      return roots;
+    }
+    if (node.type === "ArrayExpression") return new Set();
+    if (node.type === "CallExpression" && expressionKind(node) === "array") return new Set();
+    return undefined;
   };
 
   const abstractJson = (node: AstNode): AbstractValue | undefined => {
@@ -613,7 +668,20 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
       if (kind === "string") return { kind: "typed", valueType: "string" };
       if (kind === "scalar") return { kind: "typed", valueType: "number" };
     }
-    if (node.type === "LogicalExpression" || (node.type === "UnaryExpression" && node.operator === "!")) return { kind: "typed", valueType: "boolean" };
+    if (node.type === "LogicalExpression") {
+      if (node.operator !== "&&" && node.operator !== "||") return undefined;
+      const left = abstractJson(childNode(node.left)!);
+      const right = abstractJson(childNode(node.right)!);
+      if (left?.kind === "exact") {
+        const leftTruthy = left.value ? true : false;
+        const choosesLeft = node.operator === "&&" ? !leftTruthy : leftTruthy;
+        return choosesLeft ? left : right;
+      }
+      if (left?.kind === "typed" && right?.kind === "typed" && left.valueType === right.valueType) return left;
+      if (left?.kind === "record-list" && right?.kind === "record-list" && left.dataId === right.dataId) return left;
+      return undefined;
+    }
+    if (node.type === "UnaryExpression" && node.operator === "!") return { kind: "typed", valueType: "boolean" };
     if (node.type === "CallExpression") {
       const callee = childNode(node.callee);
       const direct = identifierName(callee);
@@ -751,7 +819,7 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
       ...(conditionalDepth > 0 ? { execution: "conditional" as const } : {}),
     });
     semanticEffects.get(currentFunction)!.push(Object.freeze({
-      call, api,
+      call, api, start: node.start,
       ...(target === undefined ? {} : { targetId: target.value }),
       ...(inputId === undefined ? {} : { inputId }),
       ...(outputId === undefined ? {} : { outputId }),
@@ -792,7 +860,10 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
         const init = childNode(declaration.init);
         binding.kind = expressionKind(init);
         binding.boundedArray = boundedArrayExpression(init);
-        if (init?.type === "Identifier") binding.aliasRoots = new Set([identifierName(init)!]);
+        if (binding.kind === "array") {
+          const roots = arrayIdentityRoots(init);
+          binding.aliasRoots = roots === undefined || roots.size === 0 ? new Set([name]) : new Set(roots);
+        }
         if (init !== undefined) {
           const abstract = abstractJson(init);
           mergeAbstractValue(binding, abstract, true);
@@ -824,6 +895,7 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
       return;
     }
     if (node.type === "LogicalExpression") {
+      if (node.operator !== "&&" && node.operator !== "||") fail("CUSTOM_SCRIPT_FORBIDDEN", `logical operator is not allowed: ${String(node.operator)}`);
       const left = childNode(node.left);
       const right = childNode(node.right);
       if (left !== undefined) visit(left, node);
@@ -844,8 +916,8 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
     if (node.type === "ForOfStatement") {
       const right = childNode(node.right);
       if (!boundedArrayExpression(right)) fail("CUSTOM_SCRIPT_FORBIDDEN", "for-of requires a statically bounded array");
-      const iteratedName = identifierName(right);
-      activeLoops.push({ ...(iteratedName === undefined ? {} : { iteratedRoot: bindingRoot(iteratedName) }) });
+      const iteratedRoots = arrayIdentityRoots(right);
+      activeLoops.push({ ...(iteratedRoots === undefined || iteratedRoots.size === 0 ? {} : { iteratedRoots }) });
       for (const child of children(node)) visit(child, node);
       activeLoops.pop();
       return;
@@ -893,6 +965,7 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
         functionCallSites.push({
           caller: currentFunction, callee: binding.functionName, start: node.start,
           conditional: conditionalDepth > 0, repeated: activeLoops.length > 0 || repeatedFunctions.has(currentFunction),
+          conditionalPath: Object.freeze([...conditionalPath]),
         });
         if (activeLoops.length > 0) loopCallSites.push({ callee: binding.functionName, loops: activeLoops.map((loop) => ({ ...loop })) });
         if (currentFunction === "<program>") programCallSites.push({ callee: binding.functionName, start: node.start });
@@ -935,6 +1008,7 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
         functionCallSites.push({
           caller: currentFunction, callee: callbackName, start: node.start,
           conditional: conditionalDepth > 0, repeated: true,
+          conditionalPath: Object.freeze([...conditionalPath]),
         });
         if (currentFunction === "<program>") programCallSites.push({ callee: callbackName, start: node.start });
       }
@@ -942,7 +1016,7 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
         if (nodeArray(node.arguments).length !== 1) fail("CUSTOM_SCRIPT_FORBIDDEN", "push requires one value");
         if (repeatedFunctions.has(currentFunction)) fail("CUSTOM_SCRIPT_FORBIDDEN", "filter callbacks cannot mutate arrays");
         const receiver = identifierName(member.object);
-        if (receiver !== undefined && activeLoops.some((loop) => loop.iteratedRoot !== undefined && mayAlias(receiver, loop.iteratedRoot))) {
+        if (receiver !== undefined && activeLoops.some((loop) => loop.iteratedRoots !== undefined && mayAlias(receiver, loop.iteratedRoots))) {
           fail("CUSTOM_SCRIPT_FORBIDDEN", `cannot mutate an iterated array: ${receiver}`);
         }
         if (receiver !== undefined) recordMutation(receiver);
@@ -976,23 +1050,22 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
       const binding = requireBinding(name, left!);
       if (!binding.mutable) fail("CUSTOM_SCRIPT_FORBIDDEN", `assignment requires a mutable non-function local: ${name}`);
       if (!allowedLoopUpdates.has(node) && activeLoops.some((loop) => loop.counter === name)) fail("CUSTOM_SCRIPT_FORBIDDEN", `loop counter may only change in its update clause: ${name}`);
-      if (activeLoops.some((loop) => loop.iteratedRoot !== undefined && mayAlias(name, loop.iteratedRoot))) fail("CUSTOM_SCRIPT_FORBIDDEN", `cannot rebind an iterated array or alias: ${name}`);
+      if (activeLoops.some((loop) => loop.iteratedRoots !== undefined && mayAlias(name, loop.iteratedRoots))) fail("CUSTOM_SCRIPT_FORBIDDEN", `cannot rebind an iterated array or alias: ${name}`);
       const right = childNode(node.right);
       if (right !== undefined) {
-        if (node.operator === "=" && right.type === "Identifier") {
-          const rightName = identifierName(right)!;
-          if (activeLoops.some((loop) => loop.iteratedRoot !== undefined && mayAlias(rightName, loop.iteratedRoot))) {
+        if (node.operator === "=" && binding.kind === "array") {
+          const assignedRoots = arrayIdentityRoots(right);
+          if (assignedRoots === undefined) fail("CUSTOM_SCRIPT_FORBIDDEN", `array identity cannot be proven: ${name}`);
+          if (activeLoops.some((loop) => loop.iteratedRoots !== undefined && rootsIntersect(assignedRoots, loop.iteratedRoots))) {
             fail("CUSTOM_SCRIPT_FORBIDDEN", `cannot create an alias to an iterated array: ${name}`);
           }
+          const aliases = binding.aliasRoots ?? new Set<string>();
+          (assignedRoots.size === 0 ? new Set([name]) : assignedRoots).forEach((root) => aliases.add(root));
+          binding.aliasRoots = aliases;
         }
         const assigned = abstractJson(right);
         if (conditionalDepth > 0 && binding.abstractValue === undefined) mergeAbstractValue(binding, undefined);
         else mergeAbstractValue(binding, assigned);
-        if (node.operator === "=" && right.type === "Identifier") {
-          const aliases = binding.aliasRoots ?? new Set<string>();
-          aliases.add(identifierName(right)!);
-          binding.aliasRoots = aliases;
-        }
       }
       recordMutation(name);
       return;
@@ -1000,7 +1073,7 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
     if (left?.type !== "MemberExpression" || left.computed !== true) fail("CUSTOM_SCRIPT_FORBIDDEN", "property assignment is forbidden");
     const arrayName = identifierName(childNode(left.object));
     if (arrayName === undefined || bindings.get(arrayName)?.boundedArray !== true) fail("CUSTOM_SCRIPT_FORBIDDEN", "only bounded local array elements may be assigned");
-    if (activeLoops.some((loop) => loop.iteratedRoot !== undefined && mayAlias(arrayName, loop.iteratedRoot))) fail("CUSTOM_SCRIPT_FORBIDDEN", `cannot assign an iterated array element: ${arrayName}`);
+    if (activeLoops.some((loop) => loop.iteratedRoots !== undefined && mayAlias(arrayName, loop.iteratedRoots))) fail("CUSTOM_SCRIPT_FORBIDDEN", `cannot assign an iterated array element: ${arrayName}`);
     if (!safeArrayIndex(childNode(left.property), bindings)) fail("CUSTOM_SCRIPT_FORBIDDEN", "array assignment requires a bounded local index");
     if (repeatedFunctions.has(currentFunction)) fail("CUSTOM_SCRIPT_FORBIDDEN", "filter callbacks cannot mutate arrays");
     const arrayBinding = bindings.get(arrayName);
@@ -1071,29 +1144,44 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
 
   visit(ast(program));
 
-  const recursionState = new Map<string, "visiting" | "done">();
-  const detectRecursion = (name: string): void => {
-    if (recursionState.get(name) === "visiting") fail("CUSTOM_SCRIPT_FORBIDDEN", `function recursion is forbidden: ${name}`);
-    if (recursionState.get(name) === "done") return;
-    recursionState.set(name, "visiting");
-    functionCalls.get(name)?.forEach(detectRecursion);
-    recursionState.set(name, "done");
-  };
-  functionCalls.forEach((_calls, name) => detectRecursion(name));
+  const functionNodes = [...functionCalls.keys()].sort((left, right) => left.localeCompare(right, "en-US"));
+  const indegrees = new Map(functionNodes.map((name) => [name, 0]));
+  for (const callees of functionCalls.values()) {
+    for (const callee of callees) {
+      chargeAnalysis();
+      indegrees.set(callee, (indegrees.get(callee) ?? 0) + 1);
+    }
+  }
+  const ready = functionNodes.filter((name) => indegrees.get(name) === 0);
+  const topologicalOrder: string[] = [];
+  while (ready.length > 0) {
+    const name = ready.shift()!;
+    topologicalOrder.push(name);
+    for (const callee of [...(functionCalls.get(name) ?? [])].sort((left, right) => left.localeCompare(right, "en-US"))) {
+      chargeAnalysis();
+      const next = (indegrees.get(callee) ?? 0) - 1;
+      indegrees.set(callee, next);
+      if (next === 0) {
+        ready.push(callee);
+        ready.sort((left, right) => left.localeCompare(right, "en-US"));
+      }
+    }
+  }
+  if (topologicalOrder.length !== functionNodes.length) fail("CUSTOM_SCRIPT_FORBIDDEN", "function recursion is forbidden");
 
-  let effectsChanged = true;
-  for (let iteration = 0; effectsChanged && iteration <= functionCalls.size; iteration += 1) {
-    effectsChanged = false;
-    for (const [caller, callees] of functionCalls) {
-      const effects = functionMutations.get(caller) ?? new Set<string>();
-      functionMutations.set(caller, effects);
-      for (const callee of callees) {
-        for (const mutation of functionMutations.get(callee) ?? []) {
-          if (!effects.has(mutation)) {
-            effects.add(mutation);
-            effectsChanged = true;
-          }
-        }
+  for (const caller of [...topologicalOrder].reverse()) {
+    const mutations = functionMutations.get(caller) ?? new Set<string>();
+    functionMutations.set(caller, mutations);
+    const captures = functionCaptures.get(caller) ?? new Set<string>();
+    functionCaptures.set(caller, captures);
+    for (const callee of functionCalls.get(caller) ?? []) {
+      for (const mutation of functionMutations.get(callee) ?? []) {
+        chargeAnalysis();
+        mutations.add(mutation);
+      }
+      for (const capture of functionCaptures.get(callee) ?? []) {
+        chargeAnalysis();
+        captures.add(capture);
       }
     }
   }
@@ -1101,7 +1189,7 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
     const effects = functionMutations.get(callSite.callee) ?? new Set<string>();
     for (const loop of callSite.loops) {
       if ((loop.counter !== undefined && effects.has(loop.counter))
-        || (loop.iteratedRoot !== undefined && [...effects].some((mutation) => mayAlias(mutation, loop.iteratedRoot!)))) {
+        || (loop.iteratedRoots !== undefined && [...effects].some((mutation) => mayAlias(mutation, loop.iteratedRoots!)))) {
         fail("CUSTOM_SCRIPT_FORBIDDEN", `called function mutates an active loop dependency: ${callSite.callee}`);
       }
     }
@@ -1109,22 +1197,6 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
   for (const callSite of functionCallSites) {
     if (callSite.repeated && (functionMutations.get(callSite.callee)?.size ?? 0) > 0) {
       fail("CUSTOM_SCRIPT_FORBIDDEN", `repeated callback cannot call a mutating function: ${callSite.callee}`);
-    }
-  }
-  let capturesChanged = true;
-  for (let iteration = 0; capturesChanged && iteration <= functionCalls.size; iteration += 1) {
-    capturesChanged = false;
-    for (const [caller, callees] of functionCalls) {
-      const captures = functionCaptures.get(caller) ?? new Set<string>();
-      functionCaptures.set(caller, captures);
-      for (const callee of callees) {
-        for (const capture of functionCaptures.get(callee) ?? []) {
-          if (!captures.has(capture)) {
-            captures.add(capture);
-            capturesChanged = true;
-          }
-        }
-      }
     }
   }
   for (const callSite of programCallSites) {
@@ -1144,12 +1216,16 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
   }
 
   const reachableFunctions = new Set<string>();
-  const markReachable = (name: string): void => {
-    if (reachableFunctions.has(name)) return;
+  const reachableQueue = ["<program>"];
+  while (reachableQueue.length > 0) {
+    const name = reachableQueue.shift()!;
+    if (reachableFunctions.has(name)) continue;
     reachableFunctions.add(name);
-    functionCalls.get(name)?.forEach(markReachable);
-  };
-  markReachable("<program>");
+    for (const callee of functionCalls.get(name) ?? []) {
+      chargeAnalysis();
+      reachableQueue.push(callee);
+    }
+  }
   for (const name of functionNames) {
     if (!reachableFunctions.has(name)) fail("CUSTOM_SCRIPT_FORBIDDEN", `unused function is forbidden: ${name}`);
   }
@@ -1179,36 +1255,100 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
         || candidate.api.startsWith("$page.") || candidate.api.startsWith("$overlay.");
     });
   };
-  const functionExecutionCounts = new Map<string, number>();
+  type SaturatedCount = 0 | 1 | "many";
+  const addCounts = (left: SaturatedCount, right: SaturatedCount): SaturatedCount => left === "many" || right === "many" || left + right > 1
+    ? "many" : left + right as SaturatedCount;
+  const multiplyCounts = (left: SaturatedCount, right: SaturatedCount): SaturatedCount => left === 0 || right === 0 ? 0
+    : left === "many" || right === "many" ? "many" : 1;
+  interface LocalInvocation {
+    readonly count: SaturatedCount;
+    readonly guaranteed: boolean;
+  }
+  const localInvocations = new Map<string, Map<string, LocalInvocation>>();
+  for (const [caller, sites] of callSitesByCaller) {
+    const byCallee = new Map<string, FunctionCallSite[]>();
+    for (const site of sites) {
+      chargeAnalysis();
+      const matches = byCallee.get(site.callee) ?? [];
+      matches.push(site);
+      byCallee.set(site.callee, matches);
+    }
+    const summaries = new Map<string, LocalInvocation>();
+    for (const [callee, matches] of byCallee) {
+      const repeated = matches.some((site) => site.repeated);
+      const unconditional = matches.filter((site) => !site.conditional);
+      const conditional = matches.filter((site) => site.conditional);
+      let conditionalCount: SaturatedCount = conditional.length === 0 ? 0 : conditional.length === 1 ? 1 : "many";
+      let conditionalGuaranteed = false;
+      if (conditional.length > 0 && conditional.every((site) => site.conditionalPath.length === 1)) {
+        const segments = conditional.map((site) => site.conditionalPath[0]!);
+        const branchIds = new Set(segments.map((segment) => segment.slice(0, segment.lastIndexOf(":"))));
+        const thenCount = segments.filter((segment) => segment.endsWith(":then")).length;
+        const elseCount = segments.filter((segment) => segment.endsWith(":else")).length;
+        if (branchIds.size === 1 && thenCount > 0 && elseCount > 0) {
+          conditionalCount = Math.max(thenCount, elseCount) > 1 ? "many" : 1;
+          conditionalGuaranteed = conditionalCount === 1;
+        }
+      }
+      const directCount: SaturatedCount = unconditional.length === 0 ? 0 : unconditional.length === 1 ? 1 : "many";
+      const count = repeated ? "many" : addCounts(directCount, conditionalCount);
+      summaries.set(callee, Object.freeze({
+        count,
+        guaranteed: count === 1 && (unconditional.length === 1 || conditionalGuaranteed),
+      }));
+    }
+    localInvocations.set(caller, summaries);
+  }
+
+  const functionExecutionCounts = new Map<string, SaturatedCount>([["<program>", 1]]);
+  const functionExecutionGuaranteed = new Map<string, boolean>([["<program>", true]]);
+  for (const caller of topologicalOrder) {
+    const callerCount = functionExecutionCounts.get(caller) ?? 0;
+    if (callerCount === 0) continue;
+    for (const [callee, local] of localInvocations.get(caller) ?? []) {
+      chargeAnalysis();
+      const contribution = multiplyCounts(callerCount, local.count);
+      const previous = functionExecutionCounts.get(callee) ?? 0;
+      functionExecutionCounts.set(callee, addCounts(previous, contribution));
+      const contributionGuaranteed = functionExecutionGuaranteed.get(caller) === true && local.guaranteed;
+      functionExecutionGuaranteed.set(callee, previous === 0 && contribution === 1 && contributionGuaranteed);
+    }
+  }
+  for (const name of reachableFunctions) {
+    if ((functionExecutionCounts.get(name) ?? 0) !== "many") continue;
+    const pureRepeatedCallback = name.startsWith("<callback:")
+      && (semanticEffects.get(name)?.length ?? 0) === 0
+      && (functionCalls.get(name)?.size ?? 0) === 0
+      && (functionMutations.get(name)?.size ?? 0) === 0;
+    if (!pureRepeatedCallback) fail("CUSTOM_SCRIPT_FORBIDDEN", `function execution count is not statically single: ${name}`);
+  }
   const outputWriteEffects = new Map<string, SemanticEffect[]>();
-  const collectExecution = (name: string, inheritedConditional: boolean, inheritedRepeated: boolean): void => {
-    const executionCount = (functionExecutionCounts.get(name) ?? 0) + 1;
-    functionExecutionCounts.set(name, executionCount);
-    for (const effect of semanticEffects.get(name) ?? []) {
-      const conditional = inheritedConditional || effect.conditional;
-      const repeated = inheritedRepeated || effect.repeated || (name !== "<program>" && executionCount > 1);
-      const externalEffect = readApis[effect.api] === undefined && effect.api !== "$event.record";
-      const conditionalOutputClosed = !conditional
-        || (effect.conditional && effect.outputId !== undefined && branchHasVisibleCounterpart(name, effect));
-      if (externalEffect && (repeated || (effect.outputId !== undefined && !conditionalOutputClosed))) {
-        fail("CUSTOM_SCRIPT_FORBIDDEN", `external side effect requires one unconditional execution: ${effect.api}`);
-      }
-      calls.push(conditional && effect.call.execution === undefined
-        ? Object.freeze({ ...effect.call, execution: "conditional" as const })
-        : effect.call);
-      if (effect.inputId !== undefined) inputReads.add(effect.inputId);
-      if (effect.outputId !== undefined) {
-        const writes = outputWriteEffects.get(effect.outputId) ?? [];
-        writes.push(effect);
-        outputWriteEffects.set(effect.outputId, writes);
-      }
-      if (effect.scheduledScriptId !== undefined) scheduled.add(effect.scheduledScriptId);
+  const orderedEffects = [...semanticEffects.entries()]
+    .filter(([name]) => reachableFunctions.has(name))
+    .flatMap(([owner, effects]) => effects.map((effect) => ({ owner, effect })))
+    .sort((left, right) => left.effect.start - right.effect.start || left.owner.localeCompare(right.owner, "en-US"));
+  for (const { owner, effect } of orderedEffects) {
+    chargeAnalysis();
+    const executionCount = functionExecutionCounts.get(owner) ?? 0;
+    const conditional = functionExecutionGuaranteed.get(owner) !== true || effect.conditional;
+    const repeated = executionCount === "many" || effect.repeated;
+    const externalEffect = readApis[effect.api] === undefined && effect.api !== "$event.record";
+    const conditionalOutputClosed = !conditional
+      || (effect.conditional && effect.outputId !== undefined && branchHasVisibleCounterpart(owner, effect));
+    if (externalEffect && (repeated || (effect.outputId !== undefined && !conditionalOutputClosed))) {
+      fail("CUSTOM_SCRIPT_FORBIDDEN", `external side effect requires one unconditional execution: ${effect.api}`);
     }
-    for (const callSite of callSitesByCaller.get(name) ?? []) {
-      collectExecution(callSite.callee, inheritedConditional || callSite.conditional, inheritedRepeated || callSite.repeated);
+    calls.push(conditional && effect.call.execution === undefined
+      ? Object.freeze({ ...effect.call, execution: "conditional" as const })
+      : effect.call);
+    if (effect.inputId !== undefined) inputReads.add(effect.inputId);
+    if (effect.outputId !== undefined) {
+      const writes = outputWriteEffects.get(effect.outputId) ?? [];
+      writes.push(effect);
+      outputWriteEffects.set(effect.outputId, writes);
     }
-  };
-  collectExecution("<program>", false, false);
+    if (effect.scheduledScriptId !== undefined) scheduled.add(effect.scheduledScriptId);
+  }
   for (const [outputId, effects] of outputWriteEffects) {
     let count = effects.length;
     if (effects.length > 1 && effects.every((effect) => effect.conditionalPath.length === 1)) {
