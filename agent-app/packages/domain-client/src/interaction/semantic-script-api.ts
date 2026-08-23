@@ -8,6 +8,11 @@ import {
   type SolutionImplementationPlan,
 } from "@kf/contracts";
 import { requireScriptCapabilityProfile } from "../design-knowledge/script-capability-registry.js";
+import { createDefaultModuleRegistry } from "../modules/module-registry.js";
+import {
+  validateSolutionControlProvenance,
+  type ExpectedControlProvenance,
+} from "../solution-compile/solution-provenance.js";
 
 const API_NAMES = [
   "$control.getValue", "$control.setValue", "$control.setData", "$event.record",
@@ -208,13 +213,29 @@ export function createSemanticScriptApiContext(input: unknown): SemanticScriptAp
       }
       if (root.overlayHost !== undefined) overlayByControl.set(control.id, root.overlayHost.overlayId);
     }
+    const provenanceByControl = new Map<string, ExpectedControlProvenance>();
+    try {
+      validateSolutionControlProvenance({
+        plan: parsedPlan.data,
+        root: planPage.root,
+        controls: page.controls.filter((control) => !overlayByControl.has(control.id)),
+        moduleRegistry: createDefaultModuleRegistry(),
+      }).forEach((provenance, id) => provenanceByControl.set(id, provenance));
+      for (const overlay of parsedPlan.data.overlays.filter((candidate) => candidate.hostPageId === page.id)) {
+        validateSolutionControlProvenance({
+          plan: parsedPlan.data,
+          root: overlay.root,
+          controls: page.controls.filter((control) => overlayByControl.get(control.id) === overlay.id),
+          moduleRegistry: createDefaultModuleRegistry(),
+        }).forEach((provenance, id) => provenanceByControl.set(id, provenance));
+      }
+    } catch (error) {
+      return invalidContext(page.id, error instanceof Error ? error.message : "solution provenance validation failed", error instanceof Error ? { cause: error } : undefined);
+    }
     for (const control of page.controls) {
       const instanceName = instances.get(control.id);
       if (instanceName === undefined) return invalidContext(control.id, "runtime correlation is missing");
-      const overlayId = overlayByControl.get(control.id);
-      const sourceNode = overlayId === undefined
-        ? pageNodes.get(page.id)?.get(control.sourceSolutionNodeId)
-        : overlayNodes.get(overlayId)?.get(control.sourceSolutionNodeId);
+      const sourceNode = provenanceByControl.get(control.id)?.sourceNode;
       if (sourceNode === undefined || control.sourceBlueprintPageId !== page.sourceBlueprintPageId) {
         return invalidContext(control.id, "implementation control page ownership or provenance does not match the authoritative plan");
       }

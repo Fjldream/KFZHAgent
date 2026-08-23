@@ -36,6 +36,7 @@ import {
   type CompiledLayoutTree,
 } from "./layout-compiler.js";
 import type { SemanticDataRecord } from "./module-node-compiler.js";
+import { normalizeSolutionRepeaterKey } from "./solution-provenance.js";
 
 export interface SolutionCompileInput {
   readonly plan: SolutionImplementationPlan;
@@ -378,18 +379,11 @@ function expandedId(id: string, prefix: string | undefined): string {
 }
 
 function repeaterKey(value: SemanticScalar, nodeId: string): string {
-  if (value === null || typeof value === "boolean") fail("expansion", nodeId, "REPEATER_KEY_UNSAFE", String(value));
-  if (typeof value === "number" && (!Number.isFinite(value) || value < 0)) {
-    fail("expansion", nodeId, "REPEATER_KEY_UNSAFE", String(value));
+  try {
+    return normalizeSolutionRepeaterKey(value);
+  } catch (error) {
+    fail("expansion", nodeId, "REPEATER_KEY_UNSAFE", String(value), [], error instanceof Error ? error : undefined);
   }
-  const raw = String(value).normalize("NFKC").trim();
-  if (raw.length === 0 || raw.length > 48 || FORBIDDEN_KEYS.has(raw.toLowerCase())
-    || !/^[A-Za-z0-9][A-Za-z0-9 _-]*$/.test(raw)) {
-    fail("expansion", nodeId, "REPEATER_KEY_UNSAFE", raw || "empty");
-  }
-  const normalized = raw.toLowerCase().replace(/[ _]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
-  if (normalized.length === 0) fail("expansion", nodeId, "REPEATER_KEY_UNSAFE", raw);
-  return normalized;
 }
 
 function saturatedAdd(left: number, right: number, limit: number): number {

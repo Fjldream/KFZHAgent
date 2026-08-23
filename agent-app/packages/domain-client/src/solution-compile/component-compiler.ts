@@ -35,6 +35,7 @@ import {
   type CompiledLayoutNode,
   type CompiledLayoutTree,
 } from "./layout-compiler.js";
+import { normalizeSolutionRepeaterKey } from "./solution-provenance.js";
 
 type CompilePath = readonly (string | number)[];
 
@@ -90,7 +91,6 @@ interface MutableSemanticDataRecord { [key: string]: SemanticData }
 
 const OVERLAY_Z_BASE = 100_000;
 const MAX_CONTROL_ID_LENGTH = 100;
-const FORBIDDEN_REPEATER_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 
 function fail(code: string, path: CompilePath, detail: string, cause?: Error): never {
   throw new ComponentCompileError(code, path, detail, cause === undefined ? undefined : { cause });
@@ -431,16 +431,12 @@ function emitControl(context: CompileContext, node: ControlNode, walk: WalkConte
 }
 
 function normalizeRepeaterKey(value: SemanticScalar, path: CompilePath): Readonly<{ raw: string; normalized: string }> {
-  if (value === null) fail("REPEATER_KEY_MISSING", path, "null");
-  if (typeof value === "number" && (!Number.isFinite(value) || value < 0)) fail("REPEATER_KEY_UNSAFE", path, String(value));
   const raw = String(value).normalize("NFKC").trim();
-  if (raw.length === 0 || raw.length > 48 || FORBIDDEN_REPEATER_KEYS.has(raw.toLowerCase())) {
-    fail("REPEATER_KEY_UNSAFE", path, raw || "empty");
+  try {
+    return { raw: `${typeof value}:${raw}`, normalized: normalizeSolutionRepeaterKey(value) };
+  } catch (error) {
+    fail("REPEATER_KEY_UNSAFE", path, raw || "empty", error instanceof Error ? error : undefined);
   }
-  if (!/^[A-Za-z0-9][A-Za-z0-9 _-]*$/.test(raw)) fail("REPEATER_KEY_UNSAFE", path, raw);
-  const normalized = raw.toLowerCase().replace(/[ _]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(normalized)) fail("REPEATER_KEY_UNSAFE", path, raw);
-  return { raw: `${typeof value}:${raw}`, normalized };
 }
 
 function emitRepeater(context: CompileContext, node: RepeaterNode, walk: WalkContext): void {

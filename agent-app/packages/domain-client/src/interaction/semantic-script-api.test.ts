@@ -28,6 +28,20 @@ function control(id: string, capabilityId: string, sourceBlueprintPageId: string
   };
 }
 
+function pageControl(id: string, capabilityId: string, sourceBlueprintPageId: string, parentId: string) {
+  return { ...control(id, capabilityId, sourceBlueprintPageId), parentId, depth: 1 };
+}
+
+function rootControl(id: string, sourceBlueprintPageId: string, region = "region") {
+  return {
+    ...control(id, "layout.2", sourceBlueprintPageId),
+    role: "layout",
+    geometry: { x: 0, y: 0, width: 1280, height: 720 },
+    compiledLayout: { kind: "column" as const, overflow: "visible" as const },
+    sourceBlueprintRegionIds: [region],
+  };
+}
+
 function implementation(): UIImplementationSpecV2 {
   return {
     schema: "kf-ui-implementation/v2",
@@ -41,11 +55,11 @@ function implementation(): UIImplementationSpecV2 {
       {
         compatibility: "native", id: "home", width: 1280, height: 720, sourceBlueprintPageId: "bp-home",
         controls: [
-          control("go", "button", "bp-home"),
-          control("status-filter", "input", "bp-home"),
-          control("records", "easyui.1", "bp-home"),
-          control("status-select", "select", "bp-home"),
-          control("plain-text", "text", "bp-home"),
+          pageControl("go", "button", "bp-home", "home-root"),
+          pageControl("status-filter", "input", "bp-home", "home-root"),
+          { ...pageControl("records", "easyui.1", "bp-home", "home-root"), dataBinding: { mockDataId: "visitor-records", records: [{ id: "visitor-1", name: "张三" }] } },
+          pageControl("status-select", "select", "bp-home", "home-root"),
+          pageControl("plain-text", "text", "bp-home", "home-root"),
           {
             ...control("overlay-content", "text", "bp-home"),
             overlayHost: {
@@ -53,11 +67,16 @@ function implementation(): UIImplementationSpecV2 {
               dismissible: true, initiallyVisible: false,
             },
           },
+          rootControl("home-root", "bp-home"),
         ],
       },
       {
         compatibility: "native", id: "detail-page", width: 1280, height: 720, sourceBlueprintPageId: "bp-detail",
-        controls: [control("detail-input", "input", "bp-detail"), control("detail-records", "easyui.1", "bp-detail")],
+        controls: [
+          pageControl("detail-input", "input", "bp-detail", "detail-root"),
+          { ...pageControl("detail-records", "easyui.1", "bp-detail", "detail-root"), dataBinding: { mockDataId: "detail-data", records: [{ detailCode: "D-1" }] } },
+          rootControl("detail-root", "bp-detail", "detail-region"),
+        ],
       },
     ],
     runtimeCorrelation: {
@@ -70,6 +89,8 @@ function implementation(): UIImplementationSpecV2 {
         { semanticControlId: "overlay-content", instanceName: "Text2" },
         { semanticControlId: "detail-input", instanceName: "Input2" },
         { semanticControlId: "detail-records", instanceName: "Table2" },
+        { semanticControlId: "home-root", instanceName: "Layout1" },
+        { semanticControlId: "detail-root", instanceName: "Layout2" },
       ],
       pages: [
         { semanticPageId: "home", pageGuid: "00000000-0000-4000-8000-000000000001" },
@@ -105,8 +126,8 @@ function plan(): SolutionImplementationPlan {
         records: [{ values: [{ field: "id", value: "visitor-1" }, { field: "name", value: "张三" }] }],
       },
       {
-        id: "detail-data", purpose: "详情记录", fields: [{ key: "code", label: "编码", type: "text" }],
-        records: [{ values: [{ field: "code", value: "D-1" }] }],
+        id: "detail-data", purpose: "详情记录", fields: [{ key: "detailCode", label: "编码", type: "text" }],
+        records: [{ values: [{ field: "detailCode", value: "D-1" }] }],
       },
     ],
     localState: [
@@ -317,14 +338,14 @@ describe("semantic script API", () => {
     if (home?.compatibility !== "native") throw new Error("native fixture required");
     home.controls[0]!.capabilityId = "text";
     expect(() => createSemanticScriptApiContext({ plan: plan(), implementation: wrongCapability, ownerControlId: "go" }))
-      .toThrow(/capability does not match/);
+      .toThrow(/capability mismatch/);
 
     const wrongSource = implementation();
     const wrongSourceHome = wrongSource.pages[0];
     if (wrongSourceHome?.compatibility !== "native") throw new Error("native fixture required");
     wrongSourceHome.controls[0]!.sourceSolutionNodeId = "missing-node";
     expect(() => createSemanticScriptApiContext({ plan: plan(), implementation: wrongSource, ownerControlId: "go" }))
-      .toThrow(/provenance does not match/);
+      .toThrow(/provenance does not match|correlation mismatch/);
 
     const driftedPlan = plan();
     driftedPlan.projectKey = "drifted-demo";
@@ -341,7 +362,7 @@ describe("semantic script API", () => {
     if (detail?.compatibility !== "native") throw new Error("native fixture required");
     detail.controls[0]!.sourceSolutionNodeId = "status-filter";
     expect(() => createSemanticScriptApiContext({ plan: plan(), implementation: crossPageAlias, ownerControlId: "detail-input" }))
-      .toThrow(/page ownership/);
+      .toThrow(/page ownership|correlation mismatch/);
   });
 
   it("requires a one-to-one overlay root host on its exact owner page", () => {
@@ -350,7 +371,7 @@ describe("semantic script API", () => {
     if (missingHome?.compatibility !== "native") throw new Error("native fixture required");
     delete missingHome.controls.find((candidate) => candidate.id === "overlay-content")!.overlayHost;
     expect(() => createSemanticScriptApiContext({ plan: plan(), implementation: missing, ownerControlId: "go" }))
-      .toThrow(/overlay host|page ownership/);
+      .toThrow(/overlay host|page ownership|correlation mismatch/);
 
     const wrong = implementation();
     const wrongHome = wrong.pages[0];
@@ -359,7 +380,7 @@ describe("semantic script API", () => {
     delete wrongHome.controls.find((candidate) => candidate.id === "overlay-content")!.overlayHost;
     wrongHome.controls.find((candidate) => candidate.id === "plain-text")!.overlayHost = overlayHost;
     expect(() => createSemanticScriptApiContext({ plan: plan(), implementation: wrong, ownerControlId: "go" }))
-      .toThrow(/overlay host|page ownership/);
+      .toThrow(/overlay host|page ownership|correlation mismatch/);
 
     const wrongMetadata = implementation();
     const metadataHome = wrongMetadata.pages[0];
@@ -375,7 +396,7 @@ describe("semantic script API", () => {
       ...extraHome.controls.find((candidate) => candidate.id === "overlay-content")!.overlayHost!,
     };
     expect(() => createSemanticScriptApiContext({ plan: plan(), implementation: extra, ownerControlId: "go" }))
-      .toThrow(/overlay host|page ownership/);
+      .toThrow(/overlay host|page ownership|overlay provenance/);
   });
 
   it("scopes state and mock data to resources actually owned by the owner page", () => {
