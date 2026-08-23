@@ -382,6 +382,7 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
     | { readonly kind: "bounded-array"; readonly element: AbstractFact; readonly maxLength: number }
     | { readonly kind: "string" }
     | { readonly kind: "record"; readonly fields: ReadonlyMap<string, AbstractFact> }
+    | { readonly kind: "open-record" }
     | { readonly kind: "scalar" }
     | { readonly kind: "unknown" };
   const unknownFact: AbstractFact = { kind: "unknown" };
@@ -411,6 +412,13 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
     if (value?.["type"] === "Literal" && typeof value["value"] === "string") return value["value"];
     return undefined;
   };
+  const isEventRecordAccess = (value: Record<string, unknown> | undefined): boolean => value?.["type"] === "MemberExpression"
+    && identifierName(value["object"]) === "arguments" && value["computed"] === true
+    && (value["property"] as Record<string, unknown> | undefined)?.["type"] === "Literal"
+    && (value["property"] as Record<string, unknown> | undefined)?.["value"] === 1
+    && scopeByNode.get(value)?.functionOwner === "<program>"
+    && metadata.placement === "event" && instanceTypes.get(metadata.ownerInstanceName) === 31
+    && metadata.kfEvent === "Cell-click" && metadata.linkId === 200006;
   const factOf = (value: Record<string, unknown> | undefined, depth = 0): AbstractFact => {
     if (value == null || depth > 64) return unknownFact;
     const direct = identifierName(value);
@@ -458,6 +466,7 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
     if (value["type"] === "MemberExpression") {
       const receiver = factOf(value["object"] as Record<string, unknown> | undefined, depth + 1);
       const member = staticMember(value["property"] as Record<string, unknown> | undefined);
+      if (isEventRecordAccess(value)) return { kind: "open-record" };
       if (member === "length" && (receiver.kind === "bounded-array" || receiver.kind === "string")) return { kind: "scalar" };
       if (receiver.kind === "record" && member !== undefined) return receiver.fields.get(member) ?? unknownFact;
       if (receiver.kind === "bounded-array" && value["computed"] === true) return receiver.element;
@@ -506,6 +515,42 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
     });
     if (!changed) break;
   }
+  const capacityRoots = new Map<string, Set<string>>();
+  const capacityRootsOf = (value: Record<string, unknown> | undefined, target: string, depth = 0): Set<string> | undefined => {
+    if (value == null || depth > 64) return undefined;
+    const direct = identifierName(value);
+    if (direct !== undefined) return capacityRoots.get(direct);
+    if (value["type"] === "ArrayExpression") return new Set([target]);
+    if (value["type"] === "ConditionalExpression" || value["type"] === "LogicalExpression") {
+      const left = capacityRootsOf(value[value["type"] === "ConditionalExpression" ? "consequent" : "left"] as Record<string, unknown> | undefined, target, depth + 1);
+      const right = capacityRootsOf(value[value["type"] === "ConditionalExpression" ? "alternate" : "right"] as Record<string, unknown> | undefined, target, depth + 1);
+      return left === undefined || right === undefined ? undefined : new Set([...left, ...right]);
+    }
+    if (value["type"] === "CallExpression") {
+      const callee = value["callee"] as Record<string, unknown> | undefined;
+      if (callee?.["type"] === "MemberExpression" && staticMember(callee["property"] as Record<string, unknown> | undefined) === "filter") {
+        return capacityRootsOf(callee["object"] as Record<string, unknown> | undefined, target, depth + 1);
+      }
+      if (callee?.["type"] === "MemberExpression" && staticMember(callee["property"] as Record<string, unknown> | undefined) === "slice") {
+        return capacityRootsOf(callee["object"] as Record<string, unknown> | undefined, target, depth + 1) ?? new Set([target]);
+      }
+    }
+    return undefined;
+  };
+  for (let iteration = 0; iteration <= declaredNames.size; iteration += 1) {
+    let changed = false;
+    walk(program as never, { enter(node) {
+      const record = node as unknown as Record<string, unknown>;
+      if (record["type"] !== "VariableDeclarator") return;
+      const name = identifierName(record["id"]);
+      if (name === undefined || facts.get(name)?.kind !== "bounded-array") return;
+      const roots = capacityRootsOf(record["init"] as Record<string, unknown> | undefined, name);
+      if (roots !== undefined && [...roots].some((root) => capacityRoots.get(name)?.has(root) !== true)) {
+        capacityRoots.set(name, new Set([...(capacityRoots.get(name) ?? []), ...roots])); changed = true;
+      }
+    } });
+    if (!changed) break;
+  }
   let undeclaredProjectInstance: string | undefined;
   let astIssue: string | undefined = syntaxIssue;
   const usedRuntimeRoots = new Set<string>();
@@ -517,7 +562,8 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
     readonly callee: string;
     readonly loops: readonly { readonly counter?: string; readonly iteratedRoots?: ReadonlySet<string> }[];
   }> = [];
-  const activeLoops: Array<{ readonly counter?: string; readonly upperBound?: number; readonly iteratedRoots?: ReadonlySet<string> }> = [];
+  const pushSites: Array<{ readonly owner: string; readonly roots: ReadonlySet<string> }> = [];
+  const activeLoops: Array<{ readonly counter?: string; readonly maxIndex?: number; readonly iteratedRoots?: ReadonlySet<string> }> = [];
   const allowedLoopUpdates = new WeakSet<object>();
   const exactIndexReads = new Set<string>();
   let currentFunction = "<program>";
@@ -542,6 +588,11 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
       const record = node as unknown as Record<string, unknown>;
       const parentRecord = parent as unknown as Record<string, unknown> | null;
       const type = record["type"];
+      if (type === "VariableDeclarator") {
+        const name = identifierName(record["id"]);
+        const next = factOf(record["init"] as Record<string, unknown> | undefined);
+        if (name !== undefined && next.kind !== "unknown") facts.set(name, next);
+      }
       if (type === "FunctionDeclaration" || type === "FunctionExpression" || type === "ArrowFunctionExpression") {
         functionStack.push(currentFunction);
         const directName = identifierName(record["id"]);
@@ -570,7 +621,8 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
         if (init?.["type"] !== "VariableDeclaration" || init["kind"] !== "let" || declarations.length !== 1
           || counter === undefined || initial?.["type"] !== "Literal" || initial["value"] !== 0
           || test?.["type"] !== "BinaryExpression" || identifierName(left) !== counter || !["<", "<="].includes(String(test["operator"]))
-          || right?.["type"] !== "Literal" || typeof right["value"] !== "number" || right["value"] > 1_000
+          || right?.["type"] !== "Literal" || typeof right["value"] !== "number"
+          || (test["operator"] === "<" ? right["value"] > 1_000 : right["value"] >= 1_000)
           || !Number.isInteger(right["value"]) || right["value"] < 0 || !monotonic) astIssue ??= "loop bound is not a monotonic unit range limited to 1000";
         if (update !== undefined) allowedLoopUpdates.add(update);
         const body = record["body"];
@@ -582,8 +634,9 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
             if (target === counter) astIssue ??= "loop body mutates its counter";
           },
         });
-        const upperBound = right?.["type"] === "Literal" && typeof right["value"] === "number" ? right["value"] : undefined;
-        activeLoops.push(counter === undefined ? {} : { counter, ...(upperBound === undefined ? {} : { upperBound }) });
+        const maxIndex = right?.["type"] === "Literal" && typeof right["value"] === "number"
+          ? right["value"] - (test?.["operator"] === "<" ? 1 : 0) : undefined;
+        activeLoops.push(counter === undefined ? {} : { counter, ...(maxIndex === undefined ? {} : { maxIndex }) });
       }
       if (type === "ForOfStatement") {
         const right = record["right"] as Record<string, unknown> | undefined;
@@ -681,6 +734,12 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
           if (member === "push" && (receiver.kind !== "bounded-array" || receiver.maxLength >= 1_000 || args.length !== 1)) {
             astIssue ??= "push requires a bounded receiver below capacity and one value";
           }
+          if (member === "push") {
+            const roots = objectName === undefined ? undefined : capacityRoots.get(objectName);
+            if (activeLoops.length > 0 || currentFunction.startsWith("<anonymous:") || receiver.kind !== "bounded-array" || roots === undefined) {
+              astIssue ??= "push cannot execute in a loop, repeated callback, or unproven array";
+            } else pushSites.push({ owner: currentFunction, roots: new Set(roots) });
+          }
           if (member === "trim" && (receiver.kind !== "string" || args.length !== 0)) astIssue ??= "trim requires a string receiver and no arguments";
           if ((member === "includes" || member === "startsWith") && (receiver.kind !== "string" || args.length !== 1)) {
             astIssue ??= `${member} requires a string receiver and one argument`;
@@ -694,12 +753,12 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
           && property["value"] >= 0 && receiver.kind === "bounded-array" && property["value"] < receiver.maxLength;
         const counter = identifierName(property);
         const boundedCounter = counter !== undefined && receiver.kind === "bounded-array"
-          && activeLoops.some((loop) => loop.counter === counter && loop.upperBound !== undefined && loop.upperBound <= receiver.maxLength);
+          && activeLoops.some((loop) => loop.counter === counter && loop.maxIndex !== undefined && loop.maxIndex < receiver.maxLength);
         const exactIndex = counter === undefined ? undefined : exactIntegerNames.get(counter);
         const boundedExactIndex = exactIndex !== undefined && receiver.kind === "bounded-array" && exactIndex < receiver.maxLength;
         if (boundedExactIndex && !boundedCounter && counter !== undefined) exactIndexReads.add(counter);
         const literalField = property?.["type"] === "Literal" && typeof property["value"] === "string";
-        if (!literalField && !literalIndex && !boundedCounter && !boundedExactIndex) astIssue ??= "dynamic computed member access";
+        if (!literalField && !literalIndex && !boundedCounter && !boundedExactIndex && !isEventRecordAccess(record)) astIssue ??= "dynamic computed member access";
       }
       if (type === "Property") {
         if (record["kind"] !== "init" || record["method"] === true || record["computed"] === true) astIssue ??= "getter, setter, method, or computed object property";
@@ -730,7 +789,7 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
             && targetFact.kind === "bounded-array" && targetProperty["value"] < targetFact.maxLength;
           const counter = identifierName(targetProperty);
           const boundedCounter = counter !== undefined && targetFact.kind === "bounded-array"
-            && activeLoops.some((loop) => loop.counter === counter && loop.upperBound !== undefined && loop.upperBound <= targetFact.maxLength);
+            && activeLoops.some((loop) => loop.counter === counter && loop.maxIndex !== undefined && loop.maxIndex < targetFact.maxLength);
           if (type !== "AssignmentExpression" || record["operator"] !== "=" || target["computed"] !== true || (!literalIndex && !boundedCounter)) {
             astIssue ??= "member assignment requires a proven bounded-array index";
           }
@@ -774,13 +833,15 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
           && property["value"] >= 0 && receiver.kind === "bounded-array" && property["value"] < receiver.maxLength;
         const counter = identifierName(property);
         const boundedCounter = counter !== undefined && receiver.kind === "bounded-array"
-          && activeLoops.some((loop) => loop.counter === counter && loop.upperBound !== undefined && loop.upperBound <= receiver.maxLength);
+          && activeLoops.some((loop) => loop.counter === counter && loop.maxIndex !== undefined && loop.maxIndex < receiver.maxLength);
         const exactIndex = counter === undefined ? undefined : exactIntegerNames.get(counter);
         const boundedExactIndex = exactIndex !== undefined && receiver.kind === "bounded-array" && exactIndex < receiver.maxLength;
         if (boundedExactIndex && !boundedCounter && counter !== undefined) exactIndexReads.add(counter);
         const exactField = receiver.kind === "record" && member !== undefined && receiver.fields.has(member);
+        const openField = receiver.kind === "open-record" && record["computed"] === true && property?.["type"] === "Literal"
+          && typeof property["value"] === "string" && !["__proto__", "prototype", "constructor"].includes(property["value"]);
         if (!called && !literalIndex && !boundedCounter && !boundedExactIndex
-          && !(member === "length" && (receiver.kind === "bounded-array" || receiver.kind === "string")) && !exactField) {
+          && !(member === "length" && (receiver.kind === "bounded-array" || receiver.kind === "string")) && !exactField && !openField) {
           astIssue ??= `local member exactness is unproven: ${name}.${member ?? "?"}`;
         }
         return;
@@ -836,6 +897,22 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
     if ((functionMutations.get("<program>") ?? new Set<string>()).has(name)) {
       astIssue ??= `exact integer index is mutated in the reachable call graph: ${name}`;
     }
+  }
+  const pushesByRoot = new Map<string, number>();
+  for (const site of pushSites) {
+    const singleExecution = site.owner === "<program>" || functionCallSites.filter((call) => call.callee === site.owner).length === 1
+      && functionCallSites.some((call) => call.callee === site.owner && call.caller === "<program>")
+      && !loopCallSites.some((call) => call.callee === site.owner);
+    if (!singleExecution) { astIssue ??= `push owner execution count is not statically one: ${site.owner}`; continue; }
+    for (const root of site.roots) pushesByRoot.set(root, (pushesByRoot.get(root) ?? 0) + 1);
+  }
+  for (const [root, pushes] of pushesByRoot) {
+    let initialMax: number | undefined;
+    for (const [name, fact] of facts) {
+      if (fact.kind !== "bounded-array" || capacityRoots.get(name)?.has(root) !== true) continue;
+      initialMax = Math.max(initialMax ?? 0, fact.maxLength);
+    }
+    if (initialMax === undefined || initialMax + pushes > 1_000) astIssue ??= `push capacity exceeds 1000 for ${root}`;
   }
   // Project-instance evidence is more specific than the generic global/call
   // grammar rejection discovered by the same walk. Both are fail-closed, but

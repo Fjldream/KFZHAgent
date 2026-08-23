@@ -119,7 +119,7 @@ function reencodeMarker(source: string, transform: (metadata: Record<string, unk
   return `${prefix}${transform(metadata)}${source.slice(newline)}`;
 }
 
-function compileReviewedSyntax(): ReturnType<typeof compileScriptPlan>["module"] {
+function compileReviewedSyntax(options: { readonly cellClickSource?: string; readonly source?: string } = {}): ReturnType<typeof compileScriptPlan>["module"] {
   const theme = {
     background: "#f4f7fb", surface: "#ffffff", primary: "#163a5f", accent: "#e47b32",
     textPrimary: "#14212b", textSecondary: "#52616d", fontFamily: "Inter", spacingUnit: 8,
@@ -129,7 +129,7 @@ function compileReviewedSyntax(): ReturnType<typeof compileScriptPlan>["module"]
     importance: "primary" as const, visualWeight: 3, readingOrder: 0, density: "comfortable" as const, groupWith: [],
     width: { mode: "fixed" as const, value: 120 }, height: { mode: "fixed" as const, value: 40 }, align: "start" as const,
   };
-  const source = [
+  const reviewedSource = [
     'const value = $control.getValue("status-filter");',
     "let index = 0;",
     'const rows = [{ "extra": true }];',
@@ -150,18 +150,25 @@ function compileReviewedSyntax(): ReturnType<typeof compileScriptPlan>["module"]
     "for (const entry of rows) { total += entry === made ? 1 : 0; }",
     "if (label === value) total = -total; else total = Math.max(total, 0);",
   ].join("\n");
+  const source = options.cellClickSource ?? options.source ?? reviewedSource;
+  const cellClick = options.cellClickSource !== undefined;
   const script: ScriptPlan = {
     id: "reviewed-syntax", purpose: "覆盖已审阅语法", kind: "custom", programVersion: "semantic-js/v1", source,
-    inputs: [{ name: "filter", description: "filter", refKind: "control", refId: "status-filter" }], outputs: [],
+    inputs: source.includes("$control.getValue") ? [{ name: "filter", description: "filter", refKind: "control" as const, refId: "status-filter" }] : [],
+    outputs: source.includes("$control.setData") ? [{ name: "records", description: "records", refKind: "control" as const, refId: "records" }] : [],
   };
   const plan: SolutionImplementationPlan = {
     schema: "kf-solution-implementation/v1", projectKey: "validator-e2e", blueprintHash: "a".repeat(64), candidateBundleHash: "b".repeat(64),
-    theme, roleStyles: [{ role: "content", declarations: {}, states: {} }], mockData: [], localState: [], overlays: [], scripts: [script],
+    theme, roleStyles: [{ role: "content", declarations: {}, states: {} }],
+    mockData: [{ id: "visitor-records", purpose: "访客", fields: [{ key: "id", label: "标识", type: "text" }], records: [{ values: [{ field: "id", value: "a" }] }] }],
+    localState: [], overlays: [], scripts: [script],
     actions: [{ id: "run-reviewed", kind: "run-script", scriptId: script.id, afterActionIds: [] }],
     pages: [{ id: "home", title: "首页", purpose: "验证", canvas: "desktop", sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region"], initialStateIds: [], root: {
       id: "root", kind: "layout", layout: "column", sourceBlueprintRegionIds: ["region"], intent, children: [
-        { id: "go", kind: "control", capabilityId: "button", content: "执行", properties: [], tabIds: [], styleRole: "content", sourceBlueprintRegionIds: ["region"], intent, eventBindings: [{ semanticEvent: "click", actionIds: ["run-reviewed"] }] },
+        { id: "go", kind: "control", capabilityId: "button", content: "执行", properties: [], tabIds: [], styleRole: "content", sourceBlueprintRegionIds: ["region"], intent, eventBindings: cellClick ? [] : [{ semanticEvent: "click", actionIds: ["run-reviewed"] }] },
         { id: "status-filter", kind: "control", capabilityId: "input", content: "筛选", properties: [], tabIds: [], styleRole: "content", sourceBlueprintRegionIds: ["region"], intent, eventBindings: [] },
+        { id: "records", kind: "control", capabilityId: "easyui.1", content: "记录", properties: [], tabIds: [], styleRole: "content", sourceBlueprintRegionIds: ["region"], intent,
+          mockDataId: "visitor-records", eventBindings: cellClick ? [{ semanticEvent: "row-click", actionIds: ["run-reviewed"] }] : [] },
       ],
     } }],
   };
@@ -175,14 +182,17 @@ function compileReviewedSyntax(): ReturnType<typeof compileScriptPlan>["module"]
     schema: "kf-ui-implementation/v2", compatibility: "native", sourceSolutionPlanHash: canonicalServerHash(plan),
     sourceModuleRegistryHash: solutionModuleRegistryHash(plan, createDefaultModuleRegistry()),
     theme, compiledRoleStyles: {}, compiledActions: [], compiledScripts: [], pages: [{ compatibility: "native", id: "home", width: 1280, height: 720,
-      sourceBlueprintPageId: "bp-home", controls: [control("go", "button", "root"), control("status-filter", "input", "root"), control("root", "layout.4")] }],
-    runtimeCorrelation: { controls: [{ semanticControlId: "go", instanceName: "Button1" }, { semanticControlId: "status-filter", instanceName: "Input1" }, { semanticControlId: "root", instanceName: "Layout1" }],
+      sourceBlueprintPageId: "bp-home", controls: [control("go", "button", "root"), control("status-filter", "input", "root"),
+        { ...control("records", "easyui.1", "root"), dataBinding: { mockDataId: "visitor-records", records: [{ id: "a" }] } }, control("root", "layout.4")] }],
+    runtimeCorrelation: { controls: [{ semanticControlId: "go", instanceName: "Button1" }, { semanticControlId: "status-filter", instanceName: "Input1" }, { semanticControlId: "records", instanceName: "Table1" }, { semanticControlId: "root", instanceName: "Layout1" }],
       pages: [{ semanticPageId: "home", pageGuid: "00000000-0000-4000-8000-000000000001" }] },
   };
-  const context = createSemanticScriptApiContext({ plan, implementation, ownerControlId: "go", activeEvent: { controlId: "go", semanticEvent: "click" } });
+  const ownerControlId = cellClick ? "records" : "go";
+  const semanticEvent = cellClick ? "row-click" : "click";
+  const context = createSemanticScriptApiContext({ plan, implementation, ownerControlId, activeEvent: { controlId: ownerControlId, semanticEvent } });
   const identity = createSemanticScriptValidationIdentity(script, context);
   const validatedAst = validateCustomScript({ source, inputs: script.inputs, outputs: script.outputs, context, currentScriptIdentity: identity });
-  return compileScriptPlan({ script, context, validationIdentity: identity, validatedAst, binding: { controlId: "go", semanticEvent: "click" } }).module;
+  return compileScriptPlan({ script, context, validationIdentity: identity, validatedAst, binding: { controlId: ownerControlId, semanticEvent } }).module;
 }
 
 describe("client validator (Task 7 brief Step 2)", () => {
@@ -380,6 +390,11 @@ describe("client validator (Task 7 brief Step 2)", () => {
       "const values = [1]; values.filter((value) => true, 1);",
       "const values = [1]; values.push();",
       `const values = [${Array.from({ length: 1_000 }, () => "1").join(",")}]; values.push(1);`,
+      `const values = [${Array.from({ length: 999 }, () => "1").join(",")}]; values.push(1); values.push(1);`,
+      `const values = [${Array.from({ length: 999 }, () => "1").join(",")}]; const alias = values; alias.push(1); values.push(1);`,
+      `const values = [${Array.from({ length: 999 }, () => "1").join(",")}]; values.push(1); const copy = values.slice(0, 1000); copy.push(1);`,
+      "const values = [1]; for (let index = 0; index < 2; index += 1) { values.push(index); }",
+      "const values = [1]; function add() { values.push(2); } add(); add();",
       "const value = 1; const result = Math.abs(value, value);",
       "const result = Math.max();",
       "const Math = { abs: (value) => value }; const result = Math.abs(1);",
@@ -409,6 +424,9 @@ describe("client validator (Task 7 brief Step 2)", () => {
       "const holder = { rows: [{ value: 1 }] }; const made = { ...holder.rows[0] };",
       "const rows = [{ value: 1 }]; for (let index = 0; index < 1; index += 1) { const made = { ...rows[index] }; }",
       "const rows = [{ value: 1 }]; for (let index = 0; index < 1; index += 1) { rows[index] = { value: 2 }; }",
+      "const values = [1]; values.push(2); values.push(3); const selected = values.filter((value) => value > 0);",
+      "const values = [1]; function add() { values.push(2); } add();",
+      `const values = [${Array.from({ length: 1_000 }, () => "1").join(",")}]; for (let index = 0; index <= 999; index += 1) { const value = values[index]; }`,
     ];
     const rejected = [
       "const record = { value: 1 }; record.value = 2;",
@@ -418,6 +436,8 @@ describe("client validator (Task 7 brief Step 2)", () => {
       "const rows = [{ value: 1 }]; let index = 0; rows[index] = { value: 2 };",
       "const unknown = true ? [1] : {}; unknown.push(1);",
       "let values = [1]; values = true ? [1] : {}; values.push(1);",
+      "for (let index = 0; index <= 1000; index += 1) {}",
+      "for (let index = 0; index < 1001; index += 1) {}",
     ];
     for (const [expected, sources] of [["pass", accepted], ["fail", rejected]] as const) for (const body of sources) {
       const base = await copyFixture("client-unknown-field");
@@ -443,6 +463,44 @@ describe("client validator (Task 7 brief Step 2)", () => {
         moduleId: module.id, sourceScriptId: module.sourceScriptId,
         instanceReferences: module.instanceReferences,
       }),
+    }] };
+    await writePage(candidate, page);
+    const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.businessRules, report.warnings.join("\n")).toBe("pass");
+  });
+
+  it("rebuilds a read-only Cell-click event record fact for real Task6 output", async () => {
+    const module = compileReviewedSyntax({ cellClickSource: 'const record = $event.record(); const code = record["code"];' });
+    expect(module.source).toContain("arguments[1]");
+    const base = await copyFixture("client-unknown-field");
+    const basePage = await readPage(base);
+    basePage.objects.push({ name: "Table1", uiModelType: 31, guid: "record-table", leftTopPt: { x: 0, y: 0 }, width: 20, height: 20 });
+    await writePage(base, basePage);
+    const candidate = await applyClientPatch(base, happyPlan());
+    const page = await readPage(candidate);
+    page.objects[1]!.linkMng = { linkList: [{
+      linkId: 200006, enable: true, name: "Cell-click",
+      script: markedScript(module.source, {
+        moduleId: module.id, sourceScriptId: module.sourceScriptId, ownerInstanceName: "Table1",
+        kfEvent: "Cell-click", linkId: 200006, instanceReferences: module.instanceReferences,
+      }),
+    }] };
+    await writePage(candidate, page);
+    const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.businessRules, report.warnings.join("\n")).toBe("pass");
+  });
+
+  it("accepts one capacity-proven Task6 push through final project validation", async () => {
+    const module = compileReviewedSyntax({ source: 'const records = [{ "id": "a" }]; records.push({ "id": "b" }); $control.setData("records", records);' });
+    const base = await copyFixture("client-unknown-field");
+    const basePage = await readPage(base);
+    basePage.objects.push({ name: "Table1", uiModelType: 31, guid: "push-table", leftTopPt: { x: 0, y: 0 }, width: 20, height: 20 });
+    await writePage(base, basePage);
+    const candidate = await applyClientPatch(base, happyPlan());
+    const page = await readPage(candidate);
+    page.objects[0]!.linkMng = { linkList: [{
+      linkId: 200001, enable: true, name: "onClick",
+      script: markedScript(module.source, { moduleId: module.id, sourceScriptId: module.sourceScriptId, instanceReferences: module.instanceReferences }),
     }] };
     await writePage(candidate, page);
     const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
@@ -489,6 +547,8 @@ describe("client validator (Task 7 brief Step 2)", () => {
       "const record = arguments[1]; const selected = record.items.filter((item) => true);",
       "const record = arguments[1]; const secret = record.secret;",
       "const record = arguments[1]; const made = { ...record };",
+      'const record = arguments[1]; record["code"] = "changed";',
+      'function fake() { const record = arguments[1]; const code = record["code"]; } fake();',
     ]) {
       tablePage.objects[1]!.linkMng = { linkList: [{
         linkId: 200006, enable: true, name: "Cell-click",

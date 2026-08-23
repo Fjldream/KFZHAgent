@@ -87,7 +87,9 @@ interface LexicalBinding {
   readonly functionName?: string;
   kind: ValueKind;
   boundedArray: boolean;
+  maxArrayLength?: number;
   aliasRoots?: Set<string>;
+  capacityRoots?: Set<string>;
   abstractValue?: AbstractValue;
   abstractConflicted?: boolean;
 }
@@ -438,6 +440,7 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
   const functionCallSites: FunctionCallSite[] = [];
   const repeatedFunctions = new Set<string>();
   const loopCallSites: Array<{ readonly callee: string; readonly loops: readonly ActiveLoop[] }> = [];
+  const pushSites: Array<{ readonly owner: string; readonly roots: ReadonlySet<string> }> = [];
   const programCallSites: Array<{ readonly callee: string; readonly start: number }> = [];
   const activeLoops: ActiveLoop[] = [];
   const allowedLoopUpdates = new WeakSet<object>();
@@ -632,7 +635,7 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
   };
 
   const boundedArrayExpression = (node: AstNode | undefined): boolean => {
-    if (node?.type === "ArrayExpression") return true;
+    if (node?.type === "ArrayExpression") return nodeArray(node.elements).length <= 1_000;
     if (node?.type === "Identifier") return bindings.get(identifierName(node) ?? "")?.boundedArray === true;
     if (node?.type === "ConditionalExpression") return boundedArrayExpression(childNode(node.consequent)) && boundedArrayExpression(childNode(node.alternate));
     if (node?.type === "LogicalExpression") return boundedArrayExpression(childNode(node.left)) && boundedArrayExpression(childNode(node.right));
@@ -642,6 +645,25 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
     const args = nodeArray(node.arguments);
     return args.length === 2 && literalValue(args[0]) === 0 && typeof literalValue(args[1]) === "number"
       && (literalValue(args[1]) as number) >= 0 && (literalValue(args[1]) as number) <= 1000;
+  };
+  const arrayMaxLength = (node: AstNode | undefined): number | undefined => {
+    if (node?.type === "ArrayExpression") return nodeArray(node.elements).length <= 1_000 ? nodeArray(node.elements).length : undefined;
+    if (node?.type === "Identifier") return bindings.get(identifierName(node) ?? "")?.maxArrayLength;
+    if (node?.type === "ConditionalExpression" || node?.type === "LogicalExpression") {
+      const candidates = node.type === "ConditionalExpression"
+        ? [childNode(node.consequent), childNode(node.alternate)] : [childNode(node.left), childNode(node.right)];
+      const lengths = candidates.map(arrayMaxLength);
+      return lengths.every((length): length is number => length !== undefined) ? Math.max(...lengths) : undefined;
+    }
+    if (node?.type !== "CallExpression") return undefined;
+    const member = memberParts(childNode(node.callee));
+    if (member?.property === "filter") return arrayMaxLength(member.object);
+    if (member?.property !== "slice") return undefined;
+    const args = nodeArray(node.arguments);
+    const limit = literalValue(args[1]);
+    if (args.length !== 2 || literalValue(args[0]) !== 0 || typeof limit !== "number" || !Number.isInteger(limit) || limit < 0 || limit > 1_000) return undefined;
+    const receiverLength = arrayMaxLength(member.object);
+    return receiverLength === undefined ? limit : Math.min(receiverLength, limit);
   };
 
   const arrayIdentityRoots = (node: AstNode | undefined): ReadonlySet<string> | undefined => {
@@ -665,6 +687,26 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
     if (node.type === "ArrayExpression") return new Set();
     if (node.type === "CallExpression" && expressionKind(node) === "array") return new Set();
     return undefined;
+  };
+  const capacityRootsForExpression = (node: AstNode | undefined): ReadonlySet<string> | undefined => {
+    if (node === undefined) return undefined;
+    if (node.type === "Identifier") return bindings.get(identifierName(node) ?? "")?.capacityRoots;
+    if (node.type === "ConditionalExpression" || node.type === "LogicalExpression") {
+      const candidates = node.type === "ConditionalExpression"
+        ? [childNode(node.consequent), childNode(node.alternate)] : [childNode(node.left), childNode(node.right)];
+      const roots = new Set<string>();
+      for (const candidate of candidates) {
+        const candidateRoots = capacityRootsForExpression(candidate);
+        if (candidateRoots === undefined) return undefined;
+        candidateRoots.forEach((root) => roots.add(root));
+      }
+      return roots;
+    }
+    if (node.type === "CallExpression") {
+      const member = memberParts(childNode(node.callee));
+      if (member?.property === "filter" || member?.property === "slice") return capacityRootsForExpression(member.object);
+    }
+    return new Set<string>();
   };
 
   const abstractJson = (node: AstNode): AbstractValue | undefined => {
@@ -869,9 +911,14 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
         const init = childNode(declaration.init);
         binding.kind = expressionKind(init);
         binding.boundedArray = boundedArrayExpression(init);
+        const initialMaxArrayLength = arrayMaxLength(init);
+        if (initialMaxArrayLength === undefined) delete binding.maxArrayLength;
+        else binding.maxArrayLength = initialMaxArrayLength;
         if (binding.kind === "array") {
           const roots = arrayIdentityRoots(init);
           binding.aliasRoots = roots === undefined || roots.size === 0 ? new Set([name]) : new Set(roots);
+          const capacityRoots = capacityRootsForExpression(init);
+          binding.capacityRoots = capacityRoots === undefined || capacityRoots.size === 0 ? new Set([name]) : new Set(capacityRoots);
         }
         if (init !== undefined) {
           const abstract = abstractJson(init);
@@ -1023,13 +1070,17 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
       }
       if (member.property === "push") {
         if (nodeArray(node.arguments).length !== 1) fail("CUSTOM_SCRIPT_FORBIDDEN", "push requires one value");
-        if (repeatedFunctions.has(currentFunction)) fail("CUSTOM_SCRIPT_FORBIDDEN", "filter callbacks cannot mutate arrays");
+        if (activeLoops.length > 0 || repeatedFunctions.has(currentFunction)) fail("CUSTOM_SCRIPT_FORBIDDEN", "push cannot execute in a loop or repeated callback");
         const receiver = identifierName(member.object);
         if (receiver !== undefined && activeLoops.some((loop) => loop.iteratedRoots !== undefined && mayAlias(receiver, loop.iteratedRoots))) {
           fail("CUSTOM_SCRIPT_FORBIDDEN", `cannot mutate an iterated array: ${receiver}`);
         }
-        if (receiver !== undefined) recordMutation(receiver);
         const receiverBinding = receiver === undefined ? undefined : bindings.get(receiver);
+        if (receiverBinding?.boundedArray !== true || receiverBinding.maxArrayLength === undefined || receiverBinding.maxArrayLength >= 1_000) {
+          fail("CUSTOM_SCRIPT_FORBIDDEN", "push exceeds or lacks a proven array capacity");
+        }
+        pushSites.push({ owner: currentFunction, roots: new Set(receiverBinding.capacityRoots ?? [receiver!]) });
+        recordMutation(receiver!);
         if (receiverBinding?.abstractValue?.kind === "record-list" && snapshot.context !== undefined) {
           const pushed = abstractJson(nodeArray(node.arguments)[0]!);
           if (pushed?.kind === "exact") {
@@ -1071,6 +1122,11 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
           const aliases = binding.aliasRoots ?? new Set<string>();
           (assignedRoots.size === 0 ? new Set([name]) : assignedRoots).forEach((root) => aliases.add(root));
           binding.aliasRoots = aliases;
+          const assignedMaxArrayLength = arrayMaxLength(right);
+          if (assignedMaxArrayLength === undefined) delete binding.maxArrayLength;
+          else binding.maxArrayLength = assignedMaxArrayLength;
+          const capacityRoots = capacityRootsForExpression(right);
+          binding.capacityRoots = capacityRoots === undefined || capacityRoots.size === 0 ? new Set([name]) : new Set(capacityRoots);
         }
         const assigned = abstractJson(right);
         if (conditionalDepth > 0 && binding.abstractValue === undefined) mergeAbstractValue(binding, undefined);
@@ -1331,6 +1387,20 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
       && (functionMutations.get(name)?.size ?? 0) === 0;
     if (!pureRepeatedCallback) fail("CUSTOM_SCRIPT_FORBIDDEN", `function execution count is not statically single: ${name}`);
   }
+  const pushesByRoot = new Map<string, number>();
+  for (const site of pushSites) {
+    const count = functionExecutionCounts.get(site.owner) ?? 0;
+    if (count !== 1) fail("CUSTOM_SCRIPT_FORBIDDEN", `push owner execution count is not statically one: ${site.owner}`);
+    for (const root of site.roots) pushesByRoot.set(root, (pushesByRoot.get(root) ?? 0) + 1);
+  }
+  for (const [root, pushes] of pushesByRoot) {
+    let initialMax: number | undefined;
+    for (const binding of bindings.values()) {
+      if (binding.capacityRoots?.has(root) !== true || binding.maxArrayLength === undefined) continue;
+      initialMax = Math.max(initialMax ?? 0, binding.maxArrayLength);
+    }
+    if (initialMax === undefined || initialMax + pushes > 1_000) fail("CUSTOM_SCRIPT_FORBIDDEN", `push capacity exceeds 1000 for ${root}`);
+  }
   const outputWriteEffects = new Map<string, SemanticEffect[]>();
   const orderedEffects = [...semanticEffects.entries()]
     .filter(([name]) => reachableFunctions.has(name))
@@ -1451,7 +1521,8 @@ function hasLiteralUpperBound(node: AstNode, counter: string): boolean {
   if (node.type !== "BinaryExpression" || (node.operator !== "<" && node.operator !== "<=")) return false;
   if (identifierName(childNode(node.left)) !== counter) return false;
   const bound = literalValue(childNode(node.right));
-  return typeof bound === "number" && Number.isInteger(bound) && bound >= 0 && bound <= 1000;
+  return typeof bound === "number" && Number.isInteger(bound) && bound >= 0
+    && (node.operator === "<" ? bound <= 1000 : bound < 1000);
 }
 
 function semanticApiArity(api: string): readonly [number, number] {
@@ -1478,7 +1549,7 @@ function isIdentifierReference(node: AstNode, parent?: AstNode): boolean {
 
 function safeArrayIndex(node: AstNode | undefined, declared: ReadonlyMap<string, { readonly mutable: boolean }>): boolean {
   const literal = literalValue(node);
-  if (typeof literal === "number" && Number.isInteger(literal) && literal >= 0 && literal <= 1000) return true;
+  if (typeof literal === "number" && Number.isInteger(literal) && literal >= 0 && literal < 1000) return true;
   const name = identifierName(node);
   return name !== undefined && declared.get(name)?.mutable === true;
 }

@@ -262,12 +262,32 @@ describe("constrained custom script validation", () => {
       .toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*bounded loop/i);
     expect(() => validate('for (let index = 0; index < 1001; index += 1) {}'))
       .toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*bounded loop/i);
+    expect(() => validate('for (let index = 0; index < 1000; index += 1) {}')).not.toThrow();
+    expect(() => validate('for (let index = 0; index <= 999; index += 1) {}')).not.toThrow();
+    expect(() => validate('for (let index = 0; index <= 1000; index += 1) {}'))
+      .toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*bounded loop/i);
     expect(() => validate('const records = $data.get("records"); for (const record of records) {}', {
       inputs: [port("records", "mock-data")],
     })).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*for-of/i);
     expect(() => validate('const records = $data.get("records").slice(0, 100); for (const record of records) {}', {
       inputs: [port("records", "mock-data")],
     })).not.toThrow();
+  });
+
+  it("tracks top-level push capacity and rejects repeated or overflowing growth", () => {
+    expect(() => validate("const values = [1]; values.push(2); values.push(3); const selected = values.filter((value) => value > 0);"))
+      .not.toThrow();
+    expect(() => validate(`const values = [${Array.from({ length: 999 }, () => "1").join(",")}]; values.push(1); values.push(1);`))
+      .toThrow(/CUSTOM_SCRIPT_(?:FORBIDDEN|LIMIT).*push|CUSTOM_SCRIPT_(?:FORBIDDEN|LIMIT).*capacity/i);
+    expect(() => validate(`const values = [${Array.from({ length: 999 }, () => "1").join(",")}]; const alias = values; alias.push(1); values.push(1);`))
+      .toThrow(/CUSTOM_SCRIPT_(?:FORBIDDEN|LIMIT).*push|CUSTOM_SCRIPT_(?:FORBIDDEN|LIMIT).*capacity/i);
+    expect(() => validate(`const values = [${Array.from({ length: 999 }, () => "1").join(",")}]; values.push(1); const copy = values.slice(0, 1000); copy.push(1);`))
+      .toThrow(/CUSTOM_SCRIPT_(?:FORBIDDEN|LIMIT).*push|CUSTOM_SCRIPT_(?:FORBIDDEN|LIMIT).*capacity/i);
+    expect(() => validate("const values = [1]; for (let index = 0; index < 2; index += 1) { values.push(index); }"))
+      .toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*push/i);
+    expect(() => validate("const values = [1]; function add() { values.push(2); } add();")).not.toThrow();
+    expect(() => validate("const values = [1]; function add() { values.push(2); } add(); add();"))
+      .toThrow(/CUSTOM_SCRIPT_FORBIDDEN/);
   });
 
   it("rejects loop-counter mutation and mutation or aliasing of an iterated array", () => {
