@@ -4,11 +4,15 @@ import {
   type UIImplementationSpecV2,
 } from "@kf/contracts";
 import { describe, expect, it } from "vitest";
+import { beforeAll } from "vitest";
+import { compileClientProject } from "../compile/client-compiler.js";
 import { deriveGuid } from "../compile/guid-factory.js";
+import { inspectClientProject, type InspectResult } from "../inspect/client-inspector.js";
 import {
-  RuntimeCorrelationError,
   attachRuntimeCorrelation,
-  type VerifiedExistingRuntimeCorrelation,
+  verifyExistingRuntimeCorrelation,
+  type ExistingRuntimeCorrelationDisposition,
+  type VerifiedExistingRuntimeCorrelationHandle,
 } from "./runtime-correlation.js";
 
 const theme = {
@@ -51,6 +55,23 @@ function correlationMaps(result: UIImplementationSpecV2) {
 }
 
 describe("attachRuntimeCorrelation", () => {
+  let realInspection: InspectResult;
+  let uploadedPageGuid: string;
+  beforeAll(async () => {
+    const workspace = await compileClientProject({
+      schema: "kf-client-project-ir/v1", id: "existing-project", name: "Existing", version: "1.0.0.1",
+      pages: [{ id: "existing-page", name: "Page1", width: 1280, height: 720, controls: [
+        { id: "Button1", type: "button", x: 10, y: 10, width: 90, height: 40, text: "Existing" },
+      ] }], variables: [], scripts: [],
+    }, { seed: "uploaded-workspace" });
+    realInspection = await inspectClientProject(workspace.path);
+    uploadedPageGuid = Object.keys(realInspection.index.pages)[0]!;
+  });
+
+  function verified(correlations: ExistingRuntimeCorrelationDisposition): VerifiedExistingRuntimeCorrelationHandle {
+    return verifyExistingRuntimeCorrelation({ inspection: realInspection, correlations });
+  }
+
   it("attaches a complete immutable correlation without mutating its input", () => {
     const source = implementation();
     const before = structuredClone(source);
@@ -92,58 +113,115 @@ describe("attachRuntimeCorrelation", () => {
   it("reuses uploaded native identities and valid compiler-derived identities", () => {
     const derived = attachRuntimeCorrelation({ workspaceId: "workspace-1", implementation: implementation() });
     const maps = correlationMaps(derived);
-    const existing: VerifiedExistingRuntimeCorrelation = {
+    const existing = verified({
       controls: [
-        { source: "uploaded-existing", semanticControlId: "home-root", instanceName: "UploadedLayout9" },
+        { source: "uploaded-existing", semanticControlId: "home-root", instanceName: "Button1" },
         { source: "workspace-derived", semanticControlId: "open-detail", instanceName: maps.controls["open-detail"]! },
+        { source: "workspace-derived", semanticControlId: "detail-root", instanceName: maps.controls["detail-root"]! },
       ],
       pages: [
-        { source: "uploaded-existing", semanticPageId: "home", pageGuid: "k11111111-2222-4333-8444-555555555555" },
+        { source: "uploaded-existing", semanticPageId: "home", pageGuid: uploadedPageGuid },
         { source: "workspace-derived", semanticPageId: "detail", pageGuid: maps.pages["detail"]! },
       ],
-    };
+    });
     const result = attachRuntimeCorrelation({ workspaceId: "workspace-1", implementation: implementation(), verifiedExisting: existing });
     const correlated = correlationMaps(result);
-    expect(correlated.controls["home-root"]).toBe("UploadedLayout9");
+    expect(correlated.controls["home-root"]).toBe("Button1");
     expect(correlated.controls["open-detail"]).toBe(maps.controls["open-detail"]);
-    expect(correlated.pages["home"]).toBe("k11111111-2222-4333-8444-555555555555");
+    expect(correlated.pages["home"]).toBe(uploadedPageGuid);
     expect(correlated.pages["detail"]).toBe(maps.pages["detail"]);
   });
 
   it("rejects forged workspace-derived values while uploaded page GUIDs may be non-derived", () => {
     expect(() => attachRuntimeCorrelation({
       workspaceId: "workspace-1", implementation: implementation(),
-      verifiedExisting: { controls: [{ source: "workspace-derived", semanticControlId: "home-root", instanceName: "Forged1" }], pages: [] },
+      verifiedExisting: verified({
+        controls: [
+          { source: "workspace-derived", semanticControlId: "home-root", instanceName: "Forged1" },
+          { source: "workspace-derived", semanticControlId: "open-detail", instanceName: mapsFor("workspace-1").controls["open-detail"]! },
+          { source: "workspace-derived", semanticControlId: "detail-root", instanceName: mapsFor("workspace-1").controls["detail-root"]! },
+        ],
+        pages: [
+          { source: "workspace-derived", semanticPageId: "home", pageGuid: mapsFor("workspace-1").pages["home"]! },
+          { source: "workspace-derived", semanticPageId: "detail", pageGuid: mapsFor("workspace-1").pages["detail"]! },
+        ],
+      }),
     })).toThrowError(/FORGED_WORKSPACE_DERIVATION.*home-root/);
     expect(() => attachRuntimeCorrelation({
       workspaceId: "workspace-1", implementation: implementation(),
-      verifiedExisting: { controls: [], pages: [{ source: "workspace-derived", semanticPageId: "home", pageGuid: "k11111111-2222-4333-8444-555555555555" }] },
+      verifiedExisting: verified({
+        controls: allDerived("workspace-1").controls,
+        pages: [
+          { source: "workspace-derived", semanticPageId: "home", pageGuid: "k11111111-2222-4333-8444-555555555555" },
+          { source: "workspace-derived", semanticPageId: "detail", pageGuid: mapsFor("workspace-1").pages["detail"]! },
+        ],
+      }),
     })).toThrowError(/FORGED_WORKSPACE_DERIVATION.*home/);
   });
 
-  it.each([
-    ["unknown", { controls: [{ source: "uploaded-existing", semanticControlId: "ghost", instanceName: "Ghost1" }], pages: [] }],
-    ["duplicate", { controls: [
-      { source: "uploaded-existing", semanticControlId: "home-root", instanceName: "One1" },
-      { source: "uploaded-existing", semanticControlId: "home-root", instanceName: "Two2" },
-    ], pages: [] }],
-    ["semantic case alias", { controls: [{ source: "uploaded-existing", semanticControlId: "HOME-ROOT", instanceName: "One1" }], pages: [] }],
-    ["runtime case alias", { controls: [
-      { source: "uploaded-existing", semanticControlId: "home-root", instanceName: "Alias1" },
-      { source: "uploaded-existing", semanticControlId: "open-detail", instanceName: "alias1" },
-    ], pages: [] }],
-    ["GUID alias", { controls: [], pages: [
-      { source: "uploaded-existing", semanticPageId: "home", pageGuid: "k11111111-2222-4333-8444-555555555555" },
-      { source: "uploaded-existing", semanticPageId: "detail", pageGuid: "k11111111-2222-4333-8444-555555555555" },
-    ] }],
-    ["invalid name", { controls: [{ source: "uploaded-existing", semanticControlId: "home-root", instanceName: "not-valid" }], pages: [] }],
-    ["invalid GUID", { controls: [], pages: [{ source: "uploaded-existing", semanticPageId: "home", pageGuid: "11111111-2222-4333-8444-555555555555" }] }],
-    ["missing field", { controls: [{ source: "uploaded-existing", semanticControlId: "home-root" }], pages: [] }],
-  ])("rejects %s existing correlation", (_label, verifiedExisting) => {
+  function mapsFor(workspaceId: string) {
+    return correlationMaps(attachRuntimeCorrelation({ workspaceId, implementation: implementation() }));
+  }
+
+  function allDerived(workspaceId: string): ExistingRuntimeCorrelationDisposition {
+    const maps = mapsFor(workspaceId);
+    return {
+      controls: Object.entries(maps.controls).map(([semanticControlId, instanceName]) => ({ source: "workspace-derived", semanticControlId, instanceName })),
+      pages: Object.entries(maps.pages).map(([semanticPageId, pageGuid]) => ({ source: "workspace-derived", semanticPageId, pageGuid })),
+    };
+  }
+
+  it("rejects plain proof declarations, untrusted inspections, and incomplete dispositions", () => {
+    const declaration = allDerived("workspace-1");
     expect(() => attachRuntimeCorrelation({
-      workspaceId: "workspace-1", implementation: implementation(),
-      verifiedExisting: verifiedExisting as VerifiedExistingRuntimeCorrelation,
-    })).toThrow(RuntimeCorrelationError);
+      workspaceId: "workspace-1", implementation: implementation(), verifiedExisting: declaration as never,
+    })).toThrowError(/INVALID_VERIFIED_HANDLE/);
+    expect(() => verifyExistingRuntimeCorrelation({ inspection: structuredClone(realInspection), correlations: declaration }))
+      .toThrowError(/UNTRUSTED_INSPECTION/);
+    const partial = verified({ controls: declaration.controls.slice(1), pages: declaration.pages });
+    expect(() => attachRuntimeCorrelation({ workspaceId: "workspace-1", implementation: implementation(), verifiedExisting: partial }))
+      .toThrowError(/MISSING_CORRELATION/);
+  });
+
+  it("rejects duplicate, invalid, aliased, and inspector-mismatched declarations", () => {
+    const duplicate = allDerived("workspace-1");
+    expect(() => verified({ ...duplicate, controls: [...duplicate.controls, { ...duplicate.controls[0]! }] }))
+      .toThrowError(/DUPLICATE_CORRELATION/);
+    expect(() => verified({ controls: [{ source: "uploaded-existing", semanticControlId: "home-root", instanceName: "Missing1" }], pages: [] }))
+      .toThrowError(/UPLOADED_ENTITY_MISMATCH/);
+    expect(() => verified({ controls: [], pages: [{ source: "uploaded-existing", semanticPageId: "home", pageGuid: "k11111111-2222-4333-8444-555555555555" }] }))
+      .toThrowError(/UPLOADED_ENTITY_MISMATCH/);
+    expect(() => verified({ controls: [{ source: "workspace-derived", semanticControlId: "home-root", instanceName: "not-valid" }], pages: [] }))
+      .toThrowError(/INVALID_INSTANCE_NAME/);
+  });
+
+  it("uses the immutable identity snapshot rather than a mutated branded inspection", () => {
+    realInspection.index.controls.fake = {
+      guid: "fake", pageGuid: uploadedPageGuid, type: "button", capabilityId: "button",
+      x: 0, y: 0, width: 1, height: 1, id: "Forged1", name: "Forged1", rawPath: "fake", unknownFields: [],
+    };
+    try {
+      expect(() => verified({ controls: [{ source: "uploaded-existing", semanticControlId: "home-root", instanceName: "Forged1" }], pages: [] }))
+        .toThrowError(/UPLOADED_ENTITY_MISMATCH/);
+    } finally {
+      delete realInspection.index.controls.fake;
+    }
+  });
+
+  it("requires the same verified proof when an uploaded or mixed correlation is attached again", () => {
+    const derived = allDerived("workspace-1");
+    const mixed = verified({
+      controls: derived.controls.map((entry) => entry.semanticControlId === "home-root"
+        ? { source: "uploaded-existing" as const, semanticControlId: entry.semanticControlId, instanceName: "Button1" }
+        : entry),
+      pages: derived.pages.map((entry) => entry.semanticPageId === "home"
+        ? { source: "uploaded-existing" as const, semanticPageId: entry.semanticPageId, pageGuid: uploadedPageGuid }
+        : entry),
+    });
+    const first = attachRuntimeCorrelation({ workspaceId: "workspace-1", implementation: implementation(), verifiedExisting: mixed });
+    expect(() => attachRuntimeCorrelation({ workspaceId: "workspace-1", implementation: first }))
+      .toThrowError(/EXISTING_CORRELATION_PROOF_REQUIRED/);
+    expect(attachRuntimeCorrelation({ workspaceId: "workspace-1", implementation: first, verifiedExisting: mixed })).toEqual(first);
   });
 
   it("rejects case-insensitive semantic aliases in the implementation", () => {
@@ -168,7 +246,38 @@ describe("attachRuntimeCorrelation", () => {
     Object.defineProperty(accessor, "verifiedExisting", { enumerable: true, get: () => ({ controls: [], pages: [] }) });
     expect(() => attachRuntimeCorrelation(accessor as never)).toThrowError(/INPUT_ACCESSOR_FORBIDDEN/);
 
-    const nonPlain = { workspaceId: "workspace-1", implementation: implementation(), verifiedExisting: new Map() };
+    const nonPlainImplementation = implementation();
+    const nonPlainControl = nonPlainImplementation.pages[0]!.compatibility === "native" ? nonPlainImplementation.pages[0]!.controls[0]! : undefined;
+    if (nonPlainControl === undefined) throw new Error("fixture drift");
+    nonPlainControl.nativeProperties = { invalid: new Map() as never };
+    const nonPlain = { workspaceId: "workspace-1", implementation: nonPlainImplementation };
     expect(() => attachRuntimeCorrelation(nonPlain as never)).toThrowError(/INPUT_NON_PLAIN_DATA/);
+  });
+
+  it("rejects proxies before invoking reflection traps and rejects shared aliases", () => {
+    let traps = 0;
+    const proxied = new Proxy({ workspaceId: "workspace-1", implementation: implementation() }, {
+      getPrototypeOf: () => { traps += 1; return Object.prototype; },
+      ownKeys: () => { traps += 1; return []; },
+      getOwnPropertyDescriptor: () => { traps += 1; return undefined; },
+    });
+    expect(() => attachRuntimeCorrelation(proxied)).toThrowError(/INPUT_PROXY_FORBIDDEN/);
+    expect(traps).toBe(0);
+
+    const correlationProxy = new Proxy(allDerived("workspace-1"), {
+      ownKeys: () => { traps += 1; return []; },
+      getPrototypeOf: () => { traps += 1; return Object.prototype; },
+    });
+    expect(() => verifyExistingRuntimeCorrelation({ inspection: realInspection, correlations: correlationProxy }))
+      .toThrowError(/INPUT_PROXY_FORBIDDEN/);
+    expect(traps).toBe(0);
+
+    const aliased = implementation();
+    const shared = { safe: true };
+    const control = aliased.pages[0]!.compatibility === "native" ? aliased.pages[0]!.controls[0]! : undefined;
+    if (control === undefined) throw new Error("fixture drift");
+    control.nativeProperties = { first: shared, second: shared };
+    expect(() => attachRuntimeCorrelation({ workspaceId: "workspace-1", implementation: aliased }))
+      .toThrowError(/INPUT_ALIAS_FORBIDDEN/);
   });
 });

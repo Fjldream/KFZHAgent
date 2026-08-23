@@ -16,7 +16,7 @@ export function stableModuleComponentId(moduleId: string, slot: string): string 
 
 function isStableSegment(value: string): boolean {
   return /^[A-Za-z][A-Za-z0-9_-]*$/.test(value)
-    && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+    && !/^k?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
 
 import { createHash } from "node:crypto";

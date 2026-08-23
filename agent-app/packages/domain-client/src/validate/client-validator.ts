@@ -132,7 +132,7 @@ function compilerMetadata(value: unknown): CompilerOwnedScriptMetadata | undefin
     || !Array.isArray(pageReferences) || !pageReferences.every((entry) => {
       const candidate = asRecord(entry); return Object.keys(candidate).sort().join("\0") === "pageGuid\0semanticId"
         && typeof candidate["semanticId"] === "string" && stableId.test(candidate["semanticId"])
-        && typeof candidate["pageGuid"] === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(candidate["pageGuid"]);
+        && typeof candidate["pageGuid"] === "string" && /^k?[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(candidate["pageGuid"]);
     }) || instanceReferences.length > 128 || pageReferences.length > 32
     || new Set(instanceReferences.map((entry) => asRecord(entry)["semanticId"])).size !== instanceReferences.length
     || new Set(pageReferences.map((entry) => asRecord(entry)["semanticId"])).size !== pageReferences.length) return undefined;
@@ -1083,7 +1083,7 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
   for (const { pageGuid } of metadata.pageReferences) {
     if (!source.includes(JSON.stringify(pageGuid))) return `compiled script does not use declared page reference "${pageGuid}"`;
   }
-  for (const pageGuid of source.match(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi) ?? []) {
+  for (const pageGuid of source.match(/(?<![A-Za-z0-9])k?[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![A-Za-z0-9])/gi) ?? []) {
     if (!declaredPages.has(pageGuid.toLowerCase())) return `compiled script uses undeclared page reference "${pageGuid}"`;
   }
   return undefined;

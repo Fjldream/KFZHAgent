@@ -203,6 +203,8 @@ describe("constrained custom script validation", () => {
     })).toThrow(/CUSTOM_SCRIPT_UNDECLARED_OUTPUT.*other-state/);
     expect(() => validate('$page.navigate("00000000-0000-4000-8000-000000000001");'))
       .toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*GUID/);
+    expect(() => validate('$page.navigate("k00000000-0000-4000-8000-000000000001");'))
+      .toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*GUID/);
   });
 
   it("rejects undeclared globals, dynamic property escapes, and reserved member paths", () => {

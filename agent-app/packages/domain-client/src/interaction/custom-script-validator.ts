@@ -366,7 +366,7 @@ function constantStringIssue(input: string): string | undefined {
   if (cssProperty.test(value) || /[{};]/.test(value)) return "css";
   if (/^(?:#|\.|\[)[A-Za-z_-]/.test(value)
     || /^(?:a|button|div|form|input|label|option|select|span|table|td|textarea|tr)(?:\s+(?:(?:a|button|div|form|input|label|option|select|span|table|td|textarea|tr)\b|[.#]|\[)|\s*[>{+~:])/i.test(value)) return "selector";
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) return "GUID";
+  if (/^k?[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) return "GUID";
   if (/^(?:Button|Input|Select|Text|Table|Layout)\d+$/i.test(value)) return "runtime instance";
   return undefined;
 }
@@ -809,7 +809,7 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
     if (target !== undefined) {
       const leak = target.composed ? constantStringIssue(target.value) : undefined;
       if (leak !== undefined) fail("CUSTOM_SCRIPT_FORBIDDEN", `${leak} is not a semantic reference`);
-      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(target.value)) {
+      if (/^k?[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(target.value)) {
         fail("CUSTOM_SCRIPT_FORBIDDEN", "GUID is not a semantic reference");
       }
       if ((api.startsWith("$page.") || api.startsWith("$overlay.")) && snapshot.context === undefined) {

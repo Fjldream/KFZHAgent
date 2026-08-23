@@ -192,6 +192,23 @@ export interface InspectResult {
   warnings: string[];
 }
 
+export interface ServerOwnedRuntimeIdentitySnapshot {
+  readonly controlNames: readonly string[];
+  readonly pageGuids: readonly string[];
+}
+
+const serverOwnedInspectResults = new WeakMap<object, ServerOwnedRuntimeIdentitySnapshot>();
+
+/** Runtime trust check used by server-only consumers of the lossless inspector result. */
+export function isServerOwnedInspectResult(value: unknown): value is InspectResult {
+  return typeof value === "object" && value !== null && serverOwnedInspectResults.has(value);
+}
+
+/** Immutable identity-only snapshot captured when inspection completed. */
+export function serverOwnedRuntimeIdentitySnapshot(value: InspectResult): ServerOwnedRuntimeIdentitySnapshot | undefined {
+  return serverOwnedInspectResults.get(value);
+}
+
 // ---------------------------------------------------------------------------
 // Known-field sets (sourced from kmui_*.js serialization + real SDB pages)
 // ---------------------------------------------------------------------------
@@ -1127,5 +1144,11 @@ export async function inspectClientProject(
     pages: pagesProvenance,
   };
 
-  return { raw, index, summary, provenance, warnings };
+  const result: InspectResult = { raw, index, summary, provenance, warnings };
+  const runtimeIdentitySnapshot: ServerOwnedRuntimeIdentitySnapshot = Object.freeze({
+    controlNames: Object.freeze(Object.values(controlsIndex).flatMap((control) => control.name === undefined ? [] : [control.name]).sort()),
+    pageGuids: Object.freeze(Object.keys(pagesIndex).sort()),
+  });
+  serverOwnedInspectResults.set(result, runtimeIdentitySnapshot);
+  return result;
 }

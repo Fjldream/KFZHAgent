@@ -12,6 +12,7 @@ import { compileScriptPlan } from "../interaction/script-compiler.js";
 import { createDefaultModuleRegistry } from "../modules/module-registry.js";
 import { applyClientPatch, deleteOperationDigest } from "../patch/client-patcher.js";
 import { inspectClientProject } from "../inspect/client-inspector.js";
+import { attachRuntimeCorrelation } from "../implementation/runtime-correlation.js";
 import { solutionModuleRegistryHash } from "../solution-compile/solution-provenance.js";
 import { validateClientProject } from "./client-validator.js";
 
@@ -229,6 +230,44 @@ describe("client validator (Task 7 brief Step 2)", () => {
     const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
     expect(report.checks.references).toBe("fail");
     expect(report.warnings.join("\n")).toMatch(/unknown compiler-owned instance reference/);
+  });
+
+  it("accepts a compiler-derived k page GUID through runtime correlation, marker metadata, source scanning, and project references", async () => {
+    const correlated = attachRuntimeCorrelation({
+      workspaceId: "validator-k-page",
+      implementation: {
+        schema: "kf-ui-implementation/v2", compatibility: "native",
+        theme: { background: "#fff", surface: "#fff", primary: "#163a5f", accent: "#e47b32", textPrimary: "#14212b", textSecondary: "#52616d", fontFamily: "Inter", spacingUnit: 8, radiusScale: { small: 4, medium: 8, large: 16 } },
+        compiledRoleStyles: {}, compiledActions: [], compiledScripts: [],
+        pages: [{ compatibility: "native", id: "home", width: 1280, height: 720, sourceBlueprintPageId: "bp-home", controls: [{
+          id: "go", role: "action", capabilityId: "button", depth: 0, zIndex: 0,
+          geometry: { x: 0, y: 0, width: 90, height: 40 }, nativeProperties: {},
+          sourceSolutionNodeId: "go", sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["hero"], eventBindings: [],
+        }] }],
+      },
+    });
+    const pageGuid = correlated.runtimeCorrelation!.pages[0]!.pageGuid;
+    expect(pageGuid).toMatch(/^k[0-9a-f-]{36}$/);
+
+    const base = await copyFixture("client-unknown-field");
+    const candidate = await applyClientPatch(base, happyPlan());
+    const page = await readPage(candidate) as PageFixture & Record<string, unknown>;
+    page.guid = pageGuid;
+    const body = `const targetPage = ${JSON.stringify(pageGuid)};`;
+    page.objects[0]!.linkMng = { linkList: [{
+      linkId: 200001, enable: true, name: "onClick",
+      script: markedScript(body, { pageReferences: [{ semanticId: "home", pageGuid }] }),
+    }] };
+    await writePage(candidate, page);
+    const managerPath = await pageManagerFile(candidate);
+    const manager = JSON.parse(await readFile(managerPath, "utf8")) as { Pages: Array<Record<string, unknown>> };
+    manager.Pages[0]!.id = pageGuid;
+    await writeFile(managerPath, JSON.stringify(manager, null, 2));
+
+    const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.references).toBe("pass");
+    expect(report.checks.businessRules).toBe("pass");
+    expect(report.warnings.join("\n")).not.toMatch(/undeclared page reference|invalid schema|unknown compiler-owned page reference/);
   });
 
   it("rejects non-canonical marker payloads and non-ASI-safe legacy boundaries", async () => {
