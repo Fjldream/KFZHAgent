@@ -147,8 +147,8 @@ describe("script program contracts", () => {
       "const state = \"input:ready\"; const status = \"status:active\"; const urn = \"urn:kingfusion:visitor1\";",
       "function chooseText(input) { if (input !== \"\") return input; return \"empty\"; } const chosen = chooseText(\"ready\");",
       "/* function fake() {} */ function/* reviewed separator */normalize(input) { return input; } const value = normalize(\"ready\");",
-      "const label = \"\\u4f60\\u597d\"; const template = `\\u{1f642}`;",
-      String.raw`const matcher = /\u0061/u;`,
+      "const label = \"你好\"; const template = `🙂`;",
+      "const matcher = /你好🙂/u;",
     ];
     validSources.forEach((source) => expect(ScriptPlanSchema.safeParse({ ...sourcePlan.scripts[0], source }).success, source).toBe(true));
 
@@ -177,6 +177,11 @@ describe("script program contracts", () => {
       String.raw`doc\u{75}ment.querySelector("main");`,
       String.raw`let count = 1; count++ / F\u0075nction('return 1');`,
       String.raw`let count = 1; count-- / doc\u0075ment.value;`,
+      String.raw`const label = "\u4f60\u597d";`,
+      "const template = `\\u{1f642}`;",
+      String.raw`const matcher = /\u0061/u;`,
+      String.raw`// \u0061 is rejected even in comments
+const label = "actual";`,
     ];
     forbiddenSources.forEach((source) => expect(ScriptPlanSchema.safeParse({ ...sourcePlan.scripts[0], source }).success, source).toBe(false));
 

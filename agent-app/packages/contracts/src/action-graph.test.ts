@@ -154,7 +154,7 @@ describe("ActionGraph contracts", () => {
     }
   });
 
-  it("rejects Unicode escapes in JavaScript identifiers without screening literal escapes", () => {
+  it("rejects Unicode escape syntax everywhere in semantic source while allowing actual Unicode", () => {
     for (const source of [
       String.raw`F\u0075nction('return 1')`,
       String.raw`new F\u0075nction('return 1')`,
@@ -164,19 +164,24 @@ describe("ActionGraph contracts", () => {
       String.raw`doc\u0075ment.querySelector("main")`,
       String.raw`$contr\u{6f}l.getValue("status-filter")`,
       String.raw`doc\u{75}ment.querySelector("main")`,
+      String.raw`const label = "\u4f60\u597d";`,
+      "const label = `\\u{1f642}`;",
+      String.raw`const matcher = /\u0061/u;`,
+      String.raw`// \u0061 is intentionally not canonical source
+const label = "actual";`,
     ]) {
       expect(semanticImplementationTextIssue(source, "semantic-js-source"), source).toBeDefined();
     }
     for (const source of [
-      String.raw`const label = "\u4f60\u597d";`,
-      "const label = `\\u{1f642}`;",
-      String.raw`const matcher = /\u0061/u;`,
+      'const label = "你好🙂";',
+      "const label = `你好🙂`;",
+      "const matcher = /你好🙂/u;",
     ]) {
       expect(semanticImplementationTextIssue(source, "semantic-js-source"), source).toBeUndefined();
     }
   });
 
-  it("distinguishes division after update operands from regex literal contexts", () => {
+  it("rejects escapes before regex/division lexing while preserving ordinary regex contexts", () => {
     for (const source of [
       String.raw`let count = 1; count++ / F\u0075nction('return 1');`,
       String.raw`let count = 1; count-- / doc\u0075ment.value;`,
@@ -195,7 +200,7 @@ describe("ActionGraph contracts", () => {
       "const patterns = [/x/];",
       'const options = { "pattern": /x/ };',
       "function matcher(value) { return /* reviewed */ /x/.test(value); }",
-      "const label = `template / F\\u0075nction text`;",
+      "const label = `template / 实际Unicode文本`;",
     ]) {
       expect(semanticImplementationTextIssue(source, "semantic-js-source"), source).toBeUndefined();
     }

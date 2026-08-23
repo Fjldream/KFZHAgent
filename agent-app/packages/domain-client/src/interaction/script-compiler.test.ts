@@ -324,7 +324,7 @@ describe("compileScriptPlan", () => {
       'const rows = [{ "extra": true }];',
       'const transformRecord = (item) => ({ 1: item, "label": item, ...rows[index] });',
       "const normalizeText = (raw) => { return String(raw).trim(); };",
-      "const matcher = /a\\/b[\\u2028]/gu;",
+      "const matcher = /a\\/b[你好]/gu;",
       "const large = 9007199254740993n;",
       "const mask = 0xFFn;",
       "const preselected = chooseText(value);",
@@ -356,7 +356,7 @@ describe("compileScriptPlan", () => {
     expect(compiled.module.source.indexOf("const chooseText")).toBeLessThan(compiled.module.source.indexOf("const preselected"));
     expect(compiled.module.source).toContain("(total++)");
     expect(compiled.module.source).toContain('normalizeText(preselected) || "empty"');
-    expect(compiled.module.source).toContain("/a\\/b[\\u2028]/gu");
+    expect(compiled.module.source).toContain("/a\\/b[你好]/gu");
     expect(compiled.module.source).toContain("9007199254740993n");
     expect(compiled.module.source).toContain("const mask = 255n;");
     const sandbox = { Input1: { Value: "ready" }, __result: undefined as unknown };
@@ -367,7 +367,7 @@ describe("compileScriptPlan", () => {
       label: "ready-1",
       chosen: "ready",
       total: 11,
-      regex: "a\\/b[\\u2028]",
+      regex: "a\\/b[你好]",
       flags: "gu",
       large: "9007199254740993",
       mask: "255",
