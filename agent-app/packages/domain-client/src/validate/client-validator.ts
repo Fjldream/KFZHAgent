@@ -246,6 +246,12 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
     if (declaredNames.has(name)) { syntaxIssue ??= `binding shadowing is forbidden: ${name}`; return; }
     declaredNames.add(name);
     currentScope.names.add(name);
+    if (name === "arguments") {
+      initializedAt.set(name, hoisted ? -1 : nodeEnd(declaration));
+      declarationOwner.set(name, currentScope.functionOwner);
+      syntaxIssue ??= "reserved runtime binding cannot be declared: arguments";
+      return;
+    }
     if (callable) { currentScope.callableNames.add(name); callableNames.add(name); }
     initializedAt.set(name, hoisted ? -1 : nodeEnd(declaration));
     declarationOwner.set(name, currentScope.functionOwner);
@@ -412,10 +418,15 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
     if (value?.["type"] === "Literal" && typeof value["value"] === "string") return value["value"];
     return undefined;
   };
+  const resolvesLocal = (scope: LexicalScope | undefined, name: string): boolean => {
+    for (let current = scope; current !== undefined; current = current.parent) if (current.names.has(name)) return true;
+    return false;
+  };
   const isEventRecordAccess = (value: Record<string, unknown> | undefined): boolean => value?.["type"] === "MemberExpression"
     && identifierName(value["object"]) === "arguments" && value["computed"] === true
     && (value["property"] as Record<string, unknown> | undefined)?.["type"] === "Literal"
     && (value["property"] as Record<string, unknown> | undefined)?.["value"] === 1
+    && !resolvesLocal(scopeByNode.get(value["object"] as object), "arguments")
     && scopeByNode.get(value)?.functionOwner === "<program>"
     && metadata.placement === "event" && instanceTypes.get(metadata.ownerInstanceName) === 31
     && metadata.kfEvent === "Cell-click" && metadata.linkId === 200006;
@@ -568,10 +579,6 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
   const exactIndexReads = new Set<string>();
   let currentFunction = "<program>";
   const functionStack: string[] = [];
-  const resolvesLocal = (scope: LexicalScope | undefined, name: string): boolean => {
-    for (let current = scope; current !== undefined; current = current.parent) if (current.names.has(name)) return true;
-    return false;
-  };
   const resolvesCallable = (scope: LexicalScope | undefined, name: string): boolean => {
     for (let current = scope; current !== undefined; current = current.parent) {
       if (current.names.has(name)) return current.callableNames.has(name);
@@ -838,8 +845,10 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
         const boundedExactIndex = exactIndex !== undefined && receiver.kind === "bounded-array" && exactIndex < receiver.maxLength;
         if (boundedExactIndex && !boundedCounter && counter !== undefined) exactIndexReads.add(counter);
         const exactField = receiver.kind === "record" && member !== undefined && receiver.fields.has(member);
-        const openField = receiver.kind === "open-record" && record["computed"] === true && property?.["type"] === "Literal"
-          && typeof property["value"] === "string" && !["__proto__", "prototype", "constructor"].includes(property["value"]);
+        const openFieldName = receiver.kind === "open-record" ? (record["computed"] === false && property?.["type"] === "Identifier"
+          && typeof property["name"] === "string" ? property["name"]
+          : record["computed"] === true && property?.["type"] === "Literal" && typeof property["value"] === "string" ? property["value"] : undefined) : undefined;
+        const openField = openFieldName !== undefined && !["__proto__", "prototype", "constructor"].includes(openFieldName);
         if (!called && !literalIndex && !boundedCounter && !boundedExactIndex
           && !(member === "length" && (receiver.kind === "bounded-array" || receiver.kind === "string")) && !exactField && !openField) {
           astIssue ??= `local member exactness is unproven: ${name}.${member ?? "?"}`;
@@ -898,12 +907,141 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
       astIssue ??= `exact integer index is mutated in the reachable call graph: ${name}`;
     }
   }
+  interface ExecutionCallSite {
+    readonly caller: string;
+    readonly callee: string;
+    readonly conditional: boolean;
+    readonly conditionalPath: readonly string[];
+    readonly repeated: boolean;
+  }
+  const executionCallSites: ExecutionCallSite[] = [];
+  const astRecord = (value: unknown): Record<string, unknown> | undefined => typeof value === "object" && value !== null
+    && typeof (value as Record<string, unknown>)["type"] === "string" ? value as Record<string, unknown> : undefined;
+  const visitExecution = (
+    node: Record<string, unknown>, owner: string, conditionalPath: readonly string[], repeated: boolean,
+  ): void => {
+    const type = String(node["type"]);
+    const start = typeof node["start"] === "number" ? node["start"] : -1;
+    if (type === "FunctionDeclaration" || type === "ArrowFunctionExpression" || type === "FunctionExpression") {
+      const functionOwner = identifierName(node["id"])
+        ?? `<anonymous:${String(node["start"])}>`;
+      const body = astRecord(node["body"]);
+      if (body !== undefined) visitExecution(body, functionOwner, [], false);
+      return;
+    }
+    if (type === "VariableDeclarator") {
+      const init = astRecord(node["init"]);
+      if (init?.["type"] === "ArrowFunctionExpression") {
+        const functionOwner = identifierName(node["id"]) ?? `<anonymous:${String(init["start"])}>`;
+        const body = astRecord(init["body"]);
+        if (body !== undefined) visitExecution(body, functionOwner, [], false);
+        return;
+      }
+    }
+    if (type === "IfStatement" || type === "ConditionalExpression") {
+      const test = astRecord(node["test"]);
+      if (test !== undefined) visitExecution(test, owner, conditionalPath, repeated);
+      const consequent = astRecord(node["consequent"]);
+      if (consequent !== undefined) visitExecution(consequent, owner, [...conditionalPath, `${start}:then`], repeated);
+      const alternate = astRecord(node["alternate"]);
+      if (alternate !== undefined) visitExecution(alternate, owner, [...conditionalPath, `${start}:else`], repeated);
+      return;
+    }
+    if (type === "LogicalExpression") {
+      const left = astRecord(node["left"]);
+      if (left !== undefined) visitExecution(left, owner, conditionalPath, repeated);
+      const right = astRecord(node["right"]);
+      if (right !== undefined) visitExecution(right, owner, [...conditionalPath, `${start}:then`], repeated);
+      return;
+    }
+    if (type === "ForStatement" || type === "ForOfStatement") {
+      for (const key of ["init", "left", "right", "test", "update", "body"] as const) {
+        const child = astRecord(node[key]);
+        if (child !== undefined) visitExecution(child, owner, conditionalPath, true);
+      }
+      return;
+    }
+    if (type === "CallExpression") {
+      const callee = astRecord(node["callee"]);
+      const direct = identifierName(callee);
+      if (direct !== undefined && resolvesCallable(callee === undefined ? undefined : scopeByNode.get(callee), direct)) {
+        executionCallSites.push({ caller: owner, callee: direct, conditional: conditionalPath.length > 0, conditionalPath, repeated });
+      }
+      if (callee?.["type"] === "MemberExpression" && staticMember(callee["property"] as Record<string, unknown> | undefined) === "filter") {
+        const callback = (Array.isArray(node["arguments"]) ? node["arguments"] as unknown[] : []).map(astRecord)
+          .find((candidate) => candidate?.["type"] === "ArrowFunctionExpression");
+        if (callback !== undefined) executionCallSites.push({
+          caller: owner, callee: `<anonymous:${String(callback["start"])}>`, conditional: conditionalPath.length > 0,
+          conditionalPath, repeated: true,
+        });
+      }
+    }
+    for (const [key, value] of Object.entries(node)) {
+      if (["type", "start", "end", "loc", "range"].includes(key)) continue;
+      const child = astRecord(value);
+      if (child !== undefined) visitExecution(child, owner, conditionalPath, repeated);
+      else if (Array.isArray(value)) for (const entry of value) {
+        const item = astRecord(entry);
+        if (item !== undefined) visitExecution(item, owner, conditionalPath, repeated);
+      }
+    }
+  };
+  visitExecution(program, "<program>", [], false);
+
+  type SaturatedCount = 0 | 1 | "many";
+  const addCounts = (left: SaturatedCount, right: SaturatedCount): SaturatedCount => left === "many" || right === "many" || left + right > 1
+    ? "many" : left + right as SaturatedCount;
+  const multiplyCounts = (left: SaturatedCount, right: SaturatedCount): SaturatedCount => left === 0 || right === 0 ? 0
+    : left === "many" || right === "many" ? "many" : 1;
+  const callSitesByCaller = new Map<string, ExecutionCallSite[]>();
+  for (const site of executionCallSites) callSitesByCaller.set(site.caller, [...(callSitesByCaller.get(site.caller) ?? []), site]);
+  const localInvocations = new Map<string, Map<string, SaturatedCount>>();
+  for (const [caller, sites] of callSitesByCaller) {
+    const byCallee = new Map<string, ExecutionCallSite[]>();
+    for (const site of sites) byCallee.set(site.callee, [...(byCallee.get(site.callee) ?? []), site]);
+    const summaries = new Map<string, SaturatedCount>();
+    for (const [callee, matches] of byCallee) {
+      const unconditional = matches.filter((site) => !site.conditional);
+      const conditional = matches.filter((site) => site.conditional);
+      let conditionalCount: SaturatedCount = conditional.length === 0 ? 0 : conditional.length === 1 ? 1 : "many";
+      if (conditional.length > 0 && conditional.every((site) => site.conditionalPath.length === 1)) {
+        const segments = conditional.map((site) => site.conditionalPath[0]!);
+        const branchIds = new Set(segments.map((segment) => segment.slice(0, segment.lastIndexOf(":"))));
+        const thenCount = segments.filter((segment) => segment.endsWith(":then")).length;
+        const elseCount = segments.filter((segment) => segment.endsWith(":else")).length;
+        if (branchIds.size === 1 && thenCount > 0 && elseCount > 0) conditionalCount = Math.max(thenCount, elseCount) > 1 ? "many" : 1;
+      }
+      const directCount: SaturatedCount = unconditional.length === 0 ? 0 : unconditional.length === 1 ? 1 : "many";
+      summaries.set(callee, matches.some((site) => site.repeated) ? "many" : addCounts(directCount, conditionalCount));
+    }
+    localInvocations.set(caller, summaries);
+  }
+  const graphNodes = new Set<string>(["<program>", ...functionCalls.keys()]);
+  for (const callees of functionCalls.values()) for (const callee of callees) graphNodes.add(callee);
+  const indegrees = new Map([...graphNodes].map((name) => [name, 0]));
+  for (const callees of functionCalls.values()) for (const callee of callees) indegrees.set(callee, (indegrees.get(callee) ?? 0) + 1);
+  const ready = [...graphNodes].filter((name) => indegrees.get(name) === 0).sort((left, right) => left.localeCompare(right, "en-US"));
+  const topologicalOrder: string[] = [];
+  while (ready.length > 0) {
+    const caller = ready.shift()!;
+    topologicalOrder.push(caller);
+    for (const callee of [...(functionCalls.get(caller) ?? [])].sort((left, right) => left.localeCompare(right, "en-US"))) {
+      const next = (indegrees.get(callee) ?? 0) - 1;
+      indegrees.set(callee, next);
+      if (next === 0) { ready.push(callee); ready.sort((left, right) => left.localeCompare(right, "en-US")); }
+    }
+  }
+  if (topologicalOrder.length !== graphNodes.size) astIssue ??= "function recursion is forbidden";
+  const functionExecutionCounts = new Map<string, SaturatedCount>([["<program>", 1]]);
+  for (const caller of topologicalOrder) {
+    const callerCount = functionExecutionCounts.get(caller) ?? 0;
+    for (const [callee, localCount] of localInvocations.get(caller) ?? []) {
+      functionExecutionCounts.set(callee, addCounts(functionExecutionCounts.get(callee) ?? 0, multiplyCounts(callerCount, localCount)));
+    }
+  }
   const pushesByRoot = new Map<string, number>();
   for (const site of pushSites) {
-    const singleExecution = site.owner === "<program>" || functionCallSites.filter((call) => call.callee === site.owner).length === 1
-      && functionCallSites.some((call) => call.callee === site.owner && call.caller === "<program>")
-      && !loopCallSites.some((call) => call.callee === site.owner);
-    if (!singleExecution) { astIssue ??= `push owner execution count is not statically one: ${site.owner}`; continue; }
+    if ((functionExecutionCounts.get(site.owner) ?? 0) !== 1) { astIssue ??= `push owner execution count is not statically one: ${site.owner}`; continue; }
     for (const root of site.roots) pushesByRoot.set(root, (pushesByRoot.get(root) ?? 0) + 1);
   }
   for (const [root, pushes] of pushesByRoot) {

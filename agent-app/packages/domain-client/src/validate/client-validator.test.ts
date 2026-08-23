@@ -395,6 +395,8 @@ describe("client validator (Task 7 brief Step 2)", () => {
       `const values = [${Array.from({ length: 999 }, () => "1").join(",")}]; values.push(1); const copy = values.slice(0, 1000); copy.push(1);`,
       "const values = [1]; for (let index = 0; index < 2; index += 1) { values.push(index); }",
       "const values = [1]; function add() { values.push(2); } add(); add();",
+      "const values = [1]; function helperB() { values.push(2); } function helperA() { helperB(); } helperA(); helperA();",
+      "const values = [1]; function add() { values.push(2); } if (true) { add(); } if (true) { add(); }",
       "const value = 1; const result = Math.abs(value, value);",
       "const result = Math.max();",
       "const Math = { abs: (value) => value }; const result = Math.abs(1);",
@@ -426,6 +428,8 @@ describe("client validator (Task 7 brief Step 2)", () => {
       "const rows = [{ value: 1 }]; for (let index = 0; index < 1; index += 1) { rows[index] = { value: 2 }; }",
       "const values = [1]; values.push(2); values.push(3); const selected = values.filter((value) => value > 0);",
       "const values = [1]; function add() { values.push(2); } add();",
+      "const values = [1]; function helperB() { values.push(2); } function helperA() { helperB(); } helperA();",
+      "const values = [1]; function add() { values.push(2); } if (true) { add(); } else { add(); }",
       `const values = [${Array.from({ length: 1_000 }, () => "1").join(",")}]; for (let index = 0; index <= 999; index += 1) { const value = values[index]; }`,
     ];
     const rejected = [
@@ -490,6 +494,32 @@ describe("client validator (Task 7 brief Step 2)", () => {
     expect(report.checks.businessRules, report.warnings.join("\n")).toBe("pass");
   });
 
+  it("accepts a static dot field from a real Cell-click record and closes through Table SetData", async () => {
+    const module = compileReviewedSyntax({
+      cellClickSource: 'const record = $event.record(); const code = record.code; $control.setData("records", [{ "id": String(code) }]);',
+    });
+    const base = await copyFixture("client-unknown-field");
+    const basePage = await readPage(base);
+    basePage.objects.push({ name: "Table1", uiModelType: 31, guid: "dot-record-table", leftTopPt: { x: 0, y: 0 }, width: 20, height: 20 });
+    await writePage(base, basePage);
+    const candidate = await applyClientPatch(base, happyPlan());
+    const page = await readPage(candidate);
+    page.objects[1]!.linkMng = { linkList: [{
+      linkId: 200006, enable: true, name: "Cell-click",
+      script: markedScript(module.source, { moduleId: module.id, sourceScriptId: module.sourceScriptId, ownerInstanceName: "Table1",
+        kfEvent: "Cell-click", linkId: 200006, instanceReferences: module.instanceReferences }),
+    }] };
+    await writePage(candidate, page);
+    const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.businessRules, report.warnings.join("\n")).toBe("pass");
+  });
+
+  it("rejects semantic Cell-click record scripts that shadow the reserved runtime arguments binding", () => {
+    expect(() => compileReviewedSyntax({
+      cellClickSource: 'const arguments = [null, { "code": "forged" }]; const record = $event.record(); const code = record.code;',
+    })).toThrow();
+  });
+
   it("accepts one capacity-proven Task6 push through final project validation", async () => {
     const module = compileReviewedSyntax({ source: 'const records = [{ "id": "a" }]; records.push({ "id": "b" }); $control.setData("records", records);' });
     const base = await copyFixture("client-unknown-field");
@@ -502,6 +532,27 @@ describe("client validator (Task 7 brief Step 2)", () => {
       linkId: 200001, enable: true, name: "onClick",
       script: markedScript(module.source, { moduleId: module.id, sourceScriptId: module.sourceScriptId, instanceReferences: module.instanceReferences }),
     }] };
+    await writePage(candidate, page);
+    const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.businessRules, report.warnings.join("\n")).toBe("pass");
+  });
+
+  it("accepts a nested single-call Task6 helper push through final project validation", async () => {
+    const module = compileReviewedSyntax({ source: [
+      'const records = [{ "id": "a" }];',
+      'function helperB() { records.push({ "id": "b" }); }',
+      "function helperA() { helperB(); }",
+      "helperA();",
+      '$control.setData("records", records);',
+    ].join("\n") });
+    const base = await copyFixture("client-unknown-field");
+    const basePage = await readPage(base);
+    basePage.objects.push({ name: "Table1", uiModelType: 31, guid: "nested-push-table", leftTopPt: { x: 0, y: 0 }, width: 20, height: 20 });
+    await writePage(base, basePage);
+    const candidate = await applyClientPatch(base, happyPlan());
+    const page = await readPage(candidate);
+    page.objects[0]!.linkMng = { linkList: [{ linkId: 200001, enable: true, name: "onClick",
+      script: markedScript(module.source, { moduleId: module.id, sourceScriptId: module.sourceScriptId, instanceReferences: module.instanceReferences }) }] };
     await writePage(candidate, page);
     const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
     expect(report.checks.businessRules, report.warnings.join("\n")).toBe("pass");
@@ -545,10 +596,13 @@ describe("client validator (Task 7 brief Step 2)", () => {
     const tablePage = await readPage(tableCandidate);
     for (const eventBody of [
       "const record = arguments[1]; const selected = record.items.filter((item) => true);",
-      "const record = arguments[1]; const secret = record.secret;",
       "const record = arguments[1]; const made = { ...record };",
       'const record = arguments[1]; record["code"] = "changed";',
+      'const record = arguments[1]; const field = "code"; const code = record[field];',
+      "const record = arguments[1]; const code = record.constructor;",
+      "const record = arguments[1]; record.trim();",
       'function fake() { const record = arguments[1]; const code = record["code"]; } fake();',
+      'const arguments = [null, { "code": "forged" }]; const record = arguments[1]; const code = record.code;',
     ]) {
       tablePage.objects[1]!.linkMng = { linkList: [{
         linkId: 200006, enable: true, name: "Cell-click",

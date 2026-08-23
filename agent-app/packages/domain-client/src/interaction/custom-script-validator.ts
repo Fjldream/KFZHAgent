@@ -170,6 +170,7 @@ const forbiddenIdentifiers = new Set([
   "document", "window", "globalThis", "navigator", "location", "localStorage", "sessionStorage",
   "fetch", "XMLHttpRequest", "WebSocket", "eval", "Function", "require", "process", "Proxy", "Reflect",
   "Object", "RegExp", "setTimeout", "setInterval", "queueMicrotask",
+  "arguments",
 ]);
 const allowedNodeTypes = new Set([
   "Program", "VariableDeclaration", "VariableDeclarator", "Identifier", "Literal", "ExpressionStatement",

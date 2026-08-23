@@ -213,6 +213,10 @@ describe("constrained custom script validation", () => {
       .toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*constructor/);
     expect(() => validate("const clock = Date();")).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*Date/);
     expect(() => validate('const parsed = Date.parse("2026-01-01");')).not.toThrow();
+    expect(() => validate("const arguments = [null, { code: 'forged' }]; const record = $event.record();"))
+      .toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*bindings require unique safe identifiers/);
+    expect(() => validate("function read(arguments) { return arguments[1]; } read([]);"))
+      .toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*bindings require unique safe identifiers/);
   });
 
   it("enforces semantic API arity and plan-declared non-port references", () => {
