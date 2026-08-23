@@ -186,4 +186,101 @@ describe("compileInteractions", () => {
     adapted.implementation = { ...adapted.implementation, compatibility: "adapted-v1" };
     expect(() => compileInteractions(adapted)).toThrow(/INTERACTION_INPUT_INVALID/);
   });
+
+  it("recomputes both authoritative provenance hashes before every tier", () => {
+    for (const kind of ["native", "script"] as const) {
+      const planHash = fixture(kind);
+      planHash.implementation.sourceSolutionPlanHash = "c".repeat(64);
+      expect(() => compileInteractions(planHash)).toThrow(/INTERACTION_INPUT_PROVENANCE_MISMATCH.*solution-plan/);
+
+      const registryHash = fixture(kind);
+      registryHash.implementation.sourceModuleRegistryHash = "d".repeat(64);
+      expect(() => compileInteractions(registryHash)).toThrow(/INTERACTION_INPUT_PROVENANCE_MISMATCH.*module-registry/);
+    }
+  });
+
+  it("preserves normalized topology within one tier instead of sorting artifact ids", () => {
+    const input = fixture("script");
+    input.plan.scripts.push({
+      id: "read-filter", purpose: "读取筛选", kind: "custom", programVersion: "semantic-js/v1",
+      source: 'const value = $control.getValue("filter");',
+      inputs: [{ name: "filter-input", description: "筛选输入", refKind: "control", refId: "filter" }], outputs: [],
+    });
+    input.plan.actions = [
+      { id: "z-read-first", kind: "run-script", scriptId: "read-filter", afterActionIds: ["a-load-second"] },
+      { id: "a-load-second", kind: "run-script", scriptId: "load-records", afterActionIds: [] },
+    ];
+    const root = input.plan.pages[0]!.root;
+    if (root.kind !== "layout" || root.children[0]!.kind !== "control") throw new Error("control fixture required");
+    root.children[0]!.eventBindings[0]!.actionIds = ["z-read-first", "a-load-second"];
+    input.implementation.sourceSolutionPlanHash = canonicalServerHash(input.plan);
+    const result = compileInteractions(input);
+    const page = result.implementation.pages[0]!;
+    if (page.compatibility !== "native") throw new Error("native fixture required");
+    const binding = page.controls.find((control) => control.id === "go")!.eventBindings[0]!;
+    const sourceIds = binding.scriptModuleIds.map((id) => result.implementation.compiledScripts.find((module) => module.id === id)!.sourceScriptId);
+    expect(sourceIds).toEqual(["read-filter", "load-records"]);
+    expect(result.diagnostics.errors).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "INTERACTION_CLOSURE_MISSING", nodeId: "z-read-first" }),
+    ]));
+  });
+
+  it("fails closed when a trigger graph has no visible terminal or a conditional-only result", () => {
+    const readOnly = fixture("script");
+    const script = readOnly.plan.scripts[0]!;
+    if (script.kind !== "custom") throw new Error("custom fixture required");
+    script.source = 'const value = $control.getValue("filter");';
+    script.inputs = [{ name: "filter-input", description: "筛选输入", refKind: "control", refId: "filter" }];
+    script.outputs = [];
+    readOnly.implementation.sourceSolutionPlanHash = canonicalServerHash(readOnly.plan);
+    expect(compileInteractions(readOnly).diagnostics.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "INTERACTION_CLOSURE_MISSING", nodeId: "run-load" }),
+    ]));
+
+    const conditional = fixture("script");
+    const conditionalScript = conditional.plan.scripts[0]!;
+    if (conditionalScript.kind !== "custom") throw new Error("custom fixture required");
+    conditionalScript.source = 'const value = $control.getValue("filter");\nif (value === "open") { $control.setData("records", []); }';
+    conditionalScript.inputs = [{ name: "filter-input", description: "筛选输入", refKind: "control", refId: "filter" }];
+    conditional.implementation.sourceSolutionPlanHash = canonicalServerHash(conditional.plan);
+    expect(compileInteractions(conditional).diagnostics.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "INTERACTION_CONDITIONAL_CLOSURE_UNPROVEN", nodeId: "run-load" }),
+    ]));
+  });
+
+  it("rejects an afterAction edge that crosses two declared triggers", () => {
+    const input = fixture("script");
+    input.plan.actions = [
+      { id: "from-button", kind: "run-script", scriptId: "load-records", afterActionIds: ["from-table"] },
+      { id: "from-table", kind: "navigate-page", targetPageId: "detail", afterActionIds: [] },
+    ];
+    const root = input.plan.pages[0]!.root;
+    if (root.kind !== "layout" || root.children[0]!.kind !== "control" || root.children[2]!.kind !== "control") throw new Error("control fixture required");
+    root.children[0]!.eventBindings = [{ semanticEvent: "click", actionIds: ["from-button"] }];
+    root.children[2]!.eventBindings = [{ semanticEvent: "row-click", actionIds: ["from-table"] }];
+    input.implementation.sourceSolutionPlanHash = canonicalServerHash(input.plan);
+    expect(() => compileInteractions(input)).toThrow(/INTERACTION_CROSS_TRIGGER_EDGE.*from-button.*from-table/);
+  });
+
+  it("blocks a same-event cross-tier order that the binding contract cannot represent", () => {
+    const input = fixture("script");
+    input.plan.actions = [
+      { id: "z-native-first", kind: "navigate-page", targetPageId: "detail", afterActionIds: ["a-script-second"] },
+      { id: "a-script-second", kind: "run-script", scriptId: "load-records", afterActionIds: [] },
+    ];
+    const root = input.plan.pages[0]!.root;
+    if (root.kind !== "layout" || root.children[0]!.kind !== "control") throw new Error("control fixture required");
+    root.children[0]!.eventBindings[0]!.actionIds = ["z-native-first", "a-script-second"];
+    input.implementation.sourceSolutionPlanHash = canonicalServerHash(input.plan);
+    const result = compileInteractions(input);
+    expect(result.diagnostics.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "INTERACTION_BINDING_TIER_ORDER_UNREPRESENTABLE", nodeId: "go" }),
+    ]));
+    expect(result.diagnostics.requests).toEqual(expect.arrayContaining([
+      expect.objectContaining({ actionId: "z-native-first", status: "blocked" }),
+      expect.objectContaining({ actionId: "a-script-second", status: "blocked" }),
+    ]));
+    expect(result.implementation.compiledActions).toEqual([]);
+    expect(result.implementation.compiledScripts).toEqual([]);
+  });
 });

@@ -213,6 +213,61 @@ describe("client validator (Task 7 brief Step 2)", () => {
     expect(report.checks.businessRules).toBe("fail");
     expect(report.warnings.join("\n")).toMatch(/unsupported runtime member/);
   });
+
+  it("rejects compiler-owned payloads with escaped globals, dynamic calls, or unbounded work", async () => {
+    const attacks = [
+      "\\u0070rocess.exit();",
+      "const target = String; target(1);",
+      "const invoke = 1; { const invoke = () => 1; } invoke();",
+      "while (true) {}",
+      "for (let i = 0; i < 10; i--) {}",
+      "for (let i = 0; i < 10; i += 1) { i = 0; }",
+    ];
+    for (const body of attacks) {
+      const base = await copyFixture("client-unknown-field");
+      const candidate = await applyClientPatch(base, happyPlan());
+      const page = await readPage(candidate);
+      page.objects[0]!.linkMng = { linkList: [{ linkId: 200001, enable: true, name: "onClick", script: markedScript(body) }] };
+      await writePage(candidate, page);
+      const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+      expect(report.checks.businessRules, body).toBe("fail");
+      expect(report.warnings.join("\n"), body).toMatch(/compiled script.*(?:global|call|loop|syntax)/i);
+    }
+  });
+
+  it("checks configureData without linkMng and rejects hidden malformed markers", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const basePage = await readPage(base);
+    basePage.objects.push({ name: "Table1", uiModelType: 31, guid: "table-guid-config", leftTopPt: { x: 0, y: 0 }, width: 20, height: 20 });
+    await writePage(base, basePage);
+    const candidate = await applyClientPatch(base, happyPlan());
+    const page = await readPage(candidate);
+    page.objects[1]!.configureData = markedScript("Table1.UnknownMethod();", {
+      ownerInstanceName: "Table1", placement: "configure-data", kfEvent: null, linkId: null, phase: null,
+      instanceReferences: [{ semanticId: "records", instanceName: "Table1" }],
+    });
+    delete page.objects[1]!.linkMng;
+    page.objects[0]!.linkMng = { linkList: [{ linkId: 200001, enable: true, name: "onClick", script: `legacy();\n// kf-compiled-event/v1 not-base64\nButton1.Value;` }] };
+    await writePage(candidate, page);
+    const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.businessRules).toBe("fail");
+    expect(report.warnings.join("\n")).toMatch(/configureData|marker/);
+  });
+
+  it("requires enabled canonical compiler bindings and unique module identities", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const candidate = await applyClientPatch(base, happyPlan());
+    const page = await readPage(candidate);
+    const first = markedScript("Button1.Value;");
+    const second = markedScript("Button1.Value;");
+    page.objects[0]!.linkMng = { linkList: [
+      { linkId: 200001, enable: false, name: "onClick", script: `${first}\n;\n${second}` },
+    ] };
+    await writePage(candidate, page);
+    const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.businessRules).toBe("fail");
+    expect(report.warnings.join("\n")).toMatch(/enable|duplicate compiled module/);
+  });
   it("accepts disabled native image Load/Error event slots as inert metadata", async () => {
     const base = await copyFixture("client-unknown-field");
     const page = await readPage(base);

@@ -114,18 +114,28 @@ function compilerMetadata(value: unknown): CompilerOwnedScriptMetadata | undefin
   if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) return undefined;
   const instanceReferences = record["instanceReferences"];
   const pageReferences = record["pageReferences"];
-  if (typeof record["moduleId"] !== "string" || typeof record["sourceScriptId"] !== "string"
+  const stableId = /^[A-Za-z][A-Za-z0-9_-]{0,99}$/;
+  const instanceName = /^[A-Za-z_$][A-Za-z0-9_$]*[0-9]$/;
+  if (typeof record["moduleId"] !== "string" || !/^kf\$script:[A-Za-z0-9][A-Za-z0-9_-]{0,89}$/.test(record["moduleId"])
+    || typeof record["sourceScriptId"] !== "string" || !stableId.test(record["sourceScriptId"])
     || typeof record["bodySha256"] !== "string" || !Number.isInteger(record["bodyByteLength"]) || Number(record["bodyByteLength"]) < 1
-    || typeof record["ownerInstanceName"] !== "string" || !["event", "configure-data"].includes(String(record["placement"]))
+    || Number(record["bodyByteLength"]) > 32_000 || typeof record["ownerInstanceName"] !== "string" || !instanceName.test(record["ownerInstanceName"])
+    || !["event", "configure-data"].includes(String(record["placement"]))
     || (record["kfEvent"] !== null && typeof record["kfEvent"] !== "string")
     || (record["linkId"] !== null && !Number.isInteger(record["linkId"]))
     || (record["phase"] !== null && record["phase"] !== "event" && record["phase"] !== "after-event")
     || !Array.isArray(instanceReferences) || !instanceReferences.every((entry) => {
-      const candidate = asRecord(entry); return Object.keys(candidate).sort().join("\0") === "instanceName\0semanticId" && typeof candidate["semanticId"] === "string" && typeof candidate["instanceName"] === "string";
+      const candidate = asRecord(entry); return Object.keys(candidate).sort().join("\0") === "instanceName\0semanticId"
+        && typeof candidate["semanticId"] === "string" && stableId.test(candidate["semanticId"])
+        && typeof candidate["instanceName"] === "string" && instanceName.test(candidate["instanceName"]);
     })
     || !Array.isArray(pageReferences) || !pageReferences.every((entry) => {
-      const candidate = asRecord(entry); return Object.keys(candidate).sort().join("\0") === "pageGuid\0semanticId" && typeof candidate["semanticId"] === "string" && typeof candidate["pageGuid"] === "string";
-    })) return undefined;
+      const candidate = asRecord(entry); return Object.keys(candidate).sort().join("\0") === "pageGuid\0semanticId"
+        && typeof candidate["semanticId"] === "string" && stableId.test(candidate["semanticId"])
+        && typeof candidate["pageGuid"] === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(candidate["pageGuid"]);
+    }) || instanceReferences.length > 128 || pageReferences.length > 32
+    || new Set(instanceReferences.map((entry) => asRecord(entry)["semanticId"])).size !== instanceReferences.length
+    || new Set(pageReferences.map((entry) => asRecord(entry)["semanticId"])).size !== pageReferences.length) return undefined;
   return record as unknown as CompilerOwnedScriptMetadata;
 }
 
@@ -200,24 +210,38 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
   if (/\b(?:window|document|globalThis|fetch|XMLHttpRequest|WebSocket|eval|Function)\b/.test(source)) return "compiled script contains a forbidden global";
   const declaredInstances = new Set(metadata.instanceReferences.map((reference) => reference.instanceName));
   const program = parse(source, { ecmaVersion: 2022, sourceType: "script" }) as unknown as Record<string, unknown>;
-  interface LexicalScope { readonly parent?: LexicalScope; readonly names: Set<string> }
-  const rootScope: LexicalScope = { names: new Set() };
+  const allowedNodeTypes = new Set([
+    "Program", "VariableDeclaration", "VariableDeclarator", "ExpressionStatement", "ReturnStatement", "IfStatement",
+    "FunctionDeclaration", "ArrowFunctionExpression", "FunctionExpression", "BlockStatement", "EmptyStatement",
+    "Identifier", "Literal", "ArrayExpression", "ObjectExpression", "Property", "SpreadElement", "MemberExpression",
+    "CallExpression", "AssignmentExpression", "UpdateExpression", "UnaryExpression", "BinaryExpression", "LogicalExpression",
+    "ConditionalExpression", "TemplateLiteral", "TemplateElement", "ForStatement", "ForOfStatement",
+  ]);
+  interface LexicalScope { readonly parent?: LexicalScope; readonly names: Set<string>; readonly callableNames: Set<string> }
+  const rootScope: LexicalScope = { names: new Set(), callableNames: new Set() };
   const scopeByNode = new WeakMap<object, LexicalScope>();
   let currentScope = rootScope;
   const boundaryNodes = new WeakSet<object>();
+  const callableNames = new Set<string>();
+  const boundedIterables = new Set<string>();
+  const mutableNames = new Set<string>();
+  let syntaxIssue: string | undefined;
+  let unsupportedRuntimeMember: string | undefined;
   const identifierName = (value: unknown): string | undefined => {
     const record = value as Record<string, unknown> | undefined;
     return record?.["type"] === "Identifier" && typeof record["name"] === "string" ? record["name"] : undefined;
   };
   walk(program as never, {
-    enter(node) {
+    enter(node, parent) {
       const record = node as unknown as Record<string, unknown>;
       const type = record["type"];
+      if (!allowedNodeTypes.has(String(type))) syntaxIssue ??= `syntax:${String(type)}`;
       if (type === "FunctionDeclaration") {
-        const name = identifierName(record["id"]); if (name !== undefined) currentScope.names.add(name);
+        const name = identifierName(record["id"]);
+        if (name !== undefined) { currentScope.names.add(name); currentScope.callableNames.add(name); callableNames.add(name); }
       }
       if (type === "FunctionDeclaration" || type === "FunctionExpression" || type === "ArrowFunctionExpression" || type === "BlockStatement" || type === "CatchClause") {
-        currentScope = { parent: currentScope, names: new Set() };
+        currentScope = { parent: currentScope, names: new Set(), callableNames: new Set() };
         boundaryNodes.add(node);
       }
       scopeByNode.set(node, currentScope);
@@ -228,22 +252,156 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
         const params = Array.isArray(record["params"]) ? record["params"] as Array<Record<string, unknown>> : [];
         params.forEach((param) => { const name = identifierName(param); if (name !== undefined) currentScope.names.add(name); });
       }
-      if (type === "VariableDeclarator") { const name = identifierName(record["id"]); if (name !== undefined) currentScope.names.add(name); }
+      if (type === "VariableDeclarator") {
+        const name = identifierName(record["id"]);
+        if (name !== undefined) {
+          currentScope.names.add(name);
+          if ((parent as unknown as Record<string, unknown> | null)?.["kind"] === "let") mutableNames.add(name);
+          const init = record["init"] as Record<string, unknown> | undefined;
+          if (init?.["type"] === "ArrowFunctionExpression" || init?.["type"] === "FunctionExpression") {
+            callableNames.add(name);
+            currentScope.callableNames.add(name);
+          }
+          if (init?.["type"] === "ArrayExpression" && Array.isArray(init["elements"]) && init["elements"].length <= 1_000) boundedIterables.add(name);
+          if (init?.["type"] === "CallExpression") {
+            const callee = init["callee"] as Record<string, unknown> | undefined;
+            const property = callee?.["type"] === "MemberExpression" ? callee["property"] as Record<string, unknown> | undefined : undefined;
+            const args = Array.isArray(init["arguments"]) ? init["arguments"] as Array<Record<string, unknown>> : [];
+            if (property?.["name"] === "slice" && args.length >= 2 && args[1]?.["type"] === "Literal"
+              && typeof args[1]["value"] === "number" && args[1]["value"] <= 1_000) boundedIterables.add(name);
+          }
+        }
+      }
       if (type === "CatchClause") { const name = identifierName(record["param"]); if (name !== undefined) currentScope.names.add(name); }
     },
     leave(node) { if (boundaryNodes.has(node)) currentScope = currentScope.parent ?? rootScope; },
   });
   let undeclaredProjectInstance: string | undefined;
-  let unsupportedRuntimeMember: string | undefined;
+  let astIssue: string | undefined = syntaxIssue;
   const usedRuntimeRoots = new Set<string>();
+  const functionCalls = new Map<string, Set<string>>();
+  let currentFunction = "<program>";
+  const functionStack: string[] = [];
   const resolvesLocal = (scope: LexicalScope | undefined, name: string): boolean => {
     for (let current = scope; current !== undefined; current = current.parent) if (current.names.has(name)) return true;
+    return false;
+  };
+  const resolvesCallable = (scope: LexicalScope | undefined, name: string): boolean => {
+    for (let current = scope; current !== undefined; current = current.parent) {
+      if (current.names.has(name)) return current.callableNames.has(name);
+    }
     return false;
   };
   walk(program as never, {
     enter(node, parent) {
       const record = node as unknown as Record<string, unknown>;
-      if (record["type"] !== "MemberExpression") return;
+      const parentRecord = parent as unknown as Record<string, unknown> | null;
+      const type = record["type"];
+      if (type === "FunctionDeclaration" || type === "FunctionExpression" || type === "ArrowFunctionExpression") {
+        functionStack.push(currentFunction);
+        const directName = identifierName(record["id"]);
+        const parentName = parentRecord?.["type"] === "VariableDeclarator" ? identifierName(parentRecord["id"]) : undefined;
+        currentFunction = directName ?? parentName ?? `<anonymous:${functionStack.length}>`;
+      }
+      if (type === "WhileStatement" || type === "DoWhileStatement") astIssue ??= "unbounded loop syntax";
+      if (type === "ForStatement") {
+        const init = record["init"] as Record<string, unknown> | undefined;
+        const declarations = init?.["type"] === "VariableDeclaration" && Array.isArray(init["declarations"])
+          ? init["declarations"] as Array<Record<string, unknown>> : [];
+        const declaration = declarations[0];
+        const counter = declaration === undefined ? undefined : identifierName(declaration["id"]);
+        const initial = declaration?.["init"] as Record<string, unknown> | undefined;
+        const test = record["test"] as Record<string, unknown> | undefined;
+        const left = test?.["left"] as Record<string, unknown> | undefined;
+        const right = test?.["right"] as Record<string, unknown> | undefined;
+        const update = record["update"] as Record<string, unknown> | undefined;
+        const updateTarget = update?.["type"] === "UpdateExpression" ? identifierName(update["argument"])
+          : update?.["type"] === "AssignmentExpression" ? identifierName(update["left"]) : undefined;
+        const monotonic = updateTarget === counter && (update?.["type"] === "UpdateExpression" && update["operator"] === "++"
+          || update?.["type"] === "AssignmentExpression" && update["operator"] === "+="
+            && (update["right"] as Record<string, unknown> | undefined)?.["value"] === 1);
+        if (init?.["type"] !== "VariableDeclaration" || init["kind"] !== "let" || declarations.length !== 1
+          || counter === undefined || initial?.["type"] !== "Literal" || initial["value"] !== 0
+          || test?.["type"] !== "BinaryExpression" || identifierName(left) !== counter || !["<", "<="].includes(String(test["operator"]))
+          || right?.["type"] !== "Literal" || typeof right["value"] !== "number" || right["value"] > 1_000
+          || !Number.isInteger(right["value"]) || right["value"] < 0 || !monotonic) astIssue ??= "loop bound is not a monotonic unit range limited to 1000";
+        const body = record["body"];
+        if (counter !== undefined && body !== undefined && typeof body === "object") walk(body as never, {
+          enter(bodyNode) {
+            const candidate = bodyNode as unknown as Record<string, unknown>;
+            const target = candidate["type"] === "AssignmentExpression" ? identifierName(candidate["left"])
+              : candidate["type"] === "UpdateExpression" ? identifierName(candidate["argument"]) : undefined;
+            if (target === counter) astIssue ??= "loop body mutates its counter";
+          },
+        });
+      }
+      if (type === "ForOfStatement") {
+        const right = record["right"] as Record<string, unknown> | undefined;
+        const bounded = right?.["type"] === "ArrayExpression" && Array.isArray(right["elements"]) && right["elements"].length <= 1_000
+          || right?.["type"] === "Identifier" && typeof right["name"] === "string" && boundedIterables.has(right["name"]);
+        if (!bounded) astIssue ??= "for-of iterable is not statically bounded";
+        const iterable = identifierName(right);
+        const body = record["body"];
+        if (iterable !== undefined && body !== undefined && typeof body === "object") walk(body as never, {
+          enter(bodyNode) {
+            const candidate = bodyNode as unknown as Record<string, unknown>;
+            const target = candidate["type"] === "AssignmentExpression" ? identifierName(candidate["left"])
+              : candidate["type"] === "UpdateExpression" ? identifierName(candidate["argument"]) : undefined;
+            const callee = candidate["type"] === "CallExpression" ? candidate["callee"] as Record<string, unknown> | undefined : undefined;
+            const callObject = callee?.["type"] === "MemberExpression" ? identifierName(callee["object"]) : undefined;
+            if (target === iterable || callObject === iterable) astIssue ??= "for-of body mutates its iterated array";
+          },
+        });
+      }
+      if (type === "Identifier") {
+        const name = typeof record["name"] === "string" ? record["name"] : undefined;
+        if (name !== undefined) {
+          const isProperty = parentRecord?.["type"] === "MemberExpression" && parentRecord["property"] === node && parentRecord["computed"] !== true;
+          const isObjectKey = parentRecord?.["type"] === "Property" && parentRecord["key"] === node && parentRecord["computed"] !== true;
+          const isDeclaration = (parentRecord?.["type"] === "VariableDeclarator" && parentRecord["id"] === node)
+            || ((parentRecord?.["type"] === "FunctionDeclaration" || parentRecord?.["type"] === "FunctionExpression") && parentRecord["id"] === node)
+            || ((parentRecord?.["type"] === "FunctionDeclaration" || parentRecord?.["type"] === "FunctionExpression" || parentRecord?.["type"] === "ArrowFunctionExpression")
+              && Array.isArray(parentRecord["params"]) && parentRecord["params"].includes(node));
+          const allowedGlobal = ["String", "Number", "Boolean", "Math", "Date"].includes(name)
+            || (name === "arguments" && metadata.placement === "event" && instanceTypes.get(metadata.ownerInstanceName) === 31 && metadata.kfEvent === "Cell-click")
+            || declaredInstances.has(name) && instanceTypes.has(name);
+          if (!isProperty && !isObjectKey && !isDeclaration && !resolvesLocal(scopeByNode.get(node), name) && !allowedGlobal) {
+            astIssue ??= `undeclared global "${name}"`;
+          }
+        }
+      }
+      if (type === "CallExpression") {
+        const callee = record["callee"] as Record<string, unknown> | undefined;
+        if (callee?.["type"] === "Identifier") {
+          const name = typeof callee["name"] === "string" ? callee["name"] : undefined;
+          if (name === undefined || (!resolvesCallable(scopeByNode.get(node), name) && !["String", "Number", "Boolean"].includes(name))) astIssue ??= "dynamic or unknown direct call";
+          if (name !== undefined && resolvesCallable(scopeByNode.get(node), name)) {
+            const edges = functionCalls.get(currentFunction) ?? new Set<string>(); edges.add(name); functionCalls.set(currentFunction, edges);
+          }
+        } else if (callee?.["type"] === "MemberExpression") {
+          const object = callee["object"] as Record<string, unknown> | undefined;
+          const property = callee["property"] as Record<string, unknown> | undefined;
+          const objectName = identifierName(object);
+          const member = identifierName(property);
+          const runtimeCall = objectName !== undefined && declaredInstances.has(objectName) && member === "SetData" && instanceTypes.get(objectName) === 31;
+          const standardCall = objectName === "Math" && ["abs", "ceil", "floor", "max", "min", "round", "trunc"].includes(member ?? "")
+            || objectName === "Date" && ["parse", "UTC"].includes(member ?? "")
+            || ["slice", "filter", "push", "trim", "includes", "startsWith"].includes(member ?? "");
+          if (!runtimeCall && !standardCall) astIssue ??= "dynamic or unknown member call";
+        } else astIssue ??= "dynamic or unknown call target";
+      }
+      if (type === "MemberExpression" && record["computed"] === true) {
+        const property = record["property"] as Record<string, unknown> | undefined;
+        if (property?.["type"] !== "Literal") astIssue ??= "dynamic computed member access";
+      }
+      if (type === "Property" && (record["kind"] !== "init" || record["method"] === true || record["computed"] === true)) astIssue ??= "getter, setter, method, or computed object property";
+      if (type === "AssignmentExpression" || type === "UpdateExpression") {
+        const target = type === "AssignmentExpression" ? record["left"] as Record<string, unknown> | undefined : record["argument"] as Record<string, unknown> | undefined;
+        const targetName = identifierName(target);
+        if (targetName !== undefined && !mutableNames.has(targetName)) astIssue ??= "assignment/update target is not a mutable local";
+        if (targetName === undefined && target?.["type"] !== "MemberExpression") astIssue ??= "assignment/update target is not reviewed";
+      }
+      if (type !== "MemberExpression") return;
       const object = record["object"] as Record<string, unknown> | undefined;
       const name = object?.["type"] === "Identifier" && typeof object["name"] === "string" ? object["name"] : undefined;
       if (name === undefined || resolvesLocal(scopeByNode.get(node), name) || !instanceTypes.has(name)) return;
@@ -251,16 +409,33 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
       if (!declaredInstances.has(name)) { undeclaredProjectInstance ??= name; return; }
       const property = record["property"] as Record<string, unknown> | undefined;
       const member = property?.["type"] === "Identifier" && typeof property["name"] === "string" ? property["name"] : undefined;
-      const parentRecord = parent as unknown as Record<string, unknown> | null;
       const called = parentRecord?.["type"] === "CallExpression" && parentRecord["callee"] === node;
       const uiModelType = instanceTypes.get(name);
       const supported = (uiModelType === 38 && /^Input\d+$/.test(name) && member === "Value" && !called)
         || (uiModelType === 31 && /^Table\d+$/.test(name) && member === "SetData" && called);
       if (!supported) unsupportedRuntimeMember ??= `${name}.${member ?? "?"}`;
     },
+    leave(node) {
+      const type = (node as unknown as Record<string, unknown>)["type"];
+      if (type === "FunctionDeclaration" || type === "FunctionExpression" || type === "ArrowFunctionExpression") currentFunction = functionStack.pop() ?? "<program>";
+    },
   });
+  // Project-instance evidence is more specific than the generic global/call
+  // grammar rejection discovered by the same walk. Both are fail-closed, but
+  // surface the evidence failure so callers cannot mistake a forged instance
+  // or method for a merely unsupported JavaScript construct.
   if (undeclaredProjectInstance !== undefined) return `compiled script uses undeclared instance reference "${undeclaredProjectInstance}"`;
   if (unsupportedRuntimeMember !== undefined) return `compiled script uses unsupported runtime member "${unsupportedRuntimeMember}"`;
+  if (astIssue !== undefined) return `compiled script AST rejected ${astIssue}`;
+  const cycleVisit = (name: string, active: Set<string>, done: Set<string>): boolean => {
+    if (active.has(name)) return true;
+    if (done.has(name)) return false;
+    active.add(name);
+    for (const target of functionCalls.get(name) ?? []) if (cycleVisit(target, active, done)) return true;
+    active.delete(name); done.add(name); return false;
+  };
+  const callDone = new Set<string>();
+  for (const name of functionCalls.keys()) if (cycleVisit(name, new Set(), callDone)) return "compiled script AST rejected recursive call graph";
   for (const { instanceName } of metadata.instanceReferences) {
     if (instanceName !== metadata.ownerInstanceName && !usedRuntimeRoots.has(instanceName)) return `compiled script does not use declared instance reference "${instanceName}"`;
   }
@@ -533,13 +708,12 @@ async function checkBusinessRules(
         }
       }
       // Well-formed serialized script actions.
+      const compilerModuleIds = new Set<string>();
       const links = asRecord(control["linkMng"])["linkList"];
-      if (links === undefined) return;
-      if (!Array.isArray(links)) {
+      if (links !== undefined && !Array.isArray(links)) {
         issues.push(`control "${String(name)}" has a malformed linkMng.linkList`);
-        return;
       }
-      for (const rawLink of links) {
+      if (Array.isArray(links)) for (const rawLink of links) {
         const link = asRecord(rawLink);
         const action = link["action"];
         const script = link["script"];
@@ -547,6 +721,8 @@ async function checkBusinessRules(
         if (parsedCompilerSource.issue !== undefined || parsedCompilerSource.segments.length > 0) {
           if (parsedCompilerSource.issue !== undefined) issues.push(`control "${String(name)}" ${parsedCompilerSource.issue}`);
           for (const segment of parsedCompilerSource.segments) {
+            if (compilerModuleIds.has(segment.metadata.moduleId)) issues.push(`control "${String(name)}" duplicate compiled module identity`);
+            compilerModuleIds.add(segment.metadata.moduleId);
             const sourceIssue = compilerSourceIssue(segment, projectInstanceTypes);
             if (sourceIssue !== undefined) issues.push(`control "${String(name)}" ${sourceIssue}`);
             const metadata = segment.metadata;
@@ -554,6 +730,14 @@ async function checkBusinessRules(
             if (metadata.ownerInstanceName !== name) issues.push(`control "${String(name)}" compiler-owned script owner mismatch`);
             if (metadata.kfEvent !== link["name"] || metadata.linkId !== (link["linkId"] ?? null)) issues.push(`control "${String(name)}" compiler-owned event identity mismatch`);
             if (metadata.phase === null) issues.push(`control "${String(name)}" compiler-owned event phase is missing`);
+          }
+          if (link["enable"] !== true) issues.push(`control "${String(name)}" compiler-owned event must set enable true`);
+          const moduleIds = parsedCompilerSource.segments.map((segment) => segment.metadata.moduleId);
+          if (new Set(moduleIds).size !== moduleIds.length) issues.push(`control "${String(name)}" duplicate compiled module identity`);
+          let afterEventSeen = false;
+          for (const segment of parsedCompilerSource.segments) {
+            if (segment.metadata.phase === "after-event") afterEventSeen = true;
+            else if (afterEventSeen && segment.metadata.phase === "event") issues.push(`control "${String(name)}" compiler event phases are out of order`);
           }
           continue;
         }
@@ -594,6 +778,8 @@ async function checkBusinessRules(
         const parsedConfigure = compilerOwnedSegments(configureData);
         if (parsedConfigure.issue !== undefined) issues.push(`control "${String(name)}" ${parsedConfigure.issue}`);
         for (const segment of parsedConfigure.segments) {
+          if (compilerModuleIds.has(segment.metadata.moduleId)) issues.push(`control "${String(name)}" duplicate compiled module identity`);
+          compilerModuleIds.add(segment.metadata.moduleId);
           const sourceIssue = compilerSourceIssue(segment, projectInstanceTypes);
           if (sourceIssue !== undefined) issues.push(`control "${String(name)}" ${sourceIssue}`);
           if (segment.metadata.placement !== "configure-data" || segment.metadata.kfEvent !== null

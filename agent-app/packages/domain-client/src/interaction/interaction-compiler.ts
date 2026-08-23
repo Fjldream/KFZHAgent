@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { types as utilTypes } from "node:util";
 import { parse } from "acorn";
 import {
+  canonicalServerHash,
   SolutionImplementationPlanSchema,
   UIImplementationSpecV2Schema,
   type CompiledEventBinding,
@@ -9,6 +10,8 @@ import {
   type SolutionImplementationPlan,
   type UIImplementationSpecV2,
 } from "@kf/contracts";
+import { createDefaultModuleRegistry } from "../modules/module-registry.js";
+import { solutionModuleRegistryHash } from "../solution-compile/solution-provenance.js";
 import { compileNativeActions, type TypedScriptRequest } from "./action-compiler.js";
 import { normalizeActionGraph } from "./action-graph.js";
 import { validateCustomScript, type ValidatedSemanticCall } from "./custom-script-validator.js";
@@ -19,12 +22,15 @@ import {
 import { compileScriptPlan, type CompiledScriptPlan } from "./script-compiler.js";
 
 export type InteractionDiagnosticCode =
+  | "INTERACTION_BINDING_TIER_ORDER_UNREPRESENTABLE"
   | "INTERACTION_BINDING_DUPLICATE"
   | "INTERACTION_CAPACITY_OVERFLOW"
   | "INTERACTION_CLOSURE_MISSING"
+  | "INTERACTION_CONDITIONAL_CLOSURE_UNPROVEN"
   | "INTERACTION_COMPILED_SOURCE_INVALID"
   | "INTERACTION_SCRIPT_BLOCKED"
   | "INTERACTION_SCRIPT_CYCLE"
+  | "INTERACTION_OUTPUT_CONSUMER_MISSING"
   | "JOURNEY_PROVENANCE_UNAVAILABLE";
 
 export interface InteractionDiagnostic {
@@ -50,7 +56,7 @@ export interface InteractionCompilationResult {
 }
 
 interface TrustedTrace {
-  readonly actions: ReadonlyMap<string, { readonly successors: readonly string[] }>;
+  readonly actions: ReadonlyMap<string, { readonly successors: readonly string[]; readonly triggerKey: string }>;
   readonly triggers: ReadonlyMap<string, readonly string[]>;
 }
 
@@ -106,17 +112,94 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
+function rawRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+/**
+ * The plan schema correctly rejects multiple propagated trigger owners, but its
+ * aggregate error cannot identify the crossing edge. Inspect the already
+ * descriptor-safe clone before schema refinement so this compiler can fail on
+ * the exact edge instead of accepting an ambiguous interaction graph.
+ */
+function rejectRawCrossTriggerEdges(rawPlan: unknown): void {
+  const plan = rawRecord(rawPlan);
+  if (plan === undefined) return;
+  const directTriggers = new Map<string, Set<string>>();
+  const pending: unknown[] = [];
+  for (const pageValue of Array.isArray(plan.pages) ? plan.pages : []) {
+    const page = rawRecord(pageValue);
+    if (page !== undefined) pending.push(page.root);
+  }
+  for (const overlayValue of Array.isArray(plan.overlays) ? plan.overlays : []) {
+    const overlay = rawRecord(overlayValue);
+    if (overlay !== undefined) pending.push(overlay.root);
+  }
+  while (pending.length > 0) {
+    const node = rawRecord(pending.pop());
+    if (node === undefined) continue;
+    if (typeof node.id === "string" && Array.isArray(node.eventBindings)) {
+      for (const bindingValue of node.eventBindings) {
+        const binding = rawRecord(bindingValue);
+        if (binding === undefined || typeof binding.semanticEvent !== "string" || !Array.isArray(binding.actionIds)) continue;
+        for (const actionId of binding.actionIds) {
+          if (typeof actionId !== "string") continue;
+          const triggers = directTriggers.get(actionId) ?? new Set<string>();
+          triggers.add(`${node.id}\0${binding.semanticEvent}`);
+          directTriggers.set(actionId, triggers);
+        }
+      }
+    }
+    if (node.kind === "layout" && Array.isArray(node.children)) node.children.forEach((child: unknown) => pending.push(child));
+    if (node.kind === "registered-module" && Array.isArray(node.slots)) {
+      for (const slotValue of node.slots) {
+        const slot = rawRecord(slotValue);
+        if (slot !== undefined && Array.isArray(slot.children)) slot.children.forEach((child: unknown) => pending.push(child));
+      }
+    }
+    if (node.kind === "repeater") pending.push(node.template);
+  }
+  for (const actionValue of Array.isArray(plan.actions) ? plan.actions : []) {
+    const action = rawRecord(actionValue);
+    if (action === undefined || typeof action.id !== "string" || !Array.isArray(action.afterActionIds)) continue;
+    const source = directTriggers.get(action.id);
+    if (source?.size !== 1) continue;
+    for (const successorId of action.afterActionIds) {
+      if (typeof successorId !== "string") continue;
+      const successor = directTriggers.get(successorId);
+      if (successor?.size === 1 && [...source][0] !== [...successor][0]) {
+        return failInput("INTERACTION_CROSS_TRIGGER_EDGE", `${action.id} -> ${successorId}`);
+      }
+    }
+  }
+}
+
 function snapshotInput(input: unknown): { plan: SolutionImplementationPlan; implementation: UIImplementationSpecV2 } {
   const cloned = clonePureData(input) as Record<string, unknown>;
   if (cloned === null || typeof cloned !== "object" || Array.isArray(cloned)
     || Object.keys(cloned).sort().join("\0") !== "implementation\0plan") {
     return failInput("INTERACTION_INPUT_INVALID", "exact plan and implementation fields are required");
   }
+  rejectRawCrossTriggerEdges(cloned.plan);
   const plan = SolutionImplementationPlanSchema.safeParse(cloned.plan);
   const implementation = UIImplementationSpecV2Schema.safeParse(cloned.implementation);
   if (!plan.success) return failInput("INTERACTION_INPUT_INVALID", `plan: ${plan.error.issues[0]?.message ?? "invalid"}`);
   if (!implementation.success || implementation.data.compatibility !== "native") {
     return failInput("INTERACTION_INPUT_INVALID", `implementation: ${implementation.success ? "native v2 required" : implementation.error.issues[0]?.message ?? "invalid"}`);
+  }
+  if (implementation.data.sourceSolutionPlanHash !== canonicalServerHash(plan.data)) {
+    return failInput("INTERACTION_INPUT_PROVENANCE_MISMATCH", "solution-plan hash does not match authoritative plan bytes");
+  }
+  let registryHash: string;
+  try {
+    registryHash = solutionModuleRegistryHash(plan.data, createDefaultModuleRegistry());
+  } catch {
+    return failInput("INTERACTION_INPUT_PROVENANCE_MISMATCH", "module-registry hash cannot be recomputed from the trusted default registry");
+  }
+  if (implementation.data.sourceModuleRegistryHash !== registryHash) {
+    return failInput("INTERACTION_INPUT_PROVENANCE_MISMATCH", "module-registry hash does not match the trusted default registry");
   }
   const hasBindings = implementation.data.pages.some((page) => page.compatibility === "native" && page.controls.some((control) => control.eventBindings.length > 0));
   if (implementation.data.compiledActions.length > 0 || implementation.data.compiledScripts.length > 0 || hasBindings) {
@@ -151,18 +234,40 @@ function bindingKey(binding: CompiledEventBinding): string {
   return `${binding.ownerInstanceName}\0${binding.kfEvent}\0${binding.linkId ?? ""}\0${binding.phase}`;
 }
 
-function mergeBindings(bindings: readonly CompiledEventBinding[], errors: InteractionDiagnostic[]): CompiledEventBinding[] {
+function mergeBindings(
+  bindings: readonly CompiledEventBinding[],
+  errors: InteractionDiagnostic[],
+  requests: InteractionCompilationRequest[],
+  actionOrder: ReadonlyMap<string, number>,
+  actionByNativeId: ReadonlyMap<string, string>,
+  actionByScriptId: ReadonlyMap<string, string>,
+  semanticControlByInstance: ReadonlyMap<string, string>,
+): { bindings: CompiledEventBinding[]; blockedNativeIds: Set<string>; blockedScriptIds: Set<string> } {
   const groups = new Map<string, CompiledEventBinding[]>();
   bindings.forEach((binding) => groups.set(bindingKey(binding), [...(groups.get(bindingKey(binding)) ?? []), binding]));
   const merged: CompiledEventBinding[] = [];
+  const blockedNativeIds = new Set<string>();
+  const blockedScriptIds = new Set<string>();
+  const byOrder = (map: ReadonlyMap<string, string>) => (left: string, right: string): number =>
+    (actionOrder.get(map.get(left) ?? "") ?? Number.MAX_SAFE_INTEGER) - (actionOrder.get(map.get(right) ?? "") ?? Number.MAX_SAFE_INTEGER);
   for (const [key, group] of [...groups].sort(([left], [right]) => codePointCompare(left, right))) {
-    const scriptModuleIds = Array.from(new Set(group.flatMap((binding) => binding.scriptModuleIds))).sort(codePointCompare);
-    const nativeActionIds = Array.from(new Set(group.flatMap((binding) => binding.nativeActionIds))).sort(codePointCompare);
+    const scriptModuleIds = Array.from(new Set(group.flatMap((binding) => binding.scriptModuleIds))).sort(byOrder(actionByScriptId));
+    const nativeActionIds = Array.from(new Set(group.flatMap((binding) => binding.nativeActionIds))).sort(byOrder(actionByNativeId));
     if (scriptModuleIds.length > 16 || nativeActionIds.length > 16) {
       errors.push(diagnostic("INTERACTION_CAPACITY_OVERFLOW", group[0]!.ownerInstanceName, "binding exceeds sixteen scripts or actions"));
       continue;
     }
     const first = group[0]!;
+    if (scriptModuleIds.length > 0 && nativeActionIds.length > 0) {
+      scriptModuleIds.forEach((id) => blockedScriptIds.add(id));
+      nativeActionIds.forEach((id) => blockedNativeIds.add(id));
+      const actionIds = [...nativeActionIds.map((id) => actionByNativeId.get(id)), ...scriptModuleIds.map((id) => actionByScriptId.get(id))]
+        .filter((id): id is string => id !== undefined).sort((left, right) => (actionOrder.get(left) ?? 0) - (actionOrder.get(right) ?? 0));
+      const nodeId = semanticControlByInstance.get(first.ownerInstanceName) ?? first.ownerInstanceName;
+      errors.push(diagnostic("INTERACTION_BINDING_TIER_ORDER_UNREPRESENTABLE", nodeId, `same-event native/script order cannot be represented: ${actionIds.join(" -> ")}`));
+      actionIds.forEach((actionId) => requests.push({ actionId, status: "blocked", reason: "BINDING_TIER_ORDER_UNREPRESENTABLE" }));
+      continue;
+    }
     const identity = createHash("sha256").update(key).digest("hex").slice(0, 16);
     merged.push({
       id: group.length === 1 ? first.id : `kf$binding:merged-${identity}`,
@@ -171,7 +276,7 @@ function mergeBindings(bindings: readonly CompiledEventBinding[], errors: Intera
       scriptModuleIds, nativeActionIds,
     });
   }
-  return merged;
+  return { bindings: merged, blockedNativeIds, blockedScriptIds };
 }
 
 function verifyCompiledModule(module: CompiledScriptModule): string | undefined {
@@ -223,11 +328,14 @@ export function compileInteractions(input: unknown): InteractionCompilationResul
   const requests: InteractionCompilationRequest[] = [];
   const compiledScripts: CompiledScriptModule[] = [];
   const scriptBindings: CompiledEventBinding[] = [];
+  const actionByScriptModuleId = new Map<string, string>();
   const scheduledByScript = new Map<string, readonly string[]>();
   const visibleScriptIds = new Set<string>();
+  const callsByAction = new Map<string, readonly ValidatedSemanticCall[]>();
   const scriptById = new Map(plan.scripts.map((script) => [script.id, script]));
 
-  for (const request of [...native.scriptRequests].sort((left, right) => codePointCompare(left.actionId, right.actionId))) {
+  const actionOrder = new Map(normalized.executionOrder.map((id, index) => [id, index]));
+  for (const request of [...native.scriptRequests].sort((left, right) => (actionOrder.get(left.actionId) ?? 0) - (actionOrder.get(right.actionId) ?? 0))) {
     if (request.reason !== "RUN_SCRIPT_REQUIRES_VALIDATION" || request.sourceScriptId === undefined) {
       errors.push(diagnostic("INTERACTION_SCRIPT_BLOCKED", request.actionId, request.reason));
       requests.push(requestDiagnostic(request, request.reason));
@@ -265,6 +373,8 @@ export function compileInteractions(input: unknown): InteractionCompilationResul
       const sourceIssue = verifyCompiledModule(compiled.module);
       if (sourceIssue !== undefined) throw new Error(sourceIssue);
       compiledScripts.push(compiled.module);
+      callsByAction.set(request.actionId, calls);
+      actionByScriptModuleId.set(compiled.module.id, request.actionId);
       if (compiled.binding !== undefined) scriptBindings.push(compiled.binding);
       scheduledByScript.set(script.id, compiled.scheduledScriptIds);
       if (calls.some((call) => isVisibleCall(call) && call.execution !== "conditional")
@@ -275,6 +385,9 @@ export function compileInteractions(input: unknown): InteractionCompilationResul
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (/conditional|unconditional execution/i.test(message)) {
+        errors.push(diagnostic("INTERACTION_CONDITIONAL_CLOSURE_UNPROVEN", request.actionId, "script condition branches do not each prove a visible terminal result"));
+      }
       errors.push(diagnostic("INTERACTION_SCRIPT_BLOCKED", script.id, message));
       requests.push(requestDiagnostic(request, message));
     }
@@ -284,17 +397,91 @@ export function compileInteractions(input: unknown): InteractionCompilationResul
     errors.push(diagnostic("INTERACTION_SCRIPT_CYCLE", cycle[0]!, `scheduled script cycle: ${cycle.join(" -> ")}`));
   }
 
-  const compiledActionIds = new Set(native.actions.map((action) => action.sourceActionId));
-  for (const action of normalized.graph.actions) {
-    const visibleNative = compiledActionIds.has(action.id) && action.effects.some((effect) =>
-      ["navigate-page", "open-overlay", "close-overlay", "set-visibility", "switch-tab", "set-control-value", "show-feedback"].includes(effect.kind));
-    const visibleScript = action.effects.some((effect) => effect.kind === "run-script" && visibleScriptIds.has(effect.scriptId));
-    if (!visibleNative && !visibleScript && !errors.some((entry) => entry.nodeId === action.id || action.effects.some((effect) => effect.kind === "run-script" && effect.scriptId === entry.nodeId))) {
-      errors.push(diagnostic("INTERACTION_CLOSURE_MISSING", action.id, "declared trigger has no trigger-to-visible-result closure"));
+  const actionByNativeId = new Map(native.actions.map((action) => [action.id, action.sourceActionId]));
+  const semanticControlByInstance = new Map(implementation.runtimeCorrelation?.controls.map((entry) => [entry.instanceName, entry.semanticControlId]) ?? []);
+  const mergedBindings = mergeBindings(
+    [...native.bindings, ...scriptBindings], errors, requests, actionOrder,
+    actionByNativeId, actionByScriptModuleId, semanticControlByInstance,
+  );
+  const bindings = mergedBindings.bindings;
+  const emittedActions = native.actions.filter((action) => !mergedBindings.blockedNativeIds.has(action.id));
+  const emittedScripts = compiledScripts.filter((module) => !mergedBindings.blockedScriptIds.has(module.id));
+  const emittedNativeActionIds = new Set(emittedActions.map((action) => action.sourceActionId));
+  const emittedScriptActionIds = new Set(emittedScripts.map((module) => actionByScriptModuleId.get(module.id)).filter((id): id is string => id !== undefined));
+  const visibleActionIds = new Set<string>();
+  normalized.graph.actions.forEach((action) => {
+    if (emittedNativeActionIds.has(action.id) && action.effects.some((effect) =>
+      ["navigate-page", "open-overlay", "close-overlay", "set-visibility", "switch-tab", "set-control-value", "show-feedback"].includes(effect.kind))) visibleActionIds.add(action.id);
+    if (emittedScriptActionIds.has(action.id) && action.effects.some((effect) => effect.kind === "run-script" && visibleScriptIds.has(effect.scriptId))) visibleActionIds.add(action.id);
+    if (action.conditions.length > 0) {
+      errors.push(diagnostic("INTERACTION_CONDITIONAL_CLOSURE_UNPROVEN", action.id, "the contract has no explicit else branch, so every conditional path cannot be proven visible"));
+      visibleActionIds.delete(action.id);
     }
+  });
+  const graphActionById = new Map(normalized.graph.actions.map((action) => [action.id, action]));
+  const triggerKeyByAction = new Map(normalized.graph.actions.map((action) => [
+    action.id,
+    `${action.trigger.controlId}\0${action.trigger.semanticEvent}`,
+  ]));
+  const actionIdsByTrigger = new Map<string, Set<string>>();
+  normalized.graph.actions.forEach((action) => {
+    const triggerKey = triggerKeyByAction.get(action.id)!;
+    const actionIds = actionIdsByTrigger.get(triggerKey) ?? new Set<string>();
+    actionIds.add(action.id);
+    actionIdsByTrigger.set(triggerKey, actionIds);
+    action.afterActionIds.forEach((successorId) => {
+      const successorTriggerKey = triggerKeyByAction.get(successorId);
+      if (successorTriggerKey !== undefined && successorTriggerKey !== triggerKey) {
+        failInput("INTERACTION_CROSS_TRIGGER_EDGE", `${action.id} -> ${successorId}`);
+      }
+    });
+  });
+  const reachable = new Set<string>();
+  const missingPath = (id: string, triggerKey: string, visible: boolean, active = new Set<string>()): boolean => {
+    if (active.has(id)) return true;
+    active.add(id); reachable.add(id);
+    const action = graphActionById.get(id);
+    if (action === undefined || triggerKeyByAction.get(id) !== triggerKey) return true;
+    const hasVisible = visible || visibleActionIds.has(id);
+    if (action.afterActionIds.length === 0) { active.delete(id); return !hasVisible; }
+    const missing = action.afterActionIds.some((successor) => missingPath(successor, triggerKey, hasVisible, active));
+    active.delete(id); return missing;
+  };
+  for (const [triggerKey, actionIds] of actionIdsByTrigger) {
+    const incoming = new Map(Array.from(actionIds, (id) => [id, 0]));
+    actionIds.forEach((id) => graphActionById.get(id)?.afterActionIds.forEach((successorId) => {
+      if (actionIds.has(successorId)) incoming.set(successorId, (incoming.get(successorId) ?? 0) + 1);
+    }));
+    const roots = normalized.executionOrder.filter((id) => actionIds.has(id) && incoming.get(id) === 0);
+    roots.forEach((root) => {
+      if (missingPath(root, triggerKey, false)) errors.push(diagnostic("INTERACTION_CLOSURE_MISSING", root, "at least one trigger path has no visible terminal result"));
+    });
   }
+  normalized.executionOrder.filter((id) => !reachable.has(id)).forEach((id) =>
+    errors.push(diagnostic("INTERACTION_CLOSURE_MISSING", id, "action is unreachable from every trigger root")));
 
-  const bindings = mergeBindings([...native.bindings, ...scriptBindings], errors);
+  const mockDataConsumers = new Set<string>();
+  implementation.pages.forEach((page) => page.compatibility === "native" && page.controls.forEach((control) => {
+    if (control.dataBinding !== undefined) mockDataConsumers.add(control.dataBinding.mockDataId);
+  }));
+  plan.scripts.forEach((script) => script.inputs.forEach((port) => { if (port.refKind === "mock-data") mockDataConsumers.add(port.refId); }));
+  const stateConsumers = new Set<string>();
+  plan.scripts.forEach((script) => script.inputs.forEach((port) => { if (port.refKind === "local-state") stateConsumers.add(port.refId); }));
+  plan.actions.forEach((action) => {
+    action.conditions?.forEach((condition) => [condition.left, condition.right].forEach((operand) => { if (operand.kind === "local-state") stateConsumers.add(operand.stateId); }));
+    if (action.kind === "set-control-value" && action.value.kind === "local-state") stateConsumers.add(action.value.stateId);
+  });
+  plan.overlays.forEach((overlay) => stateConsumers.add(overlay.visibleStateId));
+  normalized.graph.actions.forEach((action) => action.effects.forEach((effect) => {
+    if (effect.kind !== "run-script") return;
+    const calls = callsByAction.get(action.id) ?? [];
+    for (const output of normalized.scriptClosures.get(effect.scriptId)?.candidateOutputRefs ?? []) {
+      const consumed = output.refKind === "control"
+        ? calls.some((call) => call.targetId === output.refId && isVisibleCall(call) && call.execution !== "conditional")
+        : output.refKind === "mock-data" ? mockDataConsumers.has(output.refId) : stateConsumers.has(output.refId);
+      if (!consumed) errors.push(diagnostic("INTERACTION_OUTPUT_CONSUMER_MISSING", effect.scriptId, `${output.refKind} output has no proven UI or script consumer: ${output.refId}`));
+    }
+  }));
   const duplicateModuleIds = compiledScripts.map((module) => module.id).filter((id, index, all) => all.indexOf(id) !== index);
   duplicateModuleIds.forEach((id) => errors.push(diagnostic("INTERACTION_BINDING_DUPLICATE", id, "duplicate compiled module identity")));
   const bindingByInstance = new Map<string, CompiledEventBinding[]>();
@@ -302,8 +489,8 @@ export function compileInteractions(input: unknown): InteractionCompilationResul
   const instanceByControl = new Map(implementation.runtimeCorrelation?.controls.map((entry) => [entry.semanticControlId, entry.instanceName]) ?? []);
   const outputCandidate = {
     ...implementation,
-    compiledActions: [...native.actions].sort((left, right) => codePointCompare(left.id, right.id)),
-    compiledScripts: [...compiledScripts].sort((left, right) => codePointCompare(left.id, right.id)),
+    compiledActions: [...emittedActions].sort((left, right) => (actionOrder.get(left.sourceActionId) ?? 0) - (actionOrder.get(right.sourceActionId) ?? 0)),
+    compiledScripts: [...emittedScripts].sort((left, right) => (actionOrder.get(actionByScriptModuleId.get(left.id) ?? "") ?? 0) - (actionOrder.get(actionByScriptModuleId.get(right.id) ?? "") ?? 0)),
     pages: implementation.pages.map((page) => page.compatibility !== "native" ? page : ({
       ...page,
       controls: page.controls.map((control) => ({
@@ -324,11 +511,21 @@ export function compileInteractions(input: unknown): InteractionCompilationResul
       warnings, requests: requests.sort((left, right) => codePointCompare(`${left.actionId}\0${left.sourceScriptId ?? ""}`, `${right.actionId}\0${right.sourceScriptId ?? ""}`)),
     },
   }) as InteractionCompilationResult;
-  const actionMap = new Map(normalized.graph.actions.map((action) => [action.id, { successors: action.afterActionIds }]));
+  const actionMap = new Map(normalized.graph.actions.map((action) => [action.id, {
+    successors: action.afterActionIds,
+    triggerKey: `${action.trigger.controlId}\0${action.trigger.semanticEvent}`,
+  }]));
   const triggerMap = new Map<string, string[]>();
-  normalized.graph.actions.forEach((action) => {
+  const incomingByTrigger = new Map<string, number>();
+  normalized.graph.actions.forEach((action) => action.afterActionIds.forEach((successorId) => {
+    const successor = actionMap.get(successorId);
     const key = `${action.trigger.controlId}\0${action.trigger.semanticEvent}`;
-    triggerMap.set(key, [...(triggerMap.get(key) ?? []), action.id].sort(codePointCompare));
+    if (successor?.triggerKey === key) incomingByTrigger.set(successorId, (incomingByTrigger.get(successorId) ?? 0) + 1);
+  }));
+  normalized.executionOrder.forEach((actionId) => {
+    if ((incomingByTrigger.get(actionId) ?? 0) !== 0) return;
+    const key = actionMap.get(actionId)?.triggerKey;
+    if (key !== undefined) triggerMap.set(key, [...(triggerMap.get(key) ?? []), actionId]);
   });
   traces.set(result, { actions: actionMap, triggers: triggerMap });
   return result;
@@ -342,7 +539,10 @@ export function traceInteraction(result: InteractionCompilationResult, controlId
   const visit = (id: string): void => {
     if (visited.has(id)) return;
     visited.add(id); output.push(id);
-    [...(trace.actions.get(id)?.successors ?? [])].sort(codePointCompare).forEach(visit);
+    const action = trace.actions.get(id);
+    [...(action?.successors ?? [])].sort(codePointCompare).forEach((successorId) => {
+      if (trace.actions.get(successorId)?.triggerKey === action?.triggerKey) visit(successorId);
+    });
   };
   (trace.triggers.get(`${controlId}\0${semanticEvent}`) ?? []).forEach(visit);
   return Object.freeze(output);
