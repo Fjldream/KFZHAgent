@@ -36,7 +36,7 @@ function pageControl(id: string, capabilityId: string, sourceBlueprintPageId: st
 
 function rootControl(id: string, sourceBlueprintPageId: string, region = "region") {
   return {
-    ...control(id, "layout.2", sourceBlueprintPageId),
+    ...control(id, "layout.4", sourceBlueprintPageId),
     role: "layout",
     geometry: { x: 0, y: 0, width: 1280, height: 720 },
     compiledLayout: { kind: "column" as const, overflow: "visible" as const },

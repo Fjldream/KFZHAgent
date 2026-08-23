@@ -606,6 +606,12 @@ describe("compileSolutionImplementation", () => {
     reject((_plan, candidate) => {
       nativeControls(candidate).find((control) => control.id === "people-list--e-001")!.sourceBlueprintRegionIds = ["other-region"];
     });
+    reject((_plan, candidate) => {
+      nativeControls(candidate).find((control) => control.id === "people-list--e-001")!.capabilityId = "layout.evil";
+    });
+    reject((_plan, candidate) => {
+      nativeControls(candidate).find((control) => control.id === "people-list--e-001")!.capabilityId = "layout.2";
+    });
 
     const moduleFixture = industrialFixture();
     const moduleImplementation = withRuntimeCorrelation(compileFixture(moduleFixture));
@@ -659,6 +665,8 @@ describe("compileSolutionImplementation", () => {
     rejectAdmin((controls) => { controls.find((control) => control.id === "people-list--e-001")!.dataBinding = { mockDataId: "people", records: [] }; });
     rejectAdmin((controls) => { controls.find((control) => control.id === "people-list--e-001")!.assetIds = [MODEL_ASSET_ID]; });
     rejectAdmin((controls) => { controls.find((control) => control.id === "people-list--e-001")!.sourceBlueprintRegionIds = ["other-region"]; });
+    rejectAdmin((controls) => { controls.find((control) => control.id === "people-list--e-001")!.capabilityId = "layout.evil"; });
+    rejectAdmin((controls) => { controls.find((control) => control.id === "people-list--e-001")!.capabilityId = "layout.2"; });
     rejectAdmin((controls) => { controls.find((control) => control.id === "admin-root")!.sourceBlueprintPageId = "bp-other"; });
 
     const industrial = industrialFixture();
@@ -680,6 +688,43 @@ describe("compileSolutionImplementation", () => {
     rejectModule((controls) => { controls.find((control) => control.sourceModuleId === "kpi-grid")!.assetIds = [MODEL_ASSET_ID]; });
     rejectModule((controls) => { controls.find((control) => control.sourceModuleId === "kpi-grid")!.sourceBlueprintRegionIds = ["other-region"]; });
     rejectModule((controls) => { controls.find((control) => control.sourceModuleId === "kpi-grid")!.sourceBlueprintPageId = "bp-other"; });
+  });
+
+  it("rejects unknown and kind-incompatible layout capabilities in direct and context validation", () => {
+    const fixture = planWithBundle("row-layout", [{
+      id: "row-page", title: "横向布局", purpose: "验证布局能力与语义布局类型精确对应", canvas: "desktop",
+      sourceBlueprintPageId: "bp-row", sourceBlueprintRegionIds: ["row"], initialStateIds: [],
+      root: layout("row-root", "row", "row", [textNode("row-text", "row", "横向内容")]),
+    }], [{ pageId: "bp-row", regions: ["row"] }]);
+    const implementation = compileFixture(fixture);
+    const page = implementation.pages[0]!;
+    if (page.compatibility !== "native") throw new Error("native fixture required");
+
+    const rejectDirect = (capabilityId: string) => {
+      const controls = structuredClone(page.controls);
+      controls.find((control) => control.id === "row-root")!.capabilityId = capabilityId;
+      expect(() => validateSolutionControlSemanticProjection({
+        plan: fixture.plan,
+        root: fixture.plan.pages[0]!.root,
+        controls,
+        moduleRegistry: createDefaultModuleRegistry(),
+      })).toThrow("SOLUTION_PROVENANCE_INVALID");
+    };
+    rejectDirect("layout.evil");
+    rejectDirect("layout.4");
+
+    const correlated = withRuntimeCorrelation(implementation);
+    const rejectContext = (capabilityId: string) => {
+      const candidate = structuredClone(correlated);
+      nativeControls(candidate).find((control) => control.id === "row-root")!.capabilityId = capabilityId;
+      expect(() => createSemanticScriptApiContext({
+        plan: fixture.plan,
+        implementation: candidate,
+        ownerControlId: "row-text",
+      })).toThrow("SCRIPT_API_CONTEXT_INVALID");
+    };
+    rejectContext("layout.evil");
+    rejectContext("layout.4");
   });
 
   it("correlates semantic contexts only with the trusted default module registry", () => {

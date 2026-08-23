@@ -7,6 +7,7 @@ import {
   type UIImplementationControlV2,
 } from "@kf/contracts";
 import type { ModuleRegistry } from "../modules/module-registry.js";
+import { layoutCapabilityIdsFor } from "../planning/capability-retrieval.js";
 import {
   replayRegisteredModuleDefinition,
   semanticValueToData,
@@ -118,6 +119,14 @@ function expectedControlAssetIds(
 
 function exactAssetIds(control: UIImplementationControlV2, expected: readonly string[]): boolean {
   return expected.length === 0 ? control.assetIds === undefined : sameStrings(control.assetIds, expected);
+}
+
+/** Checks kind compatibility only; candidate ranking remains owned by the solution compiler. */
+function isLayoutCapabilityFor(
+  control: UIImplementationControlV2,
+  kind: Extract<PlanNode, { kind: "layout" }>["layout"],
+): boolean {
+  return layoutCapabilityIdsFor(kind).includes(control.capabilityId);
 }
 
 /**
@@ -237,12 +246,12 @@ export function validateSolutionControlSemanticProjection(input: Readonly<{
         }
       }
     } else if (provenance.kind === "repeater-item") {
-      if (control.role !== "repeater-item" || !control.capabilityId.startsWith("layout.") || control.compiledLayout?.kind !== "column"
+      if (control.role !== "repeater-item" || !isLayoutCapabilityFor(control, "column") || control.compiledLayout?.kind !== "column"
         || control.dataBinding !== undefined || control.assetIds !== undefined) {
         throw new SolutionProvenanceError(control.id, "repeater item layout mismatch");
       }
     } else if (provenance.sourceNode.kind === "layout") {
-      if (!control.capabilityId.startsWith("layout.") || control.compiledLayout?.kind !== provenance.sourceNode.layout
+      if (!isLayoutCapabilityFor(control, provenance.sourceNode.layout) || control.compiledLayout?.kind !== provenance.sourceNode.layout
         || control.dataBinding !== undefined || control.assetIds !== undefined) {
         throw new SolutionProvenanceError(control.id, "layout capability mismatch");
       }
