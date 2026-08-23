@@ -2,8 +2,13 @@ import { createHash } from "node:crypto";
 import { types as utilTypes } from "node:util";
 import { parse, type Node, type Program } from "acorn";
 import { walk, type Node as WalkerNode } from "estree-walker";
-import type { SemanticScriptApiContext } from "./semantic-script-api.js";
-import { resolveSemanticApiCall } from "./semantic-script-api.js";
+import type { SemanticScriptApiContext, SemanticScriptValidationIdentity } from "./semantic-script-api.js";
+import {
+  assertSemanticRecordListCompatibility,
+  assertSemanticRecordCompatibility,
+  requireSemanticScriptValidationIdentity,
+  resolveSemanticApiCall,
+} from "./semantic-script-api.js";
 
 type RefKind = "control" | "local-state" | "mock-data";
 
@@ -20,6 +25,7 @@ export interface CustomScriptValidationInput {
   readonly inputs: readonly (CustomScriptPort | string)[];
   readonly outputs: readonly (CustomScriptPort | string)[];
   readonly context?: SemanticScriptApiContext;
+  readonly currentScriptIdentity?: SemanticScriptValidationIdentity;
 }
 
 export interface ValidatedSemanticCall {
@@ -28,6 +34,7 @@ export interface ValidatedSemanticCall {
   readonly method: string;
   readonly targetId?: string;
   readonly availability: "supported" | "planned" | "unresolved";
+  readonly execution?: "conditional";
 }
 
 export interface ValidatedScriptAst {
@@ -73,20 +80,46 @@ interface LexicalBinding {
   readonly name: string;
   readonly scope: LexicalScope;
   readonly declaredAt: number;
+  readonly initializedAt: number;
   readonly mutable: boolean;
   readonly functionOwner: string;
   readonly hoisted: boolean;
   readonly functionName?: string;
   kind: ValueKind;
   boundedArray: boolean;
-  aliasRoot?: string;
-  abstractValue?: { readonly known: true; readonly value: unknown };
+  aliasRoots?: Set<string>;
+  abstractValue?: AbstractValue;
   abstractConflicted?: boolean;
 }
+
+type AbstractValue =
+  | { readonly kind: "exact"; readonly value: unknown }
+  | { readonly kind: "typed"; readonly valueType: "array" | "boolean" | "number" | "string" }
+  | { readonly kind: "record-list"; readonly dataId: string };
 
 interface ActiveLoop {
   readonly counter?: string;
   readonly iteratedRoot?: string;
+}
+
+interface FunctionCallSite {
+  readonly caller: string;
+  readonly callee: string;
+  readonly start: number;
+  readonly conditional: boolean;
+  readonly repeated: boolean;
+}
+
+interface SemanticEffect {
+  readonly call: ValidatedSemanticCall;
+  readonly api: string;
+  readonly targetId?: string;
+  readonly inputId?: string;
+  readonly outputId?: string;
+  readonly scheduledScriptId?: string;
+  readonly conditional: boolean;
+  readonly conditionalPath: readonly string[];
+  readonly repeated: boolean;
 }
 
 interface PortSnapshot {
@@ -102,6 +135,7 @@ interface InputSnapshot {
   readonly inputs: readonly PortSnapshot[];
   readonly outputs: readonly PortSnapshot[];
   readonly context?: SemanticScriptApiContext;
+  readonly currentScriptIdentity?: SemanticScriptValidationIdentity;
 }
 
 const validatedPrograms = new WeakMap<ValidatedScriptAst, Program>();
@@ -154,7 +188,7 @@ function cloneInput(input: unknown): InputSnapshot {
   if ((prototype !== Object.prototype && prototype !== null) || keys.some((key) => typeof key !== "string" || reservedKeys.has(key))) {
     return fail("CUSTOM_SCRIPT_INPUT_INVALID", "input must be a plain string-keyed object");
   }
-  const allowed = new Set(["source", "scriptId", "inputs", "outputs", "context"]);
+  const allowed = new Set(["source", "scriptId", "inputs", "outputs", "context", "currentScriptIdentity"]);
   if (keys.some((key) => !allowed.has(String(key)))) return fail("CUSTOM_SCRIPT_INPUT_INVALID", "unknown input field");
   const valueOf = (key: string): unknown => {
     const descriptor = descriptors[key];
@@ -166,6 +200,7 @@ function cloneInput(input: unknown): InputSnapshot {
   const outputs = valueOf("outputs");
   const scriptId = descriptors.scriptId === undefined ? undefined : valueOf("scriptId");
   const context = descriptors.context === undefined ? undefined : valueOf("context");
+  const currentScriptIdentity = descriptors.currentScriptIdentity === undefined ? undefined : valueOf("currentScriptIdentity");
   if (typeof source !== "string" || source.length < 1 || source.length > 8_000) return fail("CUSTOM_SCRIPT_INPUT_INVALID", "source must contain 1..8000 characters");
   if (scriptId !== undefined && (typeof scriptId !== "string" || scriptId.length === 0)) return fail("CUSTOM_SCRIPT_INPUT_INVALID", "scriptId must be non-empty");
   const clonePorts = (value: unknown, label: string): readonly PortSnapshot[] => {
@@ -199,6 +234,7 @@ function cloneInput(input: unknown): InputSnapshot {
     outputs: clonePorts(outputs, "outputs"),
     ...(scriptId === undefined ? {} : { scriptId }),
     ...(context === undefined ? {} : { context: context as SemanticScriptApiContext }),
+    ...(currentScriptIdentity === undefined ? {} : { currentScriptIdentity: currentScriptIdentity as SemanticScriptValidationIdentity }),
   });
 }
 
@@ -333,6 +369,26 @@ function deepFreeze<T>(value: T): T {
 
 export function validateCustomScript(input: unknown): ValidatedScriptAst {
   const snapshot = cloneInput(input);
+  let authoritativeScriptId: string | undefined;
+  if (snapshot.currentScriptIdentity !== undefined) {
+    if (snapshot.context === undefined) fail("CUSTOM_SCRIPT_UNTRUSTED_AST", "current-script identity requires its trusted semantic context");
+    let script: ReturnType<typeof requireSemanticScriptValidationIdentity>;
+    try {
+      script = requireSemanticScriptValidationIdentity(snapshot.currentScriptIdentity, snapshot.context);
+    } catch (error) {
+      return fail("CUSTOM_SCRIPT_UNTRUSTED_AST", "current-script identity is not trusted by this context", error instanceof Error ? { cause: error } : undefined);
+    }
+    const exactPorts = (left: readonly PortSnapshot[], right: typeof script.inputs): boolean => left.length === right.length
+      && left.every((port, index) => {
+        const expected = right[index];
+        return expected !== undefined && port.name === expected.name && port.description === expected.description
+          && port.refKind === expected.refKind && port.refId === expected.refId;
+      });
+    if (script.source !== snapshot.source || !exactPorts(snapshot.inputs, script.inputs) || !exactPorts(snapshot.outputs, script.outputs)) {
+      fail("CUSTOM_SCRIPT_UNTRUSTED_AST", "source and ports must exactly match the authoritative semantic-js ScriptPlan");
+    }
+    authoritativeScriptId = script.id;
+  }
   let program: Program;
   try {
     program = parse(snapshot.source, { ecmaVersion: 2022, sourceType: "script", allowAwaitOutsideFunction: false, allowReturnOutsideFunction: false });
@@ -367,15 +423,21 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
   const functionCalls = new Map<string, Set<string>>();
   const functionMutations = new Map<string, Set<string>>();
   const functionCaptures = new Map<string, Set<string>>();
+  const semanticEffects = new Map<string, SemanticEffect[]>();
+  const functionCallSites: FunctionCallSite[] = [];
+  const repeatedFunctions = new Set<string>();
   const loopCallSites: Array<{ readonly callee: string; readonly loops: readonly ActiveLoop[] }> = [];
   const programCallSites: Array<{ readonly callee: string; readonly start: number }> = [];
   const activeLoops: ActiveLoop[] = [];
   const allowedLoopUpdates = new WeakSet<object>();
   let currentFunction = "<program>";
+  let conditionalDepth = 0;
+  const conditionalPath: string[] = [];
   let nextScopeId = 1;
   functionCalls.set(currentFunction, new Set());
   functionMutations.set(currentFunction, new Set());
   functionCaptures.set(currentFunction, new Set());
+  semanticEffects.set(currentFunction, []);
 
   const newScope = (parent?: LexicalScope, functionOwner = parent?.functionOwner ?? "<program>"): LexicalScope => Object.freeze({
     id: nextScopeId++, functionOwner, ...(parent === undefined ? {} : { parent }),
@@ -384,7 +446,7 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
     if (name === undefined || semanticNamespaces.has(name) || forbiddenIdentifiers.has(name)) fail("CUSTOM_SCRIPT_FORBIDDEN", "bindings require unique safe identifiers");
     if (bindings.has(name)) fail("CUSTOM_SCRIPT_FORBIDDEN", `binding shadowing is forbidden: ${name}`);
     const binding: LexicalBinding = {
-      name, scope, declaredAt: declaration.start, mutable: functionName === undefined && mutable,
+      name, scope, declaredAt: declaration.start, initializedAt: declaration.end, mutable: functionName === undefined && mutable,
       functionOwner: scope.functionOwner, hoisted,
       kind: "unknown", boundedArray: false, ...(functionName === undefined ? {} : { functionName }),
     };
@@ -394,6 +456,7 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
       functionCalls.set(functionName, new Set());
       functionMutations.set(functionName, new Set());
       functionCaptures.set(functionName, new Set());
+      semanticEffects.set(functionName, []);
     }
   };
   const declareStatements = (statements: readonly AstNode[], scope: LexicalScope): void => {
@@ -406,7 +469,7 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
         for (const declaration of nodeArray(statement.declarations)) {
           const name = identifierName(childNode(declaration.id));
           const functionName = childNode(declaration.init)?.type === "ArrowFunctionExpression" ? name : undefined;
-          declareBinding(name, childNode(declaration.id) ?? declaration, scope, statement.kind === "let", functionName);
+          declareBinding(name, declaration, scope, statement.kind === "let", functionName);
           const init = childNode(declaration.init);
           if (functionName !== undefined && init !== undefined) functionNameByNode.set(init, functionName);
         }
@@ -464,27 +527,43 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
     if (binding === undefined || referenceScope === undefined || !scopeContains(binding.scope, referenceScope)) {
       return fail("CUSTOM_SCRIPT_FORBIDDEN", `undeclared or out-of-scope identifier: ${name}`);
     }
-    if (!binding.hoisted && node.start < binding.declaredAt) {
+    if (!binding.hoisted && node.start < binding.initializedAt) {
       if (currentFunction === "<program>" || binding.functionOwner === currentFunction) fail("CUSTOM_SCRIPT_FORBIDDEN", `use before declaration: ${name}`);
       functionCaptures.get(currentFunction)?.add(name);
     }
     return binding;
   };
-  const bindingRoot = (name: string): string => bindings.get(name)?.aliasRoot ?? name;
-  const recordMutation = (name: string): void => {
-    functionMutations.get(currentFunction)?.add(bindingRoot(name));
+  const bindingRoots = (name: string, seen = new Set<string>()): ReadonlySet<string> => {
+    if (seen.has(name)) return new Set([name]);
+    seen.add(name);
+    const aliases = bindings.get(name)?.aliasRoots;
+    if (aliases === undefined || aliases.size === 0) return new Set([name]);
+    return new Set([...aliases].flatMap((alias) => [...bindingRoots(alias, new Set(seen))]));
   };
-  const mergeAbstractValue = (binding: LexicalBinding, value: { known: boolean; value?: unknown }): void => {
-    if (!value.known || binding.abstractConflicted === true) {
+  const bindingRoot = (name: string): string => [...bindingRoots(name)][0] ?? name;
+  const mayAlias = (name: string, root: string): boolean => bindingRoots(name).has(root);
+  const recordMutation = (name: string): void => {
+    functionMutations.get(currentFunction)?.add(name);
+  };
+  const sameExactValue = (left: unknown, right: unknown): boolean => {
+    if (Object.is(left, right)) return true;
+    try { return JSON.stringify(left) === JSON.stringify(right); } catch { return false; }
+  };
+  const mergeAbstractValue = (binding: LexicalBinding, value: AbstractValue | undefined, initializing = false): void => {
+    if (value === undefined || binding.abstractConflicted === true) {
       delete binding.abstractValue;
       binding.abstractConflicted = true;
       return;
     }
-    if (binding.abstractValue === undefined) {
-      binding.abstractValue = { known: true, value: value.value };
+    if (initializing || binding.abstractValue === undefined) {
+      binding.abstractValue = value;
       return;
     }
-    if (abstractValueType(binding.abstractValue.value) !== abstractValueType(value.value)) {
+    const previous = binding.abstractValue;
+    const compatible = previous.kind === "typed" && value.kind === "typed" && previous.valueType === value.valueType
+      || previous.kind === "record-list" && value.kind === "record-list" && previous.dataId === value.dataId
+      || previous.kind === "exact" && value.kind === "exact" && sameExactValue(previous.value, value.value);
+    if (!compatible) {
       delete binding.abstractValue;
       binding.abstractConflicted = true;
     }
@@ -524,30 +603,35 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
       && (literalValue(args[1]) as number) >= 0 && (literalValue(args[1]) as number) <= 1000;
   };
 
-  const abstractJson = (node: AstNode): { known: boolean; value?: unknown } => {
+  const abstractJson = (node: AstNode): AbstractValue | undefined => {
     const concrete = staticJson(node);
-    if (concrete.known) return concrete;
-    if (node.type === "Identifier") return bindings.get(identifierName(node) ?? "")?.abstractValue ?? { known: false };
+    if (concrete.known) return { kind: "exact", value: concrete.value };
+    if (node.type === "Identifier") return bindings.get(identifierName(node) ?? "")?.abstractValue;
     if (node.type === "BinaryExpression") {
-      if (["===", "!==", "<", "<=", ">", ">="].includes(String(node.operator))) return { known: true, value: false };
+      if (["===", "!==", "<", "<=", ">", ">="].includes(String(node.operator))) return { kind: "typed", valueType: "boolean" };
       const kind = expressionKind(node);
-      if (kind === "string") return { known: true, value: "" };
-      if (kind === "scalar") return { known: true, value: 0 };
+      if (kind === "string") return { kind: "typed", valueType: "string" };
+      if (kind === "scalar") return { kind: "typed", valueType: "number" };
     }
-    if (node.type === "LogicalExpression") return { known: true, value: false };
+    if (node.type === "LogicalExpression" || (node.type === "UnaryExpression" && node.operator === "!")) return { kind: "typed", valueType: "boolean" };
     if (node.type === "CallExpression") {
       const callee = childNode(node.callee);
       const direct = identifierName(callee);
-      if (direct === "String") return { known: true, value: "" };
-      if (direct === "Number") return { known: true, value: 0 };
-      if (direct === "Boolean") return { known: true, value: false };
+      if (direct === "String") return { kind: "typed", valueType: "string" };
+      if (direct === "Number") return { kind: "typed", valueType: "number" };
+      if (direct === "Boolean") return { kind: "typed", valueType: "boolean" };
       const member = memberParts(callee);
       const objectName = member === undefined ? undefined : identifierName(member.object);
       const api = member === undefined || objectName === undefined ? undefined : `${objectName}.${member.property}`;
-      if (api === "$data.get" || member?.property === "slice" || member?.property === "filter") return { known: true, value: [] };
+      if (objectName === "Math" || objectName === "Date") return { kind: "typed", valueType: "number" };
+      if (api === "$data.get") {
+        const dataId = foldStringExpression(nodeArray(node.arguments)[0])?.value;
+        return dataId === undefined ? undefined : { kind: "record-list", dataId };
+      }
+      if (member?.property === "slice" || member?.property === "filter") return abstractJson(member.object);
     }
-    if (expressionKind(node) === "array") return { known: true, value: [] };
-    return { known: false };
+    if (expressionKind(node) === "array") return { kind: "typed", valueType: "array" };
+    return undefined;
   };
 
   const foldPrimitiveExpression = (node: AstNode | undefined, seen = new Set<string>()): { value: null | string | number | boolean; composed: boolean } | undefined => {
@@ -559,8 +643,8 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
       const name = identifierName(node)!;
       if (seen.has(name)) return undefined;
       const binding = bindings.get(name);
-      const value = binding?.abstractValue?.value;
-      if (binding === undefined || binding.abstractConflicted === true
+      const value = binding?.abstractValue?.kind === "exact" ? binding.abstractValue.value : undefined;
+      if (binding === undefined || binding.abstractConflicted === true || binding.abstractValue?.kind !== "exact"
         || (value !== null && typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean")) return undefined;
       return { value, composed: false };
     }
@@ -613,25 +697,28 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
       }
     }
     const refKind = readApis[api];
+    let inputId: string | undefined;
     if (refKind !== undefined) {
       const refId = target!.value;
       const port = inputs.get(refId);
       if (port === undefined || (port.refKind !== refKind && port.refKind !== "unknown")) fail("CUSTOM_SCRIPT_UNDECLARED_INPUT", refId);
-      inputReads.add(refId);
+      inputId = refId;
     }
     const writeKind = writeApis[api];
+    let outputId: string | undefined;
     if (writeKind !== undefined) {
       const refId = target!.value;
       const port = outputs.get(refId);
       if (port === undefined || (port.refKind !== writeKind && port.refKind !== "unknown")) fail("CUSTOM_SCRIPT_UNDECLARED_OUTPUT", refId);
-      outputWrites.set(refId, (outputWrites.get(refId) ?? 0) + 1);
+      outputId = refId;
     }
+    let scheduledScriptId: string | undefined;
     if (api === "$timer.after" || api === "$timer.repeat") {
       const scriptArg = args[api === "$timer.after" ? 1 : 2];
       const scriptId = foldStringExpression(scriptArg)?.value;
       if (scriptId === undefined) fail("CUSTOM_SCRIPT_FORBIDDEN", `${api} requires a static script ID`);
-      if (snapshot.scriptId === undefined) fail("CUSTOM_SCRIPT_INPUT_INVALID", "scriptId is required for timer calls");
-      if (scriptId === snapshot.scriptId) fail("CUSTOM_SCRIPT_SELF_SCHEDULE", scriptId);
+      if (authoritativeScriptId === undefined) fail("CUSTOM_SCRIPT_UNTRUSTED_AST", "timer calls require an authoritative current-script identity");
+      if (scriptId === authoritativeScriptId) fail("CUSTOM_SCRIPT_SELF_SCHEDULE", scriptId);
       if (snapshot.context === undefined) fail("CUSTOM_SCRIPT_UNDECLARED_INPUT", scriptId);
       const delay = literalValue(args[0]);
       if (typeof delay !== "number" || !Number.isInteger(delay) || delay < 100 || delay > 60_000) fail("CUSTOM_SCRIPT_FORBIDDEN", `${api} delay must be 100..60000ms`);
@@ -639,16 +726,40 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
         const repetitions = literalValue(args[1]);
         if (typeof repetitions !== "number" || !Number.isInteger(repetitions) || repetitions < 1 || repetitions > 10) fail("CUSTOM_SCRIPT_FORBIDDEN", "$timer.repeat count must be 1..10");
       }
-      scheduled.add(scriptId);
+      scheduledScriptId = scriptId;
     }
     let availability: ValidatedSemanticCall["availability"] = "unresolved";
     if (snapshot.context !== undefined) {
       const resolvedArgs = args.map(abstractJson);
-      if (!resolvedArgs.every((value) => value.known)) fail("CUSTOM_SCRIPT_FORBIDDEN", `${api} dynamic argument type cannot be proven in trusted context`);
-      const resolution = resolveSemanticApiCall({ api, args: resolvedArgs.map((value) => value.value) }, snapshot.context);
+      const recordList = resolvedArgs.find((value) => value?.kind === "record-list");
+      if (recordList?.kind === "record-list") {
+        if ((api !== "$data.set" && api !== "$control.setData") || target === undefined || resolvedArgs[1] !== recordList) {
+          fail("CUSTOM_SCRIPT_FORBIDDEN", `${api} does not accept record-list provenance here`);
+        }
+        assertSemanticRecordListCompatibility(api, target.value, recordList.dataId, snapshot.context);
+      }
+      if (resolvedArgs.some((value) => value === undefined)) fail("CUSTOM_SCRIPT_FORBIDDEN", `${api} dynamic argument type cannot be proven in trusted context`);
+      const representative = resolvedArgs.map((value) => value!.kind === "exact" ? value!.value
+        : value!.kind === "record-list" ? []
+          : value!.valueType === "string" ? "dynamic"
+            : value!.valueType === "array" ? [] : value!.valueType === "number" ? 0 : false);
+      const resolution = resolveSemanticApiCall({ api, args: representative }, snapshot.context);
       availability = resolution.availability;
     }
-    calls.push(Object.freeze({ api, namespace, method, ...(target === undefined ? {} : { targetId: target.value }), availability }));
+    const call = Object.freeze({
+      api, namespace, method, ...(target === undefined ? {} : { targetId: target.value }), availability,
+      ...(conditionalDepth > 0 ? { execution: "conditional" as const } : {}),
+    });
+    semanticEffects.get(currentFunction)!.push(Object.freeze({
+      call, api,
+      ...(target === undefined ? {} : { targetId: target.value }),
+      ...(inputId === undefined ? {} : { inputId }),
+      ...(outputId === undefined ? {} : { outputId }),
+      ...(scheduledScriptId === undefined ? {} : { scheduledScriptId }),
+      conditional: conditionalDepth > 0,
+      conditionalPath: Object.freeze([...conditionalPath]),
+      repeated: activeLoops.length > 0 || repeatedFunctions.has(currentFunction),
+    }));
   };
 
   const visit = (node: AstNode, parent?: AstNode): void => {
@@ -681,10 +792,10 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
         const init = childNode(declaration.init);
         binding.kind = expressionKind(init);
         binding.boundedArray = boundedArrayExpression(init);
-        if (init?.type === "Identifier") binding.aliasRoot = bindingRoot(identifierName(init)!);
+        if (init?.type === "Identifier") binding.aliasRoots = new Set([identifierName(init)!]);
         if (init !== undefined) {
           const abstract = abstractJson(init);
-          mergeAbstractValue(binding, abstract);
+          mergeAbstractValue(binding, abstract, true);
         }
       }
     }
@@ -695,6 +806,32 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
       functionCalls.set(currentFunction, functionCalls.get(currentFunction) ?? new Set());
       for (const child of children(node)) visit(child, node);
       currentFunction = previous;
+      return;
+    }
+    if (node.type === "IfStatement" || node.type === "ConditionalExpression") {
+      const condition = childNode(node.test);
+      const consequent = childNode(node.consequent);
+      const alternate = childNode(node.alternate);
+      if (condition !== undefined) visit(condition, node);
+      conditionalDepth += 1;
+      conditionalPath.push(`${node.start}:then`);
+      if (consequent !== undefined) visit(consequent, node);
+      conditionalPath.pop();
+      conditionalPath.push(`${node.start}:else`);
+      if (alternate !== undefined) visit(alternate, node);
+      conditionalPath.pop();
+      conditionalDepth -= 1;
+      return;
+    }
+    if (node.type === "LogicalExpression") {
+      const left = childNode(node.left);
+      const right = childNode(node.right);
+      if (left !== undefined) visit(left, node);
+      conditionalDepth += 1;
+      conditionalPath.push(`${node.start}:then`);
+      if (right !== undefined) visit(right, node);
+      conditionalPath.pop();
+      conditionalDepth -= 1;
       return;
     }
     if (node.type === "ForStatement") {
@@ -753,6 +890,10 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
         const binding = requireBinding(direct, callee!);
         if (binding.functionName === undefined) fail("CUSTOM_SCRIPT_FORBIDDEN", `call target is not an immutable function: ${direct}`);
         functionCalls.get(currentFunction)!.add(binding.functionName);
+        functionCallSites.push({
+          caller: currentFunction, callee: binding.functionName, start: node.start,
+          conditional: conditionalDepth > 0, repeated: activeLoops.length > 0 || repeatedFunctions.has(currentFunction),
+        });
         if (activeLoops.length > 0) loopCallSites.push({ callee: binding.functionName, loops: activeLoops.map((loop) => ({ ...loop })) });
         if (currentFunction === "<program>") programCallSites.push({ callee: binding.functionName, start: node.start });
         return;
@@ -788,16 +929,33 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
         functionCalls.set(callbackName, functionCalls.get(callbackName) ?? new Set());
         functionMutations.set(callbackName, functionMutations.get(callbackName) ?? new Set());
         functionCaptures.set(callbackName, functionCaptures.get(callbackName) ?? new Set());
+        semanticEffects.set(callbackName, semanticEffects.get(callbackName) ?? []);
+        repeatedFunctions.add(callbackName);
         functionCalls.get(currentFunction)!.add(callbackName);
+        functionCallSites.push({
+          caller: currentFunction, callee: callbackName, start: node.start,
+          conditional: conditionalDepth > 0, repeated: true,
+        });
         if (currentFunction === "<program>") programCallSites.push({ callee: callbackName, start: node.start });
       }
       if (member.property === "push") {
         if (nodeArray(node.arguments).length !== 1) fail("CUSTOM_SCRIPT_FORBIDDEN", "push requires one value");
+        if (repeatedFunctions.has(currentFunction)) fail("CUSTOM_SCRIPT_FORBIDDEN", "filter callbacks cannot mutate arrays");
         const receiver = identifierName(member.object);
-        if (receiver !== undefined && activeLoops.some((loop) => loop.iteratedRoot === bindingRoot(receiver))) {
+        if (receiver !== undefined && activeLoops.some((loop) => loop.iteratedRoot !== undefined && mayAlias(receiver, loop.iteratedRoot))) {
           fail("CUSTOM_SCRIPT_FORBIDDEN", `cannot mutate an iterated array: ${receiver}`);
         }
         if (receiver !== undefined) recordMutation(receiver);
+        const receiverBinding = receiver === undefined ? undefined : bindings.get(receiver);
+        if (receiverBinding?.abstractValue?.kind === "record-list" && snapshot.context !== undefined) {
+          const pushed = abstractJson(nodeArray(node.arguments)[0]!);
+          if (pushed?.kind === "exact") {
+            assertSemanticRecordCompatibility(receiverBinding.abstractValue.dataId, pushed.value, snapshot.context);
+          } else {
+            delete receiverBinding.abstractValue;
+            receiverBinding.abstractConflicted = true;
+          }
+        }
       }
       return;
     }
@@ -818,10 +976,23 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
       const binding = requireBinding(name, left!);
       if (!binding.mutable) fail("CUSTOM_SCRIPT_FORBIDDEN", `assignment requires a mutable non-function local: ${name}`);
       if (!allowedLoopUpdates.has(node) && activeLoops.some((loop) => loop.counter === name)) fail("CUSTOM_SCRIPT_FORBIDDEN", `loop counter may only change in its update clause: ${name}`);
-      if (activeLoops.some((loop) => loop.iteratedRoot === bindingRoot(name))) fail("CUSTOM_SCRIPT_FORBIDDEN", `cannot rebind an iterated array or alias: ${name}`);
+      if (activeLoops.some((loop) => loop.iteratedRoot !== undefined && mayAlias(name, loop.iteratedRoot))) fail("CUSTOM_SCRIPT_FORBIDDEN", `cannot rebind an iterated array or alias: ${name}`);
       const right = childNode(node.right);
       if (right !== undefined) {
-        mergeAbstractValue(binding, abstractJson(right));
+        if (node.operator === "=" && right.type === "Identifier") {
+          const rightName = identifierName(right)!;
+          if (activeLoops.some((loop) => loop.iteratedRoot !== undefined && mayAlias(rightName, loop.iteratedRoot))) {
+            fail("CUSTOM_SCRIPT_FORBIDDEN", `cannot create an alias to an iterated array: ${name}`);
+          }
+        }
+        const assigned = abstractJson(right);
+        if (conditionalDepth > 0 && binding.abstractValue === undefined) mergeAbstractValue(binding, undefined);
+        else mergeAbstractValue(binding, assigned);
+        if (node.operator === "=" && right.type === "Identifier") {
+          const aliases = binding.aliasRoots ?? new Set<string>();
+          aliases.add(identifierName(right)!);
+          binding.aliasRoots = aliases;
+        }
       }
       recordMutation(name);
       return;
@@ -829,8 +1000,19 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
     if (left?.type !== "MemberExpression" || left.computed !== true) fail("CUSTOM_SCRIPT_FORBIDDEN", "property assignment is forbidden");
     const arrayName = identifierName(childNode(left.object));
     if (arrayName === undefined || bindings.get(arrayName)?.boundedArray !== true) fail("CUSTOM_SCRIPT_FORBIDDEN", "only bounded local array elements may be assigned");
-    if (activeLoops.some((loop) => loop.iteratedRoot === bindingRoot(arrayName))) fail("CUSTOM_SCRIPT_FORBIDDEN", `cannot assign an iterated array element: ${arrayName}`);
+    if (activeLoops.some((loop) => loop.iteratedRoot !== undefined && mayAlias(arrayName, loop.iteratedRoot))) fail("CUSTOM_SCRIPT_FORBIDDEN", `cannot assign an iterated array element: ${arrayName}`);
     if (!safeArrayIndex(childNode(left.property), bindings)) fail("CUSTOM_SCRIPT_FORBIDDEN", "array assignment requires a bounded local index");
+    if (repeatedFunctions.has(currentFunction)) fail("CUSTOM_SCRIPT_FORBIDDEN", "filter callbacks cannot mutate arrays");
+    const arrayBinding = bindings.get(arrayName);
+    if (arrayBinding?.abstractValue?.kind === "record-list" && snapshot.context !== undefined) {
+      const replacement = abstractJson(childNode(node.right)!);
+      if (replacement?.kind === "exact") {
+        assertSemanticRecordCompatibility(arrayBinding.abstractValue.dataId, replacement.value, snapshot.context);
+      } else {
+        delete arrayBinding.abstractValue;
+        arrayBinding.abstractConflicted = true;
+      }
+    }
     recordMutation(arrayName);
   };
 
@@ -919,9 +1101,14 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
     const effects = functionMutations.get(callSite.callee) ?? new Set<string>();
     for (const loop of callSite.loops) {
       if ((loop.counter !== undefined && effects.has(loop.counter))
-        || (loop.iteratedRoot !== undefined && effects.has(loop.iteratedRoot))) {
+        || (loop.iteratedRoot !== undefined && [...effects].some((mutation) => mayAlias(mutation, loop.iteratedRoot!)))) {
         fail("CUSTOM_SCRIPT_FORBIDDEN", `called function mutates an active loop dependency: ${callSite.callee}`);
       }
+    }
+  }
+  for (const callSite of functionCallSites) {
+    if (callSite.repeated && (functionMutations.get(callSite.callee)?.size ?? 0) > 0) {
+      fail("CUSTOM_SCRIPT_FORBIDDEN", `repeated callback cannot call a mutating function: ${callSite.callee}`);
     }
   }
   let capturesChanged = true;
@@ -945,6 +1132,93 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
       const binding = bindings.get(capture);
       if (binding !== undefined && binding.declaredAt > callSite.start) fail("CUSTOM_SCRIPT_FORBIDDEN", `use before declaration through ${callSite.callee}: ${capture}`);
     }
+  }
+
+  for (const callSite of functionCallSites) {
+    for (const capture of functionCaptures.get(callSite.callee) ?? []) {
+      const binding = bindings.get(capture);
+      if (binding !== undefined && binding.functionOwner === callSite.caller && binding.initializedAt > callSite.start) {
+        fail("CUSTOM_SCRIPT_FORBIDDEN", `use before declaration through ${callSite.callee}: ${capture}`);
+      }
+    }
+  }
+
+  const reachableFunctions = new Set<string>();
+  const markReachable = (name: string): void => {
+    if (reachableFunctions.has(name)) return;
+    reachableFunctions.add(name);
+    functionCalls.get(name)?.forEach(markReachable);
+  };
+  markReachable("<program>");
+  for (const name of functionNames) {
+    if (!reachableFunctions.has(name)) fail("CUSTOM_SCRIPT_FORBIDDEN", `unused function is forbidden: ${name}`);
+  }
+  for (const name of semanticEffects.keys()) {
+    if (name.startsWith("<callback:") && !reachableFunctions.has(name)) fail("CUSTOM_SCRIPT_FORBIDDEN", `unused callback is forbidden: ${name}`);
+  }
+
+  const callSitesByCaller = new Map<string, FunctionCallSite[]>();
+  for (const callSite of functionCallSites) {
+    const sites = callSitesByCaller.get(callSite.caller) ?? [];
+    sites.push(callSite);
+    callSitesByCaller.set(callSite.caller, sites);
+  }
+  const branchHasVisibleCounterpart = (owner: string, effect: SemanticEffect): boolean => {
+    const segment = effect.conditionalPath.at(-1);
+    if (segment === undefined) return true;
+    const separator = segment.lastIndexOf(":");
+    const branchId = segment.slice(0, separator);
+    const side = segment.slice(separator + 1);
+    const counterpart = `${branchId}:${side === "then" ? "else" : "then"}`;
+    const prefix = effect.conditionalPath.slice(0, -1);
+    return (semanticEffects.get(owner) ?? []).some((candidate) => {
+      if (candidate === effect || candidate.conditionalPath.at(-1) !== counterpart) return false;
+      const candidatePrefix = candidate.conditionalPath.slice(0, -1);
+      if (candidatePrefix.length !== prefix.length || candidatePrefix.some((value, index) => value !== prefix[index])) return false;
+      return candidate.outputId !== undefined || candidate.api.startsWith("$feedback.")
+        || candidate.api.startsWith("$page.") || candidate.api.startsWith("$overlay.");
+    });
+  };
+  const functionExecutionCounts = new Map<string, number>();
+  const outputWriteEffects = new Map<string, SemanticEffect[]>();
+  const collectExecution = (name: string, inheritedConditional: boolean, inheritedRepeated: boolean): void => {
+    const executionCount = (functionExecutionCounts.get(name) ?? 0) + 1;
+    functionExecutionCounts.set(name, executionCount);
+    for (const effect of semanticEffects.get(name) ?? []) {
+      const conditional = inheritedConditional || effect.conditional;
+      const repeated = inheritedRepeated || effect.repeated || (name !== "<program>" && executionCount > 1);
+      const externalEffect = readApis[effect.api] === undefined && effect.api !== "$event.record";
+      const conditionalOutputClosed = !conditional
+        || (effect.conditional && effect.outputId !== undefined && branchHasVisibleCounterpart(name, effect));
+      if (externalEffect && (repeated || (effect.outputId !== undefined && !conditionalOutputClosed))) {
+        fail("CUSTOM_SCRIPT_FORBIDDEN", `external side effect requires one unconditional execution: ${effect.api}`);
+      }
+      calls.push(conditional && effect.call.execution === undefined
+        ? Object.freeze({ ...effect.call, execution: "conditional" as const })
+        : effect.call);
+      if (effect.inputId !== undefined) inputReads.add(effect.inputId);
+      if (effect.outputId !== undefined) {
+        const writes = outputWriteEffects.get(effect.outputId) ?? [];
+        writes.push(effect);
+        outputWriteEffects.set(effect.outputId, writes);
+      }
+      if (effect.scheduledScriptId !== undefined) scheduled.add(effect.scheduledScriptId);
+    }
+    for (const callSite of callSitesByCaller.get(name) ?? []) {
+      collectExecution(callSite.callee, inheritedConditional || callSite.conditional, inheritedRepeated || callSite.repeated);
+    }
+  };
+  collectExecution("<program>", false, false);
+  for (const [outputId, effects] of outputWriteEffects) {
+    let count = effects.length;
+    if (effects.length > 1 && effects.every((effect) => effect.conditionalPath.length === 1)) {
+      const segments = effects.map((effect) => effect.conditionalPath[0]!);
+      const branchIds = new Set(segments.map((segment) => segment.slice(0, segment.lastIndexOf(":"))));
+      const thenCount = segments.filter((segment) => segment.endsWith(":then")).length;
+      const elseCount = segments.filter((segment) => segment.endsWith(":else")).length;
+      if (branchIds.size === 1 && thenCount > 0 && elseCount > 0) count = Math.max(thenCount, elseCount);
+    }
+    outputWrites.set(outputId, count);
   }
 
   for (const port of snapshot.inputs) if (!inputReads.has(port.refId)) fail("CUSTOM_SCRIPT_INPUT_NOT_READ", port.refId);
@@ -996,16 +1270,6 @@ function staticJson(node: AstNode): { known: boolean; value?: null | string | nu
     return { known: true, value: result };
   }
   return { known: false };
-}
-
-function abstractValueType(value: unknown): "array" | "boolean" | "null" | "number" | "object" | "string" | "unknown" {
-  if (value === null) return "null";
-  if (Array.isArray(value)) return "array";
-  if (typeof value === "boolean") return "boolean";
-  if (typeof value === "number") return "number";
-  if (typeof value === "string") return "string";
-  if (typeof value === "object") return "object";
-  return "unknown";
 }
 
 function hasLiteralUpperBound(node: AstNode, counter: string): boolean {

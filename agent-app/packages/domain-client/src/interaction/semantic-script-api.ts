@@ -2,10 +2,12 @@ import { types as utilTypes } from "node:util";
 import {
   canonicalServerHash,
   SolutionImplementationPlanSchema,
+  ScriptPlanSchema,
   UIImplementationSpecV2Schema,
   type MockDataSet,
   type ScriptCapabilityProfile,
   type SolutionImplementationPlan,
+  type ScriptPlan,
 } from "@kf/contracts";
 import { requireScriptCapabilityProfile } from "../design-knowledge/script-capability-registry.js";
 import { createDefaultModuleRegistry } from "../modules/module-registry.js";
@@ -47,6 +49,10 @@ export interface SemanticScriptApiContext {
   readonly schema: "kf-semantic-script-api-context/v1";
 }
 
+export interface SemanticScriptValidationIdentity {
+  readonly schema: "kf-semantic-script-validation-identity/v1";
+}
+
 interface RuntimeControl {
   readonly semanticControlId: string;
   readonly instanceName: string;
@@ -62,11 +68,15 @@ interface TrustedContext {
   readonly overlays: ReadonlySet<string>;
   readonly localState: ReadonlyMap<string, SolutionImplementationPlan["localState"][number]>;
   readonly mockData: ReadonlyMap<string, MockDataSet>;
-  readonly scripts: ReadonlySet<string>;
+  readonly scripts: ReadonlyMap<string, ScriptPlan>;
   readonly activeEvent?: { readonly controlId: string; readonly semanticEvent: string };
 }
 
 const trustedContexts = new WeakMap<SemanticScriptApiContext, TrustedContext>();
+const trustedScriptIdentities = new WeakMap<SemanticScriptValidationIdentity, {
+  readonly context: SemanticScriptApiContext;
+  readonly script: Extract<ScriptPlan, { kind: "custom" }>;
+}>();
 const RESERVED_DATA_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 
 function invalidContext(nodeId: string, detail: string, options?: ErrorOptions): never {
@@ -315,7 +325,7 @@ export function createSemanticScriptApiContext(input: unknown): SemanticScriptAp
       const data = dataById.get(id);
       return data === undefined ? [] : [[id, data] as const];
     })),
-    scripts: new Set(parsedPlan.data.scripts.map((script) => script.id)),
+    scripts: new Map(parsedPlan.data.scripts.map((script) => [script.id, script])),
     ...(activeEvent === undefined ? {} : { activeEvent }),
   });
   return context;
@@ -325,6 +335,78 @@ function requireContext(context: SemanticScriptApiContext): TrustedContext {
   const trusted = trustedContexts.get(context);
   if (trusted === undefined) throw new SemanticScriptApiError("SCRIPT_API_CONTEXT_UNTRUSTED", "context");
   return trusted;
+}
+
+export function createSemanticScriptValidationIdentity(
+  input: unknown,
+  context: SemanticScriptApiContext,
+): SemanticScriptValidationIdentity {
+  const trusted = requireContext(context);
+  let cloned: JsonData;
+  try {
+    cloned = clonePureData(input, "current-script");
+  } catch (error) {
+    if (error instanceof SemanticScriptApiError) {
+      throw new SemanticScriptApiError("SCRIPT_API_INPUT_INVALID", "current-script", error.message, { cause: error });
+    }
+    throw error;
+  }
+  const parsed = ScriptPlanSchema.safeParse(cloned);
+  if (!parsed.success || parsed.data.kind !== "custom" || parsed.data.programVersion !== "semantic-js/v1" || parsed.data.source === undefined) {
+    throw new SemanticScriptApiError("SCRIPT_API_INPUT_INVALID", "current-script", "authoritative semantic-js ScriptPlan is required", parsed.success ? undefined : { cause: parsed.error });
+  }
+  const authoritative = trusted.scripts.get(parsed.data.id);
+  if (authoritative === undefined || canonicalServerHash(authoritative) !== canonicalServerHash(parsed.data)) {
+    throw new SemanticScriptApiError("SCRIPT_API_INPUT_INVALID", parsed.data.id, "script does not match the authoritative plan");
+  }
+  const identity = Object.freeze({ schema: "kf-semantic-script-validation-identity/v1" as const });
+  trustedScriptIdentities.set(identity, { context, script: deepFreeze(parsed.data) });
+  return identity;
+}
+
+export function requireSemanticScriptValidationIdentity(
+  identity: SemanticScriptValidationIdentity,
+  context: SemanticScriptApiContext,
+): Extract<ScriptPlan, { kind: "custom" }> {
+  const trusted = trustedScriptIdentities.get(identity);
+  if (trusted === undefined || trusted.context !== context) {
+    throw new SemanticScriptApiError("SCRIPT_API_CONTEXT_UNTRUSTED", "current-script", "validation identity is not compiler-owned by this context");
+  }
+  return trusted.script;
+}
+
+export function assertSemanticRecordListCompatibility(
+  api: "$control.setData" | "$data.set",
+  targetId: string,
+  sourceDataId: string,
+  context: SemanticScriptApiContext,
+): void {
+  const trusted = requireContext(context);
+  const source = trusted.mockData.get(sourceDataId);
+  const target = api === "$data.set"
+    ? trusted.mockData.get(targetId)
+    : (() => {
+      const control = targetControl(targetId, trusted);
+      return control.mockDataId === undefined ? undefined : trusted.mockData.get(control.mockDataId);
+    })();
+  if (source === undefined || target === undefined) invalidCall(api, "record-list provenance is not owned by the current page");
+  const signature = (dataSet: MockDataSet): string => dataSet.fields
+    .map((field) => `${field.key}:${field.type}`)
+    .sort((left, right) => left.localeCompare(right, "en-US"))
+    .join("|");
+  if (signature(source) !== signature(target)) invalidCall(api, "record-list provenance schema does not match the target");
+}
+
+export function assertSemanticRecordCompatibility(
+  dataId: string,
+  record: unknown,
+  context: SemanticScriptApiContext,
+): void {
+  const trusted = requireContext(context);
+  const dataSet = trusted.mockData.get(dataId);
+  if (dataSet === undefined) invalidCall("$data.set", "record provenance is not owned by the current page");
+  const cloned = clonePureData(record, "record-provenance");
+  validateRuntimeRecordList("$data.set", [cloned], dataSet);
 }
 
 function parseRecordInput(value: unknown, nodeId: string, expectedKeys: readonly string[]): Record<string, JsonData> {

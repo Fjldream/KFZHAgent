@@ -1,8 +1,12 @@
 import { createHash } from "node:crypto";
-import { canonicalServerHash, type SolutionImplementationPlan, type UIImplementationSpecV2 } from "@kf/contracts";
+import { canonicalServerHash, type ScriptPlan, type SolutionImplementationPlan, type UIImplementationSpecV2 } from "@kf/contracts";
 import { describe, expect, it } from "vitest";
 import { renderScriptTemplate } from "./script-template-registry.js";
-import { createSemanticScriptApiContext } from "./semantic-script-api.js";
+import {
+  createSemanticScriptApiContext,
+  createSemanticScriptValidationIdentity,
+  requireSemanticScriptValidationIdentity,
+} from "./semantic-script-api.js";
 import { createDefaultModuleRegistry } from "../modules/module-registry.js";
 import { solutionModuleRegistryHash } from "../solution-compile/solution-provenance.js";
 import {
@@ -24,27 +28,30 @@ const intent: SolutionImplementationPlan["pages"][number]["root"]["intent"] = {
   importance: "primary", visualWeight: 3, readingOrder: 0, density: "comfortable", groupWith: [],
   width: { mode: "fixed", value: 120 }, height: { mode: "fixed", value: 40 }, align: "start",
 };
-const script = (id: string) => ({
+const script = (id: string): ScriptPlan => ({
   id, purpose: `运行${id}`, kind: "custom" as const, programVersion: "declarative-steps/v1" as const,
   inputs: [], outputs: [], steps: [{ order: 1, intent: `执行${id}`, inputNames: [], outputNames: [] }],
 });
-const semanticPlan = (): SolutionImplementationPlan => ({
+const semanticPlan = (scripts: SolutionImplementationPlan["scripts"] = [script("current-script"), script("refresh-script"), script("pulse-script")]): SolutionImplementationPlan => ({
   schema: "kf-solution-implementation/v1", projectKey: "validator", blueprintHash: "a".repeat(64), candidateBundleHash: "b".repeat(64),
-  theme, roleStyles: [{ role: "content", declarations: {}, states: {} }], mockData: [], localState: [], actions: [],
-  scripts: [script("current-script"), script("refresh-script"), script("pulse-script")], overlays: [],
+  theme, roleStyles: [{ role: "content", declarations: {}, states: {} }], mockData: [], localState: [],
+  actions: scripts.filter((candidate) => candidate.kind === "custom" && candidate.programVersion === "semantic-js/v1")
+    .map((candidate) => ({ id: `run-${candidate.id}`, kind: "run-script" as const, scriptId: candidate.id, afterActionIds: [] })),
+  scripts, overlays: [],
   pages: [{
     id: "home", title: "首页", purpose: "脚本宿主页", canvas: "desktop", sourceBlueprintPageId: "bp-home",
     sourceBlueprintRegionIds: ["region"], initialStateIds: [], root: {
       id: "home-root", kind: "layout", layout: "column", sourceBlueprintRegionIds: ["region"], intent,
       children: [{
         id: "go", kind: "control", capabilityId: "button", content: "执行", properties: [], tabIds: [], styleRole: "content",
-        sourceBlueprintRegionIds: ["region"], intent, eventBindings: [],
+        sourceBlueprintRegionIds: ["region"], intent,
+        eventBindings: scripts.filter((candidate) => candidate.kind === "custom" && candidate.programVersion === "semantic-js/v1")
+          .map((candidate) => ({ semanticEvent: "click", actionIds: [`run-${candidate.id}`] })),
       }],
     },
   }],
 });
-const semanticImplementation = (): UIImplementationSpecV2 => {
-  const plan = semanticPlan();
+const semanticImplementation = (plan = semanticPlan()): UIImplementationSpecV2 => {
   return {
     schema: "kf-ui-implementation/v2", compatibility: "native", theme, compiledRoleStyles: {}, compiledActions: [], compiledScripts: [],
     sourceSolutionPlanHash: canonicalServerHash(plan), sourceModuleRegistryHash: solutionModuleRegistryHash(plan, createDefaultModuleRegistry()),
@@ -69,9 +76,47 @@ const semanticImplementation = (): UIImplementationSpecV2 => {
     },
   };
 };
-const trustedContext = () => createSemanticScriptApiContext({
-  plan: semanticPlan(), implementation: semanticImplementation(), ownerControlId: "go",
+const trustedContext = (plan = semanticPlan()) => createSemanticScriptApiContext({
+  plan, implementation: semanticImplementation(plan), ownerControlId: "go",
 });
+
+const recordFixture = () => {
+  const base = semanticPlan();
+  const root = base.pages[0]!.root;
+  if (root.kind !== "layout") throw new Error("record fixture requires a layout root");
+  const tableNode = (id: string, mockDataId: string) => ({
+    id, kind: "control" as const, capabilityId: "easyui.1", content: id, properties: [], tabIds: [], styleRole: "content",
+    sourceBlueprintRegionIds: ["region"], intent, eventBindings: [], mockDataId,
+  });
+  const plan: SolutionImplementationPlan = {
+    ...base,
+    mockData: [
+      { id: "visitor-records", purpose: "访客", fields: [{ key: "id", label: "标识", type: "text" }, { key: "name", label: "姓名", type: "text" }], records: [{ values: [{ field: "id", value: "v1" }, { field: "name", value: "张三" }] }] },
+      { id: "audit-records", purpose: "审计", fields: [{ key: "auditId", label: "编码", type: "text" }], records: [{ values: [{ field: "auditId", value: "a1" }] }] },
+    ],
+    pages: [{ ...base.pages[0]!, root: { ...root, children: [...root.children, tableNode("visitor-table", "visitor-records"), tableNode("audit-table", "audit-records")] } }],
+  };
+  const implementation = semanticImplementation(plan);
+  type NativePage = Extract<UIImplementationSpecV2["pages"][number], { compatibility: "native" }>;
+  const implementationPage = implementation.pages[0] as NativePage;
+  const tableControl = (id: string, mockDataId: string): NativePage["controls"][number] => ({
+    id, role: "content", capabilityId: "easyui.1", parentId: "home-root", depth: 1, zIndex: 0,
+    geometry: { x: 0, y: 0, width: 120, height: 40 }, nativeProperties: {}, sourceSolutionNodeId: id,
+    sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region"], eventBindings: [],
+    dataBinding: { mockDataId, records: mockDataId === "visitor-records" ? [{ id: "v1", name: "张三" }] : [{ auditId: "a1" }] },
+  });
+  const withTables: UIImplementationSpecV2 = {
+    ...implementation,
+    pages: [{ ...implementationPage, controls: [...implementationPage.controls,
+      tableControl("visitor-table", "visitor-records"), tableControl("audit-table", "audit-records")] }],
+    runtimeCorrelation: {
+      ...implementation.runtimeCorrelation!,
+      controls: [...implementation.runtimeCorrelation!.controls,
+        { semanticControlId: "visitor-table", instanceName: "Table1" }, { semanticControlId: "audit-table", instanceName: "Table2" }],
+    },
+  };
+  return { plan, context: createSemanticScriptApiContext({ plan, implementation: withTables, ownerControlId: "go" }) };
+};
 
 const validate = (source: string, overrides: Partial<CustomScriptValidationInput> = {}) => validateCustomScript({
   source,
@@ -179,6 +224,9 @@ describe("constrained custom script validation", () => {
     expect(validate('const target = "go"; $control.setVisible(target, true);', {
       context: trustedContext(), outputs: [port("go", "control")],
     }).calls[0]).toMatchObject({ availability: "planned", targetId: "go" });
+    expect(validate('const visible = Boolean(1); $control.setVisible("go", visible);', {
+      context: trustedContext(), outputs: [port("go", "control")],
+    }).calls[0]).toMatchObject({ availability: "planned", targetId: "go" });
     expect(() => validate('let visible = true; if (true) { visible = "yes"; } if (true) { visible = false; } $control.setVisible("go", visible);', {
       context: trustedContext(), outputs: [port("go", "control")],
     })).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*cannot be proven/);
@@ -230,6 +278,10 @@ describe("constrained custom script validation", () => {
       'let records = $data.get("records").slice(0, 100); for (const record of records) { records = []; }',
       'const records = $data.get("records").slice(0, 100); const alias = records; for (const record of records) { alias.push(record); }',
       'const records = $data.get("records").slice(0, 100); function mutate() { records.push({}); } for (const record of records) { mutate(); }',
+      'const records = $data.get("records").slice(0, 100); let alias = []; for (const record of records) { alias = records; alias.push(record); }',
+      'const records = $data.get("records").slice(0, 100); let alias = []; function bind() { alias = records; } function mutate() { alias.push({}); } for (const record of records) { bind(); mutate(); }',
+      'const records = $data.get("records").slice(0, 100); let alias = []; function mutate() { alias.push({}); } function bind() { alias = records; } for (const record of records) { bind(); mutate(); }',
+      'const records = $data.get("records").slice(0, 100); let alias = []; for (const record of records) { alias = records; }',
       "function bump() { index += 1; } for (let index = 0; index < 10; index += 1) { bump(); }",
     ]) expect(() => validate(source, { inputs: source.includes("$data.get") ? [port("records", "mock-data")] : [] }))
       .toThrow(/CUSTOM_SCRIPT_FORBIDDEN/);
@@ -239,14 +291,48 @@ describe("constrained custom script validation", () => {
     expect(() => validate('function recurse() { recurse(); } recurse();')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*recursion/i);
     expect(() => validate("const f = () => [1].filter(() => f()); f();")).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*recursion/i);
     expect(() => validate("const f = () => [1].filter(() => g()); const g = () => f(); f();")).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*recursion/i);
-    expect(() => validate('$timer.after(100, "current-script");')).toThrow(/CUSTOM_SCRIPT_SELF_SCHEDULE/);
+    const source = '$timer.after(100, "refresh-script"); $timer.repeat(500, 2, "pulse-script");';
+    const current = {
+      id: "current-script", purpose: "运行当前脚本", kind: "custom" as const, programVersion: "semantic-js/v1" as const,
+      inputs: [], outputs: [], source,
+    };
+    const plan = semanticPlan([current, script("refresh-script"), script("pulse-script")]);
+    const context = trustedContext(plan);
+    const identity = createSemanticScriptValidationIdentity(current, context);
+    const authorized = requireSemanticScriptValidationIdentity(identity, context);
+    expect(Object.isFrozen(authorized)).toBe(true);
+    expect(Object.isFrozen(authorized.inputs)).toBe(true);
+    const selfSource = '$timer.after(100, "current-script");';
+    const selfScript = { ...current, source: selfSource };
+    const selfPlan = semanticPlan([selfScript, script("refresh-script"), script("pulse-script")]);
+    const selfContext = trustedContext(selfPlan);
+    expect(() => validate(selfSource, {
+      context: selfContext, currentScriptIdentity: createSemanticScriptValidationIdentity(selfScript, selfContext),
+    })).toThrow(/CUSTOM_SCRIPT_SELF_SCHEDULE/);
     expect(() => validateCustomScript({ source: '$timer.after(100, "refresh-script");', inputs: [], outputs: [], context: trustedContext() }))
-      .toThrow(/CUSTOM_SCRIPT_INPUT_INVALID.*scriptId/);
-    expect(() => validate('$timer.after(100, "missing-script");')).toThrow(/CUSTOM_SCRIPT_UNDECLARED_INPUT.*missing-script/);
-    expect(validate('$timer.after(100, "refresh-script"); $timer.repeat(500, 2, "pulse-script");', {
-      context: trustedContext(),
+      .toThrow(/CUSTOM_SCRIPT_(?:INPUT_INVALID|UNTRUSTED_AST)/);
+    expect(() => validate('$timer.after(100, "missing-script");')).toThrow(/CUSTOM_SCRIPT_UNTRUSTED_AST/);
+    expect(validate(source, {
+      context, currentScriptIdentity: identity,
     }).scheduledScriptIds)
       .toEqual(["pulse-script", "refresh-script"]);
+    expect(() => validate(source, { context, currentScriptIdentity: { schema: "kf-semantic-script-validation-identity/v1" } as never }))
+      .toThrow(/CUSTOM_SCRIPT_(?:INPUT_INVALID|UNTRUSTED_AST)/);
+    expect(() => validate(source, { context: trustedContext(plan), currentScriptIdentity: identity }))
+      .toThrow(/CUSTOM_SCRIPT_(?:INPUT_INVALID|UNTRUSTED_AST)/);
+    expect(() => validate(source.replace("500", "501"), { context, currentScriptIdentity: identity }))
+      .toThrow(/CUSTOM_SCRIPT_(?:INPUT_INVALID|UNTRUSTED_AST)/);
+    expect(() => validate(source, {
+      context, currentScriptIdentity: identity, inputs: [port("extra", "control")],
+    })).toThrow(/CUSTOM_SCRIPT_UNTRUSTED_AST.*ports/);
+    expect(() => createSemanticScriptValidationIdentity({ ...current, source: source.replace("500", "501") }, context))
+      .toThrow(/SCRIPT_API_INPUT_INVALID.*does not match/);
+    let getterCalls = 0;
+    const hostile = { ...current } as Record<string, unknown>;
+    Object.defineProperty(hostile, "source", { enumerable: true, get() { getterCalls += 1; return source; } });
+    expect(() => createSemanticScriptValidationIdentity(hostile, context)).toThrow(/SCRIPT_API_INPUT_INVALID/);
+    expect(getterCalls).toBe(0);
+    expect(() => createSemanticScriptValidationIdentity(new Proxy({}, {}), context)).toThrow(/SCRIPT_API_INPUT_INVALID/);
   });
 
   it("enforces AST node/depth budgets and script parsing mode", () => {
@@ -286,11 +372,14 @@ describe("constrained custom script validation", () => {
       "[1].filter((record) => true); const leaked = record;",
       "let value = 1; if (true) { let value = 2; }",
       "for (let index = 0; index < 2; index += 1) { if (true) { let index = 0; } }",
+      "const value = value;",
     ]) expect(() => validate(source)).toThrow(/CUSTOM_SCRIPT_FORBIDDEN/);
     expect(() => validate("const read = () => later; read(); const later = 1;"))
       .toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*use before declaration/);
     expect(() => validate("const read = () => later; const later = 1; read();")).not.toThrow();
     expect(() => validate("const read = () => { const value = later; const later = 1; return value; }; read();"))
+      .toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*use before declaration/);
+    expect(() => validate("const read = () => later; read(); const later = 1; const outer = () => read(); outer();"))
       .toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*use before declaration/);
     expect(() => validate("const value = read(); function read() { return 1; }")).not.toThrow();
   });
@@ -300,6 +389,64 @@ describe("constrained custom script validation", () => {
     expect(() => validate('const css = "color" + ": red";')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*css/i);
     expect(() => validate('const selector = "div" + " .record";')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*selector/i);
     expect(() => validate('const selector = "button" + " input";')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*selector/i);
+  });
+
+  it("does not preserve stale exact constants after mutable reassignment", () => {
+    expect(() => validate('let target = "home"; target = "missing"; $page.navigate(target);', {
+      context: trustedContext(),
+    })).toThrow(/CUSTOM_SCRIPT_FORBIDDEN|SCRIPT_PAGE_NOT_FOUND/);
+    expect(() => validate('let level = "success"; level = "bogus"; $feedback.show(level, "done");', {
+      context: trustedContext(),
+    })).toThrow(/CUSTOM_SCRIPT_FORBIDDEN|SCRIPT_API_INPUT_INVALID/);
+  });
+
+  it("preserves record-list provenance instead of treating dynamic data as an empty array", () => {
+    const { context } = recordFixture();
+    expect(() => validate('const records = $data.get("visitor-records"); $data.set("visitor-records", records.slice(0, 100));', {
+      context, inputs: [port("records", "mock-data", "visitor-records")], outputs: [port("updated", "mock-data", "visitor-records")],
+    })).not.toThrow();
+    expect(() => validate('const records = $data.get("visitor-records").slice(0, 100); records.push({ "id": "v2", "name": "李四" }); $data.set("visitor-records", records);', {
+      context, inputs: [port("records", "mock-data", "visitor-records")], outputs: [port("updated", "mock-data", "visitor-records")],
+    })).not.toThrow();
+    expect(() => validate('const records = $data.get("visitor-records"); $data.set("audit-records", records.slice(0, 100));', {
+      context, inputs: [port("records", "mock-data", "visitor-records")], outputs: [port("updated", "mock-data", "audit-records")],
+    })).toThrow(/CUSTOM_SCRIPT_FORBIDDEN|SCRIPT_API_INPUT_INVALID/);
+    expect(() => validate('const records = $data.get("visitor-records").slice(0, 100); records.push({ "auditId": "a1" }); $data.set("visitor-records", records);', {
+      context, inputs: [port("records", "mock-data", "visitor-records")], outputs: [port("updated", "mock-data", "visitor-records")],
+    })).toThrow(/CUSTOM_SCRIPT_FORBIDDEN|SCRIPT_API_INPUT_INVALID/);
+    expect(() => validate('const records = $data.get("visitor-records").slice(0, 100); records[0] = { "auditId": "a1" }; $data.set("visitor-records", records);', {
+      context, inputs: [port("records", "mock-data", "visitor-records")], outputs: [port("updated", "mock-data", "visitor-records")],
+    })).toThrow(/CUSTOM_SCRIPT_FORBIDDEN|SCRIPT_API_INPUT_INVALID/);
+  });
+
+  it("counts ports and dependencies only through reachable, single-execution code", () => {
+    expect(() => validate('function unused() { return $control.getValue("name"); }', {
+      inputs: [port("name", "control")],
+    })).toThrow(/CUSTOM_SCRIPT_(?:FORBIDDEN|INPUT_NOT_READ)/);
+    expect(() => validate('function unused() { $state.set("submitted", true); }', {
+      outputs: [port("submitted", "local-state")],
+    })).toThrow(/CUSTOM_SCRIPT_(?:FORBIDDEN|OUTPUT_NOT_WRITTEN)/);
+    expect(() => validate('function write() { $state.set("submitted", true); } write(); write();', {
+      outputs: [port("submitted", "local-state")],
+    })).toThrow(/CUSTOM_SCRIPT_(?:FORBIDDEN|OUTPUT_WRITTEN_MULTIPLE_TIMES)/);
+    expect(() => validate('function notify() { $feedback.show("info", "again"); } notify(); notify();'))
+      .toThrow(/CUSTOM_SCRIPT_FORBIDDEN/);
+    expect(() => validate('for (let index = 0; index < 2; index += 1) { $feedback.show("info", "again"); }'))
+      .toThrow(/CUSTOM_SCRIPT_FORBIDDEN/);
+    expect(() => validate('[1].filter((value) => { $feedback.show("info", "again"); return true; });'))
+      .toThrow(/CUSTOM_SCRIPT_FORBIDDEN/);
+    expect(() => validate('const values = [1]; values.filter((value) => { values.push(value); return true; });'))
+      .toThrow(/CUSTOM_SCRIPT_FORBIDDEN/);
+    expect(() => validate('const values = [1]; function mutate() { values.push(2); } values.filter((value) => { mutate(); return true; });'))
+      .toThrow(/CUSTOM_SCRIPT_FORBIDDEN/);
+    expect(() => validate('if (true) { $state.set("submitted", true); }', {
+      outputs: [port("submitted", "local-state")],
+    })).toThrow(/CUSTOM_SCRIPT_FORBIDDEN|CUSTOM_SCRIPT_OUTPUT_NOT_WRITTEN/);
+    const branched = validate('if (true) { $state.set("submitted", true); } else { $state.set("submitted", false); }', {
+      outputs: [port("submitted", "local-state")],
+    });
+    expect(branched.outputWrites).toEqual(["submitted"]);
+    expect(branched.calls.map((call) => call.execution)).toEqual(["conditional", "conditional"]);
   });
 });
 
@@ -369,5 +516,9 @@ describe("reviewed templates pass the same AST gate", () => {
       outputs: invocation.outputs,
     });
     expect(result.sourceHash).toMatch(/^[0-9a-f]{64}$/);
+    if (id === "master-detail-fill") {
+      expect(result.calls.filter((call) => call.execution === "conditional").map((call) => call.api))
+        .toEqual(["$feedback.show", "$control.setValue"]);
+    }
   });
 });
