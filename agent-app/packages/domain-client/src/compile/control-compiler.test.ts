@@ -135,6 +135,17 @@ describe("control compiler — compiled scripts", () => {
   });
 
   it("bounds aggregate script fields and rejects hostile serialization descriptors without reading them", () => {
+    const unicode = scriptModule("unicode", `//${"中".repeat(11_000)}`);
+    const unicodeControl = compileButtonScripts({
+      ownerInstanceName: "Button1", capabilityId: "button", modules: [unicode], bindings: [{
+        id: "kf$binding:script-unicode", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
+        phase: "event", scriptModuleIds: [unicode.id], nativeActionIds: [],
+      }],
+    });
+    const unicodeField = ((unicodeControl["linkMng"] as { linkList: Array<{ script: string }> }).linkList[0]!).script;
+    expect(unicodeField.length).toBeLessThanOrEqual(32_000);
+    expect(Buffer.byteLength(unicodeField, "utf8")).toBeGreaterThan(32_000);
+
     const longA = scriptModule("long-a", `${"a;".repeat(8_100)}\n`);
     const longB = scriptModule("long-b", `${"b;".repeat(8_100)}\n`);
     expect(() => compileButtonScripts({

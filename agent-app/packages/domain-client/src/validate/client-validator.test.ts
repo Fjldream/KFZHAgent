@@ -269,6 +269,9 @@ describe("client validator (Task 7 brief Step 2)", () => {
     for (const body of [
       "const records = [1]; const alias = records; let total = 0; for (const record of alias) { total += record; }",
       "const read = () => later; const later = 1; const value = read();",
+      "const selected = [1].filter((value) => value === 1);",
+      "const records = [1].slice(0, 1); for (const record of records) {}",
+      "const rows = [{ value: 1 }]; let index = 0; const made = { ...rows[index] };",
     ]) {
       const base = await copyFixture("client-unknown-field");
       const candidate = await applyClientPatch(base, happyPlan());
@@ -277,6 +280,102 @@ describe("client validator (Task 7 brief Step 2)", () => {
       await writePage(candidate, page);
       const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
       expect(report.checks.businessRules, body).toBe("pass");
+    }
+  });
+
+  it("rejects runtime writes, reserved members, unreviewed operators, and unbounded implicit work", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const basePage = await readPage(base);
+    basePage.objects.push({ name: "Input1", uiModelType: 38, guid: "input-guid-1", leftTopPt: { x: 0, y: 0 }, width: 20, height: 20 });
+    await writePage(base, basePage);
+    const attacks = [
+      { body: 'Input1.Value = "changed";', refs: [{ semanticId: "go", instanceName: "Button1" }, { semanticId: "filter", instanceName: "Input1" }] },
+      { body: "Input1.Value++;", refs: [{ semanticId: "go", instanceName: "Button1" }, { semanticId: "filter", instanceName: "Input1" }] },
+      { body: "const value = {}; value.__proto__;" },
+      { body: 'const value = {}; value["prototype"];' },
+      { body: "const value = { constructor: 1 };" },
+      { body: "const value = {}; value.constructor;" },
+      { body: "const value = 1; const changed = ~value;" },
+      { body: 'const changed = 1 == "1";' },
+      { body: "let value = 1; value **= 2;" },
+      { body: "const holder = { records: [1] }; const selected = holder.records.filter((record) => true);" },
+      { body: "const holder = { records: [1] }; const copy = holder.records.slice(0, 1);" },
+      { body: "const holder = { records: [1] }; const copy = [...holder.records];" },
+      { body: "const method = [1].filter;" },
+      { body: "const copy = [...[1]];" },
+    ];
+    for (const attack of attacks) {
+      const candidate = await applyClientPatch(base, happyPlan());
+      const page = await readPage(candidate);
+      page.objects[0]!.linkMng = { linkList: [{
+        linkId: 200001, enable: true, name: "onClick",
+        script: markedScript(attack.body, attack.refs === undefined ? {} : { instanceReferences: attack.refs }),
+      }] };
+      await writePage(candidate, page);
+      const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+      expect(report.checks.businessRules, attack.body).toBe("fail");
+    }
+
+    const tableBase = await copyFixture("client-unknown-field");
+    const tableBasePage = await readPage(tableBase);
+    tableBasePage.objects.push({ name: "Table1", uiModelType: 31, guid: "table-guid-event", leftTopPt: { x: 0, y: 0 }, width: 20, height: 20 });
+    await writePage(tableBase, tableBasePage);
+    const tableCandidate = await applyClientPatch(tableBase, happyPlan());
+    const tablePage = await readPage(tableCandidate);
+    for (const eventBody of [
+      "const record = arguments[1]; const selected = record.items.filter((item) => true);",
+      "const record = arguments[1]; const secret = record.secret;",
+    ]) {
+      tablePage.objects[1]!.linkMng = { linkList: [{
+        linkId: 200006, enable: true, name: "Cell-click",
+        script: markedScript(eventBody, {
+          ownerInstanceName: "Table1", kfEvent: "Cell-click", linkId: 200006,
+          instanceReferences: [{ semanticId: "records", instanceName: "Table1" }],
+        }),
+      }] };
+      await writePage(tableCandidate, tablePage);
+      expect((await validateClientProject(tableBase, tableCandidate, happyPlan(), { skipRoundTrip: true })).checks.businessRules, eventBody).toBe("fail");
+    }
+  });
+
+  it("requires a unique project instance index and globally unique compiled module ids", async () => {
+    const duplicateBase = await copyFixture("client-unknown-field");
+    const duplicatePage = await readPage(duplicateBase);
+    duplicatePage.objects.push({ name: "Button1", uiModelType: 38, guid: "duplicate-button-name", leftTopPt: { x: 0, y: 0 }, width: 20, height: 20 });
+    await writePage(duplicateBase, duplicatePage);
+    const duplicateCandidate = await applyClientPatch(duplicateBase, happyPlan());
+    let report = await validateClientProject(duplicateBase, duplicateCandidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.businessRules).toBe("fail");
+    expect(report.warnings.join("\n")).toMatch(/duplicate.*instance/i);
+
+    const moduleBase = await copyFixture("client-unknown-field");
+    const moduleBasePage = await readPage(moduleBase);
+    moduleBasePage.objects.push({ name: "Button2", uiModelType: 35, guid: "button-guid-2", leftTopPt: { x: 0, y: 0 }, width: 20, height: 20 });
+    await writePage(moduleBase, moduleBasePage);
+    const moduleCandidate = await applyClientPatch(moduleBase, happyPlan());
+    const modulePage = await readPage(moduleCandidate);
+    modulePage.objects[0]!.linkMng = { linkList: [{ linkId: 200001, enable: true, name: "onClick", script: markedScript("const first = 1;") }] };
+    modulePage.objects[1]!.linkMng = { linkList: [{
+      linkId: 200001, enable: true, name: "onClick",
+      script: markedScript("const second = 2;", { ownerInstanceName: "Button2", instanceReferences: [{ semanticId: "other", instanceName: "Button2" }] }),
+    }] };
+    await writePage(moduleCandidate, modulePage);
+    report = await validateClientProject(moduleBase, moduleCandidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.businessRules).toBe("fail");
+    expect(report.warnings.join("\n")).toMatch(/duplicate compiled module identity/i);
+  });
+
+  it("uses the full KF field character limit while retaining UTF-8 body slicing", async () => {
+    const base = await copyFixture("client-unknown-field");
+    for (const [body, expected] of [[`//${"中".repeat(11_000)}`, "pass"], [`//${"中".repeat(31_900)}`, "fail"]] as const) {
+      const candidate = await applyClientPatch(base, happyPlan());
+      const page = await readPage(candidate);
+      const source = markedScript(body);
+      expect(Buffer.byteLength(body, "utf8")).toBeGreaterThan(body.length);
+      page.objects[0]!.linkMng = { linkList: [{ linkId: 200001, enable: true, name: "onClick", script: source }] };
+      await writePage(candidate, page);
+      const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+      expect(report.checks.businessRules, `${source.length} chars`).toBe(expected);
     }
   });
 

@@ -460,25 +460,64 @@ export function compileInteractions(input: unknown): InteractionCompilationResul
   normalized.executionOrder.filter((id) => !reachable.has(id)).forEach((id) =>
     errors.push(diagnostic("INTERACTION_CLOSURE_MISSING", id, "action is unreachable from every trigger root")));
 
-  const mockDataConsumers = new Set<string>();
+  const uiMockDataConsumersByPage = new Map<string, Set<string>>();
+  const pageByControlId = new Map<string, string>();
   implementation.pages.forEach((page) => page.compatibility === "native" && page.controls.forEach((control) => {
-    if (control.dataBinding !== undefined) mockDataConsumers.add(control.dataBinding.mockDataId);
+    pageByControlId.set(control.id, page.id);
+    if (control.dataBinding !== undefined) {
+      const consumers = uiMockDataConsumersByPage.get(page.id) ?? new Set<string>();
+      consumers.add(control.dataBinding.mockDataId);
+      uiMockDataConsumersByPage.set(page.id, consumers);
+    }
   }));
-  plan.scripts.forEach((script) => script.inputs.forEach((port) => { if (port.refKind === "mock-data") mockDataConsumers.add(port.refId); }));
-  const stateConsumers = new Set<string>();
-  plan.scripts.forEach((script) => script.inputs.forEach((port) => { if (port.refKind === "local-state") stateConsumers.add(port.refId); }));
-  plan.actions.forEach((action) => {
-    action.conditions?.forEach((condition) => [condition.left, condition.right].forEach((operand) => { if (operand.kind === "local-state") stateConsumers.add(operand.stateId); }));
-    if (action.kind === "set-control-value" && action.value.kind === "local-state") stateConsumers.add(action.value.stateId);
+  const uiStateConsumersByPage = new Map<string, Set<string>>();
+  plan.overlays.forEach((overlay) => {
+    const consumers = uiStateConsumersByPage.get(overlay.hostPageId) ?? new Set<string>();
+    consumers.add(overlay.visibleStateId);
+    uiStateConsumersByPage.set(overlay.hostPageId, consumers);
   });
-  plan.overlays.forEach((overlay) => stateConsumers.add(overlay.visibleStateId));
+  const emittedActionIds = new Set([...emittedNativeActionIds, ...emittedScriptActionIds]);
+  const scriptInputsById = new Map(plan.scripts.map((script) => [script.id, script.inputs]));
+  const planActionById = new Map(plan.actions.map((action) => [action.id, action]));
+  const downstream = (producerId: string, consumerId: string): boolean => {
+    if (producerId === consumerId || !emittedActionIds.has(consumerId)
+      || triggerKeyByAction.get(producerId) !== triggerKeyByAction.get(consumerId)) return false;
+    const pending = [...(graphActionById.get(producerId)?.afterActionIds ?? [])];
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+      const candidate = pending.pop()!;
+      if (visited.has(candidate) || !emittedActionIds.has(candidate)
+        || triggerKeyByAction.get(candidate) !== triggerKeyByAction.get(producerId)) continue;
+      if (candidate === consumerId) return true;
+      visited.add(candidate);
+      pending.push(...(graphActionById.get(candidate)?.afterActionIds ?? []));
+    }
+    return false;
+  };
+  const hasEmittedConsumer = (producerId: string, refKind: "control" | "mock-data" | "local-state", refId: string): boolean =>
+    normalized.graph.actions.some((candidate) => {
+      if (!downstream(producerId, candidate.id)) return false;
+      const scriptConsumes = candidate.effects.some((effect) => effect.kind === "run-script"
+        && (scriptInputsById.get(effect.scriptId) ?? []).some((input) => input.refKind === refKind && input.refId === refId));
+      if (scriptConsumes) return true;
+      if (refKind !== "local-state" || !emittedNativeActionIds.has(candidate.id)) return false;
+      const planAction = planActionById.get(candidate.id);
+      return planAction?.conditions?.some((condition) => [condition.left, condition.right].some((operand) => operand.kind === "local-state" && operand.stateId === refId)) === true
+        || planAction?.kind === "set-control-value" && planAction.value.kind === "local-state" && planAction.value.stateId === refId;
+    });
   normalized.graph.actions.forEach((action) => action.effects.forEach((effect) => {
     if (effect.kind !== "run-script") return;
+    if (!emittedScriptActionIds.has(action.id) || !reachable.has(action.id)) return;
     const calls = callsByAction.get(action.id) ?? [];
+    const producerPageId = pageByControlId.get(action.trigger.controlId);
     for (const output of normalized.scriptClosures.get(effect.scriptId)?.candidateOutputRefs ?? []) {
       const consumed = output.refKind === "control"
         ? calls.some((call) => call.targetId === output.refId && isVisibleCall(call) && call.execution !== "conditional")
-        : output.refKind === "mock-data" ? mockDataConsumers.has(output.refId) : stateConsumers.has(output.refId);
+          || hasEmittedConsumer(action.id, "control", output.refId)
+        : output.refKind === "mock-data" ? (producerPageId !== undefined && uiMockDataConsumersByPage.get(producerPageId)?.has(output.refId) === true)
+            || hasEmittedConsumer(action.id, "mock-data", output.refId)
+          : (producerPageId !== undefined && uiStateConsumersByPage.get(producerPageId)?.has(output.refId) === true)
+            || hasEmittedConsumer(action.id, "local-state", output.refId);
       if (!consumed) errors.push(diagnostic("INTERACTION_OUTPUT_CONSUMER_MISSING", effect.scriptId, `${output.refKind} output has no proven UI or script consumer: ${output.refId}`));
     }
   }));

@@ -248,6 +248,23 @@ describe("compileInteractions", () => {
     ]));
   });
 
+  it("does not invent output-consumer evidence for a blocked producer", () => {
+    const input = fixture("planned");
+    const script = input.plan.scripts[0]!;
+    if (script.kind !== "custom") throw new Error("custom fixture required");
+    script.source = '$data.set("visitor-records", []);';
+    script.outputs = [{ name: "records-output", description: "记录输出", refKind: "mock-data", refId: "visitor-records" }];
+    input.implementation.sourceSolutionPlanHash = canonicalServerHash(input.plan);
+
+    const result = compileInteractions(input);
+    expect(result.diagnostics.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "INTERACTION_SCRIPT_BLOCKED", nodeId: "load-records" }),
+    ]));
+    expect(result.diagnostics.errors).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "INTERACTION_OUTPUT_CONSUMER_MISSING", nodeId: "load-records" }),
+    ]));
+  });
+
   it("rejects an afterAction edge that crosses two declared triggers", () => {
     const input = fixture("script");
     input.plan.actions = [
