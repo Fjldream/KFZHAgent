@@ -346,6 +346,7 @@ const label = "actual";`,
       kind: "open-overlay",
       overlayId: "record-detail",
       afterActionIds: [],
+      journeyStepRefs: [{ journeyId: "review-record", stepIndex: 0 }],
     }).success).toBe(true);
     expect(SemanticEventBindingSchema.safeParse({
       semanticEvent: "click",

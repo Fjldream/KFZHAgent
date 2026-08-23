@@ -8,8 +8,8 @@ import {
   type SemanticEventBinding,
 } from "./action-graph.js";
 import { ScriptPlanSchema, type ScriptPlan } from "./script-program.js";
-export { ActionPlanSchema, SemanticEventBindingSchema, ValueExpressionSchema } from "./action-graph.js";
-export type { ActionPlan, SemanticEventBinding } from "./action-graph.js";
+export { ActionPlanSchema, JourneyStepReferenceSchema, SemanticEventBindingSchema, ValueExpressionSchema } from "./action-graph.js";
+export type { ActionPlan, JourneyStepReference, SemanticEventBinding } from "./action-graph.js";
 export { ScriptPlanSchema } from "./script-program.js";
 export type { ScriptPlan } from "./script-program.js";
 import {
@@ -718,6 +718,11 @@ export type SolutionImplementationPlan = z.infer<typeof SolutionImplementationPl
 
 const NativeSolutionImplementationPlanSchema =
   NativeSolutionImplementationPlanObjectSchema.superRefine((plan, ctx) => {
+    plan.actions.forEach((action, actionIndex) => {
+      if (action.journeyStepRefs === undefined) {
+        ctx.addIssue({ code: "custom", path: ["actions", actionIndex, "journeyStepRefs"], message: "native actions require confirmed journey step references" });
+      }
+    });
     validateImplementationFree(plan, ctx);
     validateSemanticValueContainers(plan, ctx);
     validateRepeaterFieldReferenceScopes(plan, ctx);

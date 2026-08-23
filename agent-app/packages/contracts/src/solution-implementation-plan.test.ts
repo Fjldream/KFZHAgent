@@ -202,11 +202,11 @@ const solutionPlanFixture = {
     },
   ],
   actions: [
-    { id: "go-operations", kind: "navigate-page", targetPageId: "operations-page", afterActionIds: [] },
-    { id: "open-detail", kind: "open-overlay", overlayId: "equipment-overlay", afterActionIds: ["mark-detail-open"] },
-    { id: "close-detail", kind: "close-overlay", overlayId: "equipment-overlay", result: "dismissed", afterActionIds: [] },
-    { id: "mark-detail-open", kind: "set-state", stateId: "detail-visible", value: true, afterActionIds: ["prepare-detail"] },
-    { id: "prepare-detail", kind: "run-script", scriptId: "prepare-detail-script", afterActionIds: [] },
+    { id: "go-operations", kind: "navigate-page", targetPageId: "operations-page", afterActionIds: [], journeyStepRefs: [{ journeyId: "review-equipment", stepIndex: 0 }] },
+    { id: "open-detail", kind: "open-overlay", overlayId: "equipment-overlay", afterActionIds: ["mark-detail-open"], journeyStepRefs: [{ journeyId: "review-equipment", stepIndex: 0 }] },
+    { id: "close-detail", kind: "close-overlay", overlayId: "equipment-overlay", result: "dismissed", afterActionIds: [], journeyStepRefs: [{ journeyId: "review-equipment", stepIndex: 0 }] },
+    { id: "mark-detail-open", kind: "set-state", stateId: "detail-visible", value: true, afterActionIds: ["prepare-detail"], journeyStepRefs: [{ journeyId: "review-equipment", stepIndex: 0 }] },
+    { id: "prepare-detail", kind: "run-script", scriptId: "prepare-detail-script", afterActionIds: [], journeyStepRefs: [{ journeyId: "review-equipment", stepIndex: 0 }] },
   ],
   scripts: [
     {
@@ -314,9 +314,10 @@ describe("SolutionImplementationPlanSchema", () => {
   });
 
   it("accepts exactly the phase-four target action vocabulary", () => {
+    const journeyStepRefs = [{ journeyId: "review-equipment", stepIndex: 0 }];
     const actions = [
-      { id: "a", kind: "navigate-page", targetPageId: "operations-page" },
-      { id: "a", kind: "open-overlay", overlayId: "equipment-overlay", afterActionIds: [] },
+      { id: "a", kind: "navigate-page", targetPageId: "operations-page", journeyStepRefs },
+      { id: "a", kind: "open-overlay", overlayId: "equipment-overlay", afterActionIds: [], journeyStepRefs },
       { id: "a", kind: "close-overlay", overlayId: "equipment-overlay", result: null, afterActionIds: [] },
       { id: "a", kind: "set-visibility", targetId: "operations-root", visible: true, afterActionIds: [] },
       { id: "a", kind: "switch-tab", targetId: "equipment-table", tabId: "active-tab", afterActionIds: [] },
@@ -325,8 +326,28 @@ describe("SolutionImplementationPlanSchema", () => {
       { id: "a", kind: "show-feedback", level: "success", message: "设备详情已更新", afterActionIds: [] },
       { id: "a", kind: "run-script", scriptId: "prepare-detail-script", afterActionIds: [] },
     ];
-    actions.forEach((action) => expect(ActionPlanSchema.safeParse(action).success, action.kind).toBe(true));
+    actions.forEach((action) => expect(ActionPlanSchema.safeParse({ ...action, journeyStepRefs }).success, action.kind).toBe(true));
     expect(ActionPlanSchema.safeParse({ id: "a", kind: "execute-javascript", afterActionIds: [] }).success).toBe(false);
+  });
+
+  it("requires bounded journey step references on native actions", () => {
+    expect(ActionPlanSchema.safeParse({
+      id: "show-result", kind: "show-feedback", level: "success", message: "已完成",
+      afterActionIds: [], journeyStepRefs: [{ journeyId: "review-equipment", stepIndex: 0 }],
+    }).success).toBe(true);
+    expect(ActionPlanSchema.safeParse({
+      id: "show-result", kind: "show-feedback", level: "success", message: "已完成",
+      afterActionIds: [], journeyStepRefs: Array.from({ length: 13 }, (_, stepIndex) => ({ journeyId: "review-equipment", stepIndex })),
+    }).success).toBe(false);
+    expect(ActionPlanSchema.safeParse({
+      id: "show-result", kind: "show-feedback", level: "success", message: "已完成", afterActionIds: [],
+      journeyStepRefs: [{ journeyId: "review-equipment", stepIndex: 0 }, { journeyId: "review-equipment", stepIndex: 0 }],
+    }).success).toBe(false);
+
+    const native = cloneFixture();
+    native.actions.forEach((action: any) => { delete action.journeyStepRefs; });
+    expect(SolutionImplementationPlanSchema.safeParse(native).success).toBe(false);
+
   });
 
   it("keeps repeater-field references out of standalone action values", () => {
@@ -487,10 +508,11 @@ describe("SolutionImplementationPlanSchema", () => {
         variant: "default",
         title: "Legacy module",
         content: "Legacy content",
-        eventBindings: [],
+        eventBindings: [{ semanticEvent: "navigate", actionIds: ["legacy-navigation"] }],
         slots: [],
       },
     }];
+    plan.actions = [{ id: "legacy-navigation", kind: "navigate-page", targetPageId: "legacy-page", afterActionIds: [] }];
 
     expect(SolutionImplementationPlanSchema.safeParse(plan).success).toBe(true);
     plan.theme.background = "red;position:fixed";
@@ -672,11 +694,11 @@ describe("SolutionImplementationPlanSchema", () => {
 
   it("requires every action to be reachable from a control or module binding", () => {
     const unreachable = cloneFixture();
-    unreachable.actions.push({ id: "orphan-feedback", kind: "show-feedback", level: "info", message: "尚未触发" });
+    unreachable.actions.push({ id: "orphan-feedback", kind: "show-feedback", level: "info", message: "尚未触发", journeyStepRefs: [{ journeyId: "review-equipment", stepIndex: 0 }] });
     expect(SolutionImplementationPlanSchema.safeParse(unreachable).success).toBe(false);
 
     const moduleTriggered = cloneFixture();
-    moduleTriggered.actions.push({ id: "module-feedback", kind: "show-feedback", level: "info", message: "模块已触发" });
+    moduleTriggered.actions.push({ id: "module-feedback", kind: "show-feedback", level: "info", message: "模块已触发", journeyStepRefs: [{ journeyId: "review-equipment", stepIndex: 0 }] });
     findNode(moduleTriggered, "equipment-detail-module").eventBindings.push({
       semanticEvent: "submit",
       actionIds: ["module-feedback"],
@@ -724,11 +746,11 @@ describe("SolutionImplementationPlanSchema", () => {
     expect(SolutionImplementationPlanSchema.safeParse(wrongVisibleState).success).toBe(false);
 
     const missingTab = cloneFixture();
-    missingTab.actions.push({ id: "switch-view", kind: "switch-tab", targetId: "equipment-table", tabId: "missing-tab" });
+    missingTab.actions.push({ id: "switch-view", kind: "switch-tab", targetId: "equipment-table", tabId: "missing-tab", journeyStepRefs: [{ journeyId: "review-equipment", stepIndex: 0 }] });
     expect(SolutionImplementationPlanSchema.safeParse(missingTab).success).toBe(false);
 
     const validTab = cloneFixture();
-    validTab.actions.push({ id: "switch-view", kind: "switch-tab", targetId: "equipment-table", tabId: "active-tab" });
+    validTab.actions.push({ id: "switch-view", kind: "switch-tab", targetId: "equipment-table", tabId: "active-tab", journeyStepRefs: [{ journeyId: "review-equipment", stepIndex: 0 }] });
     findNode(validTab, "equipment-table").eventBindings.push({ semanticEvent: "tab-click", actionIds: ["switch-view"] });
     expect(SolutionImplementationPlanSchema.safeParse(validTab).success).toBe(true);
   });
@@ -748,6 +770,7 @@ describe("SolutionImplementationPlanSchema", () => {
       kind: "set-state",
       stateId: "selected-equipment-list",
       value: { kind: "list", items: ["pump-a"] },
+      journeyStepRefs: [{ journeyId: "review-equipment", stepIndex: 0 }],
     });
     findNode(listState, "equipment-table").eventBindings.push({
       semanticEvent: "change",
@@ -758,6 +781,7 @@ describe("SolutionImplementationPlanSchema", () => {
       kind: "set-control-value",
       targetId: "equipment-name",
       value: { kind: "local-state", stateId: "selected-equipment" },
+      journeyStepRefs: [{ journeyId: "review-equipment", stepIndex: 0 }],
     });
     expect(SolutionImplementationPlanSchema.safeParse(listState).success).toBe(true);
 
@@ -814,6 +838,7 @@ describe("SolutionImplementationPlanSchema", () => {
       kind: "set-state",
       stateId: "selected-equipment-list",
       value: { kind: "list", items: ["pump-missing"] },
+      journeyStepRefs: [{ journeyId: "review-equipment", stepIndex: 0 }],
     });
     findNode(unknownSetValue, "equipment-table").eventBindings.push({
       semanticEvent: "change",
@@ -827,6 +852,7 @@ describe("SolutionImplementationPlanSchema", () => {
       kind: "set-state",
       stateId: "selected-equipment",
       value: null,
+      journeyStepRefs: [{ journeyId: "review-equipment", stepIndex: 0 }],
     });
     findNode(validUnselect, "equipment-table").eventBindings.push({ semanticEvent: "clear", actionIds: ["clear-selection"] });
     expect(SolutionImplementationPlanSchema.safeParse(validUnselect).success).toBe(true);

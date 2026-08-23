@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   canonicalServerHash,
+  type CustomerSolutionBlueprint,
   type ScriptPlan,
   type SolutionImplementationPlan,
   type UIImplementationSpecV2,
@@ -22,6 +23,27 @@ const intent = {
 };
 
 function fixture(kind: "native" | "script" | "planned" = "native") {
+  const blueprint: CustomerSolutionBlueprint = {
+    schema: "kf-design-plan/v3", displayName: "交互验证", objective: "完成访客交互闭环",
+    audiences: ["访客"], scenarios: ["查看记录"],
+    pages: [
+      { id: "bp-home", title: "首页", purpose: "处理记录", readingOrder: ["region"], regions: [{
+        id: "region", purpose: "执行记录操作", semanticRoles: ["records"], dataShape: "records",
+        density: "comfortable", importance: "primary", content: ["记录"], sampleData: [],
+        interactions: ["执行操作"], states: ["ready"], visualIntent: "清晰",
+      }] },
+      { id: "bp-detail", title: "详情", purpose: "显示详情", readingOrder: ["detail-region"], regions: [{
+        id: "detail-region", purpose: "显示详情", semanticRoles: ["detail"], dataShape: "detail",
+        density: "comfortable", importance: "primary", content: ["详情"], sampleData: [],
+        interactions: [], states: ["ready"], visualIntent: "清晰",
+      }] },
+    ],
+    journeys: [{ id: "review-record", actor: "访客", goal: "执行记录操作", steps: [{
+      pageId: "bp-home", regionId: "region", action: "触发操作", result: "看到结果",
+    }], completion: "操作结果可见" }],
+    visualDirection: { tone: "专业", colors: ["蓝色"], typography: "清晰", spacingAndSurfaces: "舒适" },
+    acceptanceScenarios: ["操作结果可见"], openQuestions: [],
+  };
   const script: ScriptPlan = {
     id: "load-records", purpose: "加载本地记录", kind: "custom", programVersion: "semantic-js/v1",
     source: kind === "planned"
@@ -32,13 +54,13 @@ function fixture(kind: "native" | "script" | "planned" = "native") {
   };
   const isNative = kind === "native";
   const plan: SolutionImplementationPlan = {
-    schema: "kf-solution-implementation/v1", projectKey: "interaction", blueprintHash: "a".repeat(64), candidateBundleHash: "b".repeat(64),
+    schema: "kf-solution-implementation/v1", projectKey: "interaction", blueprintHash: canonicalServerHash(blueprint), candidateBundleHash: "b".repeat(64),
     theme, roleStyles: [{ role: "content", declarations: {}, states: {} }],
     mockData: [{ id: "visitor-records", purpose: "访客", fields: [{ key: "id", label: "标识", type: "text" }], records: [{ values: [{ field: "id", value: "v1" }] }] }],
     localState: [], overlays: [], scripts: isNative ? [] : [script],
     actions: isNative
-      ? [{ id: "navigate", kind: "navigate-page", targetPageId: "detail", afterActionIds: [] }]
-      : [{ id: "run-load", kind: "run-script", scriptId: script.id, afterActionIds: [] }],
+      ? [{ id: "navigate", kind: "navigate-page", targetPageId: "detail", afterActionIds: [], journeyStepRefs: [{ journeyId: "review-record", stepIndex: 0 }] }]
+      : [{ id: "run-load", kind: "run-script", scriptId: script.id, afterActionIds: [], journeyStepRefs: [{ journeyId: "review-record", stepIndex: 0 }] }],
     pages: [
       {
         id: "home", title: "首页", purpose: "首页", canvas: "desktop", sourceBlueprintPageId: "bp-home",
@@ -91,7 +113,7 @@ function fixture(kind: "native" | "script" | "planned" = "native") {
       ],
     },
   };
-  return { plan, implementation };
+  return { blueprint, plan, implementation };
 }
 
 describe("compileInteractions", () => {
@@ -101,9 +123,7 @@ describe("compileInteractions", () => {
     const result = compileInteractions(input);
 
     expect(input).toEqual(original);
-    expect(result.diagnostics.errors).toEqual([
-      expect.objectContaining({ code: "JOURNEY_PROVENANCE_UNAVAILABLE", nodeId: input.plan.blueprintHash }),
-    ]);
+    expect(result.diagnostics.errors).toEqual([]);
     expect(result.diagnostics.requests).toEqual([]);
     expect(result.implementation.compiledActions).toHaveLength(1);
     expect(result.implementation.compiledScripts).toEqual([]);
@@ -113,9 +133,7 @@ describe("compileInteractions", () => {
   it("compiles an evidence-backed Input/Button event to Table SetData script", () => {
     const result = compileInteractions(fixture("script"));
 
-    expect(result.diagnostics.errors).toEqual([
-      expect.objectContaining({ code: "JOURNEY_PROVENANCE_UNAVAILABLE" }),
-    ]);
+    expect(result.diagnostics.errors).toEqual([]);
     expect(result.implementation.compiledScripts).toHaveLength(1);
     const module = result.implementation.compiledScripts[0]!;
     expect(module.source).toBe("Table1.SetData([]);\n");
@@ -169,7 +187,7 @@ describe("compileInteractions", () => {
       id: "refresh-records", purpose: "刷新本地记录", kind: "custom", programVersion: "semantic-js/v1",
       source: '$timer.after(100, "load-records");', inputs: [], outputs: [],
     });
-    cyclic.plan.actions.push({ id: "run-refresh", kind: "run-script", scriptId: "refresh-records", afterActionIds: [] });
+    cyclic.plan.actions.push({ id: "run-refresh", kind: "run-script", scriptId: "refresh-records", afterActionIds: [], journeyStepRefs: [{ journeyId: "review-record", stepIndex: 0 }] });
     const root = cyclic.plan.pages[0]!.root;
     if (root.kind !== "layout" || root.children[0]!.kind !== "control") throw new Error("control fixture required");
     root.children[0]!.eventBindings[0]!.actionIds.push("run-refresh");
@@ -180,7 +198,7 @@ describe("compileInteractions", () => {
 
     const precompiled = fixture("native");
     const native = compileInteractions(precompiled);
-    expect(() => compileInteractions({ plan: precompiled.plan, implementation: native.implementation })).toThrow(/INTERACTION_INPUT_ALREADY_COMPILED/);
+    expect(() => compileInteractions({ blueprint: precompiled.blueprint, plan: precompiled.plan, implementation: native.implementation })).toThrow(/INTERACTION_INPUT_ALREADY_COMPILED/);
 
     const adapted = fixture("native");
     adapted.implementation = { ...adapted.implementation, compatibility: "adapted-v1" };
@@ -199,6 +217,50 @@ describe("compileInteractions", () => {
     }
   });
 
+  it("binds every confirmed journey step to one owning trigger closure", () => {
+    const mismatch = fixture("native");
+    mismatch.plan.blueprintHash = "a".repeat(64);
+    mismatch.implementation.sourceSolutionPlanHash = canonicalServerHash(mismatch.plan);
+    expect(() => compileInteractions(mismatch)).toThrow(/INTERACTION_INPUT_PROVENANCE_MISMATCH.*blueprint/);
+
+    const unknown = fixture("native");
+    unknown.plan.actions[0]!.journeyStepRefs = [{ journeyId: "missing-journey", stepIndex: 0 }];
+    unknown.implementation.sourceSolutionPlanHash = canonicalServerHash(unknown.plan);
+    expect(compileInteractions(unknown).diagnostics.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "JOURNEY_REFERENCE_UNKNOWN", nodeId: "navigate" }),
+      expect.objectContaining({ code: "JOURNEY_STEP_UNCOVERED", nodeId: "review-record:0" }),
+    ]));
+
+    const wrongRegion = fixture("native");
+    wrongRegion.blueprint.journeys[0]!.steps[0] = { ...wrongRegion.blueprint.journeys[0]!.steps[0]!, regionId: "detail-region", pageId: "bp-detail" };
+    wrongRegion.plan.blueprintHash = canonicalServerHash(wrongRegion.blueprint);
+    wrongRegion.implementation.sourceSolutionPlanHash = canonicalServerHash(wrongRegion.plan);
+    expect(compileInteractions(wrongRegion).diagnostics.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "JOURNEY_TRIGGER_OWNERSHIP_MISMATCH", nodeId: "navigate" }),
+    ]));
+
+    const uncovered = fixture("native");
+    uncovered.blueprint.journeys[0]!.steps.push({ pageId: "bp-home", regionId: "region", action: "再次触发", result: "再次看到结果" });
+    uncovered.plan.blueprintHash = canonicalServerHash(uncovered.blueprint);
+    uncovered.implementation.sourceSolutionPlanHash = canonicalServerHash(uncovered.plan);
+    expect(compileInteractions(uncovered).diagnostics.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "JOURNEY_STEP_UNCOVERED", nodeId: "review-record:1" }),
+    ]));
+
+    const ambiguous = fixture("native");
+    ambiguous.plan.actions.push({
+      id: "navigate-again", kind: "navigate-page", targetPageId: "detail", afterActionIds: [],
+      journeyStepRefs: [{ journeyId: "review-record", stepIndex: 0 }],
+    });
+    const root = ambiguous.plan.pages[0]!.root;
+    if (root.kind !== "layout" || root.children[2]!.kind !== "control") throw new Error("control fixture required");
+    root.children[2]!.eventBindings = [{ semanticEvent: "row-click", actionIds: ["navigate-again"] }];
+    ambiguous.implementation.sourceSolutionPlanHash = canonicalServerHash(ambiguous.plan);
+    expect(compileInteractions(ambiguous).diagnostics.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "JOURNEY_REFERENCE_AMBIGUOUS", nodeId: "review-record:0" }),
+    ]));
+  });
+
   it("preserves normalized topology within one tier instead of sorting artifact ids", () => {
     const input = fixture("script");
     input.plan.scripts.push({
@@ -207,8 +269,8 @@ describe("compileInteractions", () => {
       inputs: [{ name: "filter-input", description: "筛选输入", refKind: "control", refId: "filter" }], outputs: [],
     });
     input.plan.actions = [
-      { id: "z-read-first", kind: "run-script", scriptId: "read-filter", afterActionIds: ["a-load-second"] },
-      { id: "a-load-second", kind: "run-script", scriptId: "load-records", afterActionIds: [] },
+      { id: "z-read-first", kind: "run-script", scriptId: "read-filter", afterActionIds: ["a-load-second"], journeyStepRefs: [{ journeyId: "review-record", stepIndex: 0 }] },
+      { id: "a-load-second", kind: "run-script", scriptId: "load-records", afterActionIds: [], journeyStepRefs: [{ journeyId: "review-record", stepIndex: 0 }] },
     ];
     const root = input.plan.pages[0]!.root;
     if (root.kind !== "layout" || root.children[0]!.kind !== "control") throw new Error("control fixture required");
@@ -235,6 +297,7 @@ describe("compileInteractions", () => {
     readOnly.implementation.sourceSolutionPlanHash = canonicalServerHash(readOnly.plan);
     expect(compileInteractions(readOnly).diagnostics.errors).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: "INTERACTION_CLOSURE_MISSING", nodeId: "run-load" }),
+      expect.objectContaining({ code: "JOURNEY_CLOSURE_MISSING", nodeId: "review-record:0" }),
     ]));
 
     const conditional = fixture("script");
@@ -268,8 +331,8 @@ describe("compileInteractions", () => {
   it("rejects an afterAction edge that crosses two declared triggers", () => {
     const input = fixture("script");
     input.plan.actions = [
-      { id: "from-button", kind: "run-script", scriptId: "load-records", afterActionIds: ["from-table"] },
-      { id: "from-table", kind: "navigate-page", targetPageId: "detail", afterActionIds: [] },
+      { id: "from-button", kind: "run-script", scriptId: "load-records", afterActionIds: ["from-table"], journeyStepRefs: [{ journeyId: "review-record", stepIndex: 0 }] },
+      { id: "from-table", kind: "navigate-page", targetPageId: "detail", afterActionIds: [], journeyStepRefs: [{ journeyId: "review-record", stepIndex: 0 }] },
     ];
     const root = input.plan.pages[0]!.root;
     if (root.kind !== "layout" || root.children[0]!.kind !== "control" || root.children[2]!.kind !== "control") throw new Error("control fixture required");
@@ -282,8 +345,8 @@ describe("compileInteractions", () => {
   it("blocks a same-event cross-tier order that the binding contract cannot represent", () => {
     const input = fixture("script");
     input.plan.actions = [
-      { id: "z-native-first", kind: "navigate-page", targetPageId: "detail", afterActionIds: ["a-script-second"] },
-      { id: "a-script-second", kind: "run-script", scriptId: "load-records", afterActionIds: [] },
+      { id: "z-native-first", kind: "navigate-page", targetPageId: "detail", afterActionIds: ["a-script-second"], journeyStepRefs: [{ journeyId: "review-record", stepIndex: 0 }] },
+      { id: "a-script-second", kind: "run-script", scriptId: "load-records", afterActionIds: [], journeyStepRefs: [{ journeyId: "review-record", stepIndex: 0 }] },
     ];
     const root = input.plan.pages[0]!.root;
     if (root.kind !== "layout" || root.children[0]!.kind !== "control") throw new Error("control fixture required");

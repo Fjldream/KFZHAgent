@@ -468,6 +468,11 @@ export const ActionConditionSchema = z.object({
   right: ConditionOperandSchema,
 }).strict();
 
+export const JourneyStepReferenceSchema = z.object({
+  journeyId: StableSemanticIdSchema,
+  stepIndex: z.number().int().min(0).max(11),
+}).strict();
+
 const effectOptions = [
   z.object({ kind: z.literal("navigate-page"), targetPageId: StableSemanticIdSchema }).strict(),
   z.object({ kind: z.literal("open-overlay"), overlayId: StableSemanticIdSchema }).strict(),
@@ -486,6 +491,14 @@ const actionBase = {
   id: StableSemanticIdSchema,
   conditions: z.array(ActionConditionSchema).max(8).optional(),
   afterActionIds: z.array(StableSemanticIdSchema).max(16).default([]),
+  journeyStepRefs: z.array(JourneyStepReferenceSchema).min(1).max(12).superRefine((refs, ctx) => {
+    const seen = new Set<string>();
+    refs.forEach((ref, index) => {
+      const key = `${ref.journeyId}\0${ref.stepIndex}`;
+      if (seen.has(key)) ctx.addIssue({ code: "custom", path: [index], message: "JOURNEY_STEP_REFERENCE_DUPLICATE" });
+      seen.add(key);
+    });
+  }).optional(),
 };
 
 export const ActionPlanSchema = z.discriminatedUnion("kind", [
@@ -638,6 +651,7 @@ export const CompiledNativeActionSchema = z.discriminatedUnion("kind", [
 
 export type SemanticEventBinding = z.infer<typeof SemanticEventBindingSchema>;
 export type ActionCondition = z.infer<typeof ActionConditionSchema>;
+export type JourneyStepReference = z.infer<typeof JourneyStepReferenceSchema>;
 export type ActionEffect = z.infer<typeof ActionEffectSchema>;
 export type ActionPlan = z.infer<typeof ActionPlanSchema>;
 export type ActionGraph = z.infer<typeof ActionGraphSchema>;

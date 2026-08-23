@@ -48,8 +48,8 @@ function plan(overrides: Record<string, unknown> = {}): SolutionImplementationPl
       root: { ...node("open-button", [{ semanticEvent: "click", actionIds: ["open-detail"] }]) },
     }],
     actions: [
-      { id: "open-detail", kind: "show-feedback", level: "info", message: "已打开", afterActionIds: ["populate-detail"] },
-      { id: "populate-detail", kind: "set-control-value", targetId: "detail", value: { kind: "literal", value: "记录" }, afterActionIds: [] },
+      { id: "open-detail", kind: "show-feedback", level: "info", message: "已打开", afterActionIds: ["populate-detail"], journeyStepRefs: [{ journeyId: "review-home", stepIndex: 0 }] },
+      { id: "populate-detail", kind: "set-control-value", targetId: "detail", value: { kind: "literal", value: "记录" }, afterActionIds: [], journeyStepRefs: [{ journeyId: "review-home", stepIndex: 0 }] },
     ],
     ...overrides,
   } as unknown as SolutionImplementationPlan;
@@ -89,8 +89,8 @@ describe("normalizeActionGraph", () => {
   it("uses code-point ordering for independent roots regardless of source order", () => {
     const ordered = plan({
       actions: [
-        { id: "action-b", kind: "show-feedback", level: "info", message: "B", afterActionIds: [] },
-        { id: "action-a", kind: "show-feedback", level: "info", message: "A", afterActionIds: [] },
+        { id: "action-b", kind: "show-feedback", level: "info", message: "B", afterActionIds: [], journeyStepRefs: [{ journeyId: "review-home", stepIndex: 0 }] },
+        { id: "action-a", kind: "show-feedback", level: "info", message: "A", afterActionIds: [], journeyStepRefs: [{ journeyId: "review-home", stepIndex: 0 }] },
       ],
       pages: [{
         id: "home", title: "首页", purpose: "演示", canvas: "desktop", sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region"], initialStateIds: [],
@@ -119,7 +119,7 @@ describe("normalizeActionGraph", () => {
       .toThrowError(expect.objectContaining({ code: "ACTION_DEPENDENCY_CYCLE" }));
 
     const orphan = plan();
-    orphan.actions.push({ id: "orphan", kind: "show-feedback", level: "info", message: "孤立", afterActionIds: [] });
+    orphan.actions.push({ id: "orphan", kind: "show-feedback", level: "info", message: "孤立", afterActionIds: [], journeyStepRefs: [{ journeyId: "review-home", stepIndex: 0 }] });
     expect(() => normalizeActionGraph({ plan: orphan, implementation: implementation() }))
       .toThrowError(expect.objectContaining({ code: "ACTION_TRIGGER_MISSING", nodeId: "orphan" }));
   });
@@ -148,7 +148,7 @@ describe("normalizeActionGraph", () => {
 
   it("marks run-script closure as unverified even with declared output candidates", () => {
     const scripted = plan({
-      actions: [{ id: "filter", kind: "run-script", scriptId: "filter-script", afterActionIds: [] }],
+      actions: [{ id: "filter", kind: "run-script", scriptId: "filter-script", afterActionIds: [], journeyStepRefs: [{ journeyId: "review-home", stepIndex: 0 }] }],
       scripts: [{ id: "filter-script", kind: "template", template: "multi-filter", purpose: "筛选", inputs: [], outputs: [{ name: "filtered", description: "筛选结果", refKind: "control", refId: "detail" }], parameters: [] }],
       pages: [{
         id: "home", title: "首页", purpose: "演示", canvas: "desktop", sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region"], initialStateIds: [],
@@ -275,7 +275,7 @@ describe("normalizeActionGraph", () => {
 
   it("wraps canonical graph reference failures as stable normalization errors", () => {
     const invalid = plan({
-      actions: [{ id: "open-detail", kind: "set-visibility", targetId: "missing", visible: true, afterActionIds: [] }],
+      actions: [{ id: "open-detail", kind: "set-visibility", targetId: "missing", visible: true, afterActionIds: [], journeyStepRefs: [{ journeyId: "review-home", stepIndex: 0 }] }],
     });
     expect(() => normalizeActionGraph({ plan: invalid, implementation: implementation() }))
       .toThrowError(expect.objectContaining({ code: "ACTION_INPUT_INVALID", nodeId: "open-detail" }));
@@ -371,7 +371,7 @@ describe("normalizeActionGraph", () => {
           eventBindings: [{ semanticEvent: "click", actionIds: ["stay"] }],
         },
       }],
-      actions: [{ id: "stay", kind: "navigate-page", targetPageId: "home", afterActionIds: [] }],
+      actions: [{ id: "stay", kind: "navigate-page", targetPageId: "home", afterActionIds: [], journeyStepRefs: [{ journeyId: "review-home", stepIndex: 0 }] }],
     });
     const phase3 = structuredClone(compileSolutionImplementation({
       plan: compiledPlan, candidateBundle: bundle, moduleRegistry: createDefaultModuleRegistry(),

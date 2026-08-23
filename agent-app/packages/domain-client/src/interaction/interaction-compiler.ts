@@ -3,10 +3,12 @@ import { types as utilTypes } from "node:util";
 import { parse } from "acorn";
 import {
   canonicalServerHash,
+  CustomerSolutionBlueprintSchema,
   SolutionImplementationPlanSchema,
   UIImplementationSpecV2Schema,
   type CompiledEventBinding,
   type CompiledScriptModule,
+  type CustomerSolutionBlueprint,
   type SolutionImplementationPlan,
   type UIImplementationSpecV2,
 } from "@kf/contracts";
@@ -31,7 +33,11 @@ export type InteractionDiagnosticCode =
   | "INTERACTION_SCRIPT_BLOCKED"
   | "INTERACTION_SCRIPT_CYCLE"
   | "INTERACTION_OUTPUT_CONSUMER_MISSING"
-  | "JOURNEY_PROVENANCE_UNAVAILABLE";
+  | "JOURNEY_REFERENCE_UNKNOWN"
+  | "JOURNEY_REFERENCE_AMBIGUOUS"
+  | "JOURNEY_STEP_UNCOVERED"
+  | "JOURNEY_TRIGGER_OWNERSHIP_MISMATCH"
+  | "JOURNEY_CLOSURE_MISSING";
 
 export interface InteractionDiagnostic {
   readonly code: InteractionDiagnosticCode;
@@ -176,21 +182,26 @@ function rejectRawCrossTriggerEdges(rawPlan: unknown): void {
   }
 }
 
-function snapshotInput(input: unknown): { plan: SolutionImplementationPlan; implementation: UIImplementationSpecV2 } {
+function snapshotInput(input: unknown): { blueprint: CustomerSolutionBlueprint; plan: SolutionImplementationPlan; implementation: UIImplementationSpecV2 } {
   const cloned = clonePureData(input) as Record<string, unknown>;
   if (cloned === null || typeof cloned !== "object" || Array.isArray(cloned)
-    || Object.keys(cloned).sort().join("\0") !== "implementation\0plan") {
-    return failInput("INTERACTION_INPUT_INVALID", "exact plan and implementation fields are required");
+    || Object.keys(cloned).sort().join("\0") !== "blueprint\0implementation\0plan") {
+    return failInput("INTERACTION_INPUT_INVALID", "exact blueprint, plan and implementation fields are required");
   }
   rejectRawCrossTriggerEdges(cloned.plan);
+  const blueprint = CustomerSolutionBlueprintSchema.safeParse(cloned.blueprint);
   const plan = SolutionImplementationPlanSchema.safeParse(cloned.plan);
   const implementation = UIImplementationSpecV2Schema.safeParse(cloned.implementation);
+  if (!blueprint.success) return failInput("INTERACTION_INPUT_INVALID", `blueprint: ${blueprint.error.issues[0]?.message ?? "invalid"}`);
   if (!plan.success) return failInput("INTERACTION_INPUT_INVALID", `plan: ${plan.error.issues[0]?.message ?? "invalid"}`);
   if (!implementation.success || implementation.data.compatibility !== "native") {
     return failInput("INTERACTION_INPUT_INVALID", `implementation: ${implementation.success ? "native v2 required" : implementation.error.issues[0]?.message ?? "invalid"}`);
   }
   if (implementation.data.sourceSolutionPlanHash !== canonicalServerHash(plan.data)) {
     return failInput("INTERACTION_INPUT_PROVENANCE_MISMATCH", "solution-plan hash does not match authoritative plan bytes");
+  }
+  if (plan.data.blueprintHash !== canonicalServerHash(blueprint.data)) {
+    return failInput("INTERACTION_INPUT_PROVENANCE_MISMATCH", "blueprint hash does not match the authoritative confirmed blueprint");
   }
   let registryHash: string;
   try {
@@ -205,7 +216,7 @@ function snapshotInput(input: unknown): { plan: SolutionImplementationPlan; impl
   if (implementation.data.compiledActions.length > 0 || implementation.data.compiledScripts.length > 0 || hasBindings) {
     return failInput("INTERACTION_INPUT_ALREADY_COMPILED", "compileInteractions accepts only authoritative phase-three UI v2 input");
   }
-  return { plan: plan.data, implementation: implementation.data };
+  return { blueprint: blueprint.data, plan: plan.data, implementation: implementation.data };
 }
 
 function codePointCompare(left: string, right: string): number {
@@ -316,14 +327,10 @@ function isVisibleCall(call: ValidatedSemanticCall): boolean {
 }
 
 export function compileInteractions(input: unknown): InteractionCompilationResult {
-  const { plan, implementation } = snapshotInput(input);
+  const { blueprint, plan, implementation } = snapshotInput(input);
   const normalized = normalizeActionGraph({ plan, implementation });
   const native = compileNativeActions({ normalized });
-  const errors: InteractionDiagnostic[] = [diagnostic(
-    "JOURNEY_PROVENANCE_UNAVAILABLE",
-    plan.blueprintHash,
-    "the solution plan carries only blueprintHash; acceptance journeys are unavailable, so only declared trigger closure can be proven",
-  )];
+  const errors: InteractionDiagnostic[] = [];
   const warnings: InteractionDiagnostic[] = [];
   const requests: InteractionCompilationRequest[] = [];
   const compiledScripts: CompiledScriptModule[] = [];
@@ -436,6 +443,47 @@ export function compileInteractions(input: unknown): InteractionCompilationResul
       }
     });
   });
+  const journeyById = new Map(blueprint.journeys.map((journey) => [journey.id, journey]));
+  const triggerOwnerByControl = new Map<string, { pageId: string; regionIds: ReadonlySet<string> }>();
+  implementation.pages.forEach((page) => {
+    if (page.compatibility !== "native") return;
+    page.controls.forEach((control) => triggerOwnerByControl.set(control.id, {
+      pageId: page.sourceBlueprintPageId,
+      regionIds: new Set(control.sourceBlueprintRegionIds),
+    }));
+  });
+  const validCoverage = new Set<string>();
+  const triggersByJourneyStep = new Map<string, Set<string>>();
+  plan.actions.forEach((action) => {
+    const graphAction = graphActionById.get(action.id);
+    const triggerKey = triggerKeyByAction.get(action.id);
+    (action.journeyStepRefs ?? []).forEach((reference) => {
+      const stepKey = `${reference.journeyId}:${reference.stepIndex}`;
+      const step = journeyById.get(reference.journeyId)?.steps[reference.stepIndex];
+      if (step === undefined) {
+        errors.push(diagnostic("JOURNEY_REFERENCE_UNKNOWN", action.id, `unknown journey step reference: ${stepKey}`));
+        return;
+      }
+      validCoverage.add(stepKey);
+      const owner = graphAction === undefined ? undefined : triggerOwnerByControl.get(graphAction.trigger.controlId);
+      if (owner === undefined || owner.pageId !== step.pageId || !owner.regionIds.has(step.regionId)) {
+        errors.push(diagnostic("JOURNEY_TRIGGER_OWNERSHIP_MISMATCH", action.id, `trigger does not belong to ${step.pageId}/${step.regionId}`));
+        return;
+      }
+      if (triggerKey !== undefined) {
+        const triggerKeys = triggersByJourneyStep.get(stepKey) ?? new Set<string>();
+        triggerKeys.add(triggerKey);
+        triggersByJourneyStep.set(stepKey, triggerKeys);
+      }
+    });
+  });
+  blueprint.journeys.forEach((journey) => journey.steps.forEach((_step, stepIndex) => {
+    const stepKey = `${journey.id}:${stepIndex}`;
+    if (!validCoverage.has(stepKey)) errors.push(diagnostic("JOURNEY_STEP_UNCOVERED", stepKey, "confirmed journey step has no semantic action"));
+  }));
+  triggersByJourneyStep.forEach((triggerKeys, stepKey) => {
+    if (triggerKeys.size > 1) errors.push(diagnostic("JOURNEY_REFERENCE_AMBIGUOUS", stepKey, "journey step is mapped to more than one trigger closure"));
+  });
   const reachable = new Set<string>();
   const missingPath = (id: string, triggerKey: string, visible: boolean, active = new Set<string>()): boolean => {
     if (active.has(id)) return true;
@@ -447,16 +495,27 @@ export function compileInteractions(input: unknown): InteractionCompilationResul
     const missing = action.afterActionIds.some((successor) => missingPath(successor, triggerKey, hasVisible, active));
     active.delete(id); return missing;
   };
+  const observableClosureByTrigger = new Map<string, boolean>();
   for (const [triggerKey, actionIds] of actionIdsByTrigger) {
     const incoming = new Map(Array.from(actionIds, (id) => [id, 0]));
     actionIds.forEach((id) => graphActionById.get(id)?.afterActionIds.forEach((successorId) => {
       if (actionIds.has(successorId)) incoming.set(successorId, (incoming.get(successorId) ?? 0) + 1);
     }));
     const roots = normalized.executionOrder.filter((id) => actionIds.has(id) && incoming.get(id) === 0);
+    let observable = roots.length > 0;
     roots.forEach((root) => {
-      if (missingPath(root, triggerKey, false)) errors.push(diagnostic("INTERACTION_CLOSURE_MISSING", root, "at least one trigger path has no visible terminal result"));
+      if (missingPath(root, triggerKey, false)) {
+        observable = false;
+        errors.push(diagnostic("INTERACTION_CLOSURE_MISSING", root, "at least one trigger path has no visible terminal result"));
+      }
     });
+    observableClosureByTrigger.set(triggerKey, observable);
   }
+  triggersByJourneyStep.forEach((triggerKeys, stepKey) => {
+    if (triggerKeys.size === 1 && observableClosureByTrigger.get([...triggerKeys][0]!) !== true) {
+      errors.push(diagnostic("JOURNEY_CLOSURE_MISSING", stepKey, "mapped trigger closure has no observable front-end result"));
+    }
+  });
   normalized.executionOrder.filter((id) => !reachable.has(id)).forEach((id) =>
     errors.push(diagnostic("INTERACTION_CLOSURE_MISSING", id, "action is unreachable from every trigger root")));
 

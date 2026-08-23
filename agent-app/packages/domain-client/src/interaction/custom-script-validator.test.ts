@@ -37,7 +37,7 @@ const semanticPlan = (scripts: SolutionImplementationPlan["scripts"] = [script("
   schema: "kf-solution-implementation/v1", projectKey: "validator", blueprintHash: "a".repeat(64), candidateBundleHash: "b".repeat(64),
   theme, roleStyles: [{ role: "content", declarations: {}, states: {} }], mockData: [], localState: [],
   actions: scripts.filter((candidate) => candidate.kind === "custom" && candidate.programVersion === "semantic-js/v1")
-    .map((candidate) => ({ id: `run-${candidate.id}`, kind: "run-script" as const, scriptId: candidate.id, afterActionIds: [] })),
+    .map((candidate) => ({ id: `run-${candidate.id}`, kind: "run-script" as const, scriptId: candidate.id, afterActionIds: [], journeyStepRefs: [{ journeyId: "review-records", stepIndex: 0 }] })),
   scripts, overlays: [],
   pages: [{
     id: "home", title: "首页", purpose: "脚本宿主页", canvas: "desktop", sourceBlueprintPageId: "bp-home",

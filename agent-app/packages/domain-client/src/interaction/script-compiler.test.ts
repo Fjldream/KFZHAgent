@@ -74,7 +74,7 @@ function fixtureForScript(
       id: "visitor-records", purpose: "访客", fields: [{ key: "id", label: "标识", type: "text" }],
       records: [{ values: [{ field: "id", value: "v1" }] }],
     }], localState: [], overlays: [], scripts,
-    actions: scripts.map((candidate) => ({ id: `run-${candidate.id}`, kind: "run-script" as const, scriptId: candidate.id, afterActionIds: [] })),
+    actions: scripts.map((candidate) => ({ id: `run-${candidate.id}`, kind: "run-script" as const, scriptId: candidate.id, afterActionIds: [], journeyStepRefs: [{ journeyId: "review-records", stepIndex: 0 }] })),
     pages: [{
       id: "home", title: "首页", purpose: "脚本宿主页", canvas: "desktop", sourceBlueprintPageId: "bp-home",
       sourceBlueprintRegionIds: ["region"], initialStateIds: [], root: {

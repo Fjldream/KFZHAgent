@@ -64,7 +64,7 @@ const sourcePlan = {
     },
   }],
   overlays: [],
-  actions: [{ id: "submit", kind: "run-script", scriptId: "submit-script", afterActionIds: [] }],
+  actions: [{ id: "submit", kind: "run-script", scriptId: "submit-script", afterActionIds: [], journeyStepRefs: [{ journeyId: "submit-form", stepIndex: 0 }] }],
   scripts: [{
     id: "submit-script",
     kind: "custom",

@@ -162,7 +162,7 @@ function compileReviewedSyntax(options: { readonly cellClickSource?: string; rea
     theme, roleStyles: [{ role: "content", declarations: {}, states: {} }],
     mockData: [{ id: "visitor-records", purpose: "访客", fields: [{ key: "id", label: "标识", type: "text" }], records: [{ values: [{ field: "id", value: "a" }] }] }],
     localState: [], overlays: [], scripts: [script],
-    actions: [{ id: "run-reviewed", kind: "run-script", scriptId: script.id, afterActionIds: [] }],
+    actions: [{ id: "run-reviewed", kind: "run-script", scriptId: script.id, afterActionIds: [], journeyStepRefs: [{ journeyId: "review-records", stepIndex: 0 }] }],
     pages: [{ id: "home", title: "首页", purpose: "验证", canvas: "desktop", sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region"], initialStateIds: [], root: {
       id: "root", kind: "layout", layout: "column", sourceBlueprintRegionIds: ["region"], intent, children: [
         { id: "go", kind: "control", capabilityId: "button", content: "执行", properties: [], tabIds: [], styleRole: "content", sourceBlueprintRegionIds: ["region"], intent, eventBindings: cellClick ? [] : [{ semanticEvent: "click", actionIds: ["run-reviewed"] }] },

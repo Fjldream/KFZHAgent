@@ -191,12 +191,15 @@ function solutionImplementationPlan(blueprint = solutionBlueprint(), candidates 
           properties: [],
           tabIds: [],
           styleRole: "record-title",
-          eventBindings: [],
+          eventBindings: [{ semanticEvent: "click", actionIds: ["show-review-result"] }],
         }],
       },
     }],
     overlays: [],
-    actions: [],
+    actions: [{
+      id: "show-review-result", kind: "show-feedback", level: "success", message: "已展示预约详情",
+      afterActionIds: [], journeyStepRefs: [{ journeyId: "review-visitor", stepIndex: 0 }],
+    }],
     scripts: [],
   };
 }
@@ -875,6 +878,8 @@ describe("DeepSeekModelPort", () => {
     expect(implementationSystemPrompt).toContain('"localState"');
     expect(implementationSystemPrompt).toContain('"overlays"');
     expect(implementationSystemPrompt).toContain('"actions"');
+    expect(implementationSystemPrompt).toContain('"journeyStepRefs"');
+    expect(capturedImplementationPrompt).toContain("每个已确认旅程步骤");
     expect(implementationSystemPrompt).toContain('"scripts"');
     expect(implementationSystemPrompt).toContain('"kind":"layout"');
     expect(implementationSystemPrompt).toContain('"kind":"registered-module"');
@@ -890,8 +895,8 @@ describe("DeepSeekModelPort", () => {
     expect(implementationSystemPrompt).toContain('"kind":"custom"');
     expect(implementationSystemPrompt).toContain('"steps"');
     expect(implementationSystemPrompt).toContain('"styleOverride":{"declarations":{},"states":{}}');
-    expect(implementationSystemPrompt).toContain('"kind":"navigate-page","id":"stable-id","afterActionIds":[],"targetPageId"');
-    expect(implementationSystemPrompt).toContain('"kind":"set-control-value","id":"stable-id","afterActionIds":[],"targetId"');
+    expect(implementationSystemPrompt).toContain('"kind":"navigate-page","id":"stable-id","afterActionIds":[],"journeyStepRefs"');
+    expect(implementationSystemPrompt).toContain('"kind":"set-control-value","id":"stable-id","afterActionIds":[],"journeyStepRefs"');
     expect(implementationSystemPrompt).toContain('"kind":"literal","value"');
     expect(implementationSystemPrompt).toContain('"mode":"fixed","value"');
     expect(implementationSystemPrompt).toContain('"mode":"minmax","min"');
@@ -914,6 +919,13 @@ describe("DeepSeekModelPort", () => {
     expect(capturedImplementationPrompt).not.toContain(`"capabilityId":"${omittedProfileId}"`);
     expect(new TextEncoder().encode(capturedImplementationPrompt).byteLength).toBeLessThanOrEqual(128_000);
     expect(new TextEncoder().encode(serializedBody).byteLength).toBeLessThanOrEqual(128_000);
+  });
+
+  it("rejects a semantic plan that does not map the exact confirmed journey steps", async () => {
+    const context = solutionPlanningContext();
+    const missing = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    missing.actions[0].journeyStepRefs = [{ journeyId: "missing-journey", stepIndex: 0 }];
+    await expect(makePort(missing).createSolutionImplementationPlan(context)).rejects.toThrow(/journey step|旅程步骤/i);
   });
 
   it.each([

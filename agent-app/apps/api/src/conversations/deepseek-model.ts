@@ -198,7 +198,8 @@ mockData 每项是 {"id":"stable-id","purpose":"行业用途","fields":[{"key":"
 localState 每项是 {"id":"stable-id","purpose":"状态用途","type":"boolean|number|text|record-key|record-key-list","initialValue":语义标量或稳定 id 数组,"mockDataId":"记录状态时必填","keyField":"记录状态时必填"}。
 pages 每项是 {"id":"stable-id","title":"标题","purpose":"用途","canvas":"responsive|desktop|large-display","sourceBlueprintPageId":"确认页面 id","sourceBlueprintRegionIds":["确认区域 id"],"initialStateIds":["状态 id"],"root":节点}。
 overlays 每项是 {"id":"stable-id","title":"标题","purpose":"用途","presentation":"dialog|window|drawer|confirmation","hostPageId":"页面 id","sourceBlueprintPageId":"确认页面 id","sourceBlueprintRegionIds":["确认区域 id"],"visibleStateId":"布尔状态 id","dismissible":true,"root":节点}。
-actions 每项是下列精确 kind 联合之一：{"kind":"navigate-page","id":"stable-id","afterActionIds":[],"targetPageId":"页面 id"}、{"kind":"open-overlay","id":"stable-id","afterActionIds":[],"overlayId":"浮层 id"}、{"kind":"close-overlay","id":"stable-id","afterActionIds":[],"overlayId":"浮层 id","result":"可选语义标量"}、{"kind":"set-visibility","id":"stable-id","afterActionIds":[],"targetId":"节点 id","visible":true}、{"kind":"switch-tab","id":"stable-id","afterActionIds":[],"targetId":"节点 id","tabId":"tab id"}、{"kind":"set-state","id":"stable-id","afterActionIds":[],"stateId":"状态 id","value":语义值}、{"kind":"set-control-value","id":"stable-id","afterActionIds":[],"targetId":"控件 id","value":值表达式}、{"kind":"show-feedback","id":"stable-id","afterActionIds":[],"level":"success|info|warning|error","message":"反馈"}、{"kind":"run-script","id":"stable-id","afterActionIds":[],"scriptId":"脚本 id"}。值表达式只能是 {"kind":"literal","value":语义值}、{"kind":"local-state","stateId":"状态 id"} 或 {"kind":"mock-data","mockDataId":"模拟数据 id"}。
+每个 action 必须包含非空且最多十二项的 "journeyStepRefs":[{"journeyId":"已确认旅程 id","stepIndex":0}]。每个已确认旅程步骤必须至少被一个 action 精确映射；不得引用不存在的旅程或步骤，也不得添加 KF 实现数据。
+actions 每项是下列精确 kind 联合之一：{"kind":"navigate-page","id":"stable-id","afterActionIds":[],"journeyStepRefs":[{"journeyId":"journey-id","stepIndex":0}],"targetPageId":"页面 id"}、{"kind":"open-overlay","id":"stable-id","afterActionIds":[],"journeyStepRefs":[{"journeyId":"journey-id","stepIndex":0}],"overlayId":"浮层 id"}、{"kind":"close-overlay","id":"stable-id","afterActionIds":[],"journeyStepRefs":[{"journeyId":"journey-id","stepIndex":0}],"overlayId":"浮层 id","result":"可选语义标量"}、{"kind":"set-visibility","id":"stable-id","afterActionIds":[],"journeyStepRefs":[{"journeyId":"journey-id","stepIndex":0}],"targetId":"节点 id","visible":true}、{"kind":"switch-tab","id":"stable-id","afterActionIds":[],"journeyStepRefs":[{"journeyId":"journey-id","stepIndex":0}],"targetId":"节点 id","tabId":"tab id"}、{"kind":"set-state","id":"stable-id","afterActionIds":[],"journeyStepRefs":[{"journeyId":"journey-id","stepIndex":0}],"stateId":"状态 id","value":语义值}、{"kind":"set-control-value","id":"stable-id","afterActionIds":[],"journeyStepRefs":[{"journeyId":"journey-id","stepIndex":0}],"targetId":"控件 id","value":值表达式}、{"kind":"show-feedback","id":"stable-id","afterActionIds":[],"journeyStepRefs":[{"journeyId":"journey-id","stepIndex":0}],"level":"success|info|warning|error","message":"反馈"}、{"kind":"run-script","id":"stable-id","afterActionIds":[],"journeyStepRefs":[{"journeyId":"journey-id","stepIndex":0}],"scriptId":"脚本 id"}。值表达式只能是 {"kind":"literal","value":语义值}、{"kind":"local-state","stateId":"状态 id"} 或 {"kind":"mock-data","mockDataId":"模拟数据 id"}。
 scripts 是声明式计划联合：{"kind":"template","id":"stable-id","purpose":"用途","inputs":[脚本端口],"outputs":[脚本端口],"template":"模板 id","parameters":[]}，或 {"kind":"custom","id":"stable-id","purpose":"用途","inputs":[脚本端口],"outputs":[脚本端口],"steps":[{"order":1,"intent":"自然语言声明式步骤","inputNames":[],"outputNames":[]}]}。脚本端口为 {"name":"semantic-name","description":"说明","refKind":"mock-data|local-state|control","refId":"已声明 id"}。
 parameters 每项精确联合：{"name":"limit","value":20} | {"name":"source","refKind":"mock-data|local-state|control","refId":"已声明 id"}；value 可以是字符串、有限数字、布尔值或 null；每项必须且只能提供 value 或完整的 refKind+refId。
 所有 stable id 在计划中全局唯一；来源 id、样式、模拟数据、状态、节点、页面、浮层、动作和脚本引用必须命中已声明对象；每个确认页面/区域必须且只能由对应页面或浮层覆盖。`;
@@ -1279,6 +1280,32 @@ function buildSolutionImplementationPrompt(input: ModelPortContext, revising: bo
   return prompt;
 }
 
+function validateSolutionJourneyCoverage(
+  blueprint: CustomerSolutionBlueprint,
+  plan: SolutionImplementationPlan,
+): void {
+  if (plan.blueprintHash !== canonicalServerHash(blueprint)) {
+    throw new DeepSeekModelOutputError("solution plan blueprint hash does not match the confirmed blueprint");
+  }
+  const journeys = new Map(blueprint.journeys.map((journey) => [journey.id, journey]));
+  const covered = new Set<string>();
+  for (const action of plan.actions) {
+    for (const reference of action.journeyStepRefs ?? []) {
+      if (journeys.get(reference.journeyId)?.steps[reference.stepIndex] === undefined) {
+        throw new DeepSeekModelOutputError(`solution plan references unknown journey step ${reference.journeyId}:${reference.stepIndex}`);
+      }
+      covered.add(`${reference.journeyId}:${reference.stepIndex}`);
+    }
+  }
+  for (const journey of blueprint.journeys) {
+    journey.steps.forEach((_step, stepIndex) => {
+      if (!covered.has(`${journey.id}:${stepIndex}`)) {
+        throw new DeepSeekModelOutputError(`solution plan does not map confirmed journey step ${journey.id}:${stepIndex}`);
+      }
+    });
+  }
+}
+
 export class DeepSeekModelPort implements ModelPort {
   private readonly baseUrl: string;
   private readonly model: string;
@@ -1892,6 +1919,8 @@ export class DeepSeekModelPort implements ModelPort {
           .join("; ")}`,
       );
     }
+    const blueprint = CustomerSolutionBlueprintSchema.parse(input.confirmedSolutionBlueprint);
+    validateSolutionJourneyCoverage(blueprint, parsed.data);
     return parsed.data;
   }
 
