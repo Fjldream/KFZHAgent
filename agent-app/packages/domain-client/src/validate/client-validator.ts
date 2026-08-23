@@ -8,6 +8,7 @@ import { walk } from "estree-walker";
 import type { ValidationReport } from "@kf/contracts";
 import { inspectClientProject } from "../inspect/client-inspector.js";
 import { CONTROL_TYPE_BY_UIMODEL_TYPE } from "../ir/client-project-ir.js";
+import { EASYUI_PROTO_TYPES } from "../ir/easyui-types.js";
 import { importNativeClientPackage, packageNativeClientProject } from "../package/native-client-package.js";
 import { resolveVersionDirName, verifyChangeScope } from "../patch/change-scope.js";
 import { deleteOperationDigest, normalizeChangePlan, type NormalizedPlan } from "../patch/client-patcher.js";
@@ -76,10 +77,12 @@ type RuntimeControlType =
 function runtimeControlType(control: Readonly<Record<string, unknown>>): RuntimeControlType | undefined {
   const uiModelType = control["uiModelType"];
   const easyuiEnvelope = control["objectType"] === 3;
-  if (typeof uiModelType === "number" && easyuiEnvelope) return undefined;
+  if (easyuiEnvelope && Object.prototype.hasOwnProperty.call(control, "uiModelType")) return undefined;
   if (typeof uiModelType === "number") return { kind: "ui-model", uiModelType };
-  if (easyuiEnvelope && typeof control["uiExtendType"] === "number") {
-    return { kind: "easyui", objectType: 3, uiExtendType: control["uiExtendType"] };
+  const uiExtendType = control["uiExtendType"];
+  if (easyuiEnvelope && typeof uiExtendType === "number" && Number.isInteger(uiExtendType)
+    && EASYUI_PROTO_TYPES[uiExtendType] !== undefined) {
+    return { kind: "easyui", objectType: 3, uiExtendType };
   }
   return undefined;
 }

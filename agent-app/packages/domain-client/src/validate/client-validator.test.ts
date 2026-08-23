@@ -906,6 +906,29 @@ describe("client validator (Task 7 brief Step 2)", () => {
     expect(report.status).toBe("fail");
   });
 
+  it.each([999, 1.5, null] as const)("fails closed on malformed EasyUI uiExtendType %s without requiring a script", async (uiExtendType) => {
+    const base = await copyFixture("client-unknown-field");
+    const candidate = await applyClientPatch(base, happyPlan());
+    const page = await readPage(candidate);
+    page.objects.push({
+      name: "MalformedEasyui1", guid: `malformed-easyui-${String(uiExtendType)}`,
+      objectType: 3, uiExtendType, leftTopPt: { x: 0, y: 0 }, width: 20, height: 20,
+    });
+    await writePage(candidate, page);
+    const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.businessRules).toBe("fail");
+    expect(report.warnings.join("\n")).toMatch(/unknown|malformed.*runtime control type/i);
+  });
+
+  it("rejects an EasyUI envelope carrying even a null uiModelType dispatch field", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const candidate = await applyClientPatch(base, happyPlan());
+    const page = await readPage(candidate);
+    page.objects.push({ ...nativeDatagrid("MalformedDatagrid1", "malformed-dispatch"), uiModelType: null });
+    await writePage(candidate, page);
+    expect((await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true })).checks.businessRules).toBe("fail");
+  });
+
   it("fails on page geometry outside bounds", async () => {
     const base = await copyFixture("client-unknown-field");
     const candidate = await applyClientPatch(base, happyPlan());

@@ -2,7 +2,11 @@ import { createHash } from "node:crypto";
 import { types as utilTypes } from "node:util";
 import { CompilerInstanceNameSchema, UIImplementationSpecV2Schema, type UIImplementationSpecV2 } from "@kf/contracts";
 import { deriveGuid } from "../compile/guid-factory.js";
-import { serverOwnedRuntimeIdentitySnapshot, type InspectResult } from "../inspect/client-inspector.js";
+import {
+  serverOwnedRuntimeIdentitySnapshot,
+  type InspectResult,
+  type ServerOwnedNativeControlType,
+} from "../inspect/client-inspector.js";
 
 export type ExistingRuntimeSource = "uploaded-existing" | "workspace-derived";
 export interface ExistingControlRuntimeDisposition { readonly source: ExistingRuntimeSource; readonly semanticControlId: string; readonly instanceName: string }
@@ -38,6 +42,7 @@ interface VerifiedDispositionPayload {
   readonly workspaceId: string;
   readonly baseRevisionId: string;
   readonly inspectionIdentityHash: string;
+  readonly inspectedControls: readonly { readonly name: string; readonly nativeType: ServerOwnedNativeControlType }[];
   readonly disposition: CanonicalDisposition;
 }
 const verifiedDispositionByHandle = new WeakMap<object, VerifiedDispositionPayload>();
@@ -145,26 +150,45 @@ function nonEmptyString(value: unknown, path: string, maximum = 200): string {
   if (typeof value !== "string" || value.length === 0 || value.length > maximum || value.trim() !== value) fail("INPUT_INVALID", `${path} must be a bounded non-empty string without surrounding whitespace`);
   return value;
 }
-const RUNTIME_PREFIX_BY_CAPABILITY: Readonly<Record<string, string>> = Object.freeze({
-  button: "Button", checkbox: "Checkbox", datetimepicker: "Datetimepicker",
-  "easyui.1": "Datagrid", datagrid: "Datagrid", "easyui.2": "LinkButton",
-  "easyui.6": "Searchbox", "easyui.12": "Dialog", "easyui.18": "Treegrid",
-  "easyui.19": "Window", "easyui.22": "Pagination", image: "Image", input: "Input",
-  inputnumber: "InputNumber", list: "List", navmenu: "Navmenu", radio: "Radio",
-  richtext: "RichText", select: "Select", switch: "Switch", tabs: "Tabs", tag: "Tag",
-  text: "Text", tree: "Tree",
+interface RuntimeCapabilityDescriptor {
+  readonly prefix: string;
+  readonly nativeType: ServerOwnedNativeControlType;
+}
+const staticDescriptor = (prefix: string, uiModelType: number): RuntimeCapabilityDescriptor =>
+  Object.freeze({ prefix, nativeType: Object.freeze({ kind: "static", uiModelType }) });
+const easyuiDescriptor = (prefix: string, uiExtendType: number): RuntimeCapabilityDescriptor =>
+  Object.freeze({ prefix, nativeType: Object.freeze({ kind: "easyui", objectType: 3, uiExtendType }) });
+const layoutDescriptor = (layoutType: number): RuntimeCapabilityDescriptor =>
+  Object.freeze({ prefix: "Layout", nativeType: Object.freeze({ kind: "layout", objectType: 2, layoutType }) });
+const RUNTIME_CAPABILITY_DESCRIPTORS: Readonly<Record<string, RuntimeCapabilityDescriptor>> = Object.freeze({
+  button: staticDescriptor("Button", 35), checkbox: staticDescriptor("Checkbox", 37), datetimepicker: staticDescriptor("Datetimepicker", 40),
+  "easyui.1": easyuiDescriptor("Datagrid", 1), datagrid: easyuiDescriptor("Datagrid", 1), "easyui.2": easyuiDescriptor("LinkButton", 2),
+  "easyui.6": easyuiDescriptor("Searchbox", 6), "easyui.12": easyuiDescriptor("Dialog", 12), "easyui.18": easyuiDescriptor("Treegrid", 18),
+  "easyui.19": easyuiDescriptor("Window", 19), "easyui.22": easyuiDescriptor("Pagination", 22), image: staticDescriptor("Image", 41),
+  input: staticDescriptor("Input", 38), inputnumber: staticDescriptor("InputNumber", 49), list: staticDescriptor("List", 9),
+  navmenu: staticDescriptor("Navmenu", 34), radio: staticDescriptor("Radio", 36), richtext: staticDescriptor("RichText", 7),
+  select: staticDescriptor("Select", 44), switch: staticDescriptor("Switch", 48), tabs: staticDescriptor("Tabs", 47),
+  tag: staticDescriptor("Tag", 50), text: staticDescriptor("Text", 6), tree: staticDescriptor("Tree", 32),
+  "layout.2": layoutDescriptor(2), "layout.4": layoutDescriptor(4), "layout.5": layoutDescriptor(5),
 });
-function runtimePrefix(capabilityId: string): string {
-  if (/^layout\.(?:2|4|5)$/.test(capabilityId)) return "Layout";
-  const prefix = RUNTIME_PREFIX_BY_CAPABILITY[capabilityId];
-  if (prefix === undefined) fail("RUNTIME_PREFIX_UNSUPPORTED", capabilityId);
-  return prefix;
+function runtimeDescriptor(capabilityId: string): RuntimeCapabilityDescriptor {
+  const descriptor = RUNTIME_CAPABILITY_DESCRIPTORS[capabilityId];
+  if (descriptor === undefined) fail("RUNTIME_PREFIX_UNSUPPORTED", capabilityId);
+  return descriptor;
 }
 function runtimeInstanceName(workspaceId: string, semanticControlId: string, capabilityId: string): string {
   const digest = createHash("sha256")
     .update("kf-runtime-control\0", "utf8").update(workspaceId, "utf8").update("\0", "utf8")
     .update(semanticControlId, "utf8").update("\0", "utf8").update(capabilityId, "utf8").digest("hex");
-  return `${runtimePrefix(capabilityId)}${BigInt(`0x${digest}`).toString(10)}`;
+  return `${runtimeDescriptor(capabilityId).prefix}${BigInt(`0x${digest}`).toString(10)}`;
+}
+function sameNativeType(actual: ServerOwnedNativeControlType, expected: ServerOwnedNativeControlType): boolean {
+  if (actual.kind !== expected.kind) return false;
+  if (actual.kind === "static" && expected.kind === "static") return actual.uiModelType === expected.uiModelType;
+  if (actual.kind === "easyui" && expected.kind === "easyui") return actual.objectType === expected.objectType && actual.uiExtendType === expected.uiExtendType;
+  if (actual.kind === "layout" && expected.kind === "layout") return actual.objectType === expected.objectType && actual.layoutType === expected.layoutType;
+  if (actual.kind === "prototype" && expected.kind === "prototype") return actual.prototypeName === expected.prototypeName;
+  return actual.kind === "malformed" && expected.kind === "malformed" && actual.reason === expected.reason;
 }
 function runtimePageGuid(workspaceId: string, semanticPageId: string): string { return `k${deriveGuid({ seed: workspaceId }, semanticPageId)}`; }
 
@@ -212,8 +236,8 @@ export function verifyExistingRuntimeCorrelation(input: VerifyExistingRuntimeCor
   if (identitySnapshot === undefined) fail("UNTRUSTED_INSPECTION", "inspection was not produced by inspectClientProject");
   const disposition = parseDisposition(clonePlainData(values.get("correlations")));
   disposition.controls.filter((entry) => entry.source === "uploaded-existing").forEach((entry) => {
-    const exact = identitySnapshot.controlNames.filter((name) => name === entry.instanceName);
-    const folded = identitySnapshot.controlNames.filter((name) => name.toLowerCase() === entry.instanceName.toLowerCase());
+    const exact = identitySnapshot.controls.filter((control) => control.name === entry.instanceName);
+    const folded = identitySnapshot.controls.filter((control) => control.name.toLowerCase() === entry.instanceName.toLowerCase());
     if (exact.length !== 1 || folded.length !== 1) fail("UPLOADED_ENTITY_MISMATCH", `control ${entry.semanticControlId}`);
   });
   disposition.pages.filter((entry) => entry.source === "uploaded-existing").forEach((entry) => {
@@ -223,7 +247,9 @@ export function verifyExistingRuntimeCorrelation(input: VerifyExistingRuntimeCor
   });
   const handle = Object.freeze(Object.create(null)) as VerifiedExistingRuntimeCorrelationHandle;
   const inspectionIdentityHash = createHash("sha256").update(JSON.stringify(identitySnapshot), "utf8").digest("hex");
-  verifiedDispositionByHandle.set(handle, Object.freeze({ workspaceId, baseRevisionId, inspectionIdentityHash, disposition }));
+  verifiedDispositionByHandle.set(handle, Object.freeze({
+    workspaceId, baseRevisionId, inspectionIdentityHash, inspectedControls: identitySnapshot.controls, disposition,
+  }));
   return handle;
 }
 
@@ -280,6 +306,7 @@ export function attachRuntimeCorrelation(input: AttachRuntimeCorrelationInput): 
   const controlIds = implementation.pages.flatMap((page) => page.compatibility === "native" ? page.controls.map((control) => control.id) : []);
   const capabilityByControlId = new Map(implementation.pages.flatMap((page) => page.compatibility === "native"
     ? page.controls.map((control) => [control.id, control.capabilityId] as const) : []));
+  capabilityByControlId.forEach((capabilityId) => { runtimeDescriptor(capabilityId); });
   assertNoSemanticCaseAliases([...pageIds, ...controlIds]);
   let controls: Array<{ semanticControlId: string; instanceName: string }>; let pages: Array<{ semanticPageId: string; pageGuid: string }>;
   if (verified === undefined) {
@@ -290,6 +317,13 @@ export function attachRuntimeCorrelation(input: AttachRuntimeCorrelationInput): 
     pages = [...pageIds].sort((a, b) => a.localeCompare(b, "en-US")).map((semanticPageId) => ({ semanticPageId, pageGuid: runtimePageGuid(workspaceId, semanticPageId) }));
   } else {
     assertExactSemanticDisposition(verified, controlIds, pageIds);
+    verified.controls.filter((entry) => entry.source === "uploaded-existing").forEach((entry) => {
+      const inspectedControl = verifiedPayload?.inspectedControls.find((control) => control.name === entry.instanceName);
+      const expected = runtimeDescriptor(capabilityByControlId.get(entry.semanticControlId)!).nativeType;
+      if (inspectedControl === undefined || !sameNativeType(inspectedControl.nativeType, expected)) {
+        fail("UPLOADED_NATIVE_TYPE_MISMATCH", entry.semanticControlId);
+      }
+    });
     verified.controls.filter((entry) => entry.source === "workspace-derived").forEach((entry) => {
       if (entry.instanceName !== runtimeInstanceName(workspaceId, entry.semanticControlId, capabilityByControlId.get(entry.semanticControlId)!)) fail("FORGED_WORKSPACE_DERIVATION", entry.semanticControlId);
     });

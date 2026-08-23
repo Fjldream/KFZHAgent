@@ -192,8 +192,15 @@ export interface InspectResult {
   warnings: string[];
 }
 
+export type ServerOwnedNativeControlType =
+  | { readonly kind: "static"; readonly uiModelType: number }
+  | { readonly kind: "easyui"; readonly objectType: 3 | null; readonly uiExtendType: number }
+  | { readonly kind: "layout"; readonly objectType: 2 | null; readonly layoutType: number }
+  | { readonly kind: "prototype"; readonly prototypeName: string }
+  | { readonly kind: "malformed"; readonly reason: string };
+
 export interface ServerOwnedRuntimeIdentitySnapshot {
-  readonly controlNames: readonly string[];
+  readonly controls: readonly { readonly name: string; readonly nativeType: ServerOwnedNativeControlType }[];
   readonly pageGuids: readonly string[];
 }
 
@@ -433,6 +440,7 @@ interface RawControl {
   width: number;
   height: number;
   kfType: number;
+  nativeRuntimeType: ServerOwnedNativeControlType;
   rawPath: string;
   unknownFields: string[];
 }
@@ -481,6 +489,7 @@ function collectControls(node: unknown, rawPath: string, out: RawControl[]): voi
       width: asNumber(record["width"]),
       height: asNumber(record["height"]),
       kfType: uiModelType,
+      nativeRuntimeType: { kind: "static", uiModelType },
       rawPath,
       unknownFields: unknownKeys(record, knownSet),
     });
@@ -502,6 +511,9 @@ function collectControls(node: unknown, rawPath: string, out: RawControl[]): voi
       width: asNumber(record["width"]),
       height: asNumber(record["height"]),
       kfType: proto,
+      nativeRuntimeType: Object.prototype.hasOwnProperty.call(record, "uiModelType")
+        ? { kind: "malformed", reason: "easyui envelope carries uiModelType" }
+        : { kind: "easyui", objectType: 3, uiExtendType: proto },
       rawPath,
       unknownFields: [],
     });
@@ -526,6 +538,7 @@ function collectControls(node: unknown, rawPath: string, out: RawControl[]): voi
       width: asNumber(record["width"]),
       height: asNumber(record["height"]),
       kfType: proto,
+      nativeRuntimeType: { kind: "easyui", objectType: null, uiExtendType: proto },
       rawPath,
       unknownFields: [],
     });
@@ -559,6 +572,7 @@ function collectControls(node: unknown, rawPath: string, out: RawControl[]): voi
         width: asNumber(baseProperty["width"]),
         height: asNumber(baseProperty["height"]),
         kfType: layoutType,
+        nativeRuntimeType: { kind: "layout", objectType: objectType === 2 ? 2 : null, layoutType },
         rawPath,
         unknownFields: [],
       });
@@ -585,6 +599,7 @@ function collectControls(node: unknown, rawPath: string, out: RawControl[]): voi
         width: geometry.width,
         height: geometry.height,
         kfType: 0,
+        nativeRuntimeType: { kind: "prototype", prototypeName },
         rawPath,
         unknownFields: [],
       });
@@ -936,6 +951,7 @@ export async function inspectClientProject(
   const rawPages: Record<string, unknown> = {};
   const pagesIndex: Record<string, PageIndexEntry> = {};
   const controlsIndex: Record<string, ControlIndexEntry> = {};
+  const nativeRuntimeTypeByControlGuid = new Map<string, ServerOwnedNativeControlType>();
   const controlsProvenance: Record<string, ControlProvenance> = {};
   const pagesProvenance: Record<string, PageProvenance> = {};
   const summaryPages: PageSummary[] = [];
@@ -978,6 +994,7 @@ export async function inspectClientProject(
     for (let i = 0; i < controls.length; i += 1) {
       const control = controls[i] as RawControl;
       if (control.guid !== "") {
+        nativeRuntimeTypeByControlGuid.set(control.guid, control.nativeRuntimeType);
         controlsIndex[control.guid] = {
           guid: control.guid,
           pageGuid: guid,
@@ -1146,7 +1163,11 @@ export async function inspectClientProject(
 
   const result: InspectResult = { raw, index, summary, provenance, warnings };
   const runtimeIdentitySnapshot: ServerOwnedRuntimeIdentitySnapshot = Object.freeze({
-    controlNames: Object.freeze(Object.values(controlsIndex).flatMap((control) => control.name === undefined ? [] : [control.name]).sort()),
+    controls: Object.freeze(Object.entries(controlsIndex).flatMap(([guid, control]) => {
+      const nativeType = nativeRuntimeTypeByControlGuid.get(guid);
+      if (control.name === undefined || nativeType === undefined) return [];
+      return [Object.freeze({ name: control.name, nativeType: Object.freeze({ ...nativeType }) })];
+    }).sort((left, right) => left.name.localeCompare(right.name, "en-US"))),
     pageGuids: Object.freeze(Object.keys(pagesIndex).sort()),
   });
   serverOwnedInspectResults.set(result, runtimeIdentitySnapshot);

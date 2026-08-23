@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { beforeAll } from "vitest";
 import { compileClientProject } from "../compile/client-compiler.js";
 import { deriveGuid } from "../compile/guid-factory.js";
-import { inspectClientProject, type InspectResult } from "../inspect/client-inspector.js";
+import { inspectClientProject, serverOwnedRuntimeIdentitySnapshot, type InspectResult } from "../inspect/client-inspector.js";
 import {
   attachRuntimeCorrelation,
   verifyExistingRuntimeCorrelation,
@@ -37,7 +37,7 @@ function implementation(
       .filter((_, controlIndex) => controlIndex % pageIds.length === pageIndex)
       .map((controlId) => ({
         id: controlId, role: "content",
-        capabilityId: controlId === "open-detail" ? "button" : controlId === "detail-root" ? "easyui.1" : "text",
+        capabilityId: controlId === "open-detail" ? "button" : controlId === "detail-root" ? "easyui.1" : controlId === "layout-host" ? "layout.4" : "text",
         depth: 0, zIndex: 0,
         geometry: { x: 0, y: 0, width: 200, height: 40 }, nativeProperties: {},
         sourceSolutionNodeId: `solution-${controlId}`,
@@ -66,6 +66,10 @@ describe("attachRuntimeCorrelation", () => {
       schema: "kf-client-project-ir/v1", id: "existing-project", name: "Existing", version: "1.0.0.1",
       pages: [{ id: "existing-page", name: "Page1", width: 1280, height: 720, controls: [
         { id: "Button1", type: "button", x: 10, y: 10, width: 90, height: 40, text: "Existing" },
+        { id: "Text1", type: "text", x: 10, y: 60, width: 90, height: 40, text: "Existing" },
+        { id: "Table1", type: "table", x: 10, y: 110, width: 320, height: 180 },
+        { id: "Datagrid1", type: "easyui", proto: 1, x: 10, y: 300, width: 320, height: 180 },
+        { id: "Layout1", type: "layout", layoutType: 4, x: 350, y: 10, width: 320, height: 480, children: [] },
       ] }], variables: [], scripts: [],
     }, { seed: "uploaded-workspace" });
     realInspection = await inspectClientProject(workspace.path);
@@ -125,7 +129,7 @@ describe("attachRuntimeCorrelation", () => {
     const maps = correlationMaps(derived);
     const existing = verified({
       controls: [
-        { source: "uploaded-existing", semanticControlId: "home-root", instanceName: "Button1" },
+        { source: "uploaded-existing", semanticControlId: "home-root", instanceName: "Text1" },
         { source: "workspace-derived", semanticControlId: "open-detail", instanceName: maps.controls["open-detail"]! },
         { source: "workspace-derived", semanticControlId: "detail-root", instanceName: maps.controls["detail-root"]! },
       ],
@@ -136,10 +140,68 @@ describe("attachRuntimeCorrelation", () => {
     });
     const result = attachRuntimeCorrelation({ workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: implementation(), verifiedExisting: existing });
     const correlated = correlationMaps(result);
-    expect(correlated.controls["home-root"]).toBe("Button1");
+    expect(correlated.controls["home-root"]).toBe("Text1");
     expect(correlated.controls["open-detail"]).toBe(maps.controls["open-detail"]);
     expect(correlated.pages["home"]).toBe(uploadedPageGuid);
     expect(correlated.pages["detail"]).toBe(maps.pages["detail"]);
+  });
+
+  it("binds uploaded identities to the implementation capability's exact native runtime type", () => {
+    const derived = allDerived(WORKSPACE_ID);
+    const withUploadedDatagrid = (instanceName: string) => verified({
+      controls: derived.controls.map((entry) => entry.semanticControlId === "detail-root"
+        ? { source: "uploaded-existing" as const, semanticControlId: entry.semanticControlId, instanceName }
+        : entry),
+      pages: derived.pages,
+    });
+    for (const forgedName of ["Table1", "Button1"]) {
+      expect(() => attachRuntimeCorrelation({
+        workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: implementation(),
+        verifiedExisting: withUploadedDatagrid(forgedName),
+      })).toThrowError(/UPLOADED_NATIVE_TYPE_MISMATCH.*detail-root/);
+    }
+    const textAsButton = verified({
+      controls: derived.controls.map((entry) => entry.semanticControlId === "home-root"
+        ? { source: "uploaded-existing" as const, semanticControlId: entry.semanticControlId, instanceName: "Button1" }
+        : entry),
+      pages: derived.pages,
+    });
+    expect(() => attachRuntimeCorrelation({
+      workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: implementation(), verifiedExisting: textAsButton,
+    })).toThrowError(/UPLOADED_NATIVE_TYPE_MISMATCH.*home-root/);
+    const accepted = attachRuntimeCorrelation({
+      workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: implementation(),
+      verifiedExisting: withUploadedDatagrid("Datagrid1"),
+    });
+    expect(correlationMaps(accepted).controls["detail-root"]).toBe("Datagrid1");
+  });
+
+  it("captures deeply immutable exact native types in the server-owned inspection snapshot", () => {
+    const snapshot = serverOwnedRuntimeIdentitySnapshot(realInspection);
+    if (snapshot === undefined) throw new Error("server-owned snapshot missing");
+    expect(snapshot.controls.find((control) => control.name === "Button1")?.nativeType)
+      .toEqual({ kind: "static", uiModelType: 35 });
+    expect(snapshot.controls.find((control) => control.name === "Datagrid1")?.nativeType)
+      .toEqual({ kind: "easyui", objectType: 3, uiExtendType: 1 });
+    expect(snapshot.controls.find((control) => control.name === "Layout1")?.nativeType)
+      .toEqual({ kind: "layout", objectType: 2, layoutType: 4 });
+    expect(Object.isFrozen(snapshot)).toBe(true);
+    expect(Object.isFrozen(snapshot.controls)).toBe(true);
+    expect(snapshot.controls.every((control) => Object.isFrozen(control) && Object.isFrozen(control.nativeType))).toBe(true);
+  });
+
+  it("accepts the exact compiler/template layout envelope for uploaded layout capabilities", () => {
+    const source = implementation(["home"], ["layout-host"]);
+    const derived = correlationMaps(attachRuntimeCorrelation({
+      workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: source,
+    }));
+    const proof = verified({
+      controls: [{ source: "uploaded-existing", semanticControlId: "layout-host", instanceName: "Layout1" }],
+      pages: [{ source: "workspace-derived", semanticPageId: "home", pageGuid: derived.pages.home! }],
+    });
+    expect(correlationMaps(attachRuntimeCorrelation({
+      workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: source, verifiedExisting: proof,
+    })).controls["layout-host"]).toBe("Layout1");
   });
 
   it("rejects forged workspace-derived values while uploaded page GUIDs may be non-derived", () => {
@@ -222,7 +284,7 @@ describe("attachRuntimeCorrelation", () => {
     const derived = allDerived("workspace-1");
     const mixed = verified({
       controls: derived.controls.map((entry) => entry.semanticControlId === "home-root"
-        ? { source: "uploaded-existing" as const, semanticControlId: entry.semanticControlId, instanceName: "Button1" }
+        ? { source: "uploaded-existing" as const, semanticControlId: entry.semanticControlId, instanceName: "Text1" }
         : entry),
       pages: derived.pages.map((entry) => entry.semanticPageId === "home"
         ? { source: "uploaded-existing" as const, semanticPageId: entry.semanticPageId, pageGuid: uploadedPageGuid }
