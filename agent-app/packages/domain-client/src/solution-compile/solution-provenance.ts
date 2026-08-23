@@ -1,14 +1,17 @@
 import {
   canonicalServerHash,
   type MockDataSet,
-  type ModulePlanModule,
   type SemanticScalar,
   type SolutionImplementationPlan,
   type SolutionNode,
   type UIImplementationControlV2,
 } from "@kf/contracts";
 import type { ModuleRegistry } from "../modules/module-registry.js";
-import { semanticValueToData, type SemanticDataRecord } from "./module-node-compiler.js";
+import {
+  replayRegisteredModuleDefinition,
+  semanticValueToData,
+  type SemanticDataRecord,
+} from "./module-node-compiler.js";
 
 type PlanNode = SolutionNode;
 
@@ -27,6 +30,34 @@ export interface ExpectedControlProvenance {
 }
 
 const FORBIDDEN_KEYS = new Set(["__proto__", "prototype", "constructor"]);
+
+/** Correlation only, not authentication; consumers must still replay the trusted semantic projection. */
+export function solutionModuleRegistryHash(plan: SolutionImplementationPlan, registry: ModuleRegistry): string {
+  const identities = new Map<string, Readonly<{
+    kind: string;
+    version: string;
+    compilerFingerprint: string;
+    layoutFingerprint: string;
+  }>>();
+  const visit = (node: PlanNode): void => {
+    if (node.kind === "layout") node.children.forEach(visit);
+    else if (node.kind === "repeater") visit(node.template);
+    else if (node.kind === "registered-module") {
+      const definition = registry.require(node.moduleKind, node.templateVersion);
+      const key = `${definition.kind}@${definition.version}`;
+      identities.set(key, {
+        kind: definition.kind,
+        version: definition.version,
+        compilerFingerprint: definition.compilerFingerprint!,
+        layoutFingerprint: definition.layoutFingerprint!,
+      });
+      node.slots.forEach((slot) => slot.children.forEach(visit));
+    }
+  };
+  plan.pages.forEach((page) => visit(page.root));
+  plan.overlays.forEach((overlay) => visit(overlay.root));
+  return canonicalServerHash([...identities.entries()].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0).map(([, identity]) => identity));
+}
 
 export function normalizeSolutionRepeaterKey(value: SemanticScalar): string {
   if (value === null || typeof value === "boolean") throw new SolutionProvenanceError("repeater-key", `unsafe key: ${String(value)}`);
@@ -57,29 +88,43 @@ function sameOptional(left: string | undefined, right: string | undefined): bool
   return left === right;
 }
 
-function moduleInstance(node: Extract<PlanNode, { kind: "registered-module" }>, definition: ReturnType<ModuleRegistry["require"]>, content: SemanticDataRecord): ModulePlanModule {
-  return {
-    id: node.id,
-    kind: node.moduleKind,
-    templateVersion: node.templateVersion,
-    variant: node.variant,
-    title: node.title,
-    content: JSON.stringify(content),
-    placement: {
-      region: definition.layout.regions[0]!,
-      order: Math.min(100, node.intent.readingOrder),
-      columnSpan: definition.layout.maxColumnSpan,
-      preferredHeight: definition.layout.preferredHeights[0]!,
-      alignment: node.intent.align,
-      emphasis: node.intent.importance === "primary" ? "primary" : node.intent.importance === "secondary" ? "secondary" : "subtle",
-    },
-    interactions: [],
-    ...(node.assetId === undefined ? {} : { assetId: node.assetId }),
-    sourceBlueprintModuleIds: [...node.sourceBlueprintRegionIds],
-  };
+function sameStrings(left: readonly string[] | undefined, right: readonly string[]): boolean {
+  return left !== undefined && left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-export function validateSolutionControlProvenance(input: Readonly<{
+function expectedControlAssetIds(
+  node: Extract<PlanNode, { kind: "control" }>,
+  records: ReadonlyMap<string, SemanticDataRecord>,
+): readonly string[] {
+  const ids: string[] = [];
+  const source = node.properties.find((property) => property.name === "src");
+  if (source !== undefined) {
+    const value = semanticValueToData(source.value, records, [node.id, "properties", "src"]);
+    if (typeof value === "string" && value.startsWith("asset-")) ids.push(value);
+  }
+  const visit = (declarations: NonNullable<typeof node.styleOverride>["declarations"]): void => {
+    declarations.advanced?.forEach((declaration) => {
+      if (declaration.kind === "background-image") ids.push(declaration.assetId);
+    });
+  };
+  if (node.styleOverride !== undefined) {
+    visit(node.styleOverride.declarations);
+    Object.values(node.styleOverride.states).forEach((declarations) => {
+      if (declarations !== undefined) visit(declarations);
+    });
+  }
+  return [...new Set(ids)].sort();
+}
+
+function exactAssetIds(control: UIImplementationControlV2, expected: readonly string[]): boolean {
+  return expected.length === 0 ? control.assetIds === undefined : sameStrings(control.assetIds, expected);
+}
+
+/**
+ * Validates only the compiler projection that can change semantic script API
+ * target resolution. Visual/content fields remain owned by the UI compiler.
+ */
+export function validateSolutionControlSemanticProjection(input: Readonly<{
   plan: SolutionImplementationPlan;
   root: PlanNode;
   controls: readonly UIImplementationControlV2[];
@@ -87,6 +132,7 @@ export function validateSolutionControlProvenance(input: Readonly<{
 }>): ReadonlyMap<string, ExpectedControlProvenance> {
   const dataSets = new Map(input.plan.mockData.map((dataSet) => [dataSet.id, dataSet]));
   const expected = new Map<string, ExpectedControlProvenance>();
+  const recordsByControl = new Map<string, ReadonlyMap<string, SemanticDataRecord>>();
   const modules = new Map<string, Readonly<{
     sourceNode: Extract<PlanNode, { kind: "registered-module" }>;
     parentId?: string;
@@ -122,6 +168,7 @@ export function validateSolutionControlProvenance(input: Readonly<{
           sourceRepeaterId: node.id,
           kind: "repeater-item",
         });
+        recordsByControl.set(itemId, records);
         const nestedRecords = new Map(records);
         nestedRecords.set(node.itemAlias, record);
         visit(node.template, itemId, itemId, node.id, nestedRecords);
@@ -145,9 +192,16 @@ export function validateSolutionControlProvenance(input: Readonly<{
       ...(sourceRepeaterId === undefined ? {} : { sourceRepeaterId }),
       kind: node.kind,
     });
+    recordsByControl.set(id, records);
     if (node.kind === "layout") node.children.forEach((child) => visit(child, prefix, id, sourceRepeaterId, records));
   };
   visit(input.root, undefined, undefined, undefined, new Map());
+
+  const surface = [
+    ...input.plan.pages.map((page) => ({ rootId: page.root.id, sourceBlueprintPageId: page.sourceBlueprintPageId })),
+    ...input.plan.overlays.map((overlay) => ({ rootId: overlay.root.id, sourceBlueprintPageId: overlay.sourceBlueprintPageId })),
+  ].find((candidate) => candidate.rootId === input.root.id);
+  if (surface === undefined) throw new SolutionProvenanceError(input.root.id, "surface is not owned by the authoritative plan");
 
   const actualById = new Map(input.controls.map((control) => [control.id, control]));
   const validated = new Map<string, ExpectedControlProvenance>();
@@ -159,11 +213,17 @@ export function validateSolutionControlProvenance(input: Readonly<{
     if (provenance === undefined
       || control.sourceSolutionNodeId !== control.id
       || !sameOptional(control.parentId, provenance.parentId)
-      || !sameOptional(control.sourceRepeaterId, provenance.sourceRepeaterId)) {
+      || !sameOptional(control.sourceRepeaterId, provenance.sourceRepeaterId)
+      || control.sourceBlueprintPageId !== surface.sourceBlueprintPageId
+      || !sameStrings(control.sourceBlueprintRegionIds, provenance.sourceNode.sourceBlueprintRegionIds)
+      || control.fallbackCapabilityId !== undefined) {
       throw new SolutionProvenanceError(control.id, "expanded source, repeater, or parent correlation mismatch");
     }
     if (provenance.kind === "control" && provenance.sourceNode.kind === "control") {
       if (control.capabilityId !== provenance.sourceNode.capabilityId) throw new SolutionProvenanceError(control.id, "control capability mismatch");
+      if (!exactAssetIds(control, expectedControlAssetIds(provenance.sourceNode, recordsByControl.get(control.id)!))) {
+        throw new SolutionProvenanceError(control.id, "control asset ownership mismatch");
+      }
       const mockDataId = provenance.sourceNode.mockDataId;
       if (mockDataId === undefined) {
         if (control.dataBinding !== undefined) throw new SolutionProvenanceError(control.id, "unexpected data binding");
@@ -177,11 +237,13 @@ export function validateSolutionControlProvenance(input: Readonly<{
         }
       }
     } else if (provenance.kind === "repeater-item") {
-      if (control.role !== "repeater-item" || !control.capabilityId.startsWith("layout.") || control.compiledLayout?.kind !== "column") {
+      if (control.role !== "repeater-item" || !control.capabilityId.startsWith("layout.") || control.compiledLayout?.kind !== "column"
+        || control.dataBinding !== undefined || control.assetIds !== undefined) {
         throw new SolutionProvenanceError(control.id, "repeater item layout mismatch");
       }
     } else if (provenance.sourceNode.kind === "layout") {
-      if (!control.capabilityId.startsWith("layout.") || control.compiledLayout?.kind !== provenance.sourceNode.layout) {
+      if (!control.capabilityId.startsWith("layout.") || control.compiledLayout?.kind !== provenance.sourceNode.layout
+        || control.dataBinding !== undefined || control.assetIds !== undefined) {
         throw new SolutionProvenanceError(control.id, "layout capability mismatch");
       }
     }
@@ -191,35 +253,31 @@ export function validateSolutionControlProvenance(input: Readonly<{
   for (const [moduleId, module] of modules) {
     const controls = input.controls.filter((control) => control.sourceModuleId === moduleId);
     if (controls.length === 0) throw new SolutionProvenanceError(moduleId, "registered-module output is missing");
-    const definition = input.moduleRegistry.require(module.sourceNode.moduleKind, module.sourceNode.templateVersion);
-    const contentValue = module.sourceNode.content === undefined
-      ? {}
-      : semanticValueToData(module.sourceNode.content, module.records, [moduleId, "content"]);
-    if (contentValue === null || Array.isArray(contentValue) || typeof contentValue !== "object") {
-      throw new SolutionProvenanceError(moduleId, "registered-module content is not a record");
-    }
-    const content = definition.contentSchema.parse(contentValue);
-    const instance = moduleInstance({ ...module.sourceNode, id: moduleId }, definition, content as SemanticDataRecord);
     const roots = controls.filter((control) => control.parentId === module.parentId);
     if (roots.length !== 1) throw new SolutionProvenanceError(moduleId, "registered-module must have one external root");
     const root = roots[0]!;
-    const output = definition.compile({ context: {
-      definition,
-      instance,
-      content,
-      asset: module.sourceNode.assetId === undefined ? undefined : { assetId: module.sourceNode.assetId, status: "resolved", resolvedName: module.sourceNode.title },
-      validationContext: { availableKfCapabilities: [...definition.requiredKfCapabilities], approvedAuthorizationRefs: [] },
-      bounds: { x: 0, y: 0, width: root.geometry.width, height: root.geometry.height },
-    } });
-    if (output.components.length !== controls.length) throw new SolutionProvenanceError(moduleId, "registered-module output count mismatch");
-    for (const component of output.components) {
+    const replay = replayRegisteredModuleDefinition({
+      plan: input.plan,
+      node: { ...module.sourceNode, id: moduleId },
+      layoutNode: { id: moduleId, kind: "registered-module", layout: undefined, geometry: root.geometry },
+      moduleRegistry: input.moduleRegistry,
+      currentRecords: module.records,
+      ...(module.sourceNode.assetId === undefined ? {} : { resolvedAsset: { assetId: module.sourceNode.assetId, status: "resolved" } }),
+    });
+    if (replay.components.length !== controls.length) throw new SolutionProvenanceError(moduleId, "registered-module output count mismatch");
+    for (const component of replay.components) {
       const id = `${moduleId}--${component.id}`;
       const control = actualById.get(id);
       const localParent = component.properties.parentId;
       const expectedParent = typeof localParent === "string" ? `${moduleId}--${localParent}` : module.parentId;
       if (control === undefined || control.sourceSolutionNodeId !== moduleId || control.sourceModuleId !== moduleId
         || !sameOptional(control.sourceRepeaterId, module.sourceRepeaterId) || control.parentId !== expectedParent
-        || control.capabilityId !== component.capabilityId || control.role !== component.role || control.critical !== component.critical) {
+        || control.capabilityId !== component.capabilityId || control.role !== component.role || control.critical !== component.critical
+        || control.sourceBlueprintPageId !== surface.sourceBlueprintPageId
+        || !sameStrings(control.sourceBlueprintRegionIds, module.sourceNode.sourceBlueprintRegionIds)
+        || control.fallbackCapabilityId !== component.fallbackCapabilityId
+        || control.dataBinding !== undefined
+        || !exactAssetIds(control, module.sourceNode.assetId !== undefined && component.capabilityId === "image" ? [module.sourceNode.assetId] : [])) {
         throw new SolutionProvenanceError(id, "registered-module output provenance mismatch");
       }
       const provenance: ExpectedControlProvenance = {

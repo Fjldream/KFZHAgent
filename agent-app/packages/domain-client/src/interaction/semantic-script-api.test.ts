@@ -5,6 +5,8 @@ import {
   resolveEventBinding,
   resolveSemanticApiCall,
 } from "./semantic-script-api.js";
+import { createDefaultModuleRegistry } from "../modules/module-registry.js";
+import { solutionModuleRegistryHash } from "../solution-compile/solution-provenance.js";
 
 const theme = {
   background: "#f4f7fb", surface: "#ffffff", primary: "#163a5f", accent: "#e47b32",
@@ -28,8 +30,8 @@ function control(id: string, capabilityId: string, sourceBlueprintPageId: string
   };
 }
 
-function pageControl(id: string, capabilityId: string, sourceBlueprintPageId: string, parentId: string) {
-  return { ...control(id, capabilityId, sourceBlueprintPageId), parentId, depth: 1 };
+function pageControl(id: string, capabilityId: string, sourceBlueprintPageId: string, parentId: string, region = "region") {
+  return { ...control(id, capabilityId, sourceBlueprintPageId), parentId, depth: 1, sourceBlueprintRegionIds: [region] };
 }
 
 function rootControl(id: string, sourceBlueprintPageId: string, region = "region") {
@@ -47,6 +49,7 @@ function implementation(): UIImplementationSpecV2 {
     schema: "kf-ui-implementation/v2",
     compatibility: "native",
     sourceSolutionPlanHash: canonicalServerHash(plan()),
+    sourceModuleRegistryHash: solutionModuleRegistryHash(plan(), createDefaultModuleRegistry()),
     theme,
     compiledRoleStyles: {},
     compiledActions: [],
@@ -73,8 +76,8 @@ function implementation(): UIImplementationSpecV2 {
       {
         compatibility: "native", id: "detail-page", width: 1280, height: 720, sourceBlueprintPageId: "bp-detail",
         controls: [
-          pageControl("detail-input", "input", "bp-detail", "detail-root"),
-          { ...pageControl("detail-records", "easyui.1", "bp-detail", "detail-root"), dataBinding: { mockDataId: "detail-data", records: [{ detailCode: "D-1" }] } },
+          pageControl("detail-input", "input", "bp-detail", "detail-root", "detail-region"),
+          { ...pageControl("detail-records", "easyui.1", "bp-detail", "detail-root", "detail-region"), dataBinding: { mockDataId: "detail-data", records: [{ detailCode: "D-1" }] } },
           rootControl("detail-root", "bp-detail", "detail-region"),
         ],
       },

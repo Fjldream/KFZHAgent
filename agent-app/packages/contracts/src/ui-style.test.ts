@@ -666,6 +666,13 @@ describe("KF UI style contracts", () => {
     expect(UIImplementationSpecV2Schema.safeParse(adapted).success).toBe(false);
   });
 
+  it("accepts native module-registry correlation and forbids adapted-v1 claims", () => {
+    expect(UIImplementationSpecV2Schema.safeParse({ ...v2Fixture, sourceModuleRegistryHash: "b".repeat(64) }).success).toBe(true);
+    const adapted = adaptUiImplementationV1(v1Fixture) as ReturnType<typeof adaptUiImplementationV1> & { sourceModuleRegistryHash?: string };
+    adapted.sourceModuleRegistryHash = "b".repeat(64);
+    expect(UIImplementationSpecV2Schema.safeParse(adapted).success).toBe(false);
+  });
+
   it("requires overlay hosts to declare a compiler-verified hidden initial state", () => {
     const parsedPage = UIImplementationSpecV2Schema.parse(v2Fixture).pages[0]!;
     expect(parsedPage.compatibility).toBe("native");

@@ -36,7 +36,7 @@ import {
   type CompiledLayoutTree,
 } from "./layout-compiler.js";
 import type { SemanticDataRecord } from "./module-node-compiler.js";
-import { normalizeSolutionRepeaterKey } from "./solution-provenance.js";
+import { normalizeSolutionRepeaterKey, solutionModuleRegistryHash } from "./solution-provenance.js";
 
 export interface SolutionCompileInput {
   readonly plan: SolutionImplementationPlan;
@@ -797,6 +797,7 @@ export function compileSolutionImplementation(input: SolutionCompileInput): UIIm
     schema: "kf-ui-implementation/v2" as const,
     compatibility: "native" as const,
     sourceSolutionPlanHash: canonicalServerHash(parsed.plan),
+    sourceModuleRegistryHash: solutionModuleRegistryHash(parsed.plan, safeInput.moduleRegistry),
     theme: parsed.plan.theme,
     compiledRoleStyles: Object.fromEntries(parsed.plan.roleStyles.map((style) => [style.role,
       boundary("style", style.role, () => resolveStyle(parsed.plan.theme, {

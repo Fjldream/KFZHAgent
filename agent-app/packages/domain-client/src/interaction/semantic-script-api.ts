@@ -10,7 +10,8 @@ import {
 import { requireScriptCapabilityProfile } from "../design-knowledge/script-capability-registry.js";
 import { createDefaultModuleRegistry } from "../modules/module-registry.js";
 import {
-  validateSolutionControlProvenance,
+  validateSolutionControlSemanticProjection,
+  solutionModuleRegistryHash,
   type ExpectedControlProvenance,
 } from "../solution-compile/solution-provenance.js";
 
@@ -171,6 +172,16 @@ export function createSemanticScriptApiContext(input: unknown): SemanticScriptAp
   if (parsed.data.sourceSolutionPlanHash !== canonicalServerHash(parsedPlan.data)) {
     return invalidContext("implementation", "solution-plan hash does not match the authoritative plan");
   }
+  const trustedModuleRegistry = createDefaultModuleRegistry();
+  let trustedModuleRegistryHash: string;
+  try {
+    trustedModuleRegistryHash = solutionModuleRegistryHash(parsedPlan.data, trustedModuleRegistry);
+  } catch (error) {
+    return invalidContext("implementation", "module registry does not match the trusted default registry", error instanceof Error ? { cause: error } : undefined);
+  }
+  if (parsed.data.sourceModuleRegistryHash !== trustedModuleRegistryHash) {
+    return invalidContext("implementation", "module registry does not match the trusted default registry");
+  }
   const instances = new Map(parsed.data.runtimeCorrelation.controls.map((entry) => [entry.semanticControlId, entry.instanceName]));
   const planPages = new Map(parsedPlan.data.pages.map((page) => [page.id, page]));
   type PlanNode = SolutionImplementationPlan["pages"][number]["root"];
@@ -215,18 +226,18 @@ export function createSemanticScriptApiContext(input: unknown): SemanticScriptAp
     }
     const provenanceByControl = new Map<string, ExpectedControlProvenance>();
     try {
-      validateSolutionControlProvenance({
+      validateSolutionControlSemanticProjection({
         plan: parsedPlan.data,
         root: planPage.root,
         controls: page.controls.filter((control) => !overlayByControl.has(control.id)),
-        moduleRegistry: createDefaultModuleRegistry(),
+        moduleRegistry: trustedModuleRegistry,
       }).forEach((provenance, id) => provenanceByControl.set(id, provenance));
       for (const overlay of parsedPlan.data.overlays.filter((candidate) => candidate.hostPageId === page.id)) {
-        validateSolutionControlProvenance({
+        validateSolutionControlSemanticProjection({
           plan: parsedPlan.data,
           root: overlay.root,
           controls: page.controls.filter((control) => overlayByControl.get(control.id) === overlay.id),
-          moduleRegistry: createDefaultModuleRegistry(),
+          moduleRegistry: trustedModuleRegistry,
         }).forEach((provenance, id) => provenanceByControl.set(id, provenance));
       }
     } catch (error) {

@@ -50,6 +50,15 @@ export interface RegisteredModuleNodeCompileInput {
   readonly depth: number;
 }
 
+export interface RegisteredModuleDefinitionReplayInput {
+  readonly plan: SolutionImplementationPlan;
+  readonly node: RegisteredModuleNode;
+  readonly layoutNode: Pick<CompiledLayoutNode, "id" | "kind" | "layout" | "geometry">;
+  readonly moduleRegistry: ModuleRegistry;
+  readonly currentRecords: ReadonlyMap<string, SemanticDataRecord>;
+  readonly resolvedAsset?: ResolvedAsset;
+}
+
 interface SemanticDataBudget {
   nodes: number;
   readonly active: WeakSet<object>;
@@ -199,7 +208,7 @@ function dataRecord(value: SemanticData, code: string, path: CompilePath): Seman
   return value;
 }
 
-function moduleContent(input: RegisteredModuleNodeCompileInput): SemanticDataRecord {
+function moduleContent(input: RegisteredModuleDefinitionReplayInput): SemanticDataRecord {
   const content = input.node.content;
   if (content === undefined) return {};
   const path: CompilePath = [input.node.id, "content"];
@@ -218,7 +227,7 @@ function moduleContent(input: RegisteredModuleNodeCompileInput): SemanticDataRec
   return dataRecord(semanticValueToData(content, input.currentRecords, path), "MODULE_CONTENT_INVALID", path);
 }
 
-function registryDefinition(input: RegisteredModuleNodeCompileInput): ModuleDefinition {
+function registryDefinition(input: RegisteredModuleDefinitionReplayInput): ModuleDefinition {
   let definition: ModuleDefinition;
   try {
     definition = input.moduleRegistry.require(input.node.moduleKind, input.node.templateVersion);
@@ -374,7 +383,7 @@ function approvedModuleAsset(
   return Object.freeze({
     modelId: input.node.assetId,
     facts,
-    resolved: Object.freeze({ assetId: input.node.assetId, status: "resolved" as const, resolvedName: facts.targetPath }),
+    resolved: Object.freeze({ assetId: input.node.assetId, status: "resolved" as const }),
   });
 }
 
@@ -387,7 +396,7 @@ function preferredHeight(definition: ModuleDefinition, height: number): ModulePl
 }
 
 function moduleInstance(
-  input: RegisteredModuleNodeCompileInput,
+  input: RegisteredModuleDefinitionReplayInput,
   definition: ModuleDefinition,
   content: SemanticDataRecord,
 ): ModulePlanModule {
@@ -412,6 +421,36 @@ function moduleInstance(
     ...(input.node.assetId === undefined ? {} : { assetId: input.node.assetId }),
     sourceBlueprintModuleIds: [...input.node.sourceBlueprintRegionIds],
   };
+}
+
+export function replayRegisteredModuleDefinition(input: RegisteredModuleDefinitionReplayInput) {
+  const definition = registryDefinition(input);
+  assertRequiredCapabilities(definition, input.node.id);
+  const semanticContent = moduleContent(input);
+  const parsedContent = definition.contentSchema.safeParse(semanticContent);
+  if (!parsedContent.success) fail("MODULE_CONTENT_INVALID", [input.node.id, "content"], parsedContent.error.issues[0]?.message ?? "schema rejected content");
+  const instance = moduleInstance(input, definition, semanticContent);
+  const localBounds = Object.freeze({
+    x: 0,
+    y: 0,
+    width: Math.floor(input.layoutNode.geometry.width),
+    height: Math.floor(input.layoutNode.geometry.height),
+  });
+  const output = definition.compile({ context: Object.freeze({
+    definition,
+    instance,
+    content: parsedContent.data,
+    asset: input.resolvedAsset,
+    validationContext: Object.freeze({
+      availableKfCapabilities: Object.freeze([...technicallyAvailableCapabilityIds()]),
+      approvedAuthorizationRefs: Object.freeze([]),
+    }),
+    bounds: localBounds,
+  }) });
+  const blockingGap = output.deliveryGaps.find((gap) => gap.severity === "blocking" && gap.status === "unresolved");
+  if (blockingGap !== undefined) fail("MODULE_COMPILE_BLOCKED", [input.node.id, "deliveryGaps"], blockingGap.reason);
+  if (output.components.length === 0) fail("MODULE_COMPILE_EMPTY", [input.node.id, "components"], `${definition.kind}@${definition.version}`);
+  return Object.freeze({ definition, components: output.components, bounds: localBounds });
 }
 
 function compareCodePoints(left: string, right: string): number {
@@ -470,34 +509,10 @@ export function compileRegisteredModuleNode(input: RegisteredModuleNodeCompileIn
     fail("MODULE_LAYOUT_CORRELATION_INVALID", [input.node.id, "layoutNode"], input.layoutNode.id);
   }
   const definition = registryDefinition(input);
-  assertRequiredCapabilities(definition, input.node.id);
-  const semanticContent = moduleContent(input);
-  const parsedContent = definition.contentSchema.safeParse(semanticContent);
-  if (!parsedContent.success) fail("MODULE_CONTENT_INVALID", [input.node.id, "content"], parsedContent.error.issues[0]?.message ?? "schema rejected content");
   const asset = approvedModuleAsset(input, definition);
-  const instance = moduleInstance(input, definition, semanticContent);
-  const localBounds = Object.freeze({
-    x: 0,
-    y: 0,
-    width: Math.floor(input.layoutNode.geometry.width),
-    height: Math.floor(input.layoutNode.geometry.height),
-  });
-  const output = definition.compile({ context: Object.freeze({
-    definition,
-    instance,
-    content: parsedContent.data,
-    asset: asset?.resolved,
-    validationContext: Object.freeze({
-      availableKfCapabilities: Object.freeze([...technicallyAvailableCapabilityIds()]),
-      approvedAuthorizationRefs: Object.freeze([]),
-    }),
-    bounds: localBounds,
-  }) });
-  const blockingGap = output.deliveryGaps.find((gap) => gap.severity === "blocking" && gap.status === "unresolved");
-  if (blockingGap !== undefined) fail("MODULE_COMPILE_BLOCKED", [input.node.id, "deliveryGaps"], blockingGap.reason);
-  if (output.components.length === 0) fail("MODULE_COMPILE_EMPTY", [input.node.id, "components"], `${definition.kind}@${definition.version}`);
+  const replay = replayRegisteredModuleDefinition({ ...input, ...(asset === undefined ? {} : { resolvedAsset: asset.resolved }) });
 
-  const components = output.components.map((component, index) => {
+  const components = replay.components.map((component, index) => {
     if (!isPlainComponentItem(component)) {
       fail("MODULE_COMPONENT_INVALID", [input.node.id, "components", index], "plain component record required");
     }
@@ -516,7 +531,7 @@ export function compileRegisteredModuleNode(input: RegisteredModuleNodeCompileIn
     if (!SAFE_LOCAL_ID.test(component.id)) fail("MODULE_COMPONENT_ID_UNSAFE", [input.node.id, "components", index, "id"], component.id);
     if (localById.has(component.id)) fail("MODULE_COMPONENT_ID_DUPLICATE", [input.node.id, "components", index, "id"], component.id);
     if (`${input.node.id}--${component.id}`.length > 100) fail("MODULE_COMPONENT_ID_TOO_LONG", [input.node.id, "components", index, "id"], component.id);
-    if (!contains(localBounds, component.geometry)) fail("MODULE_COMPONENT_OUT_OF_BOUNDS", [input.node.id, "components", index, "geometry"], component.id);
+    if (!contains(replay.bounds, component.geometry)) fail("MODULE_COMPONENT_OUT_OF_BOUNDS", [input.node.id, "components", index, "geometry"], component.id);
     localById.set(component.id, component);
   });
 

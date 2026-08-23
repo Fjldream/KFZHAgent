@@ -11,7 +11,7 @@ import {
   type SolutionNode,
 } from "@kf/contracts";
 import { describe, expect, it } from "vitest";
-import { createDefaultModuleRegistry } from "../modules/module-registry.js";
+import { createDefaultModuleRegistry, ModuleRegistry } from "../modules/module-registry.js";
 import { createPortalPlan } from "../modules/definitions/fixtures/portal-plan.js";
 import { adaptLegacyModulePlan } from "../planning/legacy-module-plan-adapter.js";
 import { createSemanticScriptApiContext } from "../interaction/semantic-script-api.js";
@@ -20,6 +20,7 @@ import {
   compileSolutionImplementation,
   type SolutionCompileInput,
 } from "./solution-compiler.js";
+import { validateSolutionControlSemanticProjection } from "./solution-provenance.js";
 
 const CATALOG_VERSION = "1.0.0";
 const WORKSPACE_ASSET_ID = "11111111-2222-3333-4444-555555555555";
@@ -292,6 +293,21 @@ function nestedRepeaterModuleFixture() {
   });
 }
 
+function assetModuleFixture() {
+  const sourcePages = [{ pageId: "bp-asset", regions: ["asset"] }] as const;
+  const hero: SolutionNode = {
+    kind: "registered-module", id: "asset-hero", moduleKind: "content.hero", templateVersion: "1.0.0",
+    variant: "portrait-left", title: "人物介绍", assetId: MODEL_ASSET_ID,
+    sourceBlueprintRegionIds: ["asset"], intent: intent(0), eventBindings: [], slots: [],
+    content: { kind: "record", fields: [{ name: "title", value: "已审核人物" }] },
+  };
+  return planWithBundle("asset-module", [{
+    id: "asset-page", title: "资产模块", purpose: "验证合法模块资产路径", canvas: "desktop",
+    sourceBlueprintPageId: "bp-asset", sourceBlueprintRegionIds: ["asset"], initialStateIds: [],
+    root: layout("asset-root", "asset", "column", [hero]),
+  }], sourcePages);
+}
+
 function recordsDataSet(id: string, count: number) {
   return {
     id,
@@ -545,6 +561,12 @@ describe("compileSolutionImplementation", () => {
     ]) {
       expect(() => createSemanticScriptApiContext({ plan: nested.plan, implementation: nestedImplementation, ownerControlId }), ownerControlId).not.toThrow();
     }
+
+    const assetModule = assetModuleFixture();
+    const assetImplementation = withRuntimeCorrelation(compileFixture(assetModule));
+    const assetOwner = nativeControls(assetImplementation).find((control) => control.sourceModuleId === "asset-hero" && control.capabilityId === "image")!;
+    expect(() => createSemanticScriptApiContext({ plan: assetModule.plan, implementation: assetImplementation, ownerControlId: assetOwner.id }))
+      .not.toThrow();
   });
 
   it("rejects forged repeater and registered-module expansion provenance", () => {
@@ -578,6 +600,12 @@ describe("compileSolutionImplementation", () => {
     reject((_plan, candidate) => {
       nativeControls(candidate).find((control) => control.id === "people-list--e-001--person-name")!.dataBinding = { mockDataId: "people", records: [] };
     });
+    reject((_plan, candidate) => {
+      nativeControls(candidate).find((control) => control.id === "admin-root")!.dataBinding = { mockDataId: "people", records: [] };
+    });
+    reject((_plan, candidate) => {
+      nativeControls(candidate).find((control) => control.id === "people-list--e-001")!.sourceBlueprintRegionIds = ["other-region"];
+    });
 
     const moduleFixture = industrialFixture();
     const moduleImplementation = withRuntimeCorrelation(compileFixture(moduleFixture));
@@ -597,6 +625,95 @@ describe("compileSolutionImplementation", () => {
     moduleReject((candidate) => {
       nativeControls(candidate).find((control) => control.sourceModuleId === "kpi-grid")!.sourceSolutionNodeId = "ops-root";
     });
+    moduleReject((candidate) => {
+      nativeControls(candidate).find((control) => control.sourceModuleId === "kpi-grid")!.dataBinding = { mockDataId: "missing", records: [] };
+    });
+    moduleReject((candidate) => {
+      nativeControls(candidate).find((control) => control.sourceModuleId === "kpi-grid")!.sourceBlueprintRegionIds = ["other-region"];
+    });
+
+    const cosmetic = structuredClone(moduleImplementation);
+    const cosmeticOwner = nativeControls(cosmetic).find((control) => control.sourceModuleId === "kpi-grid" && control.capabilityId === "text")!;
+    cosmeticOwner.nativeProperties = { text: "不会改变 semantic API resolution" };
+    expect(() => createSemanticScriptApiContext({ plan: moduleFixture.plan, implementation: cosmetic, ownerControlId: cosmeticOwner.id }))
+      .not.toThrow();
+  });
+
+  it("rejects semantic projection mutations directly across every compiled branch", () => {
+    const admin = adminFixture();
+    const adminImplementation = compileFixture(admin);
+    const adminPage = adminImplementation.pages[0]!;
+    if (adminPage.compatibility !== "native") throw new Error("native fixture required");
+    const adminSurface = surfaceGroups(adminPage).find((surface) => surface.kind === "page")!.controls;
+    const rejectAdmin = (mutate: (controls: typeof adminSurface) => void) => {
+      const controls = structuredClone(adminSurface);
+      mutate(controls);
+      expect(() => validateSolutionControlSemanticProjection({
+        plan: admin.plan,
+        root: admin.plan.pages[0]!.root,
+        controls,
+        moduleRegistry: createDefaultModuleRegistry(),
+      })).toThrow("SOLUTION_PROVENANCE_INVALID");
+    };
+    rejectAdmin((controls) => { controls.find((control) => control.id === "admin-root")!.dataBinding = { mockDataId: "people", records: [] }; });
+    rejectAdmin((controls) => { controls.find((control) => control.id === "people-list--e-001")!.dataBinding = { mockDataId: "people", records: [] }; });
+    rejectAdmin((controls) => { controls.find((control) => control.id === "people-list--e-001")!.assetIds = [MODEL_ASSET_ID]; });
+    rejectAdmin((controls) => { controls.find((control) => control.id === "people-list--e-001")!.sourceBlueprintRegionIds = ["other-region"]; });
+    rejectAdmin((controls) => { controls.find((control) => control.id === "admin-root")!.sourceBlueprintPageId = "bp-other"; });
+
+    const industrial = industrialFixture();
+    const industrialImplementation = compileFixture(industrial);
+    const industrialPage = industrialImplementation.pages[0]!;
+    if (industrialPage.compatibility !== "native") throw new Error("native fixture required");
+    const moduleControls = industrialPage.controls;
+    const rejectModule = (mutate: (controls: typeof moduleControls) => void) => {
+      const controls = structuredClone(moduleControls);
+      mutate(controls);
+      expect(() => validateSolutionControlSemanticProjection({
+        plan: industrial.plan,
+        root: industrial.plan.pages[0]!.root,
+        controls,
+        moduleRegistry: createDefaultModuleRegistry(),
+      })).toThrow("SOLUTION_PROVENANCE_INVALID");
+    };
+    rejectModule((controls) => { controls.find((control) => control.sourceModuleId === "kpi-grid")!.dataBinding = { mockDataId: "missing", records: [] }; });
+    rejectModule((controls) => { controls.find((control) => control.sourceModuleId === "kpi-grid")!.assetIds = [MODEL_ASSET_ID]; });
+    rejectModule((controls) => { controls.find((control) => control.sourceModuleId === "kpi-grid")!.sourceBlueprintRegionIds = ["other-region"]; });
+    rejectModule((controls) => { controls.find((control) => control.sourceModuleId === "kpi-grid")!.sourceBlueprintPageId = "bp-other"; });
+  });
+
+  it("correlates semantic contexts only with the trusted default module registry", () => {
+    const fixture = industrialFixture();
+    const defaultRegistry = createDefaultModuleRegistry();
+    const definition = defaultRegistry.require("metric.kpi-grid", "1.0.0");
+    const customRegistry = new ModuleRegistry();
+    customRegistry.register({ ...definition, compilerFingerprint: "custom-kpi-compiler-v1" });
+    const implementation = compileSolutionImplementation({
+      ...compileInput(fixture),
+      moduleRegistry: customRegistry,
+    });
+    expect((implementation as unknown as { sourceModuleRegistryHash?: string }).sourceModuleRegistryHash).toMatch(/^[0-9a-f]{64}$/);
+    const correlated = withRuntimeCorrelation(implementation);
+    const ownerControlId = nativeControls(correlated).find((control) => control.sourceModuleId === "kpi-grid")!.id;
+    expect(() => createSemanticScriptApiContext({ plan: fixture.plan, implementation: correlated, ownerControlId }))
+      .toThrow(/module registry/i);
+
+    const forgedRegistry = new ModuleRegistry();
+    forgedRegistry.register({
+      ...definition,
+      compile: (input) => {
+        const output = definition.compile(input);
+        const first = output.components[0]!;
+        return { ...output, components: [...output.components, { ...first, id: "forged-extra" }] };
+      },
+    });
+    const forged = withRuntimeCorrelation(compileSolutionImplementation({
+      ...compileInput(fixture),
+      moduleRegistry: forgedRegistry,
+    }));
+    const forgedOwner = nativeControls(forged).find((control) => control.sourceModuleId === "kpi-grid")!.id;
+    expect(() => createSemanticScriptApiContext({ plan: fixture.plan, implementation: forged, ownerControlId: forgedOwner }))
+      .toThrow(/provenance|output count/i);
   });
 
   it("compiles three materially different deterministic solution compositions", () => {
