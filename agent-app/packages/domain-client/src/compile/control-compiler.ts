@@ -131,6 +131,11 @@ export interface CompiledControlScriptSerialization {
   readonly modules: readonly CompiledScriptModule[];
 }
 
+export interface ExpectedCompiledControlScriptTarget {
+  readonly ownerInstanceName: string;
+  readonly capabilityId: string;
+}
+
 /**
  * Serialized restricted-action command placed in `linkMng.linkList`.
  * `openDialog` is an encoded action form supported by the serializer; the
@@ -328,7 +333,10 @@ export function compileControl(
     compiled = mergeControlTemplate(merged, applySchemaOverrides(build, control, ctx));
   }
   const styled = applyControlStyle(normalizeNativeSizePolicy(compiled), control);
-  return scripts === undefined ? styled : serializeCompiledControlScripts(styled, scripts);
+  return scripts === undefined ? styled : serializeCompiledControlScripts(styled, scripts, {
+    ownerInstanceName: control.id,
+    capabilityId: capabilityIdForControl(control),
+  });
 }
 
 function safeCloneScriptData(
@@ -389,7 +397,7 @@ function safeCloneScriptData(
 function appendScript(existing: string, additions: readonly string[]): string {
   let result = existing;
   for (const source of additions) {
-    if (result.length > 0 && !result.endsWith("\n")) result += "\n";
+    if (result.length > 0) result += "\n;\n";
     result += source;
   }
   return result;
@@ -399,38 +407,34 @@ function appendScript(existing: string, additions: readonly string[]): string {
 export function serializeCompiledControlScripts(
   compiledControl: TemplateJson,
   serialization: CompiledControlScriptSerialization,
+  expectedTarget: ExpectedCompiledControlScriptTarget,
 ): TemplateJson {
-  if (serialization === null || typeof serialization !== "object" || utilTypes.isProxy(serialization)) {
-    throw new ModelOutputInvalidError("script serialization must be a descriptor-safe plain object");
+  const clonedSerialization = safeCloneScriptData(serialization, "script serialization");
+  const clonedExpected = safeCloneScriptData(expectedTarget, "expected script target");
+  if (clonedSerialization === null || typeof clonedSerialization !== "object" || Array.isArray(clonedSerialization)
+    || clonedExpected === null || typeof clonedExpected !== "object" || Array.isArray(clonedExpected)) {
+    throw new ModelOutputInvalidError("script serialization and expected target must be plain objects");
   }
-  let serializationPrototype: object | null;
-  let serializationKeys: readonly PropertyKey[];
-  let serializationDescriptors: PropertyDescriptorMap;
-  try {
-    serializationPrototype = Object.getPrototypeOf(serialization) as object | null;
-    serializationKeys = Reflect.ownKeys(serialization);
-    serializationDescriptors = Object.getOwnPropertyDescriptors(serialization);
-  } catch (error) {
-    throw new ModelOutputInvalidError("script serialization descriptor inspection failed", error instanceof Error ? { cause: error } : undefined);
-  }
+  const serializationRecord = clonedSerialization as Record<string, unknown>;
+  const expectedRecord = clonedExpected as Record<string, unknown>;
   const expectedKeys = ["bindings", "capabilityId", "modules", "ownerInstanceName"];
-  if ((serializationPrototype !== Object.prototype && serializationPrototype !== null)
-    || serializationKeys.length !== expectedKeys.length
-    || serializationKeys.map(String).sort().some((key, index) => key !== expectedKeys[index])) {
+  if (Object.keys(serializationRecord).sort().length !== expectedKeys.length
+    || Object.keys(serializationRecord).sort().some((key, index) => key !== expectedKeys[index])
+    || Object.keys(expectedRecord).sort().join("\0") !== "capabilityId\0ownerInstanceName") {
     throw new ModelOutputInvalidError("script serialization has invalid fields or prototype");
   }
-  const readSerialization = (key: string): unknown => {
-    const descriptor = serializationDescriptors[key];
-    if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) throw new ModelOutputInvalidError(`script serialization.${key} must be an enumerable data property`);
-    return descriptor.value;
-  };
-  const ownerInstanceName = readSerialization("ownerInstanceName");
-  const capabilityId = readSerialization("capabilityId");
-  const rawModules = readSerialization("modules");
-  const rawBindings = readSerialization("bindings");
-  if (typeof ownerInstanceName !== "string" || typeof capabilityId !== "string" || !Array.isArray(rawModules) || !Array.isArray(rawBindings)) {
+  const ownerInstanceName = serializationRecord["ownerInstanceName"];
+  const capabilityId = serializationRecord["capabilityId"];
+  const rawModules = serializationRecord["modules"];
+  const rawBindings = serializationRecord["bindings"];
+  const expectedOwner = expectedRecord["ownerInstanceName"];
+  const expectedCapability = expectedRecord["capabilityId"];
+  if (typeof ownerInstanceName !== "string" || typeof capabilityId !== "string" || !Array.isArray(rawModules) || !Array.isArray(rawBindings)
+    || typeof expectedOwner !== "string" || typeof expectedCapability !== "string") {
     throw new ModelOutputInvalidError("script serialization fields have invalid types");
   }
+  if (ownerInstanceName !== expectedOwner) throw new ModelOutputInvalidError("script serialization owner does not match the authoritative control owner");
+  if (capabilityId !== expectedCapability) throw new ModelOutputInvalidError("script serialization capability does not match the authoritative control capability");
   if (rawModules.length > 200 || rawBindings.length > 32) throw new ModelOutputInvalidError("script serialization capacity exceeded");
   const modules = rawModules.map((module, index) => {
     const parsed = CompiledScriptModuleSchema.safeParse(safeCloneScriptData(module, `modules.${index}`));
@@ -460,6 +464,7 @@ export function serializeCompiledControlScripts(
     }
   }
   const result = safeCloneScriptData(compiledControl, "compiledControl") as TemplateJson;
+  if (result["name"] !== expectedOwner) throw new ModelOutputInvalidError("compiled control owner does not match the authoritative script owner");
   const rawLinkMng = result["linkMng"];
   if (rawLinkMng === null || typeof rawLinkMng !== "object" || Array.isArray(rawLinkMng)) throw new ModelOutputInvalidError("compiled control linkMng must be an object");
   const linkMng = rawLinkMng as TemplateJson;
@@ -520,7 +525,8 @@ export function serializeCompiledControlScripts(
     // a configure-data module. This serialization layer repeats the reviewed
     // KF family boundary without importing the knowledge registry (which would
     // create control-compiler -> registry -> style-registry -> control-compiler).
-    if (!capabilityId.startsWith("easyui.")) {
+    const configureDataCapabilities = new Set(Object.keys(EASYUI_TEMPLATES).map((proto) => `easyui.${proto}`));
+    if (!configureDataCapabilities.has(capabilityId)) {
       throw new ModelOutputInvalidError(`capability ${capabilityId} does not support configureData`);
     }
     const existing = result["configureData"];

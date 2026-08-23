@@ -145,6 +145,8 @@ describe("script program contracts", () => {
       "const visitor1 = $control.getValue(\"visitor1\"); const detail2 = $state.get(\"detail2\"); $page.navigate(\"p1\");",
       "const message = \"The function is ready\"; $feedback.show(\"info\", message);",
       "const state = \"input:ready\"; const status = \"status:active\"; const urn = \"urn:kingfusion:visitor1\";",
+      "function chooseText(input) { if (input !== \"\") return input; return \"empty\"; } const chosen = chooseText(\"ready\");",
+      "/* function fake() {} */ function/* reviewed separator */normalize(input) { return input; } const value = normalize(\"ready\");",
     ];
     validSources.forEach((source) => expect(ScriptPlanSchema.safeParse({ ...sourcePlan.scripts[0], source }).success, source).toBe(true));
 
@@ -158,6 +160,12 @@ describe("script program contracts", () => {
       "$control?.[\"styleDataNew\"](\"status-filter\");",
       "const raw = styleDataNew;",
       "const raw = configureData;",
+      "function(input) { return input; }",
+      "function 名称(input) { return input; }",
+      "async function chooseText(input) { return input; }",
+      "const Factory = Function;",
+      "const Factory = globalThis.Function;",
+      "const value = function chooseText(input) { return input; };",
     ];
     forbiddenSources.forEach((source) => expect(ScriptPlanSchema.safeParse({ ...sourcePlan.scripts[0], source }).success, source).toBe(false));
 

@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { runInNewContext } from "node:vm";
+import { parse } from "acorn";
 import {
   canonicalServerHash,
   type ScriptPlan,
@@ -40,7 +42,7 @@ function at(value: unknown, segments: readonly (string | number)[]): unknown {
 
 function fixture(
   source = 'const value = $control.getValue("status-filter");',
-  options: { owner?: "go" | "records"; event?: "click" | "row-click" } = {},
+  options: FixtureOptions = {},
 ) {
   const writesFilter = source.includes("$control.setValue");
   const writesRecords = source.includes("$control.setData");
@@ -60,18 +62,19 @@ function fixture(
 
 function fixtureForScript(
   script: ScriptPlan,
-  options: { owner?: "go" | "records"; event?: "click" | "row-click" } = {},
+  options: FixtureOptions = {},
 ) {
   const owner = options.owner ?? "go";
   const event = options.event ?? "click";
+  const scripts = [script, ...(options.additionalScripts ?? [])];
   const plan: SolutionImplementationPlan = {
     schema: "kf-solution-implementation/v1", projectKey: "script-compiler", blueprintHash: "a".repeat(64),
     candidateBundleHash: "b".repeat(64), theme, roleStyles: [{ role: "content", declarations: {}, states: {} }],
     mockData: [{
       id: "visitor-records", purpose: "访客", fields: [{ key: "id", label: "标识", type: "text" }],
       records: [{ values: [{ field: "id", value: "v1" }] }],
-    }], localState: [], overlays: [], scripts: [script],
-    actions: [{ id: "run-read-filter", kind: "run-script", scriptId: script.id, afterActionIds: [] }],
+    }], localState: [], overlays: [], scripts,
+    actions: scripts.map((candidate) => ({ id: `run-${candidate.id}`, kind: "run-script" as const, scriptId: candidate.id, afterActionIds: [] })),
     pages: [{
       id: "home", title: "首页", purpose: "脚本宿主页", canvas: "desktop", sourceBlueprintPageId: "bp-home",
       sourceBlueprintRegionIds: ["region"], initialStateIds: [], root: {
@@ -80,7 +83,7 @@ function fixtureForScript(
           {
             id: "go", kind: "control", capabilityId: "button", content: "执行", properties: [], tabIds: [],
             styleRole: "content", sourceBlueprintRegionIds: ["region"], intent,
-            eventBindings: owner === "go" ? [{ semanticEvent: "click", actionIds: ["run-read-filter"] }] : [],
+            eventBindings: owner === "go" ? [{ semanticEvent: "click", actionIds: scripts.map((candidate) => `run-${candidate.id}`) }] : [],
           },
           {
             id: "status-filter", kind: "control", capabilityId: "input", content: "筛选", properties: [], tabIds: [],
@@ -89,7 +92,7 @@ function fixtureForScript(
           {
             id: "records", kind: "control", capabilityId: "easyui.1", content: "记录", properties: [], tabIds: [],
             styleRole: "content", sourceBlueprintRegionIds: ["region"], intent, mockDataId: "visitor-records",
-            eventBindings: owner === "records" ? [{ semanticEvent: "row-click", actionIds: ["run-read-filter"] }] : [],
+            eventBindings: owner === "records" ? [{ semanticEvent: "row-click", actionIds: scripts.map((candidate) => `run-${candidate.id}`) }] : [],
           },
         ],
       },
@@ -125,16 +128,25 @@ function fixtureForScript(
     },
   };
   const context = createSemanticScriptApiContext({
-    plan, implementation, ownerControlId: owner, activeEvent: { controlId: owner, semanticEvent: event },
+    plan, implementation, ownerControlId: owner,
+    ...(options.active === false ? {} : { activeEvent: { controlId: owner, semanticEvent: options.activeEvent ?? event } }),
   });
   if (script.kind === "custom" && script.programVersion === "semantic-js/v1" && script.source !== undefined) {
     const identity = createSemanticScriptValidationIdentity(script, context);
     const validatedAst = validateCustomScript({
       source: script.source, inputs: script.inputs, outputs: script.outputs, context, currentScriptIdentity: identity,
     });
-    return { script, context, identity, validatedAst };
+    return { script, plan, implementation, context, identity, validatedAst };
   }
-  return { script, context };
+  return { script, plan, implementation, context };
+}
+
+interface FixtureOptions {
+  readonly owner?: "go" | "records";
+  readonly event?: "click" | "row-click";
+  readonly active?: boolean;
+  readonly activeEvent?: string;
+  readonly additionalScripts?: readonly ScriptPlan[];
 }
 
 describe("compileScriptPlan", () => {
@@ -151,7 +163,7 @@ describe("compileScriptPlan", () => {
 
     expect(first).toEqual(second);
     expect(first.module).toMatchObject({
-      id: "kf$script:read-filter", sourceScriptId: "read-filter", placement: "event", ownerInstanceName: "Button1",
+      id: expect.stringMatching(/^kf\$script:read-filter-[0-9a-f]{16}$/), sourceScriptId: "read-filter", placement: "event", ownerInstanceName: "Button1",
       instanceReferences: [
         { semanticId: "go", instanceName: "Button1" },
         { semanticId: "status-filter", instanceName: "Input1" },
@@ -161,8 +173,8 @@ describe("compileScriptPlan", () => {
     expect(first.module.source).toBe("const value = Input1.Value;\n");
     expect(first.module.sourceHash).toBe(createHash("sha256").update(first.module.source).digest("hex"));
     expect(first.binding).toEqual({
-      id: "kf$binding:script-read-filter", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
-      phase: "event", scriptModuleIds: ["kf$script:read-filter"], nativeActionIds: [],
+      id: expect.stringMatching(/^kf\$binding:script-read-filter-[0-9a-f]{16}$/), ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
+      phase: "event", scriptModuleIds: [first.module.id], nativeActionIds: [],
     });
   });
 
@@ -285,5 +297,120 @@ describe("compileScriptPlan", () => {
     expect(compiledRecord.binding).toMatchObject({ kfEvent: cellSlot.name, linkId: cellSlot.linkId });
     expect(cellSlot["script"]).toEqual(expect.stringContaining("arg[1]"));
     expect(compiledRecord.module.source).toContain("arguments[1]");
+  });
+
+  it("binds a validated AST to the exact context identity and authoritative ports", () => {
+    const sibling: ScriptPlan = {
+      id: "same-source-sibling", purpose: "同源不同端口", kind: "custom", programVersion: "semantic-js/v1",
+      source: 'const value = $control.getValue("status-filter");',
+      inputs: [{ name: "different-port", description: "不同端口", refKind: "control", refId: "status-filter" }], outputs: [],
+    };
+    const primary = fixture(undefined, { additionalScripts: [sibling] });
+    const siblingIdentity = createSemanticScriptValidationIdentity(sibling, primary.context);
+    const siblingAst = validateCustomScript({
+      source: sibling.source!, inputs: sibling.inputs, outputs: sibling.outputs,
+      context: primary.context, currentScriptIdentity: siblingIdentity,
+    });
+    expect(() => compileScriptPlan({
+      script: primary.script, context: primary.context, validationIdentity: primary.identity,
+      validatedAst: siblingAst, binding: { controlId: "go", semanticEvent: "click" },
+    })).toThrow(/SCRIPT_COMPILER_UNTRUSTED_AST.*identity|SCRIPT_COMPILER_UNTRUSTED_AST.*ports/);
+  });
+
+  it("emits every reviewed Task5 syntax branch with parse-equivalent precedence and object arrows", () => {
+    const source = [
+      'const value = $control.getValue("status-filter");',
+      "let index = 0;",
+      'const rows = [{ "extra": true }];',
+      'const transformRecord = (item) => ({ 1: item, "label": item, ...rows[index] });',
+      "const normalizeText = (raw) => { return String(raw).trim(); };",
+      "const preselected = chooseText(value);",
+      'function chooseText(input) { if (input !== "") return input; return "empty"; }',
+      "const made = transformRecord(value);",
+      "const selected = [value].filter((candidate) => candidate === value);",
+      "const label = `${value}-${selected.length}`;",
+      'const chosen = normalizeText(preselected) || "empty";',
+      "let total = (1 + 2) * 3;",
+      "total++;",
+      ";",
+      "for (let counter = 0; counter < 2; counter += 1) { total += counter; }",
+      "for (const entry of rows) { total += entry === made ? 1 : 0; }",
+      "if (label === value) total = -total; else total = Math.max(total, 0);",
+    ].join("\n");
+    const data = fixture(source);
+    const compiled = compileScriptPlan({
+      script: data.script, context: data.context, validationIdentity: data.identity,
+      validatedAst: data.validatedAst, binding: { controlId: "go", semanticEvent: "click" },
+    });
+    expect(() => parse(compiled.module.source, { ecmaVersion: 2022 })).not.toThrow();
+    expect(compiled.module.source).toContain('=> ({ 1: item, "label": item, ...rows[index] })');
+    expect(compiled.module.source).toContain("((1 + 2) * 3)");
+    expect(compiled.module.source).toContain("`${value}-${selected.length}`");
+    expect(compiled.module.source).toContain("for (let counter = 0;");
+    expect(compiled.module.source).toContain("for (const entry of rows)");
+    expect(compiled.module.source).toContain("const chooseText = (input) =>");
+    expect(compiled.module.source).not.toContain("function chooseText");
+    expect(compiled.module.source.indexOf("const chooseText")).toBeLessThan(compiled.module.source.indexOf("const preselected"));
+    expect(compiled.module.source).toContain("(total++)");
+    expect(compiled.module.source).toContain('normalizeText(preselected) || "empty"');
+    const sandbox = { Input1: { Value: "ready" }, __result: undefined as unknown };
+    runInNewContext(`${compiled.module.source}\n__result = { preselected, made, label, chosen, total };`, sandbox);
+    expect(sandbox.__result).toEqual({
+      preselected: "ready",
+      made: { 1: "ready", label: "ready", extra: true },
+      label: "ready-1",
+      chosen: "ready",
+      total: 11,
+    });
+  });
+
+  it("requires event placement to match the exact active-event brand", () => {
+    const absent = fixture(undefined, { active: false });
+    expect(() => compileScriptPlan({
+      script: absent.script, context: absent.context, validationIdentity: absent.identity,
+      validatedAst: absent.validatedAst, binding: { controlId: "go", semanticEvent: "click" },
+    })).toThrow(/SCRIPT_COMPILER_BINDING_INVALID.*active event/);
+    const mismatch = fixture(undefined, { activeEvent: "change" });
+    expect(() => compileScriptPlan({
+      script: mismatch.script, context: mismatch.context, validationIdentity: mismatch.identity,
+      validatedAst: mismatch.validatedAst, binding: { controlId: "go", semanticEvent: "click" },
+    })).toThrow(/SCRIPT_COMPILER_BINDING_INVALID.*active event/);
+  });
+
+  it("deep-clones binding descriptors and derives collision-free artifact IDs", () => {
+    const data = fixture();
+    let reads = 0;
+    const hostileBinding = Object.create(null) as Record<string, unknown>;
+    Object.defineProperty(hostileBinding, "controlId", { enumerable: true, get() { reads += 1; return "go"; } });
+    Object.defineProperty(hostileBinding, "semanticEvent", { enumerable: true, value: "click" });
+    expect(() => compileScriptPlan({
+      script: data.script, context: data.context, validationIdentity: data.identity,
+      validatedAst: data.validatedAst, binding: hostileBinding as never,
+    })).toThrow(/SCRIPT_COMPILER_INPUT_INVALID/);
+    expect(reads).toBe(0);
+
+    const first = compileScriptPlan({
+      script: data.script, context: data.context, validationIdentity: data.identity,
+      validatedAst: data.validatedAst, binding: { controlId: "go", semanticEvent: "click", phase: "event" },
+    });
+    const repeated = compileScriptPlan({
+      script: data.script, context: data.context, validationIdentity: data.identity,
+      validatedAst: data.validatedAst, binding: { controlId: "go", semanticEvent: "click", phase: "event" },
+    });
+    const after = compileScriptPlan({
+      script: data.script, context: data.context, validationIdentity: data.identity,
+      validatedAst: data.validatedAst, binding: { controlId: "go", semanticEvent: "click", phase: "after-event" },
+    });
+    const otherOwner = fixture(undefined, { owner: "records", event: "row-click" });
+    const other = compileScriptPlan({
+      script: otherOwner.script, context: otherOwner.context, validationIdentity: otherOwner.identity,
+      validatedAst: otherOwner.validatedAst, binding: { controlId: "records", semanticEvent: "row-click" },
+    });
+    expect(repeated.module.id).toBe(first.module.id);
+    expect(repeated.binding?.id).toBe(first.binding?.id);
+    expect(after.module.id).not.toBe(first.module.id);
+    expect(after.binding?.id).not.toBe(first.binding?.id);
+    expect(other.module.id).not.toBe(first.module.id);
+    expect(other.binding?.id).not.toBe(first.binding?.id);
   });
 });

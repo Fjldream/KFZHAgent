@@ -348,6 +348,21 @@ export function resolveSemanticScriptOwner(context: SemanticScriptApiContext) {
   });
 }
 
+/** Proves that an event-placement request is the context's exact active trigger. */
+export function assertSemanticScriptActiveEvent(input: unknown, context: SemanticScriptApiContext) {
+  const trusted = requireContext(context);
+  const record = parseRecordInput(input, "active-event", ["controlId", "semanticEvent"]);
+  if (typeof record.controlId !== "string" || typeof record.semanticEvent !== "string") {
+    throw new SemanticScriptApiError("SCRIPT_API_INPUT_INVALID", "active-event", "controlId and semanticEvent must be strings");
+  }
+  if (trusted.activeEvent === undefined
+    || trusted.activeEvent.controlId !== record.controlId
+    || trusted.activeEvent.semanticEvent !== record.semanticEvent) {
+    throw new SemanticScriptApiError("SCRIPT_EVENT_NOT_SUPPORTED", record.controlId, "binding does not match the active event");
+  }
+  return Object.freeze({ controlId: record.controlId, semanticEvent: record.semanticEvent });
+}
+
 /** Resolves one exact ScriptPlan from the context's authoritative plan. */
 export function requireSemanticScriptPlan(input: unknown, context: SemanticScriptApiContext): ScriptPlan {
   const trusted = requireContext(context);

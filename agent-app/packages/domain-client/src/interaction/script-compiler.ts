@@ -12,11 +12,13 @@ import {
 import { requireScriptCapabilityProfile } from "../design-knowledge/script-capability-registry.js";
 import {
   getValidatedScriptProgram,
+  requireValidatedScriptProgram,
   validateCustomScript,
   type ValidatedScriptAst,
 } from "./custom-script-validator.js";
 import { renderScriptTemplate } from "./script-template-registry.js";
 import {
+  assertSemanticScriptActiveEvent,
   requireSemanticScriptValidationIdentity,
   requireSemanticScriptPlan,
   resolveEventBinding,
@@ -101,11 +103,31 @@ function snapshotCompileInput(input: unknown): CompileInputSnapshot {
   };
   const placement = read("placement");
   if (placement !== undefined && placement !== "event" && placement !== "configure-data") return fail("SCRIPT_COMPILER_INPUT_INVALID", "placement");
+  const rawBinding = descriptors.binding === undefined ? undefined : clonePureData(read("binding"), "binding");
+  let binding: CompileScriptPlanInput["binding"];
+  if (rawBinding !== undefined) {
+    if (rawBinding === null || typeof rawBinding !== "object" || Array.isArray(rawBinding)) return fail("SCRIPT_COMPILER_INPUT_INVALID", "binding", "plain binding required");
+    const record = rawBinding as Record<string, unknown>;
+    const bindingKeys = Object.keys(record).sort();
+    const allowedBindingKeys = record.phase === undefined
+      ? ["controlId", "semanticEvent"]
+      : ["controlId", "phase", "semanticEvent"];
+    if (bindingKeys.length !== allowedBindingKeys.length || bindingKeys.some((key, index) => key !== allowedBindingKeys[index])
+      || typeof record.controlId !== "string" || typeof record.semanticEvent !== "string"
+      || (record.phase !== undefined && record.phase !== "event" && record.phase !== "after-event")) {
+      return fail("SCRIPT_COMPILER_INPUT_INVALID", "binding", "exact controlId, semanticEvent, and optional phase required");
+    }
+    binding = {
+      controlId: record.controlId,
+      semanticEvent: record.semanticEvent,
+      ...(record.phase === undefined ? {} : { phase: record.phase }),
+    };
+  }
   return {
     script: read("script", true),
     context: read("context", true) as SemanticScriptApiContext,
     ...(placement === undefined ? {} : { placement }),
-    ...(descriptors.binding === undefined ? {} : { binding: read("binding") as CompileScriptPlanInput["binding"] }),
+    ...(binding === undefined ? {} : { binding }),
     ...(descriptors.validationIdentity === undefined ? {} : { validationIdentity: read("validationIdentity") as SemanticScriptValidationIdentity }),
     ...(descriptors.validatedAst === undefined ? {} : { validatedAst: read("validatedAst") as ValidatedScriptAst }),
   };
@@ -163,10 +185,9 @@ function clonePureData(
   return result;
 }
 
-function compilerId(kind: "script" | "binding", semanticId: string): string {
+function compilerId(kind: "script" | "binding", semanticId: string, artifactIdentity: string): string {
   const prefix = `kf$${kind}:`;
-  if (prefix.length + semanticId.length <= 100) return `${prefix}${semanticId}`;
-  const digest = createHash("sha256").update(semanticId, "utf8").digest("hex").slice(0, 12);
+  const digest = createHash("sha256").update(artifactIdentity, "utf8").digest("hex").slice(0, 16);
   return `${prefix}${semanticId.slice(0, 100 - prefix.length - digest.length - 1)}-${digest}`;
 }
 
@@ -217,17 +238,25 @@ class ReviewedAstEmitter {
   ) {}
 
   program(program: Program): string {
-    const source = children(program.body).map((node) => this.statement(node, 0)).join("\n");
+    const source = this.statementList(children(program.body), 0);
     if (this.callIndex !== this.validated.calls.length) return fail("SCRIPT_COMPILER_UNTRUSTED_AST", "calls", "validated call count drifted");
     return `${source}\n`;
   }
 
   private indent(level: number): string { return "  ".repeat(level); }
 
+  private statementList(nodes: readonly AstNode[], level: number): string {
+    const emitted = nodes.map((node) => ({ node, source: this.statement(node, level) }));
+    return [
+      ...emitted.filter(({ node }) => node.type === "FunctionDeclaration"),
+      ...emitted.filter(({ node }) => node.type !== "FunctionDeclaration"),
+    ].map(({ source }) => source).join("\n");
+  }
+
   private block(node: AstNode, level: number): string {
     const body = children(node.body);
     if (body.length === 0) return "{}";
-    return `{\n${body.map((item) => this.statement(item, level + 1)).join("\n")}\n${this.indent(level)}}`;
+    return `{\n${this.statementList(body, level + 1)}\n${this.indent(level)}}`;
   }
 
   private statement(node: AstNode, level: number): string {
@@ -243,7 +272,7 @@ class ReviewedAstEmitter {
         if (alternate === undefined) return first;
         return `${first} else ${alternate.type === "BlockStatement" ? this.block(alternate, level) : `\n${this.statement(alternate, level + 1)}`}`;
       }
-      case "FunctionDeclaration": return `${pad}function ${identifier(child(node.id))}(${children(node.params).map((item) => this.expression(item)).join(", ")}) ${this.block(child(node.body)!, level)}`;
+      case "FunctionDeclaration": return `${pad}const ${identifier(child(node.id))} = (${children(node.params).map((item) => this.expression(item)).join(", ")}) => ${this.block(child(node.body)!, level)};`;
       case "ForStatement": {
         const init = child(node.init);
         const initText = init?.type === "VariableDeclaration"
@@ -277,8 +306,11 @@ class ReviewedAstEmitter {
       case "ObjectExpression": return `{ ${children(node.properties).map((item) => this.expression(item)).join(", ")} }`;
       case "Property": {
         if (node.kind !== "init" || node.method === true) return fail("SCRIPT_COMPILER_UNSUPPORTED_SYNTAX", node.type, "only plain object properties are emitted");
-        const key = node.computed === true ? `[${this.expression(child(node.key)!)}]`
-          : identifier(child(node.key)) ?? quote(staticString(child(node.key)));
+        const keyNode = child(node.key)!;
+        const literalKey = keyNode.type === "Literal" && (typeof keyNode.value === "string" || typeof keyNode.value === "number")
+          ? quote(keyNode.value) : undefined;
+        const key = node.computed === true ? `[${this.expression(keyNode)}]`
+          : identifier(keyNode) ?? literalKey ?? fail("SCRIPT_COMPILER_UNSUPPORTED_SYNTAX", node.type, "object key is not statically serializable");
         return `${key}: ${this.expression(child(node.value)!)}`;
       }
       case "SpreadElement": return `...${this.expression(child(node.argument)!)}`;
@@ -287,7 +319,8 @@ class ReviewedAstEmitter {
       case "ArrowFunctionExpression": {
         const params = children(node.params).map((item) => this.expression(item)).join(", ");
         const body = child(node.body)!;
-        return `(${params}) => ${body.type === "BlockStatement" ? this.block(body, 0) : this.expression(body)}`;
+        const emittedBody = body.type === "BlockStatement" ? this.block(body, 0) : this.expression(body);
+        return `(${params}) => ${body.type === "ObjectExpression" ? `(${emittedBody})` : emittedBody}`;
       }
       case "AssignmentExpression": return `(${this.expression(child(node.left)!)} ${String(node.operator)} ${this.expression(child(node.right)!)})`;
       case "UpdateExpression": return node.prefix === true
@@ -368,8 +401,23 @@ export function compileScriptPlan(input: CompileScriptPlanInput): CompiledScript
   if (placement === "configure-data" && !requireScriptCapabilityProfile(owner.capabilityId).initialization.supportsConfigureData) {
     return fail("SCRIPT_COMPILER_API_UNSUPPORTED", script.id, `${owner.capabilityId} does not support configureData`);
   }
+  let resolvedEvent: ReturnType<typeof resolveEventBinding> | undefined;
+  const phase = snapshot.binding?.phase ?? "event";
+  if (placement === "event") {
+    if (snapshot.binding === undefined) return fail("SCRIPT_COMPILER_BINDING_INVALID", script.id, "event placement requires a semantic binding");
+    try {
+      assertSemanticScriptActiveEvent({ controlId: snapshot.binding.controlId, semanticEvent: snapshot.binding.semanticEvent }, snapshot.context);
+      resolvedEvent = resolveEventBinding({ controlId: snapshot.binding.controlId, semanticEvent: snapshot.binding.semanticEvent }, snapshot.context);
+    } catch (error) {
+      return fail("SCRIPT_COMPILER_BINDING_INVALID", script.id, "binding does not match the exact active event", error instanceof Error ? { cause: error } : undefined);
+    }
+    if (resolvedEvent.instanceName !== owner.instanceName) return fail("SCRIPT_COMPILER_BINDING_INVALID", script.id, "binding owner does not match script owner");
+  } else if (snapshot.binding !== undefined) {
+    return fail("SCRIPT_COMPILER_BINDING_INVALID", script.id, "configure-data placement cannot declare an event binding");
+  }
   let source: string;
   let validated: ValidatedScriptAst;
+  let authoritativeCustom: ReturnType<typeof requireSemanticScriptValidationIdentity> | undefined;
   if (script.kind === "template") {
     source = renderScriptTemplate(script.template, script);
     validated = validateCustomScript({ source, inputs: script.inputs, outputs: script.outputs, context: snapshot.context });
@@ -384,12 +432,19 @@ export function compileScriptPlan(input: CompileScriptPlanInput): CompiledScript
       return fail("SCRIPT_COMPILER_UNTRUSTED_AST", script.id, "validation identity is not owned by this context", error instanceof Error ? { cause: error } : undefined);
     }
     if (authoritative.id !== script.id || authoritative.source !== script.source) return fail("SCRIPT_COMPILER_UNTRUSTED_AST", script.id, "script differs from authoritative identity");
+    authoritativeCustom = authoritative;
     source = script.source;
     validated = snapshot.validatedAst;
   }
   let program: Program;
   try {
-    program = getValidatedScriptProgram(validated);
+    program = authoritativeCustom === undefined
+      ? getValidatedScriptProgram(validated)
+      : requireValidatedScriptProgram(validated, {
+        context: snapshot.context,
+        validationIdentity: snapshot.validationIdentity!,
+        authoritativeScript: authoritativeCustom,
+      });
   } catch (error) {
     return fail("SCRIPT_COMPILER_UNTRUSTED_AST", script.id, "AST identity is not compiler-owned", error instanceof Error ? { cause: error } : undefined);
   }
@@ -398,7 +453,17 @@ export function compileScriptPlan(input: CompileScriptPlanInput): CompiledScript
   const emitter = new ReviewedAstEmitter(validated, snapshot.context);
   const compiledSource = emitter.program(program);
   emitter.instanceReferences.set(owner.semanticControlId, owner.instanceName);
-  const moduleId = compilerId("script", script.id);
+  const artifactIdentity = JSON.stringify({
+    scriptId: script.id,
+    ownerSemanticId: owner.semanticControlId,
+    ownerInstanceName: owner.instanceName,
+    placement,
+    semanticEvent: snapshot.binding?.semanticEvent ?? null,
+    kfEvent: resolvedEvent?.kfEvent ?? null,
+    linkId: resolvedEvent?.linkId ?? null,
+    phase: placement === "event" ? phase : null,
+  });
+  const moduleId = compilerId("script", script.id, artifactIdentity);
   const module = parseModule({
     id: moduleId, sourceScriptId: script.id, placement, ownerInstanceName: owner.instanceName,
     instanceReferences: [...emitter.instanceReferences].sort(([left], [right]) => left.localeCompare(right, "en-US"))
@@ -409,16 +474,12 @@ export function compileScriptPlan(input: CompileScriptPlanInput): CompiledScript
   }, script.id);
   let binding: CompiledEventBinding | undefined;
   if (placement === "event") {
-    if (snapshot.binding === undefined) return fail("SCRIPT_COMPILER_BINDING_INVALID", script.id, "event placement requires a semantic binding");
-    const event = resolveEventBinding({ controlId: snapshot.binding.controlId, semanticEvent: snapshot.binding.semanticEvent }, snapshot.context);
-    if (event.instanceName !== owner.instanceName) return fail("SCRIPT_COMPILER_BINDING_INVALID", script.id, "binding owner does not match script owner");
+    const event = resolvedEvent!;
     binding = parseBinding({
-      id: compilerId("binding", `script-${script.id}`), ownerInstanceName: owner.instanceName, kfEvent: event.kfEvent,
-      ...(event.linkId === undefined ? {} : { linkId: event.linkId }), phase: snapshot.binding.phase ?? "event",
+      id: compilerId("binding", `script-${script.id}`, artifactIdentity), ownerInstanceName: owner.instanceName, kfEvent: event.kfEvent,
+      ...(event.linkId === undefined ? {} : { linkId: event.linkId }), phase,
       scriptModuleIds: [module.id], nativeActionIds: [],
     }, script.id);
-  } else if (snapshot.binding !== undefined) {
-    return fail("SCRIPT_COMPILER_BINDING_INVALID", script.id, "configure-data placement cannot declare an event binding");
   }
   return Object.freeze({
     module: Object.freeze(module), ...(binding === undefined ? {} : { binding: Object.freeze(binding) }),

@@ -11,6 +11,7 @@ import { createDefaultModuleRegistry } from "../modules/module-registry.js";
 import { solutionModuleRegistryHash } from "../solution-compile/solution-provenance.js";
 import {
   getValidatedScriptProgram,
+  requireValidatedScriptProgram,
   validateCustomScript,
   type CustomScriptValidationInput,
 } from "./custom-script-validator.js";
@@ -322,10 +323,16 @@ describe("constrained custom script validation", () => {
     expect(() => validateCustomScript({ source: '$timer.after(100, "refresh-script");', inputs: [], outputs: [], context: trustedContext() }))
       .toThrow(/CUSTOM_SCRIPT_(?:INPUT_INVALID|UNTRUSTED_AST)/);
     expect(() => validate('$timer.after(100, "missing-script");')).toThrow(/CUSTOM_SCRIPT_UNTRUSTED_AST/);
-    expect(validate(source, {
+    const branded = validate(source, {
       context, currentScriptIdentity: identity,
-    }).scheduledScriptIds)
-      .toEqual(["pulse-script", "refresh-script"]);
+    });
+    expect(branded.scheduledScriptIds).toEqual(["pulse-script", "refresh-script"]);
+    expect(requireValidatedScriptProgram(branded, {
+      context, validationIdentity: identity, authoritativeScript: authorized,
+    }).type).toBe("Program");
+    expect(() => requireValidatedScriptProgram({ ...branded }, {
+      context, validationIdentity: identity, authoritativeScript: authorized,
+    })).toThrow(/CUSTOM_SCRIPT_UNTRUSTED_AST/);
     expect(() => validate(source, { context, currentScriptIdentity: { schema: "kf-semantic-script-validation-identity/v1" } as never }))
       .toThrow(/CUSTOM_SCRIPT_(?:INPUT_INVALID|UNTRUSTED_AST)/);
     expect(() => validate(source, { context: trustedContext(plan), currentScriptIdentity: identity }))

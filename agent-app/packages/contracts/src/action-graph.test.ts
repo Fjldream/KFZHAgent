@@ -127,6 +127,33 @@ describe("ActionGraph contracts", () => {
     }
   });
 
+  it("recognizes only strict named function declarations as semantic JavaScript syntax", () => {
+    const declarations = [
+      "function chooseText(input) { return input; }",
+      ";\n\tfunction \n $choose_1 (input) { return input; }",
+      "/* function fake() {} */ function/* reviewed separator */normalize(input) { return input; }",
+    ];
+    for (const source of declarations) {
+      expect(semanticImplementationTextIssue(source, "semantic-js-source"), source).toBeUndefined();
+      expect(semanticImplementationTextIssue(source, "semantic-text"), source).toBeDefined();
+      expect(semanticImplementationTextIssue(source, "implementation-data"), source).toBeDefined();
+      expect(semanticImplementationTextIssue(source, "compiled-js"), source).toBeDefined();
+    }
+
+    for (const source of [
+      "Function('return 1')",
+      "new Function('return 1')",
+      "const Factory = Function;",
+      "const Factory = globalThis.Function;",
+      "function(input) { return input; }",
+      "function 名称(input) { return input; }",
+      "async function chooseText(input) { return input; }",
+      "const value = function chooseText(input) { return input; };",
+    ]) {
+      expect(semanticImplementationTextIssue(source, "semantic-js-source"), source).toBeDefined();
+    }
+  });
+
   it("preflights recursive values without getters, recursion overflow, or bare descriptor errors", () => {
     let getterCalls = 0;
     const accessor = { kind: "list" };

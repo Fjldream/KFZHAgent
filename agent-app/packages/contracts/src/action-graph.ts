@@ -92,6 +92,16 @@ function javascriptLexicalView(value: string): { codeView: string; literals: str
   return { codeView: characters.join(""), literals };
 }
 
+function semanticFunctionDeclarationKeywords(codeView: string): ReadonlySet<number> {
+  const starts = new Set<number>();
+  const declaration = /(?:^|[;{}])\s*(function)(?=\s+(?!function\b)[A-Za-z_$][A-Za-z0-9_$]*\s*\()/g;
+  for (const match of codeView.matchAll(declaration)) {
+    const keywordOffset = match[0].lastIndexOf(match[1]!);
+    starts.add((match.index ?? 0) + keywordOffset);
+  }
+  return starts;
+}
+
 function containsUnsafeCall(value: string): boolean {
   const calls = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\(([^()]*)\)/g;
   for (const match of value.matchAll(calls)) {
@@ -164,6 +174,7 @@ export function semanticImplementationTextIssue(
   if (/^\{theme\.[A-Za-z][A-Za-z0-9]*\}$/.test(trimmed)) return undefined;
   const lexical = mode === "semantic-js-source" ? javascriptLexicalView(value) : undefined;
   const codeView = lexical?.codeView ?? value;
+  const semanticFunctionKeywords = lexical === undefined ? undefined : semanticFunctionDeclarationKeywords(codeView);
   const screenedText = lexical === undefined ? value : `${codeView}\n${lexical.literals.join("\n")}`;
   if (/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/i.test(screenedText)) return "GUID values are not allowed";
   if (/<\/?(?:script|style|iframe|object|embed)\b|\b(?:javascript|vbscript)\s*:/i.test(screenedText)) return "executable markup is not allowed";
@@ -172,8 +183,10 @@ export function semanticImplementationTextIssue(
       ?? cssSelectorOrRuleIssue(codeView, true)
     : cssSelectorOrRuleIssue(value, options.strictSelectors ?? false);
   if (selectorIssue !== undefined) return selectorIssue;
-  const identifiers = codeView.match(/[A-Za-z_$][A-Za-z0-9_$]*/g) ?? [];
-  for (const identifier of identifiers) {
+  const identifiers = codeView.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g);
+  for (const match of identifiers) {
+    const identifier = match[0];
+    if (identifier === "function" && semanticFunctionKeywords?.has(match.index ?? -1)) continue;
     const normalized = normalizedName(identifier);
     if (domAndNetworkNames.has(normalized)) return `forbidden runtime name: ${identifier}`;
     if (rawRuntimeNames.has(normalized)) return `implementation runtime name: ${identifier}`;

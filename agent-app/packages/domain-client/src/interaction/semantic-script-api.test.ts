@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { canonicalServerHash, type SolutionImplementationPlan, type UIImplementationSpecV2 } from "@kf/contracts";
 import {
+  assertSemanticScriptActiveEvent,
   createSemanticScriptApiContext,
   requireSemanticScriptPlan,
   resolveSemanticScriptOwner,
@@ -206,6 +207,25 @@ describe("semantic script API", () => {
     const hostile = Object.create(null) as Record<string, unknown>;
     Object.defineProperty(hostile, "id", { enumerable: true, get() { reads += 1; return candidate.id; } });
     expect(() => requireSemanticScriptPlan(hostile, trusted)).toThrow(/SCRIPT_API_INPUT_INVALID/);
+    expect(reads).toBe(0);
+  });
+
+  it("brands the exact active semantic event and rejects absent, mismatched, or hostile requests", () => {
+    const active = createSemanticScriptApiContext({
+      plan: plan(), implementation: implementation(), ownerControlId: "go",
+      activeEvent: { controlId: "go", semanticEvent: "click" },
+    });
+    const resolved = assertSemanticScriptActiveEvent({ controlId: "go", semanticEvent: "click" }, active);
+    expect(resolved).toEqual({ controlId: "go", semanticEvent: "click" });
+    expect(Object.isFrozen(resolved)).toBe(true);
+    expect(() => assertSemanticScriptActiveEvent({ controlId: "go", semanticEvent: "change" }, active))
+      .toThrow(/SCRIPT_EVENT_NOT_SUPPORTED.*active event/);
+    expect(() => assertSemanticScriptActiveEvent({ controlId: "go", semanticEvent: "click" }, context()))
+      .toThrow(/SCRIPT_EVENT_NOT_SUPPORTED.*active event/);
+    let reads = 0;
+    const hostile = Object.create(null) as Record<string, unknown>;
+    Object.defineProperty(hostile, "controlId", { enumerable: true, get() { reads += 1; return "go"; } });
+    expect(() => assertSemanticScriptActiveEvent(hostile, active)).toThrow(/SCRIPT_API_INPUT_INVALID/);
     expect(reads).toBe(0);
   });
   it("resolves exact evidence-backed input reads through semantic-to-runtime correlation", () => {

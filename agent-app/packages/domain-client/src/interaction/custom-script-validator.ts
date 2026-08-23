@@ -140,7 +140,14 @@ interface InputSnapshot {
   readonly currentScriptIdentity?: SemanticScriptValidationIdentity;
 }
 
-const validatedPrograms = new WeakMap<ValidatedScriptAst, Program>();
+interface ValidatedProgramMetadata {
+  readonly program: Program;
+  readonly context?: SemanticScriptApiContext;
+  readonly validationIdentity?: SemanticScriptValidationIdentity;
+  readonly authoritativeScript?: ReturnType<typeof requireSemanticScriptValidationIdentity>;
+}
+
+const validatedPrograms = new WeakMap<ValidatedScriptAst, ValidatedProgramMetadata>();
 const semanticNamespaces = new Set(["$control", "$event", "$page", "$overlay", "$state", "$data", "$feedback", "$timer"]);
 const semanticApis = new Set([
   "$control.getValue", "$control.setValue", "$control.setData", "$event.record",
@@ -372,6 +379,7 @@ function deepFreeze<T>(value: T): T {
 export function validateCustomScript(input: unknown): ValidatedScriptAst {
   const snapshot = cloneInput(input);
   let authoritativeScriptId: string | undefined;
+  let authoritativeScript: ReturnType<typeof requireSemanticScriptValidationIdentity> | undefined;
   if (snapshot.currentScriptIdentity !== undefined) {
     if (snapshot.context === undefined) fail("CUSTOM_SCRIPT_UNTRUSTED_AST", "current-script identity requires its trusted semantic context");
     let script: ReturnType<typeof requireSemanticScriptValidationIdentity>;
@@ -380,6 +388,7 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
     } catch (error) {
       return fail("CUSTOM_SCRIPT_UNTRUSTED_AST", "current-script identity is not trusted by this context", error instanceof Error ? { cause: error } : undefined);
     }
+    authoritativeScript = script;
     const exactPorts = (left: readonly PortSnapshot[], right: typeof script.inputs): boolean => left.length === right.length
       && left.every((port, index) => {
         const expected = right[index];
@@ -1379,14 +1388,37 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
     staticFunctionCalls: functionSnapshot,
   });
   deepFreeze(program);
-  validatedPrograms.set(result, program);
+  validatedPrograms.set(result, {
+    program,
+    ...(snapshot.context === undefined ? {} : { context: snapshot.context }),
+    ...(snapshot.currentScriptIdentity === undefined ? {} : { validationIdentity: snapshot.currentScriptIdentity }),
+    ...(authoritativeScript === undefined ? {} : { authoritativeScript }),
+  });
   return result;
 }
 
 export function getValidatedScriptProgram(validated: ValidatedScriptAst): Program {
-  const program = validatedPrograms.get(validated);
-  if (program === undefined) return fail("CUSTOM_SCRIPT_UNTRUSTED_AST", "validated AST identity is not compiler-owned");
-  return program;
+  const metadata = validatedPrograms.get(validated);
+  if (metadata === undefined) return fail("CUSTOM_SCRIPT_UNTRUSTED_AST", "validated AST identity is not compiler-owned");
+  return metadata.program;
+}
+
+export function requireValidatedScriptProgram(
+  validated: ValidatedScriptAst,
+  expected: {
+    readonly context: SemanticScriptApiContext;
+    readonly validationIdentity: SemanticScriptValidationIdentity;
+    readonly authoritativeScript: ReturnType<typeof requireSemanticScriptValidationIdentity>;
+  },
+): Program {
+  const metadata = validatedPrograms.get(validated);
+  if (metadata === undefined
+    || metadata.context !== expected.context
+    || metadata.validationIdentity !== expected.validationIdentity
+    || metadata.authoritativeScript !== expected.authoritativeScript) {
+    return fail("CUSTOM_SCRIPT_UNTRUSTED_AST", "validated AST is not bound to the exact context, identity, script, source, and ports");
+  }
+  return metadata.program;
 }
 
 function staticJson(node: AstNode): { known: boolean; value?: null | string | number | boolean | readonly unknown[] | Readonly<Record<string, unknown>> } {

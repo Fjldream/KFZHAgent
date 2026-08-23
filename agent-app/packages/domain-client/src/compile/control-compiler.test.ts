@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { parse } from "acorn";
 import { describe, expect, it } from "vitest";
 import type { ControlIR } from "../ir/client-project-ir.js";
 import { deriveGuid } from "./guid-factory.js";
@@ -44,13 +45,14 @@ describe("control compiler — compiled scripts", () => {
 
     expect(out["linkMng"]).toEqual({ linkList: [
       { action: "navigatePage", pageId: "kdetail" },
-      { linkId: 200001, enable: true, script: "const first = 1;\nconst second = 2;\n", name: "onClick" },
+      { linkId: 200001, enable: true, script: "const first = 1;\n\n;\nconst second = 2;\n", name: "onClick" },
     ] });
   });
 
   it("updates a reviewed native event slot in place without discarding its identity or unknown fields", () => {
     const first = scriptModule("first", "const first = 1;\n");
     const out = serializeCompiledControlScripts({
+      name: "Button1",
       linkMng: { keep: "native", linkList: [
         { linkId: 200001, enable: false, script: "", name: "onClick", nativeFlag: 7 },
         { action: "navigatePage", pageId: "kdetail" },
@@ -61,7 +63,7 @@ describe("control compiler — compiled scripts", () => {
         id: "kf$binding:script-first", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
         phase: "event", scriptModuleIds: [first.id], nativeActionIds: [],
       }],
-    });
+    }, { ownerInstanceName: "Button1", capabilityId: "button" });
     expect(out["linkMng"]).toEqual({ keep: "native", linkList: [
       { linkId: 200001, enable: true, script: first.source, name: "onClick", nativeFlag: 7 },
       { action: "navigatePage", pageId: "kdetail" },
@@ -71,12 +73,12 @@ describe("control compiler — compiled scripts", () => {
   it("uses configureData only for a capability that explicitly supports it", () => {
     const configure = { ...scriptModule("configure", "Table1.SetData([]);\n", "configure-data"), ownerInstanceName: "Table1",
       instanceReferences: [{ semanticId: "records", instanceName: "Table1" }] };
-    expect(serializeCompiledControlScripts({ linkMng: { linkList: [] }, configureData: "this.table({});" }, {
+    expect(serializeCompiledControlScripts({ name: "Table1", linkMng: { linkList: [] }, configureData: "this.table({});" }, {
       ownerInstanceName: "Table1", capabilityId: "easyui.1", modules: [configure], bindings: [],
-    })["configureData"]).toBe("this.table({});\nTable1.SetData([]);\n");
-    expect(() => serializeCompiledControlScripts({ linkMng: { linkList: [] }, configureData: "" }, {
+    }, { ownerInstanceName: "Table1", capabilityId: "easyui.1" })["configureData"]).toBe("this.table({});\n;\nTable1.SetData([]);\n");
+    expect(() => serializeCompiledControlScripts({ name: "Table1", linkMng: { linkList: [] }, configureData: "" }, {
       ownerInstanceName: "Table1", capabilityId: "button", modules: [configure], bindings: [],
-    })).toThrow(/MODEL_OUTPUT_INVALID.*configureData/);
+    }, { ownerInstanceName: "Table1", capabilityId: "button" })).toThrow(/MODEL_OUTPUT_INVALID.*configureData/);
   });
 
   it("fails closed on duplicate event phases, bad hashes, missing modules, and owner drift", () => {
@@ -85,37 +87,79 @@ describe("control compiler — compiled scripts", () => {
       id: "kf$binding:script-first", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
       phase: "event" as const, scriptModuleIds: [first.id], nativeActionIds: [],
     };
-    const base = { linkMng: { linkList: [] }, configureData: "" };
+    const base = { name: "Button1", linkMng: { linkList: [] }, configureData: "" };
     expect(() => serializeCompiledControlScripts(base, {
       ownerInstanceName: "Button1", capabilityId: "button", modules: [first], bindings: [binding, { ...binding, id: "kf$binding:script-copy" }],
-    })).toThrow(/MODEL_OUTPUT_INVALID.*duplicate/);
+    }, { ownerInstanceName: "Button1", capabilityId: "button" })).toThrow(/MODEL_OUTPUT_INVALID.*duplicate/);
     expect(() => serializeCompiledControlScripts(base, {
       ownerInstanceName: "Button1", capabilityId: "button", modules: [{ ...first, sourceHash: "0".repeat(64) }], bindings: [binding],
-    })).toThrow(/MODEL_OUTPUT_INVALID.*hash/);
+    }, { ownerInstanceName: "Button1", capabilityId: "button" })).toThrow(/MODEL_OUTPUT_INVALID.*hash/);
     expect(() => serializeCompiledControlScripts(base, {
       ownerInstanceName: "Button1", capabilityId: "button", modules: [], bindings: [binding],
-    })).toThrow(/MODEL_OUTPUT_INVALID.*missing/);
+    }, { ownerInstanceName: "Button1", capabilityId: "button" })).toThrow(/MODEL_OUTPUT_INVALID.*missing/);
     expect(() => serializeCompiledControlScripts(base, {
       ownerInstanceName: "Other1", capabilityId: "button", modules: [first], bindings: [binding],
-    })).toThrow(/MODEL_OUTPUT_INVALID.*owner/);
+    }, { ownerInstanceName: "Button1", capabilityId: "button" })).toThrow(/MODEL_OUTPUT_INVALID.*owner/);
   });
 
   it("bounds aggregate script fields and rejects hostile serialization descriptors without reading them", () => {
     const longA = scriptModule("long-a", `${"a;".repeat(8_100)}\n`);
     const longB = scriptModule("long-b", `${"b;".repeat(8_100)}\n`);
-    expect(() => serializeCompiledControlScripts({ linkMng: { linkList: [] }, configureData: "" }, {
+    expect(() => serializeCompiledControlScripts({ name: "Button1", linkMng: { linkList: [] }, configureData: "" }, {
       ownerInstanceName: "Button1", capabilityId: "button", modules: [longA, longB], bindings: [{
         id: "kf$binding:script-long", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
         phase: "event", scriptModuleIds: [longA.id, longB.id], nativeActionIds: [],
       }],
-    })).toThrow(/MODEL_OUTPUT_INVALID.*32000/);
+    }, { ownerInstanceName: "Button1", capabilityId: "button" })).toThrow(/MODEL_OUTPUT_INVALID.*32000/);
 
     let reads = 0;
     const hostile = Object.create(null) as Record<string, unknown>;
     Object.defineProperty(hostile, "modules", { enumerable: true, get() { reads += 1; return []; } });
-    expect(() => serializeCompiledControlScripts({ linkMng: { linkList: [] }, configureData: "" }, hostile as never))
+    expect(() => serializeCompiledControlScripts({ name: "Button1", linkMng: { linkList: [] }, configureData: "" }, hostile as never,
+      { ownerInstanceName: "Button1", capabilityId: "button" }))
       .toThrow(/MODEL_OUTPUT_INVALID.*serialization/);
     expect(reads).toBe(0);
+  });
+
+  it("binds serialization owner and capability to the compiled control instead of caller claims", () => {
+    const first = scriptModule("first", "const first = 1;\n");
+    const serialization = {
+      ownerInstanceName: "Button1", capabilityId: "button", modules: [first], bindings: [{
+        id: "kf$binding:script-first", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
+        phase: "event" as const, scriptModuleIds: [first.id], nativeActionIds: [],
+      }],
+    };
+    expect(() => serializeCompiledControlScripts({ name: "Other1", linkMng: { linkList: [] }, configureData: "" }, serialization,
+      { ownerInstanceName: "Button1", capabilityId: "button" })).toThrow(/MODEL_OUTPUT_INVALID.*compiled control owner/);
+    expect(() => serializeCompiledControlScripts({ name: "Button1", linkMng: { linkList: [] }, configureData: "" },
+      { ...serialization, capabilityId: "easyui.999" },
+      { ownerInstanceName: "Button1", capabilityId: "button" })).toThrow(/MODEL_OUTPUT_INVALID.*capability/);
+  });
+
+  it("deep-clones serialization arrays and inserts ASI-safe boundaries without changing existing bytes", () => {
+    const first = scriptModule("first", "const first = 1;\n");
+    let reads = 0;
+    const hostileModules: unknown[] = [first];
+    Object.defineProperty(hostileModules, "0", { enumerable: true, get() { reads += 1; return first; } });
+    expect(() => serializeCompiledControlScripts({ name: "Button1", linkMng: { linkList: [] }, configureData: "" }, {
+      ownerInstanceName: "Button1", capabilityId: "button", modules: hostileModules as never, bindings: [],
+    }, { ownerInstanceName: "Button1", capabilityId: "button" })).toThrow(/MODEL_OUTPUT_INVALID.*data properties/);
+    expect(reads).toBe(0);
+
+    for (const existing of ["[]", "() => ({})", "`template`", "value"]) {
+      const out = serializeCompiledControlScripts({
+        name: "Button1", configureData: "", linkMng: { linkList: [{ linkId: 200001, enable: true, name: "onClick", script: existing }] },
+      }, {
+        ownerInstanceName: "Button1", capabilityId: "button", modules: [first], bindings: [{
+          id: "kf$binding:script-first", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
+          phase: "event", scriptModuleIds: [first.id], nativeActionIds: [],
+        }],
+      }, { ownerInstanceName: "Button1", capabilityId: "button" });
+      const source = ((out["linkMng"] as { linkList: Array<{ script: string }> }).linkList[0]!).script;
+      expect(source.startsWith(existing)).toBe(true);
+      expect(source.slice(existing.length)).toBe("\n;\nconst first = 1;\n");
+      expect(() => parse(source, { ecmaVersion: 2022 })).not.toThrow();
+    }
   });
 });
 
