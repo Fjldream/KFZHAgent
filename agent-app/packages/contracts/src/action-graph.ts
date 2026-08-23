@@ -33,6 +33,11 @@ const domAndNetworkNames = new Set([
   "document", "window", "globalthis", "navigator", "location", "localstorage", "sessionstorage", "fetch",
   "xmlhttprequest", "websocket", "eval", "function", "require", "import",
 ]);
+const canonicalSemanticSourceForbiddenIdentifiers = new Set([
+  "document", "window", "globalThis", "navigator", "location", "localStorage", "sessionStorage",
+  "fetch", "XMLHttpRequest", "WebSocket", "eval", "Function", "require", "import", "process", "Proxy", "Reflect",
+  "Object", "RegExp", "setTimeout", "setInterval", "queueMicrotask",
+]);
 const selectorTagNames = new Set([
   "a", "button", "form", "input", "label", "option", "select", "textarea",
 ]);
@@ -125,6 +130,19 @@ function semanticFunctionDeclarationKeywords(codeView: string): ReadonlySet<numb
   return starts;
 }
 
+function canonicalSemanticSourceRuntimeIssue(value: string): string | undefined {
+  for (const match of value.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)) {
+    const identifier = match[0];
+    if (canonicalSemanticSourceForbiddenIdentifiers.has(identifier)) {
+      return `forbidden runtime token in canonical semantic source: ${identifier}`;
+    }
+    if (rawRuntimeNames.has(normalizedName(identifier))) {
+      return `implementation runtime token in canonical semantic source: ${identifier}`;
+    }
+  }
+  return undefined;
+}
+
 function containsUnsafeCall(value: string): boolean {
   const calls = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\(([^()]*)\)/g;
   for (const match of value.matchAll(calls)) {
@@ -193,6 +211,10 @@ export function semanticImplementationTextIssue(
   const trimmed = value.trim();
   if (mode === "semantic-js-source" && /\\u(?:[0-9A-Fa-f]{4}|\{[0-9A-Fa-f]{1,6}\})/.test(value)) {
     return "Unicode escape syntax is not allowed in semantic JavaScript source";
+  }
+  if (mode === "semantic-js-source") {
+    const runtimeIssue = canonicalSemanticSourceRuntimeIssue(value);
+    if (runtimeIssue !== undefined) return runtimeIssue;
   }
   if (/^https?:\/\/\S+$/i.test(trimmed)
     || /^urn:[A-Za-z0-9][A-Za-z0-9:._-]*$/i.test(trimmed)

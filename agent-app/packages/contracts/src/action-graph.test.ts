@@ -206,6 +206,42 @@ const label = "actual";`,
     }
   });
 
+  it("rejects high-risk runtime tokens before lexical masking with ASCII identifier boundaries", () => {
+    for (const source of [
+      "let count = 1; count++ / Function('return 1');",
+      "let count = 1; count-- / document.value;",
+      "let count = 1; count++ / /fetch/.test('fetch');",
+      'const label = "globalThis";',
+      "const matcher = /XMLHttpRequest/;",
+      "// Proxy must not be canonical semantic source\nconst value = 1;",
+      "const schedule = setTimeout;",
+      "const runtime = process;",
+      "const metadata = styleDataNew;",
+    ]) {
+      expect(semanticImplementationTextIssue(source, "semantic-js-source"), source).toBeDefined();
+    }
+    for (const identifier of [
+      "document", "window", "globalThis", "navigator", "location", "localStorage", "sessionStorage", "fetch",
+      "XMLHttpRequest", "WebSocket", "eval", "Function", "require", "import", "process", "Proxy", "Reflect",
+      "Object", "RegExp", "setTimeout", "setInterval", "queueMicrotask", "configureData", "coordinates", "coords",
+      "geometry", "guid", "javascript", "leftTopPt", "linkId", "linkMng", "objectType", "onclick", "selector",
+      "styleData", "styleDataNew", "uiModelType",
+    ]) {
+      const source = `const label = "${identifier}";`;
+      expect(semanticImplementationTextIssue(source, "semantic-js-source"), identifier).toBeDefined();
+    }
+
+    for (const source of [
+      'const documentation = "Functionality and fetching";',
+      'const proxyStatus = "reflection-windowed";',
+      'const objectModel = "processing and navigation";',
+      "function chooseText(input) { return input; }",
+      'const message = "The function is ready";',
+    ]) {
+      expect(semanticImplementationTextIssue(source, "semantic-js-source"), source).toBeUndefined();
+    }
+  });
+
   it("preflights recursive values without getters, recursion overflow, or bare descriptor errors", () => {
     let getterCalls = 0;
     const accessor = { kind: "list" };

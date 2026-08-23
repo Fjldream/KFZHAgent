@@ -182,6 +182,12 @@ describe("script program contracts", () => {
       String.raw`const matcher = /\u0061/u;`,
       String.raw`// \u0061 is rejected even in comments
 const label = "actual";`,
+      "let count = 1; count++ / Function('return 1');",
+      "let count = 1; count-- / document.value;",
+      "let count = 1; count++ / /fetch/.test('fetch');",
+      'const label = "globalThis";',
+      "const matcher = /XMLHttpRequest/;",
+      "// Proxy is rejected even in comments\nconst value = 1;",
     ];
     forbiddenSources.forEach((source) => expect(ScriptPlanSchema.safeParse({ ...sourcePlan.scripts[0], source }).success, source).toBe(false));
 
