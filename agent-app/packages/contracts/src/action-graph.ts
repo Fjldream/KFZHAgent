@@ -491,7 +491,7 @@ const actionBase = {
   id: StableSemanticIdSchema,
   conditions: z.array(ActionConditionSchema).max(8).optional(),
   afterActionIds: z.array(StableSemanticIdSchema).max(16).default([]),
-  journeyStepRefs: z.array(JourneyStepReferenceSchema).min(1).max(12).superRefine((refs, ctx) => {
+  journeyStepRefs: z.array(JourneyStepReferenceSchema).max(12).superRefine((refs, ctx) => {
     const seen = new Set<string>();
     refs.forEach((ref, index) => {
       const key = `${ref.journeyId}\0${ref.stepIndex}`;

@@ -130,6 +130,19 @@ describe("compileInteractions", () => {
     expect(traceInteraction(result, "go", "click")).toEqual(["navigate"]);
   });
 
+  it("allows an auxiliary action with no journey refs without weakening confirmed-step coverage", () => {
+    const input = fixture("native");
+    input.plan.actions.push({
+      id: "helper-navigation", kind: "navigate-page", targetPageId: "detail", afterActionIds: [], journeyStepRefs: [],
+    });
+    const root = input.plan.pages[0]!.root;
+    if (root.kind !== "layout" || root.children[0]!.kind !== "control") throw new Error("control fixture required");
+    root.children[0]!.eventBindings[0]!.actionIds.push("helper-navigation");
+    input.implementation.sourceSolutionPlanHash = canonicalServerHash(input.plan);
+
+    expect(compileInteractions(input).diagnostics.errors).toEqual([]);
+  });
+
   it("compiles an evidence-backed Input/Button event to Table SetData script", () => {
     const result = compileInteractions(fixture("script"));
 
@@ -237,6 +250,7 @@ describe("compileInteractions", () => {
     wrongRegion.implementation.sourceSolutionPlanHash = canonicalServerHash(wrongRegion.plan);
     expect(compileInteractions(wrongRegion).diagnostics.errors).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: "JOURNEY_TRIGGER_OWNERSHIP_MISMATCH", nodeId: "navigate" }),
+      expect.objectContaining({ code: "JOURNEY_STEP_UNCOVERED", nodeId: "review-record:0" }),
     ]));
 
     const uncovered = fixture("native");
@@ -298,6 +312,7 @@ describe("compileInteractions", () => {
     expect(compileInteractions(readOnly).diagnostics.errors).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: "INTERACTION_CLOSURE_MISSING", nodeId: "run-load" }),
       expect.objectContaining({ code: "JOURNEY_CLOSURE_MISSING", nodeId: "review-record:0" }),
+      expect.objectContaining({ code: "JOURNEY_STEP_UNCOVERED", nodeId: "review-record:0" }),
     ]));
 
     const conditional = fixture("script");

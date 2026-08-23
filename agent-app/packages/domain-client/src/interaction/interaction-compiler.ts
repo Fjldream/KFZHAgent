@@ -452,7 +452,6 @@ export function compileInteractions(input: unknown): InteractionCompilationResul
       regionIds: new Set(control.sourceBlueprintRegionIds),
     }));
   });
-  const validCoverage = new Set<string>();
   const triggersByJourneyStep = new Map<string, Set<string>>();
   plan.actions.forEach((action) => {
     const graphAction = graphActionById.get(action.id);
@@ -464,7 +463,6 @@ export function compileInteractions(input: unknown): InteractionCompilationResul
         errors.push(diagnostic("JOURNEY_REFERENCE_UNKNOWN", action.id, `unknown journey step reference: ${stepKey}`));
         return;
       }
-      validCoverage.add(stepKey);
       const owner = graphAction === undefined ? undefined : triggerOwnerByControl.get(graphAction.trigger.controlId);
       if (owner === undefined || owner.pageId !== step.pageId || !owner.regionIds.has(step.regionId)) {
         errors.push(diagnostic("JOURNEY_TRIGGER_OWNERSHIP_MISMATCH", action.id, `trigger does not belong to ${step.pageId}/${step.regionId}`));
@@ -477,10 +475,6 @@ export function compileInteractions(input: unknown): InteractionCompilationResul
       }
     });
   });
-  blueprint.journeys.forEach((journey) => journey.steps.forEach((_step, stepIndex) => {
-    const stepKey = `${journey.id}:${stepIndex}`;
-    if (!validCoverage.has(stepKey)) errors.push(diagnostic("JOURNEY_STEP_UNCOVERED", stepKey, "confirmed journey step has no semantic action"));
-  }));
   triggersByJourneyStep.forEach((triggerKeys, stepKey) => {
     if (triggerKeys.size > 1) errors.push(diagnostic("JOURNEY_REFERENCE_AMBIGUOUS", stepKey, "journey step is mapped to more than one trigger closure"));
   });
@@ -516,6 +510,18 @@ export function compileInteractions(input: unknown): InteractionCompilationResul
       errors.push(diagnostic("JOURNEY_CLOSURE_MISSING", stepKey, "mapped trigger closure has no observable front-end result"));
     }
   });
+  const observableJourneyCoverage = new Set<string>();
+  triggersByJourneyStep.forEach((triggerKeys, stepKey) => {
+    if ([...triggerKeys].some((triggerKey) => observableClosureByTrigger.get(triggerKey) === true)) {
+      observableJourneyCoverage.add(stepKey);
+    }
+  });
+  blueprint.journeys.forEach((journey) => journey.steps.forEach((_step, stepIndex) => {
+    const stepKey = `${journey.id}:${stepIndex}`;
+    if (!observableJourneyCoverage.has(stepKey)) {
+      errors.push(diagnostic("JOURNEY_STEP_UNCOVERED", stepKey, "confirmed journey step has no ownership-correct observable trigger closure"));
+    }
+  }));
   normalized.executionOrder.filter((id) => !reachable.has(id)).forEach((id) =>
     errors.push(diagnostic("INTERACTION_CLOSURE_MISSING", id, "action is unreachable from every trigger root")));
 

@@ -330,7 +330,7 @@ describe("SolutionImplementationPlanSchema", () => {
     expect(ActionPlanSchema.safeParse({ id: "a", kind: "execute-javascript", afterActionIds: [] }).success).toBe(false);
   });
 
-  it("requires bounded journey step references on native actions", () => {
+  it("requires a bounded journey reference field while allowing native helper actions to use an empty list", () => {
     expect(ActionPlanSchema.safeParse({
       id: "show-result", kind: "show-feedback", level: "success", message: "已完成",
       afterActionIds: [], journeyStepRefs: [{ journeyId: "review-equipment", stepIndex: 0 }],
@@ -343,6 +343,10 @@ describe("SolutionImplementationPlanSchema", () => {
       id: "show-result", kind: "show-feedback", level: "success", message: "已完成", afterActionIds: [],
       journeyStepRefs: [{ journeyId: "review-equipment", stepIndex: 0 }, { journeyId: "review-equipment", stepIndex: 0 }],
     }).success).toBe(false);
+
+    const helper = cloneFixture();
+    helper.actions[3].journeyStepRefs = [];
+    expect(SolutionImplementationPlanSchema.safeParse(helper).success).toBe(true);
 
     const native = cloneFixture();
     native.actions.forEach((action: any) => { delete action.journeyStepRefs; });

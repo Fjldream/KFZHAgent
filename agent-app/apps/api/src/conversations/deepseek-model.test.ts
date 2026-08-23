@@ -880,6 +880,7 @@ describe("DeepSeekModelPort", () => {
     expect(implementationSystemPrompt).toContain('"actions"');
     expect(implementationSystemPrompt).toContain('"journeyStepRefs"');
     expect(capturedImplementationPrompt).toContain("每个已确认旅程步骤");
+    expect(implementationSystemPrompt).toContain("辅助 action 必须填写 []");
     expect(implementationSystemPrompt).toContain('"scripts"');
     expect(implementationSystemPrompt).toContain('"kind":"layout"');
     expect(implementationSystemPrompt).toContain('"kind":"registered-module"');
@@ -926,6 +927,17 @@ describe("DeepSeekModelPort", () => {
     const missing = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
     missing.actions[0].journeyStepRefs = [{ journeyId: "missing-journey", stepIndex: 0 }];
     await expect(makePort(missing).createSolutionImplementationPlan(context)).rejects.toThrow(/journey step|旅程步骤/i);
+  });
+
+  it("accepts auxiliary semantic actions with empty journey refs after all confirmed steps are mapped", async () => {
+    const context = solutionPlanningContext();
+    const plan = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    plan.actions.push({
+      id: "auxiliary-feedback", kind: "show-feedback", level: "info", message: "辅助说明",
+      afterActionIds: [], journeyStepRefs: [],
+    });
+    plan.pages[0].root.children[0].eventBindings[0].actionIds.push("auxiliary-feedback");
+    await expect(makePort(plan).createSolutionImplementationPlan(context)).resolves.toEqual(plan);
   });
 
   it.each([
