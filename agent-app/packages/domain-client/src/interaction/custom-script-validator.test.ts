@@ -80,6 +80,15 @@ const semanticImplementation = (plan = semanticPlan()): UIImplementationSpecV2 =
 const trustedContext = (plan = semanticPlan()) => createSemanticScriptApiContext({
   plan, implementation: semanticImplementation(plan), ownerControlId: "go",
 });
+const renamedTrustedContext = () => {
+  const plan = semanticPlan();
+  const implementation = semanticImplementation(plan);
+  implementation.runtimeCorrelation!.controls = [
+    { semanticControlId: "go", instanceName: "input2" },
+    { semanticControlId: "home-root", instanceName: "records9" },
+  ];
+  return createSemanticScriptApiContext({ plan, implementation, ownerControlId: "go" });
+};
 
 const recordFixture = () => {
   const base = semanticPlan();
@@ -243,9 +252,21 @@ describe("constrained custom script validation", () => {
   it("rejects constant-folded selectors and CSS assembled from harmless atoms", () => {
     expect(() => validate('const selector = "." + "records";')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*selector/i);
     expect(() => validate('const css = `color:${"red"}`;')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*css/i);
-    expect(() => validate('const instance = "Button" + 1;')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*runtime instance/i);
-    expect(() => validate('const instance = "Datagrid" + 1;')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*runtime instance/i);
-    expect(() => validate('const instance = "input" + 2;')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*runtime instance/i);
+    expect(() => validate('const instance = "Button" + 1;')).not.toThrow();
+    expect(() => validate('const instance = "Button" + 1;', { context: trustedContext() }))
+      .toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*runtime identity/i);
+    expect(() => validate('const instance = "input" + 2;', { context: renamedTrustedContext() }))
+      .toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*runtime identity/i);
+    expect(() => validate('const instance = "input2";', { context: renamedTrustedContext() }))
+      .toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*runtime identity/i);
+    expect(() => validate('const instance = "records" + 9;', { context: renamedTrustedContext() }))
+      .toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*runtime identity/i);
+    expect(() => validate('const label = "phase" + 1; const version = "version" + 2;', { context: renamedTrustedContext() }))
+      .not.toThrow();
+    expect(() => validate('const label = "input" + 2;')).not.toThrow();
+    expect(() => validate('const label = "safe";', {
+      context: { schema: "kf-semantic-script-api-context/v1" } as never,
+    })).toThrow(/SCRIPT_API_CONTEXT_UNTRUSTED/);
     expect(() => validate('const prefix = "."; const selector = prefix + "records";')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*selector/i);
     expect(() => validate('let prefix = "."; const selector = prefix + "records";')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*selector/i);
   });

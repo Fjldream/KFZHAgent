@@ -53,6 +53,11 @@ export interface SemanticScriptValidationIdentity {
   readonly schema: "kf-semantic-script-validation-identity/v1";
 }
 
+export interface SemanticScriptRuntimeIdentities {
+  readonly instanceNames: readonly string[];
+  readonly pageIdentities: readonly string[];
+}
+
 interface RuntimeControl {
   readonly semanticControlId: string;
   readonly instanceName: string;
@@ -345,6 +350,19 @@ export function resolveSemanticScriptOwner(context: SemanticScriptApiContext) {
     instanceName: owner.instanceName,
     capabilityId: owner.capabilityId,
     pageId: owner.pageId,
+  });
+}
+
+/** Compiler-only exact identities projected from the WeakMap-authenticated context. */
+export function resolveSemanticScriptRuntimeIdentities(
+  context: SemanticScriptApiContext,
+): SemanticScriptRuntimeIdentities {
+  const trusted = requireContext(context);
+  return Object.freeze({
+    instanceNames: Object.freeze([...trusted.controls.values()]
+      .map((control) => control.instanceName).sort((left, right) => left.localeCompare(right, "en-US"))),
+    pageIdentities: Object.freeze([...trusted.pages.values()]
+      .sort((left, right) => left.localeCompare(right, "en-US"))),
   });
 }
 

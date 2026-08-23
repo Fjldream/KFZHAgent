@@ -658,6 +658,40 @@ describe("KF UI style contracts", () => {
     }).success).toBe(false);
   });
 
+  it("uses exact page identities for compiled navigation while folding only alias detection", () => {
+    const navigationFixture = (pageGuid: string, targetPageGuid = pageGuid) => {
+      const fixture = structuredClone(v2Fixture);
+      const controls = fixture.pages[0]!.controls.map((control, index) => index !== 1 ? control : ({
+        ...control,
+        eventBindings: [{
+          id: "kf$binding:navigate", ownerInstanceName: "Text1", kfEvent: "onClick", linkId: 200001,
+          phase: "event", scriptModuleIds: [], nativeActionIds: ["kf$action:navigate"],
+        }],
+      }));
+      return {
+        ...fixture,
+        pages: [{ ...fixture.pages[0]!, controls }],
+        runtimeCorrelation: {
+          controls: [
+            { semanticControlId: "hero", instanceName: "Layout1" },
+            { semanticControlId: "hero-title", instanceName: "Text1" },
+            { semanticControlId: "visitor-dialog", instanceName: "Window1" },
+          ],
+          pages: [{ semanticPageId: "home", pageGuid }],
+        },
+        compiledActions: [{
+          id: "kf$action:navigate", sourceActionId: "navigate", ownerInstanceName: "Text1",
+          kind: "navigate-page", targetPageGuid,
+        }],
+      };
+    };
+    const opaque = "7UJ0lvKq8Q708A6Zl0C02";
+    expect(UIImplementationSpecV2Schema.safeParse(navigationFixture(opaque)).success).toBe(true);
+    expect(UIImplementationSpecV2Schema.safeParse(navigationFixture(opaque, opaque.toLowerCase())).success).toBe(false);
+    const upperUuid = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
+    expect(UIImplementationSpecV2Schema.safeParse(navigationFixture(upperUuid)).success).toBe(true);
+  });
+
   it("accepts a compiler-owned native solution-plan hash and forbids it on adapted v1", () => {
     expect(UIImplementationSpecV2Schema.safeParse(v2Fixture).success).toBe(true);
     expect(UIImplementationSpecV2Schema.safeParse({ ...v2Fixture, sourceSolutionPlanHash: "A".repeat(64) }).success).toBe(false);

@@ -849,6 +849,7 @@ export const UIImplementationSpecV2Schema = z.object({
   const controlByInstance = new Map<string, string>();
   const guidByPage = new Map<string, string>();
   const pageByGuid = new Map<string, string>();
+  const pageByFoldedGuid = new Map<string, string>();
   implementation.runtimeCorrelation?.controls.forEach((entry, index) => {
     if (!controlIds.has(entry.semanticControlId)) ctx.addIssue({ code: "custom", path: ["runtimeCorrelation", "controls", index, "semanticControlId"], message: `unknown correlated control: ${entry.semanticControlId}` });
     if (instanceByControl.has(entry.semanticControlId)) ctx.addIssue({ code: "custom", path: ["runtimeCorrelation", "controls", index, "semanticControlId"], message: `duplicate correlated control: ${entry.semanticControlId}` });
@@ -860,9 +861,10 @@ export const UIImplementationSpecV2Schema = z.object({
     const foldedGuid = entry.pageGuid.toLowerCase();
     if (!pageIds.has(entry.semanticPageId)) ctx.addIssue({ code: "custom", path: ["runtimeCorrelation", "pages", index, "semanticPageId"], message: `unknown correlated page: ${entry.semanticPageId}` });
     if (guidByPage.has(entry.semanticPageId)) ctx.addIssue({ code: "custom", path: ["runtimeCorrelation", "pages", index, "semanticPageId"], message: `duplicate correlated page: ${entry.semanticPageId}` });
-    if (pageByGuid.has(foldedGuid)) ctx.addIssue({ code: "custom", path: ["runtimeCorrelation", "pages", index, "pageGuid"], message: `compiler page GUID mapped to multiple pages: ${entry.pageGuid}` });
+    if (pageByFoldedGuid.has(foldedGuid)) ctx.addIssue({ code: "custom", path: ["runtimeCorrelation", "pages", index, "pageGuid"], message: `compiler page GUID mapped to multiple pages: ${entry.pageGuid}` });
     guidByPage.set(entry.semanticPageId, entry.pageGuid);
-    pageByGuid.set(foldedGuid, entry.semanticPageId);
+    pageByGuid.set(entry.pageGuid, entry.semanticPageId);
+    pageByFoldedGuid.set(foldedGuid, entry.semanticPageId);
   });
   if (implementation.runtimeCorrelation !== undefined) {
     controlIds.forEach((controlId) => {

@@ -5,6 +5,7 @@ import {
   createSemanticScriptApiContext,
   requireSemanticScriptPlan,
   resolveSemanticScriptOwner,
+  resolveSemanticScriptRuntimeIdentities,
   resolveEventBinding,
   resolveSemanticApiCall,
 } from "./semantic-script-api.js";
@@ -187,6 +188,23 @@ describe("semantic script API", () => {
     expect(Object.isFrozen(owner)).toBe(true);
     expect(Reflect.ownKeys(owner).sort()).toEqual(["capabilityId", "instanceName", "pageId", "semanticControlId"]);
     expect(() => resolveSemanticScriptOwner({ schema: "kf-semantic-script-api-context/v1" }))
+      .toThrow(/SCRIPT_API_CONTEXT_UNTRUSTED/);
+  });
+
+  it("reveals only frozen exact runtime identities from a trusted context", () => {
+    const trusted = context();
+    const identities = resolveSemanticScriptRuntimeIdentities(trusted);
+    expect(identities.instanceNames).toContain("Button1");
+    expect(identities.pageIdentities).toEqual([
+      "00000000-0000-4000-8000-000000000001",
+      "00000000-0000-4000-8000-000000000002",
+    ]);
+    expect(Object.isFrozen(identities)).toBe(true);
+    expect(Object.isFrozen(identities.instanceNames)).toBe(true);
+    expect(Object.isFrozen(identities.pageIdentities)).toBe(true);
+    expect(() => (identities.instanceNames as string[]).push("Forged1")).toThrow();
+    expect(resolveSemanticScriptRuntimeIdentities(trusted).instanceNames).not.toContain("Forged1");
+    expect(() => resolveSemanticScriptRuntimeIdentities({ schema: "kf-semantic-script-api-context/v1" }))
       .toThrow(/SCRIPT_API_CONTEXT_UNTRUSTED/);
   });
 

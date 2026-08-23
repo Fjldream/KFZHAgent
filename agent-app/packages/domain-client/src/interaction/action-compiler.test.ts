@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SolutionImplementationPlan, UIImplementationSpecV2 } from "@kf/contracts";
 import { compileAction } from "../compile/control-compiler.js";
+import { attachRuntimeCorrelation } from "../implementation/runtime-correlation.js";
 
 const validTheme = {
   background: "#f4f7fb", surface: "#ffffff", primary: "#163a5f", accent: "#e47b32",
@@ -45,6 +46,21 @@ afterEach(() => {
 });
 
 describe("compileNativeActions", () => {
+  it("closes attached runtime page identities through exact native navigation compilation", async () => {
+    const { normalizeActionGraph } = await import("./action-graph.js");
+    const { compileNativeActions } = await import("./action-compiler.js");
+    const data = fixture();
+    const uncorrelated = structuredClone(data.implementation);
+    delete uncorrelated.runtimeCorrelation;
+    data.implementation = attachRuntimeCorrelation({
+      workspaceId: "navigation-workspace", baseRevisionId: "navigation-revision", implementation: uncorrelated,
+    });
+    const targetPageGuid = data.implementation.runtimeCorrelation!.pages
+      .find((entry) => entry.semanticPageId === "detail-page")!.pageGuid;
+    const result = compileNativeActions({ normalized: normalizeActionGraph(data) });
+    expect(result.actions[0]).toMatchObject({ kind: "navigate-page", targetPageGuid });
+  });
+
   it("accepts only the exact trusted normalized object and rejects clones or forgeries", async () => {
     const { normalizeActionGraph } = await import("./action-graph.js");
     const { compileNativeActions } = await import("./action-compiler.js");

@@ -47,7 +47,6 @@ interface CanonicalDisposition {
 interface VerifiedDispositionPayload {
   readonly workspaceId: string;
   readonly baseRevisionId: string;
-  readonly inspectionIdentityHash: string;
   readonly inspectedControls: readonly {
     readonly guid: string;
     readonly pageGuid: string;
@@ -265,9 +264,8 @@ export function verifyExistingRuntimeCorrelation(input: VerifyExistingRuntimeCor
     if (exact.length !== 1 || folded.length !== 1) fail("UPLOADED_ENTITY_MISMATCH", `page ${entry.semanticPageId}`);
   });
   const handle = Object.freeze(Object.create(null)) as VerifiedExistingRuntimeCorrelationHandle;
-  const inspectionIdentityHash = createHash("sha256").update(JSON.stringify(identitySnapshot), "utf8").digest("hex");
   verifiedDispositionByHandle.set(handle, Object.freeze({
-    workspaceId, baseRevisionId, inspectionIdentityHash, inspectedControls: identitySnapshot.controls, disposition,
+    workspaceId, baseRevisionId, inspectedControls: identitySnapshot.controls, disposition,
   }));
   return handle;
 }

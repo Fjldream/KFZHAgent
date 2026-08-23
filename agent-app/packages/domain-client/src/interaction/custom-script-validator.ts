@@ -2,13 +2,13 @@ import { createHash } from "node:crypto";
 import { types as utilTypes } from "node:util";
 import { parse, type Node, type Program } from "acorn";
 import { walk, type Node as WalkerNode } from "estree-walker";
-import { CompilerInstanceNameSchema } from "@kf/contracts";
 import type { SemanticScriptApiContext, SemanticScriptValidationIdentity } from "./semantic-script-api.js";
 import {
   assertSemanticRecordListCompatibility,
   assertSemanticRecordCompatibility,
   requireSemanticScriptValidationIdentity,
   resolveSemanticApiCall,
+  resolveSemanticScriptRuntimeIdentities,
 } from "./semantic-script-api.js";
 
 type RefKind = "control" | "local-state" | "mock-data";
@@ -355,20 +355,20 @@ function isUnsafeRegex(node: AstNode): boolean {
     || pattern.length > 200;
 }
 
-function constantLeak(node: AstNode): string | undefined {
+function constantLeak(node: AstNode, runtimeIdentities?: ReadonlySet<string>): string | undefined {
   const folded = staticString(node);
   if (folded === undefined || !folded.composed) return undefined;
-  return constantStringIssue(folded.value);
+  return constantStringIssue(folded.value, runtimeIdentities);
 }
 
-function constantStringIssue(input: string): string | undefined {
+function constantStringIssue(input: string, runtimeIdentities?: ReadonlySet<string>): string | undefined {
   const value = input.trim();
   const cssProperty = /^(?:--[\w-]+|background(?:-color)?|border(?:-[\w-]+)?|color|display|font(?:-[\w-]+)?|gap|height|margin(?:-[\w-]+)?|opacity|padding(?:-[\w-]+)?|position|transform|transition|width|z-index)\s*:/i;
   if (cssProperty.test(value) || /[{};]/.test(value)) return "css";
   if (/^(?:#|\.|\[)[A-Za-z_-]/.test(value)
     || /^(?:a|button|div|form|input|label|option|select|span|table|td|textarea|tr)(?:\s+(?:(?:a|button|div|form|input|label|option|select|span|table|td|textarea|tr)\b|[.#]|\[)|\s*[>{+~:])/i.test(value)) return "selector";
   if (/^k?[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) return "GUID";
-  if (CompilerInstanceNameSchema.safeParse(value).success) return "runtime instance";
+  if (runtimeIdentities?.has(value) === true) return "runtime identity";
   return undefined;
 }
 
@@ -382,6 +382,10 @@ function deepFreeze<T>(value: T): T {
 
 export function validateCustomScript(input: unknown): ValidatedScriptAst {
   const snapshot = cloneInput(input);
+  const trustedRuntimeIdentities = snapshot.context === undefined ? undefined : (() => {
+    const identities = resolveSemanticScriptRuntimeIdentities(snapshot.context);
+    return new Set([...identities.instanceNames, ...identities.pageIdentities]);
+  })();
   let authoritativeScriptId: string | undefined;
   let authoritativeScript: ReturnType<typeof requireSemanticScriptValidationIdentity> | undefined;
   if (snapshot.currentScriptIdentity !== undefined) {
@@ -808,7 +812,9 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
     const target = hasTarget ? foldStringExpression(args[targetIndex]) : undefined;
     if (hasTarget && target === undefined) fail("CUSTOM_SCRIPT_FORBIDDEN", `${api} requires a static semantic ID`);
     if (target !== undefined) {
-      const leak = target.composed ? constantStringIssue(target.value) : undefined;
+      const leak = trustedRuntimeIdentities?.has(target.value) === true
+        ? "runtime identity"
+        : target.composed ? constantStringIssue(target.value, trustedRuntimeIdentities) : undefined;
       if (leak !== undefined) fail("CUSTOM_SCRIPT_FORBIDDEN", `${leak} is not a semantic reference`);
       if (/^k?[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(target.value)) {
         fail("CUSTOM_SCRIPT_FORBIDDEN", "GUID is not a semantic reference");
@@ -885,7 +891,11 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
 
   const visit = (node: AstNode, parent?: AstNode): void => {
     const folded = foldStringExpression(node);
-    const leak = folded?.composed === true ? constantStringIssue(folded.value) : constantLeak(node);
+    const leak = folded !== undefined && trustedRuntimeIdentities?.has(folded.value) === true
+      ? "runtime identity"
+      : folded?.composed === true
+        ? constantStringIssue(folded.value, trustedRuntimeIdentities)
+        : constantLeak(node, trustedRuntimeIdentities);
     if (leak !== undefined) fail("CUSTOM_SCRIPT_FORBIDDEN", `${leak} constructed from constant text`);
     if (isUnsafeRegex(node)) fail("CUSTOM_SCRIPT_FORBIDDEN", "unsafe regular expression");
     if (node.type === "Identifier") {
