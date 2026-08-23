@@ -622,6 +622,7 @@ function backgroundAssetIdsFromStyle(
 export const UIImplementationSpecV2Schema = z.object({
   schema: z.literal("kf-ui-implementation/v2"),
   compatibility: z.enum(["native", "adapted-v1"]),
+  sourceSolutionPlanHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
   theme: z.union([ThemeSpecSchema, NativeThemeSpecSchema]),
   compiledRoleStyles: z.record(stableId, ComponentStyleSpecV2Schema),
   pages: z.array(UIImplementationPageAnyV2Schema).min(1),
@@ -635,6 +636,9 @@ export const UIImplementationSpecV2Schema = z.object({
     }
   });
   if (implementation.compatibility === "adapted-v1") {
+    if (implementation.sourceSolutionPlanHash !== undefined) {
+      ctx.addIssue({ code: "custom", path: ["sourceSolutionPlanHash"], message: "adapted v1 implementations cannot claim a native solution-plan hash" });
+    }
     if (Object.keys(implementation.compiledRoleStyles).length > 0) {
       ctx.addIssue({ code: "custom", path: ["compiledRoleStyles"], message: "adapted v1 implementations cannot invent compiled role styles" });
     }

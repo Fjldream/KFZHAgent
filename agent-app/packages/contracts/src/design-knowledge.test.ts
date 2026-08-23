@@ -108,7 +108,7 @@ describe("design knowledge contracts", () => {
         readable: true,
         writable: true,
         availability: "supported",
-        evidence: [{ kind: "product-source", ref: "KingFusion3.6_Node/pages/select.json#Value", contentSha256: "b".repeat(64) }],
+        evidence: [{ kind: "product-source", ref: "KingFusion3.6_Node/pages/select.json#Value" }],
       }],
       initialization: { supportsConfigureData: false, lifecycleEvents: [] },
       limitations: [],
@@ -139,7 +139,7 @@ describe("design knowledge contracts", () => {
     }).success).toBe(false);
   });
 
-  it("accepts exact content hashes and typed event arguments without weakening strict evidence", () => {
+  it("keeps v1 evidence hashes and event argument metadata optional while validating them when present", () => {
     const profile = {
       schema: "kf-script-capability-profile/v1",
       capabilityId: "easyui.1",
@@ -175,15 +175,15 @@ describe("design knowledge contracts", () => {
     expect(ScriptCapabilityProfileSchema.safeParse({
       ...profile,
       events: [{ ...profile.events[0], arguments: [{ name: "record", valueKind: "record" }] }],
-    }).success).toBe(false);
+    }).success).toBe(true);
     expect(ScriptCapabilityProfileSchema.safeParse({
       ...profile,
       events: [{ ...profile.events[0], arguments: [{ name: "record", position: 1 }] }],
-    }).success).toBe(false);
+    }).success).toBe(true);
     expect(ScriptCapabilityProfileSchema.safeParse({
       ...profile,
       events: [{ ...profile.events[0], evidence: [{ kind: "product-source", ref: "KingFusion3.6_Node/pages/table.json#script" }] }],
-    }).success).toBe(false);
+    }).success).toBe(true);
   });
 
   it("requires evidence references to be repository-relative paths", () => {

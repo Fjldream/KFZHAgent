@@ -43,6 +43,7 @@ const v1Fixture = UIImplementationSpecSchema.parse({
 const v2Fixture = {
   schema: "kf-ui-implementation/v2",
   compatibility: "native",
+  sourceSolutionPlanHash: "a".repeat(64),
   theme,
   compiledRoleStyles: {
     heading: { declarations: { fontSize: 24, fontWeight: 600 }, states: {} },
@@ -655,6 +656,14 @@ describe("KF UI style contracts", () => {
         controls: [{ ...v2Fixture.pages[0]!.controls[0]!, eventBindings: [{ event: "click" }] }],
       }],
     }).success).toBe(false);
+  });
+
+  it("accepts a compiler-owned native solution-plan hash and forbids it on adapted v1", () => {
+    expect(UIImplementationSpecV2Schema.safeParse(v2Fixture).success).toBe(true);
+    expect(UIImplementationSpecV2Schema.safeParse({ ...v2Fixture, sourceSolutionPlanHash: "A".repeat(64) }).success).toBe(false);
+    const adapted = adaptUiImplementationV1(v1Fixture) as ReturnType<typeof adaptUiImplementationV1> & { sourceSolutionPlanHash?: string };
+    adapted.sourceSolutionPlanHash = "a".repeat(64);
+    expect(UIImplementationSpecV2Schema.safeParse(adapted).success).toBe(false);
   });
 
   it("requires overlay hosts to declare a compiler-verified hidden initial state", () => {

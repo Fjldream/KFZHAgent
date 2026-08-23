@@ -1,6 +1,7 @@
 import {
   ApprovedAssetFactsSchema,
   CapabilityCandidateBundleSchema,
+  canonicalServerHash,
   LEGACY_MODULE_PLAN_CANDIDATE_BUNDLE_HASH,
   SolutionImplementationPlanSchema,
   UIImplementationSpecV2Schema,
@@ -801,6 +802,7 @@ export function compileSolutionImplementation(input: SolutionCompileInput): UIIm
   const candidate = {
     schema: "kf-ui-implementation/v2" as const,
     compatibility: "native" as const,
+    sourceSolutionPlanHash: canonicalServerHash(parsed.plan),
     theme: parsed.plan.theme,
     compiledRoleStyles: Object.fromEntries(parsed.plan.roleStyles.map((style) => [style.role,
       boundary("style", style.role, () => resolveStyle(parsed.plan.theme, {

@@ -483,6 +483,7 @@ describe("compileSolutionImplementation", () => {
     const admin = compileFixture(adminFixture());
 
     expect(UIImplementationSpecV2Schema.safeParse(portfolio).success).toBe(true);
+    expect(portfolio.sourceSolutionPlanHash).toBe(canonicalServerHash(portfolioFixture().plan));
     expect(portfolio.schema).toBe("kf-ui-implementation/v2");
     expect(portfolio.compiledRoleStyles.body?.declarations.textColor).toBe("#f8fafc");
     expect(portfolio.pages).toHaveLength(2);

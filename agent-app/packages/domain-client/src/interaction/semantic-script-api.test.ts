@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { SolutionImplementationPlan, UIImplementationSpecV2 } from "@kf/contracts";
+import { canonicalServerHash, type SolutionImplementationPlan, type UIImplementationSpecV2 } from "@kf/contracts";
 import {
   createSemanticScriptApiContext,
   resolveEventBinding,
@@ -32,6 +32,7 @@ function implementation(): UIImplementationSpecV2 {
   return {
     schema: "kf-ui-implementation/v2",
     compatibility: "native",
+    sourceSolutionPlanHash: canonicalServerHash(plan()),
     theme,
     compiledRoleStyles: {},
     compiledActions: [],
@@ -45,11 +46,18 @@ function implementation(): UIImplementationSpecV2 {
           control("records", "easyui.1", "bp-home"),
           control("status-select", "select", "bp-home"),
           control("plain-text", "text", "bp-home"),
+          {
+            ...control("overlay-content", "text", "bp-home"),
+            overlayHost: {
+              overlayId: "detail-overlay", hostPageId: "home", presentation: "dialog", visibleStateId: "detail-visible",
+              dismissible: true, initiallyVisible: false,
+            },
+          },
         ],
       },
       {
         compatibility: "native", id: "detail-page", width: 1280, height: 720, sourceBlueprintPageId: "bp-detail",
-        controls: [control("detail-input", "input", "bp-detail")],
+        controls: [control("detail-input", "input", "bp-detail"), control("detail-records", "easyui.1", "bp-detail")],
       },
     ],
     runtimeCorrelation: {
@@ -59,7 +67,9 @@ function implementation(): UIImplementationSpecV2 {
         { semanticControlId: "records", instanceName: "Table1" },
         { semanticControlId: "status-select", instanceName: "Select1" },
         { semanticControlId: "plain-text", instanceName: "Text1" },
+        { semanticControlId: "overlay-content", instanceName: "Text2" },
         { semanticControlId: "detail-input", instanceName: "Input2" },
+        { semanticControlId: "detail-records", instanceName: "Table2" },
       ],
       pages: [
         { semanticPageId: "home", pageGuid: "00000000-0000-4000-8000-000000000001" },
@@ -89,27 +99,41 @@ function plan(): SolutionImplementationPlan {
   return {
     schema: "kf-solution-implementation/v1", projectKey: "demo", blueprintHash: "a".repeat(64), candidateBundleHash: "b".repeat(64),
     theme, roleStyles: [{ role: "content", declarations: {}, states: {} }],
-    mockData: [{
-      id: "visitor-records", purpose: "访客记录", fields: [{ key: "name", label: "姓名", type: "text" }],
-      records: [{ values: [{ field: "name", value: "张三" }] }],
-    }],
+    mockData: [
+      {
+        id: "visitor-records", purpose: "访客记录", fields: [{ key: "id", label: "标识", type: "text" }, { key: "name", label: "姓名", type: "text" }],
+        records: [{ values: [{ field: "id", value: "visitor-1" }, { field: "name", value: "张三" }] }],
+      },
+      {
+        id: "detail-data", purpose: "详情记录", fields: [{ key: "code", label: "编码", type: "text" }],
+        records: [{ values: [{ field: "code", value: "D-1" }] }],
+      },
+    ],
     localState: [
       { id: "submitted", purpose: "是否提交", type: "boolean", initialValue: false },
       { id: "detail-visible", purpose: "详情是否显示", type: "boolean", initialValue: false },
+      { id: "selected-name", purpose: "选中姓名", type: "record-key", initialValue: "visitor-1", mockDataId: "visitor-records", keyField: "id" },
+      { id: "selected-names", purpose: "选中姓名列表", type: "record-key-list", initialValue: ["visitor-1"], mockDataId: "visitor-records", keyField: "id" },
+      { id: "detail-state", purpose: "详情状态", type: "text", initialValue: "待处理" },
     ],
     pages: [
       {
         id: "home", title: "首页", purpose: "首页", canvas: "desktop", sourceBlueprintPageId: "bp-home",
-        sourceBlueprintRegionIds: ["region"], initialStateIds: ["submitted", "detail-visible"],
+        sourceBlueprintRegionIds: ["region"], initialStateIds: ["submitted", "detail-visible", "selected-name", "selected-names"],
         root: { id: "home-root", kind: "layout", layout: "column", sourceBlueprintRegionIds: ["region"], intent, children: [
-          planControl("go", "button", "前往详情"), planControl("status-filter", "input"), planControl("records", "easyui.1"),
+          planControl("go", "button", "前往详情"), planControl("status-filter", "input"),
+          { ...planControl("records", "easyui.1"), mockDataId: "visitor-records" },
           planControl("status-select", "select"), planControl("plain-text", "text"),
         ] },
       },
       {
         id: "detail-page", title: "详情", purpose: "详情", canvas: "desktop", sourceBlueprintPageId: "bp-detail",
-        sourceBlueprintRegionIds: ["detail-region"], initialStateIds: [], root: {
-          ...planControl("detail-input", "input"), sourceBlueprintRegionIds: ["detail-region"],
+        sourceBlueprintRegionIds: ["detail-region"], initialStateIds: ["detail-state"], root: {
+          id: "detail-root", kind: "layout", layout: "column", sourceBlueprintRegionIds: ["detail-region"], intent,
+          children: [
+            { ...planControl("detail-input", "input"), sourceBlueprintRegionIds: ["detail-region"] },
+            { ...planControl("detail-records", "easyui.1"), sourceBlueprintRegionIds: ["detail-region"], mockDataId: "detail-data" },
+          ],
         },
       },
     ],
@@ -153,9 +177,8 @@ describe("semantic script API", () => {
       availability: "supported", kind: "method", semanticControlId: "records", instanceName: "Table1",
       capabilityId: "easyui.1", pageId: "home", kfMethod: "SetData", parameterNames: ["records"],
     });
-    expect(resolveSemanticApiCall(call("$control.setData", "status-select", []), context())).toEqual({
-      availability: "planned", kind: "planned", api: "$control.setData", reason: "SCRIPT_METHOD_NOT_SUPPORTED",
-    });
+    expect(() => resolveSemanticApiCall(call("$control.setData", "status-select", []), context()))
+      .toThrow(/SCRIPT_API_INPUT_INVALID.*not bound to mock data/);
   });
 
   it("maps the reviewed semantic row-click alias to exact Cell-click evidence", () => {
@@ -302,6 +325,91 @@ describe("semantic script API", () => {
     wrongSourceHome.controls[0]!.sourceSolutionNodeId = "missing-node";
     expect(() => createSemanticScriptApiContext({ plan: plan(), implementation: wrongSource, ownerControlId: "go" }))
       .toThrow(/provenance does not match/);
+
+    const driftedPlan = plan();
+    driftedPlan.projectKey = "drifted-demo";
+    expect(() => createSemanticScriptApiContext({ plan: driftedPlan, implementation: implementation(), ownerControlId: "go" }))
+      .toThrow(/solution-plan hash does not match/);
+
+    const missingPlanHash = implementation();
+    delete missingPlanHash.sourceSolutionPlanHash;
+    expect(() => createSemanticScriptApiContext({ plan: plan(), implementation: missingPlanHash, ownerControlId: "go" }))
+      .toThrow(/solution-plan hash does not match/);
+
+    const crossPageAlias = implementation();
+    const detail = crossPageAlias.pages[1];
+    if (detail?.compatibility !== "native") throw new Error("native fixture required");
+    detail.controls[0]!.sourceSolutionNodeId = "status-filter";
+    expect(() => createSemanticScriptApiContext({ plan: plan(), implementation: crossPageAlias, ownerControlId: "detail-input" }))
+      .toThrow(/page ownership/);
+  });
+
+  it("requires a one-to-one overlay root host on its exact owner page", () => {
+    const missing = implementation();
+    const missingHome = missing.pages[0];
+    if (missingHome?.compatibility !== "native") throw new Error("native fixture required");
+    delete missingHome.controls.find((candidate) => candidate.id === "overlay-content")!.overlayHost;
+    expect(() => createSemanticScriptApiContext({ plan: plan(), implementation: missing, ownerControlId: "go" }))
+      .toThrow(/overlay host|page ownership/);
+
+    const wrong = implementation();
+    const wrongHome = wrong.pages[0];
+    if (wrongHome?.compatibility !== "native") throw new Error("native fixture required");
+    const overlayHost = wrongHome.controls.find((candidate) => candidate.id === "overlay-content")!.overlayHost!;
+    delete wrongHome.controls.find((candidate) => candidate.id === "overlay-content")!.overlayHost;
+    wrongHome.controls.find((candidate) => candidate.id === "plain-text")!.overlayHost = overlayHost;
+    expect(() => createSemanticScriptApiContext({ plan: plan(), implementation: wrong, ownerControlId: "go" }))
+      .toThrow(/overlay host|page ownership/);
+
+    const wrongMetadata = implementation();
+    const metadataHome = wrongMetadata.pages[0];
+    if (metadataHome?.compatibility !== "native") throw new Error("native fixture required");
+    metadataHome.controls.find((candidate) => candidate.id === "overlay-content")!.overlayHost!.presentation = "drawer";
+    expect(() => createSemanticScriptApiContext({ plan: plan(), implementation: wrongMetadata, ownerControlId: "go" }))
+      .toThrow(/overlay provenance/);
+
+    const extra = implementation();
+    const extraHome = extra.pages[0];
+    if (extraHome?.compatibility !== "native") throw new Error("native fixture required");
+    extraHome.controls.find((candidate) => candidate.id === "plain-text")!.overlayHost = {
+      ...extraHome.controls.find((candidate) => candidate.id === "overlay-content")!.overlayHost!,
+    };
+    expect(() => createSemanticScriptApiContext({ plan: plan(), implementation: extra, ownerControlId: "go" }))
+      .toThrow(/overlay host|page ownership/);
+  });
+
+  it("scopes state and mock data to resources actually owned by the owner page", () => {
+    expect(() => resolveSemanticApiCall(call("$state.get", "detail-state"), context("go")))
+      .toThrow(/SCRIPT_API_INPUT_INVALID.*unknown local state/);
+    expect(() => resolveSemanticApiCall(call("$data.get", "detail-data"), context("go")))
+      .toThrow(/SCRIPT_API_INPUT_INVALID.*unknown mock data/);
+    expect(resolveSemanticApiCall(call("$state.get", "detail-state"), context("detail-input"))).toMatchObject({ availability: "planned" });
+    expect(resolveSemanticApiCall(call("$data.get", "detail-data"), context("detail-input"))).toMatchObject({ availability: "planned" });
+    expect(() => resolveSemanticApiCall(call("$overlay.open", "detail-overlay"), context("detail-input")))
+      .toThrow(/SCRIPT_API_INPUT_INVALID.*unknown overlay/);
+  });
+
+  it("validates record-list values against the target and page mock-data schema", () => {
+    expect(resolveSemanticApiCall(call("$control.setData", "records", [{ id: "visitor-2", name: "李四" }]), context())).toMatchObject({ availability: "supported" });
+    expect(resolveSemanticApiCall(call("$data.set", "visitor-records", [{ id: "visitor-2", name: "李四" }]), context())).toMatchObject({ availability: "planned" });
+    for (const records of [[{ id: "visitor-2", name: 1 }], [{ other: "李四" }], [{ id: "visitor-2", name: "李四", extra: true }], ["李四"]]) {
+      expect(() => resolveSemanticApiCall(call("$control.setData", "records", records), context())).toThrow(/SCRIPT_API_INPUT_INVALID.*record-list/);
+      expect(() => resolveSemanticApiCall(call("$data.set", "visitor-records", records), context())).toThrow(/SCRIPT_API_INPUT_INVALID.*record-list/);
+    }
+  });
+
+  it("validates capability-specific values, record keys, unique key lists, and scalar overlay results", () => {
+    expect(() => resolveSemanticApiCall(call("$control.setValue", "status-filter", 1), context()))
+      .toThrow(/SCRIPT_API_INPUT_INVALID.*input value/);
+    expect(() => resolveSemanticApiCall(call("$state.set", "selected-name", "不存在"), context()))
+      .toThrow(/SCRIPT_API_INPUT_INVALID.*record key/);
+    expect(() => resolveSemanticApiCall(call("$state.set", "selected-names", ["visitor-1", "visitor-1"]), context()))
+      .toThrow(/SCRIPT_API_INPUT_INVALID.*unique/);
+    expect(() => resolveSemanticApiCall(call("$state.set", "selected-names", ["不存在"]), context()))
+      .toThrow(/SCRIPT_API_INPUT_INVALID.*record key/);
+    expect(() => resolveSemanticApiCall(call("$overlay.close", "detail-overlay", { accepted: true }), context()))
+      .toThrow(/SCRIPT_API_INPUT_INVALID.*scalar/);
+    expect(resolveSemanticApiCall(call("$overlay.close", "detail-overlay", "accepted"), context())).toMatchObject({ availability: "planned" });
   });
 
   it.each([
