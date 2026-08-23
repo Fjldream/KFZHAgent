@@ -220,6 +220,7 @@ const label = "actual";`,
   it("canonicalizes page GUIDs so case aliases cannot create distinct runtime identities", () => {
     const upper = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
     expect(CompilerPageGuidSchema.parse(upper)).toBe(upper.toLowerCase());
+    expect(CompilerPageGuidSchema.parse(`K${upper}`)).toBe(`k${upper.toLowerCase()}`);
     const parsed = CompiledScriptModuleSchema.parse({
       ...compiledScript,
       pageReferences: [{ semanticId: "home", pageGuid: upper }],

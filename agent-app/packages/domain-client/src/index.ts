@@ -17,6 +17,7 @@ export {
 export * from "./style/style-adapter.js";
 export * from "./style/style-engine.js";
 export * from "./implementation/ui-implementation-compiler.js";
+export * from "./implementation/runtime-correlation.js";
 export {
   renderClientPreview,
   escapeHtml,

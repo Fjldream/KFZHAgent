@@ -624,7 +624,7 @@ export const ActionGraphSchema = z.object({
 export const CompilerInstanceNameSchema = z.string().trim().min(2).max(100)
   .regex(/^[A-Za-z_$][A-Za-z0-9_$]*[0-9]$/, "compiler instance names must use an evidence-backed KF instance shape");
 export const CompilerPageGuidSchema = z.string()
-  .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
+  .regex(/^k?[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
   .transform((value) => value.toLowerCase());
 export const CompilerOwnedIdSchema = z.string().trim().min(1).max(100)
   .regex(/^kf\$(?:action|binding|script):[A-Za-z0-9][A-Za-z0-9_-]*$/);
