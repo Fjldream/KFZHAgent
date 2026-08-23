@@ -63,6 +63,32 @@ export class CustomScriptValidationError extends Error {
 type AstNode = Node & Record<string, unknown>;
 type ValueKind = "array" | "string" | "record" | "scalar" | "unknown";
 
+interface LexicalScope {
+  readonly id: number;
+  readonly functionOwner: string;
+  readonly parent?: LexicalScope;
+}
+
+interface LexicalBinding {
+  readonly name: string;
+  readonly scope: LexicalScope;
+  readonly declaredAt: number;
+  readonly mutable: boolean;
+  readonly functionOwner: string;
+  readonly hoisted: boolean;
+  readonly functionName?: string;
+  kind: ValueKind;
+  boundedArray: boolean;
+  aliasRoot?: string;
+  abstractValue?: { readonly known: true; readonly value: unknown };
+  abstractConflicted?: boolean;
+}
+
+interface ActiveLoop {
+  readonly counter?: string;
+  readonly iteratedRoot?: string;
+}
+
 interface PortSnapshot {
   readonly name: string;
   readonly description: string;
@@ -89,7 +115,8 @@ const readApis: Readonly<Record<string, RefKind>> = {
   "$control.getValue": "control", "$state.get": "local-state", "$data.get": "mock-data",
 };
 const writeApis: Readonly<Record<string, RefKind>> = {
-  "$control.setValue": "control", "$control.setData": "control", "$state.set": "local-state", "$data.set": "mock-data",
+  "$control.setValue": "control", "$control.setData": "control", "$control.setVisible": "control",
+  "$control.setEnabled": "control", "$state.set": "local-state", "$data.set": "mock-data",
 };
 const arrayMethods = new Set(["slice", "filter", "push"]);
 const stringMethods = new Set(["trim", "includes", "startsWith"]);
@@ -282,9 +309,15 @@ function isUnsafeRegex(node: AstNode): boolean {
 function constantLeak(node: AstNode): string | undefined {
   const folded = staticString(node);
   if (folded === undefined || !folded.composed) return undefined;
-  const value = folded.value.trim();
-  if (/^(?:--[\w-]+\s*:|[A-Za-z-]+\s*:)|[{};]/.test(value)) return "css";
-  if (/^(?:#|\.|\[)[A-Za-z_-]|[A-Za-z][\w-]*(?:\s*[>{+~:]|\s+)[.#[]?/.test(value)) return "selector";
+  return constantStringIssue(folded.value);
+}
+
+function constantStringIssue(input: string): string | undefined {
+  const value = input.trim();
+  const cssProperty = /^(?:--[\w-]+|background(?:-color)?|border(?:-[\w-]+)?|color|display|font(?:-[\w-]+)?|gap|height|margin(?:-[\w-]+)?|opacity|padding(?:-[\w-]+)?|position|transform|transition|width|z-index)\s*:/i;
+  if (cssProperty.test(value) || /[{};]/.test(value)) return "css";
+  if (/^(?:#|\.|\[)[A-Za-z_-]/.test(value)
+    || /^(?:a|button|div|form|input|label|option|select|span|table|td|textarea|tr)(?:\s+(?:(?:a|button|div|form|input|label|option|select|span|table|td|textarea|tr)\b|[.#]|\[)|\s*[>{+~:])/i.test(value)) return "selector";
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) return "GUID";
   if (/^(?:Button|Input|Select|Text|Table|Layout)\d+$/i.test(value)) return "runtime instance";
   return undefined;
@@ -327,35 +360,142 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
   const outputWrites = new Map<string, number>();
   const calls: ValidatedSemanticCall[] = [];
   const scheduled = new Set<string>();
-  const declared = new Map<string, { mutable: boolean; kind: ValueKind; boundedArray: boolean }>();
+  const bindings = new Map<string, LexicalBinding>();
+  const scopeByNode = new WeakMap<object, LexicalScope>();
+  const functionNameByNode = new WeakMap<object, string>();
   const functionNames = new Set<string>();
   const functionCalls = new Map<string, Set<string>>();
+  const functionMutations = new Map<string, Set<string>>();
+  const functionCaptures = new Map<string, Set<string>>();
+  const loopCallSites: Array<{ readonly callee: string; readonly loops: readonly ActiveLoop[] }> = [];
+  const programCallSites: Array<{ readonly callee: string; readonly start: number }> = [];
+  const activeLoops: ActiveLoop[] = [];
+  const allowedLoopUpdates = new WeakSet<object>();
   let currentFunction = "<program>";
+  let nextScopeId = 1;
   functionCalls.set(currentFunction, new Set());
+  functionMutations.set(currentFunction, new Set());
+  functionCaptures.set(currentFunction, new Set());
 
-  for (const statement of program.body.map(ast)) {
-    if (statement.type === "FunctionDeclaration") {
-      const name = identifierName(childNode(statement.id));
-      if (name === undefined || functionNames.has(name)) fail("CUSTOM_SCRIPT_FORBIDDEN", "function declarations require unique names");
-      functionNames.add(name);
-      functionCalls.set(name, new Set());
-    } else if (statement.type === "VariableDeclaration") {
-      for (const declaration of nodeArray(statement.declarations)) {
-        const name = identifierName(childNode(declaration.id));
-        if (name !== undefined && childNode(declaration.init)?.type === "ArrowFunctionExpression") {
-          functionNames.add(name);
-          functionCalls.set(name, new Set());
+  const newScope = (parent?: LexicalScope, functionOwner = parent?.functionOwner ?? "<program>"): LexicalScope => Object.freeze({
+    id: nextScopeId++, functionOwner, ...(parent === undefined ? {} : { parent }),
+  });
+  const declareBinding = (name: string | undefined, declaration: AstNode, scope: LexicalScope, mutable: boolean, functionName?: string, hoisted = false): void => {
+    if (name === undefined || semanticNamespaces.has(name) || forbiddenIdentifiers.has(name)) fail("CUSTOM_SCRIPT_FORBIDDEN", "bindings require unique safe identifiers");
+    if (bindings.has(name)) fail("CUSTOM_SCRIPT_FORBIDDEN", `binding shadowing is forbidden: ${name}`);
+    const binding: LexicalBinding = {
+      name, scope, declaredAt: declaration.start, mutable: functionName === undefined && mutable,
+      functionOwner: scope.functionOwner, hoisted,
+      kind: "unknown", boundedArray: false, ...(functionName === undefined ? {} : { functionName }),
+    };
+    bindings.set(name, binding);
+    if (functionName !== undefined) {
+      functionNames.add(functionName);
+      functionCalls.set(functionName, new Set());
+      functionMutations.set(functionName, new Set());
+      functionCaptures.set(functionName, new Set());
+    }
+  };
+  const declareStatements = (statements: readonly AstNode[], scope: LexicalScope): void => {
+    for (const statement of statements) {
+      if (statement.type === "FunctionDeclaration") {
+        const name = identifierName(childNode(statement.id));
+        declareBinding(name, childNode(statement.id) ?? statement, scope, false, name, true);
+        if (name !== undefined) functionNameByNode.set(statement, name);
+      } else if (statement.type === "VariableDeclaration") {
+        for (const declaration of nodeArray(statement.declarations)) {
+          const name = identifierName(childNode(declaration.id));
+          const functionName = childNode(declaration.init)?.type === "ArrowFunctionExpression" ? name : undefined;
+          declareBinding(name, childNode(declaration.id) ?? declaration, scope, statement.kind === "let", functionName);
+          const init = childNode(declaration.init);
+          if (functionName !== undefined && init !== undefined) functionNameByNode.set(init, functionName);
         }
       }
     }
-  }
+  };
+  const indexScopes = (node: AstNode, scope: LexicalScope): void => {
+    if (node.type === "Program") {
+      scopeByNode.set(node, scope);
+      declareStatements(nodeArray(node.body), scope);
+      nodeArray(node.body).forEach((child) => indexScopes(child, scope));
+      return;
+    }
+    if (node.type === "BlockStatement") {
+      const blockScope = newScope(scope);
+      scopeByNode.set(node, blockScope);
+      declareStatements(nodeArray(node.body), blockScope);
+      nodeArray(node.body).forEach((child) => indexScopes(child, blockScope));
+      return;
+    }
+    if (node.type === "ForStatement" || node.type === "ForOfStatement") {
+      const loopScope = newScope(scope);
+      scopeByNode.set(node, loopScope);
+      const declaration = childNode(node.type === "ForStatement" ? node.init : node.left);
+      if (declaration?.type === "VariableDeclaration") declareStatements([declaration], loopScope);
+      for (const child of children(node)) indexScopes(child, loopScope);
+      return;
+    }
+    if (node.type === "FunctionDeclaration" || node.type === "ArrowFunctionExpression") {
+      const functionName = functionNameByNode.get(node) ?? `<callback:${node.start}>`;
+      const functionScope = newScope(scope, functionName);
+      scopeByNode.set(node, functionScope);
+      for (const parameter of nodeArray(node.params)) {
+        const name = identifierName(parameter);
+        declareBinding(name, parameter, functionScope, false);
+      }
+      for (const child of children(node)) indexScopes(child, functionScope);
+      return;
+    }
+    scopeByNode.set(node, scope);
+    for (const child of children(node)) indexScopes(child, scope);
+  };
+  const programScope = newScope();
+  indexScopes(ast(program), programScope);
+
+  const scopeContains = (bindingScope: LexicalScope, referenceScope: LexicalScope): boolean => {
+    for (let scope: LexicalScope | undefined = referenceScope; scope !== undefined; scope = scope.parent) {
+      if (scope === bindingScope) return true;
+    }
+    return false;
+  };
+  const requireBinding = (name: string, node: AstNode): LexicalBinding => {
+    const binding = bindings.get(name);
+    const referenceScope = scopeByNode.get(node);
+    if (binding === undefined || referenceScope === undefined || !scopeContains(binding.scope, referenceScope)) {
+      return fail("CUSTOM_SCRIPT_FORBIDDEN", `undeclared or out-of-scope identifier: ${name}`);
+    }
+    if (!binding.hoisted && node.start < binding.declaredAt) {
+      if (currentFunction === "<program>" || binding.functionOwner === currentFunction) fail("CUSTOM_SCRIPT_FORBIDDEN", `use before declaration: ${name}`);
+      functionCaptures.get(currentFunction)?.add(name);
+    }
+    return binding;
+  };
+  const bindingRoot = (name: string): string => bindings.get(name)?.aliasRoot ?? name;
+  const recordMutation = (name: string): void => {
+    functionMutations.get(currentFunction)?.add(bindingRoot(name));
+  };
+  const mergeAbstractValue = (binding: LexicalBinding, value: { known: boolean; value?: unknown }): void => {
+    if (!value.known || binding.abstractConflicted === true) {
+      delete binding.abstractValue;
+      binding.abstractConflicted = true;
+      return;
+    }
+    if (binding.abstractValue === undefined) {
+      binding.abstractValue = { known: true, value: value.value };
+      return;
+    }
+    if (abstractValueType(binding.abstractValue.value) !== abstractValueType(value.value)) {
+      delete binding.abstractValue;
+      binding.abstractConflicted = true;
+    }
+  };
 
   const expressionKind = (node: AstNode | undefined): ValueKind => {
     if (node === undefined) return "unknown";
     if (node.type === "ArrayExpression") return "array";
     if (node.type === "ObjectExpression") return "record";
     if (node.type === "Literal") return typeof node.value === "string" ? "string" : "scalar";
-    if (node.type === "Identifier") return declared.get(identifierName(node) ?? "")?.kind ?? "unknown";
+    if (node.type === "Identifier") return bindings.get(identifierName(node) ?? "")?.kind ?? "unknown";
     if (node.type === "CallExpression") {
       const callee = childNode(node.callee);
       const name = identifierName(callee);
@@ -375,13 +515,82 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
 
   const boundedArrayExpression = (node: AstNode | undefined): boolean => {
     if (node?.type === "ArrayExpression") return true;
-    if (node?.type === "Identifier") return declared.get(identifierName(node) ?? "")?.boundedArray === true;
+    if (node?.type === "Identifier") return bindings.get(identifierName(node) ?? "")?.boundedArray === true;
     if (node?.type !== "CallExpression") return false;
     const member = memberParts(childNode(node.callee));
     if (member?.property !== "slice") return false;
     const args = nodeArray(node.arguments);
     return args.length === 2 && literalValue(args[0]) === 0 && typeof literalValue(args[1]) === "number"
       && (literalValue(args[1]) as number) >= 0 && (literalValue(args[1]) as number) <= 1000;
+  };
+
+  const abstractJson = (node: AstNode): { known: boolean; value?: unknown } => {
+    const concrete = staticJson(node);
+    if (concrete.known) return concrete;
+    if (node.type === "Identifier") return bindings.get(identifierName(node) ?? "")?.abstractValue ?? { known: false };
+    if (node.type === "BinaryExpression") {
+      if (["===", "!==", "<", "<=", ">", ">="].includes(String(node.operator))) return { known: true, value: false };
+      const kind = expressionKind(node);
+      if (kind === "string") return { known: true, value: "" };
+      if (kind === "scalar") return { known: true, value: 0 };
+    }
+    if (node.type === "LogicalExpression") return { known: true, value: false };
+    if (node.type === "CallExpression") {
+      const callee = childNode(node.callee);
+      const direct = identifierName(callee);
+      if (direct === "String") return { known: true, value: "" };
+      if (direct === "Number") return { known: true, value: 0 };
+      if (direct === "Boolean") return { known: true, value: false };
+      const member = memberParts(callee);
+      const objectName = member === undefined ? undefined : identifierName(member.object);
+      const api = member === undefined || objectName === undefined ? undefined : `${objectName}.${member.property}`;
+      if (api === "$data.get" || member?.property === "slice" || member?.property === "filter") return { known: true, value: [] };
+    }
+    if (expressionKind(node) === "array") return { known: true, value: [] };
+    return { known: false };
+  };
+
+  const foldPrimitiveExpression = (node: AstNode | undefined, seen = new Set<string>()): { value: null | string | number | boolean; composed: boolean } | undefined => {
+    if (node === undefined) return undefined;
+    if (node.type === "Literal" && (node.value === null || typeof node.value === "string" || typeof node.value === "number" || typeof node.value === "boolean")) {
+      return { value: node.value, composed: false };
+    }
+    if (node.type === "Identifier") {
+      const name = identifierName(node)!;
+      if (seen.has(name)) return undefined;
+      const binding = bindings.get(name);
+      const value = binding?.abstractValue?.value;
+      if (binding === undefined || binding.abstractConflicted === true
+        || (value !== null && typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean")) return undefined;
+      return { value, composed: false };
+    }
+    if (node.type === "BinaryExpression" && node.operator === "+") {
+      const left = foldPrimitiveExpression(childNode(node.left), seen);
+      const right = foldPrimitiveExpression(childNode(node.right), seen);
+      if (left === undefined || right === undefined || (typeof left.value !== "string" && typeof right.value !== "string")) return undefined;
+      return { value: String(left.value) + String(right.value), composed: true };
+    }
+    if (node.type === "TemplateLiteral") {
+      const quasis = nodeArray(node.quasis);
+      const expressions = nodeArray(node.expressions);
+      let value = "";
+      for (let index = 0; index < quasis.length; index += 1) {
+        const quasi = quasis[index]?.value;
+        if (quasi === null || typeof quasi !== "object" || typeof (quasi as { cooked?: unknown }).cooked !== "string") return undefined;
+        value += (quasi as { cooked: string }).cooked;
+        if (index < expressions.length) {
+          const expression = foldPrimitiveExpression(expressions[index], seen);
+          if (expression === undefined) return undefined;
+          value += String(expression.value);
+        }
+      }
+      return { value, composed: true };
+    }
+    return undefined;
+  };
+  const foldStringExpression = (node: AstNode | undefined): { value: string; composed: boolean } | undefined => {
+    const folded = foldPrimitiveExpression(node);
+    return folded !== undefined && typeof folded.value === "string" ? { value: folded.value, composed: folded.composed } : undefined;
   };
 
   const semanticCall = (node: AstNode, api: string): void => {
@@ -391,10 +600,10 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
     if (args.length < arity[0] || args.length > arity[1]) fail("CUSTOM_SCRIPT_FORBIDDEN", `${api} arity must be ${arity[0] === arity[1] ? arity[0] : `${arity[0]}..${arity[1]}`}`);
     const targetIndex = api === "$timer.after" ? 1 : api === "$timer.repeat" ? 2 : 0;
     const hasTarget = api !== "$event.record" && api !== "$feedback.show" && !api.startsWith("$timer.");
-    const target = hasTarget ? staticString(args[targetIndex]) : undefined;
+    const target = hasTarget ? foldStringExpression(args[targetIndex]) : undefined;
     if (hasTarget && target === undefined) fail("CUSTOM_SCRIPT_FORBIDDEN", `${api} requires a static semantic ID`);
     if (target !== undefined) {
-      const leak = constantLeak(args[0]!);
+      const leak = target.composed ? constantStringIssue(target.value) : undefined;
       if (leak !== undefined) fail("CUSTOM_SCRIPT_FORBIDDEN", `${leak} is not a semantic reference`);
       if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(target.value)) {
         fail("CUSTOM_SCRIPT_FORBIDDEN", "GUID is not a semantic reference");
@@ -419,8 +628,9 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
     }
     if (api === "$timer.after" || api === "$timer.repeat") {
       const scriptArg = args[api === "$timer.after" ? 1 : 2];
-      const scriptId = staticString(scriptArg)?.value;
+      const scriptId = foldStringExpression(scriptArg)?.value;
       if (scriptId === undefined) fail("CUSTOM_SCRIPT_FORBIDDEN", `${api} requires a static script ID`);
+      if (snapshot.scriptId === undefined) fail("CUSTOM_SCRIPT_INPUT_INVALID", "scriptId is required for timer calls");
       if (scriptId === snapshot.scriptId) fail("CUSTOM_SCRIPT_SELF_SCHEDULE", scriptId);
       if (snapshot.context === undefined) fail("CUSTOM_SCRIPT_UNDECLARED_INPUT", scriptId);
       const delay = literalValue(args[0]);
@@ -433,37 +643,49 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
     }
     let availability: ValidatedSemanticCall["availability"] = "unresolved";
     if (snapshot.context !== undefined) {
-      const staticArgs = args.map(staticJson);
-      if (staticArgs.every((value) => value.known)) {
-        const resolution = resolveSemanticApiCall({ api, args: staticArgs.map((value) => value.value) }, snapshot.context);
-        availability = resolution.availability;
-      }
+      const resolvedArgs = args.map(abstractJson);
+      if (!resolvedArgs.every((value) => value.known)) fail("CUSTOM_SCRIPT_FORBIDDEN", `${api} dynamic argument type cannot be proven in trusted context`);
+      const resolution = resolveSemanticApiCall({ api, args: resolvedArgs.map((value) => value.value) }, snapshot.context);
+      availability = resolution.availability;
     }
     calls.push(Object.freeze({ api, namespace, method, ...(target === undefined ? {} : { targetId: target.value }), availability }));
   };
 
   const visit = (node: AstNode, parent?: AstNode): void => {
-    const leak = constantLeak(node);
+    const folded = foldStringExpression(node);
+    const leak = folded?.composed === true ? constantStringIssue(folded.value) : constantLeak(node);
     if (leak !== undefined) fail("CUSTOM_SCRIPT_FORBIDDEN", `${leak} constructed from constant text`);
     if (isUnsafeRegex(node)) fail("CUSTOM_SCRIPT_FORBIDDEN", "unsafe regular expression");
     if (node.type === "Identifier") {
       const name = identifierName(node)!;
       if (forbiddenIdentifiers.has(name)) fail("CUSTOM_SCRIPT_FORBIDDEN", `forbidden global: ${name}`);
-      if (isIdentifierReference(node, parent)
-        && !declared.has(name)
-        && !functionNames.has(name)
+      const reference = isIdentifierReference(node, parent);
+      if (reference && (semanticNamespaces.has(name) || name === "Math" || name === "Date")) {
+        if (parent?.type !== "MemberExpression" || parent.object !== node) fail("CUSTOM_SCRIPT_FORBIDDEN", `global namespace aliases are forbidden: ${name}`);
+      }
+      if (reference && ["String", "Number", "Boolean"].includes(name)
+        && (parent?.type !== "CallExpression" || parent.callee !== node)) fail("CUSTOM_SCRIPT_FORBIDDEN", `conversion aliases are forbidden: ${name}`);
+      if (reference
         && !semanticNamespaces.has(name)
         && !["String", "Number", "Boolean", "Date", "Math"].includes(name)) {
-        fail("CUSTOM_SCRIPT_FORBIDDEN", `undeclared global identifier: ${name}`);
+        requireBinding(name, node);
       }
     }
     if (node.type === "VariableDeclaration") {
       if (node.kind !== "const" && node.kind !== "let") fail("CUSTOM_SCRIPT_FORBIDDEN", "only const and let declarations are allowed");
       for (const declaration of nodeArray(node.declarations)) {
         const name = identifierName(childNode(declaration.id));
-        if (name === undefined || declared.has(name) || semanticNamespaces.has(name)) fail("CUSTOM_SCRIPT_FORBIDDEN", "variables require unique safe identifiers");
+        if (name === undefined) fail("CUSTOM_SCRIPT_FORBIDDEN", "variables require identifier bindings");
+        const binding = bindings.get(name);
+        if (binding === undefined) fail("CUSTOM_SCRIPT_FORBIDDEN", `binding index is missing: ${name}`);
         const init = childNode(declaration.init);
-        declared.set(name, { mutable: node.kind === "let", kind: expressionKind(init), boundedArray: boundedArrayExpression(init) });
+        binding.kind = expressionKind(init);
+        binding.boundedArray = boundedArrayExpression(init);
+        if (init?.type === "Identifier") binding.aliasRoot = bindingRoot(identifierName(init)!);
+        if (init !== undefined) {
+          const abstract = abstractJson(init);
+          mergeAbstractValue(binding, abstract);
+        }
       }
     }
     if (node.type === "FunctionDeclaration" || node.type === "ArrowFunctionExpression") {
@@ -471,23 +693,30 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
       const declaredName = node.type === "FunctionDeclaration" ? identifierName(childNode(node.id)) : parent?.type === "VariableDeclarator" ? identifierName(childNode(parent.id)) : undefined;
       currentFunction = declaredName ?? `<callback:${node.start}>`;
       functionCalls.set(currentFunction, functionCalls.get(currentFunction) ?? new Set());
-      for (const parameter of nodeArray(node.params)) {
-        const name = identifierName(parameter);
-        if (name === undefined || forbiddenIdentifiers.has(name)) fail("CUSTOM_SCRIPT_FORBIDDEN", "functions require identifier parameters");
-        declared.set(name, { mutable: false, kind: "unknown", boundedArray: false });
-      }
       for (const child of children(node)) visit(child, node);
       currentFunction = previous;
+      return;
+    }
+    if (node.type === "ForStatement") {
+      const counter = validateFor(node);
+      activeLoops.push({ counter });
+      for (const child of children(node)) visit(child, node);
+      activeLoops.pop();
+      return;
+    }
+    if (node.type === "ForOfStatement") {
+      const right = childNode(node.right);
+      if (!boundedArrayExpression(right)) fail("CUSTOM_SCRIPT_FORBIDDEN", "for-of requires a statically bounded array");
+      const iteratedName = identifierName(right);
+      activeLoops.push({ ...(iteratedName === undefined ? {} : { iteratedRoot: bindingRoot(iteratedName) }) });
+      for (const child of children(node)) visit(child, node);
+      activeLoops.pop();
       return;
     }
     if (node.type === "CallExpression") validateCall(node);
     if (node.type === "MemberExpression") validateMember(node, parent);
     if (node.type === "AssignmentExpression") validateAssignment(node);
     if (node.type === "UpdateExpression") validateUpdate(node);
-    if (node.type === "ForStatement") validateFor(node);
-    if (node.type === "ForOfStatement") {
-      if (!boundedArrayExpression(childNode(node.right))) fail("CUSTOM_SCRIPT_FORBIDDEN", "for-of requires a statically bounded array");
-    }
     if (node.type === "Property") {
       if (node.kind !== "init" || node.method === true || node.computed === true) fail("CUSTOM_SCRIPT_FORBIDDEN", "getters, setters, methods, and computed object keys are forbidden");
       const key = identifierName(childNode(node.key)) ?? (typeof literalValue(childNode(node.key)) === "string" ? literalValue(childNode(node.key)) as string : undefined);
@@ -503,7 +732,7 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
       }
       const arrayName = identifierName(childNode(argument.object));
       const indexName = identifierName(childNode(argument.property));
-      if (arrayName === undefined || declared.get(arrayName)?.boundedArray !== true || indexName === undefined || !declared.has(indexName)) {
+      if (arrayName === undefined || bindings.get(arrayName)?.boundedArray !== true || indexName === undefined || !bindings.has(indexName)) {
         fail("CUSTOM_SCRIPT_FORBIDDEN", "object spread requires a bounded local array element");
       }
     }
@@ -521,7 +750,11 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
       }
       if (direct === "Date") fail("CUSTOM_SCRIPT_FORBIDDEN", "Date() current-time access is forbidden; use Date.parse/UTC conversion");
       if (functionNames.has(direct)) {
-        functionCalls.get(currentFunction)!.add(direct);
+        const binding = requireBinding(direct, callee!);
+        if (binding.functionName === undefined) fail("CUSTOM_SCRIPT_FORBIDDEN", `call target is not an immutable function: ${direct}`);
+        functionCalls.get(currentFunction)!.add(binding.functionName);
+        if (activeLoops.length > 0) loopCallSites.push({ callee: binding.functionName, loops: activeLoops.map((loop) => ({ ...loop })) });
+        if (currentFunction === "<program>") programCallSites.push({ callee: binding.functionName, start: node.start });
         return;
       }
       fail("CUSTOM_SCRIPT_FORBIDDEN", `unknown direct call: ${direct}`);
@@ -551,8 +784,21 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
       if (member.property === "filter") {
         const argumentsList = nodeArray(node.arguments);
         if (argumentsList.length !== 1 || argumentsList[0]?.type !== "ArrowFunctionExpression") fail("CUSTOM_SCRIPT_FORBIDDEN", "filter requires one inline arrow callback");
+        const callbackName = `<callback:${argumentsList[0].start}>`;
+        functionCalls.set(callbackName, functionCalls.get(callbackName) ?? new Set());
+        functionMutations.set(callbackName, functionMutations.get(callbackName) ?? new Set());
+        functionCaptures.set(callbackName, functionCaptures.get(callbackName) ?? new Set());
+        functionCalls.get(currentFunction)!.add(callbackName);
+        if (currentFunction === "<program>") programCallSites.push({ callee: callbackName, start: node.start });
       }
-      if (member.property === "push" && nodeArray(node.arguments).length !== 1) fail("CUSTOM_SCRIPT_FORBIDDEN", "push requires one value");
+      if (member.property === "push") {
+        if (nodeArray(node.arguments).length !== 1) fail("CUSTOM_SCRIPT_FORBIDDEN", "push requires one value");
+        const receiver = identifierName(member.object);
+        if (receiver !== undefined && activeLoops.some((loop) => loop.iteratedRoot === bindingRoot(receiver))) {
+          fail("CUSTOM_SCRIPT_FORBIDDEN", `cannot mutate an iterated array: ${receiver}`);
+        }
+        if (receiver !== undefined) recordMutation(receiver);
+      }
       return;
     }
     if (stringMethods.has(member.property)) {
@@ -569,27 +815,44 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
     const left = childNode(node.left);
     const name = identifierName(left);
     if (name !== undefined) {
-      if (declared.get(name)?.mutable !== true) fail("CUSTOM_SCRIPT_FORBIDDEN", `assignment requires a local let variable: ${name}`);
+      const binding = requireBinding(name, left!);
+      if (!binding.mutable) fail("CUSTOM_SCRIPT_FORBIDDEN", `assignment requires a mutable non-function local: ${name}`);
+      if (!allowedLoopUpdates.has(node) && activeLoops.some((loop) => loop.counter === name)) fail("CUSTOM_SCRIPT_FORBIDDEN", `loop counter may only change in its update clause: ${name}`);
+      if (activeLoops.some((loop) => loop.iteratedRoot === bindingRoot(name))) fail("CUSTOM_SCRIPT_FORBIDDEN", `cannot rebind an iterated array or alias: ${name}`);
+      const right = childNode(node.right);
+      if (right !== undefined) {
+        mergeAbstractValue(binding, abstractJson(right));
+      }
+      recordMutation(name);
       return;
     }
     if (left?.type !== "MemberExpression" || left.computed !== true) fail("CUSTOM_SCRIPT_FORBIDDEN", "property assignment is forbidden");
     const arrayName = identifierName(childNode(left.object));
-    if (arrayName === undefined || declared.get(arrayName)?.boundedArray !== true) fail("CUSTOM_SCRIPT_FORBIDDEN", "only bounded local array elements may be assigned");
-    if (!safeArrayIndex(childNode(left.property), declared)) fail("CUSTOM_SCRIPT_FORBIDDEN", "array assignment requires a bounded local index");
+    if (arrayName === undefined || bindings.get(arrayName)?.boundedArray !== true) fail("CUSTOM_SCRIPT_FORBIDDEN", "only bounded local array elements may be assigned");
+    if (activeLoops.some((loop) => loop.iteratedRoot === bindingRoot(arrayName))) fail("CUSTOM_SCRIPT_FORBIDDEN", `cannot assign an iterated array element: ${arrayName}`);
+    if (!safeArrayIndex(childNode(left.property), bindings)) fail("CUSTOM_SCRIPT_FORBIDDEN", "array assignment requires a bounded local index");
+    recordMutation(arrayName);
   };
 
   const validateMember = (node: AstNode, parent?: AstNode): void => {
     const property = childNode(node.property);
     const propertyName = node.computed === true ? staticString(property)?.value : identifierName(property);
     if (propertyName !== undefined && reservedKeys.has(propertyName)) fail("CUSTOM_SCRIPT_FORBIDDEN", `reserved member path: ${propertyName}`);
+    const objectName = identifierName(childNode(node.object));
+    const isDirectCall = parent?.type === "CallExpression" && parent.callee === node;
+    if (objectName !== undefined && (semanticNamespaces.has(objectName) || objectName === "Math" || objectName === "Date")) {
+      if (!isDirectCall || node.computed === true) fail("CUSTOM_SCRIPT_FORBIDDEN", `API members are direct static calls only: ${objectName}`);
+      return;
+    }
+    if (!isDirectCall && propertyName !== undefined && (arrayMethods.has(propertyName) || stringMethods.has(propertyName))) {
+      fail("CUSTOM_SCRIPT_FORBIDDEN", `method aliases are forbidden: ${propertyName}`);
+    }
     if (node.computed === true) {
       if (propertyName !== undefined) return;
-      if (safeArrayIndex(property, declared) && expressionKind(childNode(node.object)) === "array") return;
+      if (safeArrayIndex(property, bindings) && expressionKind(childNode(node.object)) === "array") return;
       fail("CUSTOM_SCRIPT_FORBIDDEN", "computed property requires a literal field or bounded array index");
     }
-    const objectName = identifierName(childNode(node.object));
-    if (objectName !== undefined && (semanticNamespaces.has(objectName) || objectName === "Math" || objectName === "Date")) return;
-    if (parent?.type === "CallExpression" && parent.callee === node) return;
+    if (isDirectCall) return;
     if (propertyName === "length" && ["array", "string"].includes(expressionKind(childNode(node.object)))) return;
     if (expressionKind(childNode(node.object)) === "record") return;
     fail("CUSTOM_SCRIPT_FORBIDDEN", `unknown member access: ${propertyName ?? "computed"}`);
@@ -597,12 +860,15 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
 
   const validateUpdate = (node: AstNode): void => {
     const name = identifierName(childNode(node.argument));
-    if ((node.operator !== "++" && node.operator !== "--") || name === undefined || declared.get(name)?.mutable !== true) {
+    const argument = childNode(node.argument);
+    if ((node.operator !== "++" && node.operator !== "--") || name === undefined || argument === undefined || !requireBinding(name, argument).mutable) {
       fail("CUSTOM_SCRIPT_FORBIDDEN", "update requires a local let variable");
     }
+    if (!allowedLoopUpdates.has(node) && activeLoops.some((loop) => loop.counter === name)) fail("CUSTOM_SCRIPT_FORBIDDEN", `loop counter may only change in its update clause: ${name}`);
+    recordMutation(name);
   };
 
-  const validateFor = (node: AstNode): void => {
+  const validateFor = (node: AstNode): string => {
     const init = childNode(node.init);
     const test = childNode(node.test);
     const update = childNode(node.update);
@@ -617,6 +883,8 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
     const validUpdate = updateTarget === counter && ((update.type === "UpdateExpression" && update.operator === "++")
       || (update.type === "AssignmentExpression" && update.operator === "+=" && literalValue(childNode(update.right)) === 1));
     if (!validUpdate) fail("CUSTOM_SCRIPT_FORBIDDEN", "for requires a monotonic unit update");
+    allowedLoopUpdates.add(update);
+    return counter;
   };
 
   visit(ast(program));
@@ -630,6 +898,54 @@ export function validateCustomScript(input: unknown): ValidatedScriptAst {
     recursionState.set(name, "done");
   };
   functionCalls.forEach((_calls, name) => detectRecursion(name));
+
+  let effectsChanged = true;
+  for (let iteration = 0; effectsChanged && iteration <= functionCalls.size; iteration += 1) {
+    effectsChanged = false;
+    for (const [caller, callees] of functionCalls) {
+      const effects = functionMutations.get(caller) ?? new Set<string>();
+      functionMutations.set(caller, effects);
+      for (const callee of callees) {
+        for (const mutation of functionMutations.get(callee) ?? []) {
+          if (!effects.has(mutation)) {
+            effects.add(mutation);
+            effectsChanged = true;
+          }
+        }
+      }
+    }
+  }
+  for (const callSite of loopCallSites) {
+    const effects = functionMutations.get(callSite.callee) ?? new Set<string>();
+    for (const loop of callSite.loops) {
+      if ((loop.counter !== undefined && effects.has(loop.counter))
+        || (loop.iteratedRoot !== undefined && effects.has(loop.iteratedRoot))) {
+        fail("CUSTOM_SCRIPT_FORBIDDEN", `called function mutates an active loop dependency: ${callSite.callee}`);
+      }
+    }
+  }
+  let capturesChanged = true;
+  for (let iteration = 0; capturesChanged && iteration <= functionCalls.size; iteration += 1) {
+    capturesChanged = false;
+    for (const [caller, callees] of functionCalls) {
+      const captures = functionCaptures.get(caller) ?? new Set<string>();
+      functionCaptures.set(caller, captures);
+      for (const callee of callees) {
+        for (const capture of functionCaptures.get(callee) ?? []) {
+          if (!captures.has(capture)) {
+            captures.add(capture);
+            capturesChanged = true;
+          }
+        }
+      }
+    }
+  }
+  for (const callSite of programCallSites) {
+    for (const capture of functionCaptures.get(callSite.callee) ?? []) {
+      const binding = bindings.get(capture);
+      if (binding !== undefined && binding.declaredAt > callSite.start) fail("CUSTOM_SCRIPT_FORBIDDEN", `use before declaration through ${callSite.callee}: ${capture}`);
+    }
+  }
 
   for (const port of snapshot.inputs) if (!inputReads.has(port.refId)) fail("CUSTOM_SCRIPT_INPUT_NOT_READ", port.refId);
   for (const port of snapshot.outputs) {
@@ -680,6 +996,16 @@ function staticJson(node: AstNode): { known: boolean; value?: null | string | nu
     return { known: true, value: result };
   }
   return { known: false };
+}
+
+function abstractValueType(value: unknown): "array" | "boolean" | "null" | "number" | "object" | "string" | "unknown" {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  if (typeof value === "boolean") return "boolean";
+  if (typeof value === "number") return "number";
+  if (typeof value === "string") return "string";
+  if (typeof value === "object") return "object";
+  return "unknown";
 }
 
 function hasLiteralUpperBound(node: AstNode, counter: string): boolean {

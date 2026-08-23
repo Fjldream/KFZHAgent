@@ -137,6 +137,17 @@ describe("constrained custom script validation", () => {
     expect(() => validate(source)).toThrow(/CUSTOM_SCRIPT_FORBIDDEN/);
   });
 
+  it("rejects semantic, standard-library, and function aliases as first-class values", () => {
+    for (const source of [
+      'let f = () => 1; f = $control["getValue"]; f("Button1");',
+      'const f = $control.getValue; f("Button1");',
+      "const max = Math.max; const value = max(1, 2);",
+      'const method = "max"; const value = Math[method](1, 2);',
+      "const api = $control;",
+      "const math = Math;",
+    ]) expect(() => validate(source)).toThrow(/CUSTOM_SCRIPT_FORBIDDEN/);
+  });
+
   it("rejects undeclared semantic reads, writes, and runtime-looking IDs", () => {
     expect(() => validate('$control.getValue("Button1");', {
       inputs: [port("status", "control")],
@@ -162,12 +173,24 @@ describe("constrained custom script validation", () => {
     expect(() => validate('$feedback.show("info");')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*arity/);
     expect(() => validate('$page.navigate("detail-page");')).toThrow(/CUSTOM_SCRIPT_UNDECLARED_INPUT.*detail-page/);
     expect(validate('$page.navigate("home");', { context: trustedContext() }).calls[0]).toMatchObject({ availability: "supported", targetId: "home" });
+    expect(validate('const visible = true; $control.setVisible("go", visible);', {
+      context: trustedContext(), outputs: [port("go", "control")],
+    }).calls[0]).toMatchObject({ availability: "planned", targetId: "go" });
+    expect(validate('const target = "go"; $control.setVisible(target, true);', {
+      context: trustedContext(), outputs: [port("go", "control")],
+    }).calls[0]).toMatchObject({ availability: "planned", targetId: "go" });
+    expect(() => validate('let visible = true; if (true) { visible = "yes"; } if (true) { visible = false; } $control.setVisible("go", visible);', {
+      context: trustedContext(), outputs: [port("go", "control")],
+    })).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*cannot be proven/);
+    expect(validate('$feedback.show("info", "Status: ready");').calls[0]).toMatchObject({ api: "$feedback.show", availability: "unresolved" });
   });
 
   it("rejects constant-folded selectors and CSS assembled from harmless atoms", () => {
     expect(() => validate('const selector = "." + "records";')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*selector/i);
     expect(() => validate('const css = `color:${"red"}`;')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*css/i);
     expect(() => validate('const instance = "Button" + 1;')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*runtime instance/i);
+    expect(() => validate('const prefix = "."; const selector = prefix + "records";')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*selector/i);
+    expect(() => validate('let prefix = "."; const selector = prefix + "records";')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*selector/i);
   });
 
   it("requires every declared input to be read and every declared output to be written exactly", () => {
@@ -198,9 +221,27 @@ describe("constrained custom script validation", () => {
     })).not.toThrow();
   });
 
+  it("rejects loop-counter mutation and mutation or aliasing of an iterated array", () => {
+    for (const source of [
+      "for (let index = 0; index < 10; index += 1) { index += 1; }",
+      "for (let index = 0; index < 10; index += 1) { function mutate() { index += 1; } }",
+      'const records = $data.get("records").slice(0, 100); for (const record of records) { records.push(record); }',
+      'const records = $data.get("records").slice(0, 100); for (const record of records) { records[0] = record; }',
+      'let records = $data.get("records").slice(0, 100); for (const record of records) { records = []; }',
+      'const records = $data.get("records").slice(0, 100); const alias = records; for (const record of records) { alias.push(record); }',
+      'const records = $data.get("records").slice(0, 100); function mutate() { records.push({}); } for (const record of records) { mutate(); }',
+      "function bump() { index += 1; } for (let index = 0; index < 10; index += 1) { bump(); }",
+    ]) expect(() => validate(source, { inputs: source.includes("$data.get") ? [port("records", "mock-data")] : [] }))
+      .toThrow(/CUSTOM_SCRIPT_FORBIDDEN/);
+  });
+
   it("rejects recursive functions and reports static timer dependencies without allowing self-scheduling", () => {
     expect(() => validate('function recurse() { recurse(); } recurse();')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*recursion/i);
+    expect(() => validate("const f = () => [1].filter(() => f()); f();")).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*recursion/i);
+    expect(() => validate("const f = () => [1].filter(() => g()); const g = () => f(); f();")).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*recursion/i);
     expect(() => validate('$timer.after(100, "current-script");')).toThrow(/CUSTOM_SCRIPT_SELF_SCHEDULE/);
+    expect(() => validateCustomScript({ source: '$timer.after(100, "refresh-script");', inputs: [], outputs: [], context: trustedContext() }))
+      .toThrow(/CUSTOM_SCRIPT_INPUT_INVALID.*scriptId/);
     expect(() => validate('$timer.after(100, "missing-script");')).toThrow(/CUSTOM_SCRIPT_UNDECLARED_INPUT.*missing-script/);
     expect(validate('$timer.after(100, "refresh-script"); $timer.repeat(500, 2, "pulse-script");', {
       context: trustedContext(),
@@ -237,6 +278,29 @@ describe("constrained custom script validation", () => {
       .toThrow(/CUSTOM_SCRIPT_INPUT_INVALID/);
     expect(getterCalls).toBe(0);
   });
+
+  it("enforces lexical scope, use-before-declare, and a no-shadowing policy", () => {
+    for (const source of [
+      "const value = later; const later = 1;",
+      "if (true) { const scoped = 1; } const leaked = scoped;",
+      "[1].filter((record) => true); const leaked = record;",
+      "let value = 1; if (true) { let value = 2; }",
+      "for (let index = 0; index < 2; index += 1) { if (true) { let index = 0; } }",
+    ]) expect(() => validate(source)).toThrow(/CUSTOM_SCRIPT_FORBIDDEN/);
+    expect(() => validate("const read = () => later; read(); const later = 1;"))
+      .toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*use before declaration/);
+    expect(() => validate("const read = () => later; const later = 1; read();")).not.toThrow();
+    expect(() => validate("const read = () => { const value = later; const later = 1; return value; }; read();"))
+      .toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*use before declaration/);
+    expect(() => validate("const value = read(); function read() { return 1; }")).not.toThrow();
+  });
+
+  it("allows ordinary colon and prose strings while rejecting actual composed CSS and selectors", () => {
+    expect(() => validate('const status = "Status" + ": ready"; const action = "go" + " home";')).not.toThrow();
+    expect(() => validate('const css = "color" + ": red";')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*css/i);
+    expect(() => validate('const selector = "div" + " .record";')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*selector/i);
+    expect(() => validate('const selector = "button" + " input";')).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*selector/i);
+  });
 });
 
 describe("reviewed templates pass the same AST gate", () => {
@@ -269,6 +333,22 @@ describe("reviewed templates pass the same AST gate", () => {
         inputs: [port("records", "mock-data", "visitor-records"), port("key", "control", "visitor-code"), port("field-1", "control", "visitor-name")],
         outputs: [port("updated", "mock-data", "updated-records"), port("view", "control", "records-table")],
         parameters: [{ name: "operation", value: "append" }, { name: "key-field", value: "code" }, { name: "field-1-name", value: "name" }, { name: "success-message", value: "追加成功" }],
+      },
+    },
+    {
+      id: "record-mutate", invocation: {
+        id: "update-record", kind: "template", template: "record-mutate", purpose: "更新记录",
+        inputs: [port("records", "mock-data", "visitor-records"), port("key", "local-state", "selected-code"), port("field-1", "control", "visitor-name")],
+        outputs: [port("updated", "mock-data", "updated-records"), port("view", "control", "records-table")],
+        parameters: [{ name: "operation", value: "update" }, { name: "key-field", value: "code" }, { name: "field-1-name", value: "name" }, { name: "success-message", value: "更新成功" }],
+      },
+    },
+    {
+      id: "record-mutate", invocation: {
+        id: "remove-record", kind: "template", template: "record-mutate", purpose: "移除记录",
+        inputs: [port("records", "mock-data", "visitor-records"), port("key", "control", "visitor-code")],
+        outputs: [port("updated", "mock-data", "updated-records"), port("view", "control", "records-table")],
+        parameters: [{ name: "operation", value: "remove" }, { name: "key-field", value: "code" }, { name: "success-message", value: "移除成功" }],
       },
     },
     {
