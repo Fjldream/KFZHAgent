@@ -63,7 +63,28 @@ const CreativeBuildEvidenceSchema = z.object({
     approvedAssets: z.array(VerifiedCreativeAssetSchema).max(64),
   }).strict()).max(5_000),
   verifiedAssets: z.array(VerifiedCreativeAssetSchema).max(256),
-}).strict();
+}).strict().superRefine((evidence, ctx) => {
+  const dictionary = new Map<string, typeof evidence.verifiedAssets[number]>();
+  evidence.verifiedAssets.forEach((asset, index) => {
+    if (dictionary.has(asset.assetId)) ctx.addIssue({ code: "custom", path: ["verifiedAssets", index, "assetId"], message: "duplicate verified asset id" });
+    else dictionary.set(asset.assetId, asset);
+  });
+  const used = new Set<string>();
+  evidence.stylesData.forEach((style, styleIndex) => {
+    const local = new Set<string>();
+    style.approvedAssets.forEach((asset, assetIndex) => {
+      if (local.has(asset.assetId)) ctx.addIssue({ code: "custom", path: ["stylesData", styleIndex, "approvedAssets", assetIndex], message: "duplicate style asset id" });
+      local.add(asset.assetId); used.add(asset.assetId);
+      const verified = dictionary.get(asset.assetId);
+      if (verified === undefined || stableJson(verified) !== stableJson(asset)) {
+        ctx.addIssue({ code: "custom", path: ["stylesData", styleIndex, "approvedAssets", assetIndex], message: "style asset facts differ from verified dictionary" });
+      }
+    });
+  });
+  evidence.verifiedAssets.forEach((asset, index) => {
+    if (!used.has(asset.assetId)) ctx.addIssue({ code: "custom", path: ["verifiedAssets", index], message: "unused verified asset" });
+  });
+});
 
 export const CreativeBuildArtifactSchema = z.object({
   schema: z.literal("kf-creative-build-artifact/v1"),
@@ -203,6 +224,18 @@ export const TrustedNativeMaterializationSchema = z.object({
   value.stylesData.forEach((style, index) => {
     if (controls.get(style.semanticControlId)?.instanceName !== style.instanceName) ctx.addIssue({ code: "custom", path: ["stylesData", index], message: "style provenance mismatch" });
   });
+  const assetFacts = new Map<string, VerifiedCreativeAsset>();
+  value.stylesData.forEach((style, styleIndex) => {
+    const local = new Set<string>();
+    style.approvedAssets.forEach((asset, assetIndex) => {
+      if (local.has(asset.assetId)) ctx.addIssue({ code: "custom", path: ["stylesData", styleIndex, "approvedAssets", assetIndex], message: "duplicate materialized asset id" });
+      local.add(asset.assetId);
+      const prior = assetFacts.get(asset.assetId);
+      if (prior !== undefined && stableJson(prior) !== stableJson(asset)) {
+        ctx.addIssue({ code: "custom", path: ["stylesData", styleIndex, "approvedAssets", assetIndex], message: "conflicting materialized asset facts" });
+      } else assetFacts.set(asset.assetId, asset);
+    });
+  });
   value.interactions.scripts.forEach((script, index) => {
     if (createHash("sha256").update(script.source).digest("hex") !== script.sourceHash) ctx.addIssue({ code: "custom", path: ["interactions", "scripts", index, "sourceHash"], message: "compiled script hash mismatch" });
   });
@@ -293,6 +326,19 @@ export function validateCreativeArtifactMaterializationProjection(
     ...(control.existingDeltas === undefined ? {} : { existingDeltas: control.existingDeltas }),
   }));
   if (stableJson(expectedControls) !== stableJson(actualControls)) throw new Error("CREATIVE_MATERIALIZATION_PROJECTION_MISMATCH: controls");
+  materialization.controls.forEach((control) => {
+    if (control.source !== "uploaded-existing") return;
+    const implementationControl = controls.find((candidate) => candidate.id === control.semanticControlId)!;
+    const candidates: Array<{ path: string; value: unknown }> = [
+      { path: "/x", value: implementationControl.geometry.x }, { path: "/y", value: implementationControl.geometry.y },
+      { path: "/width", value: implementationControl.geometry.width }, { path: "/height", value: implementationControl.geometry.height },
+      ...Object.entries(implementationControl.nativeProperties).map(([key, value]) => ({ path: `/${key}`, value })),
+      ...(implementationControl.content === undefined ? [] : [{ path: "/text", value: implementationControl.content }]),
+    ];
+    if (stableJson(control.existingDeltas) !== stableJson(candidates)) {
+      throw new Error(`CREATIVE_MATERIALIZATION_PROJECTION_MISMATCH: existing delta ${control.semanticControlId}`);
+    }
+  });
   const styleEvidence = new Map(artifact.evidence.stylesData.map((style) => [style.semanticControlId, style]));
   const expectedStyles = controls.map((control) => {
     const evidence = styleEvidence.get(control.id);

@@ -121,6 +121,7 @@ function expectRawBudgetFailure(value: unknown): void {
 describe("HMAC server plan authority", () => {
   it("does not expose a standalone raw creative trust issuer", () => {
     expect(moduleAuthorityExports).not.toHaveProperty("createTrustedCreativePayload");
+    expect(createHmacServerPlanAuthority(decodeServerPlanHmacKey(keyA))).not.toHaveProperty("creativePayloadIssuer");
   });
 
   it("rejects a plain object pretending to be a trusted creative payload", () => {

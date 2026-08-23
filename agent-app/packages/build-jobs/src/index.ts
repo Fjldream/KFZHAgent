@@ -9,11 +9,12 @@ export { BuildExecutor, BuildWorkerCrash } from "./job-executor.js";
 export { graphBuildIdempotencyKey, buildJobBelongsToConversation } from "./build-idempotency.js";
 export {
   createHmacServerPlanAuthority,
+  createHmacCreativeBuildFacade,
   decodeServerPlanHmacKey,
   type ServerPlanAuthority,
   type ServerPlanSignInput,
   type TrustedCreativePayloadHandle,
-  type TrustedCreativePayloadIssuer,
+  type ServerCreativeBuildFacade,
   createHmacModuleArtifactAuthority,
   readVerifiedAcceptedBlueprintArtifact,
   readVerifiedModuleCompilationArtifact,

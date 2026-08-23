@@ -129,12 +129,13 @@ describe("creative build contracts", () => {
     uploadedArtifact.evidence.pages[0]!.source = "uploaded-existing";
     const runtimeEvidence = uploadedArtifact.evidence.controls[0]!;
     runtimeEvidence.source = "uploaded-existing";
-    Object.assign(runtimeEvidence, { nativeGuid: "native-button-guid", existingDeltas: [{ path: "/x", value: 10 }, { path: "/width", value: 120 }] });
+    const completeDeltas = [{ path: "/x", value: 10 }, { path: "/y", value: 10 }, { path: "/width", value: 120 }, { path: "/height", value: 40 }, { path: "/text", value: "打开" }];
+    Object.assign(runtimeEvidence, { nativeGuid: "native-button-guid", existingDeltas: completeDeltas });
     uploadedArtifact.hashes.evidenceHash = canonicalServerHash(uploadedArtifact.evidence);
     const uploadedMaterialization = TrustedNativeMaterializationSchema.parse(materialization());
     uploadedMaterialization.pages[0]!.source = "uploaded-existing";
     uploadedMaterialization.controls[0]!.source = "uploaded-existing";
-    Object.assign(uploadedMaterialization.controls[0]!, { nativeGuid: "native-button-guid", existingDeltas: [{ path: "/x", value: 10 }, { path: "/width", value: 120 }] });
+    Object.assign(uploadedMaterialization.controls[0]!, { nativeGuid: "native-button-guid", existingDeltas: structuredClone(completeDeltas) });
     uploadedMaterialization.creativeArtifactHash = canonicalCreativeBuildArtifactHash(uploadedArtifact);
     expect(() => validateCreativeArtifactMaterializationProjection(uploadedArtifact, uploadedMaterialization)).not.toThrow();
     const forgedGuid = structuredClone(uploadedMaterialization); forgedGuid.controls[0]!.nativeGuid = "substituted-guid";
@@ -151,6 +152,41 @@ describe("creative build contracts", () => {
     expect(() => validateCreativeArtifactMaterializationProjection(assetArtifact, assetMaterialization)).not.toThrow();
     const substituted = structuredClone(assetMaterialization); substituted.stylesData[0]!.approvedAssets[0]!.approvedAsset.sizeBytes += 1;
     expect(() => validateCreativeArtifactMaterializationProjection(assetArtifact, substituted)).toThrow(/styles-data|approved assets/);
+  });
+
+  it("independently rejects synchronized forbidden deltas and duplicate asset dictionaries", () => {
+    const synchronizedArtifact = structuredClone(CreativeBuildArtifactSchema.parse(artifact()));
+    synchronizedArtifact.evidence.pages[0]!.source = "uploaded-existing";
+    Object.assign(synchronizedArtifact.evidence.controls[0]!, {
+      source: "uploaded-existing", nativeGuid: "native-button-guid", existingDeltas: [{ path: "/forbidden", value: true }],
+    });
+    synchronizedArtifact.hashes.evidenceHash = canonicalServerHash(synchronizedArtifact.evidence);
+    const synchronizedMaterialization = TrustedNativeMaterializationSchema.parse(materialization());
+    synchronizedMaterialization.pages[0]!.source = "uploaded-existing";
+    Object.assign(synchronizedMaterialization.controls[0]!, {
+      source: "uploaded-existing", nativeGuid: "native-button-guid", existingDeltas: [{ path: "/forbidden", value: true }],
+    });
+    synchronizedMaterialization.creativeArtifactHash = canonicalCreativeBuildArtifactHash(synchronizedArtifact);
+    expect(() => validateCreativeArtifactMaterializationProjection(synchronizedArtifact, synchronizedMaterialization)).toThrow(/existing delta/);
+
+    const synchronizedMutations = [
+      [{ path: "/x", value: 10 }, { path: "/y", value: 10 }, { path: "/width", value: 120 }, { path: "/height", value: 40 }],
+      [{ path: "/x", value: 999 }, { path: "/y", value: 10 }, { path: "/width", value: 120 }, { path: "/height", value: 40 }, { path: "/text", value: "打开" }],
+      [{ path: "/x", value: 10 }, { path: "/x", value: 10 }, { path: "/y", value: 10 }, { path: "/width", value: 120 }, { path: "/height", value: 40 }, { path: "/text", value: "打开" }],
+    ];
+    for (const deltas of synchronizedMutations) {
+      const evidenceMutation = structuredClone(synchronizedArtifact); evidenceMutation.evidence.controls[0]!.existingDeltas = deltas;
+      evidenceMutation.hashes.evidenceHash = canonicalServerHash(evidenceMutation.evidence);
+      const materializationMutation = structuredClone(synchronizedMaterialization); materializationMutation.controls[0]!.existingDeltas = structuredClone(deltas);
+      materializationMutation.creativeArtifactHash = canonicalCreativeBuildArtifactHash(evidenceMutation);
+      expect(() => validateCreativeArtifactMaterializationProjection(evidenceMutation, materializationMutation)).toThrow(/existing delta/);
+    }
+
+    const duplicate = structuredClone(CreativeBuildArtifactSchema.parse(artifact()));
+    const asset = { assetId: "asset-1", approvedAsset: { workspaceAssetId: "00000000-0000-4000-8000-000000000001", targetPath: `project/res/images/${"a".repeat(64)}.png`, mediaType: "image/png" as const, sha256: "a".repeat(64), sizeBytes: 10 } };
+    duplicate.evidence.verifiedAssets = [asset, structuredClone(asset)];
+    duplicate.hashes.evidenceHash = canonicalServerHash(duplicate.evidence);
+    expect(CreativeBuildArtifactSchema.safeParse(duplicate).success).toBe(false);
   });
 
   it("binds a complete creative payload into envelope validation and signing bytes while keeping legacy compatible", () => {

@@ -1,19 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { canonicalServerHash, workspaceAssetIdToModelId, type SolutionImplementationPlan, type UIImplementationSpecV2 } from "@kf/contracts";
-import { compileCreativeUIImplementationV2 } from "./ui-implementation-v2-compiler.js";
+import { createCreativeUIImplementationV2Compiler } from "./ui-implementation-v2-compiler.js";
 import { compileClientProject } from "../compile/client-compiler.js";
 import { inspectClientProject } from "../inspect/client-inspector.js";
 import { attachRuntimeCorrelation, verifyExistingRuntimeCorrelation } from "./runtime-correlation.js";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { createHmacServerPlanAuthority } from "@kf/build-jobs";
+import { createHmacCreativeBuildFacade, createHmacServerPlanAuthority } from "@kf/build-jobs";
 import { compileInteractions } from "../interaction/interaction-compiler.js";
 import { createDefaultModuleRegistry } from "../modules/module-registry.js";
 import { solutionModuleRegistryHash } from "../solution-compile/solution-provenance.js";
 
 const theme = { background: "#fff", surface: "#fff", primary: "#123456", accent: "#654321", textPrimary: "#111", textSecondary: "#555", fontFamily: "Inter", spacingUnit: 8, radiusScale: { small: 4, medium: 8, large: 16 } } as const;
 const intent = { importance: "primary" as const, visualWeight: 3, readingOrder: 0, density: "comfortable" as const, groupWith: [], width: { mode: "fixed" as const, value: 120 }, height: { mode: "fixed" as const, value: 40 }, align: "start" as const };
-const authority = createHmacServerPlanAuthority(Buffer.alloc(32, 0x41));
+const creativeFacade = createHmacCreativeBuildFacade(Buffer.alloc(32, 0x41), createCreativeUIImplementationV2Compiler);
+const authority = creativeFacade.authority;
+const compiler = creativeFacade.compiler.compiler;
+const assetResolver = creativeFacade.compiler.assetProofResolver;
 
 function input() {
   const blueprint = {
@@ -64,7 +67,7 @@ function input() {
   const compiled = compileInteractions({ blueprint, plan: semanticPlan, implementation });
   if (compiled.diagnostics.errors.length > 0 || compiled.diagnostics.requests.length > 0) throw new Error(JSON.stringify(compiled.diagnostics));
   implementation = structuredClone(compiled.implementation);
-  return { workspaceId: "workspace", baseRevisionId: "revision", blueprint, candidateBundle, semanticPlan, implementation, compilerVersion: "1.0.0", evidenceVersion: "1.0.0", approvedAssets: [] as unknown[], trustedPayloadIssuer: authority.creativePayloadIssuer };
+  return { workspaceId: "workspace", baseRevisionId: "revision", blueprint, candidateBundle, semanticPlan, implementation, compilerVersion: "1.0.0", evidenceVersion: "1.0.0" };
 }
 
 function reattachCorrelation(source: ReturnType<typeof input>): void {
@@ -91,14 +94,14 @@ function compileFixtureInteractions(source: ReturnType<typeof input>): void {
 }
 
 function cloneInput(source: ReturnType<typeof input>): ReturnType<typeof input> {
-  const { trustedPayloadIssuer, ...plain } = source;
-  return { ...structuredClone(plain), trustedPayloadIssuer };
+  return structuredClone(source);
 }
 
 describe("creative UI implementation v2 compiler", () => {
   it("lowers pages before parent-first controls with exact dimensions and runtime identities", () => {
+    expect(compiler).not.toHaveProperty("verifyApprovedAssets");
     const source = input(); const before = cloneInput(source);
-    const result = compileCreativeUIImplementationV2(source);
+    const result = compiler.compile(source);
     const instanceById = new Map(source.implementation.runtimeCorrelation!.controls.map((entry) => [entry.semanticControlId, entry.instanceName]));
     expect(source).toEqual(before);
     expect(result.materialization.pages.map((page) => [page.semanticPageId, page.width, page.height])).toEqual([["detail", 1280, 760], ["home", 1440, 900]]);
@@ -122,46 +125,54 @@ describe("creative UI implementation v2 compiler", () => {
   });
 
   it("is deterministic and rejects missing correlation, unapproved assets, proxies and aliases", () => {
-    const first = input(); expect(compileCreativeUIImplementationV2(first)).toEqual(compileCreativeUIImplementationV2(cloneInput(first)));
+    const first = input(); expect(compiler.compile(first)).toEqual(compiler.compile(cloneInput(first)));
     const missing = input(); delete missing.implementation.runtimeCorrelation;
-    expect(() => compileCreativeUIImplementationV2(missing)).toThrow(/RUNTIME_CORRELATION_REQUIRED/);
+    expect(() => compiler.compile(missing)).toThrow(/RUNTIME_CORRELATION_REQUIRED/);
     const asset = input(); const modelId = workspaceAssetIdToModelId("00000000-0000-4000-8000-000000000001");
     const assetPage = asset.implementation.pages[0]!; if (assetPage.compatibility !== "native") throw new Error("native fixture required");
     assetPage.controls[0]!.assetIds = [modelId];
-    expect(() => compileCreativeUIImplementationV2(asset)).toThrow(/ASSET_NOT_APPROVED/);
+    expect(() => compiler.compile(asset)).toThrow(/ASSET_NOT_APPROVED/);
     let trapped = false; const proxy = new Proxy(input(), { ownKeys() { trapped = true; return []; } });
-    expect(() => compileCreativeUIImplementationV2(proxy)).toThrow(/PROXY_FORBIDDEN/); expect(trapped).toBe(false);
+    expect(() => compiler.compile(proxy)).toThrow(/PROXY_FORBIDDEN/); expect(trapped).toBe(false);
     let nestedTrap = false; const nestedProxy = input(); nestedProxy.implementation.theme = new Proxy(nestedProxy.implementation.theme, { ownKeys() { nestedTrap = true; return []; } });
-    expect(() => compileCreativeUIImplementationV2(nestedProxy)).toThrow(/PROXY_FORBIDDEN/); expect(nestedTrap).toBe(false);
+    expect(() => compiler.compile(nestedProxy)).toThrow(/PROXY_FORBIDDEN/); expect(nestedTrap).toBe(false);
+    let rawIssuerGetter = false; const rawIssuer = input() as ReturnType<typeof input> & { trustedPayloadIssuer?: unknown };
+    Object.defineProperty(rawIssuer, "trustedPayloadIssuer", { enumerable: true, get() { rawIssuerGetter = true; return {}; } });
+    expect(() => compiler.compile(rawIssuer)).toThrow(/UNKNOWN_FIELD/); expect(rawIssuerGetter).toBe(false);
+    let factoryTrap = false; const proxyIssuer = new Proxy({}, { getPrototypeOf() { factoryTrap = true; return Object.prototype; }, ownKeys() { factoryTrap = true; return []; } });
+    expect(() => createCreativeUIImplementationV2Compiler(proxyIssuer as never)).toThrow(/ISSUER.*PROXY|PROXY.*ISSUER/); expect(factoryTrap).toBe(false);
+    let issuerGetter = false; const getterIssuer = {};
+    Object.defineProperty(getterIssuer, "issue", { enumerable: true, get() { issuerGetter = true; return () => undefined; } });
+    expect(() => createCreativeUIImplementationV2Compiler(getterIssuer as never)).toThrow(/ISSUER.*ACCESSOR|ACCESSOR.*ISSUER/); expect(issuerGetter).toBe(false);
     let getterRan = false; const accessor = input(); Object.defineProperty(accessor.blueprint, "displayName", { enumerable: true, get() { getterRan = true; return "bad"; } });
-    expect(() => compileCreativeUIImplementationV2(accessor)).toThrow(/ACCESSOR_FORBIDDEN/); expect(getterRan).toBe(false);
+    expect(() => compiler.compile(accessor)).toThrow(/ACCESSOR_FORBIDDEN/); expect(getterRan).toBe(false);
     const nonPlain = Object.assign(Object.create({ inherited: true }) as ReturnType<typeof input>, input());
-    expect(() => compileCreativeUIImplementationV2(nonPlain)).toThrow(/NON_PLAIN|INVALID/);
+    expect(() => compiler.compile(nonPlain)).toThrow(/NON_PLAIN|INVALID/);
     const cyclic = input(); (cyclic.blueprint as unknown as Record<string, unknown>)["cycle"] = cyclic.blueprint;
-    expect(() => compileCreativeUIImplementationV2(cyclic)).toThrow(/CYCLE_FORBIDDEN/);
+    expect(() => compiler.compile(cyclic)).toThrow(/CYCLE_FORBIDDEN/);
     const deep = input(); let cursor = deep.blueprint as unknown as Record<string, unknown>; for (let index = 0; index < 100; index += 1) { const next = {}; cursor[`deep${index}`] = next; cursor = next; }
-    expect(() => compileCreativeUIImplementationV2(deep)).toThrow(/BUDGET_EXCEEDED/);
+    expect(() => compiler.compile(deep)).toThrow(/BUDGET_EXCEEDED/);
     const alias = input(); alias.implementation.theme = alias.semanticPlan.theme;
-    expect(() => compileCreativeUIImplementationV2(alias)).toThrow(/ALIAS/);
+    expect(() => compiler.compile(alias)).toThrow(/ALIAS/);
     const unsupported = input(); const unsupportedPage = unsupported.implementation.pages[0]!; if (unsupportedPage.compatibility !== "native") throw new Error("native fixture required");
     unsupportedPage.controls[0]!.capabilityId = "unknown.99";
     const unsupportedRoot = unsupported.semanticPlan.pages[0]!.root; if (unsupportedRoot.kind !== "layout" || unsupportedRoot.children[0]!.kind !== "control") throw new Error("control fixture required");
     unsupportedRoot.children[0]!.capabilityId = "unknown.99"; unsupported.implementation.sourceSolutionPlanHash = canonicalServerHash(unsupported.semanticPlan);
-    expect(() => compileCreativeUIImplementationV2(unsupported)).toThrow(/CAPABILITY_UNSUPPORTED|RUNTIME_PREFIX_UNSUPPORTED/);
+    expect(() => compiler.compile(unsupported)).toThrow(/CAPABILITY_UNSUPPORTED|RUNTIME_PREFIX_UNSUPPORTED/);
     const forgedStyle = input(); const forgedPage = forgedStyle.implementation.pages[0]!; if (forgedPage.compatibility !== "native") throw new Error("native fixture required");
     forgedPage.controls[0]!.compiledStyle!.warnings.push({ code: "FORGED_STYLE", message: "伪造" });
-    expect(() => compileCreativeUIImplementationV2(forgedStyle)).toThrow(/COMPILED_STYLE_MISMATCH/);
+    expect(() => compiler.compile(forgedStyle)).toThrow(/COMPILED_STYLE_MISMATCH/);
     const forgedRole = input(); forgedRole.implementation.compiledRoleStyles.content!.declarations.textColor = "#ffffff";
-    expect(() => compileCreativeUIImplementationV2(forgedRole)).toThrow(/COMPILED_ROLE_STYLE_MISMATCH/);
+    expect(() => compiler.compile(forgedRole)).toThrow(/COMPILED_ROLE_STYLE_MISMATCH/);
     const forgedRuntime = input(); forgedRuntime.implementation.runtimeCorrelation!.controls.find((entry) => entry.semanticControlId === "open")!.instanceName = "Button999";
     forgedRuntime.implementation.compiledActions[0]!.ownerInstanceName = "Button999";
     const forgedRuntimePage = forgedRuntime.implementation.pages[0]!; if (forgedRuntimePage.compatibility !== "native") throw new Error("native fixture required");
     forgedRuntimePage.controls[0]!.eventBindings[0]!.ownerInstanceName = "Button999";
-    expect(() => compileCreativeUIImplementationV2(forgedRuntime)).toThrow(/RUNTIME_CORRELATION_PROVENANCE/);
+    expect(() => compiler.compile(forgedRuntime)).toThrow(/RUNTIME_CORRELATION_PROVENANCE/);
     const forgedAction = input(); const forgedNavigate = forgedAction.implementation.compiledActions[0]!;
     if (forgedNavigate.kind !== "navigate-page") throw new Error("navigate fixture required");
     forgedNavigate.targetPageGuid = forgedAction.implementation.runtimeCorrelation!.pages.find((entry) => entry.semanticPageId === "home")!.pageGuid;
-    expect(() => compileCreativeUIImplementationV2(forgedAction)).toThrow(/INTERACTION_PROVENANCE/);
+    expect(() => compiler.compile(forgedAction)).toThrow(/INTERACTION_PROVENANCE/);
   });
 
   it("preserves exact opaque uploaded page identity and emits allowlisted semantic deltas only", async () => {
@@ -198,11 +209,15 @@ describe("creative UI implementation v2 compiler", () => {
       pages: [{ source: "uploaded-existing", semanticPageId: "home", pageGuid: "7UJ0lvKq8Q708A6Zl0C02" }, { source: "uploaded-existing", semanticPageId: "detail", pageGuid: detailGuid }],
       controls: [{ source: "uploaded-existing", semanticControlId: "open", instanceName: "Button1" }, { source: "uploaded-existing", semanticControlId: "root", instanceName: "Layout1" }, { source: "uploaded-existing", semanticControlId: "grid", instanceName: "Datagrid1" }],
     } });
-    const result = compileCreativeUIImplementationV2({ ...source, verifiedExisting: handle });
+    const result = compiler.compile({ ...source, verifiedExisting: handle });
     expect(result.materialization.pages.find((page) => page.semanticPageId === "home")?.pageGuid).toBe("7UJ0lvKq8Q708A6Zl0C02");
     expect(result.plan.operations.every((operation) => operation.op === "update")).toBe(true);
     expect(result.plan.operations.map((operation) => operation.entityId)).toEqual(["detail", "home", "grid", "root", "open"]);
-    expect(result.materialization.controls.find((control) => control.semanticControlId === "grid")).toMatchObject({ nativeGuid: expect.any(String), existingDeltas: expect.any(Array) });
+    const deltaPaths = (id: string) => result.materialization.controls.find((control) => control.semanticControlId === id)?.existingDeltas?.map((delta) => delta.path);
+    expect(deltaPaths("grid")).toEqual(["/x", "/y", "/width", "/height", "/pagination"]);
+    expect(deltaPaths("root")).toEqual(["/x", "/y", "/width", "/height"]);
+    expect(deltaPaths("open")).toEqual(["/x", "/y", "/width", "/height", "/text"]);
+    expect(result.materialization.controls.find((control) => control.semanticControlId === "grid")?.nativeGuid).toEqual(expect.any(String));
   });
 
   it("materializes exact Datagrid data, onClickRow evidence and compiled SetData script", () => {
@@ -215,7 +230,7 @@ describe("creative UI implementation v2 compiler", () => {
     source.semanticPlan.actions.push({ id: "refresh-grid", kind: "run-script", scriptId: "refresh", afterActionIds: [], journeyStepRefs: [] });
     compileFixtureInteractions(source);
     const scriptSource = source.implementation.compiledScripts[0]!.source;
-    const result = compileCreativeUIImplementationV2(source);
+    const result = compiler.compile(source);
     expect(result.materialization.interactions.eventBindings).toContainEqual(expect.objectContaining({ ownerInstanceName: datagridName, kfEvent: "onClickRow", linkId: 200024 }));
     expect(result.materialization.interactions.scripts[0]).toMatchObject({ ownerInstanceName: datagridName, source: scriptSource });
     expect(result.materialization.stylesData.find((entry) => entry.semanticControlId === "grid")?.dataBinding?.records).toEqual([{ id: "1" }]);
@@ -226,8 +241,8 @@ describe("creative UI implementation v2 compiler", () => {
     const assetId = workspaceAssetIdToModelId(workspaceAssetId); const sha256 = "a".repeat(64);
     const page = source.implementation.pages[0]!; if (page.compatibility !== "native") throw new Error("native fixture required");
     page.controls[0]!.assetIds = [assetId];
-    source.approvedAssets.push({ assetId, approvedAsset: { workspaceAssetId, targetPath: `project/res/images/${sha256}.png`, mediaType: "image/png", sha256, sizeBytes: 100 } });
-    const result = compileCreativeUIImplementationV2(source);
+    const assetFacts = { assetId, approvedAsset: { workspaceAssetId, targetPath: `project/res/images/${sha256}.png`, mediaType: "image/png" as const, sha256, sizeBytes: 100 } };
+    const result = compiler.compile({ ...source, verifiedAssets: assetResolver.attestResolvedAssets({ workspaceId: "workspace", assets: [assetFacts] }) });
     expect(result.verifiedAssets).toHaveLength(1);
     expect(result.plan.assetBindings).toBeUndefined();
     expect(result.materialization.stylesData.find((style) => style.semanticControlId === "open")?.approvedAssets[0]?.approvedAsset.sha256).toBe(sha256);
@@ -239,12 +254,24 @@ describe("creative UI implementation v2 compiler", () => {
     if (imageRoot.kind !== "control") throw new Error("control fixture required");
     imageRoot.capabilityId = "image"; delete imageRoot.mockDataId;
     image.implementation.sourceSolutionPlanHash = canonicalServerHash(image.semanticPlan);
-    image.approvedAssets.push({ assetId, approvedAsset: { workspaceAssetId, targetPath: `project/res/images/${sha256}.png`, mediaType: "image/png", sha256, sizeBytes: 100 } });
     reattachCorrelation(image);
-    expect(compileCreativeUIImplementationV2(image).plan.assetBindings?.[0]).toMatchObject({ assetId, entityId: "grid", controlId: "grid" });
-    const forged = input(); forged.approvedAssets.push({ assetId, approvedAsset: { workspaceAssetId: "00000000-0000-4000-8000-000000000002", targetPath: `project/res/images/${sha256}.png`, mediaType: "image/png", sha256, sizeBytes: 100 } });
-    expect(() => compileCreativeUIImplementationV2(forged)).toThrow(/ASSET_INVALID/);
-    const unused = input(); unused.approvedAssets.push({ assetId, approvedAsset: { workspaceAssetId, targetPath: `project/res/images/${sha256}.png`, mediaType: "image/png", sha256, sizeBytes: 100 } });
-    expect(() => compileCreativeUIImplementationV2(unused)).toThrow(/ASSET_UNUSED/);
+    expect(compiler.compile({ ...image, verifiedAssets: assetResolver.attestResolvedAssets({ workspaceId: "workspace", assets: [assetFacts] }) }).plan.assetBindings?.[0])
+      .toMatchObject({ assetId, entityId: "grid", controlId: "grid" });
+    const forgedFacts = { assetId, approvedAsset: { ...assetFacts.approvedAsset, workspaceAssetId: "00000000-0000-4000-8000-000000000002" } };
+    expect(() => assetResolver.attestResolvedAssets({ workspaceId: "workspace", assets: [forgedFacts] })).toThrow(/ASSET_INVALID/);
+    expect(() => compiler.compile({ ...input(), verifiedAssets: assetResolver.attestResolvedAssets({ workspaceId: "workspace", assets: [assetFacts] }) })).toThrow(/ASSET_UNUSED/);
+    expect(() => assetResolver.attestResolvedAssets({ workspaceId: "workspace", assets: [assetFacts, structuredClone(assetFacts)] })).toThrow(/ASSET_INVALID/);
+    const conflicting = structuredClone(assetFacts); conflicting.approvedAsset.sizeBytes += 1;
+    expect(() => assetResolver.attestResolvedAssets({ workspaceId: "workspace", assets: [assetFacts, conflicting] })).toThrow(/ASSET_INVALID/);
+    let proxyTrap = false; const assetProxy = new Proxy([assetFacts], { ownKeys() { proxyTrap = true; return []; } });
+    expect(() => assetResolver.attestResolvedAssets(assetProxy as never)).toThrow(/PROXY/); expect(proxyTrap).toBe(false);
+    let getterTrap = false; const getterAsset = structuredClone(assetFacts);
+    Object.defineProperty(getterAsset, "assetId", { enumerable: true, get() { getterTrap = true; return assetId; } });
+    expect(() => assetResolver.attestResolvedAssets({ workspaceId: "workspace", assets: [getterAsset] })).toThrow(/ACCESSOR/); expect(getterTrap).toBe(false);
+    const otherFacade = createHmacCreativeBuildFacade(Buffer.alloc(32, 0x42), createCreativeUIImplementationV2Compiler);
+    const foreignProof = otherFacade.compiler.assetProofResolver.attestResolvedAssets({ workspaceId: "workspace", assets: [assetFacts] });
+    expect(() => compiler.compile({ ...source, verifiedAssets: foreignProof })).toThrow(/ASSET_PROOF_REQUIRED/);
+    const wrongWorkspace = assetResolver.attestResolvedAssets({ workspaceId: "other-workspace", assets: [assetFacts] });
+    expect(() => compiler.compile({ ...source, verifiedAssets: wrongWorkspace })).toThrow(/ASSET_PROOF.*BINDING|BINDING.*ASSET_PROOF/);
   });
 });

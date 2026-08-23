@@ -40,7 +40,7 @@ declare const trustedCreativePayloadBrand: unique symbol;
 export interface TrustedCreativePayloadHandle { readonly [trustedCreativePayloadBrand]: true }
 const creativePayloads = new WeakMap<object, Readonly<{ authorityIdentity: object; planHash: string; artifact: CreativeBuildArtifact; materialization: TrustedNativeMaterialization }>>();
 
-export interface TrustedCreativePayloadIssuer {
+interface TrustedCreativePayloadIssuer {
   issue(input: {
     readonly plan: InternalChangePlan;
     readonly artifact: CreativeBuildArtifact;
@@ -81,9 +81,13 @@ function deepFreeze<T>(value: T): T {
 }
 
 export interface ServerPlanAuthority {
-  readonly creativePayloadIssuer: TrustedCreativePayloadIssuer;
   sign(input: ServerPlanSignInput): ServerPlanEnvelope;
   verify(input: unknown, expected?: ServerPlanEnvelopeExpectations): ServerPlanEnvelope;
+}
+
+export interface ServerCreativeBuildFacade<TCompiler> {
+  readonly authority: ServerPlanAuthority;
+  readonly compiler: TCompiler;
 }
 
 /** Same server HMAC key, with discriminator-prefixed bytes to prevent cross-artifact replay. */
@@ -206,7 +210,10 @@ export function decodeServerPlanHmacKey(raw: string | undefined): Uint8Array {
   return key;
 }
 
-export function createHmacServerPlanAuthority(key: Uint8Array): ServerPlanAuthority {
+function createHmacServerPlanAuthorityParts(key: Uint8Array): {
+  authority: ServerPlanAuthority;
+  issuer: TrustedCreativePayloadIssuer;
+} {
   if (key.byteLength < 32) throw new Error("server plan HMAC key must contain at least 32 bytes");
   const ownedKey = Buffer.from(key);
   const authorityIdentity = Object.freeze(Object.create(null)) as object;
@@ -217,8 +224,7 @@ export function createHmacServerPlanAuthority(key: Uint8Array): ServerPlanAuthor
     .update(canonicalServerPlanSigningBytes(envelope))
     .digest();
 
-  return Object.freeze({
-    creativePayloadIssuer,
+  const authority: ServerPlanAuthority = Object.freeze({
     sign(input: ServerPlanSignInput): ServerPlanEnvelope {
       const creative = input.creative === undefined ? undefined : creativePayloads.get(input.creative);
       if (input.creative !== undefined && creative === undefined) throw new Error("UNTRUSTED_CREATIVE_PAYLOAD");
@@ -251,4 +257,18 @@ export function createHmacServerPlanAuthority(key: Uint8Array): ServerPlanAuthor
       return validateServerPlanEnvelopeData(parsed, expected);
     },
   });
+  return Object.freeze({ authority, issuer: creativePayloadIssuer });
+}
+
+export function createHmacServerPlanAuthority(key: Uint8Array): ServerPlanAuthority {
+  return createHmacServerPlanAuthorityParts(key).authority;
+}
+
+/** Server bootstrap composition: the issuer is closure-injected and never exposed by the returned authority. */
+export function createHmacCreativeBuildFacade<TCompiler>(
+  key: Uint8Array,
+  bindCompiler: (issuer: TrustedCreativePayloadIssuer) => TCompiler,
+): ServerCreativeBuildFacade<TCompiler> {
+  const { authority, issuer } = createHmacServerPlanAuthorityParts(key);
+  return Object.freeze({ authority, compiler: bindCompiler(issuer) });
 }

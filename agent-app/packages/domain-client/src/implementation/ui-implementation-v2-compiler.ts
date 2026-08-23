@@ -25,7 +25,7 @@ import {
   type UIImplementationSpecV2,
   type VerifiedCreativeAsset,
 } from "@kf/contracts";
-import type { TrustedCreativePayloadHandle, TrustedCreativePayloadIssuer } from "@kf/build-jobs";
+import type { TrustedCreativePayloadHandle } from "@kf/build-jobs";
 import { getControlCapability } from "../style/control-capability-registry.js";
 import { compileResolvedStyle } from "../style/style-engine.js";
 import { resolveStyle } from "../style/theme-resolver.js";
@@ -48,9 +48,32 @@ export interface CompileCreativeUIImplementationV2Input {
   readonly implementation: unknown;
   readonly compilerVersion: string;
   readonly evidenceVersion: string;
-  readonly approvedAssets: readonly unknown[];
-  readonly trustedPayloadIssuer: TrustedCreativePayloadIssuer;
+  readonly verifiedAssets?: VerifiedCreativeAssetProofHandle;
   readonly verifiedExisting?: VerifiedExistingRuntimeCorrelationHandle;
+}
+
+declare const verifiedCreativeAssetProofBrand: unique symbol;
+export interface VerifiedCreativeAssetProofHandle { readonly [verifiedCreativeAssetProofBrand]: true }
+
+export interface CreativeUIImplementationV2Compiler {
+  compile(input: CompileCreativeUIImplementationV2Input): CreativeUIImplementationV2CompileResult;
+}
+
+export interface CreativeAssetProofResolver {
+  attestResolvedAssets(input: { readonly workspaceId: string; readonly assets: unknown }): VerifiedCreativeAssetProofHandle;
+}
+
+export interface CreativeUIImplementationV2CompilerBundle {
+  readonly compiler: CreativeUIImplementationV2Compiler;
+  readonly assetProofResolver: CreativeAssetProofResolver;
+}
+
+interface ServerScopedCreativePayloadIssuer {
+  issue(input: {
+    readonly plan: InternalChangePlan;
+    readonly artifact: CreativeBuildArtifact;
+    readonly materialization: TrustedNativeMaterialization;
+  }): TrustedCreativePayloadHandle;
 }
 
 export interface CreativeUIImplementationV2CompileResult {
@@ -111,26 +134,25 @@ function safeClone(input: unknown): unknown {
   return clone(input, 0);
 }
 
-function rootValues(input: unknown): { plain: Record<string, unknown>; handle?: VerifiedExistingRuntimeCorrelationHandle; issuer: TrustedCreativePayloadIssuer } {
+function rootValues(input: unknown): { plain: Record<string, unknown>; existing?: VerifiedExistingRuntimeCorrelationHandle; assets?: VerifiedCreativeAssetProofHandle } {
   if (typeof input !== "object" || input === null || Array.isArray(input) || utilTypes.isProxy(input)) fail("CREATIVE_INPUT_PROXY_FORBIDDEN", "input must be a plain non-proxy object");
   const prototype: unknown = Object.getPrototypeOf(input) as unknown;
   if (prototype !== Object.prototype && prototype !== null) fail("CREATIVE_INPUT_NON_PLAIN", "input must have a plain prototype");
-  const allowed = new Set(["workspaceId", "baseRevisionId", "blueprint", "candidateBundle", "semanticPlan", "implementation", "compilerVersion", "evidenceVersion", "approvedAssets", "verifiedExisting", "trustedPayloadIssuer"]);
+  const allowed = new Set(["workspaceId", "baseRevisionId", "blueprint", "candidateBundle", "semanticPlan", "implementation", "compilerVersion", "evidenceVersion", "verifiedAssets", "verifiedExisting"]);
   const descriptors = Object.getOwnPropertyDescriptors(input);
   const keys = Reflect.ownKeys(input);
-  if (keys.some((key) => typeof key !== "string" || !allowed.has(key)) || keys.length < 10 || keys.length > 11) fail("CREATIVE_INPUT_UNKNOWN_FIELD", "invalid input keys");
+  if (keys.some((key) => typeof key !== "string" || !allowed.has(key)) || keys.length < 8 || keys.length > 10) fail("CREATIVE_INPUT_UNKNOWN_FIELD", "invalid input keys");
   const plain: Record<string, unknown> = {};
-  let handle: VerifiedExistingRuntimeCorrelationHandle | undefined;
-  let issuer: TrustedCreativePayloadIssuer | undefined;
+  let existing: VerifiedExistingRuntimeCorrelationHandle | undefined;
+  let assets: VerifiedCreativeAssetProofHandle | undefined;
   for (const key of keys) {
     if (typeof key !== "string") continue;
     const descriptor = descriptors[key]; if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) fail("CREATIVE_INPUT_ACCESSOR_FORBIDDEN", key);
-    if (key === "verifiedExisting") handle = descriptor.value as VerifiedExistingRuntimeCorrelationHandle;
-    else if (key === "trustedPayloadIssuer") issuer = descriptor.value as TrustedCreativePayloadIssuer;
+    if (key === "verifiedExisting") existing = descriptor.value as VerifiedExistingRuntimeCorrelationHandle;
+    else if (key === "verifiedAssets") assets = descriptor.value as VerifiedCreativeAssetProofHandle;
     else plain[key] = descriptor.value;
   }
-  if (issuer === undefined || typeof issuer !== "object" || typeof issuer.issue !== "function") fail("CREATIVE_TRUST_ISSUER_REQUIRED", "server authority issuer is required");
-  return { plain: safeClone(plain) as Record<string, unknown>, ...(handle === undefined ? {} : { handle }), issuer };
+  return { plain: safeClone(plain) as Record<string, unknown>, ...(existing === undefined ? {} : { existing }), ...(assets === undefined ? {} : { assets }) };
 }
 
 function exactString(value: unknown, field: string): string {
@@ -178,8 +200,12 @@ function deepFreeze<T>(input: T): T {
   return input;
 }
 
-export function compileCreativeUIImplementationV2(input: CompileCreativeUIImplementationV2Input): CreativeUIImplementationV2CompileResult {
-  const { plain, handle, issuer } = rootValues(input);
+function compileCreativeUIImplementationV2(
+  input: CompileCreativeUIImplementationV2Input,
+  issuer: ServerScopedCreativePayloadIssuer,
+  verifiedAssetPayloads: WeakMap<object, Readonly<{ workspaceId: string; assets: readonly VerifiedCreativeAsset[] }>>,
+): CreativeUIImplementationV2CompileResult {
+  const { plain, existing: handle, assets: assetProof } = rootValues(input);
   const workspaceId = exactString(plain.workspaceId, "workspaceId");
   const baseRevisionId = exactString(plain.baseRevisionId, "baseRevisionId");
   const blueprint = CustomerSolutionBlueprintSchema.parse(plain.blueprint);
@@ -226,9 +252,10 @@ export function compileCreativeUIImplementationV2(input: CompileCreativeUIImplem
   }
   const compilerVersion = exactString(plain.compilerVersion, "compilerVersion");
   const evidenceVersion = exactString(plain.evidenceVersion, "evidenceVersion");
-  if (!Array.isArray(plain.approvedAssets)) fail("CREATIVE_INPUT_INVALID", "approvedAssets");
-  const verifiedAssets = plain.approvedAssets.map((entry) => VerifiedCreativeAssetSchema.parse(entry))
-    .sort((left, right) => compareCreativeIdentifiers(left.assetId, right.assetId));
+  const assetPayload = assetProof === undefined ? undefined : verifiedAssetPayloads.get(assetProof);
+  if (assetProof !== undefined && assetPayload === undefined) fail("CREATIVE_ASSET_PROOF_REQUIRED", "assets were not verified by this compiler facade");
+  if (assetPayload !== undefined && assetPayload.workspaceId !== workspaceId) fail("CREATIVE_ASSET_PROOF_BINDING_MISMATCH", workspaceId);
+  const verifiedAssets = assetPayload?.assets ?? [];
   const assets = new Map<string, VerifiedCreativeAsset>();
   for (const asset of verifiedAssets) {
     if (assets.has(asset.assetId) || modelAssetIdToWorkspaceAssetId(asset.assetId) !== asset.approvedAsset.workspaceAssetId) fail("CREATIVE_ASSET_INVALID", asset.assetId);
@@ -379,4 +406,54 @@ export function compileCreativeUIImplementationV2(input: CompileCreativeUIImplem
   };
   const trustedCreativePayload = issuer.issue({ plan, artifact, materialization });
   return deepFreeze({ plan, capabilityReport, verifiedAssets, artifact, materialization, trustedCreativePayload });
+}
+
+export function createCreativeUIImplementationV2Compiler(
+  issuer: ServerScopedCreativePayloadIssuer,
+): CreativeUIImplementationV2CompilerBundle {
+  if (typeof issuer !== "object" || issuer === null || utilTypes.isProxy(issuer)) {
+    fail("CREATIVE_ISSUER_PROXY_FORBIDDEN", "issuer must be a non-proxy server capability");
+  }
+  let issuerPrototype: unknown; let issuerKeys: PropertyKey[]; let issueDescriptor: PropertyDescriptor | undefined;
+  try {
+    issuerPrototype = Object.getPrototypeOf(issuer) as unknown;
+    issuerKeys = Reflect.ownKeys(issuer);
+    issueDescriptor = Object.getOwnPropertyDescriptor(issuer, "issue");
+  } catch {
+    return fail("CREATIVE_ISSUER_INSPECTION_FAILED", "issuer reflection failed");
+  }
+  if (issuerPrototype !== Object.prototype || issuerKeys.length !== 1 || issuerKeys[0] !== "issue"
+    || issueDescriptor === undefined || !("value" in issueDescriptor) || typeof issueDescriptor.value !== "function") {
+    fail("CREATIVE_ISSUER_ACCESSOR_FORBIDDEN", "issuer must expose one own data method");
+  }
+  const verifiedAssetPayloads = new WeakMap<object, Readonly<{ workspaceId: string; assets: readonly VerifiedCreativeAsset[] }>>();
+  const assetProofResolver: CreativeAssetProofResolver = Object.freeze({
+    attestResolvedAssets(input: { readonly workspaceId: string; readonly assets: unknown }): VerifiedCreativeAssetProofHandle {
+      const cloned = safeClone(input) as { workspaceId?: unknown; assets?: unknown };
+      if (cloned === null || typeof cloned !== "object" || Object.keys(cloned).length !== 2
+        || typeof cloned.workspaceId !== "string" || cloned.workspaceId.trim() !== cloned.workspaceId
+        || cloned.workspaceId.length < 1 || cloned.workspaceId.length > 100 || !Array.isArray(cloned.assets)) {
+        fail("CREATIVE_ASSET_INVALID", "resolved asset attestation input is invalid");
+      }
+      const verifiedAssets = cloned.assets.map((entry) => VerifiedCreativeAssetSchema.parse(entry))
+        .sort((left, right) => compareCreativeIdentifiers(left.assetId, right.assetId));
+      const seen = new Set<string>();
+      for (const asset of verifiedAssets) {
+        if (seen.has(asset.assetId) || modelAssetIdToWorkspaceAssetId(asset.assetId) !== asset.approvedAsset.workspaceAssetId) {
+          fail("CREATIVE_ASSET_INVALID", asset.assetId);
+        }
+        seen.add(asset.assetId);
+        ApprovedAssetFactsSchema.parse(asset.approvedAsset);
+      }
+      const handle = Object.freeze(Object.create(null)) as VerifiedCreativeAssetProofHandle;
+      verifiedAssetPayloads.set(handle, deepFreeze({ workspaceId: cloned.workspaceId, assets: verifiedAssets }));
+      return handle;
+    },
+  });
+  const compiler: CreativeUIImplementationV2Compiler = Object.freeze({
+    compile(input: CompileCreativeUIImplementationV2Input): CreativeUIImplementationV2CompileResult {
+      return compileCreativeUIImplementationV2(input, issuer, verifiedAssetPayloads);
+    },
+  });
+  return Object.freeze({ compiler, assetProofResolver });
 }
