@@ -12,6 +12,8 @@ export {
   decodeServerPlanHmacKey,
   type ServerPlanAuthority,
   type ServerPlanSignInput,
+  createTrustedCreativePayload,
+  type TrustedCreativePayloadHandle,
   createHmacModuleArtifactAuthority,
   readVerifiedAcceptedBlueprintArtifact,
   readVerifiedModuleCompilationArtifact,

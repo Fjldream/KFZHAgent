@@ -1,6 +1,13 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { internalChangePlanSchema, type InternalChangePlan } from "./change-plan.js";
+import {
+  CreativeBuildArtifactSchema,
+  TrustedNativeMaterializationSchema,
+  canonicalCreativeBuildArtifactHash,
+  canonicalTrustedNativeMaterializationHash,
+  validateCreativeArtifactMaterializationProjection,
+} from "./creative-build-artifact.js";
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 
@@ -20,9 +27,18 @@ export const ServerPlanEnvelopeSchema = z.object({
   planHash: Sha256Schema,
   revisionId: z.string().trim().min(1).max(100),
   semanticOperations: z.array(TrustedSemanticOperationSchema).max(500),
+  creativeArtifact: CreativeBuildArtifactSchema.optional(),
+  creativeArtifactHash: Sha256Schema.optional(),
+  trustedNativeMaterialization: TrustedNativeMaterializationSchema.optional(),
+  nativeMaterializationHash: Sha256Schema.optional(),
   /** HMAC-SHA-256 issued by the server; never returned by the public API. */
   signature: Sha256Schema,
-}).strict();
+}).strict().superRefine((envelope, ctx) => {
+  const present = [envelope.creativeArtifact, envelope.creativeArtifactHash,
+    envelope.trustedNativeMaterialization, envelope.nativeMaterializationHash]
+    .filter((value) => value !== undefined).length;
+  if (present !== 0 && present !== 4) ctx.addIssue({ code: "custom", path: ["creativeArtifact"], message: "creative envelope fields must be complete" });
+});
 
 export type TrustedSemanticOperationInput = z.infer<typeof TrustedSemanticOperationInputSchema>;
 export type TrustedSemanticOperation = z.infer<typeof TrustedSemanticOperationSchema>;
@@ -31,6 +47,8 @@ export type ServerPlanEnvelope = z.infer<typeof ServerPlanEnvelopeSchema>;
 export interface ServerPlanEnvelopeExpectations {
   expectedPlanHash?: string;
   expectedRevisionId?: string;
+  expectedCreativeArtifactHash?: string;
+  expectedNativeMaterializationHash?: string;
 }
 
 /**
@@ -40,7 +58,7 @@ export interface ServerPlanEnvelopeExpectations {
  */
 export const SERVER_PLAN_RAW_LIMITS = Object.freeze({
   maxDepth: 128,
-  maxNodes: 50_000,
+  maxNodes: 1_000_000,
   maxArrayLength: 10_000,
   maxKeysPerObject: 1_000,
   maxTotalStringBytes: 16 * 1024 * 1024,
@@ -102,6 +120,7 @@ export function canonicalChangePlanHash(input: unknown): string {
       }
     }),
     ...(plan.assetBindings === undefined ? {} : { assetBindings: plan.assetBindings }),
+    ...(plan.creative === undefined ? {} : { creative: plan.creative }),
   });
 }
 
@@ -118,6 +137,12 @@ export function canonicalServerPlanSigningBytes(input: ServerPlanEnvelope): Uint
     planHash: envelope.planHash,
     revisionId: envelope.revisionId,
     semanticOperations: envelope.semanticOperations,
+    ...(envelope.creativeArtifact === undefined ? {} : {
+      creativeArtifact: envelope.creativeArtifact,
+      creativeArtifactHash: envelope.creativeArtifactHash,
+      trustedNativeMaterialization: envelope.trustedNativeMaterialization,
+      nativeMaterializationHash: envelope.nativeMaterializationHash,
+    }),
   }), "utf8");
 }
 
@@ -140,6 +165,7 @@ export function validateServerPlanEnvelopeData(
   if (expected.expectedRevisionId !== undefined && envelope.revisionId !== expected.expectedRevisionId) {
     throw new Error("SERVER_PLAN_BINDING_MISMATCH: persisted plan belongs to another base revision");
   }
+  validateCreativeEnvelope(envelope, expected);
 
   const remaining = semanticPayloadsFromPlan(envelope.plan);
   for (const operation of envelope.semanticOperations) {
@@ -156,6 +182,82 @@ export function validateServerPlanEnvelopeData(
     throw new Error("SERVER_PLAN_SEMANTIC_MISMATCH: plan payload has no server authorization");
   }
   return envelope;
+}
+
+function validateCreativeEnvelope(envelope: ServerPlanEnvelope, expected: ServerPlanEnvelopeExpectations): void {
+  if (envelope.creativeArtifact === undefined) {
+    if (envelope.plan.creative !== undefined
+      || expected.expectedCreativeArtifactHash !== undefined
+      || expected.expectedNativeMaterializationHash !== undefined) {
+      throw new Error("SERVER_PLAN_CREATIVE_MISMATCH: expected creative payload is absent");
+    }
+    return;
+  }
+  const artifactHash = canonicalCreativeBuildArtifactHash(envelope.creativeArtifact);
+  const materialization = envelope.trustedNativeMaterialization!;
+  validateCreativeArtifactMaterializationProjection(envelope.creativeArtifact, materialization);
+  const materializationHash = canonicalTrustedNativeMaterializationHash(materialization);
+  if (artifactHash !== envelope.creativeArtifactHash || materializationHash !== envelope.nativeMaterializationHash
+    || materialization.creativeArtifactHash !== artifactHash
+    || materialization.implementationHash !== envelope.creativeArtifact.hashes.implementationHash
+    || materialization.workspaceId !== envelope.plan.workspaceId
+    || materialization.baseRevisionId !== envelope.revisionId
+    || envelope.plan.creative?.artifactHash !== artifactHash
+    || envelope.plan.creative.materializationHash !== materializationHash) {
+    throw new Error("SERVER_PLAN_CREATIVE_MISMATCH: creative hashes or bindings differ");
+  }
+  validateCreativePlanMaterializationProjection(envelope.plan, materialization);
+  if (expected.expectedCreativeArtifactHash !== undefined && artifactHash !== expected.expectedCreativeArtifactHash
+    || expected.expectedNativeMaterializationHash !== undefined && materializationHash !== expected.expectedNativeMaterializationHash) {
+    throw new Error("SERVER_PLAN_CREATIVE_MISMATCH: creative payload does not match build job");
+  }
+  const implementation = envelope.creativeArtifact.implementation;
+  const pages = new Map(implementation.runtimeCorrelation!.pages.map((entry) => [entry.semanticPageId, entry.pageGuid]));
+  const controls = new Map(implementation.runtimeCorrelation!.controls.map((entry) => [entry.semanticControlId, entry.instanceName]));
+  if (materialization.pages.length !== pages.size || materialization.controls.length !== controls.size
+    || materialization.pages.some((page) => pages.get(page.semanticPageId) !== page.pageGuid)
+    || materialization.controls.some((control) => controls.get(control.semanticControlId) !== control.instanceName)
+    || stableJson(materialization.interactions.actions) !== stableJson(implementation.compiledActions)
+    || stableJson(materialization.interactions.scripts) !== stableJson(implementation.compiledScripts)
+    || stableJson(materialization.interactions.eventBindings) !== stableJson(implementation.pages.flatMap((page) => page.compatibility === "native" ? page.controls.flatMap((control) => control.eventBindings) : []))) {
+    throw new Error("SERVER_PLAN_CREATIVE_MISMATCH: materialization differs from final implementation");
+  }
+}
+
+export function validateCreativePlanMaterializationProjection(plan: InternalChangePlan, materialization: NonNullable<ServerPlanEnvelope["trustedNativeMaterialization"]>): void {
+  const expected: InternalChangePlan["operations"] = [];
+  for (const page of materialization.pages) {
+    expected.push(page.source === "workspace-derived"
+      ? { op: "create", entityType: "page", entityId: page.semanticPageId, properties: { width: page.width, height: page.height } }
+      : { op: "update", entityType: "page", entityId: page.semanticPageId, changes: [{ path: "/pageViewWidth", value: page.width }, { path: "/pageViewHeight", value: page.height }] });
+  }
+  for (const control of materialization.controls) {
+    const variant = nativeVariant(control.capabilityId);
+    expected.push(control.source === "workspace-derived"
+      ? { op: "create", entityType: "control", entityId: control.semanticControlId,
+        properties: { semanticPageId: control.semanticPageId, ...variant, ...control.geometry, zIndex: control.zIndex,
+          ...(control.compiledLayout === undefined ? {} : { compiledLayout: control.compiledLayout }),
+          ...(control.overlayHost === undefined ? {} : { overlayHost: control.overlayHost }),
+          ...control.nativeProperties,
+          ...(control.content === undefined ? {} : { text: control.content }) } }
+      : { op: "update", entityType: "control", entityId: control.semanticControlId, changes: control.existingDeltas! });
+  }
+  if (stableJson(plan.operations) !== stableJson(expected)) throw new Error("SERVER_PLAN_CREATIVE_MISMATCH: plan operations differ from materialization");
+  const capabilityByControl = new Map(materialization.controls.map((control) => [control.semanticControlId, control.capabilityId]));
+  const expectedAssets = materialization.stylesData.flatMap((style) => capabilityByControl.get(style.semanticControlId) === "image"
+    ? style.approvedAssets.map((asset) => ({
+    assetId: asset.assetId, ...asset.approvedAsset, entityId: style.semanticControlId,
+    controlId: style.semanticControlId, capabilityId: "image" as const,
+  })) : []).sort((left, right) => left.assetId.localeCompare(right.assetId) || left.controlId.localeCompare(right.controlId));
+  const actualAssets = [...(plan.assetBindings ?? [])].sort((left, right) => left.assetId.localeCompare(right.assetId) || left.controlId.localeCompare(right.controlId));
+  if (stableJson(actualAssets) !== stableJson(expectedAssets)) throw new Error("SERVER_PLAN_CREATIVE_MISMATCH: plan assets differ from materialization");
+}
+
+function nativeVariant(capabilityId: string): { type: string; proto?: number; layoutType?: number; prototypeName?: string } {
+  const easyui = /^easyui\.(\d+)$/.exec(capabilityId); if (easyui !== null) return { type: "easyui", proto: Number(easyui[1]) };
+  const layout = /^layout\.(\d+)$/.exec(capabilityId); if (layout !== null) return { type: "layout", layoutType: Number(layout[1]) };
+  const prototype = /^prototype\.(.+)$/.exec(capabilityId); if (prototype !== null) return { type: "prototype", prototypeName: prototype[1]! };
+  return { type: capabilityId };
 }
 
 function semanticPayloadsFromPlan(plan: InternalChangePlan): Array<{

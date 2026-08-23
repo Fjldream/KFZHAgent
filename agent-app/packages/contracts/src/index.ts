@@ -16,3 +16,4 @@ export * from "./capability-candidates.js";
 export * from "./action-graph.js";
 export * from "./script-program.js";
 export * from "./solution-implementation-plan.js";
+export * from "./creative-build-artifact.js";

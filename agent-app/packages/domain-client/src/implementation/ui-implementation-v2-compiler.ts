@@ -1,0 +1,321 @@
+import { types as utilTypes } from "node:util";
+import {
+  ApprovedAssetFactsSchema,
+  CapabilityCandidateBundleSchema,
+  CreativeBuildArtifactSchema,
+  CustomerSolutionBlueprintSchema,
+  SolutionImplementationPlanSchema,
+  TrustedNativeMaterializationSchema,
+  UIImplementationSpecV2Schema,
+  VerifiedCreativeAssetSchema,
+  canonicalCreativeBuildArtifactHash,
+  canonicalServerHash,
+  canonicalTrustedNativeMaterializationHash,
+  internalChangePlanSchema,
+  modelAssetIdToWorkspaceAssetId,
+  validateCreativeArtifactMaterializationProjection,
+  type CapabilityReport,
+  type ChangeOperation,
+  type ChangePlanAssetBinding,
+  type CreativeBuildArtifact,
+  type InternalChangePlan,
+  type TrustedNativeMaterialization,
+  type UIImplementationControlV2,
+  type UIImplementationSpecV2,
+  type VerifiedCreativeAsset,
+} from "@kf/contracts";
+import { createTrustedCreativePayload, type TrustedCreativePayloadHandle } from "@kf/build-jobs";
+import { getControlCapability } from "../style/control-capability-registry.js";
+import { compileResolvedStyle } from "../style/style-engine.js";
+import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
+import { allowedFieldsFor } from "../patch/allowlist.js";
+import { validateGeneratedComponentProperties } from "./component-properties.js";
+import {
+  attachRuntimeCorrelation,
+  readVerifiedExistingRuntimeCorrelation,
+  type VerifiedExistingRuntimeCorrelationHandle,
+} from "./runtime-correlation.js";
+
+export interface CompileCreativeUIImplementationV2Input {
+  readonly workspaceId: string;
+  readonly baseRevisionId: string;
+  readonly blueprint: unknown;
+  readonly candidateBundle: unknown;
+  readonly semanticPlan: unknown;
+  readonly implementation: unknown;
+  readonly compilerVersion: string;
+  readonly evidenceVersion: string;
+  readonly approvedAssets: readonly unknown[];
+  readonly verifiedExisting?: VerifiedExistingRuntimeCorrelationHandle;
+}
+
+export interface CreativeUIImplementationV2CompileResult {
+  readonly plan: InternalChangePlan;
+  readonly capabilityReport: CapabilityReport;
+  readonly verifiedAssets: readonly VerifiedCreativeAsset[];
+  readonly artifact: CreativeBuildArtifact;
+  readonly materialization: TrustedNativeMaterialization;
+  readonly trustedCreativePayload: TrustedCreativePayloadHandle;
+}
+
+const EMPTY_STYLE = Object.freeze({ declarations: Object.freeze({}), states: Object.freeze({}) });
+const MAX_NODES = 1_500_000;
+const MAX_DEPTH = 96;
+const MAX_KEYS = 512;
+const MAX_ARRAY = 20_000;
+
+function fail(code: string, detail: string): never { throw new Error(`${code}: ${detail}`); }
+
+function safeClone(input: unknown): unknown {
+  const clones = new WeakMap<object, unknown>();
+  const active = new WeakSet<object>();
+  let nodes = 0;
+  const clone = (value: unknown, depth: number): unknown => {
+    nodes += 1; if (nodes > MAX_NODES || depth > MAX_DEPTH) fail("CREATIVE_INPUT_BUDGET_EXCEEDED", "plain-data budget exceeded");
+    if (value === null || value === undefined || typeof value === "string" || typeof value === "boolean") return value;
+    if (typeof value === "number") { if (!Number.isFinite(value)) fail("CREATIVE_INPUT_INVALID", "non-finite number"); return value; }
+    if (typeof value !== "object") fail("CREATIVE_INPUT_INVALID", `unsupported ${typeof value}`);
+    if (utilTypes.isProxy(value)) fail("CREATIVE_INPUT_PROXY_FORBIDDEN", "proxy values are not allowed");
+    if (active.has(value)) fail("CREATIVE_INPUT_CYCLE_FORBIDDEN", "cyclic values are not allowed");
+    const memo = clones.get(value); if (memo !== undefined) return memo;
+    let inspectedPrototype: unknown; let keys: PropertyKey[];
+    try { inspectedPrototype = Object.getPrototypeOf(value) as unknown; keys = Reflect.ownKeys(value); } catch { return fail("CREATIVE_INPUT_INSPECTION_FAILED", "reflection failed"); }
+    if (inspectedPrototype !== null && typeof inspectedPrototype !== "object") fail("CREATIVE_INPUT_INVALID", "invalid prototype");
+    const proto = inspectedPrototype;
+    if (Array.isArray(value)) {
+      if (proto !== Array.prototype || value.length > MAX_ARRAY || keys.length !== value.length + 1) fail("CREATIVE_INPUT_INVALID", "invalid array");
+      const output: unknown[] = []; clones.set(value, output); active.add(value);
+      for (let index = 0; index < value.length; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) fail("CREATIVE_INPUT_ACCESSOR_FORBIDDEN", `array[${index}]`);
+        output.push(clone(descriptor.value, depth + 1));
+      }
+      active.delete(value); return output;
+    }
+    if (proto !== Object.prototype && proto !== null || keys.length > MAX_KEYS) fail("CREATIVE_INPUT_INVALID", "non-plain object");
+    const output: Record<string, unknown> = {}; clones.set(value, output); active.add(value);
+    for (const key of keys) {
+      if (typeof key !== "string") fail("CREATIVE_INPUT_INVALID", "symbol key");
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) fail("CREATIVE_INPUT_ACCESSOR_FORBIDDEN", key);
+      output[key] = clone(descriptor.value, depth + 1);
+    }
+    active.delete(value); return output;
+  };
+  return clone(input, 0);
+}
+
+function rootValues(input: unknown): { plain: Record<string, unknown>; handle?: VerifiedExistingRuntimeCorrelationHandle } {
+  if (typeof input !== "object" || input === null || Array.isArray(input) || utilTypes.isProxy(input)) fail("CREATIVE_INPUT_PROXY_FORBIDDEN", "input must be a plain non-proxy object");
+  const prototype: unknown = Object.getPrototypeOf(input) as unknown;
+  if (prototype !== Object.prototype && prototype !== null) fail("CREATIVE_INPUT_NON_PLAIN", "input must have a plain prototype");
+  const allowed = new Set(["workspaceId", "baseRevisionId", "blueprint", "candidateBundle", "semanticPlan", "implementation", "compilerVersion", "evidenceVersion", "approvedAssets", "verifiedExisting"]);
+  const descriptors = Object.getOwnPropertyDescriptors(input);
+  const keys = Reflect.ownKeys(input);
+  if (keys.some((key) => typeof key !== "string" || !allowed.has(key)) || keys.length < 9 || keys.length > 10) fail("CREATIVE_INPUT_UNKNOWN_FIELD", "invalid input keys");
+  const plain: Record<string, unknown> = {};
+  let handle: VerifiedExistingRuntimeCorrelationHandle | undefined;
+  for (const key of keys) {
+    if (typeof key !== "string") continue;
+    const descriptor = descriptors[key]; if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) fail("CREATIVE_INPUT_ACCESSOR_FORBIDDEN", key);
+    if (key === "verifiedExisting") handle = descriptor.value as VerifiedExistingRuntimeCorrelationHandle;
+    else plain[key] = descriptor.value;
+  }
+  return { plain: safeClone(plain) as Record<string, unknown>, ...(handle === undefined ? {} : { handle }) };
+}
+
+function exactString(value: unknown, field: string): string {
+  if (typeof value !== "string" || value.length < 1 || value.length > 100 || value.trim() !== value) fail("CREATIVE_INPUT_INVALID", field);
+  return value;
+}
+
+function controlVariant(capabilityId: string): { type: string; proto?: number; layoutType?: number; prototypeName?: string } {
+  const easyui = /^easyui\.(\d+)$/.exec(capabilityId); if (easyui !== null) return { type: "easyui", proto: Number(easyui[1]) };
+  const layout = /^layout\.(\d+)$/.exec(capabilityId); if (layout !== null) return { type: "layout", layoutType: Number(layout[1]) };
+  const prototype = /^prototype\.(.+)$/.exec(capabilityId); if (prototype !== null) return { type: "prototype", prototypeName: prototype[1]! };
+  return { type: capabilityId };
+}
+
+function existingDeltas(control: UIImplementationControlV2): Array<{ path: string; value: unknown }> {
+  const variant = controlVariant(control.capabilityId);
+  const allowed = allowedFieldsFor({ kind: "control", controlType: variant.type,
+    ...(variant.proto === undefined ? {} : { easyuiProto: variant.proto }),
+    ...(variant.prototypeName === undefined ? {} : { prototypeName: variant.prototypeName }) });
+  const candidates: Array<[string, unknown]> = [["x", control.geometry.x], ["y", control.geometry.y], ["width", control.geometry.width], ["height", control.geometry.height]];
+  for (const [key, value] of Object.entries(control.nativeProperties)) candidates.push([key, value]);
+  if (control.content !== undefined) candidates.push(["text", control.content]);
+  return candidates.filter(([key]) => allowed.has(key)).map(([key, value]) => ({ path: `/${key}`, value }));
+}
+
+function topologicalControls(pages: readonly Extract<UIImplementationSpecV2["pages"][number], { compatibility: "native" }>[]): UIImplementationControlV2[] {
+  const pageOrder = new Map(pages.map((page, index) => [page.id, index]));
+  const owner = new Map(pages.flatMap((page) => page.controls.map((control) => [control.id, page.id] as const)));
+  const controls = pages.flatMap((page) => page.controls).slice().sort((left, right) =>
+    pageOrder.get(owner.get(left.id)!)! - pageOrder.get(owner.get(right.id)!)!
+      || left.depth - right.depth || left.id.localeCompare(right.id, "en-US"));
+  const seen = new Set<string>();
+  for (const control of controls) {
+    if (control.parentId !== undefined && (!seen.has(control.parentId) || owner.get(control.parentId) !== owner.get(control.id))) fail("CREATIVE_PARENT_ORDER_INVALID", control.id);
+    seen.add(control.id);
+  }
+  return controls;
+}
+
+function deepFreeze<T>(input: T): T {
+  if (input !== null && typeof input === "object" && !Object.isFrozen(input)) {
+    Reflect.ownKeys(input).forEach((key) => { const descriptor = Object.getOwnPropertyDescriptor(input, key); if (descriptor !== undefined && "value" in descriptor) deepFreeze(descriptor.value); });
+    Object.freeze(input);
+  }
+  return input;
+}
+
+export function compileCreativeUIImplementationV2(input: CompileCreativeUIImplementationV2Input): CreativeUIImplementationV2CompileResult {
+  const { plain, handle } = rootValues(input);
+  const workspaceId = exactString(plain.workspaceId, "workspaceId");
+  const baseRevisionId = exactString(plain.baseRevisionId, "baseRevisionId");
+  const blueprint = CustomerSolutionBlueprintSchema.parse(plain.blueprint);
+  const candidateBundle = CapabilityCandidateBundleSchema.parse(plain.candidateBundle);
+  const semanticPlan = SolutionImplementationPlanSchema.parse(plain.semanticPlan);
+  if (plain.implementation === null || typeof plain.implementation !== "object"
+    || !("runtimeCorrelation" in plain.implementation)) {
+    fail("RUNTIME_CORRELATION_REQUIRED", "native final implementation must have complete runtime correlation");
+  }
+  const implementation = UIImplementationSpecV2Schema.parse(plain.implementation);
+  if (implementation.compatibility !== "native" || implementation.runtimeCorrelation === undefined) fail("RUNTIME_CORRELATION_REQUIRED", "native final implementation must have complete runtime correlation");
+  const correlationInput: UIImplementationSpecV2 = {
+    ...implementation,
+    pages: implementation.pages.map((page) => page.compatibility === "native"
+      ? { ...page, controls: page.controls.map((control) => ({ ...control, eventBindings: [] })) }
+      : page),
+    compiledActions: [],
+    compiledScripts: [],
+  };
+  delete correlationInput.runtimeCorrelation;
+  const trustedCorrelation = attachRuntimeCorrelation({ workspaceId, baseRevisionId, implementation: correlationInput,
+    ...(handle === undefined ? {} : { verifiedExisting: handle }) }).runtimeCorrelation;
+  const normalizedCorrelation = (correlation: NonNullable<UIImplementationSpecV2["runtimeCorrelation"]>) => ({
+    controls: [...correlation.controls].sort((left, right) => left.semanticControlId.localeCompare(right.semanticControlId, "en-US")),
+    pages: [...correlation.pages].sort((left, right) => left.semanticPageId.localeCompare(right.semanticPageId, "en-US")),
+  });
+  if (canonicalServerHash(normalizedCorrelation(implementation.runtimeCorrelation)) !== canonicalServerHash(normalizedCorrelation(trustedCorrelation!))) {
+    fail("RUNTIME_CORRELATION_PROVENANCE_MISMATCH", "runtime identities were not issued by the Task-2 correlator");
+  }
+  const compilerVersion = exactString(plain.compilerVersion, "compilerVersion");
+  const evidenceVersion = exactString(plain.evidenceVersion, "evidenceVersion");
+  if (!Array.isArray(plain.approvedAssets)) fail("CREATIVE_INPUT_INVALID", "approvedAssets");
+  const verifiedAssets = plain.approvedAssets.map((entry) => VerifiedCreativeAssetSchema.parse(entry));
+  const assets = new Map<string, VerifiedCreativeAsset>();
+  for (const asset of verifiedAssets) {
+    if (assets.has(asset.assetId) || modelAssetIdToWorkspaceAssetId(asset.assetId) !== asset.approvedAsset.workspaceAssetId) fail("CREATIVE_ASSET_INVALID", asset.assetId);
+    ApprovedAssetFactsSchema.parse(asset.approvedAsset); assets.set(asset.assetId, asset);
+  }
+  const artifact = CreativeBuildArtifactSchema.parse({
+    schema: "kf-creative-build-artifact/v1", blueprint, candidateBundle, semanticPlan, implementation, compilerVersion, evidenceVersion,
+    hashes: { blueprintHash: canonicalServerHash(blueprint), candidateBundleHash: canonicalServerHash(candidateBundle), semanticPlanHash: canonicalServerHash(semanticPlan), implementationHash: canonicalServerHash(implementation) },
+  });
+  const artifactHash = canonicalCreativeBuildArtifactHash(artifact);
+  const projection = handle === undefined ? undefined : readVerifiedExistingRuntimeCorrelation(handle, workspaceId, baseRevisionId);
+  const controlSource = new Map(projection?.controls.map((entry) => [entry.semanticControlId, entry]));
+  const pageSource = new Map(projection?.pages.map((entry) => [entry.semanticPageId, entry]));
+  const correlationControl = new Map(implementation.runtimeCorrelation.controls.map((entry) => [entry.semanticControlId, entry.instanceName]));
+  const correlationPage = new Map(implementation.runtimeCorrelation.pages.map((entry) => [entry.semanticPageId, entry.pageGuid]));
+  const nativePages = implementation.pages.filter((page): page is Extract<typeof page, { compatibility: "native" }> => page.compatibility === "native")
+    .slice().sort((left, right) => left.id.localeCompare(right.id, "en-US"));
+  const controls = topologicalControls(nativePages);
+  const pageByControl = new Map(nativePages.flatMap((page) => page.controls.map((control) => [control.id, page] as const)));
+  const styleRecords = new Map(controls.map((control) => {
+    if (getControlCapability(control.capabilityId) === undefined) fail("CREATIVE_CAPABILITY_UNSUPPORTED", control.capabilityId);
+    const approved = (control.assetIds ?? []).map((assetId) => assets.get(assetId) ?? fail("CREATIVE_ASSET_NOT_APPROVED", assetId));
+    const styleRole = control.style?.role ?? control.role;
+    const roleStyle = semanticPlan.roleStyles.find((style) => style.role === styleRole)
+      ?? { role: styleRole, declarations: {}, states: {} };
+    const compiled = compileResolvedStyle({ componentId: control.id, capabilityId: control.capabilityId,
+      theme: semanticPlan.theme, styleRole, roleStyle, instanceOverride: control.style ?? EMPTY_STYLE,
+      approvedAssets: approved.map((asset) => asset.approvedAsset), runtimeProfile: KF36_RUNTIME_PROFILE });
+    const compiledStyle = { nativeFields: compiled.nativeFields, cssFragments: compiled.cssFragments,
+      warnings: compiled.warnings.map((warning) => ({ code: warning.code, message: warning.message })) };
+    if (control.compiledStyle === undefined || canonicalServerHash(control.compiledStyle) !== canonicalServerHash(compiledStyle)) {
+      fail("CREATIVE_COMPILED_STYLE_MISMATCH", control.id);
+    }
+    return [control.id, { approved, compiledStyle,
+      structuredStyle: control.style ?? implementation.compiledRoleStyles[control.role] ?? roleStyle }] as const;
+  }));
+  const operations: ChangeOperation[] = [];
+  const materializedPages = nativePages.map((page, order) => {
+    const pageGuid = correlationPage.get(page.id)!; const source = pageSource.get(page.id)?.source ?? "workspace-derived";
+    operations.push(source === "workspace-derived"
+      ? { op: "create", entityType: "page", entityId: page.id, properties: { width: page.width, height: page.height } }
+      : { op: "update", entityType: "page", entityId: page.id, changes: [{ path: "/pageViewWidth", value: page.width }, { path: "/pageViewHeight", value: page.height }] });
+    return { source, semanticPageId: page.id, pageGuid, width: page.width, height: page.height, order };
+  });
+  const assetBindings: ChangePlanAssetBinding[] = [];
+  const materializedControls = controls.map((control, order) => {
+    if (getControlCapability(control.capabilityId) === undefined) fail("CREATIVE_CAPABILITY_UNSUPPORTED", control.capabilityId);
+    const page = pageByControl.get(control.id)!; const pageGuid = correlationPage.get(page.id)!; const instanceName = correlationControl.get(control.id)!;
+    const verified = controlSource.get(control.id); const source = verified?.source ?? "workspace-derived";
+    const compiledNativeFields = styleRecords.get(control.id)!.compiledStyle.nativeFields;
+    const semanticNativeProperties = { ...control.nativeProperties };
+    for (const [key, value] of Object.entries(compiledNativeFields)) {
+      if (!Object.hasOwn(semanticNativeProperties, key)
+        || canonicalServerHash(semanticNativeProperties[key]) !== canonicalServerHash(value)) fail("CREATIVE_COMPILED_STYLE_MISMATCH", `${control.id}.${key}`);
+      delete semanticNativeProperties[key];
+    }
+    const nativeProperties = { ...validateGeneratedComponentProperties(control.capabilityId, semanticNativeProperties), ...compiledNativeFields };
+    const parentInstanceName = control.parentId === undefined ? undefined : correlationControl.get(control.parentId);
+    const variant = controlVariant(control.capabilityId);
+    if (source === "workspace-derived") operations.push({ op: "create", entityType: "control", entityId: control.id, properties: {
+      semanticPageId: page.id, ...variant, ...control.geometry, zIndex: control.zIndex,
+      ...(control.compiledLayout === undefined ? {} : { compiledLayout: control.compiledLayout }),
+      ...(control.overlayHost === undefined ? {} : { overlayHost: control.overlayHost }),
+      ...nativeProperties, ...(control.content === undefined ? {} : { text: control.content }),
+    } });
+    else operations.push({ op: "update", entityType: "control", entityId: control.id, changes: existingDeltas(control) });
+    for (const assetId of control.assetIds ?? []) {
+      const asset = assets.get(assetId); if (asset === undefined) fail("CREATIVE_ASSET_NOT_APPROVED", assetId);
+      if (control.capabilityId === "image") {
+        assetBindings.push({ assetId, ...asset.approvedAsset, entityId: control.id, controlId: control.id, capabilityId: "image" });
+      }
+    }
+    return { source, semanticControlId: control.id, sourceSolutionNodeId: control.sourceSolutionNodeId, semanticPageId: page.id, pageGuid, instanceName, capabilityId: control.capabilityId,
+      ...(control.parentId === undefined ? {} : { parentSemanticControlId: control.parentId, parentInstanceName }),
+      depth: control.depth, zIndex: control.zIndex, order, geometry: control.geometry,
+      ...(control.compiledLayout === undefined ? {} : { compiledLayout: control.compiledLayout }),
+      ...(control.overlayHost === undefined ? {} : { overlayHost: control.overlayHost }),
+      nativeProperties, ...(control.content === undefined ? {} : { content: control.content }),
+      ...(source === "uploaded-existing" ? { nativeGuid: verified!.nativeGuid, existingDeltas: existingDeltas(control) } : {}) };
+  });
+  const stylesData = controls.map((control) => {
+    const styleRecord = styleRecords.get(control.id)!;
+    return { semanticControlId: control.id, instanceName: correlationControl.get(control.id)!,
+      structuredStyle: styleRecord.structuredStyle, compiledStyle: styleRecord.compiledStyle,
+      ...(control.dataBinding === undefined ? {} : { dataBinding: control.dataBinding }), approvedAssets: styleRecord.approved };
+  });
+  const eventBindings = implementation.pages.flatMap((page) => page.compatibility === "native" ? page.controls.flatMap((control) => control.eventBindings) : []);
+  const materialization = TrustedNativeMaterializationSchema.parse({
+    schema: "kf-trusted-native-materialization/v1", workspaceId, baseRevisionId, creativeArtifactHash: artifactHash,
+    implementationHash: artifact.hashes.implementationHash, pages: materializedPages, controls: materializedControls, stylesData,
+    interactions: { actions: implementation.compiledActions, scripts: implementation.compiledScripts, eventBindings },
+  });
+  validateCreativeArtifactMaterializationProjection(artifact, materialization);
+  const plan = internalChangePlanSchema.parse({ schema: "kf-change-plan/v1", workspaceId, operations,
+    ...(assetBindings.length === 0 ? {} : { assetBindings }), creative: { artifactHash, materializationHash: canonicalTrustedNativeMaterializationHash(materialization) } });
+  const selectedCapabilities = [...new Set(controls.map((control) => control.capabilityId))].sort();
+  const full: string[] = [];
+  const partial: string[] = [];
+  selectedCapabilities.forEach((capabilityId) => {
+    const capability = getControlCapability(capabilityId) ?? fail("CREATIVE_CAPABILITY_UNSUPPORTED", capabilityId);
+    const fullyVerified = capability.runtimeVerification.status === "verified"
+      && [capability.generation, capability.style, capability.preview, capability.dataBinding, capability.interaction]
+        .every((dimension) => dimension.status === "full");
+    (fullyVerified ? full : partial).push(capabilityId);
+  });
+  const capabilityReport: CapabilityReport = {
+    status: partial.length === 0 ? "pass" : "warning",
+    full,
+    partial,
+    unsupported: [],
+    deliveryGaps: [],
+  };
+  const trustedCreativePayload = createTrustedCreativePayload({ plan, artifact, materialization });
+  return deepFreeze({ plan, capabilityReport, verifiedAssets, artifact, materialization, trustedCreativePayload });
+}

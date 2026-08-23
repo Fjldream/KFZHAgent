@@ -122,6 +122,10 @@ export const internalChangePlanSchema = z.object({
   workspaceId: z.string(),
   operations: z.array(changeOperationSchema),
   assetBindings: z.array(ChangePlanAssetBindingSchema).max(500).optional(),
+  creative: z.object({
+    artifactHash: AssetSha256Schema,
+    materializationHash: AssetSha256Schema,
+  }).strict().optional(),
 }).strict().superRefine((plan, ctx) => {
   const entities = new Set<string>();
   const assetFacts = new Map<string, string>();

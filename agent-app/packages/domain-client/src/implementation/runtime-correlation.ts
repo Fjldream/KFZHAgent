@@ -35,6 +35,10 @@ export interface AttachRuntimeCorrelationInput {
   readonly implementation: UIImplementationSpecV2;
   readonly verifiedExisting?: VerifiedExistingRuntimeCorrelationHandle;
 }
+export interface VerifiedExistingRuntimeCorrelationProjection {
+  readonly controls: readonly Readonly<ExistingControlRuntimeDisposition & { readonly nativeGuid?: string; readonly pageGuid?: string }>[];
+  readonly pages: readonly Readonly<ExistingPageRuntimeDisposition>[];
+}
 
 export class RuntimeCorrelationError extends Error {
   constructor(message: string) { super(message); this.name = "RuntimeCorrelationError"; }
@@ -287,6 +291,28 @@ function deepFreeze<T>(value: T): T {
     Object.freeze(value);
   }
   return value;
+}
+
+/** Compiler-only projection from the opaque Task-2 proof; never accepts plain disposition data. */
+export function readVerifiedExistingRuntimeCorrelation(
+  handle: VerifiedExistingRuntimeCorrelationHandle,
+  workspaceId: string,
+  baseRevisionId: string,
+): VerifiedExistingRuntimeCorrelationProjection {
+  const payload = handle !== null && typeof handle === "object" ? verifiedDispositionByHandle.get(handle) : undefined;
+  if (payload === undefined) fail("INVALID_VERIFIED_HANDLE", "verifiedExisting was not issued by the verifier");
+  if (payload.workspaceId !== workspaceId || payload.baseRevisionId !== baseRevisionId) {
+    fail("VERIFIED_IDENTITY_MISMATCH", `${workspaceId}/${baseRevisionId}`);
+  }
+  return deepFreeze({
+    controls: payload.disposition.controls.map((entry) => {
+      if (entry.source !== "uploaded-existing") return { ...entry };
+      const inspectedControl = payload.inspectedControls.find((control) => control.name === entry.instanceName);
+      if (inspectedControl === undefined) fail("UPLOADED_ENTITY_MISMATCH", entry.semanticControlId);
+      return { ...entry, nativeGuid: inspectedControl.guid, pageGuid: inspectedControl.pageGuid };
+    }),
+    pages: payload.disposition.pages.map((entry) => ({ ...entry })),
+  });
 }
 
 /** Attaches server-owned KF runtime identities before interaction compilation. */

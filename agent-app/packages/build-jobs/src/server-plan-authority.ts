@@ -3,6 +3,8 @@ import type {
   ServerPlanEnvelope,
   ServerPlanEnvelopeExpectations,
   TrustedSemanticOperationInput,
+  CreativeBuildArtifact,
+  TrustedNativeMaterialization,
 } from "@kf/contracts";
 import {
   canonicalAcceptedBlueprintArtifactSigningBytes,
@@ -14,6 +16,12 @@ import {
 } from "@kf/contracts";
 import {
   canonicalChangePlanHash,
+  CreativeBuildArtifactSchema,
+  canonicalCreativeBuildArtifactHash,
+  canonicalTrustedNativeMaterializationHash,
+  validateCreativeArtifactMaterializationProjection,
+  internalChangePlanSchema,
+  validateCreativePlanMaterializationProjection,
   canonicalServerPlanSigningBytes,
   parseServerPlanEnvelopeData,
   ServerPlanEnvelopeSchema,
@@ -25,6 +33,43 @@ export interface ServerPlanSignInput {
   plan: InternalChangePlan;
   revisionId: string;
   semanticOperations: readonly TrustedSemanticOperationInput[];
+  creative?: TrustedCreativePayloadHandle;
+}
+
+declare const trustedCreativePayloadBrand: unique symbol;
+export interface TrustedCreativePayloadHandle { readonly [trustedCreativePayloadBrand]: true }
+const creativePayloads = new WeakMap<object, Readonly<{ planHash: string; artifact: CreativeBuildArtifact; materialization: TrustedNativeMaterialization }>>();
+
+/** Server-only brand issued after the complete plan/artifact/materialization projection is verified. */
+export function createTrustedCreativePayload(input: {
+  readonly plan: InternalChangePlan;
+  readonly artifact: CreativeBuildArtifact;
+  readonly materialization: TrustedNativeMaterialization;
+}): TrustedCreativePayloadHandle {
+  const plan = internalChangePlanSchema.parse(input.plan);
+  const artifact = deepFreeze(CreativeBuildArtifactSchema.parse(input.artifact));
+  const materialization = deepFreeze(validateCreativeArtifactMaterializationProjection(artifact, input.materialization));
+  const artifactHash = canonicalCreativeBuildArtifactHash(artifact);
+  const materializationHash = canonicalTrustedNativeMaterializationHash(materialization);
+  const planHash = canonicalChangePlanHash(plan);
+  if (plan.creative?.artifactHash !== artifactHash || plan.creative.materializationHash !== materializationHash) {
+    throw new Error("CREATIVE_PLAN_BINDING_MISMATCH");
+  }
+  validateCreativePlanMaterializationProjection(plan, materialization);
+  const handle = Object.freeze(Object.create(null)) as TrustedCreativePayloadHandle;
+  creativePayloads.set(handle, Object.freeze({ planHash, artifact, materialization }));
+  return handle;
+}
+
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    Reflect.ownKeys(value).forEach((key) => {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (descriptor !== undefined && "value" in descriptor) deepFreeze(descriptor.value);
+    });
+    Object.freeze(value);
+  }
+  return value;
 }
 
 export interface ServerPlanAuthority {
@@ -161,12 +206,21 @@ export function createHmacServerPlanAuthority(key: Uint8Array): ServerPlanAuthor
 
   return Object.freeze({
     sign(input: ServerPlanSignInput): ServerPlanEnvelope {
+      const creative = input.creative === undefined ? undefined : creativePayloads.get(input.creative);
+      if (input.creative !== undefined && creative === undefined) throw new Error("UNTRUSTED_CREATIVE_PAYLOAD");
+      if (creative !== undefined && creative.planHash !== canonicalChangePlanHash(input.plan)) throw new Error("CREATIVE_PLAN_BINDING_MISMATCH");
       const unsigned = ServerPlanEnvelopeSchema.parse({
         schema: "kf-server-plan-envelope/v1",
         plan: input.plan,
         planHash: canonicalChangePlanHash(input.plan),
         revisionId: input.revisionId,
         semanticOperations: input.semanticOperations,
+        ...(creative === undefined ? {} : {
+          creativeArtifact: creative.artifact,
+          creativeArtifactHash: canonicalCreativeBuildArtifactHash(creative.artifact),
+          trustedNativeMaterialization: creative.materialization,
+          nativeMaterializationHash: canonicalTrustedNativeMaterializationHash(creative.materialization),
+        }),
         signature: "0".repeat(64),
       });
       validateServerPlanEnvelopeData(unsigned);

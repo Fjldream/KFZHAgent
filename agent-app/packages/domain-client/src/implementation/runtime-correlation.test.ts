@@ -12,6 +12,7 @@ import { deriveGuid } from "../compile/guid-factory.js";
 import { inspectClientProject, serverOwnedRuntimeIdentitySnapshot, type InspectResult } from "../inspect/client-inspector.js";
 import {
   attachRuntimeCorrelation,
+  readVerifiedExistingRuntimeCorrelation,
   verifyExistingRuntimeCorrelation,
   type ExistingRuntimeCorrelationDisposition,
   type VerifiedExistingRuntimeCorrelationHandle,
@@ -152,6 +153,18 @@ describe("attachRuntimeCorrelation", () => {
       workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, inspection: realInspection, correlations,
     });
   }
+
+  it("projects a frozen compiler-only verified existing disposition bound to workspace and revision", () => {
+    const handle = verified({
+      controls: [{ source: "uploaded-existing", semanticControlId: "existing", instanceName: "Button1" }],
+      pages: [{ source: "uploaded-existing", semanticPageId: "existing-page", pageGuid: uploadedPageGuid }],
+    });
+    const projection = readVerifiedExistingRuntimeCorrelation(handle, WORKSPACE_ID, BASE_REVISION_ID);
+    expect(projection.controls[0]).toMatchObject({ semanticControlId: "existing", instanceName: "Button1", source: "uploaded-existing" });
+    expect(projection.controls[0]!.nativeGuid).toMatch(/./);
+    expect(Object.isFrozen(projection.controls)).toBe(true);
+    expect(() => readVerifiedExistingRuntimeCorrelation(handle, "other", BASE_REVISION_ID)).toThrow(/VERIFIED_IDENTITY_MISMATCH/);
+  });
 
   it("attaches a complete immutable correlation without mutating its input", () => {
     const source = implementation();

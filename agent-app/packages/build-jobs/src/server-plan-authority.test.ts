@@ -118,6 +118,13 @@ function expectRawBudgetFailure(value: unknown): void {
 }
 
 describe("HMAC server plan authority", () => {
+  it("rejects a plain object pretending to be a trusted creative payload", () => {
+    expect(() => createHmacServerPlanAuthority(decodeServerPlanHmacKey(keyA)).sign({
+      plan, revisionId: "revision-1", semanticOperations: [{
+        kind: "kf.table-data/v1", entityId: "table-guid", capabilityId: "easyui.1", sourceModuleId: "table-module", payloadHash: semanticPayloadHash(tableData),
+      }], creative: {} as never,
+    })).toThrow(/UNTRUSTED_CREATIVE_PAYLOAD/);
+  });
   it.each([undefined, "", Buffer.alloc(31, 0x41).toString("base64"), "not-base64***"])(
     "rejects missing, malformed, or short server-only key material",
     (raw) => expect(() => decodeServerPlanHmacKey(raw)).toThrow(/HMAC key/i),
@@ -295,7 +302,9 @@ describe("HMAC server plan authority", () => {
 
   it("rejects raw values beyond the node budget", () => {
     const groups: unknown[][] = [];
-    for (let group = 0; group < 51; group += 1) groups.push(new Array(1_000).fill(null));
+    for (let group = 0; group <= SERVER_PLAN_RAW_LIMITS.maxNodes / SERVER_PLAN_RAW_LIMITS.maxArrayLength; group += 1) {
+      groups.push(new Array(SERVER_PLAN_RAW_LIMITS.maxArrayLength).fill(null));
+    }
     expectRawBudgetFailure({ groups });
   });
 

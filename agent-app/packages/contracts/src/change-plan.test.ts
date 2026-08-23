@@ -52,6 +52,17 @@ describe("change plan schema", () => {
     expect(canonicalChangePlanHash(bound)).not.toBe(canonicalChangePlanHash(plain));
   });
 
+  it("keeps creative hash references internal and makes the plan hash sensitive to them", () => {
+    const plain = { schema: "kf-change-plan/v1" as const, workspaceId: "w-1", operations: [] };
+    const creative = {
+      ...plain,
+      creative: { artifactHash: "a".repeat(64), materializationHash: "b".repeat(64) },
+    };
+    expect(changePlanSchema.safeParse(creative).success).toBe(false);
+    expect(internalChangePlanSchema.parse(creative).creative).toEqual(creative.creative);
+    expect(canonicalChangePlanHash(creative)).not.toBe(canonicalChangePlanHash(plain));
+  });
+
   it("rejects ambiguous duplicate asset bindings for one control", () => {
     expect(internalChangePlanSchema.safeParse({
       schema: "kf-change-plan/v1",

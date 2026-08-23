@@ -223,7 +223,7 @@ const ImplementationDataValueSchema = ImplementationDataNodeSchema.superRefine((
   visit(value, 0);
 });
 
-const ImplementationDataRecordSchema = z.record(
+export const ImplementationDataRecordSchema = z.record(
   ImplementationDataKeySchema,
   ImplementationDataValueSchema,
 ).superRefine((record, ctx) => {
@@ -454,7 +454,7 @@ const VisibleLayoutKindSchema = z.enum([
   "overlay-anchor",
 ]);
 
-const CompiledLayoutMetadataSchema = z.discriminatedUnion("overflow", [
+export const CompiledLayoutMetadataSchema = z.discriminatedUnion("overflow", [
   z.object({
     kind: z.literal("scroll-region"),
     overflow: z.literal("local-scroll"),
@@ -490,7 +490,7 @@ const DataBindingSpecSchema = z.object({
   records: z.array(ImplementationDataRecordSchema).max(100).optional(),
 }).strict();
 
-const OverlayHostMetadataSchema = z.object({
+export const OverlayHostMetadataSchema = z.object({
   overlayId: boundedId,
   hostPageId: boundedId,
   presentation: z.enum(["dialog", "window", "drawer", "confirmation"]),
