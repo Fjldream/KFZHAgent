@@ -50,7 +50,16 @@ function javascriptLexicalView(value: string): { codeView: string; literals: str
   const characters = [...value];
   const literals: string[] = [];
   let literal = "";
-  let state: "code" | "single" | "double" | "template" | "line-comment" | "block-comment" = "code";
+  let state: "code" | "single" | "double" | "template" | "regex" | "line-comment" | "block-comment" = "code";
+  let regexCharacterClass = false;
+  const regexMayStart = (index: number): boolean => {
+    let previous = index - 1;
+    while (previous >= 0 && /\s/.test(characters[previous]!)) previous -= 1;
+    if (previous < 0) return true;
+    if (/[([{,:;=!?&|+*%^~<>-]/.test(characters[previous]!)) return true;
+    const prefix = characters.slice(0, previous + 1).join("");
+    return /\b(?:await|case|delete|in|instanceof|new|of|return|throw|typeof|void|yield)$/.test(prefix);
+  };
   for (let index = 0; index < characters.length; index += 1) {
     const character = characters[index]!;
     const next = characters[index + 1];
@@ -60,6 +69,7 @@ function javascriptLexicalView(value: string): { codeView: string; literals: str
       else if (character === "`") { state = "template"; literal = ""; characters[index] = " "; continue; }
       else if (character === "/" && next === "/") state = "line-comment";
       else if (character === "/" && next === "*") state = "block-comment";
+      else if (character === "/" && regexMayStart(index)) { state = "regex"; regexCharacterClass = false; characters[index] = " "; continue; }
       else continue;
     } else if (state === "line-comment" && character === "\n") {
       state = "code";
@@ -68,6 +78,19 @@ function javascriptLexicalView(value: string): { codeView: string; literals: str
       characters[index] = " ";
       characters[index + 1] = " ";
       index += 1;
+      state = "code";
+      continue;
+    } else if (state === "regex" && character === "\\") {
+      characters[index] = " ";
+      if (index + 1 < characters.length) characters[++index] = " ";
+      continue;
+    } else if (state === "regex" && character === "[") {
+      regexCharacterClass = true;
+    } else if (state === "regex" && character === "]") {
+      regexCharacterClass = false;
+    } else if (state === "regex" && character === "/" && !regexCharacterClass) {
+      characters[index] = " ";
+      while (index + 1 < characters.length && /[A-Za-z]/.test(characters[index + 1]!)) characters[++index] = " ";
       state = "code";
       continue;
     } else if ((state === "single" && character === "'")
@@ -90,6 +113,15 @@ function javascriptLexicalView(value: string): { codeView: string; literals: str
   }
   if (state === "single" || state === "double" || state === "template") literals.push(literal);
   return { codeView: characters.join(""), literals };
+}
+
+function unicodeEscapedIdentifierIssue(codeView: string): string | undefined {
+  const escape = String.raw`\\u(?:[0-9A-Fa-f]{4}|\{[0-9A-Fa-f]{1,6}\})`;
+  const identifier = new RegExp(`(?:[A-Za-z_$]|${escape})(?:[A-Za-z0-9_$]|${escape})*`, "g");
+  for (const match of codeView.matchAll(identifier)) {
+    if (match[0].includes("\\u")) return "Unicode escapes in identifiers are not allowed";
+  }
+  return undefined;
 }
 
 function semanticFunctionDeclarationKeywords(codeView: string): ReadonlySet<number> {
@@ -176,6 +208,10 @@ export function semanticImplementationTextIssue(
   const codeView = lexical?.codeView ?? value;
   const semanticFunctionKeywords = lexical === undefined ? undefined : semanticFunctionDeclarationKeywords(codeView);
   const screenedText = lexical === undefined ? value : `${codeView}\n${lexical.literals.join("\n")}`;
+  if (mode === "semantic-js-source") {
+    const escapedIdentifierIssue = unicodeEscapedIdentifierIssue(codeView);
+    if (escapedIdentifierIssue !== undefined) return escapedIdentifierIssue;
+  }
   if (/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/i.test(screenedText)) return "GUID values are not allowed";
   if (/<\/?(?:script|style|iframe|object|embed)\b|\b(?:javascript|vbscript)\s*:/i.test(screenedText)) return "executable markup is not allowed";
   const selectorIssue = mode === "semantic-js-source"

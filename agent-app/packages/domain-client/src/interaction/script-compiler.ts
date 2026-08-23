@@ -227,6 +227,24 @@ function quote(value: unknown): string {
   return serialized.replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
 }
 
+function emitRegexPattern(pattern: string): string {
+  let emitted = "";
+  for (let index = 0; index < pattern.length; index += 1) {
+    const character = pattern[index]!;
+    if (character === "\n") { emitted += "\\n"; continue; }
+    if (character === "\r") { emitted += "\\r"; continue; }
+    if (character === "\u2028") { emitted += "\\u2028"; continue; }
+    if (character === "\u2029") { emitted += "\\u2029"; continue; }
+    if (character === "/") {
+      let precedingBackslashes = 0;
+      for (let cursor = index - 1; cursor >= 0 && pattern[cursor] === "\\"; cursor -= 1) precedingBackslashes += 1;
+      if (precedingBackslashes % 2 === 0) emitted += "\\";
+    }
+    emitted += character;
+  }
+  return emitted;
+}
+
 class ReviewedAstEmitter {
   private callIndex = 0;
   readonly instanceReferences = new Map<string, string>();
@@ -298,7 +316,18 @@ class ReviewedAstEmitter {
     switch (node.type) {
       case "Identifier": return identifier(node)!;
       case "Literal": {
-        if (node.regex !== undefined || typeof node.value === "bigint") return fail("SCRIPT_COMPILER_UNSUPPORTED_SYNTAX", node.type, "regex and bigint literals are not emitted");
+        if (node.regex !== undefined) {
+          if (node.regex === null || typeof node.regex !== "object") return fail("SCRIPT_COMPILER_UNSUPPORTED_SYNTAX", node.type, "regex metadata is invalid");
+          const pattern = (node.regex as { pattern?: unknown }).pattern;
+          const flags = (node.regex as { flags?: unknown }).flags;
+          if (typeof pattern !== "string" || typeof flags !== "string" || !/^[dgimsuvy]*$/.test(flags)
+            || new Set(flags).size !== flags.length) {
+            return fail("SCRIPT_COMPILER_UNSUPPORTED_SYNTAX", node.type, "regex pattern or flags are invalid");
+          }
+          return `/${emitRegexPattern(pattern)}/${flags}`;
+        }
+        if (typeof node.value === "bigint") return `${node.value.toString(10)}n`;
+        if (node.bigint !== undefined) return fail("SCRIPT_COMPILER_UNSUPPORTED_SYNTAX", node.type, "bigint metadata is invalid");
         return quote(node.value);
       }
       case "VariableDeclarator": return `${this.expression(child(node.id)!)}${node.init === null || node.init === undefined ? "" : ` = ${this.expression(child(node.init)!)}`}`;

@@ -154,6 +154,28 @@ describe("ActionGraph contracts", () => {
     }
   });
 
+  it("rejects Unicode escapes in JavaScript identifiers without screening literal escapes", () => {
+    for (const source of [
+      String.raw`F\u0075nction('return 1')`,
+      String.raw`new F\u0075nction('return 1')`,
+      String.raw`const Factory = F\u0075nction;`,
+      String.raw`\u0046\u0075\u006e\u0063\u0074\u0069\u006f\u006e('return 1')`,
+      String.raw`$contr\u006fl.getValue("status-filter")`,
+      String.raw`doc\u0075ment.querySelector("main")`,
+      String.raw`$contr\u{6f}l.getValue("status-filter")`,
+      String.raw`doc\u{75}ment.querySelector("main")`,
+    ]) {
+      expect(semanticImplementationTextIssue(source, "semantic-js-source"), source).toBeDefined();
+    }
+    for (const source of [
+      String.raw`const label = "\u4f60\u597d";`,
+      "const label = `\\u{1f642}`;",
+      String.raw`const matcher = /\u0061/u;`,
+    ]) {
+      expect(semanticImplementationTextIssue(source, "semantic-js-source"), source).toBeUndefined();
+    }
+  });
+
   it("preflights recursive values without getters, recursion overflow, or bare descriptor errors", () => {
     let getterCalls = 0;
     const accessor = { kind: "list" };

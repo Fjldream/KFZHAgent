@@ -131,7 +131,7 @@ export interface CompiledControlScriptSerialization {
   readonly modules: readonly CompiledScriptModule[];
 }
 
-export interface ExpectedCompiledControlScriptTarget {
+interface ExpectedCompiledControlScriptTarget {
   readonly ownerInstanceName: string;
   readonly capabilityId: string;
 }
@@ -404,7 +404,7 @@ function appendScript(existing: string, additions: readonly string[]): string {
 }
 
 /** Serializes compiler-owned script modules into the two reviewed KF 3.6 script fields. */
-export function serializeCompiledControlScripts(
+function serializeCompiledControlScripts(
   compiledControl: TemplateJson,
   serialization: CompiledControlScriptSerialization,
   expectedTarget: ExpectedCompiledControlScriptTarget,

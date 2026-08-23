@@ -147,6 +147,8 @@ describe("script program contracts", () => {
       "const state = \"input:ready\"; const status = \"status:active\"; const urn = \"urn:kingfusion:visitor1\";",
       "function chooseText(input) { if (input !== \"\") return input; return \"empty\"; } const chosen = chooseText(\"ready\");",
       "/* function fake() {} */ function/* reviewed separator */normalize(input) { return input; } const value = normalize(\"ready\");",
+      "const label = \"\\u4f60\\u597d\"; const template = `\\u{1f642}`;",
+      String.raw`const matcher = /\u0061/u;`,
     ];
     validSources.forEach((source) => expect(ScriptPlanSchema.safeParse({ ...sourcePlan.scripts[0], source }).success, source).toBe(true));
 
@@ -166,6 +168,13 @@ describe("script program contracts", () => {
       "const Factory = Function;",
       "const Factory = globalThis.Function;",
       "const value = function chooseText(input) { return input; };",
+      String.raw`F\u0075nction('return 1')`,
+      String.raw`new F\u0075nction('return 1')`,
+      String.raw`const Factory = F\u0075nction;`,
+      String.raw`$contr\u006fl.getValue("status-filter");`,
+      String.raw`doc\u0075ment.querySelector("main");`,
+      String.raw`$contr\u{6f}l.getValue("status-filter");`,
+      String.raw`doc\u{75}ment.querySelector("main");`,
     ];
     forbiddenSources.forEach((source) => expect(ScriptPlanSchema.safeParse({ ...sourcePlan.scripts[0], source }).success, source).toBe(false));
 

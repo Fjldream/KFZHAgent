@@ -324,6 +324,9 @@ describe("compileScriptPlan", () => {
       'const rows = [{ "extra": true }];',
       'const transformRecord = (item) => ({ 1: item, "label": item, ...rows[index] });',
       "const normalizeText = (raw) => { return String(raw).trim(); };",
+      "const matcher = /a\\/b[\\u2028]/gu;",
+      "const large = 9007199254740993n;",
+      "const mask = 0xFFn;",
       "const preselected = chooseText(value);",
       'function chooseText(input) { if (input !== "") return input; return "empty"; }',
       "const made = transformRecord(value);",
@@ -353,15 +356,23 @@ describe("compileScriptPlan", () => {
     expect(compiled.module.source.indexOf("const chooseText")).toBeLessThan(compiled.module.source.indexOf("const preselected"));
     expect(compiled.module.source).toContain("(total++)");
     expect(compiled.module.source).toContain('normalizeText(preselected) || "empty"');
+    expect(compiled.module.source).toContain("/a\\/b[\\u2028]/gu");
+    expect(compiled.module.source).toContain("9007199254740993n");
+    expect(compiled.module.source).toContain("const mask = 255n;");
     const sandbox = { Input1: { Value: "ready" }, __result: undefined as unknown };
-    runInNewContext(`${compiled.module.source}\n__result = { preselected, made, label, chosen, total };`, sandbox);
+    runInNewContext(`${compiled.module.source}\n__result = { preselected, made, label, chosen, total, regex: matcher.source, flags: matcher.flags, large: large.toString(), mask: mask.toString() };`, sandbox);
     expect(sandbox.__result).toEqual({
       preselected: "ready",
       made: { 1: "ready", label: "ready", extra: true },
       label: "ready-1",
       chosen: "ready",
       total: 11,
+      regex: "a\\/b[\\u2028]",
+      flags: "gu",
+      large: "9007199254740993",
+      mask: "255",
     });
+    expect(() => fixture("const unsafe = /(a+)+$/;")).toThrow(/CUSTOM_SCRIPT_FORBIDDEN.*unsafe regular expression/);
   });
 
   it("requires event placement to match the exact active-event brand", () => {
