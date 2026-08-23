@@ -20,6 +20,8 @@ const theme = {
   textPrimary: "#14212b", textSecondary: "#52616d", fontFamily: "Inter", spacingUnit: 8,
   radiusScale: { small: 4, medium: 8, large: 16 },
 } as const;
+const WORKSPACE_ID = "workspace-1";
+const BASE_REVISION_ID = "revision-1";
 
 function implementation(
   pageIds: readonly string[] = ["home", "detail"],
@@ -34,7 +36,9 @@ function implementation(
     controls: controlIds
       .filter((_, controlIndex) => controlIndex % pageIds.length === pageIndex)
       .map((controlId) => ({
-        id: controlId, role: "content", capabilityId: "text", depth: 0, zIndex: 0,
+        id: controlId, role: "content",
+        capabilityId: controlId === "open-detail" ? "button" : controlId === "detail-root" ? "easyui.1" : "text",
+        depth: 0, zIndex: 0,
         geometry: { x: 0, y: 0, width: 200, height: 40 }, nativeProperties: {},
         sourceSolutionNodeId: `solution-${controlId}`,
         sourceBlueprintPageId: `blueprint-${pageId}`,
@@ -69,13 +73,15 @@ describe("attachRuntimeCorrelation", () => {
   });
 
   function verified(correlations: ExistingRuntimeCorrelationDisposition): VerifiedExistingRuntimeCorrelationHandle {
-    return verifyExistingRuntimeCorrelation({ inspection: realInspection, correlations });
+    return verifyExistingRuntimeCorrelation({
+      workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, inspection: realInspection, correlations,
+    });
   }
 
   it("attaches a complete immutable correlation without mutating its input", () => {
     const source = implementation();
     const before = structuredClone(source);
-    const result = attachRuntimeCorrelation({ workspaceId: "workspace-1", implementation: source });
+    const result = attachRuntimeCorrelation({ workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: source });
 
     expect(source).toEqual(before);
     expect(result).not.toBe(source);
@@ -89,6 +95,10 @@ describe("attachRuntimeCorrelation", () => {
     result.runtimeCorrelation!.controls.forEach((entry) => {
       expect(CompilerInstanceNameSchema.safeParse(entry.instanceName).success).toBe(true);
     });
+    const names = correlationMaps(result).controls;
+    expect(names["open-detail"]).toMatch(/^Button\d+$/);
+    expect(names["detail-root"]).toMatch(/^Table\d+$/);
+    expect(names["home-root"]).toMatch(/^Text\d+$/);
     expect(UIImplementationSpecV2Schema.safeParse(result).success).toBe(true);
     expect(Object.isFrozen(result)).toBe(true);
     expect(Object.isFrozen(result.runtimeCorrelation)).toBe(true);
@@ -96,22 +106,22 @@ describe("attachRuntimeCorrelation", () => {
   });
 
   it("is idempotent, enumeration-order independent, and insertion-stable", () => {
-    const first = attachRuntimeCorrelation({ workspaceId: "workspace-1", implementation: implementation() });
-    const second = attachRuntimeCorrelation({ workspaceId: "workspace-1", implementation: first });
+    const first = attachRuntimeCorrelation({ workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: implementation() });
+    const second = attachRuntimeCorrelation({ workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: first });
     expect(second).toEqual(first);
 
     const reordered = implementation(["detail", "home"], ["detail-root", "open-detail", "home-root"]);
-    expect(correlationMaps(attachRuntimeCorrelation({ workspaceId: "workspace-1", implementation: reordered })))
+    expect(correlationMaps(attachRuntimeCorrelation({ workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: reordered })))
       .toEqual(correlationMaps(first));
 
     const expanded = implementation(["home", "detail"], ["home-root", "open-detail", "detail-root", "unrelated-control"]);
-    const expandedMap = correlationMaps(attachRuntimeCorrelation({ workspaceId: "workspace-1", implementation: expanded }));
+    const expandedMap = correlationMaps(attachRuntimeCorrelation({ workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: expanded }));
     const firstMap = correlationMaps(first);
     Object.entries(firstMap.controls).forEach(([id, name]) => expect(expandedMap.controls[id]).toBe(name));
   });
 
   it("reuses uploaded native identities and valid compiler-derived identities", () => {
-    const derived = attachRuntimeCorrelation({ workspaceId: "workspace-1", implementation: implementation() });
+    const derived = attachRuntimeCorrelation({ workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: implementation() });
     const maps = correlationMaps(derived);
     const existing = verified({
       controls: [
@@ -124,7 +134,7 @@ describe("attachRuntimeCorrelation", () => {
         { source: "workspace-derived", semanticPageId: "detail", pageGuid: maps.pages["detail"]! },
       ],
     });
-    const result = attachRuntimeCorrelation({ workspaceId: "workspace-1", implementation: implementation(), verifiedExisting: existing });
+    const result = attachRuntimeCorrelation({ workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: implementation(), verifiedExisting: existing });
     const correlated = correlationMaps(result);
     expect(correlated.controls["home-root"]).toBe("Button1");
     expect(correlated.controls["open-detail"]).toBe(maps.controls["open-detail"]);
@@ -134,7 +144,7 @@ describe("attachRuntimeCorrelation", () => {
 
   it("rejects forged workspace-derived values while uploaded page GUIDs may be non-derived", () => {
     expect(() => attachRuntimeCorrelation({
-      workspaceId: "workspace-1", implementation: implementation(),
+      workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: implementation(),
       verifiedExisting: verified({
         controls: [
           { source: "workspace-derived", semanticControlId: "home-root", instanceName: "Forged1" },
@@ -148,7 +158,7 @@ describe("attachRuntimeCorrelation", () => {
       }),
     })).toThrowError(/FORGED_WORKSPACE_DERIVATION.*home-root/);
     expect(() => attachRuntimeCorrelation({
-      workspaceId: "workspace-1", implementation: implementation(),
+      workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: implementation(),
       verifiedExisting: verified({
         controls: allDerived("workspace-1").controls,
         pages: [
@@ -160,7 +170,7 @@ describe("attachRuntimeCorrelation", () => {
   });
 
   function mapsFor(workspaceId: string) {
-    return correlationMaps(attachRuntimeCorrelation({ workspaceId, implementation: implementation() }));
+    return correlationMaps(attachRuntimeCorrelation({ workspaceId, baseRevisionId: BASE_REVISION_ID, implementation: implementation() }));
   }
 
   function allDerived(workspaceId: string): ExistingRuntimeCorrelationDisposition {
@@ -174,12 +184,12 @@ describe("attachRuntimeCorrelation", () => {
   it("rejects plain proof declarations, untrusted inspections, and incomplete dispositions", () => {
     const declaration = allDerived("workspace-1");
     expect(() => attachRuntimeCorrelation({
-      workspaceId: "workspace-1", implementation: implementation(), verifiedExisting: declaration as never,
+      workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: implementation(), verifiedExisting: declaration as never,
     })).toThrowError(/INVALID_VERIFIED_HANDLE/);
-    expect(() => verifyExistingRuntimeCorrelation({ inspection: structuredClone(realInspection), correlations: declaration }))
+    expect(() => verifyExistingRuntimeCorrelation({ workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, inspection: structuredClone(realInspection), correlations: declaration }))
       .toThrowError(/UNTRUSTED_INSPECTION/);
     const partial = verified({ controls: declaration.controls.slice(1), pages: declaration.pages });
-    expect(() => attachRuntimeCorrelation({ workspaceId: "workspace-1", implementation: implementation(), verifiedExisting: partial }))
+    expect(() => attachRuntimeCorrelation({ workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: implementation(), verifiedExisting: partial }))
       .toThrowError(/MISSING_CORRELATION/);
   });
 
@@ -218,31 +228,49 @@ describe("attachRuntimeCorrelation", () => {
         ? { source: "uploaded-existing" as const, semanticPageId: entry.semanticPageId, pageGuid: uploadedPageGuid }
         : entry),
     });
-    const first = attachRuntimeCorrelation({ workspaceId: "workspace-1", implementation: implementation(), verifiedExisting: mixed });
-    expect(() => attachRuntimeCorrelation({ workspaceId: "workspace-1", implementation: first }))
+    const first = attachRuntimeCorrelation({ workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: implementation(), verifiedExisting: mixed });
+    expect(() => attachRuntimeCorrelation({ workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: first }))
       .toThrowError(/EXISTING_CORRELATION_PROOF_REQUIRED/);
-    expect(attachRuntimeCorrelation({ workspaceId: "workspace-1", implementation: first, verifiedExisting: mixed })).toEqual(first);
+    expect(attachRuntimeCorrelation({ workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: first, verifiedExisting: mixed })).toEqual(first);
+  });
+
+  it("binds verified proof to exact workspace and base revision identity", () => {
+    expect(() => attachRuntimeCorrelation({ workspaceId: WORKSPACE_ID, implementation: implementation() } as never))
+      .toThrowError(/INPUT_INVALID.*incomplete/);
+    const handle = verified(allDerived(WORKSPACE_ID));
+    expect(() => attachRuntimeCorrelation({
+      workspaceId: "workspace-2", baseRevisionId: BASE_REVISION_ID, implementation: implementation(), verifiedExisting: handle,
+    })).toThrowError(/VERIFIED_IDENTITY_MISMATCH/);
+    expect(() => attachRuntimeCorrelation({
+      workspaceId: WORKSPACE_ID, baseRevisionId: "revision-2", implementation: implementation(), verifiedExisting: handle,
+    })).toThrowError(/VERIFIED_IDENTITY_MISMATCH/);
+    const first = attachRuntimeCorrelation({
+      workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: implementation(), verifiedExisting: handle,
+    });
+    expect(attachRuntimeCorrelation({
+      workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: first, verifiedExisting: handle,
+    })).toEqual(first);
   });
 
   it("rejects case-insensitive semantic aliases in the implementation", () => {
     const aliased = implementation(["Home", "home"], ["control-one", "control-two"]);
-    expect(() => attachRuntimeCorrelation({ workspaceId: "workspace-1", implementation: aliased }))
+    expect(() => attachRuntimeCorrelation({ workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: aliased }))
       .toThrowError(/SEMANTIC_CASE_ALIAS/);
   });
 
   it("rejects adapted-v1 and already-compiled interactions", () => {
     const adapted = { ...implementation(), compatibility: "adapted-v1", pages: [] } as unknown as UIImplementationSpecV2;
-    expect(() => attachRuntimeCorrelation({ workspaceId: "workspace-1", implementation: adapted }))
+    expect(() => attachRuntimeCorrelation({ workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: adapted }))
       .toThrowError(/NATIVE_IMPLEMENTATION_REQUIRED/);
 
     const compiled = structuredClone(implementation());
     compiled.compiledActions = [{ id: "unsafe" }] as never;
-    expect(() => attachRuntimeCorrelation({ workspaceId: "workspace-1", implementation: compiled }))
+    expect(() => attachRuntimeCorrelation({ workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: compiled }))
       .toThrowError(/INTERACTIONS_ALREADY_COMPILED/);
   });
 
   it("rejects accessors and non-plain data before schema parsing", () => {
-    const accessor = { workspaceId: "workspace-1", implementation: implementation() };
+    const accessor = { workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: implementation() };
     Object.defineProperty(accessor, "verifiedExisting", { enumerable: true, get: () => ({ controls: [], pages: [] }) });
     expect(() => attachRuntimeCorrelation(accessor as never)).toThrowError(/INPUT_ACCESSOR_FORBIDDEN/);
 
@@ -250,13 +278,13 @@ describe("attachRuntimeCorrelation", () => {
     const nonPlainControl = nonPlainImplementation.pages[0]!.compatibility === "native" ? nonPlainImplementation.pages[0]!.controls[0]! : undefined;
     if (nonPlainControl === undefined) throw new Error("fixture drift");
     nonPlainControl.nativeProperties = { invalid: new Map() as never };
-    const nonPlain = { workspaceId: "workspace-1", implementation: nonPlainImplementation };
+    const nonPlain = { workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: nonPlainImplementation };
     expect(() => attachRuntimeCorrelation(nonPlain as never)).toThrowError(/INPUT_NON_PLAIN_DATA/);
   });
 
   it("rejects proxies before invoking reflection traps and rejects shared aliases", () => {
     let traps = 0;
-    const proxied = new Proxy({ workspaceId: "workspace-1", implementation: implementation() }, {
+    const proxied = new Proxy({ workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: implementation() }, {
       getPrototypeOf: () => { traps += 1; return Object.prototype; },
       ownKeys: () => { traps += 1; return []; },
       getOwnPropertyDescriptor: () => { traps += 1; return undefined; },
@@ -268,7 +296,7 @@ describe("attachRuntimeCorrelation", () => {
       ownKeys: () => { traps += 1; return []; },
       getPrototypeOf: () => { traps += 1; return Object.prototype; },
     });
-    expect(() => verifyExistingRuntimeCorrelation({ inspection: realInspection, correlations: correlationProxy }))
+    expect(() => verifyExistingRuntimeCorrelation({ workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, inspection: realInspection, correlations: correlationProxy }))
       .toThrowError(/INPUT_PROXY_FORBIDDEN/);
     expect(traps).toBe(0);
 
@@ -277,7 +305,15 @@ describe("attachRuntimeCorrelation", () => {
     const control = aliased.pages[0]!.compatibility === "native" ? aliased.pages[0]!.controls[0]! : undefined;
     if (control === undefined) throw new Error("fixture drift");
     control.nativeProperties = { first: shared, second: shared };
-    expect(() => attachRuntimeCorrelation({ workspaceId: "workspace-1", implementation: aliased }))
+    expect(() => attachRuntimeCorrelation({ workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: aliased }))
       .toThrowError(/INPUT_ALIAS_FORBIDDEN/);
+  });
+
+  it("fails closed for an unreviewed capability prefix", () => {
+    const unknown = implementation();
+    if (unknown.pages[0]!.compatibility !== "native") throw new Error("fixture drift");
+    unknown.pages[0]!.controls[0]!.capabilityId = "unknown-runtime-control";
+    expect(() => attachRuntimeCorrelation({ workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: unknown }))
+      .toThrowError(/RUNTIME_PREFIX_UNSUPPORTED/);
   });
 });

@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { canonicalServerHash, type ScriptPlan, type SolutionImplementationPlan, type UIImplementationSpecV2 } from "@kf/contracts";
 import type { ClientWorkspace } from "../compile/client-compiler.js";
+import { compileControl, type CompileContext } from "../compile/control-compiler.js";
+import { deriveGuid } from "../compile/guid-factory.js";
 import { validateCustomScript } from "../interaction/custom-script-validator.js";
 import { createSemanticScriptApiContext, createSemanticScriptValidationIdentity } from "../interaction/semantic-script-api.js";
 import { compileScriptPlan } from "../interaction/script-compiler.js";
@@ -120,7 +122,12 @@ function reencodeMarker(source: string, transform: (metadata: Record<string, unk
   return `${prefix}${transform(metadata)}${source.slice(newline)}`;
 }
 
-function compileReviewedSyntax(options: { readonly cellClickSource?: string; readonly source?: string } = {}): ReturnType<typeof compileScriptPlan>["module"] {
+function compileReviewedSyntax(options: {
+  readonly cellClickSource?: string;
+  readonly source?: string;
+  readonly derivedRuntime?: { readonly workspaceId: string; readonly baseRevisionId: string };
+  readonly captureImplementation?: (implementation: UIImplementationSpecV2) => void;
+} = {}): ReturnType<typeof compileScriptPlan>["module"] {
   const theme = {
     background: "#f4f7fb", surface: "#ffffff", primary: "#163a5f", accent: "#e47b32",
     textPrimary: "#14212b", textSecondary: "#52616d", fontFamily: "Inter", spacingUnit: 8,
@@ -179,15 +186,20 @@ function compileReviewedSyntax(options: { readonly cellClickSource?: string; rea
     sourceSolutionNodeId: id, sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region"], eventBindings: [],
     ...(capabilityId.startsWith("layout.") ? { compiledLayout: { kind: "column" as const, overflow: "visible" as const } } : {}),
   });
-  const implementation: UIImplementationSpecV2 = {
+  const implementationBase: UIImplementationSpecV2 = {
     schema: "kf-ui-implementation/v2", compatibility: "native", sourceSolutionPlanHash: canonicalServerHash(plan),
     sourceModuleRegistryHash: solutionModuleRegistryHash(plan, createDefaultModuleRegistry()),
     theme, compiledRoleStyles: {}, compiledActions: [], compiledScripts: [], pages: [{ compatibility: "native", id: "home", width: 1280, height: 720,
       sourceBlueprintPageId: "bp-home", controls: [control("go", "button", "root"), control("status-filter", "input", "root"),
         { ...control("records", "easyui.1", "root"), dataBinding: { mockDataId: "visitor-records", records: [{ id: "a" }] } }, control("root", "layout.4")] }],
-    runtimeCorrelation: { controls: [{ semanticControlId: "go", instanceName: "Button1" }, { semanticControlId: "status-filter", instanceName: "Input1" }, { semanticControlId: "records", instanceName: "Table1" }, { semanticControlId: "root", instanceName: "Layout1" }],
-      pages: [{ semanticPageId: "home", pageGuid: "00000000-0000-4000-8000-000000000001" }] },
   };
+  const implementation: UIImplementationSpecV2 = options.derivedRuntime === undefined
+    ? { ...implementationBase, runtimeCorrelation: {
+      controls: [{ semanticControlId: "go", instanceName: "Button1" }, { semanticControlId: "status-filter", instanceName: "Input1" }, { semanticControlId: "records", instanceName: "Table1" }, { semanticControlId: "root", instanceName: "Layout1" }],
+      pages: [{ semanticPageId: "home", pageGuid: "00000000-0000-4000-8000-000000000001" }],
+    } }
+    : attachRuntimeCorrelation({ ...options.derivedRuntime, implementation: implementationBase });
+  options.captureImplementation?.(implementation);
   const ownerControlId = cellClick ? "records" : "go";
   const semanticEvent = cellClick ? "row-click" : "click";
   const context = createSemanticScriptApiContext({ plan, implementation, ownerControlId, activeEvent: { controlId: ownerControlId, semanticEvent } });
@@ -232,32 +244,45 @@ describe("client validator (Task 7 brief Step 2)", () => {
     expect(report.warnings.join("\n")).toMatch(/unknown compiler-owned instance reference/);
   });
 
-  it("accepts a compiler-derived k page GUID through runtime correlation, marker metadata, source scanning, and project references", async () => {
-    const correlated = attachRuntimeCorrelation({
-      workspaceId: "validator-k-page",
-      implementation: {
-        schema: "kf-ui-implementation/v2", compatibility: "native",
-        theme: { background: "#fff", surface: "#fff", primary: "#163a5f", accent: "#e47b32", textPrimary: "#14212b", textSecondary: "#52616d", fontFamily: "Inter", spacingUnit: 8, radiusScale: { small: 4, medium: 8, large: 16 } },
-        compiledRoleStyles: {}, compiledActions: [], compiledScripts: [],
-        pages: [{ compatibility: "native", id: "home", width: 1280, height: 720, sourceBlueprintPageId: "bp-home", controls: [{
-          id: "go", role: "action", capabilityId: "button", depth: 0, zIndex: 0,
-          geometry: { x: 0, y: 0, width: 90, height: 40 }, nativeProperties: {},
-          sourceSolutionNodeId: "go", sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["hero"], eventBindings: [],
-        }] }],
-      },
+  it("accepts derived Button/Table identities and k page GUID through script compilation, materialization, marker scanning, and project validation", async () => {
+    let correlated: UIImplementationSpecV2 | undefined;
+    const module = compileReviewedSyntax({
+      source: 'const records = []; $control.setData("records", records);',
+      derivedRuntime: { workspaceId: "validator-k-page", baseRevisionId: "validator-base-revision" },
+      captureImplementation: (implementation) => { correlated = implementation; },
     });
-    const pageGuid = correlated.runtimeCorrelation!.pages[0]!.pageGuid;
+    expect(module.ownerInstanceName).toMatch(/^Button\d+$/);
+    const tableName = module.instanceReferences.find((reference) => reference.semanticId === "records")!.instanceName;
+    expect(tableName).toMatch(/^Table\d+$/);
+    const pageGuid = correlated?.runtimeCorrelation?.pages.find((entry) => entry.semanticPageId === "home")?.pageGuid;
+    if (pageGuid === undefined) throw new Error("derived runtime correlation was not captured");
     expect(pageGuid).toMatch(/^k[0-9a-f-]{36}$/);
+
+    const compileContext: CompileContext = {
+      variableGroupGuid: "kvariables", pageGroupGuid: "kpages",
+      resolvePageGuid: () => pageGuid, resolveVariableName: (id) => id,
+    };
+    const compiledButton = compileControl({ seed: "validator-k-page" }, {
+      id: module.ownerInstanceName, type: "button", x: 10, y: 10, width: 120, height: 60, text: "Run",
+      action: { kind: "navigate", pageId: "home" },
+    }, compileContext, {
+      ownerInstanceName: module.ownerInstanceName, capabilityId: "button", modules: [module],
+      bindings: [{
+        id: "kf$binding:validator-derived", ownerInstanceName: module.ownerInstanceName,
+        kfEvent: "onClick", linkId: 200001, phase: "event", scriptModuleIds: [module.id], nativeActionIds: [],
+      }],
+    });
+    const compiledTable = compileControl({ seed: "validator-k-page" }, {
+      id: tableName, type: "table", x: 10, y: 100, width: 640, height: 240,
+    }, compileContext);
+    expect((compiledButton.linkMng as { linkList: Array<Record<string, unknown>> }).linkList)
+      .toContainEqual({ action: "navigatePage", pageId: pageGuid });
 
     const base = await copyFixture("client-unknown-field");
     const candidate = await applyClientPatch(base, happyPlan());
     const page = await readPage(candidate) as PageFixture & Record<string, unknown>;
     page.guid = pageGuid;
-    const body = `const targetPage = ${JSON.stringify(pageGuid)};`;
-    page.objects[0]!.linkMng = { linkList: [{
-      linkId: 200001, enable: true, name: "onClick",
-      script: markedScript(body, { pageReferences: [{ semanticId: "home", pageGuid }] }),
-    }] };
+    page.objects = [compiledButton, compiledTable];
     await writePage(candidate, page);
     const managerPath = await pageManagerFile(candidate);
     const manager = JSON.parse(await readFile(managerPath, "utf8")) as { Pages: Array<Record<string, unknown>> };
@@ -265,9 +290,29 @@ describe("client validator (Task 7 brief Step 2)", () => {
     await writeFile(managerPath, JSON.stringify(manager, null, 2));
 
     const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.references, report.warnings.join("\n")).toBe("pass");
+    expect(report.checks.businessRules, report.warnings.join("\n")).toBe("pass");
+    expect(report.warnings.join("\n")).not.toMatch(/undeclared page reference|invalid schema|unknown compiler-owned page reference/);
+  });
+
+  it("treats a declared k page GUID as one full marker/source token rather than an inner bare UUID", async () => {
+    const pageGuid = `k${deriveGuid({ seed: "validator-marker-page" }, "home")}`;
+    const base = await copyFixture("client-unknown-field");
+    const candidate = await applyClientPatch(base, happyPlan());
+    const page = await readPage(candidate) as PageFixture & Record<string, unknown>;
+    page.guid = pageGuid;
+    const body = `const targetPage = ${JSON.stringify(pageGuid)};`;
+    page.objects[0]!.linkMng = { linkList: [{ linkId: 200001, enable: true, name: "onClick", script: markedScript(body, {
+      pageReferences: [{ semanticId: "home", pageGuid }],
+    }) }] };
+    await writePage(candidate, page);
+    const managerPath = await pageManagerFile(candidate);
+    const manager = JSON.parse(await readFile(managerPath, "utf8")) as { Pages: Array<Record<string, unknown>> };
+    manager.Pages[0]!.id = pageGuid;
+    await writeFile(managerPath, JSON.stringify(manager, null, 2));
+    const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
     expect(report.checks.references).toBe("pass");
     expect(report.checks.businessRules).toBe("pass");
-    expect(report.warnings.join("\n")).not.toMatch(/undeclared page reference|invalid schema|unknown compiler-owned page reference/);
   });
 
   it("rejects non-canonical marker payloads and non-ASI-safe legacy boundaries", async () => {

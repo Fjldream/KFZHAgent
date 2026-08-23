@@ -13,9 +13,15 @@ export interface ExistingRuntimeCorrelationDisposition {
 }
 declare const verifiedRuntimeCorrelationBrand: unique symbol;
 export interface VerifiedExistingRuntimeCorrelationHandle { readonly [verifiedRuntimeCorrelationBrand]: true }
-export interface VerifyExistingRuntimeCorrelationInput { readonly inspection: InspectResult; readonly correlations: ExistingRuntimeCorrelationDisposition }
+export interface VerifyExistingRuntimeCorrelationInput {
+  readonly workspaceId: string;
+  readonly baseRevisionId: string;
+  readonly inspection: InspectResult;
+  readonly correlations: ExistingRuntimeCorrelationDisposition;
+}
 export interface AttachRuntimeCorrelationInput {
   readonly workspaceId: string;
+  readonly baseRevisionId: string;
   readonly implementation: UIImplementationSpecV2;
   readonly verifiedExisting?: VerifiedExistingRuntimeCorrelationHandle;
 }
@@ -28,7 +34,13 @@ interface CanonicalDisposition {
   readonly controls: readonly Readonly<ExistingControlRuntimeDisposition>[];
   readonly pages: readonly Readonly<ExistingPageRuntimeDisposition>[];
 }
-const verifiedDispositionByHandle = new WeakMap<object, CanonicalDisposition>();
+interface VerifiedDispositionPayload {
+  readonly workspaceId: string;
+  readonly baseRevisionId: string;
+  readonly inspectionIdentityHash: string;
+  readonly disposition: CanonicalDisposition;
+}
+const verifiedDispositionByHandle = new WeakMap<object, VerifiedDispositionPayload>();
 const MAX_INPUT_DEPTH = 96;
 const MAX_INPUT_NODES = 1_500_000;
 const MAX_ARRAY_LENGTH = 10_000;
@@ -133,9 +145,26 @@ function nonEmptyString(value: unknown, path: string, maximum = 200): string {
   if (typeof value !== "string" || value.length === 0 || value.length > maximum || value.trim() !== value) fail("INPUT_INVALID", `${path} must be a bounded non-empty string without surrounding whitespace`);
   return value;
 }
-function runtimeInstanceName(workspaceId: string, semanticControlId: string): string {
-  const digest = createHash("sha256").update("kf-runtime-control\0", "utf8").update(workspaceId, "utf8").update("\0", "utf8").update(semanticControlId, "utf8").digest("hex");
-  return `KF${digest}0`;
+const RUNTIME_PREFIX_BY_CAPABILITY: Readonly<Record<string, string>> = Object.freeze({
+  button: "Button", checkbox: "Checkbox", datetimepicker: "Datetimepicker",
+  "easyui.1": "Table", datagrid: "Table", "easyui.2": "LinkButton",
+  "easyui.6": "Searchbox", "easyui.12": "Dialog", "easyui.18": "Treegrid",
+  "easyui.19": "Window", "easyui.22": "Pagination", image: "Image", input: "Input",
+  inputnumber: "InputNumber", list: "List", navmenu: "Navmenu", radio: "Radio",
+  richtext: "RichText", select: "Select", switch: "Switch", tabs: "Tabs", tag: "Tag",
+  text: "Text", tree: "Tree",
+});
+function runtimePrefix(capabilityId: string): string {
+  if (/^layout\.(?:2|4|5)$/.test(capabilityId)) return "Layout";
+  const prefix = RUNTIME_PREFIX_BY_CAPABILITY[capabilityId];
+  if (prefix === undefined) fail("RUNTIME_PREFIX_UNSUPPORTED", capabilityId);
+  return prefix;
+}
+function runtimeInstanceName(workspaceId: string, semanticControlId: string, capabilityId: string): string {
+  const digest = createHash("sha256")
+    .update("kf-runtime-control\0", "utf8").update(workspaceId, "utf8").update("\0", "utf8")
+    .update(semanticControlId, "utf8").update("\0", "utf8").update(capabilityId, "utf8").digest("hex");
+  return `${runtimePrefix(capabilityId)}${BigInt(`0x${digest}`).toString(10)}`;
 }
 function runtimePageGuid(workspaceId: string, semanticPageId: string): string { return `k${deriveGuid({ seed: workspaceId }, semanticPageId)}`; }
 
@@ -173,8 +202,10 @@ function parseDisposition(raw: unknown): CanonicalDisposition {
 
 /** Verifies uploaded identities against a server-produced inspector result and returns an opaque runtime handle. */
 export function verifyExistingRuntimeCorrelation(input: VerifyExistingRuntimeCorrelationInput): VerifiedExistingRuntimeCorrelationHandle {
-  const values = rootDescriptors(input, ["inspection", "correlations"], "$input");
-  if (!values.has("inspection") || !values.has("correlations")) fail("INPUT_INVALID", "verification input is incomplete");
+  const values = rootDescriptors(input, ["workspaceId", "baseRevisionId", "inspection", "correlations"], "$input");
+  if (!values.has("workspaceId") || !values.has("baseRevisionId") || !values.has("inspection") || !values.has("correlations")) fail("INPUT_INVALID", "verification input is incomplete");
+  const workspaceId = nonEmptyString(values.get("workspaceId"), "workspaceId");
+  const baseRevisionId = nonEmptyString(values.get("baseRevisionId"), "baseRevisionId");
   const inspection = values.get("inspection");
   if (inspection === null || typeof inspection !== "object") fail("UNTRUSTED_INSPECTION", "inspection was not produced by inspectClientProject");
   const identitySnapshot = serverOwnedRuntimeIdentitySnapshot(inspection as InspectResult);
@@ -191,7 +222,9 @@ export function verifyExistingRuntimeCorrelation(input: VerifyExistingRuntimeCor
     if (exact.length !== 1 || folded.length !== 1) fail("UPLOADED_ENTITY_MISMATCH", `page ${entry.semanticPageId}`);
   });
   const handle = Object.freeze(Object.create(null)) as VerifiedExistingRuntimeCorrelationHandle;
-  verifiedDispositionByHandle.set(handle, disposition); return handle;
+  const inspectionIdentityHash = createHash("sha256").update(JSON.stringify(identitySnapshot), "utf8").digest("hex");
+  verifiedDispositionByHandle.set(handle, Object.freeze({ workspaceId, baseRevisionId, inspectionIdentityHash, disposition }));
+  return handle;
 }
 
 function assertExactSemanticDisposition(disposition: CanonicalDisposition, controlIds: readonly string[], pageIds: readonly string[]): void {
@@ -215,15 +248,21 @@ function deepFreeze<T>(value: T): T {
 
 /** Attaches server-owned KF runtime identities before interaction compilation. */
 export function attachRuntimeCorrelation(input: AttachRuntimeCorrelationInput): UIImplementationSpecV2 {
-  const root = rootDescriptors(input, ["workspaceId", "implementation", "verifiedExisting"], "$input");
-  if (!root.has("workspaceId") || !root.has("implementation")) fail("INPUT_INVALID", "attach input is incomplete");
-  let verified: CanonicalDisposition | undefined;
+  const root = rootDescriptors(input, ["workspaceId", "baseRevisionId", "implementation", "verifiedExisting"], "$input");
+  if (!root.has("workspaceId") || !root.has("baseRevisionId") || !root.has("implementation")) fail("INPUT_INVALID", "attach input is incomplete");
+  let verifiedPayload: VerifiedDispositionPayload | undefined;
   if (root.has("verifiedExisting")) {
     const handle = root.get("verifiedExisting");
-    if (typeof handle !== "object" || handle === null || (verified = verifiedDispositionByHandle.get(handle)) === undefined) fail("INVALID_VERIFIED_HANDLE", "verifiedExisting was not issued by the verifier");
+    if (typeof handle !== "object" || handle === null || (verifiedPayload = verifiedDispositionByHandle.get(handle)) === undefined) fail("INVALID_VERIFIED_HANDLE", "verifiedExisting was not issued by the verifier");
   }
-  const safe = record(clonePlainData({ workspaceId: root.get("workspaceId"), implementation: root.get("implementation") }), "$input");
-  const workspaceId = nonEmptyString(safe.workspaceId, "workspaceId"); const rawImplementation = record(safe.implementation, "implementation");
+  const safe = record(clonePlainData({ workspaceId: root.get("workspaceId"), baseRevisionId: root.get("baseRevisionId"), implementation: root.get("implementation") }), "$input");
+  const workspaceId = nonEmptyString(safe.workspaceId, "workspaceId");
+  const baseRevisionId = nonEmptyString(safe.baseRevisionId, "baseRevisionId");
+  if (verifiedPayload !== undefined && (verifiedPayload.workspaceId !== workspaceId || verifiedPayload.baseRevisionId !== baseRevisionId)) {
+    fail("VERIFIED_IDENTITY_MISMATCH", `${workspaceId}/${baseRevisionId}`);
+  }
+  const verified = verifiedPayload?.disposition;
+  const rawImplementation = record(safe.implementation, "implementation");
   if (rawImplementation.compatibility !== "native") fail("NATIVE_IMPLEMENTATION_REQUIRED", "adapted-v1 is not supported");
   const hasBindings = Array.isArray(rawImplementation.pages) && rawImplementation.pages.some((page) => {
     const candidate = page !== null && typeof page === "object" ? page as Record<string, unknown> : {};
@@ -239,14 +278,21 @@ export function attachRuntimeCorrelation(input: AttachRuntimeCorrelationInput): 
   if (parsed.data.compatibility !== "native") fail("NATIVE_IMPLEMENTATION_REQUIRED", "adapted-v1 is not supported");
   const implementation = parsed.data; const pageIds = implementation.pages.map((page) => page.id);
   const controlIds = implementation.pages.flatMap((page) => page.compatibility === "native" ? page.controls.map((control) => control.id) : []);
+  const capabilityByControlId = new Map(implementation.pages.flatMap((page) => page.compatibility === "native"
+    ? page.controls.map((control) => [control.id, control.capabilityId] as const) : []));
   assertNoSemanticCaseAliases([...pageIds, ...controlIds]);
   let controls: Array<{ semanticControlId: string; instanceName: string }>; let pages: Array<{ semanticPageId: string; pageGuid: string }>;
   if (verified === undefined) {
-    controls = [...controlIds].sort((a, b) => a.localeCompare(b, "en-US")).map((semanticControlId) => ({ semanticControlId, instanceName: runtimeInstanceName(workspaceId, semanticControlId) }));
+    controls = [...controlIds].sort((a, b) => a.localeCompare(b, "en-US")).map((semanticControlId) => ({
+      semanticControlId,
+      instanceName: runtimeInstanceName(workspaceId, semanticControlId, capabilityByControlId.get(semanticControlId)!),
+    }));
     pages = [...pageIds].sort((a, b) => a.localeCompare(b, "en-US")).map((semanticPageId) => ({ semanticPageId, pageGuid: runtimePageGuid(workspaceId, semanticPageId) }));
   } else {
     assertExactSemanticDisposition(verified, controlIds, pageIds);
-    verified.controls.filter((entry) => entry.source === "workspace-derived").forEach((entry) => { if (entry.instanceName !== runtimeInstanceName(workspaceId, entry.semanticControlId)) fail("FORGED_WORKSPACE_DERIVATION", entry.semanticControlId); });
+    verified.controls.filter((entry) => entry.source === "workspace-derived").forEach((entry) => {
+      if (entry.instanceName !== runtimeInstanceName(workspaceId, entry.semanticControlId, capabilityByControlId.get(entry.semanticControlId)!)) fail("FORGED_WORKSPACE_DERIVATION", entry.semanticControlId);
+    });
     verified.pages.filter((entry) => entry.source === "workspace-derived").forEach((entry) => { if (entry.pageGuid !== runtimePageGuid(workspaceId, entry.semanticPageId)) fail("FORGED_WORKSPACE_DERIVATION", entry.semanticPageId); });
     controls = verified.controls.map(({ semanticControlId, instanceName }) => ({ semanticControlId, instanceName }));
     pages = verified.pages.map(({ semanticPageId, pageGuid }) => ({ semanticPageId, pageGuid }));
