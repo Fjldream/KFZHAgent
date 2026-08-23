@@ -6,6 +6,7 @@ import { CompiledNativeActionSchema, CompilerPageGuidSchema } from "./action-gra
 import { CustomerSolutionBlueprintSchema } from "./solution-blueprint.js";
 import { SolutionImplementationPlanSchema } from "./solution-implementation-plan.js";
 import { CompiledEventBindingSchema, CompiledScriptModuleSchema } from "./script-program.js";
+import { allowedFieldsForCapability } from "./native-delta-allowlist.js";
 import {
   CompiledStyleSpecSchema,
   CompiledLayoutMetadataSchema,
@@ -347,10 +348,13 @@ export function validateCreativeArtifactMaterializationProjection(
     if (control.source !== "uploaded-existing") return;
     const implementationControl = controls.find((candidate) => candidate.id === control.semanticControlId)!;
     const policy = controlEvidence.get(control.semanticControlId)?.deltaAllowlistPolicy;
-    if (policy === undefined || policy.capabilityId !== implementationControl.capabilityId) {
-      throw new Error(`CREATIVE_MATERIALIZATION_PROJECTION_MISMATCH: delta allowlist policy ${control.semanticControlId}`);
+    const canonicalAllowedFields = [...allowedFieldsForCapability(implementationControl.capabilityId)]
+      .sort(compareCreativeIdentifiers);
+    if (policy === undefined || policy.capabilityId !== implementationControl.capabilityId
+      || stableJson(policy.allowedFields) !== stableJson(canonicalAllowedFields)) {
+      throw new Error(`CREATIVE_MATERIALIZATION_PROJECTION_MISMATCH: canonical delta allowlist policy ${control.semanticControlId}`);
     }
-    const allowedFields = new Set(policy.allowedFields);
+    const allowedFields = new Set(canonicalAllowedFields);
     const candidates: Array<{ path: string; value: unknown }> = [
       { path: "/x", value: implementationControl.geometry.x }, { path: "/y", value: implementationControl.geometry.y },
       { path: "/width", value: implementationControl.geometry.width }, { path: "/height", value: implementationControl.geometry.height },

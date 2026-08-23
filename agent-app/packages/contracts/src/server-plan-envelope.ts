@@ -10,6 +10,7 @@ import {
   compareCreativeIdentifiers,
   validateCreativeArtifactMaterializationProjection,
 } from "./creative-build-artifact.js";
+import { nativeControlVariantForCapability } from "./native-delta-allowlist.js";
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 
@@ -234,7 +235,7 @@ export function validateCreativePlanMaterializationProjection(plan: InternalChan
       : { op: "update", entityType: "page", entityId: page.semanticPageId, changes: [{ path: "/pageViewWidth", value: page.width }, { path: "/pageViewHeight", value: page.height }] });
   }
   for (const control of materialization.controls) {
-    const variant = nativeVariant(control.capabilityId);
+    const variant = nativeControlVariantForCapability(control.capabilityId);
     expected.push(control.source === "workspace-derived"
       ? { op: "create", entityType: "control", entityId: control.semanticControlId,
         properties: { semanticPageId: control.semanticPageId, ...variant, ...control.geometry, zIndex: control.zIndex,
@@ -253,13 +254,6 @@ export function validateCreativePlanMaterializationProjection(plan: InternalChan
   })) : []).sort((left, right) => compareCreativeIdentifiers(left.assetId, right.assetId) || compareCreativeIdentifiers(left.controlId, right.controlId));
   const actualAssets = [...(plan.assetBindings ?? [])].sort((left, right) => compareCreativeIdentifiers(left.assetId, right.assetId) || compareCreativeIdentifiers(left.controlId, right.controlId));
   if (stableJson(actualAssets) !== stableJson(expectedAssets)) throw new Error("SERVER_PLAN_CREATIVE_MISMATCH: plan assets differ from materialization");
-}
-
-function nativeVariant(capabilityId: string): { type: string; proto?: number; layoutType?: number; prototypeName?: string } {
-  const easyui = /^easyui\.(\d+)$/.exec(capabilityId); if (easyui !== null) return { type: "easyui", proto: Number(easyui[1]) };
-  const layout = /^layout\.(\d+)$/.exec(capabilityId); if (layout !== null) return { type: "layout", layoutType: Number(layout[1]) };
-  const prototype = /^prototype\.(.+)$/.exec(capabilityId); if (prototype !== null) return { type: "prototype", prototypeName: prototype[1]! };
-  return { type: capabilityId };
 }
 
 function semanticPayloadsFromPlan(plan: InternalChangePlan): Array<{

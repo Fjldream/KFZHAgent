@@ -8,12 +8,14 @@ import {
   TrustedNativeMaterializationSchema,
   UIImplementationSpecV2Schema,
   VerifiedCreativeAssetSchema,
+  allowedFieldsForCapability,
   canonicalCreativeBuildArtifactHash,
   canonicalServerHash,
   canonicalTrustedNativeMaterializationHash,
   compareCreativeIdentifiers,
   internalChangePlanSchema,
   modelAssetIdToWorkspaceAssetId,
+  nativeControlVariantForCapability,
   validateCreativeArtifactMaterializationProjection,
   type CapabilityReport,
   type ChangeOperation,
@@ -30,7 +32,6 @@ import { getControlCapability } from "../style/control-capability-registry.js";
 import { compileResolvedStyle } from "../style/style-engine.js";
 import { resolveStyle } from "../style/theme-resolver.js";
 import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
-import { allowedFieldsFor } from "../patch/allowlist.js";
 import { validateGeneratedComponentProperties } from "./component-properties.js";
 import { compileInteractions } from "../interaction/interaction-compiler.js";
 import {
@@ -160,21 +161,11 @@ function exactString(value: unknown, field: string): string {
   return value;
 }
 
-function controlVariant(capabilityId: string): { type: string; proto?: number; layoutType?: number; prototypeName?: string } {
-  const easyui = /^easyui\.(\d+)$/.exec(capabilityId); if (easyui !== null) return { type: "easyui", proto: Number(easyui[1]) };
-  const layout = /^layout\.(\d+)$/.exec(capabilityId); if (layout !== null) return { type: "layout", layoutType: Number(layout[1]) };
-  const prototype = /^prototype\.(.+)$/.exec(capabilityId); if (prototype !== null) return { type: "prototype", prototypeName: prototype[1]! };
-  return { type: capabilityId };
-}
-
 function existingDeltaProjection(control: UIImplementationControlV2): {
   existingDeltas: Array<{ path: string; value: unknown }>;
   deltaAllowlistPolicy: { capabilityId: string; allowedFields: string[]; policyHash: string };
 } {
-  const variant = controlVariant(control.capabilityId);
-  const allowed = allowedFieldsFor({ kind: "control", controlType: variant.type,
-    ...(variant.proto === undefined ? {} : { easyuiProto: variant.proto }),
-    ...(variant.prototypeName === undefined ? {} : { prototypeName: variant.prototypeName }) });
+  const allowed = allowedFieldsForCapability(control.capabilityId);
   const allowedFields = [...allowed].sort(compareCreativeIdentifiers);
   const candidates: Array<[string, unknown]> = [["x", control.geometry.x], ["y", control.geometry.y], ["width", control.geometry.width], ["height", control.geometry.height]];
   for (const [key, value] of Object.entries(control.nativeProperties)) candidates.push([key, value]);
@@ -359,7 +350,7 @@ function compileCreativeUIImplementationV2(
     }
     const nativeProperties = { ...validateGeneratedComponentProperties(control.capabilityId, semanticNativeProperties), ...compiledNativeFields };
     const parentInstanceName = control.parentId === undefined ? undefined : correlationControl.get(control.parentId);
-    const variant = controlVariant(control.capabilityId);
+    const variant = nativeControlVariantForCapability(control.capabilityId);
     if (source === "workspace-derived") operations.push({ op: "create", entityType: "control", entityId: control.id, properties: {
       semanticPageId: page.id, ...variant, ...control.geometry, zIndex: control.zIndex,
       ...(control.compiledLayout === undefined ? {} : { compiledLayout: control.compiledLayout }),

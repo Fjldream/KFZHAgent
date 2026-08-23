@@ -88,7 +88,13 @@ function materialization() {
 }
 
 function buttonDeltaPolicy() {
-  const projection = { capabilityId: "button", allowedFields: ["height", "text", "width", "x", "y"] };
+  const projection = { capabilityId: "button", allowedFields: [
+    "backgroundColor", "circle", "comment", "configureData", "customPropertyRecords", "disabled", "enable",
+    "fixedSize", "height", "icon", "internalVertex", "isChangeFixedSize", "isChangeFont", "isControl",
+    "leftTopPt", "linkMng", "loading", "lock", "name", "plain", "primary", "resDescription", "resourceGroup",
+    "resourceGroupMsg", "round", "runVisible", "securityPriority", "securitySection", "showUiExtendType",
+    "sizePolicy", "text", "titleShow", "type", "version", "visible", "width", "x", "y",
+  ] };
   return { ...projection, policyHash: canonicalServerHash(projection) };
 }
 
@@ -201,6 +207,63 @@ describe("creative build contracts", () => {
     duplicate.evidence.verifiedAssets = [asset, structuredClone(asset)];
     duplicate.hashes.evidenceHash = canonicalServerHash(duplicate.evidence);
     expect(CreativeBuildArtifactSchema.safeParse(duplicate).success).toBe(false);
+  });
+
+  it("rejects a synchronized widened delta policy after every public hash is recomputed", () => {
+    const widenedArtifact = structuredClone(CreativeBuildArtifactSchema.parse(artifact()));
+    widenedArtifact.implementation.pages[0]!.controls[0]!.nativeProperties.forbidden = true;
+    widenedArtifact.hashes.implementationHash = canonicalServerHash(widenedArtifact.implementation);
+    widenedArtifact.evidence.pages[0]!.source = "uploaded-existing";
+    const widenedDeltas = [
+      { path: "/x", value: 10 }, { path: "/y", value: 10 }, { path: "/width", value: 120 },
+      { path: "/height", value: 40 }, { path: "/forbidden", value: true }, { path: "/text", value: "打开" },
+    ];
+    const widenedAllowedFields = [...buttonDeltaPolicy().allowedFields];
+    widenedAllowedFields.splice(8, 0, "forbidden");
+    const widenedPolicy = { capabilityId: "button", allowedFields: widenedAllowedFields };
+    Object.assign(widenedArtifact.evidence.controls[0]!, {
+      source: "uploaded-existing",
+      nativeGuid: "native-button-guid",
+      existingDeltas: widenedDeltas,
+      deltaAllowlistPolicy: { ...widenedPolicy, policyHash: canonicalServerHash(widenedPolicy) },
+    });
+    widenedArtifact.hashes.evidenceHash = canonicalServerHash(widenedArtifact.evidence);
+
+    const widenedArtifactHash = canonicalCreativeBuildArtifactHash(widenedArtifact);
+    const widenedMaterialization = TrustedNativeMaterializationSchema.parse(materialization());
+    widenedMaterialization.creativeArtifactHash = widenedArtifactHash;
+    widenedMaterialization.implementationHash = widenedArtifact.hashes.implementationHash;
+    widenedMaterialization.pages[0]!.source = "uploaded-existing";
+    widenedMaterialization.controls[0]!.source = "uploaded-existing";
+    widenedMaterialization.controls[0]!.nativeProperties.forbidden = true;
+    Object.assign(widenedMaterialization.controls[0]!, {
+      nativeGuid: "native-button-guid",
+      existingDeltas: structuredClone(widenedDeltas),
+    });
+    const widenedMaterializationHash = canonicalTrustedNativeMaterializationHash(widenedMaterialization);
+    const widenedPlan = {
+      schema: "kf-change-plan/v1" as const,
+      workspaceId: "workspace",
+      operations: [
+        { op: "update" as const, entityType: "page", entityId: "home", changes: [{ path: "/pageViewWidth", value: 1280 }, { path: "/pageViewHeight", value: 720 }] },
+        { op: "update" as const, entityType: "control", entityId: "open", changes: structuredClone(widenedDeltas) },
+      ],
+      creative: { artifactHash: widenedArtifactHash, materializationHash: widenedMaterializationHash },
+    };
+    const widenedEnvelope = {
+      schema: "kf-server-plan-envelope/v1" as const,
+      plan: widenedPlan,
+      planHash: canonicalChangePlanHash(widenedPlan),
+      revisionId: "revision",
+      semanticOperations: [],
+      creativeArtifact: widenedArtifact,
+      creativeArtifactHash: widenedArtifactHash,
+      trustedNativeMaterialization: widenedMaterialization,
+      nativeMaterializationHash: widenedMaterializationHash,
+      signature: "0".repeat(64),
+    };
+
+    expect(() => validateServerPlanEnvelopeData(widenedEnvelope)).toThrow(/canonical delta allowlist policy/);
   });
 
   it("binds a complete creative payload into envelope validation and signing bytes while keeping legacy compatible", () => {
