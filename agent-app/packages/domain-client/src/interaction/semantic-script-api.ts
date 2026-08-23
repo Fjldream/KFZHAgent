@@ -337,6 +337,40 @@ function requireContext(context: SemanticScriptApiContext): TrustedContext {
   return trusted;
 }
 
+/** Compiler-only projection of the owner already authenticated by the context WeakMap brand. */
+export function resolveSemanticScriptOwner(context: SemanticScriptApiContext) {
+  const owner = requireContext(context).owner;
+  return Object.freeze({
+    semanticControlId: owner.semanticControlId,
+    instanceName: owner.instanceName,
+    capabilityId: owner.capabilityId,
+    pageId: owner.pageId,
+  });
+}
+
+/** Resolves one exact ScriptPlan from the context's authoritative plan. */
+export function requireSemanticScriptPlan(input: unknown, context: SemanticScriptApiContext): ScriptPlan {
+  const trusted = requireContext(context);
+  let cloned: JsonData;
+  try {
+    cloned = clonePureData(input, "script-plan");
+  } catch (error) {
+    throw new SemanticScriptApiError(
+      "SCRIPT_API_INPUT_INVALID", "script-plan", error instanceof Error ? error.message : "descriptor-safe ScriptPlan required",
+      error instanceof Error ? { cause: error } : undefined,
+    );
+  }
+  const parsed = ScriptPlanSchema.safeParse(cloned);
+  if (!parsed.success) {
+    throw new SemanticScriptApiError("SCRIPT_API_INPUT_INVALID", "script-plan", parsed.error.issues[0]?.message ?? "invalid ScriptPlan", { cause: parsed.error });
+  }
+  const authoritative = trusted.scripts.get(parsed.data.id);
+  if (authoritative === undefined || canonicalServerHash(authoritative) !== canonicalServerHash(parsed.data)) {
+    throw new SemanticScriptApiError("SCRIPT_API_INPUT_INVALID", parsed.data.id, "script does not match the authoritative plan");
+  }
+  return deepFreeze(parsed.data);
+}
+
 export function createSemanticScriptValidationIdentity(
   input: unknown,
   context: SemanticScriptApiContext,

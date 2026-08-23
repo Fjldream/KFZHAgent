@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { canonicalServerHash, type SolutionImplementationPlan, type UIImplementationSpecV2 } from "@kf/contracts";
 import {
   createSemanticScriptApiContext,
+  requireSemanticScriptPlan,
+  resolveSemanticScriptOwner,
   resolveEventBinding,
   resolveSemanticApiCall,
 } from "./semantic-script-api.js";
@@ -175,6 +177,37 @@ const call = (api: string, ...args: readonly unknown[]) => ({ api, args });
 const context = (ownerControlId = "go") => createSemanticScriptApiContext({ plan: plan(), implementation: implementation(), ownerControlId });
 
 describe("semantic script API", () => {
+  it("reveals only the frozen trusted owner projection and rejects forged contexts", () => {
+    const context = createSemanticScriptApiContext({
+      plan: plan(), implementation: implementation(), ownerControlId: "go",
+    });
+    const owner = resolveSemanticScriptOwner(context);
+    expect(owner).toEqual({ semanticControlId: "go", instanceName: "Button1", capabilityId: "button", pageId: "home" });
+    expect(Object.isFrozen(owner)).toBe(true);
+    expect(Reflect.ownKeys(owner).sort()).toEqual(["capabilityId", "instanceName", "pageId", "semanticControlId"]);
+    expect(() => resolveSemanticScriptOwner({ schema: "kf-semantic-script-api-context/v1" }))
+      .toThrow(/SCRIPT_API_CONTEXT_UNTRUSTED/);
+  });
+
+  it("returns only an exact frozen authoritative script without invoking hostile descriptors", () => {
+    const trusted = context();
+    const candidate = plan().scripts[0]!;
+    const resolved = requireSemanticScriptPlan(candidate, trusted);
+    expect(resolved).toEqual(candidate);
+    expect(Object.isFrozen(resolved)).toBe(true);
+    expect(Object.isFrozen(resolved.inputs)).toBe(true);
+    expect(() => requireSemanticScriptPlan({ ...candidate, purpose: "漂移" }, trusted))
+      .toThrow(/SCRIPT_API_INPUT_INVALID.*does not match the authoritative plan/);
+    expect(() => requireSemanticScriptPlan({ ...candidate, id: "missing-script" }, trusted))
+      .toThrow(/SCRIPT_API_INPUT_INVALID.*does not match the authoritative plan/);
+    expect(() => requireSemanticScriptPlan(new Proxy(candidate, {}), trusted))
+      .toThrow(/SCRIPT_API_INPUT_INVALID/);
+    let reads = 0;
+    const hostile = Object.create(null) as Record<string, unknown>;
+    Object.defineProperty(hostile, "id", { enumerable: true, get() { reads += 1; return candidate.id; } });
+    expect(() => requireSemanticScriptPlan(hostile, trusted)).toThrow(/SCRIPT_API_INPUT_INVALID/);
+    expect(reads).toBe(0);
+  });
   it("resolves exact evidence-backed input reads through semantic-to-runtime correlation", () => {
     expect(resolveSemanticApiCall(call("$control.getValue", "status-filter"), context())).toMatchObject({
       availability: "supported",

@@ -66,6 +66,14 @@ import prototypeBaseTemplate from "../templates/control-templates/prototype-base
 import type { ControlIR, RestrictedAction, EasyuiControlIR, LayoutContainerIR } from "../ir/client-project-ir.js";
 import type { ThemeSpec } from "@kf/contracts";
 import {
+  CompiledEventBindingSchema,
+  CompiledScriptModuleSchema,
+  type CompiledEventBinding,
+  type CompiledScriptModule,
+} from "@kf/contracts";
+import { createHash } from "node:crypto";
+import { types as utilTypes } from "node:util";
+import {
   EASYUI_ALL_FIELDS,
   EASYUI_PROTO_FIELDS,
   easyuiTypeName,
@@ -114,6 +122,13 @@ export interface CompileContext {
   resolvePageGuid(semanticPageName: string): string;
   /** Validates a `setVariable.variableId` SEMANTIC VARIABLE ID (variable name). */
   resolveVariableName(semanticVariableId: string): string;
+}
+
+export interface CompiledControlScriptSerialization {
+  readonly ownerInstanceName: string;
+  readonly capabilityId: string;
+  readonly bindings: readonly CompiledEventBinding[];
+  readonly modules: readonly CompiledScriptModule[];
 }
 
 /**
@@ -292,6 +307,7 @@ export function compileControl(
   build: BuildSeed,
   control: ControlIR,
   ctx: CompileContext,
+  scripts?: CompiledControlScriptSerialization,
 ): TemplateJson {
   let compiled: TemplateJson;
   if (control.type === "easyui") {
@@ -311,7 +327,209 @@ export function compileControl(
     const merged = mergeControlTemplate(BASE_FIELDS, template);
     compiled = mergeControlTemplate(merged, applySchemaOverrides(build, control, ctx));
   }
-  return applyControlStyle(normalizeNativeSizePolicy(compiled), control);
+  const styled = applyControlStyle(normalizeNativeSizePolicy(compiled), control);
+  return scripts === undefined ? styled : serializeCompiledControlScripts(styled, scripts);
+}
+
+function safeCloneScriptData(
+  value: unknown,
+  label: string,
+  depth = 0,
+  seen = new WeakSet<object>(),
+  budget = { nodes: 0 },
+): unknown {
+  budget.nodes += 1;
+  if (budget.nodes > 50_000) throw new ModelOutputInvalidError(`${label} exceeds 50000 nodes`);
+  if (depth > 64) throw new ModelOutputInvalidError(`${label} exceeds depth 64`);
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new ModelOutputInvalidError(`${label} contains a non-finite number`);
+    return value;
+  }
+  if (typeof value !== "object" || utilTypes.isProxy(value)) throw new ModelOutputInvalidError(`${label} must be descriptor-safe data`);
+  if (seen.has(value)) throw new ModelOutputInvalidError(`${label} contains a cycle`);
+  seen.add(value);
+  let prototype: object | null;
+  let keys: readonly PropertyKey[];
+  let descriptors: PropertyDescriptorMap;
+  try {
+    prototype = Object.getPrototypeOf(value) as object | null;
+    keys = Reflect.ownKeys(value);
+    descriptors = Object.getOwnPropertyDescriptors(value);
+  } catch (error) {
+    throw new ModelOutputInvalidError(`${label} descriptor inspection failed`, error instanceof Error ? { cause: error } : undefined);
+  }
+  if (keys.some((key) => typeof key !== "string" || key === "__proto__" || key === "prototype" || key === "constructor")) {
+    throw new ModelOutputInvalidError(`${label} contains a reserved key`);
+  }
+  if (Array.isArray(value)) {
+    if (prototype !== Array.prototype || keys.filter((key) => key !== "length").length !== value.length) throw new ModelOutputInvalidError(`${label} must be a dense plain array`);
+    const result = Array.from({ length: value.length }, (_, index) => {
+      const descriptor = descriptors[String(index)];
+      if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) throw new ModelOutputInvalidError(`${label} requires array data properties`);
+      return safeCloneScriptData(descriptor.value, `${label}.${index}`, depth + 1, seen, budget);
+    });
+    seen.delete(value);
+    return result;
+  }
+  if (prototype !== Object.prototype && prototype !== null) throw new ModelOutputInvalidError(`${label} must be a plain object`);
+  const result: Record<string, unknown> = {};
+  for (const key of keys) {
+    const descriptor = descriptors[String(key)];
+    if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) throw new ModelOutputInvalidError(`${label} requires object data properties`);
+    Object.defineProperty(result, key, {
+      value: safeCloneScriptData(descriptor.value, `${label}.${String(key)}`, depth + 1, seen, budget),
+      enumerable: true, configurable: true, writable: true,
+    });
+  }
+  seen.delete(value);
+  return result;
+}
+
+function appendScript(existing: string, additions: readonly string[]): string {
+  let result = existing;
+  for (const source of additions) {
+    if (result.length > 0 && !result.endsWith("\n")) result += "\n";
+    result += source;
+  }
+  return result;
+}
+
+/** Serializes compiler-owned script modules into the two reviewed KF 3.6 script fields. */
+export function serializeCompiledControlScripts(
+  compiledControl: TemplateJson,
+  serialization: CompiledControlScriptSerialization,
+): TemplateJson {
+  if (serialization === null || typeof serialization !== "object" || utilTypes.isProxy(serialization)) {
+    throw new ModelOutputInvalidError("script serialization must be a descriptor-safe plain object");
+  }
+  let serializationPrototype: object | null;
+  let serializationKeys: readonly PropertyKey[];
+  let serializationDescriptors: PropertyDescriptorMap;
+  try {
+    serializationPrototype = Object.getPrototypeOf(serialization) as object | null;
+    serializationKeys = Reflect.ownKeys(serialization);
+    serializationDescriptors = Object.getOwnPropertyDescriptors(serialization);
+  } catch (error) {
+    throw new ModelOutputInvalidError("script serialization descriptor inspection failed", error instanceof Error ? { cause: error } : undefined);
+  }
+  const expectedKeys = ["bindings", "capabilityId", "modules", "ownerInstanceName"];
+  if ((serializationPrototype !== Object.prototype && serializationPrototype !== null)
+    || serializationKeys.length !== expectedKeys.length
+    || serializationKeys.map(String).sort().some((key, index) => key !== expectedKeys[index])) {
+    throw new ModelOutputInvalidError("script serialization has invalid fields or prototype");
+  }
+  const readSerialization = (key: string): unknown => {
+    const descriptor = serializationDescriptors[key];
+    if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) throw new ModelOutputInvalidError(`script serialization.${key} must be an enumerable data property`);
+    return descriptor.value;
+  };
+  const ownerInstanceName = readSerialization("ownerInstanceName");
+  const capabilityId = readSerialization("capabilityId");
+  const rawModules = readSerialization("modules");
+  const rawBindings = readSerialization("bindings");
+  if (typeof ownerInstanceName !== "string" || typeof capabilityId !== "string" || !Array.isArray(rawModules) || !Array.isArray(rawBindings)) {
+    throw new ModelOutputInvalidError("script serialization fields have invalid types");
+  }
+  if (rawModules.length > 200 || rawBindings.length > 32) throw new ModelOutputInvalidError("script serialization capacity exceeded");
+  const modules = rawModules.map((module, index) => {
+    const parsed = CompiledScriptModuleSchema.safeParse(safeCloneScriptData(module, `modules.${index}`));
+    if (!parsed.success) throw new ModelOutputInvalidError(`invalid compiled script module: ${parsed.error.issues[0]?.message}`, { cause: parsed.error });
+    if (parsed.data.ownerInstanceName !== ownerInstanceName) throw new ModelOutputInvalidError(`compiled script owner mismatch: ${parsed.data.id}`);
+    const hash = createHash("sha256").update(parsed.data.source, "utf8").digest("hex");
+    if (hash !== parsed.data.sourceHash) throw new ModelOutputInvalidError(`compiled script hash mismatch: ${parsed.data.id}`);
+    return parsed.data;
+  });
+  const moduleById = new Map(modules.map((module) => [module.id, module]));
+  if (moduleById.size !== modules.length) throw new ModelOutputInvalidError("duplicate compiled script module id");
+  const bindings = rawBindings.map((binding, index) => {
+    const parsed = CompiledEventBindingSchema.safeParse(safeCloneScriptData(binding, `bindings.${index}`));
+    if (!parsed.success) throw new ModelOutputInvalidError(`invalid compiled event binding: ${parsed.error.issues[0]?.message}`, { cause: parsed.error });
+    if (parsed.data.ownerInstanceName !== ownerInstanceName) throw new ModelOutputInvalidError(`compiled binding owner mismatch: ${parsed.data.id}`);
+    return parsed.data;
+  });
+  const phaseKeys = new Set<string>();
+  for (const binding of bindings) {
+    const key = `${binding.kfEvent}\u0000${binding.linkId ?? ""}\u0000${binding.phase}`;
+    if (phaseKeys.has(key)) throw new ModelOutputInvalidError(`duplicate compiled event phase: ${binding.kfEvent}/${binding.phase}`);
+    phaseKeys.add(key);
+    for (const id of binding.scriptModuleIds) {
+      const module = moduleById.get(id);
+      if (module === undefined) throw new ModelOutputInvalidError(`missing compiled script module: ${id}`);
+      if (module.placement !== "event") throw new ModelOutputInvalidError(`event binding references configureData module: ${id}`);
+    }
+  }
+  const result = safeCloneScriptData(compiledControl, "compiledControl") as TemplateJson;
+  const rawLinkMng = result["linkMng"];
+  if (rawLinkMng === null || typeof rawLinkMng !== "object" || Array.isArray(rawLinkMng)) throw new ModelOutputInvalidError("compiled control linkMng must be an object");
+  const linkMng = rawLinkMng as TemplateJson;
+  const rawLinks = linkMng["linkList"];
+  if (!Array.isArray(rawLinks)) throw new ModelOutputInvalidError("compiled control linkMng.linkList must be an array");
+  const links = rawLinks.map((link, index) => {
+    if (link === null || typeof link !== "object" || Array.isArray(link)) throw new ModelOutputInvalidError(`compiled control linkMng.linkList.${index} must be an object`);
+    return link as Record<string, unknown>;
+  });
+  const eventGroups = new Map<string, CompiledEventBinding[]>();
+  for (const binding of bindings) {
+    const key = `${binding.kfEvent}\u0000${binding.linkId ?? ""}`;
+    const group = eventGroups.get(key) ?? [];
+    group.push(binding);
+    eventGroups.set(key, group);
+  }
+  for (const [, group] of [...eventGroups].sort(([left], [right]) => left.localeCompare(right, "en-US"))) {
+    group.sort((left, right) => (left.phase === right.phase ? 0 : left.phase === "event" ? -1 : 1));
+    const first = group[0]!;
+    const sources = group.flatMap((binding) => binding.scriptModuleIds.map((id) => moduleById.get(id)!.source));
+    const matchingIndexes = links.flatMap((link, index) => {
+      const sameId = first.linkId !== undefined && link["linkId"] === first.linkId;
+      const sameName = link["name"] === first.kfEvent;
+      return sameId || sameName ? [index] : [];
+    });
+    if (matchingIndexes.length > 1) throw new ModelOutputInvalidError(`ambiguous native event slots: ${first.kfEvent}`);
+    if (matchingIndexes.length === 1) {
+      const index = matchingIndexes[0]!;
+      const current = links[index]!;
+      if (first.linkId !== undefined && current["linkId"] !== undefined && current["linkId"] !== first.linkId) {
+        throw new ModelOutputInvalidError(`native event linkId mismatch: ${first.kfEvent}`);
+      }
+      if (current["name"] !== undefined && current["name"] !== first.kfEvent) throw new ModelOutputInvalidError(`native event name mismatch: ${first.kfEvent}`);
+      const existing = current["script"];
+      if (existing !== undefined && typeof existing !== "string") throw new ModelOutputInvalidError(`native event script must be a string: ${first.kfEvent}`);
+      links[index] = {
+        ...current,
+        ...(first.linkId === undefined ? {} : { linkId: first.linkId }),
+        enable: true,
+        script: appendScript(existing ?? "", sources),
+        name: first.kfEvent,
+      };
+      if (String(links[index]["script"]).length > 32_000) throw new ModelOutputInvalidError(`compiled event script exceeds 32000 characters: ${first.kfEvent}`);
+    } else {
+      const appended = {
+        ...(first.linkId === undefined ? {} : { linkId: first.linkId }), enable: true,
+        script: appendScript("", sources), name: first.kfEvent,
+      };
+      if (appended.script.length > 32_000) throw new ModelOutputInvalidError(`compiled event script exceeds 32000 characters: ${first.kfEvent}`);
+      links.push(appended);
+    }
+  }
+  result["linkMng"] = { ...linkMng, linkList: links };
+  const configureModules = modules.filter((module) => module.placement === "configure-data")
+    .sort((left, right) => left.id.localeCompare(right.id, "en-US"));
+  if (configureModules.length > 0) {
+    // Task6's compileScriptPlan proves the exact profile flag before it creates
+    // a configure-data module. This serialization layer repeats the reviewed
+    // KF family boundary without importing the knowledge registry (which would
+    // create control-compiler -> registry -> style-registry -> control-compiler).
+    if (!capabilityId.startsWith("easyui.")) {
+      throw new ModelOutputInvalidError(`capability ${capabilityId} does not support configureData`);
+    }
+    const existing = result["configureData"];
+    if (typeof existing !== "string") throw new ModelOutputInvalidError("compiled control configureData must be a string");
+    const configured = appendScript(existing, configureModules.map((module) => module.source));
+    if (configured.length > 32_000) throw new ModelOutputInvalidError("compiled configureData exceeds 32000 characters");
+    result["configureData"] = configured;
+  }
+  return result;
 }
 
 // KF 3.6 has two incompatible size-policy readers. Legacy KMUIModel controls
