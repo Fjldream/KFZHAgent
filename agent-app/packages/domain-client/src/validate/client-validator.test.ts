@@ -231,7 +231,52 @@ describe("client validator (Task 7 brief Step 2)", () => {
       await writePage(candidate, page);
       const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
       expect(report.checks.businessRules, body).toBe("fail");
-      expect(report.warnings.join("\n"), body).toMatch(/compiled script.*(?:global|call|loop|syntax)/i);
+      expect(report.warnings.join("\n"), body).toMatch(/compiled script.*(?:global|call|loop|syntax|binding|shadow)/i);
+    }
+  });
+
+  it("mirrors loop alias, call-DAG, and lexical declaration restrictions", async () => {
+    const attacks = [
+      "const records = [1]; const alias = records; for (const record of records) { alias.push(record); }",
+      "const records = [1]; function mutate() { records.push(1); } for (const record of records) { mutate(); }",
+      "const records = [1]; let alias = []; function bind() { alias = records; } function mutate() { alias.push(1); } for (const record of records) { bind(); mutate(); }",
+      "const records = [1]; let alias = []; function mutate() { alias.push(1); } function bind() { alias = records; } for (const record of records) { bind(); mutate(); }",
+      "const first = [1]; const second = [2]; let alias = []; alias = first; alias = second; for (const value of alias) { first.push(value); }",
+      "const first = [1]; const second = [2]; let alias = []; alias = true ? first : second; for (const value of alias) { second.push(value); }",
+      "const first = [1]; const second = [2]; let alias = []; alias = first || second; for (const value of alias) { first.push(value); }",
+      "const first = [1]; function choose() { return first; } let alias = []; alias = choose(); for (const value of alias) {}",
+      "const records = [1].slice(1, 2); for (const value of records) {}",
+      "for (let index = 0; index < 10; index += 1) { function bump() { index += 1; } bump(); }",
+      "for (let index = 0; index < 10; index += 1) { function bump() { index += 1; } function wrapper() { bump(); } wrapper(); }",
+      "var value = 1;",
+      "for (let index = 0; index < 1; index += 1) {} const leaked = index;",
+      "function read() { return later; } read(); const later = 1;",
+      "function choose() { return 1; } { function choose() { return 2; } } choose();",
+    ];
+    for (const body of attacks) {
+      const base = await copyFixture("client-unknown-field");
+      const candidate = await applyClientPatch(base, happyPlan());
+      const page = await readPage(candidate);
+      page.objects[0]!.linkMng = { linkList: [{ linkId: 200001, enable: true, name: "onClick", script: markedScript(body) }] };
+      await writePage(candidate, page);
+      const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+      expect(report.checks.businessRules, body).toBe("fail");
+      expect(report.warnings.join("\n"), body).toMatch(/compiled script/i);
+    }
+  });
+
+  it("keeps bounded aliases and initialized closure captures admissible", async () => {
+    for (const body of [
+      "const records = [1]; const alias = records; let total = 0; for (const record of alias) { total += record; }",
+      "const read = () => later; const later = 1; const value = read();",
+    ]) {
+      const base = await copyFixture("client-unknown-field");
+      const candidate = await applyClientPatch(base, happyPlan());
+      const page = await readPage(candidate);
+      page.objects[0]!.linkMng = { linkList: [{ linkId: 200001, enable: true, name: "onClick", script: markedScript(body) }] };
+      await writePage(candidate, page);
+      const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+      expect(report.checks.businessRules, body).toBe("pass");
     }
   });
 

@@ -212,24 +212,42 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
   const program = parse(source, { ecmaVersion: 2022, sourceType: "script" }) as unknown as Record<string, unknown>;
   const allowedNodeTypes = new Set([
     "Program", "VariableDeclaration", "VariableDeclarator", "ExpressionStatement", "ReturnStatement", "IfStatement",
-    "FunctionDeclaration", "ArrowFunctionExpression", "FunctionExpression", "BlockStatement", "EmptyStatement",
+    "FunctionDeclaration", "ArrowFunctionExpression", "BlockStatement", "EmptyStatement",
     "Identifier", "Literal", "ArrayExpression", "ObjectExpression", "Property", "SpreadElement", "MemberExpression",
     "CallExpression", "AssignmentExpression", "UpdateExpression", "UnaryExpression", "BinaryExpression", "LogicalExpression",
     "ConditionalExpression", "TemplateLiteral", "TemplateElement", "ForStatement", "ForOfStatement",
   ]);
-  interface LexicalScope { readonly parent?: LexicalScope; readonly names: Set<string>; readonly callableNames: Set<string> }
-  const rootScope: LexicalScope = { names: new Set(), callableNames: new Set() };
+  interface LexicalScope {
+    readonly parent?: LexicalScope;
+    readonly names: Set<string>;
+    readonly callableNames: Set<string>;
+    readonly functionOwner: string;
+  }
+  const rootScope: LexicalScope = { names: new Set(), callableNames: new Set(), functionOwner: "<program>" };
   const scopeByNode = new WeakMap<object, LexicalScope>();
   let currentScope = rootScope;
   const boundaryNodes = new WeakSet<object>();
   const callableNames = new Set<string>();
   const boundedIterables = new Set<string>();
   const mutableNames = new Set<string>();
+  const declaredNames = new Set<string>();
+  const initializedAt = new Map<string, number>();
+  const declarationOwner = new Map<string, string>();
   let syntaxIssue: string | undefined;
   let unsupportedRuntimeMember: string | undefined;
   const identifierName = (value: unknown): string | undefined => {
     const record = value as Record<string, unknown> | undefined;
     return record?.["type"] === "Identifier" && typeof record["name"] === "string" ? record["name"] : undefined;
+  };
+  const nodeEnd = (value: Record<string, unknown> | undefined): number => typeof value?.["end"] === "number" ? value["end"] : Number.MAX_SAFE_INTEGER;
+  const declareLocal = (name: string | undefined, declaration: Record<string, unknown> | undefined, callable = false, hoisted = false): void => {
+    if (name === undefined) { syntaxIssue ??= "declaration requires an identifier"; return; }
+    if (declaredNames.has(name)) { syntaxIssue ??= `binding shadowing is forbidden: ${name}`; return; }
+    declaredNames.add(name);
+    currentScope.names.add(name);
+    if (callable) { currentScope.callableNames.add(name); callableNames.add(name); }
+    initializedAt.set(name, hoisted ? -1 : nodeEnd(declaration));
+    declarationOwner.set(name, currentScope.functionOwner);
   };
   walk(program as never, {
     enter(node, parent) {
@@ -238,48 +256,137 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
       if (!allowedNodeTypes.has(String(type))) syntaxIssue ??= `syntax:${String(type)}`;
       if (type === "FunctionDeclaration") {
         const name = identifierName(record["id"]);
-        if (name !== undefined) { currentScope.names.add(name); currentScope.callableNames.add(name); callableNames.add(name); }
+        declareLocal(name, record["id"] as Record<string, unknown> | undefined, true, true);
       }
-      if (type === "FunctionDeclaration" || type === "FunctionExpression" || type === "ArrowFunctionExpression" || type === "BlockStatement" || type === "CatchClause") {
-        currentScope = { parent: currentScope, names: new Set(), callableNames: new Set() };
+      if (type === "FunctionDeclaration" || type === "ArrowFunctionExpression" || type === "BlockStatement" || type === "CatchClause"
+        || type === "ForStatement" || type === "ForOfStatement") {
+        const directName = type === "FunctionDeclaration" ? identifierName(record["id"]) : undefined;
+        const parentRecord = parent as unknown as Record<string, unknown> | null;
+        const parentName = type === "ArrowFunctionExpression" && parentRecord?.["type"] === "VariableDeclarator" ? identifierName(parentRecord["id"]) : undefined;
+        currentScope = {
+          parent: currentScope,
+          names: new Set(),
+          callableNames: new Set(),
+          functionOwner: type === "BlockStatement" || type === "CatchClause" || type === "ForStatement" || type === "ForOfStatement"
+            ? currentScope.functionOwner : directName ?? parentName ?? `<anonymous:${String(record["start"])}>`,
+        };
         boundaryNodes.add(node);
       }
       scopeByNode.set(node, currentScope);
-      if (type === "FunctionExpression") {
-        const name = identifierName(record["id"]); if (name !== undefined) currentScope.names.add(name);
-      }
-      if (type === "FunctionDeclaration" || type === "FunctionExpression" || type === "ArrowFunctionExpression") {
+      if (type === "FunctionDeclaration" || type === "ArrowFunctionExpression") {
         const params = Array.isArray(record["params"]) ? record["params"] as Array<Record<string, unknown>> : [];
-        params.forEach((param) => { const name = identifierName(param); if (name !== undefined) currentScope.names.add(name); });
+        params.forEach((param) => declareLocal(identifierName(param), param));
       }
+      if (type === "VariableDeclaration" && record["kind"] !== "const" && record["kind"] !== "let") syntaxIssue ??= "only const and let declarations are allowed";
       if (type === "VariableDeclarator") {
         const name = identifierName(record["id"]);
         if (name !== undefined) {
-          currentScope.names.add(name);
-          if ((parent as unknown as Record<string, unknown> | null)?.["kind"] === "let") mutableNames.add(name);
           const init = record["init"] as Record<string, unknown> | undefined;
-          if (init?.["type"] === "ArrowFunctionExpression" || init?.["type"] === "FunctionExpression") {
-            callableNames.add(name);
-            currentScope.callableNames.add(name);
-          }
+          const callable = init?.["type"] === "ArrowFunctionExpression";
+          declareLocal(name, record, callable);
+          if ((parent as unknown as Record<string, unknown> | null)?.["kind"] === "let") mutableNames.add(name);
           if (init?.["type"] === "ArrayExpression" && Array.isArray(init["elements"]) && init["elements"].length <= 1_000) boundedIterables.add(name);
           if (init?.["type"] === "CallExpression") {
             const callee = init["callee"] as Record<string, unknown> | undefined;
             const property = callee?.["type"] === "MemberExpression" ? callee["property"] as Record<string, unknown> | undefined : undefined;
             const args = Array.isArray(init["arguments"]) ? init["arguments"] as Array<Record<string, unknown>> : [];
-            if (property?.["name"] === "slice" && args.length >= 2 && args[1]?.["type"] === "Literal"
-              && typeof args[1]["value"] === "number" && args[1]["value"] <= 1_000) boundedIterables.add(name);
+            if (property?.["name"] === "slice" && args.length === 2 && args[0]?.["type"] === "Literal" && args[0]["value"] === 0
+              && args[1]?.["type"] === "Literal" && typeof args[1]["value"] === "number"
+              && args[1]["value"] >= 0 && args[1]["value"] <= 1_000) boundedIterables.add(name);
           }
         }
       }
-      if (type === "CatchClause") { const name = identifierName(record["param"]); if (name !== undefined) currentScope.names.add(name); }
+      if (type === "CatchClause") declareLocal(identifierName(record["param"]), record["param"] as Record<string, unknown> | undefined);
     },
     leave(node) { if (boundaryNodes.has(node)) currentScope = currentScope.parent ?? rootScope; },
   });
+  const aliasRoots = new Map<string, Set<string>>();
+  const unsafeIterableAliases = new Set<string>();
+  const rootsForExpression = (value: Record<string, unknown> | undefined, depth = 0): Set<string> | undefined => {
+    if (value == null || depth > 64) return undefined;
+    const direct = identifierName(value);
+    if (direct !== undefined) return new Set(aliasRoots.get(direct) ?? [direct]);
+    if (value["type"] === "ArrayExpression") return new Set<string>();
+    if (value["type"] === "ConditionalExpression") {
+      const consequent = rootsForExpression(value["consequent"] as Record<string, unknown> | undefined, depth + 1);
+      const alternate = rootsForExpression(value["alternate"] as Record<string, unknown> | undefined, depth + 1);
+      if (consequent === undefined || alternate === undefined) return undefined;
+      return new Set([...consequent, ...alternate]);
+    }
+    if (value["type"] === "LogicalExpression") {
+      const left = rootsForExpression(value["left"] as Record<string, unknown> | undefined, depth + 1);
+      const right = rootsForExpression(value["right"] as Record<string, unknown> | undefined, depth + 1);
+      if (left === undefined || right === undefined) return undefined;
+      return new Set([...left, ...right]);
+    }
+    return undefined;
+  };
+  for (let iteration = 0; iteration <= declaredNames.size; iteration += 1) {
+    let changed = false;
+    walk(program as never, {
+      enter(node) {
+        const record = node as unknown as Record<string, unknown>;
+        let target: string | undefined;
+        let value: Record<string, unknown> | undefined;
+        if (record["type"] === "VariableDeclarator") {
+          target = identifierName(record["id"]);
+          value = record["init"] as Record<string, unknown> | undefined;
+        } else if (record["type"] === "AssignmentExpression" && record["operator"] === "=") {
+          target = identifierName(record["left"]);
+          value = record["right"] as Record<string, unknown> | undefined;
+        }
+        if (target === undefined || value == null) return;
+        let roots = rootsForExpression(value);
+        const isBoundedArray = value["type"] === "ArrayExpression" && Array.isArray(value["elements"]) && value["elements"].length <= 1_000;
+        const callee = value["type"] === "CallExpression" ? value["callee"] as Record<string, unknown> | undefined : undefined;
+        const property = callee?.["type"] === "MemberExpression" ? identifierName(callee["property"]) : undefined;
+        const args = Array.isArray(value["arguments"]) ? value["arguments"] as Array<Record<string, unknown>> : [];
+        const isBoundedSlice = property === "slice" && args.length === 2 && args[0]?.["type"] === "Literal" && args[0]["value"] === 0
+          && args[1]?.["type"] === "Literal" && typeof args[1]["value"] === "number"
+          && args[1]["value"] >= 0 && args[1]["value"] <= 1_000;
+        if (isBoundedArray || isBoundedSlice) roots = new Set([target]);
+        if (roots === undefined) { unsafeIterableAliases.add(target); return; }
+        const existing = aliasRoots.get(target) ?? new Set<string>();
+        const before = existing.size;
+        (roots.size === 0 ? new Set([target]) : roots).forEach((root) => existing.add(root));
+        aliasRoots.set(target, existing);
+        if (existing.size !== before) changed = true;
+        if (isBoundedArray || isBoundedSlice) boundedIterables.add(target);
+      },
+    });
+    if (!changed) break;
+  }
+  const resolvedAliasRoots = (name: string): Set<string> => {
+    const roots = new Set<string>();
+    const pending = [name];
+    const seen = new Set<string>();
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      if (seen.has(current)) continue;
+      seen.add(current);
+      const aliases = aliasRoots.get(current);
+      if (aliases === undefined || aliases.size === 0 || aliases.has(current)) roots.add(current);
+      for (const alias of aliases ?? []) if (alias !== current) pending.push(alias);
+    }
+    if (roots.size === 0) seen.forEach((candidate) => roots.add(candidate));
+    return roots;
+  };
+  const aliasesIntersect = (name: string, roots: ReadonlySet<string>): boolean => [...resolvedAliasRoots(name)].some((root) => roots.has(root));
+  const boundedIterable = (name: string): boolean => !unsafeIterableAliases.has(name)
+    && [...resolvedAliasRoots(name)].every((root) => boundedIterables.has(root));
   let undeclaredProjectInstance: string | undefined;
   let astIssue: string | undefined = syntaxIssue;
   const usedRuntimeRoots = new Set<string>();
   const functionCalls = new Map<string, Set<string>>();
+  const functionMutations = new Map<string, Set<string>>();
+  const functionCaptures = new Map<string, Set<string>>();
+  const functionCallSites: Array<{ readonly caller: string; readonly callee: string; readonly start: number }> = [];
+  const loopCallSites: Array<{
+    readonly callee: string;
+    readonly loops: readonly { readonly counter?: string; readonly iteratedRoots?: ReadonlySet<string> }[];
+  }> = [];
+  const activeLoops: Array<{ readonly counter?: string; readonly iteratedRoots?: ReadonlySet<string> }> = [];
+  const allowedLoopUpdates = new WeakSet<object>();
   let currentFunction = "<program>";
   const functionStack: string[] = [];
   const resolvesLocal = (scope: LexicalScope | undefined, name: string): boolean => {
@@ -292,6 +399,11 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
     }
     return false;
   };
+  const recordMutation = (name: string): void => {
+    const mutations = functionMutations.get(currentFunction) ?? new Set<string>();
+    mutations.add(name);
+    functionMutations.set(currentFunction, mutations);
+  };
   walk(program as never, {
     enter(node, parent) {
       const record = node as unknown as Record<string, unknown>;
@@ -302,6 +414,8 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
         const directName = identifierName(record["id"]);
         const parentName = parentRecord?.["type"] === "VariableDeclarator" ? identifierName(parentRecord["id"]) : undefined;
         currentFunction = directName ?? parentName ?? `<anonymous:${functionStack.length}>`;
+        functionMutations.set(currentFunction, functionMutations.get(currentFunction) ?? new Set());
+        functionCaptures.set(currentFunction, functionCaptures.get(currentFunction) ?? new Set());
       }
       if (type === "WhileStatement" || type === "DoWhileStatement") astIssue ??= "unbounded loop syntax";
       if (type === "ForStatement") {
@@ -325,6 +439,7 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
           || test?.["type"] !== "BinaryExpression" || identifierName(left) !== counter || !["<", "<="].includes(String(test["operator"]))
           || right?.["type"] !== "Literal" || typeof right["value"] !== "number" || right["value"] > 1_000
           || !Number.isInteger(right["value"]) || right["value"] < 0 || !monotonic) astIssue ??= "loop bound is not a monotonic unit range limited to 1000";
+        if (update !== undefined) allowedLoopUpdates.add(update);
         const body = record["body"];
         if (counter !== undefined && body !== undefined && typeof body === "object") walk(body as never, {
           enter(bodyNode) {
@@ -334,13 +449,15 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
             if (target === counter) astIssue ??= "loop body mutates its counter";
           },
         });
+        activeLoops.push(counter === undefined ? {} : { counter });
       }
       if (type === "ForOfStatement") {
         const right = record["right"] as Record<string, unknown> | undefined;
         const bounded = right?.["type"] === "ArrayExpression" && Array.isArray(right["elements"]) && right["elements"].length <= 1_000
-          || right?.["type"] === "Identifier" && typeof right["name"] === "string" && boundedIterables.has(right["name"]);
+          || right?.["type"] === "Identifier" && typeof right["name"] === "string" && boundedIterable(right["name"]);
         if (!bounded) astIssue ??= "for-of iterable is not statically bounded";
         const iterable = identifierName(right);
+        const iteratedRoots = iterable === undefined ? undefined : resolvedAliasRoots(iterable);
         const body = record["body"];
         if (iterable !== undefined && body !== undefined && typeof body === "object") walk(body as never, {
           enter(bodyNode) {
@@ -349,9 +466,11 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
               : candidate["type"] === "UpdateExpression" ? identifierName(candidate["argument"]) : undefined;
             const callee = candidate["type"] === "CallExpression" ? candidate["callee"] as Record<string, unknown> | undefined : undefined;
             const callObject = callee?.["type"] === "MemberExpression" ? identifierName(callee["object"]) : undefined;
-            if (target === iterable || callObject === iterable) astIssue ??= "for-of body mutates its iterated array";
+            if (target !== undefined && iteratedRoots !== undefined && aliasesIntersect(target, iteratedRoots)
+              || callObject !== undefined && iteratedRoots !== undefined && aliasesIntersect(callObject, iteratedRoots)) astIssue ??= "for-of body mutates its iterated array";
           },
         });
+        activeLoops.push(iteratedRoots === undefined ? {} : { iteratedRoots });
       }
       if (type === "Identifier") {
         const name = typeof record["name"] === "string" ? record["name"] : undefined;
@@ -367,6 +486,18 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
             || declaredInstances.has(name) && instanceTypes.has(name);
           if (!isProperty && !isObjectKey && !isDeclaration && !resolvesLocal(scopeByNode.get(node), name) && !allowedGlobal) {
             astIssue ??= `undeclared global "${name}"`;
+          } else if (!isProperty && !isObjectKey && !isDeclaration && resolvesLocal(scopeByNode.get(node), name)) {
+            const declarationEnd = initializedAt.get(name);
+            const referenceStart = typeof record["start"] === "number" ? record["start"] : -1;
+            if (declarationEnd !== undefined && referenceStart < declarationEnd) {
+              const referenceOwner = scopeByNode.get(node)?.functionOwner;
+              if (referenceOwner === declarationOwner.get(name)) astIssue ??= `use before declaration: ${name}`;
+              else {
+                const captures = functionCaptures.get(currentFunction) ?? new Set<string>();
+                captures.add(name);
+                functionCaptures.set(currentFunction, captures);
+              }
+            }
           }
         }
       }
@@ -377,6 +508,9 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
           if (name === undefined || (!resolvesCallable(scopeByNode.get(node), name) && !["String", "Number", "Boolean"].includes(name))) astIssue ??= "dynamic or unknown direct call";
           if (name !== undefined && resolvesCallable(scopeByNode.get(node), name)) {
             const edges = functionCalls.get(currentFunction) ?? new Set<string>(); edges.add(name); functionCalls.set(currentFunction, edges);
+            const start = typeof record["start"] === "number" ? record["start"] : Number.MAX_SAFE_INTEGER;
+            functionCallSites.push({ caller: currentFunction, callee: name, start });
+            if (activeLoops.length > 0) loopCallSites.push({ callee: name, loops: activeLoops.map((loop) => ({ ...loop })) });
           }
         } else if (callee?.["type"] === "MemberExpression") {
           const object = callee["object"] as Record<string, unknown> | undefined;
@@ -388,6 +522,12 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
             || objectName === "Date" && ["parse", "UTC"].includes(member ?? "")
             || ["slice", "filter", "push", "trim", "includes", "startsWith"].includes(member ?? "");
           if (!runtimeCall && !standardCall) astIssue ??= "dynamic or unknown member call";
+          if (member === "slice") {
+            const args = Array.isArray(record["arguments"]) ? record["arguments"] as Array<Record<string, unknown>> : [];
+            if (args.length !== 2 || args[0]?.["type"] !== "Literal" || args[0]["value"] !== 0
+              || args[1]?.["type"] !== "Literal" || typeof args[1]["value"] !== "number"
+              || args[1]["value"] < 0 || args[1]["value"] > 1_000) astIssue ??= "slice requires literal bounds from 0 to 1000";
+          }
         } else astIssue ??= "dynamic or unknown call target";
       }
       if (type === "MemberExpression" && record["computed"] === true) {
@@ -400,6 +540,27 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
         const targetName = identifierName(target);
         if (targetName !== undefined && !mutableNames.has(targetName)) astIssue ??= "assignment/update target is not a mutable local";
         if (targetName === undefined && target?.["type"] !== "MemberExpression") astIssue ??= "assignment/update target is not reviewed";
+        if (targetName !== undefined) {
+          recordMutation(targetName);
+          if (!allowedLoopUpdates.has(node) && activeLoops.some((loop) => loop.counter === targetName
+            || loop.iteratedRoots !== undefined && aliasesIntersect(targetName, loop.iteratedRoots))) astIssue ??= "loop dependency is mutated";
+        } else if (target?.["type"] === "MemberExpression") {
+          const objectName = identifierName(target["object"]);
+          if (objectName !== undefined) {
+            recordMutation(objectName);
+            if (activeLoops.some((loop) => loop.iteratedRoots !== undefined && aliasesIntersect(objectName, loop.iteratedRoots))) astIssue ??= "iterated array element is mutated";
+          }
+        }
+      }
+      if (type === "CallExpression") {
+        const callee = record["callee"] as Record<string, unknown> | undefined;
+        if (callee?.["type"] === "MemberExpression" && identifierName(callee["property"]) === "push") {
+          const receiver = identifierName(callee["object"]);
+          if (receiver !== undefined) {
+            recordMutation(receiver);
+            if (activeLoops.some((loop) => loop.iteratedRoots !== undefined && aliasesIntersect(receiver, loop.iteratedRoots))) astIssue ??= "iterated array alias is mutated";
+          }
+        }
       }
       if (type !== "MemberExpression") return;
       const object = record["object"] as Record<string, unknown> | undefined;
@@ -418,8 +579,40 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
     leave(node) {
       const type = (node as unknown as Record<string, unknown>)["type"];
       if (type === "FunctionDeclaration" || type === "FunctionExpression" || type === "ArrowFunctionExpression") currentFunction = functionStack.pop() ?? "<program>";
+      if (type === "ForStatement" || type === "ForOfStatement") activeLoops.pop();
     },
   });
+  for (let iteration = 0; iteration <= callableNames.size; iteration += 1) {
+    let changed = false;
+    for (const [caller, callees] of functionCalls) {
+      const mutations = functionMutations.get(caller) ?? new Set<string>();
+      const captures = functionCaptures.get(caller) ?? new Set<string>();
+      functionMutations.set(caller, mutations);
+      functionCaptures.set(caller, captures);
+      const beforeMutations = mutations.size;
+      const beforeCaptures = captures.size;
+      for (const callee of callees) {
+        (functionMutations.get(callee) ?? []).forEach((name) => mutations.add(name));
+        (functionCaptures.get(callee) ?? []).forEach((name) => captures.add(name));
+      }
+      if (mutations.size !== beforeMutations || captures.size !== beforeCaptures) changed = true;
+    }
+    if (!changed) break;
+  }
+  for (const callSite of loopCallSites) {
+    const mutations = functionMutations.get(callSite.callee) ?? new Set<string>();
+    if (callSite.loops.some((loop) => loop.counter !== undefined && mutations.has(loop.counter)
+      || loop.iteratedRoots !== undefined && [...mutations].some((name) => aliasesIntersect(name, loop.iteratedRoots!)))) {
+      astIssue ??= `called function mutates an active loop dependency: ${callSite.callee}`;
+    }
+  }
+  for (const callSite of functionCallSites) {
+    for (const capture of functionCaptures.get(callSite.callee) ?? []) {
+      if (declarationOwner.get(capture) === callSite.caller && callSite.start < (initializedAt.get(capture) ?? -1)) {
+        astIssue ??= `use before declaration through ${callSite.callee}: ${capture}`;
+      }
+    }
+  }
   // Project-instance evidence is more specific than the generic global/call
   // grammar rejection discovered by the same walk. Both are fail-closed, but
   // surface the evidence failure so callers cannot mistake a forged instance
