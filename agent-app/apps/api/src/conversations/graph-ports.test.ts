@@ -1,45 +1,52 @@
 // @ts-nocheck -- focused port test uses narrow Prisma/storage doubles.
 import { Readable } from "node:stream";
+import { Logger } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import {
-  createCreativeUIImplementationV2Compiler,
   createKingClientDomainPack,
   deriveGuid,
 } from "@kf/domain-client";
 import {
-  createHmacCreativeBuildFacade,
   createHmacModuleArtifactAuthority,
+  createHmacServerPlanAuthority,
 } from "@kf/build-jobs";
 import {
   CustomerSolutionBlueprintSchema,
   CapabilityCandidateBundleSchema,
   SolutionImplementationPlanSchema,
-  canonicalChangePlanHash,
   canonicalServerHash,
 } from "@kf/contracts";
-import { createGraphPorts } from "./graph-ports.js";
+import {
+  createCreativeSolutionCompilerFromEnvironment,
+  createGraphPorts,
+} from "./graph-ports.js";
 
 describe("conversation graph workspace query", () => {
   it("composes the server-scoped creative compiler through lowering, signing, and verification", async () => {
-    const facade = createHmacCreativeBuildFacade(
-      Buffer.alloc(32, 0x51),
-      createCreativeUIImplementationV2Compiler,
-    );
+    const key = Buffer.alloc(32, 0x51);
+    const prisma = creativePrisma();
     const assets = {
       list: vi.fn(),
       resolveManyForCompilation: vi.fn().mockResolvedValue([]),
     };
-    const ports = createGraphPorts({} as never, {} as never, undefined, assets, facade);
+    const compiler = createCreativeSolutionCompilerFromEnvironment(
+      prisma.client,
+      {} as never,
+      assets,
+      { KF_SERVER_PLAN_HMAC_KEY_BASE64: key.toString("base64") },
+    );
     const fixture = creativeFixture();
 
-    const outcome = await ports.creativeSolutionCompiler!.compile({
+    const outcome = await compiler.compile({
       tenantId: "tenant-creative",
       workspaceId: "workspace-creative",
+      conversationId: "conversation-creative",
       baseRevisionId: "revision-creative",
+      projectKey: fixture.plan.projectKey,
+      domainKind: "kingclient",
       blueprint: fixture.blueprint,
       candidateBundle: fixture.candidates,
       semanticPlan: fixture.plan,
-      editableEntities: [],
     });
 
     expect(
@@ -47,50 +54,98 @@ describe("conversation graph workspace query", () => {
       outcome.status === "blocked" ? JSON.stringify(outcome.diagnostics) : undefined,
     ).toBe("compiled");
     if (outcome.status !== "compiled") return;
-    expect(outcome.plan.creative).toMatchObject({
-      artifactHash: expect.stringMatching(/^[0-9a-f]{64}$/),
-      materializationHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+    expect(outcome).toMatchObject({
+      changeRequestId: expect.stringContaining("conversation-creative"),
+      changePlanId: expect.stringContaining(outcome.planHash),
+      planHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+      confirmationId: expect.stringMatching(/^[0-9a-f]{64}$/),
+      operationCount: expect.any(Number),
     });
-    const planHash = canonicalChangePlanHash(outcome.plan);
-    expect(() => facade.authority.verify(JSON.parse(JSON.stringify(outcome.signedPlan)), {
-      expectedPlanHash: planHash,
+    const persisted = prisma.plans.get(outcome.changePlanId)!;
+    const verified = createHmacServerPlanAuthority(key).verify(JSON.parse(JSON.stringify(persisted.plan)), {
+      expectedPlanHash: outcome.planHash,
       expectedRevisionId: "revision-creative",
-      expectedCreativeArtifactHash: outcome.plan.creative!.artifactHash,
-      expectedNativeMaterializationHash: outcome.plan.creative!.materializationHash,
-    })).not.toThrow();
+    });
+    expect(verified.creativeArtifact).toBeDefined();
+    expect(verified.trustedNativeMaterialization).toBeDefined();
+    expect(verified.creativeArtifactHash).toBe(verified.plan.creative!.artifactHash);
+    expect(verified.nativeMaterializationHash).toBe(verified.plan.creative!.materializationHash);
+    const authority = createHmacServerPlanAuthority(key);
+    const persistedPorts = createGraphPorts({
+      changePlan: { findFirst: vi.fn().mockResolvedValue({ plan: persisted.plan, changeRequestId: persisted.changeRequestId }) },
+    } as never, {} as never, undefined, undefined, undefined, authority);
+    await expect(persistedPorts.changePlanRepository.verifyPersistedCreativePlan({
+      tenantId: "tenant-creative",
+      workspaceId: "workspace-creative",
+      changePlanId: outcome.changePlanId,
+      changeRequestId: outcome.changeRequestId,
+      planHash: outcome.planHash,
+      revisionId: "revision-creative",
+    })).resolves.toBe(true);
+    const wrongOwnerPorts = createGraphPorts({
+      changePlan: { findFirst: vi.fn().mockResolvedValue({ plan: persisted.plan, changeRequestId: "different-request" }) },
+    } as never, {} as never, undefined, undefined, undefined, authority);
+    await expect(wrongOwnerPorts.changePlanRepository.verifyPersistedCreativePlan({
+      tenantId: "tenant-creative",
+      workspaceId: "workspace-creative",
+      changePlanId: outcome.changePlanId,
+      changeRequestId: outcome.changeRequestId,
+      planHash: outcome.planHash,
+      revisionId: "revision-creative",
+    })).resolves.toBe(false);
+    const forgedPorts = createGraphPorts({
+      changePlan: {
+        findFirst: vi.fn().mockResolvedValue({
+          plan: { ...persisted.plan, signature: "0".repeat(64) },
+          changeRequestId: persisted.changeRequestId,
+        }),
+      },
+    } as never, {} as never, undefined, undefined, undefined, authority);
+    await expect(forgedPorts.changePlanRepository.verifyPersistedCreativePlan({
+      tenantId: "tenant-creative",
+      workspaceId: "workspace-creative",
+      changePlanId: outcome.changePlanId,
+      changeRequestId: outcome.changeRequestId,
+      planHash: outcome.planHash,
+      revisionId: "revision-creative",
+    })).resolves.toBe(false);
     expect(assets.resolveManyForCompilation).toHaveBeenCalledWith({
       tenantId: "tenant-creative",
       workspaceId: "workspace-creative",
       assetIds: [],
     });
-    expect(Reflect.ownKeys(ports.creativeSolutionCompiler!)).toEqual(["compile"]);
+    expect(Reflect.ownKeys(compiler)).toEqual(["compile"]);
     expect(JSON.stringify(outcome)).not.toContain("trustedCreativePayload");
+    expect(JSON.stringify(outcome)).not.toMatch(/signature|creativeArtifact|materialization/i);
   });
 
-  it("fails closed when an exact editable entity lacks verified base-revision evidence", async () => {
-    const facade = createHmacCreativeBuildFacade(
-      Buffer.alloc(32, 0x52),
-      createCreativeUIImplementationV2Compiler,
-    );
+  it("fails closed on a wrong-workspace base revision before compilation or persistence", async () => {
     const prisma = {
       solutionRevision: { findFirst: vi.fn().mockResolvedValue(null) },
-      domainProjectRevision: { findFirst: vi.fn() },
+      domainProjectRevision: { findMany: vi.fn() },
     };
     const assets = {
       list: vi.fn(),
       resolveManyForCompilation: vi.fn().mockResolvedValue([]),
     };
-    const ports = createGraphPorts(prisma as never, {} as never, undefined, assets, facade);
+    const compiler = createCreativeSolutionCompilerFromEnvironment(
+      prisma as never,
+      {} as never,
+      assets,
+      { KF_SERVER_PLAN_HMAC_KEY_BASE64: Buffer.alloc(32, 0x52).toString("base64") },
+    );
     const fixture = creativeFixture();
 
-    const outcome = await ports.creativeSolutionCompiler!.compile({
+    const outcome = await compiler.compile({
       tenantId: "tenant-creative",
       workspaceId: "workspace-creative",
+      conversationId: "conversation-creative",
       baseRevisionId: "revision-creative",
+      projectKey: fixture.plan.projectKey,
+      domainKind: "kingclient",
       blueprint: fixture.blueprint,
       candidateBundle: fixture.candidates,
       semanticPlan: fixture.plan,
-      editableEntities: [{ kind: "page", name: "home", type: "page", guid: "existing-home-guid" }],
     });
 
     expect(outcome).toMatchObject({
@@ -98,67 +153,249 @@ describe("conversation graph workspace query", () => {
       diagnostics: [{ code: "CREATIVE_BASE_REVISION_EVIDENCE_MISSING", phase: "composition" }],
       warnings: [],
     });
-    expect(outcome).not.toHaveProperty("plan");
-    expect(outcome).not.toHaveProperty("signedPlan");
+    expect(outcome).not.toHaveProperty("changePlanId");
     expect(prisma.solutionRevision.findFirst).toHaveBeenCalledWith({
       where: {
         id: "revision-creative",
         tenantId: "tenant-creative",
         workspaceId: "workspace-creative",
       },
-      select: { id: true },
+      select: { id: true, state: true, kind: true },
     });
+    expect(prisma.domainProjectRevision.findMany).not.toHaveBeenCalled();
   });
 
-  it("treats a lowering capability failure as blocking before authority signing", async () => {
-    const sign = vi.fn();
-    const facade = {
-      authority: { sign, verify: vi.fn() },
-      compiler: {
-        assetProofResolver: { attestResolvedAssets: vi.fn().mockReturnValue({}) },
-        compiler: {
-          compile: vi.fn().mockReturnValue({
-            plan: {},
-            capabilityReport: {
-              status: "fail",
-              full: [],
-              partial: [],
-              unsupported: ["prototype.unreviewed"],
-              deliveryGaps: [{
-                componentId: "detail-content",
-                capability: "prototype.unreviewed",
-                severity: "critical",
-                reason: "缺少已审核原生能力",
-              }],
-            },
-            trustedCreativePayload: {},
-          }),
-        },
-      },
-    };
+  it("rolls back request ownership when atomic creative-plan persistence fails", async () => {
+    const errorLog = vi.spyOn(Logger.prototype, "error").mockImplementation(() => undefined);
+    const prisma = creativePrisma({ failPlanCreate: true });
     const assets = {
       list: vi.fn(),
       resolveManyForCompilation: vi.fn().mockResolvedValue([]),
     };
-    const ports = createGraphPorts({} as never, {} as never, undefined, assets, facade);
+    const compiler = createCreativeSolutionCompilerFromEnvironment(
+      prisma.client,
+      {} as never,
+      assets,
+      { KF_SERVER_PLAN_HMAC_KEY_BASE64: Buffer.alloc(32, 0x53).toString("base64") },
+    );
     const fixture = creativeFixture();
 
-    const outcome = await ports.creativeSolutionCompiler!.compile({
+    const outcome = await compiler.compile({
       tenantId: "tenant-creative",
       workspaceId: "workspace-creative",
+      conversationId: "conversation-creative",
       baseRevisionId: "revision-creative",
+      projectKey: fixture.plan.projectKey,
+      domainKind: "kingclient",
       blueprint: fixture.blueprint,
       candidateBundle: fixture.candidates,
       semanticPlan: fixture.plan,
-      editableEntities: [],
+    });
+    errorLog.mockRestore();
+
+    expect(outcome).toMatchObject({
+      status: "blocked",
+      diagnostics: [{ code: "CREATIVE_COMPILATION_FAILED", phase: "composition", nodeId: "$" }],
+    });
+    expect(prisma.requests.size).toBe(0);
+    expect(prisma.plans.size).toBe(0);
+  });
+
+  it("reuses identical content only within the same confirmation ownership", async () => {
+    const prisma = creativePrisma();
+    const compiler = createCreativeSolutionCompilerFromEnvironment(
+      prisma.client,
+      {} as never,
+      { resolveManyForCompilation: vi.fn().mockResolvedValue([]) },
+      { KF_SERVER_PLAN_HMAC_KEY_BASE64: Buffer.alloc(32, 0x58).toString("base64") },
+    );
+    const fixture = creativeFixture();
+    const baseInput = {
+      tenantId: "tenant-creative",
+      workspaceId: "workspace-creative",
+      baseRevisionId: "revision-creative",
+      projectKey: "creative",
+      domainKind: "kingclient",
+      blueprint: fixture.blueprint,
+      candidateBundle: fixture.candidates,
+      semanticPlan: fixture.plan,
+    } as const;
+
+    const first = await compiler.compile({ ...baseInput, conversationId: "conversation-a" });
+    const replay = await compiler.compile({ ...baseInput, conversationId: "conversation-a" });
+    const otherOwner = await compiler.compile({ ...baseInput, conversationId: "conversation-b" });
+
+    expect(first.status).toBe("compiled");
+    expect(replay).toMatchObject({
+      status: "compiled",
+      changePlanId: first.status === "compiled" ? first.changePlanId : "unreachable",
+    });
+    expect(otherOwner.status).toBe("compiled");
+    if (first.status === "compiled" && otherOwner.status === "compiled") {
+      expect(otherOwner.planHash).toBe(first.planHash);
+      expect(otherOwner.changePlanId).not.toBe(first.changePlanId);
+      expect(otherOwner.changeRequestId).not.toBe(first.changeRequestId);
+    }
+    expect(prisma.requests.size).toBe(2);
+    expect(prisma.plans.size).toBe(2);
+  });
+
+  it("selects uploaded evidence by exact project/domain identity and inspects it once", async () => {
+    const artifact = await packageForEvidence("workspace-creative");
+    const prisma = creativePrisma({
+      projects: [
+        { projectKey: "other-project", domainKind: "kingclient", packageUrl: "wrong-package" },
+        { projectKey: "creative", domainKind: "kingclient", packageUrl: "exact-package" },
+      ],
+    });
+    const storage = {
+      open: vi.fn(async (_tenantId: string, key: string) => {
+        if (key !== "exact-package") throw new Error("wrong project package opened");
+        return Readable.from([artifact]);
+      }),
+    };
+    const compiler = createCreativeSolutionCompilerFromEnvironment(
+      prisma.client,
+      storage as never,
+      { resolveManyForCompilation: vi.fn().mockResolvedValue([]) },
+      { KF_SERVER_PLAN_HMAC_KEY_BASE64: Buffer.alloc(32, 0x54).toString("base64") },
+    );
+    const fixture = creativeFixture();
+
+    const outcome = await compiler.compile({
+      tenantId: "tenant-creative",
+      workspaceId: "workspace-creative",
+      conversationId: "conversation-creative",
+      baseRevisionId: "revision-creative",
+      projectKey: "creative",
+      domainKind: "kingclient",
+      blueprint: fixture.blueprint,
+      candidateBundle: fixture.candidates,
+      semanticPlan: fixture.plan,
+    });
+
+    expect(outcome.status, JSON.stringify(outcome)).toBe("compiled");
+    expect(storage.open).toHaveBeenCalledTimes(1);
+    expect(storage.open).toHaveBeenCalledWith("tenant-creative", "exact-package");
+  });
+
+  it("fails closed instead of opening another project's uploaded package", async () => {
+    const prisma = creativePrisma({
+      projects: [{ projectKey: "other-project", domainKind: "kingclient", packageUrl: "wrong-package" }],
+    });
+    const storage = { open: vi.fn() };
+    const compiler = createCreativeSolutionCompilerFromEnvironment(
+      prisma.client,
+      storage as never,
+      { resolveManyForCompilation: vi.fn().mockResolvedValue([]) },
+      { KF_SERVER_PLAN_HMAC_KEY_BASE64: Buffer.alloc(32, 0x55).toString("base64") },
+    );
+    const fixture = creativeFixture();
+
+    const outcome = await compiler.compile({
+      tenantId: "tenant-creative",
+      workspaceId: "workspace-creative",
+      conversationId: "conversation-creative",
+      baseRevisionId: "revision-creative",
+      projectKey: "creative",
+      domainKind: "kingclient",
+      blueprint: fixture.blueprint,
+      candidateBundle: fixture.candidates,
+      semanticPlan: fixture.plan,
     });
 
     expect(outcome).toMatchObject({
       status: "blocked",
-      diagnostics: [{ code: "CREATIVE_CAPABILITY_BLOCKED", phase: "lowering", nodeId: "$" }],
+      diagnostics: [{ code: "CREATIVE_BASE_REVISION_EVIDENCE_MISSING" }],
     });
-    expect(JSON.stringify(outcome)).toContain("prototype.unreviewed");
-    expect(sign).not.toHaveBeenCalled();
+    expect(storage.open).not.toHaveBeenCalled();
+    expect(prisma.plans.size).toBe(0);
+  });
+
+  it("redacts hostile dependency exceptions from diagnostics", async () => {
+    const errorLog = vi.spyOn(Logger.prototype, "error").mockImplementation(() => undefined);
+    const prisma = creativePrisma();
+    const compiler = createCreativeSolutionCompilerFromEnvironment(
+      prisma.client,
+      {} as never,
+      {
+        resolveManyForCompilation: vi.fn().mockRejectedValue(
+          new Error("Authorization: Bearer abc /Users/customer/private.sql\nsecret=token"),
+        ),
+      },
+      { KF_SERVER_PLAN_HMAC_KEY_BASE64: Buffer.alloc(32, 0x56).toString("base64") },
+    );
+    const fixture = creativeFixture();
+
+    const outcome = await compiler.compile({
+      tenantId: "tenant-creative",
+      workspaceId: "workspace-creative",
+      conversationId: "conversation-creative",
+      baseRevisionId: "revision-creative",
+      projectKey: "creative",
+      domainKind: "kingclient",
+      blueprint: fixture.blueprint,
+      candidateBundle: fixture.candidates,
+      semanticPlan: fixture.plan,
+    });
+
+    const logCalls = errorLog.mock.calls;
+    errorLog.mockRestore();
+
+    expect(outcome).toMatchObject({
+      status: "blocked",
+      diagnostics: [{
+        code: "CREATIVE_COMPILATION_FAILED",
+        message: "工程编译依赖未通过校验",
+        correlationId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      }],
+    });
+    const correlationId = outcome.diagnostics[0].correlationId;
+    expect(logCalls).toEqual([[expect.stringContaining(correlationId), expect.stringContaining("Bearer abc")]]);
+    expect(JSON.stringify(outcome)).not.toMatch(/Bearer|private|secret|token/i);
+  });
+
+  it.each([
+    [
+      "CREATIVE_EDITABLE_ENTITY_AMBIGUOUS",
+      [{ id: "duplicate", type: "text" }, { id: "duplicate", type: "text" }],
+    ],
+    [
+      "CREATIVE_EVIDENCE_BUDGET_EXCEEDED",
+      Array.from({ length: 20_001 }, (_, index) => ({ id: `control-${index}`, type: "text" })),
+    ],
+  ])("fails closed on %s before creative compilation amplification", async (reasonCode, controls) => {
+    const prisma = creativePrisma({
+      revision: {
+        id: "revision-creative",
+        kind: "built",
+        state: { pages: [{ name: "Page1", controls }] },
+      },
+    });
+    const assets = { resolveManyForCompilation: vi.fn().mockResolvedValue([]) };
+    const compiler = createCreativeSolutionCompilerFromEnvironment(
+      prisma.client,
+      {} as never,
+      assets,
+      { KF_SERVER_PLAN_HMAC_KEY_BASE64: Buffer.alloc(32, 0x57).toString("base64") },
+    );
+    const fixture = creativeFixture();
+
+    const outcome = await compiler.compile({
+      tenantId: "tenant-creative",
+      workspaceId: "workspace-creative",
+      conversationId: "conversation-creative",
+      baseRevisionId: "revision-creative",
+      projectKey: "creative",
+      domainKind: "kingclient",
+      blueprint: fixture.blueprint,
+      candidateBundle: fixture.candidates,
+      semanticPlan: fixture.plan,
+    });
+
+    expect(outcome).toMatchObject({ status: "blocked", diagnostics: [{ code: reasonCode }] });
+    expect(assets.resolveManyForCompilation).not.toHaveBeenCalled();
+    expect(prisma.plans.size).toBe(0);
   });
 
   it("round-trips creative-v2 from the persisted workspace routing field", async () => {
@@ -493,7 +730,7 @@ describe("conversation graph workspace query", () => {
       workspaceId: "workspace-built-context",
     });
 
-    expect(entities).toEqual([
+    expect(entities).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: "page", name: "Home", type: "page" }),
       expect.objectContaining({ kind: "control", name: "HeroTitle", type: "text" }),
       expect.objectContaining({
@@ -505,8 +742,57 @@ describe("conversation graph workspace query", () => {
         width: 800,
         height: 500,
       }),
-    ]);
+    ]));
     expect(storage.open).toHaveBeenCalledWith("tenant-1", "built-package-key");
+  });
+
+  it("reads the 201st page and 51st control from the full inspection index", async () => {
+    const pack = createKingClientDomainPack({ nativeAccepted: true });
+    const built = await pack.compile({
+      buildSeed: "workspace-full-index",
+      projectIr: {
+        schema: "kf-client-project-ir/v1",
+        id: "full-index-project",
+        name: "Full Index Project",
+        pages: Array.from({ length: 201 }, (_, pageIndex) => ({
+          id: `page-${pageIndex + 1}`,
+          name: `Page${pageIndex + 1}`,
+          width: 1440,
+          height: 900,
+          controls: pageIndex === 0
+            ? Array.from({ length: 51 }, (_, controlIndex) => ({
+                id: `Control${controlIndex + 1}`,
+                type: "text" as const,
+                x: 10,
+                y: controlIndex * 12,
+                width: 100,
+                height: 10,
+                text: String(controlIndex + 1),
+              }))
+            : [],
+        })),
+      },
+    });
+    const artifact = await pack.package({ workspace: built });
+    const ports = createGraphPorts({
+      solutionRevision: { findFirst: vi.fn().mockResolvedValue({ state: {} }) },
+      domainProjectRevision: { findFirst: vi.fn().mockResolvedValue({ packageUrl: "full-index-package" }) },
+    } as never, {
+      open: vi.fn().mockResolvedValue(Readable.from([artifact.bytes])),
+    } as never);
+
+    const entities = await ports.workspaceQuery.getRevisionEntities({
+      tenantId: "tenant-1",
+      revisionId: "revision-full-index",
+      workspaceId: "workspace-full-index",
+    });
+
+    expect(entities).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "page", name: "Page201" }),
+      expect.objectContaining({ kind: "control", name: "Control51" }),
+    ]));
+    expect(entities.filter((entity) => entity.kind === "page")).toHaveLength(201);
+    expect(entities.filter((entity) => entity.kind === "control")).toHaveLength(51);
   });
 
   it("compiles a traceable multi-module UI implementation with the existing KingClient tools", async () => {
@@ -575,6 +861,74 @@ describe("conversation graph workspace query", () => {
     expect(result.capabilityReport.status).not.toBe("fail");
   });
 });
+
+function creativePrisma(options: {
+  failPlanCreate?: boolean;
+  projects?: Array<{ projectKey: string; domainKind: string; packageUrl: string | null }>;
+  revision?: { id: string; kind: string; state: unknown } | null;
+} = {}) {
+  const requests = new Map<string, Record<string, unknown>>();
+  const plans = new Map<string, Record<string, unknown>>();
+  const solutionRevision = {
+    findFirst: vi.fn().mockResolvedValue(options.revision === undefined ? {
+      id: "revision-creative",
+      kind: "built",
+      state: { pages: [] },
+    } : options.revision),
+  };
+  const domainProjectRevision = { findMany: vi.fn().mockResolvedValue(options.projects ?? []) };
+  const client = {
+    solutionRevision,
+    domainProjectRevision,
+    async $transaction(run) {
+      const requestDraft = new Map([...requests].map(([key, value]) => [key, structuredClone(value)]));
+      const planDraft = new Map([...plans].map(([key, value]) => [key, structuredClone(value)]));
+      const tx = {
+        solutionRevision,
+        changeRequest: {
+          findUnique: async ({ where: { id } }) => requestDraft.get(id) ?? null,
+          upsert: async ({ where: { id }, create, update }) => {
+            requestDraft.set(id, { ...(requestDraft.get(id) ?? create), ...update });
+          },
+        },
+        changePlan: {
+          findUnique: async ({ where: { id } }) => planDraft.get(id) ?? null,
+          create: async ({ data }) => {
+            if (options.failPlanCreate) throw new Error("hostile db path /private/secret token=abc");
+            planDraft.set(data.id, structuredClone(data));
+          },
+        },
+      };
+      const result = await run(tx);
+      requests.clear();
+      plans.clear();
+      requestDraft.forEach((value, key) => requests.set(key, value));
+      planDraft.forEach((value, key) => plans.set(key, value));
+      return result;
+    },
+  };
+  return { client, requests, plans, solutionRevision, domainProjectRevision };
+}
+
+async function packageForEvidence(workspaceId: string): Promise<Uint8Array> {
+  const pack = createKingClientDomainPack({ nativeAccepted: true });
+  const built = await pack.compile({
+    buildSeed: workspaceId,
+    projectIr: {
+      schema: "kf-client-project-ir/v1",
+      id: "creative-evidence",
+      name: "Creative Evidence",
+      pages: [{
+        id: "existing",
+        name: "Existing",
+        width: 1440,
+        height: 900,
+        controls: [],
+      }],
+    },
+  });
+  return (await pack.package({ workspace: built })).bytes;
+}
 
 function creativeFixture() {
   const blueprint = CustomerSolutionBlueprintSchema.parse({

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createDesignPlanNode } from "./design-plan.js";
+import { createCapabilityRetrievalNode } from "./capability-retrieval.js";
 import { createPlanChangeNode } from "./plan-change.js";
 import { intentValues } from "../schemas/intent.js";
 import type { CustomerEffectBlueprint, CustomerSolutionBlueprint } from "@kf/contracts";
@@ -172,6 +173,70 @@ describe("design-plan node", () => {
     expect(moduleResult).toMatchObject({ stage: "idle", lastErrorCode: "INVALID_MODEL_OUTPUT" });
     expect(legacyResult).toMatchObject({ stage: "idle", lastErrorCode: "INVALID_MODEL_OUTPUT" });
     expect(workspaceQuery.appendMessage).not.toHaveBeenCalled();
+  });
+
+  it("clears every downstream creative identity on a successful REVISE_DESIGN before later failures", async () => {
+    const { deps, modelPort } = makeDesignDeps();
+    modelPort.createDesignPlan.mockResolvedValue({
+      ...creativeBlueprint,
+      displayName: "访客协同中心修订版",
+    });
+
+    const staleState = baseState({
+      generationWorkflow: "creative-v2",
+      intent: "REVISE_DESIGN",
+      designPlan: creativeBlueprint,
+      designPlanHash: "a".repeat(64),
+      designRevision: 1,
+      capabilityCandidates: { stale: true },
+      capabilityCandidatesHash: "b".repeat(64),
+      solutionImplementationPlan: { stale: true },
+      solutionImplementationPlanHash: "c".repeat(64),
+      activeChangeRequestId: "stale-request",
+      changePlanId: "stale-plan",
+      planHash: "d".repeat(64),
+      buildJobId: "stale-job",
+      buildAuthorization: "creative-solution",
+      creativeConfirmationId: "e".repeat(64),
+      creativeProjectKey: "stale-project",
+      creativeDomainKind: "kingclient",
+      diffArtifactId: "stale-diff",
+      previewArtifactId: "stale-preview",
+    });
+    const update = await createDesignPlanNode(deps)(staleState as never);
+
+    expect(update).toMatchObject({
+      stage: "design-review",
+      designPlan: expect.objectContaining({ displayName: "访客协同中心修订版" }),
+      capabilityCandidates: undefined,
+      solutionImplementationPlan: undefined,
+      activeChangeRequestId: undefined,
+      changePlanId: undefined,
+      planHash: undefined,
+      buildJobId: undefined,
+      buildAuthorization: undefined,
+      creativeConfirmationId: undefined,
+      creativeProjectKey: undefined,
+      creativeDomainKind: undefined,
+      diffArtifactId: undefined,
+      previewArtifactId: undefined,
+    });
+
+    const laterFailure = await createCapabilityRetrievalNode({
+      capabilityRetrieval: { retrieve: vi.fn().mockRejectedValue(new Error("catalog unavailable")) },
+    } as never)({ ...staleState, ...update } as never);
+    expect({ ...staleState, ...update, ...laterFailure }).toMatchObject({
+      stage: "idle",
+      lastErrorCode: "CAPABILITY_RETRIEVAL_FAILED",
+      activeChangeRequestId: undefined,
+      changePlanId: undefined,
+      planHash: undefined,
+      buildJobId: undefined,
+      buildAuthorization: undefined,
+      creativeConfirmationId: undefined,
+      diffArtifactId: undefined,
+      previewArtifactId: undefined,
+    });
   });
 
   it("generates a design plan, hashes it, shows it, and returns to design-review", async () => {

@@ -10,8 +10,14 @@ import { AssetsModule } from "../assets/assets.module.js";
 import { DeliveryModule } from "../delivery/delivery.module.js";
 import {
   CAPABILITY_RETRIEVAL_PORT,
+  CREATIVE_SOLUTION_COMPILER_PORT,
   LOCAL_CAPABILITY_RETRIEVAL_PORT,
+  createCreativeSolutionCompilerFromEnvironment,
 } from "./graph-ports.js";
+import { PrismaService } from "../prisma/prisma.service.js";
+import { ARTIFACT_STORAGE } from "../artifacts/artifact-storage.js";
+import type { ArtifactStorage } from "@kf/artifact-storage";
+import { AssetService } from "../assets/asset.service.js";
 
 @Module({
   imports: [ArtifactsModule, AssetsModule, DeliveryModule],
@@ -21,6 +27,15 @@ import {
     {
       provide: CAPABILITY_RETRIEVAL_PORT,
       useValue: LOCAL_CAPABILITY_RETRIEVAL_PORT,
+    },
+    {
+      provide: CREATIVE_SOLUTION_COMPILER_PORT,
+      inject: [PrismaService, ARTIFACT_STORAGE, AssetService],
+      useFactory: (
+        prisma: PrismaService,
+        storage: ArtifactStorage,
+        assets: AssetService,
+      ) => createCreativeSolutionCompilerFromEnvironment(prisma, storage, assets),
     },
     {
       provide: MODEL_PORT,

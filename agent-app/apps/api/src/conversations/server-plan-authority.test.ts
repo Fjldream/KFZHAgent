@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
 import { readVerifiedAcceptedBlueprintArtifact } from "@kf/build-jobs";
 import {
-  createCreativeBuildFacadeFromEnvironment,
   createModuleArtifactAuthorityFromEnvironment,
   createServerPlanAuthorityFromEnvironment,
   signAcceptedBlueprintAtConfirmation,
@@ -21,18 +20,10 @@ describe("API server plan authority configuration", () => {
     expect(Object.keys(authority).sort()).toEqual(["sign", "verify"]);
   });
 
-  it("binds the creative issuer and asset attester inside one server-scoped facade", () => {
-    const environment = {
-      KF_SERVER_PLAN_HMAC_KEY_BASE64: Buffer.alloc(32, 0x32).toString("base64"),
-    };
-
-    const facade = createCreativeBuildFacadeFromEnvironment(environment);
-
-    expect(Object.keys(facade).sort()).toEqual(["authority", "compiler"]);
-    expect(Object.keys(facade.authority).sort()).toEqual(["sign", "verify"]);
-    expect(Object.keys(facade.compiler).sort()).toEqual(["assetProofResolver", "compiler"]);
-    expect(JSON.stringify(facade)).not.toContain(environment.KF_SERVER_PLAN_HMAC_KEY_BASE64);
-    expect(JSON.stringify(facade)).not.toContain("issuer");
+  it("does not export a full creative facade or DI token", async () => {
+    const exports = await import("./server-plan-authority.js") as Record<string, unknown>;
+    expect(exports).not.toHaveProperty("CREATIVE_BUILD_FACADE");
+    expect(exports).not.toHaveProperty("createCreativeBuildFacadeFromEnvironment");
   });
 
   it("uses the same server key with a separated module domain and signs Registry-derived blueprint facts only at confirmation", () => {

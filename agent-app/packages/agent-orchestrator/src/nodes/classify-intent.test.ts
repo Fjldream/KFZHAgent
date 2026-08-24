@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createClassifyIntentNode } from "./classify-intent.js";
 import type { ClassifyIntentResult } from "../schemas/intent.js";
+import { routeAfterClassify } from "../solution-graph.js";
 
 function makeClarifyDeps() {
   const modelPort = {
@@ -58,6 +59,31 @@ describe("classify-intent node CLARIFY gate", () => {
 });
 
 describe("classify-intent node design-review routing", () => {
+  it("preserves the retry reason until the creative explicit-retry edge consumes it", async () => {
+    const deps = {
+      modelPort: {
+        classifyIntent: vi.fn(),
+      },
+      workspaceQuery: { appendMessage: vi.fn().mockResolvedValue(undefined) },
+      isDomainSupported: () => true,
+    };
+    const before = baseState({
+      generationWorkflow: "creative-v2",
+      designPlan: { schema: "kf-design-plan/v3" },
+      designPlanHash: "a".repeat(64),
+      lastErrorCode: "CREATIVE_SOLUTION_BLOCKED:LAYOUT_OVERFLOW",
+      recentMessages: [{ role: "user", content: "重新生成工程" }],
+    });
+
+    const update = await createClassifyIntentNode(deps as never)(before as never);
+    const after = { ...before, ...update };
+
+    expect(update.intent).toBe("CONFIRM_DESIGN");
+    expect(after.lastErrorCode).toBe("CREATIVE_SOLUTION_BLOCKED:LAYOUT_OVERFLOW");
+    expect(routeAfterClassify(after as never)).toBe("capability-retrieval");
+    expect(deps.modelPort.classifyIntent).not.toHaveBeenCalled();
+  });
+
   it.each(["done", "idle"])(
     "routes an implementation retry from a stale %s checkpoint back to confirmed-design planning",
     async (stage) => {

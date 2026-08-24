@@ -67,8 +67,20 @@ export function createClassifyIntentNode(deps: SolutionGraphDeps) {
       state.designPlanHash !== undefined
       && state.lastErrorCode?.startsWith("UI_IMPLEMENTATION_INVALID") === true
       && requirementText?.trim() === "重新生成工程实施计划";
+    const creativeErrorCode = state.lastErrorCode?.split(":", 1)[0];
+    const isCreativeCompilationRetry = state.generationWorkflow === "creative-v2"
+      && state.changePlanId === undefined
+      && state.buildJobId === undefined
+      && requirementText?.trim() === "重新生成工程"
+      && [
+        "CREATIVE_SOLUTION_BLOCKED",
+        "CREATIVE_SOLUTION_COMPILATION_FAILED",
+        "CREATIVE_SOLUTION_EVIDENCE_UNAVAILABLE",
+        "CREATIVE_SOLUTION_OUTPUT_INVALID",
+        "CREATIVE_SOLUTION_PERSIST_FAILED",
+      ].includes(creativeErrorCode ?? "");
     let result: ClassifyIntentResult;
-    if (isImplementationRetry) {
+    if (isImplementationRetry || isCreativeCompilationRetry) {
       // This exact phrase is emitted by our own UI after a persisted
       // implementation failure. Route it deterministically so an old approved
       // plan/build checkpoint cannot hijack the retry and no classifier call
@@ -133,12 +145,12 @@ export function createClassifyIntentNode(deps: SolutionGraphDeps) {
     if (
       !unsupported &&
       (state.stage === "design-review" ||
-        isImplementationRetry ||
+        isImplementationRetry || isCreativeCompilationRetry ||
         ((state.stage === "idle" || state.stage === "done") && hasUncommittedDesign))
     ) {
       const text = requirementText ?? "";
       if (
-        isImplementationRetry
+        isImplementationRetry || isCreativeCompilationRetry
         || (text.length <= 12
           && /确认|可以|没问题|同意|就这样|挺好的|就按这个/.test(text))
       ) {

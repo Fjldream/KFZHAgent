@@ -138,3 +138,83 @@ Result: `git diff --check` passed with no output; the capability search returned
 ## Residual risk
 
 No blocking concern. The direct production entry/rollout for new creative workspaces remains intentionally out of scope for Task 6. Native interaction and uploaded-existing forms not already backed by Task 2–4 evidence continue to fail closed. The five skipped domain-client tests are pre-existing optional golden-reference tests, not creative graph failures.
+
+---
+
+## Fix round 1/5 — review round 0 closure
+
+This section supersedes the initial report's trust-boundary details where they describe a DI-exported full facade or a raw signed envelope crossing the graph node boundary. The graph now receives only a narrow verified persistence receipt; the issuer-bound compiler facade remains private to the API provider closure.
+
+### Important findings
+
+1. **Complete pre-persist verification.** API composition signs through its closure-local HMAC facade, JSON-roundtrips the complete envelope, then verifies it with that same facade authority and explicit expected revision, canonical plan, creative artifact, and native materialization hashes. Only that verified value enters `persistCreativePlan`. The public `CreativeSolutionCompilerPort` returns IDs, hashes, operation count, confirmation identity, project/domain identity, capability report, and warnings—never the envelope, issuer, asset proof, verified handle, artifact, or native materialization. Before enqueue, the repository JSON-roundtrips and HMAC-verifies the persisted envelope again, including tenant/workspace/revision/plan/request ownership.
+2. **Exact full-index evidence.** Creative evidence selects the exact revision by tenant + workspace + revision and the exact uploaded package by projectKey + domainKind. It buffers at most 32 MiB compressed, limits expansion to 128 MiB / 2,500 files / 512-character paths / ratio 30, caps the singleton provider at two concurrent inspections, and bounds pages/controls/variables/scripts. One `inspection.index` supplies both editable entities and runtime-correlation proof; summary truncation is not used. Ambiguous names, duplicate exact packages, wrong project/workspace, budget overflow, and inspection warnings fail closed.
+3. **Exactly-once confirmation.** Creative confirmation is accepted only from `design-review` when no confirmation was consumed, or from `idle` for the exact `重新生成工程` phrase with an allowlisted no-plan/no-job error. A canonical confirmation identity is checkpointed. `ConversationService.startTurn` holds a PostgreSQL session advisory lock across checkpoint re-read, user-message persistence, and the complete graph stream; concurrent confirmations therefore observe the winner's checkpoint. Failed unlock destroys the client and does not mask the graph error. Sequential and concurrent tests each prove one compile/persist/enqueue.
+4. **Revision cleanup.** Every successful creative v3 revision, including explicit `REVISE_DESIGN`, clears candidates and hashes, semantic plan and hash/repair state, confirmation/project/domain receipt, ChangeRequest/ChangePlan/hash/summary/capability report, build authorization/job, and diff/preview artifact references. A follow-on capability failure test proves stale identities remain absent.
+5. **Safe diagnostics.** Dependency messages never enter graph state or customer text. API composition maps only allowlisted reason codes and bounded schema-safe node/alternative fields; unexpected raw exceptions are logged server-side with a UUID correlation ID, while customer output receives only fixed engineering wording and the safe reference ID. Hostile path, bearer token, secret, control-character, and traversal-shaped inputs are covered.
+6. **Post-enqueue durability.** Enqueue failure remains `ENQUEUE_FAILED`. Once enqueue returns a durable job ID, status/message side-effect failures return `buildJobId`, `stage=building`, consumed authorization, and bounded `BUILD_POST_ENQUEUE_SYNC_FAILED`; replay cannot enqueue again. Status-write and assistant-message-write failures are tested separately.
+7. **Narrow DI.** `CREATIVE_BUILD_FACADE` and its environment factory were removed from exported DI and `ConversationService`. `ConversationsModule` constructs only `CreativeSolutionCompilerPort`; the facade, compiler issuer, and asset attester exist only in that provider's closure. Delivery exports only the verifier/authorities needed by existing consumers.
+
+### Minor findings
+
+- `persistCreativePlan` is one Prisma transaction binding tenant/workspace/revision/conversation-derived request/confirmation/plan hash/envelope. It rolls back the request when plan creation fails, accepts content reuse only for identical ownership and canonical envelope content, and gives another conversation a different persisted identity.
+- Uploaded evidence is opened/unpacked/inspected once per compile with the bounded limits and provider-scoped concurrency cap above; no repeated 256 MiB materialization remains.
+
+### TDD evidence
+
+Focused REDs were observed before their minimal production fixes: forged persisted signatures and wrong request ownership were accepted; exact retry classification cleared the allowlisted error before its route edge; plain duplicate/concurrent confirmations could reach compilation twice; `REVISE_DESIGN` retained downstream identities; hostile messages escaped diagnostics; status/message failures after durable enqueue lost the successful job; the full facade remained injectable; split persistence could leave an orphan request; summary evidence omitted page 201/control 51; and advisory-unlock failure masked the original graph error. Each test then passed after its corresponding boundary change. The final regression set additionally covers JSON transport verification, atomic rollback/content ownership, wrong workspace/project, one-pass uploaded inspection, evidence ambiguity/budgets, explicit retry, request-owner verification, server correlation logging, and legacy/module compatibility.
+
+Focused commands:
+
+```sh
+cd agent-app/packages/agent-orchestrator
+/Users/fengjinlong/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node ../../node_modules/vitest/vitest.mjs run src/nodes/classify-intent.test.ts src/nodes/capability-retrieval.test.ts src/nodes/compile-creative-solution.test.ts src/nodes/enqueue-build.test.ts src/nodes/design-plan.test.ts src/solution-graph.test.ts src/solution-graph.integration.test.ts
+
+cd agent-app/apps/api
+LANGCHAIN_TRACING_V2=false LANGSMITH_TRACING=false /Users/fengjinlong/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node ../../node_modules/vitest/vitest.mjs run src/conversations/graph-ports.test.ts src/conversations/server-plan-authority.test.ts src/conversations/conversation.service.test.ts
+```
+
+Round-1 focused result before the final full gate: orchestrator 7 files / 97 tests and API 3 files / 30 tests passed. The `REVISE_DESIGN` follow-on failure evidence was then re-run separately and passed.
+
+### Verification commands and results
+
+All commands use the bundled arm64 Node because the host's `/usr/local` x86 Node cannot load this checkout's native dependencies.
+
+```sh
+cd agent-app/packages/agent-orchestrator
+/Users/fengjinlong/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node ../../node_modules/vitest/vitest.mjs run
+# 17 files, 162 tests passed
+
+cd agent-app/apps/api
+LANGCHAIN_TRACING_V2=false LANGSMITH_TRACING=false /Users/fengjinlong/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node ../../node_modules/vitest/vitest.mjs run
+# 13 files, 291 tests passed
+
+cd agent-app/packages/build-jobs
+/Users/fengjinlong/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node ../../node_modules/vitest/vitest.mjs run
+# 4 files, 66 tests passed
+
+cd agent-app/packages/contracts
+/Users/fengjinlong/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node ../../node_modules/vitest/vitest.mjs run
+# 18 files, 480 tests passed
+
+cd agent-app/packages/domain-client
+/Users/fengjinlong/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node ../../node_modules/vitest/vitest.mjs run
+# 62 files, 1,244 passed; 5 pre-existing optional tests skipped
+
+cd agent-app/packages/agent-orchestrator
+/Users/fengjinlong/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node ../../node_modules/typescript/bin/tsc --noEmit
+/Users/fengjinlong/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node ../../node_modules/eslint/bin/eslint.js .
+
+cd agent-app/apps/api
+/Users/fengjinlong/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node ../../node_modules/typescript/bin/tsc --noEmit
+/Users/fengjinlong/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node ../../node_modules/eslint/bin/eslint.js .
+
+git diff --check
+git diff --cached --check
+```
+
+The final gate is re-run after these report/ledger edits and recorded in the commit handoff. A deliberately overlapping orchestrator full run briefly caused two legacy PostgreSQL checkpoint tests to compete on their shared truncation tables; the clean serial rerun passed 17/17 files and 162/162 tests. This is test-database isolation noise, not a creative-route failure.
+
+### Round-1 residual risk
+
+No Task 5 blocker is known. PostgreSQL session advisory locks serialize all turns in one conversation for correctness; this intentionally trades same-conversation concurrency for exactly-once graph effects. Post-enqueue metadata/message repair is identified by `BUILD_POST_ENQUEUE_SYNC_FAILED` but no new outbox was introduced because Task 5 has no existing outbox boundary. Task 6 production rollout and preview implementation remain untouched.

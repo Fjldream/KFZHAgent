@@ -151,6 +151,7 @@ function bed(specs: UIImplementationSpec[], compileError?: Error, depsOverride: 
     saveChangeRequest: vi.fn(),
     savePlan,
     loadPlanHash: vi.fn(),
+    verifyPersistedCreativePlan: vi.fn().mockResolvedValue(false),
     setChangeRequestStatus: vi.fn(),
   } satisfies ChangePlanRepository;
   const workspaceQuery = {

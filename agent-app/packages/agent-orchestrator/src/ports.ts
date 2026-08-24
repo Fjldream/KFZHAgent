@@ -99,6 +99,8 @@ export interface WorkspaceQueryPort {
     tenantId: string;
     revisionId: string;
     workspaceId: string;
+    projectKey?: string;
+    domainKind?: string;
   }): Promise<EditableEntity[]>;
 }
 
@@ -135,6 +137,15 @@ export interface ChangePlanRepository {
   saveChangeRequest(input: SaveChangeRequestInput): Promise<void>;
   savePlan(input: SavePlanInput): Promise<void>;
   loadPlanHash(input: { tenantId: string; changePlanId: string }): Promise<string | undefined>;
+  /** Re-verifies the persisted signed creative envelope before its small queue handoff. */
+  verifyPersistedCreativePlan(input: {
+    tenantId: string;
+    workspaceId: string;
+    changePlanId: string;
+    changeRequestId: string;
+    planHash: string;
+    revisionId: string;
+  }): Promise<boolean>;
   setChangeRequestStatus(input: {
     tenantId: string;
     changeRequestId: string;
@@ -234,26 +245,34 @@ export interface CreativeCompilationDiagnostic {
   phase?: string;
   nodeId: string;
   message: string;
+  /** Safe incident identity; raw dependency details remain in server logs only. */
+  correlationId?: string;
   alternatives?: readonly string[];
 }
 
 export interface CreativeSolutionCompilerInput {
   tenantId: string;
   workspaceId: string;
+  conversationId: string;
   baseRevisionId: string;
+  projectKey: string;
+  domainKind: string;
   blueprint: CustomerSolutionBlueprint;
   candidateBundle: CapabilityCandidateBundle;
   semanticPlan: SolutionImplementationPlan;
-  /** Server-read exact-base entities; composition re-verifies native matches and never checkpoints them. */
-  editableEntities: readonly EditableEntity[];
 }
 
 export type CreativeSolutionCompilerOutcome =
   | {
       status: "compiled";
-      plan: InternalChangePlan;
-      /** Server-scoped compiler facade has already signed the complete creative payload. */
-      signedPlan: ServerPlanEnvelope;
+      /** Narrow receipt for a complete, verified, atomically persisted creative envelope. */
+      changeRequestId: string;
+      changePlanId: string;
+      planHash: string;
+      operationCount: number;
+      confirmationId: string;
+      projectKey: string;
+      domainKind: string;
       capabilityReport: CapabilityReport;
       warnings: readonly CreativeCompilationDiagnostic[];
     }
@@ -263,7 +282,7 @@ export type CreativeSolutionCompilerOutcome =
       warnings: readonly CreativeCompilationDiagnostic[];
     };
 
-/** One server-owned creative boundary: evidence resolution, compilation, lowering, and signing. */
+/** One server-owned creative boundary: evidence, compilation, verification, and atomic persistence. */
 export interface CreativeSolutionCompilerPort {
   compile(input: CreativeSolutionCompilerInput): Promise<CreativeSolutionCompilerOutcome>;
 }

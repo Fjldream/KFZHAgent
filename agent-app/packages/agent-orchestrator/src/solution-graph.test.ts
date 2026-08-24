@@ -110,6 +110,12 @@ class FakeChangePlanRepository implements ChangePlanRepository {
   async loadPlanHash({ changePlanId }: { changePlanId: string }): Promise<string | undefined> {
     return this.plans.get(changePlanId)?.planHash;
   }
+  async verifyPersistedCreativePlan({ changePlanId, planHash }: { changePlanId: string; planHash: string }): Promise<boolean> {
+    const stored = this.plans.get(changePlanId);
+    return stored?.planHash === planHash
+      && (stored.plan as ServerPlanEnvelope).schema === "kf-server-plan-envelope/v1"
+      && (stored.plan as ServerPlanEnvelope).plan.creative !== undefined;
+  }
   async setChangeRequestStatus(input: {
     changeRequestId: string;
     status: string;
@@ -613,10 +619,20 @@ function createBed(options: { creativeCompiler?: "compiled" | "blocked" | "missi
                 creative: { artifactHash, materializationHash },
               };
               const planHash = canonicalChangePlanHash(plan);
-              return {
-                status: "compiled" as const,
-                plan,
-                signedPlan: {
+              const confirmationId = canonicalServerHash({
+                schema: "kf-creative-confirmation/v1",
+                tenantId: input.tenantId,
+                workspaceId: input.workspaceId,
+                conversationId: input.conversationId,
+                baseRevisionId: input.baseRevisionId,
+                blueprintHash: canonicalServerHash(input.blueprint),
+              });
+              const changeRequestId = `cr:${input.workspaceId}:${input.conversationId}:${confirmationId}`;
+              const changePlanId = `plan:${input.workspaceId}:${confirmationId}:${planHash}`;
+              repo.requests.set(changeRequestId, { id: changeRequestId, status: "OPEN" });
+              repo.plans.set(changePlanId, {
+                planHash,
+                plan: {
                   schema: "kf-server-plan-envelope/v1" as const,
                   plan,
                   planHash,
@@ -628,6 +644,16 @@ function createBed(options: { creativeCompiler?: "compiled" | "blocked" | "missi
                   nativeMaterializationHash: materializationHash,
                   signature: "test-only-server-signature",
                 } as unknown as ServerPlanEnvelope,
+              });
+              return {
+                status: "compiled" as const,
+                changeRequestId,
+                changePlanId,
+                planHash,
+                confirmationId,
+                operationCount: plan.operations.length,
+                projectKey: input.projectKey,
+                domainKind: input.domainKind,
                 capabilityReport: {
                   status: "warning" as const,
                   full: ["layout.4"],
@@ -757,7 +783,7 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
 
     bed.model.queueIntent("CONFIRM_DESIGN");
     await sendUser(bed, ctx, "确认设计");
-    const planned = await bed.graph.invoke(input(ctx), config(ctx));
+    const planned = await bed.graph.invoke({ ...input(ctx), stage: "design-review" }, config(ctx));
 
     expect(planned).toMatchObject({
       stage: "building",
@@ -776,7 +802,8 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
       workspaceId: WORKSPACE_ID,
       baseRevisionId: REVISION_1,
       blueprint: creativeBlueprint(),
-      editableEntities: [],
+      projectKey: "visitor-center",
+      domainKind: "kingclient",
     });
     expect(bed.builds.enqueues).toHaveLength(1);
     expect(bed.builds.enqueues[0]).toEqual({
@@ -785,11 +812,11 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
       baseRevisionId: REVISION_1,
       changePlanId: planned.changePlanId,
       planHash: planned.planHash,
-      projectKey: "kingclient",
+      projectKey: "visitor-center",
       domainKind: "kingclient",
       idempotencyKey: expect.any(String),
     });
-    expect(planned.changePlanId).toBe(`plan:${WORKSPACE_ID}:${planned.planHash}`);
+    expect(planned.changePlanId).toBe(`plan:${WORKSPACE_ID}:${planned.creativeConfirmationId}:${planned.planHash}`);
     expect(bed.repo.plans.get(planned.changePlanId!)).toMatchObject({
       planHash: planned.planHash,
       plan: { schema: "kf-server-plan-envelope/v1", revisionId: REVISION_1 },
@@ -814,7 +841,7 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
       await bed.graph.invoke(input(ctx), config(ctx));
       bed.model.queueIntent("CONFIRM_DESIGN");
       await sendUser(bed, ctx, "确认设计");
-      const result = await bed.graph.invoke(input(ctx), config(ctx));
+      const result = await bed.graph.invoke({ ...input(ctx), stage: "design-review" }, config(ctx));
 
       expect(result.stage).toBe("idle");
       expect(result.lastErrorCode).toMatch(
@@ -851,7 +878,7 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     await bed.graph.invoke({ ...input(ctx), ...preservedLegacy }, config(ctx));
     bed.model.queueIntent("CONFIRM_DESIGN");
     await sendUser(bed, ctx, "确认设计");
-    const ready = await bed.graph.invoke(input(ctx), config(ctx));
+    const ready = await bed.graph.invoke({ ...input(ctx), stage: "design-review" }, config(ctx));
     expect(ready.stage).toBe("building");
     const previousBlueprint = ready.designPlan;
     expect(previousBlueprint?.schema).toBe("kf-design-plan/v3");
@@ -904,7 +931,7 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     await bed.graph.invoke(input(ctx), config(ctx));
     bed.model.queueIntent("CONFIRM_DESIGN");
     await sendUser(bed, ctx, "确认设计");
-    const ready = await bed.graph.invoke(input(ctx), config(ctx));
+    const ready = await bed.graph.invoke({ ...input(ctx), stage: "design-review" }, config(ctx));
     expect(ready.stage).toBe("building");
 
     for (const [intent, message] of [
@@ -944,6 +971,29 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     expect(bed.repo.statusCalls).toHaveLength(1);
     expect(bed.builds.enqueues).toHaveLength(1);
     expect(await interruptPayload(bed, ctx)).toBeUndefined();
+  });
+
+  it("consumes a creative blueprint confirmation exactly once on sequential duplicate confirmation", async () => {
+    const bed = createBed();
+    const ctx = seed(bed);
+    bed.workspace.routing.set(WORKSPACE_ID, { mode: "new", generationWorkflow: "creative-v2" });
+
+    bed.model.queueIntent("NEW_REQUIREMENT");
+    await sendUser(bed, ctx, "创建园区访客协同中心");
+    await bed.graph.invoke(input(ctx), config(ctx));
+    bed.model.queueIntent("CONFIRM_DESIGN");
+    await sendUser(bed, ctx, "确认设计");
+    const first = await bed.graph.invoke({ ...input(ctx), stage: "design-review" }, config(ctx));
+
+    bed.model.queueIntent("CONFIRM_DESIGN");
+    await sendUser(bed, ctx, "再次确认设计");
+    const duplicate = await bed.graph.invoke(input(ctx), config(ctx));
+
+    expect(first.creativeConfirmationId).toMatch(/^[0-9a-f]{64}$/);
+    expect(duplicate.creativeConfirmationId).toBe(first.creativeConfirmationId);
+    expect(bed.creativeCompilerCalls).toHaveLength(1);
+    expect(bed.repo.plans.size).toBe(1);
+    expect(bed.builds.enqueues).toHaveLength(1);
   });
 
   it("routes an ordinary question to idle without planning or building", async () => {

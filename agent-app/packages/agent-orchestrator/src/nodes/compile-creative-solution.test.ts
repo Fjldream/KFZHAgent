@@ -1,13 +1,10 @@
 import {
-  canonicalChangePlanHash,
   canonicalServerHash,
   CapabilityCandidateBundleSchema,
   CustomerSolutionBlueprintSchema,
   SolutionImplementationPlanSchema,
   type CapabilityCandidateBundle,
   type CustomerSolutionBlueprint,
-  type InternalChangePlan,
-  type ServerPlanEnvelope,
   type SolutionImplementationPlan,
 } from "@kf/contracts";
 import { describe, expect, it, vi } from "vitest";
@@ -134,32 +131,8 @@ const semanticPlan: SolutionImplementationPlan = SolutionImplementationPlanSchem
   scripts: [],
 });
 
-const internalPlan: InternalChangePlan = {
-  schema: "kf-change-plan/v1",
-  workspaceId: "workspace-1",
-  operations: [{
-    op: "create",
-    entityType: "page",
-    entityId: "visitor-solution-page",
-    properties: {},
-  }],
-  creative: { artifactHash: "a".repeat(64), materializationHash: "b".repeat(64) },
-};
-
-function signedPlan(): ServerPlanEnvelope {
-  return {
-    schema: "kf-server-plan-envelope/v1" as const,
-    plan: internalPlan,
-    planHash: canonicalChangePlanHash(internalPlan),
-    revisionId: "revision-1",
-    semanticOperations: [],
-    creativeArtifact: { schema: "kf-creative-build-artifact/v1" },
-    creativeArtifactHash: "a".repeat(64),
-    trustedNativeMaterialization: { schema: "kf-trusted-native-materialization/v1" },
-    nativeMaterializationHash: "b".repeat(64),
-    signature: "c".repeat(64),
-  } as unknown as ServerPlanEnvelope;
-}
+const persistedPlanHash = "d".repeat(64);
+const confirmationId = "e".repeat(64);
 
 function state(overrides: Partial<AgentGraphStateValue> = {}): AgentGraphStateValue {
   return {
@@ -183,12 +156,15 @@ function state(overrides: Partial<AgentGraphStateValue> = {}): AgentGraphStateVa
 
 function bed(outcome?: Awaited<ReturnType<CreativeSolutionCompilerPort["compile"]>>) {
   const messages: string[] = [];
-  const saves: unknown[] = [];
-  const editableEntities = [{ kind: "page" as const, name: "Page1", type: "page", guid: "page-guid" }];
   const compile = vi.fn().mockResolvedValue(outcome ?? {
     status: "compiled",
-    plan: internalPlan,
-    signedPlan: signedPlan(),
+    changeRequestId: `cr:workspace-1:conversation-1:${confirmationId}`,
+    changePlanId: `plan:workspace-1:${confirmationId}:${persistedPlanHash}`,
+    planHash: persistedPlanHash,
+    operationCount: 1,
+    confirmationId,
+    projectKey: "visitor-center",
+    domainKind: "kingclient",
     capabilityReport: {
       status: "warning",
       full: ["text"],
@@ -201,16 +177,10 @@ function bed(outcome?: Awaited<ReturnType<CreativeSolutionCompilerPort["compile"
   const deps = {
     creativeSolutionCompiler: { compile },
     workspaceQuery: {
-      getRevisionEntities: vi.fn().mockResolvedValue(editableEntities),
       appendMessage: vi.fn().mockImplementation(async ({ content }: { content: string }) => { messages.push(content); }),
     },
-    changePlanRepository: {
-      findOpenChangeRequest: vi.fn().mockResolvedValue(null),
-      saveChangeRequest: vi.fn(),
-      savePlan: vi.fn().mockImplementation((input: unknown) => { saves.push(input); }),
-    },
   } as unknown as SolutionGraphDeps;
-  return { deps, compile, editableEntities, messages, saves };
+  return { deps, compile, messages };
 }
 
 describe("compile creative solution node", () => {
@@ -219,24 +189,24 @@ describe("compile creative solution node", () => {
 
     const result = await createCompileCreativeSolutionNode(fixture.deps)(state());
 
-    expect(fixture.compile).toHaveBeenCalledWith({
+    expect(fixture.compile).toHaveBeenCalledWith(expect.objectContaining({
       tenantId: "tenant-1",
       workspaceId: "workspace-1",
+      conversationId: "conversation-1",
       baseRevisionId: "revision-1",
+      projectKey: "visitor-center",
+      domainKind: "kingclient",
       blueprint,
       candidateBundle: candidates,
       semanticPlan,
-      editableEntities: fixture.editableEntities,
-    });
-    expect(fixture.saves).toEqual([expect.objectContaining({
-      id: `plan:workspace-1:${canonicalChangePlanHash(internalPlan)}`,
-      planHash: canonicalChangePlanHash(internalPlan),
-      plan: signedPlan(),
-    })]);
+    }));
     expect(result).toMatchObject({
       stage: "building",
       buildAuthorization: "creative-solution",
-      planHash: canonicalChangePlanHash(internalPlan),
+      activeChangeRequestId: `cr:workspace-1:conversation-1:${confirmationId}`,
+      changePlanId: `plan:workspace-1:${confirmationId}:${persistedPlanHash}`,
+      planHash: persistedPlanHash,
+      creativeConfirmationId: confirmationId,
       capabilityReport: { status: "warning" },
       lastErrorCode: undefined,
     });
@@ -264,7 +234,6 @@ describe("compile creative solution node", () => {
     expect(result.lastErrorCode!.length).toBeLessThanOrEqual(600);
     expect(result.lastErrorCode).toContain("node-0");
     expect(result.lastErrorCode).toContain("text");
-    expect(fixture.saves).toHaveLength(0);
     expect(fixture.messages.at(-1)).toContain("工程生成");
     expect(fixture.messages.at(-1)).not.toContain("预览");
   });
@@ -288,15 +257,18 @@ describe("compile creative solution node", () => {
     });
     expect(missing.compile).not.toHaveBeenCalled();
     expect(stale.compile).not.toHaveBeenCalled();
-    expect(missing.saves).toHaveLength(0);
-    expect(stale.saves).toHaveLength(0);
   });
 
   it("rejects a contradictory compiled outcome whose capability report still fails", async () => {
     const fixture = bed({
       status: "compiled",
-      plan: internalPlan,
-      signedPlan: signedPlan(),
+      changeRequestId: "cr",
+      changePlanId: "plan",
+      planHash: persistedPlanHash,
+      operationCount: 1,
+      confirmationId,
+      projectKey: "visitor-center",
+      domainKind: "kingclient",
       capabilityReport: {
         status: "fail",
         full: [],
@@ -314,15 +286,18 @@ describe("compile creative solution node", () => {
       lastErrorCode: "CREATIVE_SOLUTION_OUTPUT_INVALID",
       buildAuthorization: undefined,
     });
-    expect(fixture.saves).toHaveLength(0);
   });
 
-  it("bounds malformed signed envelope data instead of throwing from canonical validation", async () => {
-    const malformedEnvelope = { ...signedPlan(), plan: { schema: "forged" } };
+  it("rejects malformed persisted compiler receipts without authorizing enqueue", async () => {
     const fixture = bed({
       status: "compiled",
-      plan: internalPlan,
-      signedPlan: malformedEnvelope as never,
+      changeRequestId: "",
+      changePlanId: "",
+      planHash: "not-a-hash",
+      operationCount: -1,
+      confirmationId: "",
+      projectKey: "visitor-center",
+      domainKind: "kingclient",
       capabilityReport: {
         status: "pass",
         full: [],
@@ -338,20 +313,38 @@ describe("compile creative solution node", () => {
       lastErrorCode: "CREATIVE_SOLUTION_OUTPUT_INVALID",
       buildAuthorization: undefined,
     });
-    expect(fixture.saves).toHaveLength(0);
   });
 
-  it("maps repository lookup failures to a bounded persistence error", async () => {
+  it("maps compiler persistence failures to a bounded compilation error", async () => {
     const fixture = bed();
-    fixture.deps.changePlanRepository.findOpenChangeRequest = async () => {
-      throw new Error("database detail must not escape");
-    };
+    fixture.compile.mockRejectedValueOnce(new Error("database detail must not escape"));
 
     await expect(createCompileCreativeSolutionNode(fixture.deps)(state())).resolves.toMatchObject({
       stage: "idle",
-      lastErrorCode: "CREATIVE_SOLUTION_PERSIST_FAILED",
+      lastErrorCode: "CREATIVE_SOLUTION_COMPILATION_FAILED",
       buildAuthorization: undefined,
     });
-    expect(fixture.saves).toHaveLength(0);
+  });
+
+  it("does not surface hostile compiler diagnostics or control characters", async () => {
+    const fixture = bed({
+      status: "blocked",
+      diagnostics: [{
+        code: "UNKNOWN_DEPENDENCY",
+        phase: "composition",
+        nodeId: "../../private/secret\u0000",
+        message: "secret=token /Users/customer/private.sql\nAuthorization: Bearer abc",
+        correlationId: "34be85be-d3a8-4c24-bb0b-b2ba07a355b1",
+        alternatives: ["button", "../../secret", "x\u0000y"],
+      }],
+      warnings: [],
+    });
+
+    const result = await createCompileCreativeSolutionNode(fixture.deps)(state());
+
+    expect(JSON.stringify(result)).not.toMatch(/secret|private|Bearer|token|\.\./i);
+    expect(fixture.messages.at(-1)).not.toMatch(/secret|private|Bearer|token|\.\./i);
+    expect(result.lastErrorCode).toContain("UNKNOWN_DEPENDENCY");
+    expect(fixture.messages.at(-1)).toContain("34be85be-d3a8-4c24-bb0b-b2ba07a355b1");
   });
 });

@@ -19,11 +19,14 @@ import { AUDIT_ACTIONS, AuditService } from "../audit/audit.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { ARTIFACT_STORAGE } from "../artifacts/artifact-storage.js";
 import { PG_POOL, createCheckpointSaver } from "./checkpointer.js";
-import { CAPABILITY_RETRIEVAL_PORT, createGraphPorts } from "./graph-ports.js";
+import {
+  CAPABILITY_RETRIEVAL_PORT,
+  CREATIVE_SOLUTION_COMPILER_PORT,
+  createGraphPorts,
+} from "./graph-ports.js";
 import { MODEL_PORT } from "./model-port.js";
-import { CREATIVE_BUILD_FACADE, MODULE_ARTIFACT_AUTHORITY, SERVER_PLAN_AUTHORITY } from "./server-plan-authority.js";
-import type { ModuleArtifactAuthority, ServerCreativeBuildFacade, ServerPlanAuthority } from "@kf/build-jobs";
-import type { CreativeUIImplementationV2CompilerBundle } from "@kf/domain-client";
+import { MODULE_ARTIFACT_AUTHORITY, SERVER_PLAN_AUTHORITY } from "./server-plan-authority.js";
+import type { ModuleArtifactAuthority, ServerPlanAuthority } from "@kf/build-jobs";
 import { AssetService } from "../assets/asset.service.js";
 import { DeliverySnapshotService, projectModuleDeliveryResult } from "../delivery/delivery-snapshot.service.js";
 
@@ -61,6 +64,7 @@ const CUSTOMER_ERROR_CODES = new Set([
   "ACCEPTED_BLUEPRINT_CONFIRMATION_NOT_CONFIGURED",
   "BUILD_FAILED",
   "BUILD_PREVIEW_NOT_AVAILABLE",
+  "BUILD_POST_ENQUEUE_SYNC_FAILED",
   "BUILD_REQUIRES_APPROVAL",
   "CREATIVE_SOLUTION_BLOCKED",
   "CREATIVE_SOLUTION_COMPILATION_FAILED",
@@ -115,8 +119,8 @@ export class ConversationService {
     @Inject(PG_POOL) private readonly pool: pg.Pool,
     @Inject(ARTIFACT_STORAGE) private readonly artifactStorage: ArtifactStorage,
     @Inject(SERVER_PLAN_AUTHORITY) private readonly serverPlanAuthority: ServerPlanAuthority,
-    @Inject(CREATIVE_BUILD_FACADE)
-    private readonly creativeBuildFacade: ServerCreativeBuildFacade<CreativeUIImplementationV2CompilerBundle>,
+    @Inject(CREATIVE_SOLUTION_COMPILER_PORT)
+    private readonly creativeSolutionCompiler: NonNullable<SolutionGraphDeps["creativeSolutionCompiler"]>,
     @Inject(MODULE_ARTIFACT_AUTHORITY) private readonly moduleArtifactAuthority: ModuleArtifactAuthority,
     private readonly assetService: AssetService,
     private readonly deliverySnapshots: DeliverySnapshotService,
@@ -198,41 +202,68 @@ export class ConversationService {
     }
     const graph = await this.getGraph();
     const config = threadConfig(conversationId);
+    const lockClient = await this.pool.connect();
+    try {
+      await lockClient.query(
+        "SELECT pg_advisory_lock(hashtextextended($1, 0))",
+        [conversationId],
+      );
 
-    const snapshot = (await graph.getState(config)) as unknown as StateSnapshotLike;
-    if (hasPendingInterrupt(snapshot)) {
-      throw new ApprovalResumeRequiredError(conversationId);
-    }
+      // The re-check and the entire graph stream occur while holding the same
+      // session lock. Sequential/concurrent duplicate confirmations therefore
+      // observe the winner's committed checkpoint and cannot compile twice.
+      const snapshot = (await graph.getState(config)) as unknown as StateSnapshotLike;
+      if (hasPendingInterrupt(snapshot)) {
+        throw new ApprovalResumeRequiredError(conversationId);
+      }
 
-    await this.prisma.message.create({
-      data: {
-        tenantId: principal.tenantId,
-        conversationId,
-        role: "user",
-        content: text,
-      },
-    });
+      await this.prisma.message.create({
+        data: {
+          tenantId: principal.tenantId,
+          conversationId,
+          role: "user",
+          content: text,
+        },
+      });
 
     // 保留 checkpoint 的 stage（如 design-review / preview-review），只有首次
     // 消息（无历史 checkpoint）才落到 idle——硬编码 idle 会把 design-review
     // 等用户驱动阶段覆盖掉，导致 CONFIRM_DESIGN 兜底失效。
-    const resumedSnapshot = (await graph.getState(config)) as unknown as StateSnapshotLike;
-    const resumedStage = (resumedSnapshot?.values as Record<string, unknown> | undefined)?.stage;
+      const resumedSnapshot = (await graph.getState(config)) as unknown as StateSnapshotLike;
+      const resumedStage = (resumedSnapshot?.values as Record<string, unknown> | undefined)?.stage;
     // checkpoint 的 stage 本就是 AgentGraphState 的合法值，收窄类型即可。
-    const stage = (
-      typeof resumedStage === "string" ? resumedStage : "idle"
-    ) as Exclude<AgentGraphUpdate["stage"], undefined>;
+      const stage = (
+        typeof resumedStage === "string" ? resumedStage : "idle"
+      ) as Exclude<AgentGraphUpdate["stage"], undefined>;
 
-    const input = {
-      tenantId: principal.tenantId,
-      userId: principal.userId,
-      workspaceId: conversation.workspaceId,
-      conversationId,
-      stage,
-      recentMessages: [],
-    } satisfies AgentGraphUpdate;
-    const stream = (await graph.stream(input, config)) as AsyncGenerator<unknown>;
-    return this.forwardStream(stream, graph, config);
+      const input = {
+        tenantId: principal.tenantId,
+        userId: principal.userId,
+        workspaceId: conversation.workspaceId,
+        conversationId,
+        stage,
+        recentMessages: [],
+      } satisfies AgentGraphUpdate;
+      const stream = (await graph.stream(input, config)) as AsyncGenerator<unknown>;
+      return this.forwardLockedStream(stream, graph, config, lockClient, conversationId);
+    } catch (error) {
+      await releaseConversationLock(lockClient, conversationId);
+      throw error;
+    }
+  }
+
+  private async *forwardLockedStream(
+    stream: AsyncGenerator<unknown>,
+    graph: CompiledGraph,
+    config: Record<string, unknown>,
+    lockClient: pg.PoolClient,
+    conversationId: string,
+  ): AsyncGenerator<SseEvent> {
+    try {
+      yield* this.forwardStream(stream, graph, config);
+    } finally {
+      await releaseConversationLock(lockClient, conversationId);
+    }
   }
 
   private async *forwardStream(
@@ -424,7 +455,8 @@ export class ConversationService {
         this.artifactStorage,
         this.moduleArtifactAuthority,
         this.assetService,
-        this.creativeBuildFacade,
+        this.creativeSolutionCompiler,
+        this.serverPlanAuthority,
       );
       if (ports.creativeSolutionCompiler === undefined) {
         throw new Error("CREATIVE_SOLUTION_COMPILER_NOT_CONFIGURED");
@@ -599,4 +631,19 @@ function customerProgressFrame(chunk: unknown): { progressCode: string } {
 
 function apiError(code: string, message: string): { error: { code: string; message: string } } {
   return { error: { code, message } };
+}
+
+async function releaseConversationLock(client: pg.PoolClient, conversationId: string): Promise<void> {
+  try {
+    await client.query(
+      "SELECT pg_advisory_unlock(hashtextextended($1, 0))",
+      [conversationId],
+    );
+    client.release();
+  } catch {
+    // A session lock whose unlock result is unknown must never return to the
+    // pool. Destroying that client also avoids masking the graph failure that
+    // triggered cleanup.
+    client.release(true);
+  }
 }

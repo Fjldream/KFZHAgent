@@ -7,6 +7,7 @@ function state(overrides: Partial<AgentGraphStateValue> = {}): AgentGraphStateVa
   return {
     tenantId: "tenant", userId: "user", workspaceId: "workspace", conversationId: "conversation",
     currentRevisionId: "revision", activeChangeRequestId: "request", changePlanId: "plan", planHash: "a".repeat(64),
+    creativeProjectKey: "kingclient", creativeDomainKind: "kingclient",
     stage: "building", recentMessages: [], ...overrides,
   } as AgentGraphStateValue;
 }
@@ -16,7 +17,7 @@ function bed() {
   const messages: string[] = [];
   const deps = {
     buildJobPort: { enqueue: async (input: unknown) => { enqueues.push(input); return { id: "job", status: "QUEUED" as const }; }, getJob: async () => null },
-    changePlanRepository: { findOpenChangeRequest: async () => null, saveChangeRequest: async () => {}, savePlan: async () => {}, loadPlanHash: async () => undefined, setChangeRequestStatus: async () => {} },
+    changePlanRepository: { findOpenChangeRequest: async () => null, saveChangeRequest: async () => {}, savePlan: async () => {}, loadPlanHash: async () => undefined, verifyPersistedCreativePlan: async () => false, setChangeRequestStatus: async () => {} },
     workspaceQuery: { listRecentMessages: async () => [], appendMessage: async (input: { content: string }) => { messages.push(input.content); }, getConversationSummary: async () => undefined, setConversationSummary: async () => {}, getCurrentRevisionId: async () => undefined, getRevisionSummary: async () => undefined, getRevisionEntities: async () => [] },
     isDomainSupported: () => true,
   } as unknown as SolutionGraphDeps;
@@ -34,7 +35,7 @@ describe("enqueue build authorization", () => {
 
   it("accepts only a persisted creative-solution origin and keeps the queued input small", async () => {
     const accepted = bed();
-    accepted.deps.changePlanRepository.loadPlanHash = async () => "a".repeat(64);
+    accepted.deps.changePlanRepository.verifyPersistedCreativePlan = async () => true;
     const result = await createEnqueueBuildNode(accepted.deps)(state({
       generationWorkflow: "creative-v2",
       buildAuthorization: "creative-solution",
@@ -61,7 +62,7 @@ describe("enqueue build authorization", () => {
       { generationWorkflow: "creative-v2" as const, buildAuthorization: "legacy-plan-approval" as const, resumeAction: "approve" as const },
     ]) {
       const rejected = bed();
-      rejected.deps.changePlanRepository.loadPlanHash = async () => "a".repeat(64);
+      rejected.deps.changePlanRepository.verifyPersistedCreativePlan = async () => true;
       await expect(createEnqueueBuildNode(rejected.deps)(state({
         ...overrides,
         changePlanId: `plan:workspace:${"a".repeat(64)}`,
@@ -105,7 +106,7 @@ describe("enqueue build authorization", () => {
 
   it("reports creative enqueue failures only as engineering generation", async () => {
     const testBed = bed();
-    testBed.deps.changePlanRepository.loadPlanHash = async () => "a".repeat(64);
+    testBed.deps.changePlanRepository.verifyPersistedCreativePlan = async () => true;
     testBed.deps.buildJobPort.enqueue = async () => { throw new Error("queue unavailable"); };
 
     const result = await createEnqueueBuildNode(testBed.deps)(state({
@@ -118,4 +119,46 @@ describe("enqueue build authorization", () => {
     expect(testBed.messages.at(-1)).toContain("工程生成");
     expect(testBed.messages.at(-1)).not.toMatch(/预览|构建/);
   });
+
+  it.each(["status", "message"] as const)(
+    "preserves the durable job and never re-enqueues when the post-enqueue %s write fails",
+    async (failure) => {
+      const testBed = bed();
+      testBed.deps.changePlanRepository.verifyPersistedCreativePlan = async () => true;
+      if (failure === "status") {
+        testBed.deps.changePlanRepository.setChangeRequestStatus = async () => {
+          throw new Error("postgres path /private/db secret=token");
+        };
+      } else {
+        testBed.deps.workspaceQuery.appendMessage = async () => {
+          throw new Error("message path /private/db secret=token");
+        };
+      }
+
+      const first = await createEnqueueBuildNode(testBed.deps)(state({
+        generationWorkflow: "creative-v2",
+        buildAuthorization: "creative-solution",
+        changePlanId: `plan:workspace:confirmation:${"a".repeat(64)}`,
+      }));
+
+      expect(first).toMatchObject({
+        buildJobId: "job",
+        stage: "building",
+        buildAuthorization: undefined,
+        lastErrorCode: "BUILD_POST_ENQUEUE_SYNC_FAILED",
+      });
+      expect(JSON.stringify(first)).not.toMatch(/secret|private/);
+      expect(testBed.enqueues).toHaveLength(1);
+
+      const replay = await createEnqueueBuildNode(testBed.deps)(state({
+        buildJobId: first.buildJobId,
+        stage: "building",
+        generationWorkflow: "creative-v2",
+        buildAuthorization: undefined,
+        changePlanId: `plan:workspace:confirmation:${"a".repeat(64)}`,
+      }));
+      expect(replay.lastErrorCode).toBe("BUILD_REQUIRES_APPROVAL");
+      expect(testBed.enqueues).toHaveLength(1);
+    },
+  );
 });

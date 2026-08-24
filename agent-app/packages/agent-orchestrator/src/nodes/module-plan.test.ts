@@ -167,6 +167,7 @@ function bed(outcomes: ModuleCompilationOutcome[]): {
   const changePlanRepository: ChangePlanRepository = {
     findOpenChangeRequest: async () => null, saveChangeRequest: async () => {},
     savePlan: async (input) => { plans.set(input.id, input.plan); }, loadPlanHash: async () => undefined,
+    verifyPersistedCreativePlan: async () => false,
     setChangeRequestStatus: async () => {},
   };
   const modulePlanCompiler: ModulePlanCompilerPort = {

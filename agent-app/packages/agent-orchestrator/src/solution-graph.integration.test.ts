@@ -317,6 +317,9 @@ function makePrismaPorts() {
       const plan = await prisma.changePlan.findUnique({ where: { id: changePlanId } });
       return plan?.planHash ?? undefined;
     },
+    async verifyPersistedCreativePlan() {
+      return false;
+    },
     async setChangeRequestStatus({ tenantId, changeRequestId, status }) {
       await prisma.changeRequest.updateMany({
         where: { id: changeRequestId, tenantId },

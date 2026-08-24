@@ -2,9 +2,7 @@ import {
   CapabilityCandidateBundleSchema,
   CustomerSolutionBlueprintSchema,
   SolutionImplementationPlanSchema,
-  canonicalChangePlanHash,
   canonicalServerHash,
-  internalChangePlanSchema,
 } from "@kf/contracts";
 import type { CreativeCompilationDiagnostic, SolutionGraphDeps } from "../ports.js";
 import type { AgentGraphStateValue, AgentGraphUpdate } from "../state.js";
@@ -35,27 +33,19 @@ export function createCompileCreativeSolutionNode(deps: SolutionGraphDeps) {
       return fail(deps, state, "CREATIVE_SOLUTION_INPUT_INVALID", []);
     }
 
-    let editableEntities;
-    try {
-      editableEntities = await deps.workspaceQuery.getRevisionEntities({
-        tenantId: state.tenantId,
-        revisionId: state.currentRevisionId,
-        workspaceId: state.workspaceId,
-      });
-    } catch {
-      return fail(deps, state, "CREATIVE_SOLUTION_EVIDENCE_UNAVAILABLE", []);
-    }
-
     let outcome;
+    const domainKind = deps.defaultDomainKind ?? "kingclient";
     try {
       outcome = await deps.creativeSolutionCompiler.compile({
         tenantId: state.tenantId,
         workspaceId: state.workspaceId,
+        conversationId: state.conversationId,
         baseRevisionId: state.currentRevisionId,
+        projectKey: parsedSemanticPlan.data.projectKey,
+        domainKind,
         blueprint: parsedBlueprint.data,
         candidateBundle: parsedCandidates.data,
         semanticPlan: parsedSemanticPlan.data,
-        editableEntities,
       });
     } catch {
       return fail(deps, state, "CREATIVE_SOLUTION_COMPILATION_FAILED", []);
@@ -67,69 +57,26 @@ export function createCompileCreativeSolutionNode(deps: SolutionGraphDeps) {
       return fail(deps, state, "CREATIVE_SOLUTION_OUTPUT_INVALID", []);
     }
 
-    const parsedPlan = internalChangePlanSchema.safeParse(outcome.plan);
-    if (!parsedPlan.success || parsedPlan.data.workspaceId !== state.workspaceId) {
+    if (!isBoundedId(outcome.changeRequestId)
+      || !isBoundedId(outcome.changePlanId)
+      || !isHash(outcome.planHash)
+      || !isHash(outcome.confirmationId)
+      || outcome.projectKey !== parsedSemanticPlan.data.projectKey
+      || outcome.domainKind !== domainKind
+      || !Number.isInteger(outcome.operationCount)
+      || outcome.operationCount < 0
+      || outcome.operationCount > 10_000) {
       return fail(deps, state, "CREATIVE_SOLUTION_OUTPUT_INVALID", []);
-    }
-    const plan = parsedPlan.data;
-    const creative = plan.creative;
-    if (creative === undefined) {
-      return fail(deps, state, "CREATIVE_SOLUTION_OUTPUT_INVALID", []);
-    }
-    const planHash = canonicalChangePlanHash(plan);
-    const envelope = outcome.signedPlan;
-    let envelopePlanHash: string | undefined;
-    try {
-      envelopePlanHash = canonicalChangePlanHash(envelope.plan);
-    } catch {
-      return fail(deps, state, "CREATIVE_SOLUTION_OUTPUT_INVALID", []);
-    }
-    if (envelope.schema !== "kf-server-plan-envelope/v1"
-      || envelope.revisionId !== state.currentRevisionId
-      || envelope.planHash !== planHash
-      || envelopePlanHash !== planHash
-      || envelope.plan.creative?.artifactHash !== creative.artifactHash
-      || envelope.plan.creative.materializationHash !== creative.materializationHash
-      || envelope.creativeArtifact === undefined
-      || envelope.trustedNativeMaterialization === undefined
-      || envelope.creativeArtifactHash !== creative.artifactHash
-      || envelope.nativeMaterializationHash !== creative.materializationHash) {
-      return fail(deps, state, "CREATIVE_SOLUTION_OUTPUT_INVALID", []);
-    }
-
-    let changeRequestId: string;
-    const changePlanId = `plan:${state.workspaceId}:${planHash}`;
-    try {
-      const existing = await deps.changePlanRepository.findOpenChangeRequest({
-        tenantId: state.tenantId,
-        workspaceId: state.workspaceId,
-        conversationId: state.conversationId,
-      });
-      changeRequestId = existing?.id ?? `cr:${state.workspaceId}:${state.conversationId}`;
-      await deps.changePlanRepository.saveChangeRequest({
-        id: changeRequestId,
-        tenantId: state.tenantId,
-        workspaceId: state.workspaceId,
-        title: `工程生成 ${planHash.slice(0, 8)}`,
-        status: "OPEN",
-      });
-      await deps.changePlanRepository.savePlan({
-        id: changePlanId,
-        tenantId: state.tenantId,
-        workspaceId: state.workspaceId,
-        changeRequestId,
-        planHash,
-        plan: envelope,
-      });
-    } catch {
-      return fail(deps, state, "CREATIVE_SOLUTION_PERSIST_FAILED", []);
     }
 
     return {
-      activeChangeRequestId: changeRequestId,
-      changePlanId,
-      planHash,
-      planSummary: `工程生成包含 ${plan.operations.length} 个已签名操作。`.slice(0, 500),
+      activeChangeRequestId: outcome.changeRequestId,
+      changePlanId: outcome.changePlanId,
+      planHash: outcome.planHash,
+      creativeConfirmationId: outcome.confirmationId,
+      creativeProjectKey: outcome.projectKey,
+      creativeDomainKind: outcome.domainKind,
+      planSummary: `工程生成包含 ${outcome.operationCount} 个已签名操作。`.slice(0, 500),
       capabilityReport: outcome.capabilityReport,
       buildJobId: undefined,
       diffArtifactId: undefined,
@@ -146,12 +93,49 @@ function isHash(value: unknown): value is string {
   return typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
 }
 
+function isBoundedId(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= 500 && !/\p{Cc}/u.test(value);
+}
+
+const CUSTOMER_DIAGNOSTIC_TEXT: Readonly<Record<string, string>> = Object.freeze({
+  CREATIVE_BASE_REVISION_EVIDENCE_MISSING: "找不到当前工程版本的完整依据",
+  CREATIVE_BASE_REVISION_EVIDENCE_AMBIGUOUS: "当前工程版本存在多个不一致的工程依据",
+  CREATIVE_EVIDENCE_BUDGET_EXCEEDED: "当前工程规模超过单次安全处理范围",
+  CREATIVE_EVIDENCE_CONCURRENCY_EXCEEDED: "工程依据正在处理中",
+  CREATIVE_EDITABLE_ENTITY_AMBIGUOUS: "当前工程存在重名实体，请先消除歧义",
+  CREATIVE_EDITABLE_ENTITY_EVIDENCE_MISMATCH: "现有工程实体与当前版本依据不一致",
+  CREATIVE_CAPABILITY_BLOCKED: "部分工程能力尚不可用",
+  INTERACTION_COMPILATION_REQUEST: "交互需要补充明确的可执行能力",
+});
+
+function safeDiagnosticCode(value: string): string {
+  return /^[A-Z][A-Z0-9_]{2,80}$/.test(value) ? value : "CREATIVE_DIAGNOSTIC_INVALID";
+}
+
+function safeDiagnosticLocation(value: string | undefined): string | undefined {
+  if (value === undefined || !/^[A-Za-z0-9_$.-]{1,100}$/.test(value)) return undefined;
+  return value;
+}
+
+function safeAlternatives(values: readonly string[] | undefined, limit: number): string[] {
+  return (values ?? []).filter((value) => /^[A-Za-z0-9_.-]{1,80}$/.test(value)).slice(0, limit);
+}
+
+function safeCorrelationId(value: string | undefined): string | undefined {
+  return value !== undefined && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+    ? value.toLowerCase()
+    : undefined;
+}
+
 function boundedDiagnostics(diagnostics: readonly CreativeCompilationDiagnostic[]): string {
   return diagnostics.slice(0, MAX_DIAGNOSTICS).map((diagnostic) => {
-    const location = [diagnostic.phase, diagnostic.nodeId].filter(Boolean).join("/");
-    const alternatives = diagnostic.alternatives?.slice(0, 5).join(",");
-    return `${diagnostic.code}${location === "" ? "" : `@${location}`}: ${diagnostic.message.slice(0, 240)}`
-      + (alternatives === undefined || alternatives === "" ? "" : `；可选：${alternatives}`);
+    const code = safeDiagnosticCode(diagnostic.code);
+    const location = [safeDiagnosticLocation(diagnostic.phase), safeDiagnosticLocation(diagnostic.nodeId)].filter(Boolean).join("/");
+    const alternatives = safeAlternatives(diagnostic.alternatives, 5).join(",");
+    const correlationId = safeCorrelationId(diagnostic.correlationId);
+    return `${code}${location === "" ? "" : `@${location}`}`
+      + (alternatives === undefined || alternatives === "" ? "" : `；可选：${alternatives}`)
+      + (correlationId === undefined ? "" : `；参考：${correlationId}`);
   }).join(" | ").replace(/\p{Cc}/gu, " ").slice(0, MAX_DIAGNOSTIC_DETAIL);
 }
 
@@ -163,9 +147,12 @@ async function fail(
 ): Promise<AgentGraphUpdate> {
   const detail = boundedDiagnostics(diagnostics);
   const customerDetails = diagnostics.slice(0, MAX_MESSAGE_DIAGNOSTICS).map((diagnostic) => {
-    const alternatives = diagnostic.alternatives?.slice(0, 3).join("、");
-    return `${diagnostic.nodeId}：${diagnostic.message.slice(0, 160)}`
-      + (alternatives === undefined || alternatives === "" ? "" : `；可改用 ${alternatives}`);
+    const code = safeDiagnosticCode(diagnostic.code);
+    const alternatives = safeAlternatives(diagnostic.alternatives, 3).join("、");
+    const correlationId = safeCorrelationId(diagnostic.correlationId);
+    return `${CUSTOMER_DIAGNOSTIC_TEXT[code] ?? "工程能力校验未通过"}`
+      + (alternatives === undefined || alternatives === "" ? "" : `；可改用 ${alternatives}`)
+      + (correlationId === undefined ? "" : `；参考编号 ${correlationId}`);
   }).join("；");
   await deps.workspaceQuery.appendMessage({
     tenantId: state.tenantId,

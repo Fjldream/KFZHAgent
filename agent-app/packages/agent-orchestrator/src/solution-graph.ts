@@ -174,11 +174,37 @@ export function routeAfterDesignConfirmation(
   deps?: SolutionGraphDeps,
 ): string {
   if (state.generationWorkflow === "creative-v2") {
-    return state.designPlan?.schema === "kf-design-plan/v3" ? "capability-retrieval" : END;
+    const firstConfirmation = state.stage === "design-review"
+      && state.creativeConfirmationId === undefined;
+    const explicitRetry = state.stage === "idle"
+      && state.changePlanId === undefined
+      && state.buildJobId === undefined
+      && isRetryableCreativeError(state.lastErrorCode)
+      && latestUserText(state) === "重新生成工程";
+    return state.designPlan?.schema === "kf-design-plan/v3" && (firstConfirmation || explicitRetry)
+      ? "capability-retrieval"
+      : END;
   }
   return useModuleWorkflow(state, deps)
     ? "module-plan"
     : state.designPlan?.schema === "kf-design-plan/v2" ? "implementation-plan" : "plan-change";
+}
+
+function isRetryableCreativeError(value: string | undefined): boolean {
+  const code = value?.split(":", 1)[0];
+  return code === "CREATIVE_SOLUTION_BLOCKED"
+    || code === "CREATIVE_SOLUTION_COMPILATION_FAILED"
+    || code === "CREATIVE_SOLUTION_EVIDENCE_UNAVAILABLE"
+    || code === "CREATIVE_SOLUTION_OUTPUT_INVALID"
+    || code === "CREATIVE_SOLUTION_PERSIST_FAILED";
+}
+
+function latestUserText(state: AgentGraphStateValue): string | undefined {
+  for (let index = state.recentMessages.length - 1; index >= 0; index -= 1) {
+    const message = state.recentMessages[index];
+    if (message?.role === "user") return message.content.trim();
+  }
+  return undefined;
 }
 
 export function routeAfterCapabilityRetrieval(state: AgentGraphStateValue): string {

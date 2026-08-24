@@ -194,6 +194,26 @@ describe("creative-v2 routing", () => {
     expect(routeAfterDesignConfirmation(state({ designPlan: { schema: "kf-design-plan/v2" } }) as never)).toBe(END);
   });
 
+  it("rejects plain duplicate confirmation and permits only the explicit no-job retry phrase", () => {
+    expect(routeAfterDesignConfirmation(state({
+      stage: "building",
+      creativeConfirmationId: "a".repeat(64),
+      changePlanId: "persisted-plan",
+      buildJobId: "durable-job",
+      recentMessages: [{ role: "user", content: "再次确认" }],
+    }) as never)).toBe(END);
+    expect(routeAfterDesignConfirmation(state({
+      stage: "idle",
+      lastErrorCode: "CREATIVE_SOLUTION_BLOCKED:LAYOUT_OVERFLOW",
+      recentMessages: [{ role: "user", content: "确认" }],
+    }) as never)).toBe(END);
+    expect(routeAfterDesignConfirmation(state({
+      stage: "idle",
+      lastErrorCode: "CREATIVE_SOLUTION_BLOCKED:LAYOUT_OVERFLOW",
+      recentMessages: [{ role: "user", content: "重新生成工程" }],
+    }) as never)).toBe("capability-retrieval");
+  });
+
   it("keeps module-v1 and uploaded projects on their existing routes", () => {
     const v2 = { schema: "kf-design-plan/v2" };
     const moduleDeps = {

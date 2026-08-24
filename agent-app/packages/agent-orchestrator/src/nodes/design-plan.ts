@@ -33,7 +33,10 @@ export function createDesignPlanNode(deps: SolutionGraphDeps) {
       state.generationWorkflow === "creative-v2"
       && state.designPlan?.schema === "kf-design-plan/v3"
       && state.designPlanHash !== undefined
-      && (state.intent === "NEW_REQUIREMENT" || state.intent === "MODIFY_REQUIREMENT");
+      && (state.revising === true
+        || state.intent === "NEW_REQUIREMENT"
+        || state.intent === "MODIFY_REQUIREMENT"
+        || state.intent === "REVISE_DESIGN");
     const revising = state.revising === true || state.intent === "REVISE_DESIGN" || revisingConfirmedCreativeBlueprint;
     let modulePlanningCatalog;
     let editableEntities = (state as { editableEntities?: import("../ports.js").EditableEntity[] }).editableEntities;
@@ -157,6 +160,9 @@ export function createDesignPlanNode(deps: SolutionGraphDeps) {
             solutionImplementationPlan: undefined,
             solutionImplementationPlanHash: undefined,
             solutionPlanRepairAttempt: undefined,
+            creativeConfirmationId: undefined,
+            creativeProjectKey: undefined,
+            creativeDomainKind: undefined,
             activeChangeRequestId: undefined,
             changePlanId: undefined,
             planHash: undefined,

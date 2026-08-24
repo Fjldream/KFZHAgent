@@ -45,29 +45,38 @@ export function createEnqueueBuildNode(deps: SolutionGraphDeps) {
     }
 
     if (creativeAuthorized) {
-      const expectedCreativePlanId = `plan:${state.workspaceId}:${state.planHash}`;
-      let persistedPlanHash: string | undefined;
-      try {
-        persistedPlanHash = state.changePlanId === expectedCreativePlanId
-          ? await deps.changePlanRepository.loadPlanHash({
-              tenantId: state.tenantId,
-              changePlanId: state.changePlanId,
-            })
-          : undefined;
-      } catch {
-        persistedPlanHash = undefined;
+      if (state.creativeProjectKey === undefined || state.creativeDomainKind === undefined) {
+        return { lastErrorCode: "INCOMPLETE_PLAN", stage: "idle", buildAuthorization: undefined };
       }
-      if (persistedPlanHash !== state.planHash) {
+      let persistedAndVerified = false;
+      try {
+        persistedAndVerified = await deps.changePlanRepository.verifyPersistedCreativePlan({
+          tenantId: state.tenantId,
+          workspaceId: state.workspaceId,
+          changePlanId: state.changePlanId,
+          changeRequestId: state.activeChangeRequestId,
+          planHash: state.planHash,
+          revisionId: state.currentRevisionId,
+        });
+      } catch {
+        persistedAndVerified = false;
+      }
+      if (!persistedAndVerified) {
         return { lastErrorCode: "INCOMPLETE_PLAN", stage: "idle", buildAuthorization: undefined };
       }
     }
 
+    let job;
     try {
-      const domainKind = (deps.defaultDomainKind ?? "kingclient").trim();
+      const domainKind = (creativeAuthorized
+        ? state.creativeDomainKind!
+        : deps.defaultDomainKind ?? "kingclient").trim();
       // One canonical value drives legacy detection, durable identity, the
       // idempotency key, and the enqueue payload. This keeps spaced replays
       // bound to the exact same job as their already-normalized form.
-      const projectKey = projectKeySchema.parse(deps.defaultProjectKey ?? domainKind);
+      const projectKey = projectKeySchema.parse(creativeAuthorized
+        ? state.creativeProjectKey!
+        : deps.defaultProjectKey ?? domainKind);
       const idempotencyKey = graphBuildIdempotencyKey({
         conversationId: state.conversationId,
         projectKey,
@@ -75,7 +84,7 @@ export function createEnqueueBuildNode(deps: SolutionGraphDeps) {
         changePlanId: state.changePlanId,
         planHash: state.planHash,
       });
-      const job = await deps.buildJobPort.enqueue({
+      job = await deps.buildJobPort.enqueue({
         tenantId: state.tenantId,
         workspaceId: state.workspaceId,
         baseRevisionId: state.currentRevisionId,
@@ -85,28 +94,6 @@ export function createEnqueueBuildNode(deps: SolutionGraphDeps) {
         domainKind,
         idempotencyKey,
       });
-      await deps.changePlanRepository.setChangeRequestStatus({
-        tenantId: state.tenantId,
-        changeRequestId: state.activeChangeRequestId,
-        status: "APPROVED",
-      });
-      // Enqueue only proves durable acceptance. Legacy/module routes may later
-      // enter preview review; creative-v2 completes as a downloadable工程包.
-      await deps.workspaceQuery.appendMessage({
-        tenantId: state.tenantId,
-        conversationId: state.conversationId,
-        role: "assistant",
-        content: creativeAuthorized
-          ? "工程生成任务已提交，完成后可下载工程包。"
-          : "构建任务已提交，完成后右侧会自动显示工程预览和下载产物。",
-      });
-      return {
-        buildJobId: job.id,
-        stage: "building",
-        resumeAction: undefined,
-        buildAuthorization: undefined,
-        pendingRequirements: undefined,
-      };
     } catch {
       await deps.workspaceQuery.appendMessage({
         tenantId: state.tenantId,
@@ -124,5 +111,38 @@ export function createEnqueueBuildNode(deps: SolutionGraphDeps) {
         pendingRequirements: undefined,
       };
     }
+
+    let postEnqueueSyncFailed = false;
+    try {
+      await deps.changePlanRepository.setChangeRequestStatus({
+        tenantId: state.tenantId,
+        changeRequestId: state.activeChangeRequestId,
+        status: "APPROVED",
+      });
+    } catch {
+      postEnqueueSyncFailed = true;
+    }
+    try {
+      // Enqueue only proves durable acceptance. Legacy/module routes may later
+      // enter preview review; creative-v2 completes as a downloadable工程包.
+      await deps.workspaceQuery.appendMessage({
+        tenantId: state.tenantId,
+        conversationId: state.conversationId,
+        role: "assistant",
+        content: creativeAuthorized
+          ? "工程生成任务已提交，完成后可下载工程包。"
+          : "构建任务已提交，完成后右侧会自动显示工程预览和下载产物。",
+      });
+    } catch {
+      postEnqueueSyncFailed = true;
+    }
+    return {
+      buildJobId: job.id,
+      stage: "building",
+      lastErrorCode: postEnqueueSyncFailed ? "BUILD_POST_ENQUEUE_SYNC_FAILED" : undefined,
+      resumeAction: undefined,
+      buildAuthorization: undefined,
+      pendingRequirements: undefined,
+    };
   };
 }

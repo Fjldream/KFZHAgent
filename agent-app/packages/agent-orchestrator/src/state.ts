@@ -153,6 +153,10 @@ export const AgentGraphState = new StateSchema({
   solutionImplementationPlan: SolutionImplementationPlanSchema.optional(),
   solutionImplementationPlanHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
   solutionPlanRepairAttempt: z.number().int().min(0).max(1).optional(),
+  /** Durable identity of the v3 blueprint confirmation already consumed by engineering generation. */
+  creativeConfirmationId: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  creativeProjectKey: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/).optional(),
+  creativeDomainKind: z.string().trim().min(1).max(128).optional(),
   /** Server-routed proof of why the current ChangePlan may enter the build queue. */
   buildAuthorization: z.enum([
     "confirmed-blueprint",
