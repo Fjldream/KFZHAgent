@@ -50,21 +50,26 @@ export function createLoadContextNode(deps: SolutionGraphDeps) {
     let lastErrorCode = state.lastErrorCode;
     let summaryAddition: string | undefined;
     let refreshedRevisionId = workspaceRevisionId;
+    const generationWorkflow = workspaceRouting?.generationWorkflow ?? state.generationWorkflow;
 
     if (state.buildJobId !== undefined && state.stage === "building") {
       const job = await deps.buildJobPort.getJob({ tenantId, jobId: state.buildJobId });
       if (job !== null) {
         if (job.status === "SUCCEEDED") {
-          stage = "preview-review";
+          stage = generationWorkflow === "creative-v2" ? "done" : "preview-review";
           lastErrorCode = undefined;
           refreshedRevisionId =
             (await deps.workspaceQuery.getCurrentRevisionId({ tenantId, workspaceId })) ??
             baseRevisionId;
-          summaryAddition = `构建 ${job.id} 已完成，当前状态为最新。`;
+          summaryAddition = generationWorkflow === "creative-v2"
+            ? `工程生成 ${job.id} 已完成，工程包已就绪。`
+            : `构建 ${job.id} 已完成，当前状态为最新。`;
         } else if (job.status === "FAILED") {
           stage = "planning";
           lastErrorCode = "BUILD_FAILED";
-          summaryAddition = `构建 ${job.id} 失败，已返回规划阶段。`;
+          summaryAddition = generationWorkflow === "creative-v2"
+            ? `工程生成 ${job.id} 失败，已返回规划阶段。`
+            : `构建 ${job.id} 失败，已返回规划阶段。`;
         }
       }
     }
@@ -79,7 +84,7 @@ export function createLoadContextNode(deps: SolutionGraphDeps) {
       conversationSummary: nextSummary,
       currentRevisionId: refreshedRevisionId,
       workspaceMode: workspaceRouting?.mode,
-      generationWorkflow: workspaceRouting?.generationWorkflow,
+      generationWorkflow,
       revisionSummary,
       stage,
       lastErrorCode,

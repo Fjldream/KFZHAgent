@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Command, MemorySaver } from "@langchain/langgraph";
 import { deriveGuid, getDesignKnowledgeSnapshot, planHash, retrieveCapabilities } from "@kf/domain-client";
 import {
+  canonicalChangePlanHash,
   canonicalServerHash,
   solutionId,
   type ChangePlan,
@@ -520,15 +521,17 @@ interface Bed {
   model: FakeModelPort;
   capabilityRetrievalCalls: CustomerSolutionBlueprint[];
   assetCatalogCalls: Array<{ tenantId: string; workspaceId: string }>;
+  creativeCompilerCalls: unknown[];
 }
 
-function createBed(): Bed {
+function createBed(options: { creativeCompiler?: "compiled" | "blocked" | "missing" } = {}): Bed {
   const workspace = new FakeWorkspaceQuery();
   const repo = new FakeChangePlanRepository();
   const builds = new FakeBuildJobPort();
   const model = new FakeModelPort();
   const capabilityRetrievalCalls: CustomerSolutionBlueprint[] = [];
   const assetCatalogCalls: Array<{ tenantId: string; workspaceId: string }> = [];
+  const creativeCompilerCalls: unknown[] = [];
   const capabilityReport: CapabilityReport = {
     status: "warning",
     full: [],
@@ -577,9 +580,79 @@ function createBed(): Bed {
       },
     },
     isDomainSupported: () => true,
+    ...(options.creativeCompiler === "missing"
+      ? {}
+      : {
+          creativeSolutionCompiler: {
+            async compile(input) {
+              creativeCompilerCalls.push(input);
+              if (options.creativeCompiler === "blocked") {
+                return {
+                  status: "blocked" as const,
+                  diagnostics: [{
+                    code: "LAYOUT_UNSATISFIABLE",
+                    phase: "layout",
+                    nodeId: "visitor-root",
+                    message: "主内容区域高度不足",
+                    alternatives: ["layout.4"],
+                  }],
+                  warnings: [],
+                };
+              }
+              const artifactHash = "a".repeat(64);
+              const materializationHash = "b".repeat(64);
+              const plan = {
+                schema: "kf-change-plan/v1" as const,
+                workspaceId: input.workspaceId,
+                operations: [{
+                  op: "create" as const,
+                  entityType: "page",
+                  entityId: "visitor-solution-page",
+                  properties: { name: "访客总览" },
+                }],
+                creative: { artifactHash, materializationHash },
+              };
+              const planHash = canonicalChangePlanHash(plan);
+              return {
+                status: "compiled" as const,
+                plan,
+                signedPlan: {
+                  schema: "kf-server-plan-envelope/v1" as const,
+                  plan,
+                  planHash,
+                  revisionId: input.baseRevisionId,
+                  semanticOperations: [],
+                  creativeArtifact: {},
+                  trustedNativeMaterialization: {},
+                  creativeArtifactHash: artifactHash,
+                  nativeMaterializationHash: materializationHash,
+                  signature: "test-only-server-signature",
+                } as unknown as ServerPlanEnvelope,
+                capabilityReport: {
+                  status: "warning" as const,
+                  full: ["layout.4"],
+                  partial: ["text"],
+                  unsupported: [],
+                  deliveryGaps: [],
+                },
+                warnings: [{ code: "TEXT_TRUNCATED", phase: "content", nodeId: "visitor-title", message: "文本已截断" }],
+              };
+            },
+          },
+        }),
   };
   const graph = compileSolutionGraph(deps, { checkpointer: new MemorySaver() });
-  return { deps, graph, workspace, repo, builds, model, capabilityRetrievalCalls, assetCatalogCalls };
+  return {
+    deps,
+    graph,
+    workspace,
+    repo,
+    builds,
+    model,
+    capabilityRetrievalCalls,
+    assetCatalogCalls,
+    creativeCompilerCalls,
+  };
 }
 
 interface Ctx {
@@ -672,7 +745,7 @@ async function approve(bed: Bed, ctx: Ctx, payload: ApprovalInterrupt) {
 // ---------------------------------------------------------------------------
 
 describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
-  it("runs creative-v2 as exactly blueprint plus semantic-plan calls and stops without build authorization", async () => {
+  it("runs confirmed creative-v2 through compile, signed persistence, and one direct enqueue", async () => {
     const bed = createBed();
     const ctx = seed(bed);
     bed.workspace.routing.set(WORKSPACE_ID, { mode: "new", generationWorkflow: "creative-v2" });
@@ -687,8 +760,9 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     const planned = await bed.graph.invoke(input(ctx), config(ctx));
 
     expect(planned).toMatchObject({
-      stage: "solution-plan-ready",
+      stage: "building",
       solutionPlanRepairAttempt: 0,
+      buildJobId: "job-1",
       lastErrorCode: undefined,
     });
     expect(bed.model.designCalls).toHaveLength(1);
@@ -696,15 +770,70 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     expect(bed.model.solutionReviseCalls).toHaveLength(0);
     expect(bed.capabilityRetrievalCalls).toEqual([creativeBlueprint()]);
     expect(bed.assetCatalogCalls).toEqual([{ tenantId: TENANT_ID, workspaceId: WORKSPACE_ID }]);
-    expect(bed.builds.enqueues).toHaveLength(0);
-    expect(planned.changePlanId).toBeUndefined();
-    expect(planned.planHash).toBeUndefined();
+    expect(bed.creativeCompilerCalls).toHaveLength(1);
+    expect(bed.creativeCompilerCalls[0]).toMatchObject({
+      tenantId: TENANT_ID,
+      workspaceId: WORKSPACE_ID,
+      baseRevisionId: REVISION_1,
+      blueprint: creativeBlueprint(),
+      editableEntities: [],
+    });
+    expect(bed.builds.enqueues).toHaveLength(1);
+    expect(bed.builds.enqueues[0]).toEqual({
+      tenantId: TENANT_ID,
+      workspaceId: WORKSPACE_ID,
+      baseRevisionId: REVISION_1,
+      changePlanId: planned.changePlanId,
+      planHash: planned.planHash,
+      projectKey: "kingclient",
+      domainKind: "kingclient",
+      idempotencyKey: expect.any(String),
+    });
+    expect(planned.changePlanId).toBe(`plan:${WORKSPACE_ID}:${planned.planHash}`);
+    expect(bed.repo.plans.get(planned.changePlanId!)).toMatchObject({
+      planHash: planned.planHash,
+      plan: { schema: "kf-server-plan-envelope/v1", revisionId: REVISION_1 },
+    });
+    expect(bed.repo.statusOf(planned.activeChangeRequestId!)).toBe("APPROVED");
     expect(planned.buildAuthorization).toBeUndefined();
-    expect(planned.buildJobId).toBeUndefined();
     expect(planned.previewArtifactId).toBeUndefined();
+    expect(await interruptPayload(bed, ctx)).toBeUndefined();
+    expect(bed.workspace.appendCalls.at(-1)?.content).toContain("工程包");
+    expect(bed.workspace.appendCalls.at(-1)?.content).not.toContain("预览");
   });
 
-  it("revises a ready creative blueprint from the preserved checkpoint stage and clears stale creative state", async () => {
+  it.each(["missing", "blocked"] as const)(
+    "fails closed when the creative compiler is %s without legacy or enqueue fallback",
+    async (creativeCompiler) => {
+      const bed = createBed({ creativeCompiler });
+      const ctx = seed(bed);
+      bed.workspace.routing.set(WORKSPACE_ID, { mode: "new", generationWorkflow: "creative-v2" });
+
+      bed.model.queueIntent("NEW_REQUIREMENT");
+      await sendUser(bed, ctx, "创建园区访客协同中心");
+      await bed.graph.invoke(input(ctx), config(ctx));
+      bed.model.queueIntent("CONFIRM_DESIGN");
+      await sendUser(bed, ctx, "确认设计");
+      const result = await bed.graph.invoke(input(ctx), config(ctx));
+
+      expect(result.stage).toBe("idle");
+      expect(result.lastErrorCode).toMatch(
+        creativeCompiler === "missing"
+          ? /^CREATIVE_SOLUTION_COMPILER_NOT_CONFIGURED/
+          : /^CREATIVE_SOLUTION_BLOCKED:.*LAYOUT_UNSATISFIABLE@layout\/visitor-root/,
+      );
+      expect(result.buildAuthorization).toBeUndefined();
+      expect(result.changePlanId).toBeUndefined();
+      expect(bed.repo.plans.size).toBe(0);
+      expect(bed.builds.enqueues).toHaveLength(0);
+      expect(bed.model.createCalls).toHaveLength(0);
+      expect(bed.model.implementationCreateCalls).toHaveLength(0);
+      expect(bed.workspace.appendCalls.at(-1)?.content).toContain("工程生成");
+      expect(bed.workspace.appendCalls.at(-1)?.content).not.toContain("预览");
+    },
+  );
+
+  it("revises a compiled creative blueprint and clears stale generated route state", async () => {
     const bed = createBed();
     const ctx = seed(bed);
     bed.workspace.routing.set(WORKSPACE_ID, { mode: "new", generationWorkflow: "creative-v2" });
@@ -723,7 +852,7 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     bed.model.queueIntent("CONFIRM_DESIGN");
     await sendUser(bed, ctx, "确认设计");
     const ready = await bed.graph.invoke(input(ctx), config(ctx));
-    expect(ready.stage).toBe("solution-plan-ready");
+    expect(ready.stage).toBe("building");
     const previousBlueprint = ready.designPlan;
     expect(previousBlueprint?.schema).toBe("kf-design-plan/v3");
     expect(ready.capabilityCandidates).toBeDefined();
@@ -744,7 +873,6 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     expect(revised).toMatchObject({
       stage: "design-review",
       designPlan: expect.objectContaining({ displayName: "访客协同中心修订版" }),
-      ...preservedLegacy,
       lastErrorCode: undefined,
     });
     expect(revised.capabilityCandidates).toBeUndefined();
@@ -752,15 +880,21 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     expect(revised.solutionImplementationPlan).toBeUndefined();
     expect(revised.solutionImplementationPlanHash).toBeUndefined();
     expect(revised.solutionPlanRepairAttempt).toBeUndefined();
+    expect(revised.activeChangeRequestId).toBeUndefined();
+    expect(revised.changePlanId).toBeUndefined();
+    expect(revised.planHash).toBeUndefined();
+    expect(revised.buildJobId).toBeUndefined();
+    expect(revised.buildAuthorization).toBeUndefined();
+    expect(revised.previewArtifactId).toBeUndefined();
     expect(bed.model.solutionCreateCalls).toHaveLength(1);
     expect(bed.model.solutionReviseCalls).toHaveLength(0);
-    expect(bed.repo.requests.size).toBe(0);
-    expect(bed.repo.plans.size).toBe(0);
-    expect(bed.builds.enqueues).toHaveLength(0);
+    expect(bed.repo.requests.size).toBe(1);
+    expect(bed.repo.plans.size).toBe(1);
+    expect(bed.builds.enqueues).toHaveLength(1);
     expect(await interruptPayload(bed, ctx)).toBeUndefined();
   });
 
-  it("keeps every later creative-v2 intent in design review or terminal without legacy approval or build side effects", async () => {
+  it("keeps later creative-v2 intents away from approval and preview without duplicate enqueue", async () => {
     const bed = createBed();
     const ctx = seed(bed);
     bed.workspace.routing.set(WORKSPACE_ID, { mode: "new", generationWorkflow: "creative-v2" });
@@ -771,33 +905,44 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     bed.model.queueIntent("CONFIRM_DESIGN");
     await sendUser(bed, ctx, "确认设计");
     const ready = await bed.graph.invoke(input(ctx), config(ctx));
-    expect(ready.stage).toBe("solution-plan-ready");
+    expect(ready.stage).toBe("building");
 
-    for (const [intent, message, expectedStage] of [
-      ["CONFIRM_PLAN", "批准工程计划", "idle"],
-      ["BUILD", "立即开始构建", "idle"],
-      ["NEW_REQUIREMENT", "新增到访统计页", "design-review"],
-      ["MODIFY_REQUIREMENT", "把审核旅程改得更清晰", "design-review"],
+    for (const [intent, message] of [
+      ["CONFIRM_PLAN", "批准工程计划"],
+      ["BUILD", "立即开始构建"],
     ] as const) {
       bed.model.queueIntent(intent);
       await sendUser(bed, ctx, message);
-      const result = await bed.graph.invoke(input(ctx), config(ctx));
-      expect(result.stage).toBe(expectedStage);
-      expect(result.changePlanId).toBeUndefined();
-      expect(result.planHash).toBeUndefined();
-      expect(result.activeChangeRequestId).toBeUndefined();
-      expect(result.buildAuthorization).toBeUndefined();
-      expect(result.buildJobId).toBeUndefined();
-      expect(result.previewArtifactId).toBeUndefined();
-      expect(result.lastErrorCode).toBeUndefined();
+      const terminal = await bed.graph.invoke(input(ctx), config(ctx));
+      expect(terminal.stage).toBe("idle");
+      expect(terminal.previewArtifactId).toBeUndefined();
+      expect(terminal.lastErrorCode).toBeUndefined();
+      expect(bed.builds.enqueues).toHaveLength(1);
+    }
+
+    for (const [intent, message] of [
+      ["NEW_REQUIREMENT", "新增到访统计页"],
+      ["MODIFY_REQUIREMENT", "把审核旅程改得更清晰"],
+    ] as const) {
+      bed.model.queueIntent(intent);
+      await sendUser(bed, ctx, message);
+      const revised = await bed.graph.invoke(input(ctx), config(ctx));
+      expect(revised.stage).toBe("design-review");
+      expect(revised.changePlanId).toBeUndefined();
+      expect(revised.planHash).toBeUndefined();
+      expect(revised.activeChangeRequestId).toBeUndefined();
+      expect(revised.buildAuthorization).toBeUndefined();
+      expect(revised.buildJobId).toBeUndefined();
+      expect(revised.previewArtifactId).toBeUndefined();
+      expect(revised.lastErrorCode).toBeUndefined();
     }
 
     expect(bed.model.createCalls).toHaveLength(0);
     expect(bed.model.reviseCalls).toHaveLength(0);
-    expect(bed.repo.requests.size).toBe(0);
-    expect(bed.repo.plans.size).toBe(0);
-    expect(bed.repo.statusCalls).toHaveLength(0);
-    expect(bed.builds.enqueues).toHaveLength(0);
+    expect(bed.repo.requests.size).toBe(1);
+    expect(bed.repo.plans.size).toBe(1);
+    expect(bed.repo.statusCalls).toHaveLength(1);
+    expect(bed.builds.enqueues).toHaveLength(1);
     expect(await interruptPayload(bed, ctx)).toBeUndefined();
   });
 

@@ -1,11 +1,166 @@
 // @ts-nocheck -- focused port test uses narrow Prisma/storage doubles.
 import { Readable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
-import { createKingClientDomainPack, deriveGuid } from "@kf/domain-client";
-import { createHmacModuleArtifactAuthority } from "@kf/build-jobs";
+import {
+  createCreativeUIImplementationV2Compiler,
+  createKingClientDomainPack,
+  deriveGuid,
+} from "@kf/domain-client";
+import {
+  createHmacCreativeBuildFacade,
+  createHmacModuleArtifactAuthority,
+} from "@kf/build-jobs";
+import {
+  CustomerSolutionBlueprintSchema,
+  CapabilityCandidateBundleSchema,
+  SolutionImplementationPlanSchema,
+  canonicalChangePlanHash,
+  canonicalServerHash,
+} from "@kf/contracts";
 import { createGraphPorts } from "./graph-ports.js";
 
 describe("conversation graph workspace query", () => {
+  it("composes the server-scoped creative compiler through lowering, signing, and verification", async () => {
+    const facade = createHmacCreativeBuildFacade(
+      Buffer.alloc(32, 0x51),
+      createCreativeUIImplementationV2Compiler,
+    );
+    const assets = {
+      list: vi.fn(),
+      resolveManyForCompilation: vi.fn().mockResolvedValue([]),
+    };
+    const ports = createGraphPorts({} as never, {} as never, undefined, assets, facade);
+    const fixture = creativeFixture();
+
+    const outcome = await ports.creativeSolutionCompiler!.compile({
+      tenantId: "tenant-creative",
+      workspaceId: "workspace-creative",
+      baseRevisionId: "revision-creative",
+      blueprint: fixture.blueprint,
+      candidateBundle: fixture.candidates,
+      semanticPlan: fixture.plan,
+      editableEntities: [],
+    });
+
+    expect(
+      outcome.status,
+      outcome.status === "blocked" ? JSON.stringify(outcome.diagnostics) : undefined,
+    ).toBe("compiled");
+    if (outcome.status !== "compiled") return;
+    expect(outcome.plan.creative).toMatchObject({
+      artifactHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+      materializationHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
+    const planHash = canonicalChangePlanHash(outcome.plan);
+    expect(() => facade.authority.verify(JSON.parse(JSON.stringify(outcome.signedPlan)), {
+      expectedPlanHash: planHash,
+      expectedRevisionId: "revision-creative",
+      expectedCreativeArtifactHash: outcome.plan.creative!.artifactHash,
+      expectedNativeMaterializationHash: outcome.plan.creative!.materializationHash,
+    })).not.toThrow();
+    expect(assets.resolveManyForCompilation).toHaveBeenCalledWith({
+      tenantId: "tenant-creative",
+      workspaceId: "workspace-creative",
+      assetIds: [],
+    });
+    expect(Reflect.ownKeys(ports.creativeSolutionCompiler!)).toEqual(["compile"]);
+    expect(JSON.stringify(outcome)).not.toContain("trustedCreativePayload");
+  });
+
+  it("fails closed when an exact editable entity lacks verified base-revision evidence", async () => {
+    const facade = createHmacCreativeBuildFacade(
+      Buffer.alloc(32, 0x52),
+      createCreativeUIImplementationV2Compiler,
+    );
+    const prisma = {
+      solutionRevision: { findFirst: vi.fn().mockResolvedValue(null) },
+      domainProjectRevision: { findFirst: vi.fn() },
+    };
+    const assets = {
+      list: vi.fn(),
+      resolveManyForCompilation: vi.fn().mockResolvedValue([]),
+    };
+    const ports = createGraphPorts(prisma as never, {} as never, undefined, assets, facade);
+    const fixture = creativeFixture();
+
+    const outcome = await ports.creativeSolutionCompiler!.compile({
+      tenantId: "tenant-creative",
+      workspaceId: "workspace-creative",
+      baseRevisionId: "revision-creative",
+      blueprint: fixture.blueprint,
+      candidateBundle: fixture.candidates,
+      semanticPlan: fixture.plan,
+      editableEntities: [{ kind: "page", name: "home", type: "page", guid: "existing-home-guid" }],
+    });
+
+    expect(outcome).toMatchObject({
+      status: "blocked",
+      diagnostics: [{ code: "CREATIVE_BASE_REVISION_EVIDENCE_MISSING", phase: "composition" }],
+      warnings: [],
+    });
+    expect(outcome).not.toHaveProperty("plan");
+    expect(outcome).not.toHaveProperty("signedPlan");
+    expect(prisma.solutionRevision.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "revision-creative",
+        tenantId: "tenant-creative",
+        workspaceId: "workspace-creative",
+      },
+      select: { id: true },
+    });
+  });
+
+  it("treats a lowering capability failure as blocking before authority signing", async () => {
+    const sign = vi.fn();
+    const facade = {
+      authority: { sign, verify: vi.fn() },
+      compiler: {
+        assetProofResolver: { attestResolvedAssets: vi.fn().mockReturnValue({}) },
+        compiler: {
+          compile: vi.fn().mockReturnValue({
+            plan: {},
+            capabilityReport: {
+              status: "fail",
+              full: [],
+              partial: [],
+              unsupported: ["prototype.unreviewed"],
+              deliveryGaps: [{
+                componentId: "detail-content",
+                capability: "prototype.unreviewed",
+                severity: "critical",
+                reason: "缺少已审核原生能力",
+              }],
+            },
+            trustedCreativePayload: {},
+          }),
+        },
+      },
+    };
+    const assets = {
+      list: vi.fn(),
+      resolveManyForCompilation: vi.fn().mockResolvedValue([]),
+    };
+    const ports = createGraphPorts({} as never, {} as never, undefined, assets, facade);
+    const fixture = creativeFixture();
+
+    const outcome = await ports.creativeSolutionCompiler!.compile({
+      tenantId: "tenant-creative",
+      workspaceId: "workspace-creative",
+      baseRevisionId: "revision-creative",
+      blueprint: fixture.blueprint,
+      candidateBundle: fixture.candidates,
+      semanticPlan: fixture.plan,
+      editableEntities: [],
+    });
+
+    expect(outcome).toMatchObject({
+      status: "blocked",
+      diagnostics: [{ code: "CREATIVE_CAPABILITY_BLOCKED", phase: "lowering", nodeId: "$" }],
+    });
+    expect(JSON.stringify(outcome)).toContain("prototype.unreviewed");
+    expect(sign).not.toHaveBeenCalled();
+  });
+
   it("round-trips creative-v2 from the persisted workspace routing field", async () => {
     const findFirst = vi.fn().mockResolvedValue({ mode: "new", generationWorkflow: "creative-v2" });
     const ports = createGraphPorts({ solutionWorkspace: { findFirst } }, {} as never);
@@ -420,3 +575,137 @@ describe("conversation graph workspace query", () => {
     expect(result.capabilityReport.status).not.toBe("fail");
   });
 });
+
+function creativeFixture() {
+  const blueprint = CustomerSolutionBlueprintSchema.parse({
+    schema: "kf-design-plan/v3",
+    displayName: "创意工程",
+    objective: "帮助客户从首页进入详情",
+    audiences: ["客户"],
+    scenarios: ["查看详情"],
+    pages: ["home", "detail"].map((id) => ({
+      id: `bp-${id}`,
+      title: id === "home" ? "首页" : "详情",
+      purpose: id === "home" ? "引导查看" : "展示详情",
+      readingOrder: [`region-${id}`],
+      regions: [{
+        id: `region-${id}`,
+        purpose: id === "home" ? "引导查看" : "展示详情",
+        semanticRoles: [id === "home" ? "action" : "content"],
+        dataShape: "content",
+        density: "comfortable" as const,
+        importance: "primary" as const,
+        content: [id === "home" ? "打开详情" : "详情内容"],
+        sampleData: [],
+        interactions: id === "home" ? ["点击打开详情"] : [],
+        states: ["ready"],
+        visualIntent: "清晰",
+      }],
+    })),
+    journeys: [{
+      id: "open-detail",
+      actor: "客户",
+      goal: "查看详情",
+      steps: [{ pageId: "bp-home", regionId: "region-home", action: "点击", result: "详情可见" }],
+      completion: "详情可见",
+    }],
+    visualDirection: { tone: "专业", colors: ["蓝色"], typography: "清晰", spacingAndSurfaces: "舒适" },
+    acceptanceScenarios: ["详情可见"],
+    openQuestions: [],
+  });
+  const ranked = (id: string, score: number) => ({
+    id, score, reasons: ["适用"], limitations: [], knowledgeVersion: "1.0.0",
+  });
+  const candidates = CapabilityCandidateBundleSchema.parse({
+    schema: "kf-capability-candidates/v1",
+    knowledgeCatalogVersion: "1.0.0",
+    blueprintHash: canonicalServerHash(blueprint),
+    regions: ["home", "detail"].map((id) => ({
+      pageId: `bp-${id}`,
+      regionId: `region-${id}`,
+      controls: [ranked("button", 3), ranked("text", 2), ranked("image", 1)],
+      layouts: [ranked("layout.4", 3)],
+      recipes: [ranked("content.hero", 3)],
+    })),
+    detailedCapabilityIds: ["button", "image", "layout.4", "text"],
+    generatedAtPolicy: "deterministic-no-timestamp",
+  });
+  const intent = {
+    importance: "primary" as const,
+    visualWeight: 3,
+    readingOrder: 0,
+    density: "comfortable" as const,
+    groupWith: [],
+    width: { mode: "fixed" as const, value: 160 },
+    height: { mode: "content" as const },
+    align: "start" as const,
+  };
+  const plan = SolutionImplementationPlanSchema.parse({
+    schema: "kf-solution-implementation/v1",
+    projectKey: "creative",
+    blueprintHash: canonicalServerHash(blueprint),
+    candidateBundleHash: canonicalServerHash(candidates),
+    theme: {
+      background: "#ffffff", surface: "#ffffff", primary: "#123456", accent: "#654321",
+      textPrimary: "#111111", textSecondary: "#555555", fontFamily: "Inter", spacingUnit: 8,
+      radiusScale: { small: 4, medium: 8, large: 16 },
+    },
+    roleStyles: [
+      { role: "action", declarations: {}, states: {} },
+      { role: "content", declarations: {}, states: {} },
+    ],
+    mockData: [],
+    localState: [],
+    pages: [{
+      id: "home",
+      title: "首页",
+      purpose: "引导查看",
+      canvas: "desktop",
+      sourceBlueprintPageId: "bp-home",
+      sourceBlueprintRegionIds: ["region-home"],
+      initialStateIds: [],
+      root: {
+        id: "open",
+        kind: "control",
+        capabilityId: "button",
+        content: "打开详情",
+        properties: [],
+        tabIds: [],
+        styleRole: "action",
+        sourceBlueprintRegionIds: ["region-home"],
+        intent,
+        eventBindings: [{ semanticEvent: "click", actionIds: ["navigate"] }],
+      },
+    }, {
+      id: "detail",
+      title: "详情",
+      purpose: "展示详情",
+      canvas: "desktop",
+      sourceBlueprintPageId: "bp-detail",
+      sourceBlueprintRegionIds: ["region-detail"],
+      initialStateIds: [],
+      root: {
+        id: "detail-content",
+        kind: "control",
+        capabilityId: "text",
+        content: "详情内容",
+        properties: [],
+        tabIds: [],
+        styleRole: "content",
+        sourceBlueprintRegionIds: ["region-detail"],
+        intent,
+        eventBindings: [],
+      },
+    }],
+    overlays: [],
+    actions: [{
+      id: "navigate",
+      kind: "navigate-page",
+      targetPageId: "detail",
+      afterActionIds: [],
+      journeyStepRefs: [{ journeyId: "open-detail", stepIndex: 0 }],
+    }],
+    scripts: [],
+  });
+  return { blueprint, candidates, plan };
+}

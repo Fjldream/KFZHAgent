@@ -158,6 +158,7 @@ export const AgentGraphState = new StateSchema({
     "confirmed-blueprint",
     "preview-feedback",
     "legacy-plan-approval",
+    "creative-solution",
   ]).optional(),
   capabilityReport: CapabilityReportSchema.optional(),
   stage: StageSchema,

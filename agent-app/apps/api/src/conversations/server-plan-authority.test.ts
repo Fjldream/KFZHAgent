@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
 import { readVerifiedAcceptedBlueprintArtifact } from "@kf/build-jobs";
-import { createModuleArtifactAuthorityFromEnvironment, createServerPlanAuthorityFromEnvironment, signAcceptedBlueprintAtConfirmation } from "./server-plan-authority.js";
+import {
+  createCreativeBuildFacadeFromEnvironment,
+  createModuleArtifactAuthorityFromEnvironment,
+  createServerPlanAuthorityFromEnvironment,
+  signAcceptedBlueprintAtConfirmation,
+} from "./server-plan-authority.js";
 
 describe("API server plan authority configuration", () => {
   it.each([{}, { KF_SERVER_PLAN_HMAC_KEY_BASE64: Buffer.alloc(8).toString("base64") }])(
@@ -14,6 +19,20 @@ describe("API server plan authority configuration", () => {
       KF_SERVER_PLAN_HMAC_KEY_BASE64: Buffer.alloc(32, 0x31).toString("base64"),
     });
     expect(Object.keys(authority).sort()).toEqual(["sign", "verify"]);
+  });
+
+  it("binds the creative issuer and asset attester inside one server-scoped facade", () => {
+    const environment = {
+      KF_SERVER_PLAN_HMAC_KEY_BASE64: Buffer.alloc(32, 0x32).toString("base64"),
+    };
+
+    const facade = createCreativeBuildFacadeFromEnvironment(environment);
+
+    expect(Object.keys(facade).sort()).toEqual(["authority", "compiler"]);
+    expect(Object.keys(facade.authority).sort()).toEqual(["sign", "verify"]);
+    expect(Object.keys(facade.compiler).sort()).toEqual(["assetProofResolver", "compiler"]);
+    expect(JSON.stringify(facade)).not.toContain(environment.KF_SERVER_PLAN_HMAC_KEY_BASE64);
+    expect(JSON.stringify(facade)).not.toContain("issuer");
   });
 
   it("uses the same server key with a separated module domain and signs Registry-derived blueprint facts only at confirmation", () => {

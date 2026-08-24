@@ -12,6 +12,7 @@ import type {
   AcceptedBlueprintArtifact,
   CustomerEffectBlueprint,
   CustomerSolutionBlueprint,
+  SolutionImplementationPlan,
 } from "@kf/contracts";
 import type { ModelPort } from "./model-port.js";
 import type { GraphMessage } from "./state.js";
@@ -228,6 +229,45 @@ export interface CapabilityRetrievalPort {
   }): Promise<CapabilityCandidateBundle>;
 }
 
+export interface CreativeCompilationDiagnostic {
+  code: string;
+  phase?: string;
+  nodeId: string;
+  message: string;
+  alternatives?: readonly string[];
+}
+
+export interface CreativeSolutionCompilerInput {
+  tenantId: string;
+  workspaceId: string;
+  baseRevisionId: string;
+  blueprint: CustomerSolutionBlueprint;
+  candidateBundle: CapabilityCandidateBundle;
+  semanticPlan: SolutionImplementationPlan;
+  /** Server-read exact-base entities; composition re-verifies native matches and never checkpoints them. */
+  editableEntities: readonly EditableEntity[];
+}
+
+export type CreativeSolutionCompilerOutcome =
+  | {
+      status: "compiled";
+      plan: InternalChangePlan;
+      /** Server-scoped compiler facade has already signed the complete creative payload. */
+      signedPlan: ServerPlanEnvelope;
+      capabilityReport: CapabilityReport;
+      warnings: readonly CreativeCompilationDiagnostic[];
+    }
+  | {
+      status: "blocked";
+      diagnostics: readonly CreativeCompilationDiagnostic[];
+      warnings: readonly CreativeCompilationDiagnostic[];
+    };
+
+/** One server-owned creative boundary: evidence resolution, compilation, lowering, and signing. */
+export interface CreativeSolutionCompilerPort {
+  compile(input: CreativeSolutionCompilerInput): Promise<CreativeSolutionCompilerOutcome>;
+}
+
 /** Server-only authority port. Implementations hold the HMAC key outside graph state. */
 export interface ServerPlanSignerPort {
   sign(input: {
@@ -260,6 +300,8 @@ export interface SolutionGraphDeps {
   acceptedBlueprintConfirmation?: AcceptedBlueprintConfirmationPort;
   /** Required only by the creative-v2 route. */
   capabilityRetrieval?: CapabilityRetrievalPort;
+  /** Required only by the creative-v2 route; never stored in graph state. */
+  creativeSolutionCompiler?: CreativeSolutionCompilerPort;
   /** Domain support predicate (DomainRegistry-backed in production). */
   isDomainSupported: (domain: string) => boolean;
   /** Domain used when enqueueing a build (defaults to the KF client domain). */

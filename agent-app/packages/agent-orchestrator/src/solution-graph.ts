@@ -19,6 +19,7 @@ import { createImplementationPlanNode } from "./nodes/implementation-plan.js";
 import { createModulePlanNode } from "./nodes/module-plan.js";
 import { createCapabilityRetrievalNode } from "./nodes/capability-retrieval.js";
 import { createSolutionImplementationPlanNode } from "./nodes/solution-implementation-plan.js";
+import { createCompileCreativeSolutionNode } from "./nodes/compile-creative-solution.js";
 
 /**
  * Thrown when the caller tries to run a conversation that is paused at the
@@ -79,6 +80,7 @@ export function compileSolutionGraph(
     .addNode("module-plan", createModulePlanNode(deps))
     .addNode("capability-retrieval", createCapabilityRetrievalNode(deps))
     .addNode("solution-implementation-plan", createSolutionImplementationPlanNode(deps))
+    .addNode("compile-creative-solution", createCompileCreativeSolutionNode(deps))
     .addNode("plan-change", createPlanChangeNode(deps))
     .addNode("approval", createApprovalNode())
     .addNode("cancel-plan", createCancelPlanNode(deps))
@@ -90,7 +92,8 @@ export function compileSolutionGraph(
     .addConditionalEdges("implementation-plan", routeAfterPlanChange)
     .addConditionalEdges("module-plan", routeAfterModulePlan)
     .addConditionalEdges("capability-retrieval", routeAfterCapabilityRetrieval)
-    .addEdge("solution-implementation-plan", END)
+    .addConditionalEdges("solution-implementation-plan", routeAfterSolutionImplementationPlan)
+    .addConditionalEdges("compile-creative-solution", routeAfterCreativeSolutionCompilation)
     .addConditionalEdges("plan-change", routeAfterPlanChange)
     .addConditionalEdges("approval", routeAfterApproval)
     .addEdge("cancel-plan", END)
@@ -143,7 +146,7 @@ export function routeAfterClassify(state: AgentGraphStateValue, deps?: SolutionG
   }
 }
 
-/** Phase 2 creative planning is terminal at semantic-plan readiness and has no legacy build authority. */
+/** Creative-v2 stays on its direct confirmed-blueprint engineering route. */
 function routeCreativeAfterClassify(state: AgentGraphStateValue, deps?: SolutionGraphDeps): string {
   switch (state.intent) {
     case "CLARIFY":
@@ -180,6 +183,20 @@ export function routeAfterDesignConfirmation(
 
 export function routeAfterCapabilityRetrieval(state: AgentGraphStateValue): string {
   return state.stage === "implementation-planning" ? "solution-implementation-plan" : END;
+}
+
+export function routeAfterSolutionImplementationPlan(state: AgentGraphStateValue): string {
+  return state.generationWorkflow === "creative-v2" && state.stage === "solution-plan-ready"
+    ? "compile-creative-solution"
+    : END;
+}
+
+export function routeAfterCreativeSolutionCompilation(state: AgentGraphStateValue): string {
+  return state.generationWorkflow === "creative-v2"
+    && state.stage === "building"
+    && state.buildAuthorization === "creative-solution"
+    ? "enqueue-build"
+    : END;
 }
 
 function useModuleWorkflow(state: AgentGraphStateValue, deps: SolutionGraphDeps | undefined): boolean {

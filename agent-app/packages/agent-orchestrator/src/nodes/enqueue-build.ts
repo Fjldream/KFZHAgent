@@ -17,11 +17,16 @@ import type { SolutionGraphDeps } from "../ports.js";
 export function createEnqueueBuildNode(deps: SolutionGraphDeps) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
     const legacyAuthorized = state.buildAuthorization === "legacy-plan-approval"
-      && state.resumeAction === "approve";
+      && state.resumeAction === "approve"
+      && state.generationWorkflow !== "creative-v2";
     const moduleAuthorized = (state.buildAuthorization === "confirmed-blueprint"
       || state.buildAuthorization === "preview-feedback")
+      && state.generationWorkflow !== "creative-v2"
       && state.resumeAction === undefined;
-    if (state.stage !== "building" || (!legacyAuthorized && !moduleAuthorized)) {
+    const creativeAuthorized = state.buildAuthorization === "creative-solution"
+      && state.generationWorkflow === "creative-v2"
+      && state.resumeAction === undefined;
+    if (state.stage !== "building" || (!legacyAuthorized && !moduleAuthorized && !creativeAuthorized)) {
       return {
         lastErrorCode: "BUILD_REQUIRES_APPROVAL",
         stage: "idle",
@@ -37,6 +42,24 @@ export function createEnqueueBuildNode(deps: SolutionGraphDeps) {
       state.activeChangeRequestId === undefined
     ) {
       return { lastErrorCode: "INCOMPLETE_PLAN", stage: "idle", buildAuthorization: undefined };
+    }
+
+    if (creativeAuthorized) {
+      const expectedCreativePlanId = `plan:${state.workspaceId}:${state.planHash}`;
+      let persistedPlanHash: string | undefined;
+      try {
+        persistedPlanHash = state.changePlanId === expectedCreativePlanId
+          ? await deps.changePlanRepository.loadPlanHash({
+              tenantId: state.tenantId,
+              changePlanId: state.changePlanId,
+            })
+          : undefined;
+      } catch {
+        persistedPlanHash = undefined;
+      }
+      if (persistedPlanHash !== state.planHash) {
+        return { lastErrorCode: "INCOMPLETE_PLAN", stage: "idle", buildAuthorization: undefined };
+      }
     }
 
     try {
@@ -67,14 +90,15 @@ export function createEnqueueBuildNode(deps: SolutionGraphDeps) {
         changeRequestId: state.activeChangeRequestId,
         status: "APPROVED",
       });
-      // Enqueue only proves durable acceptance, not preview availability. The
-      // next graph turn observes the terminal job in load-context and enters
-      // preview-review only after SUCCEEDED.
+      // Enqueue only proves durable acceptance. Legacy/module routes may later
+      // enter preview review; creative-v2 completes as a downloadable工程包.
       await deps.workspaceQuery.appendMessage({
         tenantId: state.tenantId,
         conversationId: state.conversationId,
         role: "assistant",
-        content: "构建任务已提交，完成后右侧会自动显示工程预览和下载产物。",
+        content: creativeAuthorized
+          ? "工程生成任务已提交，完成后可下载工程包。"
+          : "构建任务已提交，完成后右侧会自动显示工程预览和下载产物。",
       });
       return {
         buildJobId: job.id,
@@ -88,7 +112,9 @@ export function createEnqueueBuildNode(deps: SolutionGraphDeps) {
         tenantId: state.tenantId,
         conversationId: state.conversationId,
         role: "assistant",
-        content: "构建任务提交失败，请稍后重试。",
+        content: creativeAuthorized
+          ? "工程生成任务提交失败，请稍后重试。"
+          : "构建任务提交失败，请稍后重试。",
       }).catch(() => {});
       return {
         lastErrorCode: "ENQUEUE_FAILED",

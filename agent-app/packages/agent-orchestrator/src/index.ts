@@ -42,6 +42,10 @@ export {
   type AssetCatalogPort,
   type AcceptedBlueprintConfirmationPort,
   type CapabilityRetrievalPort,
+  type CreativeCompilationDiagnostic,
+  type CreativeSolutionCompilerInput,
+  type CreativeSolutionCompilerOutcome,
+  type CreativeSolutionCompilerPort,
 } from "./ports.js";
 export {
   ModuleCompilationCoordinator,

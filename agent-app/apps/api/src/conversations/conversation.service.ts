@@ -21,8 +21,9 @@ import { ARTIFACT_STORAGE } from "../artifacts/artifact-storage.js";
 import { PG_POOL, createCheckpointSaver } from "./checkpointer.js";
 import { CAPABILITY_RETRIEVAL_PORT, createGraphPorts } from "./graph-ports.js";
 import { MODEL_PORT } from "./model-port.js";
-import { MODULE_ARTIFACT_AUTHORITY, SERVER_PLAN_AUTHORITY } from "./server-plan-authority.js";
-import type { ModuleArtifactAuthority, ServerPlanAuthority } from "@kf/build-jobs";
+import { CREATIVE_BUILD_FACADE, MODULE_ARTIFACT_AUTHORITY, SERVER_PLAN_AUTHORITY } from "./server-plan-authority.js";
+import type { ModuleArtifactAuthority, ServerCreativeBuildFacade, ServerPlanAuthority } from "@kf/build-jobs";
+import type { CreativeUIImplementationV2CompilerBundle } from "@kf/domain-client";
 import { AssetService } from "../assets/asset.service.js";
 import { DeliverySnapshotService, projectModuleDeliveryResult } from "../delivery/delivery-snapshot.service.js";
 
@@ -61,6 +62,13 @@ const CUSTOMER_ERROR_CODES = new Set([
   "BUILD_FAILED",
   "BUILD_PREVIEW_NOT_AVAILABLE",
   "BUILD_REQUIRES_APPROVAL",
+  "CREATIVE_SOLUTION_BLOCKED",
+  "CREATIVE_SOLUTION_COMPILATION_FAILED",
+  "CREATIVE_SOLUTION_COMPILER_NOT_CONFIGURED",
+  "CREATIVE_SOLUTION_EVIDENCE_UNAVAILABLE",
+  "CREATIVE_SOLUTION_INPUT_INVALID",
+  "CREATIVE_SOLUTION_OUTPUT_INVALID",
+  "CREATIVE_SOLUTION_PERSIST_FAILED",
   "DESIGN_NOT_CONFIRMED",
   "DESIGN_REVISION_NOT_APPLIED",
   "ENQUEUE_FAILED",
@@ -107,6 +115,8 @@ export class ConversationService {
     @Inject(PG_POOL) private readonly pool: pg.Pool,
     @Inject(ARTIFACT_STORAGE) private readonly artifactStorage: ArtifactStorage,
     @Inject(SERVER_PLAN_AUTHORITY) private readonly serverPlanAuthority: ServerPlanAuthority,
+    @Inject(CREATIVE_BUILD_FACADE)
+    private readonly creativeBuildFacade: ServerCreativeBuildFacade<CreativeUIImplementationV2CompilerBundle>,
     @Inject(MODULE_ARTIFACT_AUTHORITY) private readonly moduleArtifactAuthority: ModuleArtifactAuthority,
     private readonly assetService: AssetService,
     private readonly deliverySnapshots: DeliverySnapshotService,
@@ -409,7 +419,16 @@ export class ConversationService {
 
   private async getGraph(): Promise<CompiledGraph> {
     if (this.#graph === undefined) {
-      const ports = createGraphPorts(this.prisma, this.artifactStorage, this.moduleArtifactAuthority, this.assetService);
+      const ports = createGraphPorts(
+        this.prisma,
+        this.artifactStorage,
+        this.moduleArtifactAuthority,
+        this.assetService,
+        this.creativeBuildFacade,
+      );
+      if (ports.creativeSolutionCompiler === undefined) {
+        throw new Error("CREATIVE_SOLUTION_COMPILER_NOT_CONFIGURED");
+      }
       const deps: SolutionGraphDeps = {
         modelPort: this.modelPort,
         workspaceQuery: ports.workspaceQuery,
@@ -422,6 +441,7 @@ export class ConversationService {
         assetCatalog: ports.assetCatalog,
         capabilityRetrieval: this.capabilityRetrieval,
         acceptedBlueprintConfirmation: ports.acceptedBlueprintConfirmation,
+        creativeSolutionCompiler: ports.creativeSolutionCompiler,
         isDomainSupported: (domain) => domain === "kingclient",
         defaultDomainKind: "kingclient",
       };
@@ -565,6 +585,7 @@ function balancedJsonValues(input: string, limit: number): string[] {
 
 const CUSTOMER_PROGRESS_CODES = new Set([
   "load-context", "classify-intent", "design-plan", "implementation-plan", "module-plan",
+  "solution-implementation-plan", "compile-creative-solution",
   "clarify", "plan-change", "enqueue-build", "build", "validate", "preview-review",
 ]);
 

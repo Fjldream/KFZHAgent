@@ -25,7 +25,11 @@ import { PG_POOL } from "./checkpointer.js";
 import { ConversationService } from "./conversation.service.js";
 import { CAPABILITY_RETRIEVAL_PORT } from "./graph-ports.js";
 import { MODEL_PORT } from "./model-port.js";
-import { MODULE_ARTIFACT_AUTHORITY, SERVER_PLAN_AUTHORITY } from "./server-plan-authority.js";
+import {
+  CREATIVE_BUILD_FACADE,
+  MODULE_ARTIFACT_AUTHORITY,
+  SERVER_PLAN_AUTHORITY,
+} from "./server-plan-authority.js";
 
 describe("ConversationService graph dependency wiring", () => {
   beforeEach(() => {
@@ -35,6 +39,7 @@ describe("ConversationService graph dependency wiring", () => {
 
   it("passes the CAPABILITY_RETRIEVAL_PORT override to the compiled graph", async () => {
     const injectedRetrieval = { retrieve: vi.fn() };
+    const creativeFacade = { authority: {}, compiler: {} };
     const moduleRef = await Test.createTestingModule({
       providers: [
         ConversationService,
@@ -44,6 +49,7 @@ describe("ConversationService graph dependency wiring", () => {
         { provide: PG_POOL, useValue: {} },
         { provide: ARTIFACT_STORAGE, useValue: {} },
         { provide: SERVER_PLAN_AUTHORITY, useValue: {} },
+        { provide: CREATIVE_BUILD_FACADE, useValue: creativeFacade },
         { provide: MODULE_ARTIFACT_AUTHORITY, useValue: {} },
         { provide: AssetService, useValue: {} },
         { provide: DeliverySnapshotService, useValue: {} },
@@ -55,7 +61,10 @@ describe("ConversationService graph dependency wiring", () => {
     await (service as unknown as { getGraph(): Promise<unknown> }).getGraph();
 
     expect(mocks.compileSolutionGraph).toHaveBeenCalledWith(
-      expect.objectContaining({ capabilityRetrieval: injectedRetrieval }),
+      expect.objectContaining({
+        capabilityRetrieval: injectedRetrieval,
+        creativeSolutionCompiler: expect.objectContaining({ compile: expect.any(Function) }),
+      }),
       { checkpointer: { saver: "checkpoint" } },
     );
   });

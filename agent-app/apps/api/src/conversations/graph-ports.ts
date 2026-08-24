@@ -3,6 +3,8 @@ import type {
   AcceptedBlueprintConfirmationPort,
   AssetCatalogPort,
   CapabilityRetrievalPort,
+  CreativeCompilationDiagnostic,
+  CreativeSolutionCompilerPort,
   ModulePlanCompilerPort,
   UiImplementationCompilerPort,
   WorkspaceQueryPort,
@@ -12,17 +14,24 @@ import type { EditableEntity } from "@kf/agent-orchestrator";
 import type { GraphMessage } from "@kf/agent-orchestrator";
 import {
   compileModulePlan,
+  compileSolutionImplementation,
   compileUiImplementation,
   createDefaultModuleRegistry,
   deriveGuid,
+  attachRuntimeCorrelation,
+  compileInteractions,
   importNativeClientPackage,
   inspectClientProject,
   getDesignKnowledgeSnapshot,
   retrieveCapabilities,
+  verifyExistingRuntimeCorrelation,
+  SolutionCompileError,
+  type CreativeUIImplementationV2CompilerBundle,
+  type VerifiedExistingRuntimeCorrelationHandle,
 } from "@kf/domain-client";
 import type { ArtifactStorage } from "@kf/artifact-storage";
-import type { ChangePlan, CustomerSolutionBlueprint } from "@kf/contracts";
-import type { ModuleArtifactAuthority } from "@kf/build-jobs";
+import type { ChangePlan, CustomerSolutionBlueprint, SolutionImplementationPlan, UIImplementationSpecV2 } from "@kf/contracts";
+import type { ModuleArtifactAuthority, ServerCreativeBuildFacade } from "@kf/build-jobs";
 import type { Prisma } from "@prisma/client";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -64,6 +73,7 @@ export interface GraphPorts {
   modulePlanCompiler: ModulePlanCompilerPort;
   assetCatalog: AssetCatalogPort;
   capabilityRetrieval: CapabilityRetrievalPort;
+  creativeSolutionCompiler?: CreativeSolutionCompilerPort;
 }
 
 export function createGraphPorts(
@@ -71,6 +81,7 @@ export function createGraphPorts(
   storage: ArtifactStorage,
   moduleArtifactAuthority?: ModuleArtifactAuthority,
   assetService?: Pick<AssetService, "list" | "resolveManyForCompilation">,
+  creativeBuildFacade?: ServerCreativeBuildFacade<CreativeUIImplementationV2CompilerBundle>,
 ): GraphPorts {
   const buildJobs = new BuildJobService(prisma);
   const moduleRegistry = createDefaultModuleRegistry(REVIEWED_KF36_MODULE_RUNTIME_EVIDENCE);
@@ -346,6 +357,142 @@ export function createGraphPorts(
     },
   };
 
+  const creativeSolutionCompiler: CreativeSolutionCompilerPort | undefined =
+    creativeBuildFacade === undefined || assetService === undefined
+      ? undefined
+      : Object.freeze({
+          async compile(input) {
+            try {
+              const assetIds = collectCreativeAssetIds(input.semanticPlan);
+              const resolvedAssets = await assetService.resolveManyForCompilation({
+                tenantId: input.tenantId,
+                workspaceId: input.workspaceId,
+                assetIds,
+              });
+              const approvedAssets = resolvedAssets.map((asset) => ({
+                workspaceAssetId: asset.workspaceAssetId,
+                targetPath: asset.targetPath,
+                mediaType: asset.mimeType,
+                sha256: asset.sha256,
+                sizeBytes: asset.sizeBytes,
+              }));
+              const implementation = compileSolutionImplementation({
+                plan: input.semanticPlan,
+                candidateBundle: input.candidateBundle,
+                moduleRegistry: createDefaultModuleRegistry(),
+                approvedAssets,
+                activeCatalogVersion: input.candidateBundle.knowledgeCatalogVersion,
+              });
+              const correlated = await correlateCreativeImplementation({
+                prisma,
+                storage,
+                tenantId: input.tenantId,
+                workspaceId: input.workspaceId,
+                baseRevisionId: input.baseRevisionId,
+                implementation,
+                editableEntities: input.editableEntities,
+              });
+              const interactions = compileInteractions({
+                blueprint: input.blueprint,
+                plan: input.semanticPlan,
+                implementation: correlated.implementation,
+              });
+              const warnings = interactions.diagnostics.warnings.map((diagnostic) => ({
+                code: diagnostic.code,
+                nodeId: diagnostic.nodeId,
+                message: diagnostic.message,
+                phase: "interaction",
+              }));
+              const blocking: CreativeCompilationDiagnostic[] = [
+                ...interactions.diagnostics.errors.map((diagnostic) => ({
+                  code: diagnostic.code,
+                  nodeId: diagnostic.nodeId,
+                  message: diagnostic.message,
+                  phase: "interaction",
+                })),
+                ...interactions.diagnostics.requests.map((request) => ({
+                  code: "INTERACTION_COMPILATION_REQUEST",
+                  nodeId: request.actionId,
+                  message: request.reason,
+                  phase: "interaction",
+                })),
+              ];
+              if (blocking.length > 0) return { status: "blocked" as const, diagnostics: blocking, warnings };
+
+              const verifiedAssets = resolvedAssets.map((asset) => ({
+                assetId: asset.id,
+                approvedAsset: {
+                  workspaceAssetId: asset.workspaceAssetId,
+                  targetPath: asset.targetPath,
+                  mediaType: asset.mimeType,
+                  sha256: asset.sha256,
+                  sizeBytes: asset.sizeBytes,
+                },
+              }));
+              const assetProof = creativeBuildFacade.compiler.assetProofResolver.attestResolvedAssets({
+                workspaceId: input.workspaceId,
+                assets: verifiedAssets,
+              });
+              const lowered = creativeBuildFacade.compiler.compiler.compile({
+                workspaceId: input.workspaceId,
+                baseRevisionId: input.baseRevisionId,
+                blueprint: input.blueprint,
+                candidateBundle: input.candidateBundle,
+                semanticPlan: input.semanticPlan,
+                implementation: interactions.implementation,
+                compilerVersion: "1.0.0",
+                evidenceVersion: "1.0.0",
+                verifiedAssets: assetProof,
+                ...(correlated.verifiedExisting === undefined
+                  ? {}
+                  : { verifiedExisting: correlated.verifiedExisting }),
+              });
+              if (lowered.capabilityReport.status === "fail") {
+                const details = [
+                  ...lowered.capabilityReport.unsupported,
+                  ...lowered.capabilityReport.deliveryGaps.map((gap) =>
+                    `${gap.componentId}/${gap.capability}: ${gap.reason}`,
+                  ),
+                ].slice(0, 10);
+                return {
+                  status: "blocked" as const,
+                  diagnostics: [{
+                    code: "CREATIVE_CAPABILITY_BLOCKED",
+                    phase: "lowering",
+                    nodeId: "$",
+                    message: (details.join("；") || "工程能力校验未通过").slice(0, 300),
+                    alternatives: lowered.capabilityReport.unsupported.slice(0, 5),
+                  }],
+                  warnings,
+                };
+              }
+              const signedPlan = creativeBuildFacade.authority.sign({
+                plan: lowered.plan,
+                revisionId: input.baseRevisionId,
+                semanticOperations: [],
+                creative: lowered.trustedCreativePayload,
+              });
+              const partial = [...new Set([
+                ...lowered.capabilityReport.partial,
+                ...warnings.map((warning) => `${warning.code}:${warning.nodeId}`),
+              ])].slice(0, 500);
+              return {
+                status: "compiled" as const,
+                plan: lowered.plan,
+                signedPlan,
+                capabilityReport: {
+                  ...lowered.capabilityReport,
+                  status: warnings.length > 0 || lowered.capabilityReport.status === "warning" ? "warning" as const : "pass" as const,
+                  partial,
+                },
+                warnings,
+              };
+            } catch (error) {
+              return { status: "blocked" as const, diagnostics: [creativeDiagnostic(error)], warnings: [] };
+            }
+          },
+        } satisfies CreativeSolutionCompilerPort);
+
   return {
     workspaceQuery,
     changePlanRepository,
@@ -355,7 +502,173 @@ export function createGraphPorts(
     modulePlanCompiler,
     assetCatalog,
     capabilityRetrieval: LOCAL_CAPABILITY_RETRIEVAL_PORT,
+    ...(creativeSolutionCompiler === undefined ? {} : { creativeSolutionCompiler }),
   };
+}
+
+function collectCreativeAssetIds(plan: SolutionImplementationPlan): string[] {
+  const ids = new Set<string>();
+  const pending: unknown[] = [plan];
+  const seen = new Set<object>();
+  while (pending.length > 0) {
+    const value = pending.pop();
+    if (value === null || typeof value !== "object" || seen.has(value)) continue;
+    seen.add(value);
+    if (Array.isArray(value)) {
+      value.forEach((entry) => pending.push(entry));
+      continue;
+    }
+    for (const [key, nested] of Object.entries(value)) {
+      if (key === "assetId" && typeof nested === "string" && nested.startsWith("asset-")) ids.add(nested);
+      else pending.push(nested);
+    }
+  }
+  return [...ids].sort(compareCodePoints);
+}
+
+async function correlateCreativeImplementation(input: {
+  prisma: PrismaService;
+  storage: ArtifactStorage;
+  tenantId: string;
+  workspaceId: string;
+  baseRevisionId: string;
+  implementation: UIImplementationSpecV2;
+  editableEntities: readonly EditableEntity[];
+}): Promise<{ implementation: UIImplementationSpecV2; verifiedExisting?: VerifiedExistingRuntimeCorrelationHandle }> {
+  const derived = attachRuntimeCorrelation({
+    workspaceId: input.workspaceId,
+    baseRevisionId: input.baseRevisionId,
+    implementation: input.implementation,
+  });
+  const pageEntities = uniqueEditableEntities(input.editableEntities, "page");
+  const controlEntities = uniqueEditableEntities(input.editableEntities, "control");
+  const implementationPages = input.implementation.pages.filter((page) => page.compatibility === "native");
+  const hasExistingMatch = implementationPages.some((page) => pageEntities.has(page.id)
+    || page.controls.some((control) => controlEntities.has(control.id)));
+  if (!hasExistingMatch) return { implementation: derived };
+
+  const inspected = await inspectCreativeBaseRevision(input);
+  const derivedPage = new Map(derived.runtimeCorrelation!.pages.map((entry) => [entry.semanticPageId, entry.pageGuid]));
+  const derivedControl = new Map(derived.runtimeCorrelation!.controls.map((entry) => [entry.semanticControlId, entry.instanceName]));
+  const pages = implementationPages.map((page) => {
+    const entity = pageEntities.get(page.id);
+    if (entity === undefined) {
+      return { source: "workspace-derived" as const, semanticPageId: page.id, pageGuid: derivedPage.get(page.id)! };
+    }
+    const inspectedPage = inspected.index.pages[entity.guid];
+    if (inspectedPage === undefined || inspectedPage.name !== entity.name) {
+      throw new Error("CREATIVE_EDITABLE_ENTITY_EVIDENCE_MISMATCH");
+    }
+    return { source: "uploaded-existing" as const, semanticPageId: page.id, pageGuid: entity.guid };
+  });
+  const pageById = new Map(pages.map((page) => [page.semanticPageId, page]));
+  const controls = implementationPages.flatMap((page) => page.controls.map((control) => {
+    const entity = controlEntities.get(control.id);
+    if (entity === undefined) {
+      return { source: "workspace-derived" as const, semanticControlId: control.id, instanceName: derivedControl.get(control.id)! };
+    }
+    const inspectedControl = inspected.index.controls[entity.guid];
+    const owner = pageById.get(page.id);
+    if (inspectedControl === undefined || inspectedControl.name !== entity.name
+      || inspectedControl.capabilityId !== entity.type || owner?.source !== "uploaded-existing"
+      || inspectedControl.pageGuid !== owner.pageGuid) {
+      throw new Error("CREATIVE_EDITABLE_ENTITY_EVIDENCE_MISMATCH");
+    }
+    return { source: "uploaded-existing" as const, semanticControlId: control.id, instanceName: entity.name };
+  }));
+  const verifiedExisting = verifyExistingRuntimeCorrelation({
+    workspaceId: input.workspaceId,
+    baseRevisionId: input.baseRevisionId,
+    inspection: inspected,
+    correlations: { pages, controls },
+  });
+  return {
+    verifiedExisting,
+    implementation: attachRuntimeCorrelation({
+      workspaceId: input.workspaceId,
+      baseRevisionId: input.baseRevisionId,
+      implementation: input.implementation,
+      verifiedExisting,
+    }),
+  };
+}
+
+function uniqueEditableEntities(
+  entities: readonly EditableEntity[],
+  kind: EditableEntity["kind"],
+): Map<string, EditableEntity> {
+  const result = new Map<string, EditableEntity>();
+  for (const entity of entities.filter((candidate) => candidate.kind === kind)) {
+    if (result.has(entity.name)) throw new Error("CREATIVE_EDITABLE_ENTITY_AMBIGUOUS");
+    result.set(entity.name, entity);
+  }
+  return result;
+}
+
+async function inspectCreativeBaseRevision(input: {
+  prisma: PrismaService;
+  storage: ArtifactStorage;
+  tenantId: string;
+  workspaceId: string;
+  baseRevisionId: string;
+}) {
+  const revision = await input.prisma.solutionRevision.findFirst({
+    where: { id: input.baseRevisionId, tenantId: input.tenantId, workspaceId: input.workspaceId },
+    select: { id: true },
+  });
+  if (revision === null) throw new Error("CREATIVE_BASE_REVISION_EVIDENCE_MISSING");
+  const projectRevision = await input.prisma.domainProjectRevision.findFirst({
+    where: {
+      tenantId: input.tenantId,
+      solutionRevisionId: input.baseRevisionId,
+      domainKind: "kingclient",
+    },
+    select: { packageUrl: true },
+  });
+  if (projectRevision?.packageUrl === null || projectRevision?.packageUrl === undefined) {
+    throw new Error("CREATIVE_BASE_REVISION_EVIDENCE_MISSING");
+  }
+  const stream = await input.storage.open(input.tenantId, projectRevision.packageUrl);
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream as AsyncIterable<Buffer | string>) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  const destination = await mkdtemp(path.join(tmpdir(), "kf-creative-evidence-"));
+  try {
+    const rootDir = await importNativeClientPackage(Buffer.concat(chunks), destination);
+    return await inspectClientProject(rootDir, {
+      runtimeBinding: { workspaceId: input.workspaceId, baseRevisionId: input.baseRevisionId },
+    });
+  } finally {
+    await rm(destination, { recursive: true, force: true });
+  }
+}
+
+function creativeDiagnostic(error: unknown): CreativeCompilationDiagnostic {
+  if (error instanceof SolutionCompileError) {
+    return {
+      code: error.reasonCode,
+      phase: error.phase,
+      nodeId: error.nodeId,
+      message: error.message.replace(/\p{Cc}/gu, " ").slice(0, 300),
+      alternatives: error.alternatives,
+    };
+  }
+  const raw = error instanceof Error ? error.message : "CREATIVE_COMPILATION_FAILED";
+  const code = /^([A-Z][A-Z0-9_]{2,})\b/.exec(raw)?.[1] ?? "CREATIVE_COMPILATION_FAILED";
+  const boundedMessage = raw.replace(/\p{Cc}/gu, " ").slice(0, 240);
+  return {
+    code,
+    phase: "composition",
+    nodeId: "$",
+    message: code === "CREATIVE_COMPILATION_FAILED"
+      ? `工程编译依赖未通过校验：${boundedMessage}`
+      : boundedMessage,
+  };
+}
+
+function compareCodePoints(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function withoutUnverifiedModuleSources(spec: import("@kf/contracts").UIImplementationSpec): import("@kf/contracts").UIImplementationSpec {

@@ -29,12 +29,12 @@ import { encodeBlueprintMessage } from "../blueprint-message.js";
  */
 export function createDesignPlanNode(deps: SolutionGraphDeps) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
-    const revisingReadyCreativeBlueprint =
+    const revisingConfirmedCreativeBlueprint =
       state.generationWorkflow === "creative-v2"
-      && state.stage === "solution-plan-ready"
       && state.designPlan?.schema === "kf-design-plan/v3"
+      && state.designPlanHash !== undefined
       && (state.intent === "NEW_REQUIREMENT" || state.intent === "MODIFY_REQUIREMENT");
-    const revising = state.revising === true || state.intent === "REVISE_DESIGN" || revisingReadyCreativeBlueprint;
+    const revising = state.revising === true || state.intent === "REVISE_DESIGN" || revisingConfirmedCreativeBlueprint;
     let modulePlanningCatalog;
     let editableEntities = (state as { editableEntities?: import("../ports.js").EditableEntity[] }).editableEntities;
     if (state.generationWorkflow === "module-v1" && state.workspaceMode !== "upload") {
@@ -150,13 +150,22 @@ export function createDesignPlanNode(deps: SolutionGraphDeps) {
       designRevision: revision,
       stage: "design-review",
       revising: undefined,
-      ...(revisingReadyCreativeBlueprint
+      ...(revisingConfirmedCreativeBlueprint
         ? {
             capabilityCandidates: undefined,
             capabilityCandidatesHash: undefined,
             solutionImplementationPlan: undefined,
             solutionImplementationPlanHash: undefined,
             solutionPlanRepairAttempt: undefined,
+            activeChangeRequestId: undefined,
+            changePlanId: undefined,
+            planHash: undefined,
+            planSummary: undefined,
+            capabilityReport: undefined,
+            buildJobId: undefined,
+            buildAuthorization: undefined,
+            diffArtifactId: undefined,
+            previewArtifactId: undefined,
           }
         : {}),
       // 设计计划成功生成后清除历史错误码，避免残留 INVALID_MODEL_OUTPUT

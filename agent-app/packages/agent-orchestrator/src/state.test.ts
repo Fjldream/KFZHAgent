@@ -159,6 +159,11 @@ describe("AgentGraphState v2", () => {
       }
     }
     await expect(AgentGraphState.validateInput({ ...base, stage: "idle", moduleRepairAttempt: 4 })).rejects.toThrow();
+    await expect(AgentGraphState.validateInput({
+      ...base,
+      stage: "building",
+      buildAuthorization: "creative-solution",
+    })).resolves.toBeDefined();
     await expect(AgentGraphState.validateInput({ ...base, stage: "idle", buildAuthorization: "model-approved" })).rejects.toThrow();
   });
 

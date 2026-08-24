@@ -32,6 +32,53 @@ describe("enqueue build authorization", () => {
     expect(testBed.enqueues).toHaveLength(1);
   });
 
+  it("accepts only a persisted creative-solution origin and keeps the queued input small", async () => {
+    const accepted = bed();
+    accepted.deps.changePlanRepository.loadPlanHash = async () => "a".repeat(64);
+    const result = await createEnqueueBuildNode(accepted.deps)(state({
+      generationWorkflow: "creative-v2",
+      buildAuthorization: "creative-solution",
+      changePlanId: `plan:workspace:${"a".repeat(64)}`,
+    }));
+    expect(result).toMatchObject({ buildJobId: "job", stage: "building", buildAuthorization: undefined });
+    expect(accepted.enqueues).toEqual([{
+      tenantId: "tenant",
+      workspaceId: "workspace",
+      baseRevisionId: "revision",
+      changePlanId: `plan:workspace:${"a".repeat(64)}`,
+      planHash: "a".repeat(64),
+      projectKey: "kingclient",
+      domainKind: "kingclient",
+      idempotencyKey: expect.any(String),
+    }]);
+    expect(JSON.stringify(accepted.enqueues)).not.toMatch(/creativeArtifact|materialization|signature/);
+    expect(accepted.messages.at(-1)).toContain("工程包");
+    expect(accepted.messages.at(-1)).not.toContain("预览");
+
+    for (const overrides of [
+      { generationWorkflow: "legacy" as const, buildAuthorization: "creative-solution" as const },
+      { generationWorkflow: "creative-v2" as const, buildAuthorization: "confirmed-blueprint" as const },
+      { generationWorkflow: "creative-v2" as const, buildAuthorization: "legacy-plan-approval" as const, resumeAction: "approve" as const },
+    ]) {
+      const rejected = bed();
+      rejected.deps.changePlanRepository.loadPlanHash = async () => "a".repeat(64);
+      await expect(createEnqueueBuildNode(rejected.deps)(state({
+        ...overrides,
+        changePlanId: `plan:workspace:${"a".repeat(64)}`,
+      }))).resolves.toMatchObject({
+        lastErrorCode: "BUILD_REQUIRES_APPROVAL",
+      });
+      expect(rejected.enqueues).toHaveLength(0);
+    }
+    const missingPersisted = bed();
+    await expect(createEnqueueBuildNode(missingPersisted.deps)(state({
+      generationWorkflow: "creative-v2",
+      buildAuthorization: "creative-solution" as never,
+      changePlanId: `plan:workspace:${"a".repeat(64)}`,
+    }))).resolves.toMatchObject({ lastErrorCode: "INCOMPLETE_PLAN" });
+    expect(missingPersisted.enqueues).toHaveLength(0);
+  });
+
   it("requires both approval origin and approve resume for the legacy path", async () => {
     const approved = bed();
     await expect(createEnqueueBuildNode(approved.deps)(state({ buildAuthorization: "legacy-plan-approval", resumeAction: "approve" }))).resolves.toMatchObject({ buildJobId: "job" });
@@ -54,5 +101,21 @@ describe("enqueue build authorization", () => {
     expect(result.lastErrorCode).toBe("ENQUEUE_FAILED");
     expect(JSON.stringify(result)).not.toContain("secret");
     expect(testBed.messages.at(-1)).toBe("构建任务提交失败，请稍后重试。");
+  });
+
+  it("reports creative enqueue failures only as engineering generation", async () => {
+    const testBed = bed();
+    testBed.deps.changePlanRepository.loadPlanHash = async () => "a".repeat(64);
+    testBed.deps.buildJobPort.enqueue = async () => { throw new Error("queue unavailable"); };
+
+    const result = await createEnqueueBuildNode(testBed.deps)(state({
+      generationWorkflow: "creative-v2",
+      buildAuthorization: "creative-solution",
+      changePlanId: `plan:workspace:${"a".repeat(64)}`,
+    }));
+
+    expect(result.lastErrorCode).toBe("ENQUEUE_FAILED");
+    expect(testBed.messages.at(-1)).toContain("工程生成");
+    expect(testBed.messages.at(-1)).not.toMatch(/预览|构建/);
   });
 });
