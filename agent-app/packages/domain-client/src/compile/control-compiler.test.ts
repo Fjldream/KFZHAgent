@@ -29,6 +29,11 @@ const scriptModule = (id: string, source: string, placement: "event" | "configur
 });
 const buttonControl: ControlIR = { id: "Button1", type: "button", x: 0, y: 0, width: 120, height: 40, text: "Go" };
 const compileButtonScripts = (scripts: Parameters<typeof compileControl>[3]) => compileControl(build, buttonControl, ctx, scripts);
+const nativeNavigate = (id: string, ownerInstanceName = "Button1") => ({
+  id: `kf$action:${id}`, sourceActionId: id, ownerInstanceName,
+  kind: "navigate-page" as const,
+  targetPageGuid: "k00000000-0000-4000-8000-000000000001",
+});
 
 function decodedModules(source: string) {
   const marker = "// kf-compiled-event/v1 ";
@@ -62,7 +67,7 @@ describe("control compiler — compiled scripts", () => {
       ownerInstanceName: "Button1", capabilityId: "button", modules: [second, first],
       bindings: [{
         id: "kf$binding:script-chain", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
-        phase: "event", scriptModuleIds: ["kf$script:first", "kf$script:second"], nativeActionIds: ["kf$action:navigate"],
+        phase: "event", scriptModuleIds: ["kf$script:first", "kf$script:second"], nativeActionIds: [],
       }],
     });
 
@@ -109,6 +114,65 @@ describe("control compiler — compiled scripts", () => {
     });
     const links = (out.linkMng as { linkList: Array<Record<string, unknown>> }).linkList;
     expect(links.map((link) => link.name)).toEqual(["Zed", "Alpha"]);
+  });
+
+  it("preserves declared binding order across script-only, action-only, combined, and multi-action effects", () => {
+    const firstScript = scriptModule("first-order", "const first = 1;\n");
+    const combinedScript = scriptModule("combined-order", "const combined = 1;\n");
+    const secondA = nativeNavigate("second-a");
+    const secondB = nativeNavigate("second-b");
+    const third = nativeNavigate("third");
+    const out = controlCompilerModule.serializeReviewedNativeInteractions(
+      compileControl(build, buttonControl, ctx),
+      {
+        ownerInstanceName: "Button1", capabilityId: "button",
+        modules: [firstScript, combinedScript], actions: [secondA, secondB, third],
+        bindings: [
+          { id: "kf$binding:first-order", ownerInstanceName: "Button1", kfEvent: "First", linkId: 200001,
+            phase: "event", scriptModuleIds: [firstScript.id], nativeActionIds: [] },
+          { id: "kf$binding:second-order", ownerInstanceName: "Button1", kfEvent: "Second", linkId: 200002,
+            phase: "event", scriptModuleIds: [], nativeActionIds: [secondA.id, secondB.id] },
+          { id: "kf$binding:third-order", ownerInstanceName: "Button1", kfEvent: "Third", linkId: 200003,
+            phase: "event", scriptModuleIds: [combinedScript.id], nativeActionIds: [third.id] },
+        ],
+      },
+      { ownerInstanceName: "Button1", capabilityId: "button" },
+    );
+    const links = (out.linkMng as { linkList: Array<Record<string, unknown>> }).linkList;
+    expect(links.map((link) => link.kfCompilerAction === undefined
+      ? `script:${String(link.name)}`
+      : `action:${String((link.kfCompilerAction as Record<string, unknown>)["sourceActionId"])}`))
+      .toEqual(["script:First", "action:second-a", "action:second-b", "action:third", "script:Third"]);
+  });
+
+  it("rejects native action references without an authoritative actions table", () => {
+    expect(() => compileButtonScripts({
+      ownerInstanceName: "Button1", capabilityId: "button", modules: [], bindings: [{
+        id: "kf$binding:missing-actions", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
+        phase: "event", scriptModuleIds: [], nativeActionIds: ["kf$action:missing"],
+      }],
+    })).toThrow(/MODEL_OUTPUT_INVALID.*actions table/i);
+  });
+
+  it.each([
+    ["event", (link: Record<string, unknown>) => { link["name"] = "Forged"; }],
+    ["link", (link: Record<string, unknown>) => { link["linkId"] = 200099; }],
+    ["action", (link: Record<string, unknown>) => { link["action"] = "setVariable"; }],
+  ])("rejects an existing compiler action marker whose enclosing %s identity drifted", (_label, mutate) => {
+    const action = nativeNavigate("old");
+    const binding = { id: "kf$binding:old", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
+      phase: "event" as const, scriptModuleIds: [], nativeActionIds: [action.id] };
+    const first = controlCompilerModule.serializeReviewedNativeInteractions(
+      compileControl(build, buttonControl, ctx),
+      { ownerInstanceName: "Button1", capabilityId: "button", modules: [], actions: [action], bindings: [binding] },
+      { ownerInstanceName: "Button1", capabilityId: "button" },
+    );
+    const link = (first.linkMng as { linkList: Array<Record<string, unknown>> }).linkList[0]!;
+    mutate(link);
+    expect(() => controlCompilerModule.serializeReviewedNativeInteractions(first,
+      { ownerInstanceName: "Button1", capabilityId: "button", modules: [], actions: [action], bindings: [binding] },
+      { ownerInstanceName: "Button1", capabilityId: "button" }))
+      .toThrow(/MODEL_OUTPUT_INVALID.*action.*identity/i);
   });
 
   it("uses configureData only for a capability that explicitly supports it", () => {

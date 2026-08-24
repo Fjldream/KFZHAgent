@@ -20,7 +20,10 @@ import {
 } from "@kf/contracts";
 import type { ServerPlanAuthority } from "./server-plan-authority.js";
 import type { VerifiedCreativeMaterialization } from "./server-plan-authority.js";
-import { readVerifiedCreativeMaterialization } from "./server-plan-authority.js";
+import {
+  claimVerifiedCreativeMaterialization,
+  readVerifiedCreativeMaterialization,
+} from "./server-plan-authority.js";
 import type { DomainRegistry } from "@kf/domain-registry";
 import { Prisma, type BuildJob, type PrismaClient } from "@prisma/client";
 import { Readable } from "node:stream";
@@ -84,11 +87,11 @@ export function resolveStoredPlan(
     if (verifier === undefined) throw new Error("server plan verifier is not configured");
     const envelope = verifier.verify(input, expected);
     if (envelope.plan.creative !== undefined) {
-      readVerifiedCreativeMaterialization(envelope);
+      const creativeMaterialization = claimVerifiedCreativeMaterialization(verifier, envelope, expected);
       return {
         plan: envelope.plan,
         semanticOperations: envelope.semanticOperations,
-        creativeMaterialization: envelope as unknown as VerifiedCreativeMaterialization,
+        creativeMaterialization,
       };
     }
     return { plan: envelope.plan, semanticOperations: envelope.semanticOperations };

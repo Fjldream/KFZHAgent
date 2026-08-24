@@ -47,6 +47,11 @@ describe("mergeManagedStyleData", () => {
       .toBe(`${before}${START}#domId{font-size:14px}#domId:hover{color:#ffffff}${END}${after}`);
   });
 
+  it("accepts the exact KF 3.6 element selector emitted by the reviewed style compiler", () => {
+    expect(mergeManagedStyleData("#legacy{color:red}", "#domId .el-button{border-radius:8px}"))
+      .toBe(`#legacy{color:red}\n${START}#domId .el-button{border-radius:8px}${END}`);
+  });
+
   it("does not treat an escaped selector brace as an open rule when replacing the managed envelope", () => {
     const customerCss = ".\\{safe{color:red}\n";
     const existing = `${customerCss}${START}#domId{font-size:14px}${END}`;

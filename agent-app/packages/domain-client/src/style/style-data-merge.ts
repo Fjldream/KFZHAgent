@@ -1,7 +1,9 @@
+import { KF36_RUNTIME_PROFILE } from "./runtime-profile.js";
+
 const MANAGED_STYLE_START = "/* KF_AGENT_MANAGED_STYLE_V1_START */";
 const MANAGED_STYLE_END = "/* KF_AGENT_MANAGED_STYLE_V1_END */";
 
-const SELECTOR_ORDER = [
+const LEGACY_ROOT_SELECTORS = [
   "#domId",
   "#domId:hover",
   "#domId:active",
@@ -10,6 +12,12 @@ const SELECTOR_ORDER = [
   "#domId.is-selected",
   "#domId.is-error",
 ] as const;
+const SELECTOR_ORDER = Object.freeze([...new Set([
+  ...LEGACY_ROOT_SELECTORS,
+  ...Object.values(KF36_RUNTIME_PROFILE.selectors).flatMap((roles) =>
+    Object.values(roles.parts).flatMap((part) => [part.selector, ...Object.values(part.stateSelectors)])),
+])]);
+const REVIEWED_SELECTORS = new Set<string>(SELECTOR_ORDER);
 
 type Rules = Map<string, Map<string, string>>;
 
@@ -104,7 +112,7 @@ function parseManagedRules(css: string): Rules {
   for (const match of css.matchAll(pattern)) {
     consumed += match[0];
     const selector = match[1]!;
-    if (!SELECTOR_ORDER.includes(selector as (typeof SELECTOR_ORDER)[number])) {
+    if (!REVIEWED_SELECTORS.has(selector)) {
       throw new Error(`MANAGED_STYLE_DATA_INVALID: unexpected selector ${selector}`);
     }
     const declarations = rules.get(selector) ?? new Map<string, string>();
@@ -136,8 +144,7 @@ function mergeRules(existing: Rules, delta: Rules): Rules {
 
 function serializeRules(rules: Rules): string {
   return [...rules.entries()]
-    .sort(([left], [right]) => SELECTOR_ORDER.indexOf(left as (typeof SELECTOR_ORDER)[number])
-      - SELECTOR_ORDER.indexOf(right as (typeof SELECTOR_ORDER)[number]))
+    .sort(([left], [right]) => SELECTOR_ORDER.indexOf(left) - SELECTOR_ORDER.indexOf(right))
     .map(([selector, declarations]) => `${selector}{${[...declarations.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([property, value]) => `${property}:${value}`)

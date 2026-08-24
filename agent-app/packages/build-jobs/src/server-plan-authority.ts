@@ -120,11 +120,52 @@ export interface ModuleArtifactAuthority {
 
 const acceptedBlueprintPayloads = new WeakMap<object, AcceptedBlueprintArtifact>();
 const moduleCompilationPayloads = new WeakMap<object, ModuleCompilationArtifact>();
-const verifiedCreativeMaterializations = new WeakMap<object, Readonly<{
+const serverPlanAuthorityIdentities = new WeakMap<object, object>();
+const verifiedCreativeEnvelopes = new WeakMap<object, Readonly<{
+  authorityIdentity: object;
   plan: InternalChangePlan;
   artifact: CreativeBuildArtifact;
   materialization: TrustedNativeMaterialization;
 }>>();
+const verifiedCreativeMaterializations = new WeakMap<object, Readonly<{
+  authorityIdentity: object;
+  expectedPlanHash: string;
+  expectedRevisionId: string;
+  plan: InternalChangePlan;
+  artifact: CreativeBuildArtifact;
+  materialization: TrustedNativeMaterialization;
+}>>();
+
+/** Mints the propertyless worker capability only from this exact authority's verified result. */
+export function claimVerifiedCreativeMaterialization(
+  authority: Pick<ServerPlanAuthority, "verify">,
+  envelope: ServerPlanEnvelope,
+  expected: { readonly expectedPlanHash: string; readonly expectedRevisionId: string },
+): VerifiedCreativeMaterialization {
+  const authorityIdentity = authority !== null && typeof authority === "object"
+    ? serverPlanAuthorityIdentities.get(authority)
+    : undefined;
+  const attested = envelope !== null && typeof envelope === "object"
+    ? verifiedCreativeEnvelopes.get(envelope)
+    : undefined;
+  if (authorityIdentity === undefined || attested === undefined || attested.authorityIdentity !== authorityIdentity) {
+    throw new Error("CREATIVE_VERIFIER_AUTHORITY_MISMATCH");
+  }
+  if (envelope.planHash !== expected.expectedPlanHash || envelope.revisionId !== expected.expectedRevisionId
+    || canonicalChangePlanHash(attested.plan) !== expected.expectedPlanHash) {
+    throw new Error("CREATIVE_VERIFIED_BINDING_MISMATCH");
+  }
+  const handle = Object.freeze(Object.create(null)) as VerifiedCreativeMaterialization;
+  verifiedCreativeMaterializations.set(handle, Object.freeze({
+    authorityIdentity,
+    expectedPlanHash: expected.expectedPlanHash,
+    expectedRevisionId: expected.expectedRevisionId,
+    plan: attested.plan,
+    artifact: attested.artifact,
+    materialization: attested.materialization,
+  }));
+  return handle;
+}
 
 export function readVerifiedCreativeMaterialization(input: unknown): Readonly<{
   plan: InternalChangePlan;
@@ -279,7 +320,8 @@ function createHmacServerPlanAuthorityParts(key: Uint8Array): {
           throw new Error("CREATIVE_MATERIALIZATION_INCOMPLETE");
         }
         deepFreezeJson(verified);
-        verifiedCreativeMaterializations.set(verified, Object.freeze({
+        verifiedCreativeEnvelopes.set(verified, Object.freeze({
+          authorityIdentity,
           plan: verified.plan,
           artifact: verified.creativeArtifact,
           materialization: verified.trustedNativeMaterialization,
@@ -288,6 +330,7 @@ function createHmacServerPlanAuthorityParts(key: Uint8Array): {
       return verified;
     },
   });
+  serverPlanAuthorityIdentities.set(authority, authorityIdentity);
   return Object.freeze({ authority, issuer: creativePayloadIssuer });
 }
 

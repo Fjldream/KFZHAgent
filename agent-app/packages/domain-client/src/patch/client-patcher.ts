@@ -1798,6 +1798,36 @@ function findControlByInstanceName(node: unknown, instanceName: string): NamedCo
   return undefined;
 }
 
+function nativeControlInstanceName(value: unknown): string | undefined {
+  if (!isObject(value)) return undefined;
+  const name = value["name"] ?? asRecord(value["baseProperty"])["name"];
+  return typeof name === "string" ? name : undefined;
+}
+
+/** KF paints siblings in array order; reorder only compiler-created slots by signed zIndex/order. */
+function applyCreativeSiblingZOrder(
+  node: unknown,
+  createdByInstanceName: ReadonlyMap<string, { readonly zIndex: number; readonly order: number }>,
+): void {
+  if (Array.isArray(node)) {
+    const siblings = node as unknown[];
+    const positions = siblings.flatMap((value, index) => {
+      const name = nativeControlInstanceName(value);
+      return name !== undefined && createdByInstanceName.has(name) ? [index] : [];
+    });
+    const ordered = positions.map((index) => siblings[index]).sort((left, right) => {
+      const leftOrder = createdByInstanceName.get(nativeControlInstanceName(left)!)!;
+      const rightOrder = createdByInstanceName.get(nativeControlInstanceName(right)!)!;
+      return leftOrder.zIndex - rightOrder.zIndex || leftOrder.order - rightOrder.order;
+    });
+    positions.forEach((position, index) => { siblings[position] = ordered[index]; });
+    siblings.forEach((value) => applyCreativeSiblingZOrder(value, createdByInstanceName));
+    return;
+  }
+  if (!isObject(node)) return;
+  for (const key of CONTROL_CONTAINER_KEYS) applyCreativeSiblingZOrder(node[key], createdByInstanceName);
+}
+
 function pageSizeInto(page: Record<string, unknown>, width: number, height: number): void {
   page["pageViewWidth"] = width;
   page["pageViewHeight"] = height;
@@ -1880,7 +1910,33 @@ async function applyVerifiedCreativePatch(
 
     // Rebuild the entity index after page creation, then create parents before children.
     const pageInspection = await inspectClientProject(candidate);
+    const pageByGuid = new Map(materialization.pages.map((page) => [page.pageGuid, page] as const));
     const styleByControl = new Map(materialization.stylesData.map((style) => [style.semanticControlId, style]));
+    const controlBySemantic = new Map(materialization.controls
+      .map((control) => [control.semanticControlId, control] as const));
+    const implementationByControl = new Map(artifact.implementation.pages.flatMap((page) =>
+      page.compatibility === "native" ? page.controls.map((control) => [control.id, control] as const) : []));
+    type CreativeAction = (typeof materialization.interactions.actions)[number];
+    type CreativeScript = (typeof materialization.interactions.scripts)[number];
+    type CreativeEventBinding = (typeof materialization.interactions.eventBindings)[number];
+    const actionsByOwner = new Map<string, CreativeAction[]>();
+    const scriptsByOwner = new Map<string, CreativeScript[]>();
+    const bindingsByOwner = new Map<string, CreativeEventBinding[]>();
+    for (const action of materialization.interactions.actions) {
+      const owned = actionsByOwner.get(action.ownerInstanceName) ?? [];
+      owned.push(action);
+      actionsByOwner.set(action.ownerInstanceName, owned);
+    }
+    for (const script of materialization.interactions.scripts) {
+      const owned = scriptsByOwner.get(script.ownerInstanceName) ?? [];
+      owned.push(script);
+      scriptsByOwner.set(script.ownerInstanceName, owned);
+    }
+    for (const binding of materialization.interactions.eventBindings) {
+      const owned = bindingsByOwner.get(binding.ownerInstanceName) ?? [];
+      owned.push(binding);
+      bindingsByOwner.set(binding.ownerInstanceName, owned);
+    }
     const newControls = materialization.controls
       .filter((control) => control.source === "workspace-derived")
       .slice().sort((left, right) => left.depth - right.depth || left.order - right.order);
@@ -1922,16 +1978,41 @@ async function applyVerifiedCreativePatch(
       }, materialization.workspaceId, []);
     }
 
+    // Inspect once after structural edits, cache each page once, and flush once
+    // after the ordered z-order/style/data/interaction stages.
+    const finalInspection = await inspectClientProject(candidate);
+    const pageDocs = new Map<string, { file: string; doc: Record<string, unknown>; modified: boolean }>();
+    const creativePageDoc = async (pageGuid: string, semanticPageId: string) => {
+      const cached = pageDocs.get(pageGuid);
+      if (cached !== undefined) return cached;
+      const pageEntry = finalInspection.index.pages[pageGuid];
+      if (pageEntry === undefined) throw new PatchConflictError(`creative runtime page missing: ${semanticPageId}`);
+      const loaded = {
+        file: pageEntry.file,
+        doc: await readJsonFile(candidate, versionDir, pageEntry.file),
+        modified: false,
+      };
+      pageDocs.set(pageGuid, loaded);
+      return loaded;
+    };
+    const createdZOrder = new Map(newControls.map((control) => [control.instanceName, {
+      zIndex: control.zIndex,
+      order: control.order,
+    }] as const));
+    for (const pageGuid of new Set(newControls.map((control) => control.pageGuid))) {
+      const materializedPage = pageByGuid.get(pageGuid);
+      const page = await creativePageDoc(pageGuid, materializedPage?.semanticPageId ?? pageGuid);
+      applyCreativeSiblingZOrder(page.doc["objects"], createdZOrder);
+      page.modified = true;
+    }
+
     for (const style of materialization.stylesData) {
-      const control = materialization.controls.find((entry) => entry.semanticControlId === style.semanticControlId)!;
-      const pageEntry = (await inspectClientProject(candidate)).index.pages[control.pageGuid];
-      if (pageEntry === undefined) throw new PatchConflictError(`creative style page missing: ${control.semanticPageId}`);
-      const doc = await readJsonFile(candidate, versionDir, pageEntry.file);
-      const ref = findControlByInstanceName(doc["objects"], control.instanceName);
+      const control = controlBySemantic.get(style.semanticControlId);
+      if (control === undefined) throw new PatchConflictError(`creative style owner missing: ${style.semanticControlId}`);
+      const page = await creativePageDoc(control.pageGuid, control.semanticPageId);
+      const ref = findControlByInstanceName(page.doc["objects"], control.instanceName);
       if (ref === undefined) throw new PatchConflictError(`creative runtime control missing: ${control.semanticControlId}`);
-      const implementationControl = artifact.implementation.pages
-        .flatMap((page) => page.compatibility === "native" ? page.controls : [])
-        .find((entry) => entry.id === control.semanticControlId);
+      const implementationControl = implementationByControl.get(control.semanticControlId);
       if (implementationControl === undefined) {
         throw new PatchConflictError(`creative style provenance missing: ${control.semanticControlId}`);
       }
@@ -1953,24 +2034,21 @@ async function applyVerifiedCreativePatch(
       }
       if (control.source === "workspace-derived") {
         for (const [field, value] of Object.entries(control.nativeProperties)) ref.root[field] = structuredClone(value);
-        for (const [field, value] of Object.entries(style.compiledStyle.nativeFields)) ref.root[field] = structuredClone(value);
-        if (compiled.styleDataNew !== "") ref.root["styleDataNew"] = mergeManagedStyleData(ref.root["styleDataNew"], compiled.styleDataNew);
-        if (style.dataBinding?.records !== undefined) ref.root["data"] = structuredClone(style.dataBinding.records);
       }
-      await writeJsonFile(candidate, versionDir, pageEntry.file, doc);
+      for (const [field, value] of Object.entries(style.compiledStyle.nativeFields)) ref.root[field] = structuredClone(value);
+      if (compiled.styleDataNew !== "") ref.root["styleDataNew"] = mergeManagedStyleData(ref.root["styleDataNew"], compiled.styleDataNew);
+      if (style.dataBinding?.records !== undefined) ref.root["data"] = structuredClone(style.dataBinding.records);
+      page.modified = true;
     }
 
     // Stage 5: actions and scripts share the reviewed serializer and only
     // replace entries bearing valid compiler provenance for this owner.
-    const finalInspection = await inspectClientProject(candidate);
     for (const control of materialization.controls) {
-      const actions = materialization.interactions.actions.filter((action) => action.ownerInstanceName === control.instanceName);
-      const modules = materialization.interactions.scripts.filter((module) => module.ownerInstanceName === control.instanceName);
-      const bindings = materialization.interactions.eventBindings.filter((binding) => binding.ownerInstanceName === control.instanceName);
-      const pageEntry = finalInspection.index.pages[control.pageGuid];
-      if (pageEntry === undefined) throw new PatchConflictError(`creative interaction page missing: ${control.semanticPageId}`);
-      const doc = await readJsonFile(candidate, versionDir, pageEntry.file);
-      const ref = findControlByInstanceName(doc["objects"], control.instanceName);
+      const actions = actionsByOwner.get(control.instanceName) ?? [];
+      const modules = scriptsByOwner.get(control.instanceName) ?? [];
+      const bindings = bindingsByOwner.get(control.instanceName) ?? [];
+      const page = await creativePageDoc(control.pageGuid, control.semanticPageId);
+      const ref = findControlByInstanceName(page.doc["objects"], control.instanceName);
       if (ref === undefined) throw new PatchConflictError(`creative interaction owner missing: ${control.semanticControlId}`);
       if (actions.length === 0 && modules.length === 0 && bindings.length === 0
         && !isObject(ref.root["linkMng"]) && typeof ref.root["configureData"] !== "string") continue;
@@ -1982,7 +2060,10 @@ async function applyVerifiedCreativePatch(
         bindings,
       }, { ownerInstanceName: control.instanceName, capabilityId: control.capabilityId });
       ref.parent[ref.index] = serialized;
-      await writeJsonFile(candidate, versionDir, pageEntry.file, doc);
+      page.modified = true;
+    }
+    for (const page of pageDocs.values()) {
+      if (page.modified) await writeJsonFile(candidate, versionDir, page.file, page.doc);
     }
 
     const creativeAssets = new Map(materialization.stylesData.flatMap((style) => style.approvedAssets)

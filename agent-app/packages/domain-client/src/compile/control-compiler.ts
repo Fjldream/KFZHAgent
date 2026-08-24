@@ -638,6 +638,9 @@ export function serializeReviewedNativeInteractions(
   });
   const actionById = new Map((actions ?? []).map((action) => [action.id, action]));
   if (actionById.size !== (actions?.length ?? 0)) throw new ModelOutputInvalidError("duplicate compiled native action id");
+  if (actions === undefined && bindings.some((binding) => binding.nativeActionIds.length > 0)) {
+    throw new ModelOutputInvalidError("compiled native action references require an authoritative actions table");
+  }
   const referencedActions = new Set<string>();
   const referencedEventModules = new Set<string>();
   const phaseKeys = new Set<string>();
@@ -677,7 +680,13 @@ export function serializeReviewedNativeInteractions(
     const record = link as Record<string, unknown>;
     const actionMarker = parseCompiledActionMarker(record["kfCompilerAction"]);
     if (actionMarker !== undefined) {
-      if (actionMarker.ownerInstanceName !== ownerInstanceName) throw new ModelOutputInvalidError("compiler-owned action owner mismatch");
+      const enclosingLinkId = typeof record["linkId"] === "number" ? record["linkId"] : null;
+      if (actionMarker.ownerInstanceName !== ownerInstanceName
+        || actionMarker.kfEvent !== record["name"]
+        || actionMarker.linkId !== enclosingLinkId
+        || record["action"] !== "navigatePage") {
+        throw new ModelOutputInvalidError("compiler-owned action enclosing identity mismatch");
+      }
       return [];
     }
     if (typeof record["script"] === "string" && record["script"].includes("kf-compiled-event/v1")) {
@@ -690,11 +699,6 @@ export function serializeReviewedNativeInteractions(
     }
     return [record];
   });
-  if (actions !== undefined) for (const binding of bindings) {
-    for (const actionId of binding.nativeActionIds) {
-      links.push(serializeCompiledNativeAction(actionById.get(actionId)!, binding));
-    }
-  }
   const eventGroups = new Map<string, CompiledEventBinding[]>();
   for (const binding of bindings) {
     const key = `${binding.kfEvent}\u0000${binding.linkId ?? ""}`;
@@ -703,25 +707,37 @@ export function serializeReviewedNativeInteractions(
     eventGroups.set(key, group);
   }
   for (const [, group] of eventGroups) {
-    group.sort((left, right) => (left.phase === right.phase ? 0 : left.phase === "event" ? -1 : 1));
     const first = group[0]!;
     const sources = group.flatMap((binding) => binding.scriptModuleIds.map((id) => serializedCompiledModule(moduleById.get(id)!, binding)));
-    const matchingIndexes = links.flatMap((link, index) => {
-      const sameId = first.linkId !== undefined && link["linkId"] === first.linkId;
-      const sameName = link["name"] === first.kfEvent;
-      return sameId || sameName ? [index] : [];
-    });
-    if (matchingIndexes.length > 1) throw new ModelOutputInvalidError(`ambiguous native event slots: ${first.kfEvent}`);
-    if (matchingIndexes.length === 1) {
-      const index = matchingIndexes[0]!;
-      const current = links[index]!;
+    let current: Record<string, unknown> | undefined;
+    let currentIndex: number | undefined;
+    if (sources.length > 0) {
+      const matchingIndexes = links.flatMap((link, index) => {
+        const sameId = first.linkId !== undefined && link["linkId"] === first.linkId;
+        const sameName = link["name"] === first.kfEvent;
+        return sameId || sameName ? [index] : [];
+      });
+      if (matchingIndexes.length > 1) throw new ModelOutputInvalidError(`ambiguous native event slots: ${first.kfEvent}`);
+      if (matchingIndexes.length === 1) {
+        currentIndex = matchingIndexes[0]!;
+        current = links.splice(currentIndex, 1)[0]!;
+      }
+    }
+    const groupHasActions = group.some((binding) => binding.nativeActionIds.length > 0);
+    if (actions !== undefined) for (const binding of group) {
+      for (const actionId of binding.nativeActionIds) {
+        links.push(serializeCompiledNativeAction(actionById.get(actionId)!, binding));
+      }
+    }
+    if (sources.length === 0) continue;
+    if (current !== undefined) {
       if (first.linkId !== undefined && current["linkId"] !== undefined && current["linkId"] !== first.linkId) {
         throw new ModelOutputInvalidError(`native event linkId mismatch: ${first.kfEvent}`);
       }
       if (current["name"] !== undefined && current["name"] !== first.kfEvent) throw new ModelOutputInvalidError(`native event name mismatch: ${first.kfEvent}`);
       const existing = current["script"];
       if (existing !== undefined && typeof existing !== "string") throw new ModelOutputInvalidError(`native event script must be a string: ${first.kfEvent}`);
-      links[index] = {
+      const serialized = {
         ...current,
         ...(first.linkId === undefined ? {} : { linkId: first.linkId }),
         enable: true,
@@ -730,7 +746,9 @@ export function serializeReviewedNativeInteractions(
         }), sources),
         name: first.kfEvent,
       };
-      if (String(links[index]["script"]).length > 32_000) throw new ModelOutputInvalidError(`compiled event script exceeds 32000 characters: ${first.kfEvent}`);
+      if (String(serialized["script"]).length > 32_000) throw new ModelOutputInvalidError(`compiled event script exceeds 32000 characters: ${first.kfEvent}`);
+      if (!groupHasActions && currentIndex !== undefined) links.splice(currentIndex, 0, serialized);
+      else links.push(serialized);
     } else {
       const appended = {
         ...(first.linkId === undefined ? {} : { linkId: first.linkId }), enable: true,

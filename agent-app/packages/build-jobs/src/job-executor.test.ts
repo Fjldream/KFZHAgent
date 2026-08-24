@@ -33,7 +33,7 @@ describe("resolveStoredPlan", () => {
     const verifier = { verify: () => ({ plan: creativePlan, semanticOperations: [] }) };
     expect(() => resolveStoredPlan({ schema: "kf-server-plan-envelope/v1" }, {
       expectedPlanHash: "c".repeat(64), expectedRevisionId: "rev-1",
-    }, verifier as never)).toThrow(/UNVERIFIED_CREATIVE_MATERIALIZATION/);
+    }, verifier as never)).toThrow(/CREATIVE_VERIFIER_AUTHORITY_MISMATCH/);
   });
 
   it.each([

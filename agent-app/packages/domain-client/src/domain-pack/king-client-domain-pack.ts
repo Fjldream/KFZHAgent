@@ -76,6 +76,7 @@ export function createKingClientDomainPack(options: {
         {
           skipRoundTrip: false,
           assetTargetPaths: assets?.map((asset) => asset.targetPath) ?? [],
+          creativeAssets: assets ?? [],
           ...(creativeMaterialization === undefined ? {} : {
             creativeMaterialization: creativeMaterialization as VerifiedCreativeMaterialization,
           }),

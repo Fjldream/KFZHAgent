@@ -1,11 +1,16 @@
-import { mkdtemp, readdir, readFile, stat } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { parse } from "acorn";
 import { walk } from "estree-walker";
-import { CompilerPageGuidSchema, canonicalChangePlanHash, type ValidationReport } from "@kf/contracts";
+import {
+  CompilerPageGuidSchema,
+  canonicalChangePlanHash,
+  type DomainAssetInput,
+  type ValidationReport,
+} from "@kf/contracts";
 import {
   readVerifiedCreativeMaterialization,
   type VerifiedCreativeMaterialization,
@@ -19,7 +24,12 @@ import {
 import { CONTROL_TYPE_BY_UIMODEL_TYPE } from "../ir/client-project-ir.js";
 import { importNativeClientPackage, packageNativeClientProject } from "../package/native-client-package.js";
 import { resolveVersionDirName, verifyChangeScope } from "../patch/change-scope.js";
-import { deleteOperationDigest, normalizeChangePlan, type NormalizedPlan } from "../patch/client-patcher.js";
+import {
+  applyClientPatch,
+  deleteOperationDigest,
+  normalizeChangePlan,
+  type NormalizedPlan,
+} from "../patch/client-patcher.js";
 import { deriveGuid } from "../compile/guid-factory.js";
 import { serializeReviewedNativeInteractions } from "../compile/control-compiler.js";
 import { compileResolvedStyle } from "../style/style-engine.js";
@@ -1527,6 +1537,35 @@ function findRawControl(node: unknown, identity: string, byName = false): Record
   return undefined;
 }
 
+function rawControlInstanceName(value: unknown): string | undefined {
+  if (!isObjectRecord(value)) return undefined;
+  const baseProperty = asRecord(value["baseProperty"]);
+  const name = value["name"] ?? baseProperty["name"];
+  return typeof name === "string" ? name : undefined;
+}
+
+function hasCreativeZOrderMismatch(
+  node: unknown,
+  createdByInstanceName: ReadonlyMap<string, { readonly zIndex: number; readonly order: number }>,
+): boolean {
+  if (Array.isArray(node)) {
+    const actual = node.flatMap((value) => {
+      const name = rawControlInstanceName(value);
+      return name !== undefined && createdByInstanceName.has(name) ? [name] : [];
+    });
+    const expected = actual.slice().sort((left, right) => {
+      const leftOrder = createdByInstanceName.get(left)!;
+      const rightOrder = createdByInstanceName.get(right)!;
+      return leftOrder.zIndex - rightOrder.zIndex || leftOrder.order - rightOrder.order;
+    });
+    if (actual.some((name, index) => name !== expected[index])) return true;
+    return node.some((value) => hasCreativeZOrderMismatch(value, createdByInstanceName));
+  }
+  if (!isObjectRecord(node)) return false;
+  return ["objects", "children", "layoutItems", "insiderObjects"]
+    .some((key) => hasCreativeZOrderMismatch(node[key], createdByInstanceName));
+}
+
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -1540,11 +1579,37 @@ async function creativeMaterializationIssues(
   const issues: string[] = [];
   const implementationByControl = new Map(verified.artifact.implementation.pages.flatMap((page) =>
     page.compatibility === "native" ? page.controls.map((control) => [control.id, control] as const) : []));
+  const styleByControl = new Map(materialization.stylesData
+    .map((style) => [style.semanticControlId, style] as const));
+  const pageSummaryByGuid = new Map(inspection.summary.pages.map((page) => [page.guid, page] as const));
+  const assetRuntimeSrcByControl = new Map((verified.plan.assetBindings ?? [])
+    .map((binding) => [binding.entityId, path.basename(binding.targetPath)] as const));
+  type CreativeAction = (typeof materialization.interactions.actions)[number];
+  type CreativeScript = (typeof materialization.interactions.scripts)[number];
+  type CreativeEventBinding = (typeof materialization.interactions.eventBindings)[number];
+  const actionsByOwner = new Map<string, CreativeAction[]>();
+  const scriptsByOwner = new Map<string, CreativeScript[]>();
+  const bindingsByOwner = new Map<string, CreativeEventBinding[]>();
+  for (const action of materialization.interactions.actions) {
+    const owned = actionsByOwner.get(action.ownerInstanceName) ?? [];
+    owned.push(action);
+    actionsByOwner.set(action.ownerInstanceName, owned);
+  }
+  for (const script of materialization.interactions.scripts) {
+    const owned = scriptsByOwner.get(script.ownerInstanceName) ?? [];
+    owned.push(script);
+    scriptsByOwner.set(script.ownerInstanceName, owned);
+  }
+  for (const binding of materialization.interactions.eventBindings) {
+    const owned = bindingsByOwner.get(binding.ownerInstanceName) ?? [];
+    owned.push(binding);
+    bindingsByOwner.set(binding.ownerInstanceName, owned);
+  }
   const controlEntryByName = new Map(Object.values(inspection.index.controls)
     .flatMap((entry) => entry.name === undefined ? [] : [[entry.name, entry] as const]));
   for (const page of materialization.pages) {
     const entry = inspection.index.pages[page.pageGuid];
-    const summary = inspection.summary.pages.find((value) => value.guid === page.pageGuid);
+    const summary = pageSummaryByGuid.get(page.pageGuid);
     if (entry === undefined || (page.source === "workspace-derived" && entry.id !== page.semanticPageId)) {
       issues.push(`creative page correlation mismatch: ${page.semanticPageId}`);
     }
@@ -1562,6 +1627,11 @@ async function creativeMaterializationIssues(
       issues.push(`creative control correlation/type mismatch: ${control.semanticControlId}`);
       continue;
     }
+    if (control.source === "workspace-derived"
+      && (entry.x !== control.geometry.x || entry.y !== control.geometry.y
+        || entry.width !== control.geometry.width || entry.height !== control.geometry.height)) {
+      issues.push(`creative geometry mismatch: ${control.semanticControlId}`);
+    }
     if (control.parentInstanceName !== undefined) {
       const parent = controlEntryByName.get(control.parentInstanceName);
       if (parent === undefined || !entry.rawPath.startsWith(`${parent.rawPath}/insiderObjects/`)) {
@@ -1575,16 +1645,18 @@ async function creativeMaterializationIssues(
       continue;
     }
     if (control.source === "workspace-derived") for (const [field, value] of Object.entries(control.nativeProperties)) {
-      if (JSON.stringify(raw[field]) !== JSON.stringify(value)) issues.push(`creative native field mismatch: ${control.semanticControlId}.${field}`);
+      const expected = field === "src" ? assetRuntimeSrcByControl.get(control.semanticControlId) ?? value : value;
+      if (JSON.stringify(raw[field]) !== JSON.stringify(expected)) issues.push(`creative native field mismatch: ${control.semanticControlId}.${field}`);
     }
     if (control.source === "uploaded-existing") for (const delta of control.existingDeltas ?? []) {
       const field = delta.path.slice(1);
       const actual = field === "x" ? entry.x : field === "y" ? entry.y
         : field === "width" ? entry.width : field === "height" ? entry.height : raw[field];
-      if (JSON.stringify(actual) !== JSON.stringify(delta.value)) issues.push(`creative existing delta mismatch: ${control.semanticControlId}${delta.path}`);
+      const expected = field === "src" ? assetRuntimeSrcByControl.get(control.semanticControlId) ?? delta.value : delta.value;
+      if (JSON.stringify(actual) !== JSON.stringify(expected)) issues.push(`creative existing delta mismatch: ${control.semanticControlId}${delta.path}`);
     }
-    const style = materialization.stylesData.find((value) => value.semanticControlId === control.semanticControlId);
-    if (style !== undefined && control.source === "workspace-derived") {
+    const style = styleByControl.get(control.semanticControlId);
+    if (style !== undefined) {
       for (const [field, value] of Object.entries(style.compiledStyle.nativeFields)) {
         if (JSON.stringify(raw[field]) !== JSON.stringify(value)) issues.push(`creative style field mismatch: ${control.semanticControlId}.${field}`);
       }
@@ -1603,8 +1675,8 @@ async function creativeMaterializationIssues(
             approvedAssets: style.approvedAssets.map((asset) => asset.approvedAsset),
             runtimeProfile: KF36_RUNTIME_PROFILE,
           });
-          const expectedStyleData = mergeManagedStyleData("", compiled.styleDataNew);
           const actualStyleData = typeof raw["styleDataNew"] === "string" ? raw["styleDataNew"] : "";
+          const expectedStyleData = mergeManagedStyleData(actualStyleData, compiled.styleDataNew);
           if (actualStyleData !== expectedStyleData) {
             issues.push(`creative managed styleDataNew mismatch: ${control.semanticControlId}`);
           }
@@ -1613,9 +1685,9 @@ async function creativeMaterializationIssues(
         }
       }
     }
-    const actions = materialization.interactions.actions.filter((value) => value.ownerInstanceName === control.instanceName);
-    const modules = materialization.interactions.scripts.filter((value) => value.ownerInstanceName === control.instanceName);
-    const bindings = materialization.interactions.eventBindings.filter((value) => value.ownerInstanceName === control.instanceName);
+    const actions = actionsByOwner.get(control.instanceName) ?? [];
+    const modules = scriptsByOwner.get(control.instanceName) ?? [];
+    const bindings = bindingsByOwner.get(control.instanceName) ?? [];
     if (actions.length > 0 || modules.length > 0 || bindings.length > 0
       || isObjectRecord(raw["linkMng"]) || typeof raw["configureData"] === "string") {
       try {
@@ -1630,8 +1702,14 @@ async function creativeMaterializationIssues(
     }
   }
   const versionDir = await resolveVersionDirName(candidate);
-  const assets = new Map(materialization.stylesData.flatMap((style) => style.approvedAssets)
-    .map((asset) => [asset.assetId, asset.approvedAsset] as const));
+  const assets = new Map([
+    ...(verified.plan.assetBindings ?? []).map((asset) => [asset.assetId, {
+      targetPath: asset.targetPath, mediaType: asset.mediaType,
+      sha256: asset.sha256, sizeBytes: asset.sizeBytes,
+    }] as const),
+    ...materialization.stylesData.flatMap((style) => style.approvedAssets)
+      .map((asset) => [asset.assetId, asset.approvedAsset] as const),
+  ]);
   for (const [assetId, facts] of assets) {
     try {
       const bytes = await readFile(path.join(rootPath(candidate, versionDir), facts.targetPath));
@@ -1642,6 +1720,19 @@ async function creativeMaterializationIssues(
       issues.push(`creative asset missing: ${assetId}: ${String(error)}`);
     }
   }
+  const createdZOrderByPage = new Map<string, Map<string, { zIndex: number; order: number }>>();
+  for (const control of materialization.controls) {
+    if (control.source !== "workspace-derived") continue;
+    const page = createdZOrderByPage.get(control.pageGuid)
+      ?? new Map<string, { zIndex: number; order: number }>();
+    page.set(control.instanceName, { zIndex: control.zIndex, order: control.order });
+    createdZOrderByPage.set(control.pageGuid, page);
+  }
+  for (const [pageGuid, created] of createdZOrderByPage) {
+    if (hasCreativeZOrderMismatch(asRecord(inspection.raw.pages[pageGuid])["objects"], created)) {
+      issues.push(`creative z-order mismatch: ${pageGuid}`);
+    }
+  }
   return issues;
 }
 
@@ -1649,121 +1740,36 @@ async function checkCreativeChangeScope(
   base: string,
   candidate: string,
   verified: VerifiedCreativePayload,
-  assetTargetPaths: readonly string[],
+  handle: VerifiedCreativeMaterialization,
+  assets: readonly DomainAssetInput[],
+  materializationIssues: readonly string[],
 ): Promise<{ outcome: CheckOutcome; warnings: string[] }> {
+  let expectedRoot: string | undefined;
   try {
-    const [baseVersion, candidateVersion, baseFiles, candidateFiles, baseInspection, candidateInspection] = await Promise.all([
-      resolveVersionDirName(base), resolveVersionDirName(candidate), collectTreeFiles(base), collectTreeFiles(candidate),
-      inspectClientProject(base), inspectClientProject(candidate),
+    const expected = await applyClientPatch(base, verified.plan, {
+      planHash: canonicalChangePlanHash(verified.plan),
+      creativeMaterialization: handle,
+      assets,
+    });
+    expectedRoot = expected.rootDir;
+    const [expectedFiles, candidateFiles] = await Promise.all([
+      collectTreeFiles(expected.rootDir),
+      collectTreeFiles(candidate),
     ]);
-    const allowed = new Set<string>([
-      `${candidateVersion}/project/pageManager.json`,
-      ...verified.materialization.pages.flatMap((page) => {
-        const file = candidateInspection.index.pages[page.pageGuid]?.file;
-        return file === undefined ? [] : [`${candidateVersion}/${file}`];
-      }),
-      ...assetTargetPaths.map((target) => `${candidateVersion}/${target}`),
-    ]);
-    const violations: string[] = [];
-    const allFiles = new Set([...baseFiles.keys(), ...candidateFiles.keys()]);
+    const violations = [...materializationIssues];
+    const allFiles = new Set([...expectedFiles.keys(), ...candidateFiles.keys()]);
     for (const file of allFiles) {
-      const candidateFile = baseVersion === candidateVersion
-        ? file
-        : file.startsWith(`${baseVersion}/`) ? `${candidateVersion}/${file.slice(baseVersion.length + 1)}` : file;
-      if (allowed.has(candidateFile)) continue;
-      const baseBytes = baseFiles.get(file);
-      const candidateBytes = candidateFiles.get(candidateFile);
-      if (baseBytes === undefined || candidateBytes === undefined || !baseBytes.equals(candidateBytes)) {
-        violations.push(`creative change scope modified unrelated file "${candidateFile}"`);
-      }
+      const expectedBytes = expectedFiles.get(file);
+      const candidateBytes = candidateFiles.get(file);
+      if (expectedBytes === undefined) violations.push(`creative exact candidate contains unsigned file "${file}"`);
+      else if (candidateBytes === undefined) violations.push(`creative exact candidate is missing signed file "${file}"`);
+      else if (!expectedBytes.equals(candidateBytes)) violations.push(`creative exact candidate differs at "${file}"`);
     }
-    const signedExistingGuids = new Set(verified.materialization.controls
-      .flatMap((control) => control.nativeGuid === undefined ? [] : [control.nativeGuid]));
-    for (const baseControl of Object.values(baseInspection.index.controls)) {
-      if (signedExistingGuids.has(baseControl.guid)) continue;
-      const candidateControl = candidateInspection.index.controls[baseControl.guid];
-      const baseRaw = findRawControl(asRecord(baseInspection.raw.pages[baseControl.pageGuid])["objects"], baseControl.guid);
-      const candidateRaw = candidateControl === undefined
-        ? undefined
-        : findRawControl(asRecord(candidateInspection.raw.pages[candidateControl.pageGuid])["objects"], baseControl.guid);
-      if (baseRaw === undefined || candidateRaw === undefined || JSON.stringify(baseRaw) !== JSON.stringify(candidateRaw)) {
-        violations.push(`creative change scope modified unrelated control "${baseControl.id}"`);
-      }
-    }
-    for (const page of verified.materialization.pages.filter((value) => value.source === "uploaded-existing")) {
-      const basePage = structuredClone(asRecord(baseInspection.raw.pages[page.pageGuid]));
-      const candidatePage = structuredClone(asRecord(candidateInspection.raw.pages[page.pageGuid]));
-      delete basePage["objects"];
-      delete candidatePage["objects"];
-      for (const record of [basePage, candidatePage]) {
-        delete record["pageViewWidth"];
-        delete record["pageViewHeight"];
-        const property = asRecord(record["pageProperty"]);
-        delete property["pageSize"];
-        delete property["windowSize"];
-      }
-      if (JSON.stringify(basePage) !== JSON.stringify(candidatePage)) {
-        violations.push(`creative change scope modified unrelated native page fields "${page.semanticPageId}"`);
-      }
-    }
-    for (const control of verified.materialization.controls.filter((value) => value.source === "uploaded-existing")) {
-      const baseEntry = control.nativeGuid === undefined ? undefined : baseInspection.index.controls[control.nativeGuid];
-      const candidateEntry = control.nativeGuid === undefined ? undefined : candidateInspection.index.controls[control.nativeGuid];
-      const baseRaw = baseEntry === undefined ? undefined
-        : findRawControl(asRecord(baseInspection.raw.pages[baseEntry.pageGuid])["objects"], baseEntry.guid);
-      const candidateRaw = candidateEntry === undefined ? undefined
-        : findRawControl(asRecord(candidateInspection.raw.pages[candidateEntry.pageGuid])["objects"], candidateEntry.guid);
-      if (baseRaw === undefined || candidateRaw === undefined) {
-        violations.push(`creative change scope lost existing control "${control.semanticControlId}"`);
-        continue;
-      }
-      const allowed = new Set((control.existingDeltas ?? []).map((delta) => delta.path.slice(1)));
-      const normalize = (input: Record<string, unknown>): Record<string, unknown> => {
-        const output = structuredClone(input);
-        for (const field of allowed) {
-          if (!["x", "y", "width", "height"].includes(field)) delete output[field];
-        }
-        delete output["linkMng"];
-        delete output["configureData"];
-        const point = asRecord(output["leftTopPt"]);
-        const baseProperty = asRecord(output["baseProperty"]);
-        const basePoint = asRecord(baseProperty["leftTopPt"]);
-        if (allowed.has("x")) { delete point["x"]; delete basePoint["x"]; }
-        if (allowed.has("y")) { delete point["y"]; delete basePoint["y"]; }
-        if (allowed.has("width")) { delete output["width"]; delete baseProperty["width"]; }
-        if (allowed.has("height")) { delete output["height"]; delete baseProperty["height"]; }
-        return output;
-      };
-      if (JSON.stringify(normalize(baseRaw)) !== JSON.stringify(normalize(candidateRaw))) {
-        violations.push(`creative change scope modified fields outside exact existing deltas "${control.semanticControlId}"`);
-      }
-    }
-    const signedPageGuids = new Set(verified.materialization.pages.map((page) => page.pageGuid));
-    const baseManager = asRecord(baseInspection.raw.pageManager);
-    const candidateManager = asRecord(candidateInspection.raw.pageManager);
-    const baseManagerWithoutPages = { ...baseManager, Pages: undefined };
-    const candidateManagerWithoutPages = { ...candidateManager, Pages: undefined };
-    if (JSON.stringify(baseManagerWithoutPages) !== JSON.stringify(candidateManagerWithoutPages)) {
-      violations.push("creative change scope modified unrelated page-manager metadata");
-    }
-    const baseManagerPages = Array.isArray(baseManager["Pages"]) ? baseManager["Pages"] as Array<Record<string, unknown>> : [];
-    const candidateManagerPages = Array.isArray(candidateManager["Pages"]) ? candidateManager["Pages"] as Array<Record<string, unknown>> : [];
-    for (const page of baseManagerPages.filter((entry) => !signedPageGuids.has(String(entry["id"])))) {
-      const candidatePage = candidateManagerPages.find((entry) => entry["id"] === page["id"]);
-      if (candidatePage === undefined || JSON.stringify(candidatePage) !== JSON.stringify(page)) {
-        violations.push(`creative change scope modified unrelated page-manager entry "${String(page["id"])}"`);
-      }
-    }
-    for (const page of candidateManagerPages.filter((entry) => !signedPageGuids.has(String(entry["id"])))) {
-      if (!baseManagerPages.some((entry) => JSON.stringify(entry) === JSON.stringify(page))) {
-        violations.push(`creative change scope added orphan page-manager entry "${String(page["id"])}"`);
-      }
-    }
-    const materialization = await creativeMaterializationIssues(candidate, verified);
-    violations.push(...materialization);
     return { outcome: violations.length === 0 ? pass() : fail(violations), warnings: [] };
   } catch (error) {
     return { outcome: fail([`creative change-scope verification failed: ${String(error)}`]), warnings: [] };
+  } finally {
+    if (expectedRoot !== undefined) await rm(expectedRoot, { recursive: true, force: true }).catch(() => {});
   }
 }
 
@@ -1873,6 +1879,7 @@ export interface ValidateOptions {
   /** Skip the (expensive) package round-trip check. Defaults to false. */
   skipRoundTrip?: boolean;
   assetTargetPaths?: readonly string[];
+  creativeAssets?: readonly DomainAssetInput[];
   creativeMaterialization?: VerifiedCreativeMaterialization;
 }
 
@@ -1922,10 +1929,12 @@ export async function validateClientProject(
     ? planInput as Record<string, unknown>
     : undefined;
   let verifiedCreative: VerifiedCreativePayload | undefined;
+  let verifiedCreativeHandle: VerifiedCreativeMaterialization | undefined;
   let creativeTrustIssue: string | undefined;
   if (rawPlan?.["creative"] !== undefined) {
     try {
-      verifiedCreative = readVerifiedCreativeMaterialization(options?.creativeMaterialization);
+      verifiedCreativeHandle = options?.creativeMaterialization;
+      verifiedCreative = readVerifiedCreativeMaterialization(verifiedCreativeHandle);
       if (canonicalChangePlanHash(verifiedCreative.plan) !== canonicalChangePlanHash(planInput)) {
         creativeTrustIssue = "verified creative materialization does not bind the validated ChangePlan";
         verifiedCreative = undefined;
@@ -1935,11 +1944,13 @@ export async function validateClientProject(
     }
   }
 
+  const creativeIssues = verifiedCreative === undefined
+    ? []
+    : await creativeMaterializationIssues(candidate, verifiedCreative);
   let businessRules = await checkBusinessRules(candidate, plan);
   if (creativeTrustIssue !== undefined) businessRules = fail([creativeTrustIssue]);
-  else if (verifiedCreative !== undefined) {
-    const issues = await creativeMaterializationIssues(candidate, verifiedCreative);
-    if (issues.length > 0) businessRules = fail([...businessRules.issues, ...issues]);
+  else if (creativeIssues.length > 0) {
+    businessRules = fail([...businessRules.issues, ...creativeIssues]);
   }
 
   const outcomes: Record<CheckKey, CheckOutcome> = {
@@ -1957,7 +1968,14 @@ export async function validateClientProject(
     ? creativeTrustIssue === undefined
       ? await checkChangeScope(base, candidate, plan, options?.assetTargetPaths ?? [])
       : { outcome: fail([creativeTrustIssue]), warnings: [] }
-    : await checkCreativeChangeScope(base, candidate, verifiedCreative, options?.assetTargetPaths ?? []);
+    : await checkCreativeChangeScope(
+      base,
+      candidate,
+      verifiedCreative,
+      verifiedCreativeHandle!,
+      options?.creativeAssets ?? [],
+      creativeIssues,
+    );
   outcomes.changeScope = scope.outcome;
   extraWarnings.push(...scope.warnings);
 

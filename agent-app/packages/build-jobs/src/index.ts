@@ -5,7 +5,7 @@ export {
   BuildJobConflictError,
   BuildJobLeaseError,
 } from "./build-job.service.js";
-export { BuildExecutor, BuildWorkerCrash, resolveStoredPlan } from "./job-executor.js";
+export { BuildExecutor, BuildWorkerCrash, resolveBuildAssets, resolveStoredPlan } from "./job-executor.js";
 export { graphBuildIdempotencyKey, buildJobBelongsToConversation } from "./build-idempotency.js";
 export {
   createHmacServerPlanAuthority,
