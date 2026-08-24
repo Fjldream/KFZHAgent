@@ -4,7 +4,22 @@
  * validation never has to trust a policy projection supplied by the artifact.
  */
 
-export const EASYUI_PROTO_FIELDS: Readonly<Record<number, readonly string[]>> = {
+function freezeFields(fields: readonly string[]): readonly string[] {
+  return Object.freeze([...fields]);
+}
+
+function freezeFieldTable<Key extends string | number>(
+  table: Readonly<Record<Key, readonly string[]>>,
+): Readonly<Record<Key, readonly string[]>> {
+  const copy: Record<string, readonly string[]> = {};
+  const stringKeyedTable = table as Readonly<Record<string, readonly string[]>>;
+  for (const [key, fields] of Object.entries(stringKeyedTable)) {
+    copy[key] = freezeFields(fields);
+  }
+  return Object.freeze(copy) as Readonly<Record<Key, readonly string[]>>;
+}
+
+const AUTHORITATIVE_EASYUI_PROTO_FIELDS = freezeFieldTable<number>({
   0: ["editable", "value", "valueField", "textField", "mode"],
   1: [
     "striped", "pagination", "showHeader", "singleSelect", "fitColumns",
@@ -40,23 +55,23 @@ export const EASYUI_PROTO_FIELDS: Readonly<Record<number, readonly string[]>> = 
   27: ["checked", "disabled", "readonly", "reversed", "handleText", "handleWidth", "onText", "offText", "value"],
   28: ["required", "disabled", "readonly", "editable", "novalidate", "validType", "delay", "invalidMessage", "missingMessage", "validateOnBlur", "validateOnCreate", "_validateOnCreate", "tipOptions", "tipPosition", "events", "rules"],
   29: ["images", "playtime"],
-};
+});
 
-export const EASYUI_ALL_FIELDS: readonly string[] = [
-  ...new Set(Object.values(EASYUI_PROTO_FIELDS).flat()),
-];
+const AUTHORITATIVE_EASYUI_ALL_FIELDS = freezeFields([
+  ...new Set(Object.values(AUTHORITATIVE_EASYUI_PROTO_FIELDS).flat()),
+]);
 
 /** `guid` is deliberately excluded because native identities are immutable. */
-export const COMMON_CONTROL_ALLOWED_FIELDS: readonly string[] = [
+const AUTHORITATIVE_COMMON_CONTROL_ALLOWED_FIELDS = freezeFields([
   "name", "leftTopPt", "width", "height", "x", "y", "backgroundColor",
   "comment", "visible", "runVisible", "enable", "lock", "sizePolicy",
   "fixedSize", "linkMng", "configureData", "isControl", "resDescription",
   "primary", "internalVertex", "version", "securityPriority", "securitySection",
   "resourceGroup", "resourceGroupMsg", "showUiExtendType", "customPropertyRecords",
   "isChangeFixedSize", "isChangeFont",
-];
+]);
 
-export const PROTOTYPE_ALLOWED_FIELDS: readonly string[] = [
+const AUTHORITATIVE_PROTOTYPE_ALLOWED_FIELDS = freezeFields([
   "pageProperty", "objects", "modlePrototype", "region", "bordershow", "title",
   "areas", "chartComponentType", "trendMode", "refreshMode", "refreshFrequance",
   "boundRect", "relativePt", "absolutePt", "isEditLocked", "isEditVisible",
@@ -71,9 +86,9 @@ export const PROTOTYPE_ALLOWED_FIELDS: readonly string[] = [
   "customEventFontSize", "showAlarmTitle", "showToolBar", "showStatusBar", "showTree",
   "treeBackGround", "treeFontSize", "treeFontColor", "treeShowLine", "brushArray",
   "brushName", "picName", "picPath",
-];
+]);
 
-export const PROTOTYPE_ALLOWED_FIELDS_BY_NAME: Readonly<Record<string, readonly string[]>> = Object.freeze({
+const AUTHORITATIVE_PROTOTYPE_ALLOWED_FIELDS_BY_NAME = freezeFieldTable<string>({
   CustomCharts: ["pageProperty", "objects", "modlePrototype", "region", "bordershow"],
   TrendChart: ["title", "areas", "chartComponentType", "trendMode", "refreshMode", "refreshFrequance", "boundRect", "relativePt", "absolutePt", "isEditLocked", "isEditVisible"],
   BarChart: ["title", "areas", "chartComponentType", "trendMode", "refreshMode", "refreshFrequance", "boundRect", "relativePt", "absolutePt", "isEditLocked", "isEditVisible"],
@@ -83,7 +98,7 @@ export const PROTOTYPE_ALLOWED_FIELDS_BY_NAME: Readonly<Record<string, readonly 
   EventWindow: ["columns", "dateSource", "dateType", "timeType", "historyNumber", "list", "toolBar", "statusBar", "titleName", "titleFontSize", "titleFontColor", "titleTextAlign", "titleTextVertAlign", "backGroundColor", "operationEventColor", "operationEventBckColor", "operationEventFontSize", "securityEventColor", "securityEventBckColor", "securityEventFontSize", "customEventColor", "customEventBckColor", "customEventFontSize", "showToolBar", "showStatusBar", "showTree", "treeBackGround", "treeFontSize", "treeFontColor", "treeShowLine"],
 });
 
-export const CONTROL_TYPE_ALLOWED_FIELDS: Readonly<Record<string, readonly string[]>> = {
+const AUTHORITATIVE_CONTROL_TYPE_ALLOWED_FIELDS = freezeFieldTable<string>({
   text: ["text", "readOnly", "maxLen", "fontInfo", "bkColor", "type", "borderStyle", "borderColor", "layoutStyle", "isShowBorder", "toolTipEnable", "toolTipText"],
   richtext: ["text", "readOnly", "fontInfo", "bkColor", "borderStyle", "borderColor", "scrollBar", "toolTipText", "toolTipEnable", "isShowBorder"],
   spacer: [],
@@ -116,27 +131,37 @@ export const CONTROL_TYPE_ALLOWED_FIELDS: Readonly<Record<string, readonly strin
   tag: ["closable", "disableTransitions", "hit", "effect", "addable"],
   timeline: ["reverse"],
   steps: ["active", "direction", "space", "processStatus", "finishStatus", "alignCenter", "simple"],
-  easyui: EASYUI_ALL_FIELDS,
+  easyui: AUTHORITATIVE_EASYUI_ALL_FIELDS,
   layout: ["children", "panels"],
-  prototype: PROTOTYPE_ALLOWED_FIELDS,
-};
+  prototype: AUTHORITATIVE_PROTOTYPE_ALLOWED_FIELDS,
+});
 
-export const PAGE_ALLOWED_FIELDS: readonly string[] = [
+const AUTHORITATIVE_PAGE_ALLOWED_FIELDS = freezeFields([
   "pageProperty", "pageViewWidth", "pageViewHeight", "version", "showLayer",
   "objectType", "linkMng", "variable", "dataSourceMng", "customProperty",
   "pagePrototype", "pageWindowInfo",
-];
+]);
 
-export const VARIABLE_ALLOWED_FIELDS: readonly string[] = [
+const AUTHORITATIVE_VARIABLE_ALLOWED_FIELDS = freezeFields([
   "name", "dataType", "comment", "defaultValue", "isMap",
-];
+]);
 
-const COMMON_CONTROL_SET = new Set(COMMON_CONTROL_ALLOWED_FIELDS);
-const PAGE_SET = new Set(PAGE_ALLOWED_FIELDS);
-const VARIABLE_SET = new Set(VARIABLE_ALLOWED_FIELDS);
-const TYPE_SETS = new Map<string, ReadonlySet<string>>(
-  Object.entries(CONTROL_TYPE_ALLOWED_FIELDS).map(([type, fields]) => [type, new Set(fields)]),
+/**
+ * Frozen compatibility views for historical imports. Each view is copied from
+ * the private policy so callers can neither mutate nor retain its references.
+ */
+export const EASYUI_PROTO_FIELDS = freezeFieldTable(AUTHORITATIVE_EASYUI_PROTO_FIELDS);
+export const EASYUI_ALL_FIELDS = freezeFields(AUTHORITATIVE_EASYUI_ALL_FIELDS);
+export const COMMON_CONTROL_ALLOWED_FIELDS = freezeFields(AUTHORITATIVE_COMMON_CONTROL_ALLOWED_FIELDS);
+export const PROTOTYPE_ALLOWED_FIELDS = freezeFields(AUTHORITATIVE_PROTOTYPE_ALLOWED_FIELDS);
+export const PROTOTYPE_ALLOWED_FIELDS_BY_NAME = freezeFieldTable(
+  AUTHORITATIVE_PROTOTYPE_ALLOWED_FIELDS_BY_NAME,
 );
+export const CONTROL_TYPE_ALLOWED_FIELDS = freezeFieldTable(
+  AUTHORITATIVE_CONTROL_TYPE_ALLOWED_FIELDS,
+);
+export const PAGE_ALLOWED_FIELDS = freezeFields(AUTHORITATIVE_PAGE_ALLOWED_FIELDS);
+export const VARIABLE_ALLOWED_FIELDS = freezeFields(AUTHORITATIVE_VARIABLE_ALLOWED_FIELDS);
 
 export type AllowlistKind = "control" | "page" | "variable";
 
@@ -167,22 +192,30 @@ export function nativeControlVariantForCapability(capabilityId: string): NativeC
 export function allowedFieldsFor(lookup: AllowlistLookup): ReadonlySet<string> {
   switch (lookup.kind) {
     case "page":
-      return PAGE_SET;
+      return new Set(AUTHORITATIVE_PAGE_ALLOWED_FIELDS);
     case "variable":
-      return VARIABLE_SET;
+      return new Set(AUTHORITATIVE_VARIABLE_ALLOWED_FIELDS);
     case "control": {
-      if (lookup.controlType === undefined) return COMMON_CONTROL_SET;
+      if (lookup.controlType === undefined) {
+        return new Set(AUTHORITATIVE_COMMON_CONTROL_ALLOWED_FIELDS);
+      }
       if (lookup.controlType === "easyui") {
-        const exact = lookup.easyuiProto === undefined ? undefined : EASYUI_PROTO_FIELDS[lookup.easyuiProto];
-        return new Set([...COMMON_CONTROL_SET, ...(exact ?? [])]);
+        const exact = lookup.easyuiProto === undefined
+          ? undefined
+          : AUTHORITATIVE_EASYUI_PROTO_FIELDS[lookup.easyuiProto];
+        return new Set([...AUTHORITATIVE_COMMON_CONTROL_ALLOWED_FIELDS, ...(exact ?? [])]);
       }
       if (lookup.controlType === "prototype") {
-        const exact = lookup.prototypeName === undefined ? undefined : PROTOTYPE_ALLOWED_FIELDS_BY_NAME[lookup.prototypeName];
-        return new Set([...COMMON_CONTROL_SET, ...(exact ?? [])]);
+        const exact = lookup.prototypeName === undefined
+          ? undefined
+          : AUTHORITATIVE_PROTOTYPE_ALLOWED_FIELDS_BY_NAME[lookup.prototypeName];
+        return new Set([...AUTHORITATIVE_COMMON_CONTROL_ALLOWED_FIELDS, ...(exact ?? [])]);
       }
-      const typeSet = TYPE_SETS.get(lookup.controlType);
-      if (typeSet === undefined) return COMMON_CONTROL_SET;
-      return new Set([...COMMON_CONTROL_SET, ...typeSet]);
+      const typeFields = AUTHORITATIVE_CONTROL_TYPE_ALLOWED_FIELDS[lookup.controlType];
+      return new Set([
+        ...AUTHORITATIVE_COMMON_CONTROL_ALLOWED_FIELDS,
+        ...(typeFields ?? []),
+      ]);
     }
   }
 }
