@@ -95,6 +95,22 @@ describe("control compiler — compiled scripts", () => {
     expect(links[1]).toEqual({ linkId: 200002, enable: false, script: "", name: "Error" });
   });
 
+  it("serializes distinct event groups in authoritative declaration order", () => {
+    const zed = scriptModule("zed", "const zed = 1;\n");
+    const alpha = scriptModule("alpha", "const alpha = 2;\n");
+    const out = compileButtonScripts({
+      ownerInstanceName: "Button1", capabilityId: "button", modules: [zed, alpha],
+      bindings: [
+        { id: "kf$binding:zed", ownerInstanceName: "Button1", kfEvent: "Zed", linkId: 200002,
+          phase: "event", scriptModuleIds: [zed.id], nativeActionIds: [] },
+        { id: "kf$binding:alpha", ownerInstanceName: "Button1", kfEvent: "Alpha", linkId: 200001,
+          phase: "event", scriptModuleIds: [alpha.id], nativeActionIds: [] },
+      ],
+    });
+    const links = (out.linkMng as { linkList: Array<Record<string, unknown>> }).linkList;
+    expect(links.map((link) => link.name)).toEqual(["Zed", "Alpha"]);
+  });
+
   it("uses configureData only for a capability that explicitly supports it", () => {
     const configure = scriptModule("configure", "Datagrid1.SetData([]);\n", "configure-data", "Datagrid1");
     const configureOutput = compileControl(build, {
@@ -197,6 +213,51 @@ describe("control compiler — compiled scripts", () => {
       expect(decodedModules(source).map((entry) => entry.body)).toEqual([existing, first.source]);
       expect(() => parse(source, { ecmaVersion: 2022 })).not.toThrow();
     }
+  });
+
+  it("replaces only validated compiler-owned event/configureData tails and preserves unrelated native bytes", () => {
+    const oldEvent = scriptModule("old-event", "const oldEvent = 1;\n");
+    const eventBinding = {
+      id: "kf$binding:replace-event", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
+      phase: "event" as const, scriptModuleIds: [oldEvent.id], nativeActionIds: [],
+    };
+    const first = compileButtonScripts({
+      ownerInstanceName: "Button1", capabilityId: "button", modules: [oldEvent], bindings: [eventBinding],
+    });
+    const firstLinks = (first.linkMng as { linkList: Array<Record<string, unknown>> }).linkList;
+    const event = firstLinks.find((link) => link.name === "onClick")!;
+    event.script = `legacyEvent();\n;\n${String(event.script)}`;
+    firstLinks.unshift({ action: "setVariable", variableId: "untouched", value: 1 });
+    const newEvent = scriptModule("new-event", "const newEvent = 2;\n");
+    const replaced = controlCompilerModule.serializeReviewedNativeInteractions(first, {
+      ownerInstanceName: "Button1", capabilityId: "button", modules: [newEvent],
+      bindings: [{ ...eventBinding, scriptModuleIds: [newEvent.id] }],
+    }, { ownerInstanceName: "Button1", capabilityId: "button" });
+    const replacedLinks = (replaced.linkMng as { linkList: Array<Record<string, unknown>> }).linkList;
+    expect(replacedLinks[0]).toEqual({ action: "setVariable", variableId: "untouched", value: 1 });
+    const replacedEvent = replacedLinks.find((link) => link.name === "onClick")!;
+    expect(String(replacedEvent.script)).toMatch(/^legacyEvent\(\);\n;\n/);
+    expect(decodedModules(String(replacedEvent.script)).map((entry) => entry.body)).toEqual([newEvent.source]);
+
+    const oldConfigure = scriptModule("old-configure", "Datagrid1.SetData([]);\n", "configure-data", "Datagrid1");
+    const datagrid = compileControl(build, {
+      id: "Datagrid1", type: "easyui", proto: 1, x: 0, y: 0, width: 320, height: 200,
+    }, ctx, {
+      ownerInstanceName: "Datagrid1", capabilityId: "easyui.1", modules: [oldConfigure], bindings: [],
+    });
+    datagrid.configureData = `legacyConfigure();\n;\n${String(datagrid.configureData)}`;
+    const newConfigure = scriptModule("new-configure", "Datagrid1.SetData([]);\n\n", "configure-data", "Datagrid1");
+    const configured = controlCompilerModule.serializeReviewedNativeInteractions(datagrid, {
+      ownerInstanceName: "Datagrid1", capabilityId: "easyui.1", modules: [newConfigure], bindings: [],
+    }, { ownerInstanceName: "Datagrid1", capabilityId: "easyui.1" });
+    expect(String(configured.configureData)).toMatch(/^legacyConfigure\(\);\n;\n/);
+    expect(decodedModules(String(configured.configureData)).map((entry) => entry.body)).toEqual([newConfigure.source]);
+
+    const removed = controlCompilerModule.serializeReviewedNativeInteractions(configured, {
+      ownerInstanceName: "Datagrid1", capabilityId: "easyui.1", modules: [], bindings: [],
+    }, { ownerInstanceName: "Datagrid1", capabilityId: "easyui.1" });
+    expect(removed.configureData).toBe("legacyConfigure();");
+    expect(decodedModules(String(removed.configureData))).toEqual([]);
   });
 });
 

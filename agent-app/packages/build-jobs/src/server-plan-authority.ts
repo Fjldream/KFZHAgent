@@ -107,8 +107,10 @@ export interface ModuleCompilationArtifactExpectations {
 
 declare const verifiedAcceptedBlueprintBrand: unique symbol;
 declare const verifiedModuleCompilationBrand: unique symbol;
+declare const verifiedCreativeMaterializationBrand: unique symbol;
 export type VerifiedAcceptedBlueprintArtifact = Readonly<{ readonly [verifiedAcceptedBlueprintBrand]: true }>;
 export type VerifiedModuleCompilationArtifact = Readonly<{ readonly [verifiedModuleCompilationBrand]: true }>;
+export type VerifiedCreativeMaterialization = Readonly<{ readonly [verifiedCreativeMaterializationBrand]: true }>;
 export interface ModuleArtifactAuthority {
   signModuleCompilation(input: Omit<ModuleCompilationArtifact, "signature">): ModuleCompilationArtifact;
   verifyModuleCompilation(input: unknown, expected?: ModuleCompilationArtifactExpectations): VerifiedModuleCompilationArtifact;
@@ -118,6 +120,23 @@ export interface ModuleArtifactAuthority {
 
 const acceptedBlueprintPayloads = new WeakMap<object, AcceptedBlueprintArtifact>();
 const moduleCompilationPayloads = new WeakMap<object, ModuleCompilationArtifact>();
+const verifiedCreativeMaterializations = new WeakMap<object, Readonly<{
+  plan: InternalChangePlan;
+  artifact: CreativeBuildArtifact;
+  materialization: TrustedNativeMaterialization;
+}>>();
+
+export function readVerifiedCreativeMaterialization(input: unknown): Readonly<{
+  plan: InternalChangePlan;
+  artifact: CreativeBuildArtifact;
+  materialization: TrustedNativeMaterialization;
+}> {
+  const payload = input !== null && typeof input === "object"
+    ? verifiedCreativeMaterializations.get(input)
+    : undefined;
+  if (payload === undefined) throw new Error("UNVERIFIED_CREATIVE_MATERIALIZATION");
+  return payload;
+}
 
 export function readVerifiedAcceptedBlueprintArtifact(input: unknown): AcceptedBlueprintArtifact {
   const payload = input !== null && typeof input === "object" ? acceptedBlueprintPayloads.get(input) : undefined;
@@ -254,7 +273,19 @@ function createHmacServerPlanAuthorityParts(key: Uint8Array): {
       if (supplied.length !== wanted.length || !timingSafeEqual(supplied, wanted)) {
         throw new Error("SERVER_PLAN_SIGNATURE_INVALID");
       }
-      return validateServerPlanEnvelopeData(parsed, expected);
+      const verified = validateServerPlanEnvelopeData(parsed, expected);
+      if (verified.plan.creative !== undefined) {
+        if (verified.creativeArtifact === undefined || verified.trustedNativeMaterialization === undefined) {
+          throw new Error("CREATIVE_MATERIALIZATION_INCOMPLETE");
+        }
+        deepFreezeJson(verified);
+        verifiedCreativeMaterializations.set(verified, Object.freeze({
+          plan: verified.plan,
+          artifact: verified.creativeArtifact,
+          materialization: verified.trustedNativeMaterialization,
+        }));
+      }
+      return verified;
     },
   });
   return Object.freeze({ authority, issuer: creativePayloadIssuer });

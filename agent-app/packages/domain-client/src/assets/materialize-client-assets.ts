@@ -21,6 +21,14 @@ export async function materializeClientAssets(input: {
   plan: unknown;
   assets: readonly DomainAssetInput[];
   maxAggregateBytes?: number;
+  /** HMAC-verified creative style assets. They are published, never treated as image-control rewrites. */
+  additionalVerifiedAssets?: readonly {
+    assetId: string; targetPath: string; mediaType: string; sha256: string; sizeBytes: number;
+  }[];
+  /** Verified semantic-to-runtime correlation for creative image bindings. */
+  creativeControlCorrelations?: readonly {
+    semanticControlId: string; instanceName: string; nativeGuid?: string;
+  }[];
   /** Deterministic race injection used only by filesystem security tests. */
   hooks?: {
     beforePublish?: () => Promise<void>;
@@ -37,11 +45,13 @@ export async function materializeClientAssets(input: {
   // Preserve legacy callers that have neither approved bytes nor an own binding
   // field without forcing their already-validated plan through the newer schema.
   // Use the descriptor so an untrusted accessor is never executed by this guard.
-  if (input.assets.length === 0 && !hasOwnDataAssetBindings(input.plan)) return;
+  if (input.assets.length === 0 && !hasOwnDataAssetBindings(input.plan)
+    && (input.additionalVerifiedAssets?.length ?? 0) === 0) return;
   const parsed = internalChangePlanSchema.safeParse(input.plan);
   if (!parsed.success) throw new Error(`invalid internal asset plan: ${parsed.error.issues[0]?.message ?? "schema mismatch"}`);
   const bindings = parsed.data.assetBindings ?? [];
-  if (bindings.length === 0) {
+  const additional = input.additionalVerifiedAssets ?? [];
+  if (bindings.length === 0 && additional.length === 0) {
     if (input.assets.length > 0) throw new Error("unreferenced build assets");
     return;
   }
@@ -64,14 +74,15 @@ export async function materializeClientAssets(input: {
     if (aggregate > maxAggregate) throw new Error("asset aggregate size exceeds materialization limit");
   }
 
-  const referenced = new Set(bindings.map((binding) => binding.assetId));
+  const referencedFacts = [...bindings, ...additional];
+  const referenced = new Set(referencedFacts.map((binding) => binding.assetId));
   for (const assetId of referenced) {
     if (!byAssetId.has(assetId)) throw new Error(`missing approved asset bytes: ${assetId}`);
   }
   for (const assetId of byAssetId.keys()) {
     if (!referenced.has(assetId)) throw new Error(`unreferenced build asset: ${assetId}`);
   }
-  for (const binding of bindings) {
+  for (const binding of referencedFacts) {
     const asset = byAssetId.get(binding.assetId)!;
     if (binding.targetPath !== asset.targetPath
       || binding.mediaType !== asset.mediaType
@@ -85,7 +96,10 @@ export async function materializeClientAssets(input: {
   const versionDir = await resolveVersionDirName(workspaceRoot);
   const versionRoot = versionDir === "." ? workspaceRoot : path.join(workspaceRoot, versionDir);
   const inspection = await inspectClientProject(input.workspaceRoot);
-  const rewrites = bindings.map((binding) => resolveBoundImage(binding, parsed.data.workspaceId, inspection, byAssetId.get(binding.assetId)!));
+  const creativeCorrelations = new Map(input.creativeControlCorrelations?.map((control) => [control.semanticControlId, control]) ?? []);
+  const rewrites = bindings.map((binding) => resolveBoundImage(
+    binding, parsed.data.workspaceId, inspection, byAssetId.get(binding.assetId)!, creativeCorrelations,
+  ));
   const beforePublish = input.hooks?.beforePublish;
   const afterStageBeforePublish = input.hooks?.afterStageBeforePublish;
   const publication = await publishAssets({
@@ -598,13 +612,15 @@ function resolveBoundImage(
   workspaceId: string,
   inspection: Awaited<ReturnType<typeof inspectClientProject>>,
   asset: DomainAssetInput,
+  creativeCorrelations: ReadonlyMap<string, { semanticControlId: string; instanceName: string; nativeGuid?: string }>,
 ): { binding: ChangePlanAssetBinding; guid: string; file: string; targetPath: string; runtimeSrc: string } {
-  const direct = inspection.index.controls[binding.entityId];
-  const derivedGuid = deriveGuid({ seed: workspaceId }, binding.entityId);
+  const correlation = creativeCorrelations.get(binding.controlId);
+  const direct = inspection.index.controls[correlation?.nativeGuid ?? binding.entityId];
+  const derivedGuid = deriveGuid({ seed: workspaceId }, correlation?.instanceName ?? binding.entityId);
   const derived = inspection.index.controls[derivedGuid];
   const control = direct ?? derived;
   if (control === undefined) throw new Error(`asset binding target image is missing: ${binding.entityId}`);
-  if (control.id !== binding.controlId) {
+  if (control.id !== (correlation?.instanceName ?? binding.controlId)) {
     throw new Error(`asset binding control identity mismatch: ${binding.entityId}`);
   }
   if (control.type !== "image" || control.capabilityId !== binding.capabilityId) {

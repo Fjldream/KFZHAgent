@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { DomainPack } from "@kf/contracts";
+import type { VerifiedCreativeMaterialization } from "@kf/build-jobs";
 import { compileClientProject } from "../compile/client-compiler.js";
 import { inspectClientProject } from "../inspect/client-inspector.js";
 import { ClientProjectIRSchema } from "../ir/client-project-ir.schema.js";
@@ -54,22 +55,31 @@ export function createKingClientDomainPack(options: {
       return { id: workspace.id, rootDir: workspace.rootDir, mode: "candidate" };
     },
 
-    async patch({ baseWorkspace, changePlan, expectedPlanHash, semanticOperations, assets, workRoot }) {
+    async patch({ baseWorkspace, changePlan, expectedPlanHash, semanticOperations, assets, creativeMaterialization, workRoot }) {
       const workspace = await applyClientPatch(baseWorkspace.rootDir, changePlan, {
         planHash: expectedPlanHash,
         ...(semanticOperations === undefined ? {} : { semanticOperations }),
         ...(assets === undefined ? {} : { assets }),
+        ...(creativeMaterialization === undefined ? {} : {
+          creativeMaterialization: creativeMaterialization as VerifiedCreativeMaterialization,
+        }),
         ...(workRoot === undefined ? {} : { workRoot }),
       });
       return { id: workspace.id, rootDir: workspace.rootDir, mode: "candidate" };
     },
 
-    async validate({ baseWorkspace, candidateWorkspace, changePlan, assets }) {
+    async validate({ baseWorkspace, candidateWorkspace, changePlan, assets, creativeMaterialization }) {
       return validateClientProject(
         baseWorkspace.rootDir,
         candidateWorkspace.rootDir,
         changePlan,
-        { skipRoundTrip: false, assetTargetPaths: assets?.map((asset) => asset.targetPath) ?? [] },
+        {
+          skipRoundTrip: false,
+          assetTargetPaths: assets?.map((asset) => asset.targetPath) ?? [],
+          ...(creativeMaterialization === undefined ? {} : {
+            creativeMaterialization: creativeMaterialization as VerifiedCreativeMaterialization,
+          }),
+        },
       );
     },
 

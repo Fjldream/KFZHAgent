@@ -3,7 +3,6 @@ import type {
   StoredArtifact,
 } from "@kf/artifact-storage";
 import type {
-  ChangePlanAssetBinding,
   DomainAssetInput,
   DomainPack,
   DomainWorkspace,
@@ -20,6 +19,8 @@ import {
   type TrustedSemanticOperation,
 } from "@kf/contracts";
 import type { ServerPlanAuthority } from "./server-plan-authority.js";
+import type { VerifiedCreativeMaterialization } from "./server-plan-authority.js";
+import { readVerifiedCreativeMaterialization } from "./server-plan-authority.js";
 import type { DomainRegistry } from "@kf/domain-registry";
 import { Prisma, type BuildJob, type PrismaClient } from "@prisma/client";
 import { Readable } from "node:stream";
@@ -64,6 +65,7 @@ export interface BuildExecutorDeps {
 export interface ResolvedStoredPlan {
   plan: InternalChangePlan;
   semanticOperations: readonly TrustedSemanticOperation[];
+  creativeMaterialization?: VerifiedCreativeMaterialization;
 }
 
 /**
@@ -82,7 +84,12 @@ export function resolveStoredPlan(
     if (verifier === undefined) throw new Error("server plan verifier is not configured");
     const envelope = verifier.verify(input, expected);
     if (envelope.plan.creative !== undefined) {
-      throw new Error("creative materializer is not configured; refusing legacy patch fallback");
+      readVerifiedCreativeMaterialization(envelope);
+      return {
+        plan: envelope.plan,
+        semanticOperations: envelope.semanticOperations,
+        creativeMaterialization: envelope as unknown as VerifiedCreativeMaterialization,
+      };
     }
     return { plan: envelope.plan, semanticOperations: envelope.semanticOperations };
   }
@@ -125,6 +132,14 @@ type AssetResolutionPrisma = {
   };
 };
 type AssetResolutionStorage = Pick<ArtifactStorage, "open">;
+interface AssetResolutionBinding {
+  readonly assetId: string;
+  readonly workspaceAssetId: string;
+  readonly targetPath: string;
+  readonly mediaType: string;
+  readonly sha256: string;
+  readonly sizeBytes: number;
+}
 
 /**
  * Resolves only signed compiler bindings. Public aliases are reversed before,
@@ -135,7 +150,7 @@ export async function resolveBuildAssets(input: {
   storage: AssetResolutionStorage;
   tenantId: string;
   workspaceId: string;
-  bindings: readonly ChangePlanAssetBinding[];
+  bindings: readonly AssetResolutionBinding[];
   maxAggregateBytes?: number;
 }): Promise<DomainAssetInput[]> {
   if (input.bindings.length === 0) return [];
@@ -195,6 +210,21 @@ export async function resolveBuildAssets(input: {
     });
   }
   return output;
+}
+
+function creativeAssetResolutionBindings(handle: VerifiedCreativeMaterialization | undefined): AssetResolutionBinding[] {
+  if (handle === undefined) return [];
+  const verified = readVerifiedCreativeMaterialization(handle);
+  const bindings = new Map<string, AssetResolutionBinding>();
+  for (const asset of verified.materialization.stylesData.flatMap((style) => style.approvedAssets)) {
+    const binding = { assetId: asset.assetId, ...asset.approvedAsset };
+    const prior = bindings.get(asset.assetId);
+    if (prior !== undefined && JSON.stringify(prior) !== JSON.stringify(binding)) {
+      throw new Error(`conflicting verified creative asset facts: ${asset.assetId}`);
+    }
+    bindings.set(asset.assetId, binding);
+  }
+  return [...bindings.values()];
 }
 
 function mediaTypeExtension(mediaType: string): "png" | "jpg" | "webp" | undefined {
@@ -318,6 +348,9 @@ export class BuildExecutor {
         candidateWorkspace: candidate.candidateWorkspace,
         changePlan: candidate.planInput,
         assets: candidate.assets,
+        ...(candidate.creativeMaterialization === undefined ? {} : {
+          creativeMaterialization: candidate.creativeMaterialization,
+        }),
       });
       if (report.status === "fail") {
         await heartbeat.stop();
@@ -451,6 +484,7 @@ export class BuildExecutor {
     candidateWorkspace: DomainWorkspace;
     planInput: InternalChangePlan;
     assets: readonly DomainAssetInput[];
+    creativeMaterialization?: VerifiedCreativeMaterialization;
     mode: string;
   }> {
     const resolved = resolveStoredPlan(plan.plan ?? {}, {
@@ -458,12 +492,23 @@ export class BuildExecutor {
       expectedRevisionId: job.baseRevisionId,
     }, this.#deps.serverPlanVerifier);
     const planInput = resolved.plan;
+    const creativeAssetBindings = creativeAssetResolutionBindings(resolved.creativeMaterialization);
+    const allAssetBindings = new Map<string, AssetResolutionBinding>();
+    for (const binding of [...(planInput.assetBindings ?? []), ...creativeAssetBindings]) {
+      const prior = allAssetBindings.get(binding.assetId);
+      if (prior !== undefined && (prior.workspaceAssetId !== binding.workspaceAssetId
+        || prior.targetPath !== binding.targetPath || prior.mediaType !== binding.mediaType
+        || prior.sha256 !== binding.sha256 || prior.sizeBytes !== binding.sizeBytes)) {
+        throw new Error(`conflicting signed asset binding: ${binding.assetId}`);
+      }
+      allAssetBindings.set(binding.assetId, binding);
+    }
     const assets = await resolveBuildAssets({
       prisma: this.#deps.prisma,
       storage: this.#deps.storage,
       tenantId: job.tenantId,
       workspaceId: job.workspaceId,
-      bindings: planInput.assetBindings ?? [],
+      bindings: [...allAssetBindings.values()],
     });
     const workRoot =
       this.#deps.workRoot === undefined ? {} : { workRoot: this.#deps.workRoot };
@@ -508,6 +553,9 @@ export class BuildExecutor {
           expectedPlanHash: job.planHash,
           semanticOperations: resolved.semanticOperations,
           assets,
+          ...(resolved.creativeMaterialization === undefined ? {} : {
+            creativeMaterialization: resolved.creativeMaterialization,
+          }),
           ...workRoot,
         });
         return {
@@ -515,6 +563,9 @@ export class BuildExecutor {
           candidateWorkspace,
           planInput,
           assets,
+          ...(resolved.creativeMaterialization === undefined ? {} : {
+            creativeMaterialization: resolved.creativeMaterialization,
+          }),
           mode: "compile",
         };
       } catch (error) {
@@ -540,6 +591,9 @@ export class BuildExecutor {
         expectedPlanHash: job.planHash,
         semanticOperations: resolved.semanticOperations,
         assets,
+        ...(resolved.creativeMaterialization === undefined ? {} : {
+          creativeMaterialization: resolved.creativeMaterialization,
+        }),
         ...workRoot,
       });
       return {
@@ -547,6 +601,9 @@ export class BuildExecutor {
         candidateWorkspace,
         planInput,
         assets,
+        ...(resolved.creativeMaterialization === undefined ? {} : {
+          creativeMaterialization: resolved.creativeMaterialization,
+        }),
         mode: "patch",
       };
     } catch (error) {

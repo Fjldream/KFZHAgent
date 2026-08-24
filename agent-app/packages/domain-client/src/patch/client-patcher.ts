@@ -6,6 +6,8 @@ import {
   ChangeEntityIdSchema,
   ComponentStyleSpecSchema,
   canonicalChangePlanHash,
+  canonicalServerHash,
+  nativeControlVariantForCapability,
   semanticPayloadHash,
   type ComponentStyleSpec,
   type DomainAssetInput,
@@ -13,14 +15,23 @@ import {
   type ThemeSpec,
   type TrustedSemanticOperation,
 } from "@kf/contracts";
+import {
+  readVerifiedCreativeMaterialization,
+  type VerifiedCreativeMaterialization,
+} from "@kf/build-jobs";
 import { z } from "zod";
 import { inspectClientProject, type EntityIndex, type InspectResult } from "../inspect/client-inspector.js";
 import { stableStringify, type ClientWorkspace } from "../compile/client-compiler.js";
 import { deriveGuid } from "../compile/guid-factory.js";
-import { compileAction, ensureChildGuids, normalizeNativeSizePolicy } from "../compile/control-compiler.js";
+import {
+  compileAction,
+  ensureChildGuids,
+  normalizeNativeSizePolicy,
+  serializeReviewedNativeInteractions,
+} from "../compile/control-compiler.js";
 import type { RestrictedAction } from "../ir/client-project-ir.js";
 import { RestrictedAction as RestrictedActionSchema } from "../ir/client-project-ir.schema.js";
-import { assertStyleCompilationAccepted, compileControlStyle } from "../style/style-engine.js";
+import { assertStyleCompilationAccepted, compileControlStyle, compileResolvedStyle } from "../style/style-engine.js";
 import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
 import { mergeManagedStyleData } from "../style/style-data-merge.js";
 import {
@@ -701,6 +712,8 @@ export interface ApplyPatchOptions {
   semanticOperations?: readonly TrustedSemanticOperation[];
   /** Verified worker-owned bytes for the signed internal asset bindings. */
   assets?: readonly DomainAssetInput[];
+  /** Opaque handle emitted only after the complete creative envelope passes HMAC verification. */
+  creativeMaterialization?: VerifiedCreativeMaterialization;
 }
 
 function hasTrustedTableOperation(
@@ -1756,6 +1769,242 @@ function assertPatchGeneratedGuidUniqueness(
   }
 }
 
+interface NamedControlRef {
+  parent: unknown[];
+  index: number;
+  root: Record<string, unknown>;
+}
+
+function findControlByInstanceName(node: unknown, instanceName: string): NamedControlRef | undefined {
+  if (Array.isArray(node)) {
+    for (let index = 0; index < node.length; index += 1) {
+      const value: unknown = node[index];
+      if (isObject(value)) {
+        const baseProperty = asRecord(value["baseProperty"]);
+        if (value["name"] === instanceName || baseProperty["name"] === instanceName) {
+          return { parent: node, index, root: value };
+        }
+      }
+      const nested = findControlByInstanceName(value, instanceName);
+      if (nested !== undefined) return nested;
+    }
+    return undefined;
+  }
+  if (!isObject(node)) return undefined;
+  for (const key of CONTROL_CONTAINER_KEYS) {
+    const nested = findControlByInstanceName(node[key], instanceName);
+    if (nested !== undefined) return nested;
+  }
+  return undefined;
+}
+
+function pageSizeInto(page: Record<string, unknown>, width: number, height: number): void {
+  page["pageViewWidth"] = width;
+  page["pageViewHeight"] = height;
+  const pageProperty = asRecord(page["pageProperty"]);
+  pageProperty["pageSize"] = { width, height };
+  pageProperty["windowSize"] = { width, height };
+}
+
+async function applyVerifiedCreativePatch(
+  base: string,
+  input: unknown,
+  options: ApplyPatchOptions,
+): Promise<ClientWorkspace> {
+  let verified: ReturnType<typeof readVerifiedCreativeMaterialization>;
+  try {
+    verified = readVerifiedCreativeMaterialization(options.creativeMaterialization);
+  } catch (error) {
+    throw new PatchConflictError("verified creative materialization is required", { cause: error });
+  }
+  if (canonicalChangePlanHash(verified.plan) !== canonicalChangePlanHash(input)) {
+    throw new PatchConflictError("verified creative materialization does not bind the supplied ChangePlan");
+  }
+  const { artifact, materialization } = verified;
+  const versionDir = await resolveVersionDirName(base);
+  const baseInspection = await inspectClientProject(base);
+  const candidate = await mkdtemp(path.join(options.workRoot ?? tmpdir(), "kf-client-candidate-"));
+  try {
+    await cp(base, candidate, { recursive: true });
+
+    // Stage 1: pages. New pages use the signed k-GUID and dimensions exactly;
+    // existing pages retain all other native fields.
+    const manager = await readJsonFile(candidate, versionDir, "project/pageManager.json");
+    const managerPages = Array.isArray(manager["Pages"])
+      ? manager["Pages"] as Array<Record<string, unknown>>
+      : [];
+    const firstGroupId: unknown = managerPages[0]?.["groupId"];
+    const defaultGroupId = typeof firstGroupId === "string"
+      ? firstGroupId
+      : baseInspection.summary.project.guid ?? "";
+    for (const page of materialization.pages) {
+      const existing = baseInspection.index.pages[page.pageGuid];
+      if (page.source === "uploaded-existing") {
+        if (existing === undefined) throw new PatchConflictError(`creative page correlation missing: ${page.semanticPageId}`);
+        const json = await readJsonFile(candidate, versionDir, existing.file);
+        pageSizeInto(json, page.width, page.height);
+        await writeJsonFile(candidate, versionDir, existing.file, json);
+        const entry = managerPages.find((value) => value["id"] === page.pageGuid);
+        if (entry === undefined) throw new PatchConflictError(`creative page manager correlation missing: ${page.semanticPageId}`);
+        entry["width"] = page.width;
+        entry["height"] = page.height;
+        entry["resolution"] = `${page.width} * ${page.height}`;
+        continue;
+      }
+      if (existing !== undefined || Object.values(baseInspection.index.pages).some((value) => value.name === page.semanticPageId)) {
+        throw new PatchConflictError(`creative page identity collision: ${page.semanticPageId}`);
+      }
+      if (/[\\/\0]/.test(page.semanticPageId)) throw new PatchConflictError(`unsafe creative page name: ${page.semanticPageId}`);
+      const json = structuredClone(pageSkeleton) as TemplateJson;
+      json["guid"] = page.pageGuid;
+      pageSizeInto(json, page.width, page.height);
+      const pageProperty = json["pageProperty"] as Record<string, unknown>;
+      pageProperty["name"] = page.semanticPageId;
+      json["objects"] = [];
+      json["pagePrototype"] = {
+        name: page.semanticPageId,
+        guid: page.pageGuid,
+        version: json["version"],
+        type: json["objectType"],
+      };
+      await writeJsonFile(candidate, versionDir, `project/page/${page.semanticPageId}.json`, json);
+      managerPages.push({
+        name: page.semanticPageId, description: "", height: page.height, width: page.width,
+        positionX: 0, positionY: 0, pageType: 0, state: true,
+        resolution: `${page.width} * ${page.height}`, id: page.pageGuid,
+        groupId: defaultGroupId, security: "", createtime: "", priority: "",
+        securitySection: "", user: "admin", resourceGroup: "", resourceGroupMsg: "",
+      });
+    }
+    await writeJsonFile(candidate, versionDir, "project/pageManager.json", manager);
+
+    // Rebuild the entity index after page creation, then create parents before children.
+    const pageInspection = await inspectClientProject(candidate);
+    const styleByControl = new Map(materialization.stylesData.map((style) => [style.semanticControlId, style]));
+    const newControls = materialization.controls
+      .filter((control) => control.source === "workspace-derived")
+      .slice().sort((left, right) => left.depth - right.depth || left.order - right.order);
+    const reservedGuids = new Map<string, string>();
+    for (const [guid, control] of Object.entries(baseInspection.index.controls)) reservedGuids.set(guid, control.id);
+    for (const control of newControls) {
+      const guid = deriveGuid({ seed: materialization.workspaceId }, control.instanceName);
+      const collision = reservedGuids.get(guid);
+      if (collision !== undefined) throw new PatchConflictError(`GENERATED_GUID_COLLISION: ${control.instanceName} collides with ${collision}`);
+      reservedGuids.set(guid, control.instanceName);
+      const styleNativeFields = new Set(Object.keys(styleByControl.get(control.semanticControlId)?.compiledStyle.nativeFields ?? {}));
+      const semanticNativeProperties = Object.fromEntries(
+        Object.entries(control.nativeProperties).filter(([key]) => !styleNativeFields.has(key)),
+      );
+      await applyCreate(candidate, versionDir, pageInspection, candidate, {
+        op: "create", entityType: "control", entityId: control.instanceName,
+        changes: [], destructiveConfirmed: false,
+        properties: {
+          pageId: control.pageGuid,
+          ...nativeControlVariantForCapability(control.capabilityId),
+          ...control.geometry,
+          ...(control.parentInstanceName === undefined ? {} : { parentId: control.parentInstanceName }),
+          ...semanticNativeProperties,
+          ...(control.content === undefined ? {} : { text: control.content }),
+        },
+      }, materialization.workspaceId, []);
+    }
+
+    // Stage 4: exact allowlisted existing deltas, then authoritative style/data.
+    for (const control of materialization.controls.filter((value) => value.source === "uploaded-existing")) {
+      const baseEntry = control.nativeGuid === undefined ? undefined : baseInspection.index.controls[control.nativeGuid];
+      if (baseEntry === undefined || baseEntry.name !== control.instanceName || baseEntry.pageGuid !== control.pageGuid) {
+        throw new PatchConflictError(`creative existing control correlation mismatch: ${control.semanticControlId}`);
+      }
+      await applyUpdate(candidate, versionDir, baseInspection, base, {
+        op: "update", entityType: "control", entityId: control.nativeGuid!, properties: {},
+        changes: (control.existingDeltas ?? []).map((delta) => ({ path: delta.path, value: structuredClone(delta.value) })),
+        destructiveConfirmed: false,
+      }, materialization.workspaceId, []);
+    }
+
+    for (const style of materialization.stylesData) {
+      const control = materialization.controls.find((entry) => entry.semanticControlId === style.semanticControlId)!;
+      const pageEntry = (await inspectClientProject(candidate)).index.pages[control.pageGuid];
+      if (pageEntry === undefined) throw new PatchConflictError(`creative style page missing: ${control.semanticPageId}`);
+      const doc = await readJsonFile(candidate, versionDir, pageEntry.file);
+      const ref = findControlByInstanceName(doc["objects"], control.instanceName);
+      if (ref === undefined) throw new PatchConflictError(`creative runtime control missing: ${control.semanticControlId}`);
+      const implementationControl = artifact.implementation.pages
+        .flatMap((page) => page.compatibility === "native" ? page.controls : [])
+        .find((entry) => entry.id === control.semanticControlId);
+      if (implementationControl === undefined) {
+        throw new PatchConflictError(`creative style provenance missing: ${control.semanticControlId}`);
+      }
+      const role = implementationControl.role;
+      const roleStyle = { ...style.structuredStyle, role };
+      const compiled = compileResolvedStyle({
+        componentId: control.semanticControlId, capabilityId: control.capabilityId,
+        theme: artifact.semanticPlan.theme, styleRole: role, roleStyle,
+        instanceOverride: { declarations: {}, states: {} },
+        approvedAssets: style.approvedAssets.map((asset) => asset.approvedAsset),
+        runtimeProfile: KF36_RUNTIME_PROFILE,
+      });
+      const signedCompiledStyle = {
+        nativeFields: compiled.nativeFields, cssFragments: compiled.cssFragments,
+        warnings: compiled.warnings.map((warning) => ({ code: warning.code, message: warning.message })),
+      };
+      if (canonicalServerHash(signedCompiledStyle) !== canonicalServerHash(style.compiledStyle)) {
+        throw new PatchConflictError(`creative compiled style mismatch: ${control.semanticControlId}`);
+      }
+      if (control.source === "workspace-derived") {
+        for (const [field, value] of Object.entries(control.nativeProperties)) ref.root[field] = structuredClone(value);
+        for (const [field, value] of Object.entries(style.compiledStyle.nativeFields)) ref.root[field] = structuredClone(value);
+        if (compiled.styleDataNew !== "") ref.root["styleDataNew"] = mergeManagedStyleData(ref.root["styleDataNew"], compiled.styleDataNew);
+        if (style.dataBinding?.records !== undefined) ref.root["data"] = structuredClone(style.dataBinding.records);
+      }
+      await writeJsonFile(candidate, versionDir, pageEntry.file, doc);
+    }
+
+    // Stage 5: actions and scripts share the reviewed serializer and only
+    // replace entries bearing valid compiler provenance for this owner.
+    const finalInspection = await inspectClientProject(candidate);
+    for (const control of materialization.controls) {
+      const actions = materialization.interactions.actions.filter((action) => action.ownerInstanceName === control.instanceName);
+      const modules = materialization.interactions.scripts.filter((module) => module.ownerInstanceName === control.instanceName);
+      const bindings = materialization.interactions.eventBindings.filter((binding) => binding.ownerInstanceName === control.instanceName);
+      const pageEntry = finalInspection.index.pages[control.pageGuid];
+      if (pageEntry === undefined) throw new PatchConflictError(`creative interaction page missing: ${control.semanticPageId}`);
+      const doc = await readJsonFile(candidate, versionDir, pageEntry.file);
+      const ref = findControlByInstanceName(doc["objects"], control.instanceName);
+      if (ref === undefined) throw new PatchConflictError(`creative interaction owner missing: ${control.semanticControlId}`);
+      if (actions.length === 0 && modules.length === 0 && bindings.length === 0
+        && !isObject(ref.root["linkMng"]) && typeof ref.root["configureData"] !== "string") continue;
+      const serialized = serializeReviewedNativeInteractions(ref.root, {
+        ownerInstanceName: control.instanceName,
+        capabilityId: control.capabilityId,
+        actions,
+        modules,
+        bindings,
+      }, { ownerInstanceName: control.instanceName, capabilityId: control.capabilityId });
+      ref.parent[ref.index] = serialized;
+      await writeJsonFile(candidate, versionDir, pageEntry.file, doc);
+    }
+
+    const creativeAssets = new Map(materialization.stylesData.flatMap((style) => style.approvedAssets)
+      .map((asset) => [asset.assetId, { assetId: asset.assetId, ...asset.approvedAsset }] as const));
+    await materializeClientAssets({
+      workspaceRoot: candidate,
+      plan: input,
+      assets: options.assets ?? [],
+      additionalVerifiedAssets: [...creativeAssets.values()],
+      creativeControlCorrelations: materialization.controls.map((control) => ({
+        semanticControlId: control.semanticControlId,
+        instanceName: control.instanceName,
+        ...(control.nativeGuid === undefined ? {} : { nativeGuid: control.nativeGuid }),
+      })),
+    });
+    return { id: materialization.workspaceId, rootDir: candidate, mode: "candidate", path: candidate };
+  } catch (error) {
+    await rm(candidate, { recursive: true, force: true });
+    throw error;
+  }
+}
+
 /**
  * Applies a confirmed change plan to `base` and returns a fresh candidate
  * workspace. `base` is never modified.
@@ -1771,6 +2020,12 @@ export async function applyClientPatch(
     if (actual !== options.planHash) {
       throw new PatchConflictError(`planHash mismatch (expected ${options.planHash}, got ${actual})`);
     }
+  }
+  const rawPlan = input !== null && typeof input === "object" && !Array.isArray(input)
+    ? input as Record<string, unknown>
+    : undefined;
+  if (rawPlan?.["creative"] !== undefined) {
+    return applyVerifiedCreativePatch(base, input, options ?? {});
   }
   const plan = normalizeChangePlan(input);
 

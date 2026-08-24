@@ -23,7 +23,7 @@ function stored(plan: ChangePlan, semanticOperations: TrustedSemanticOperationIn
 }
 
 describe("resolveStoredPlan", () => {
-  it("fails closed for a verified creative envelope until the creative materializer is wired", () => {
+  it("fails closed when a verifier implementation tries to forge a creative materialization result", () => {
     const creativePlan = {
       schema: "kf-change-plan/v1" as const,
       workspaceId: "w",
@@ -33,7 +33,7 @@ describe("resolveStoredPlan", () => {
     const verifier = { verify: () => ({ plan: creativePlan, semanticOperations: [] }) };
     expect(() => resolveStoredPlan({ schema: "kf-server-plan-envelope/v1" }, {
       expectedPlanHash: "c".repeat(64), expectedRevisionId: "rev-1",
-    }, verifier as never)).toThrow(/creative materializer/i);
+    }, verifier as never)).toThrow(/UNVERIFIED_CREATIVE_MATERIALIZATION/);
   });
 
   it.each([
@@ -179,7 +179,7 @@ describe("resolveBuildAssets", () => {
   ])("rejects tampered signed %s", async (_label, changes) => {
     await expect(resolveBuildAssets({
       ...dependencies(), tenantId: "tenant-a", workspaceId: "workspace-a",
-      bindings: [{ ...binding, ...changes } as ChangePlanAssetBinding],
+      bindings: [{ ...binding, ...changes }],
     })).rejects.toThrow(/signed|metadata|binding|target/i);
   });
 });

@@ -5,7 +5,7 @@ export {
   BuildJobConflictError,
   BuildJobLeaseError,
 } from "./build-job.service.js";
-export { BuildExecutor, BuildWorkerCrash } from "./job-executor.js";
+export { BuildExecutor, BuildWorkerCrash, resolveStoredPlan } from "./job-executor.js";
 export { graphBuildIdempotencyKey, buildJobBelongsToConversation } from "./build-idempotency.js";
 export {
   createHmacServerPlanAuthority,
@@ -21,6 +21,8 @@ export {
   type ModuleArtifactAuthority,
   type VerifiedAcceptedBlueprintArtifact,
   type VerifiedModuleCompilationArtifact,
+  type VerifiedCreativeMaterialization,
+  readVerifiedCreativeMaterialization,
   type AcceptedBlueprintArtifactExpectations,
   type ModuleCompilationArtifactExpectations,
 } from "./server-plan-authority.js";

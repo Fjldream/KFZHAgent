@@ -52,6 +52,8 @@ export interface DomainPatchInput {
   semanticOperations?: readonly TrustedSemanticOperation[];
   /** Worker-resolved private bytes. Neither storage keys nor internal UUIDs cross this boundary. */
   assets?: readonly DomainAssetInput[];
+  /** Server-issued opaque value; domain packs must reject forged/raw creative payloads. */
+  creativeMaterialization?: unknown;
   workRoot?: string;
 }
 
@@ -60,6 +62,8 @@ export interface DomainValidateInput {
   candidateWorkspace: DomainWorkspace;
   changePlan: unknown;
   assets?: readonly DomainAssetInput[];
+  /** Same verified opaque handle consumed by patch; never persisted as plan JSON. */
+  creativeMaterialization?: unknown;
 }
 
 export interface DomainAssetInput {

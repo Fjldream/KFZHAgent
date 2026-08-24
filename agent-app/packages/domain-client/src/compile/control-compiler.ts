@@ -67,8 +67,10 @@ import type { ControlIR, RestrictedAction, EasyuiControlIR, LayoutContainerIR } 
 import type { ThemeSpec } from "@kf/contracts";
 import {
   CompiledEventBindingSchema,
+  CompiledNativeActionSchema,
   CompiledScriptModuleSchema,
   type CompiledEventBinding,
+  type CompiledNativeAction,
   type CompiledScriptModule,
 } from "@kf/contracts";
 import { createHash } from "node:crypto";
@@ -129,6 +131,8 @@ export interface CompiledControlScriptSerialization {
   readonly capabilityId: string;
   readonly bindings: readonly CompiledEventBinding[];
   readonly modules: readonly CompiledScriptModule[];
+  /** Present only at the verified creative-materialization boundary. */
+  readonly actions?: readonly CompiledNativeAction[];
 }
 
 interface ExpectedCompiledControlScriptTarget {
@@ -333,7 +337,7 @@ export function compileControl(
     compiled = mergeControlTemplate(merged, applySchemaOverrides(build, control, ctx));
   }
   const styled = applyControlStyle(normalizeNativeSizePolicy(compiled), control);
-  return scripts === undefined ? styled : serializeCompiledControlScripts(styled, scripts, {
+  return scripts === undefined ? styled : serializeReviewedNativeInteractions(styled, scripts, {
     ownerInstanceName: control.id,
     capabilityId: capabilityIdForControl(control),
   });
@@ -394,6 +398,12 @@ function safeCloneScriptData(
   return result;
 }
 
+function asCompilerRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
 function appendScript(existing: string, additions: readonly string[]): string {
   let result = existing;
   for (const source of additions) {
@@ -426,8 +436,147 @@ function serializedCompiledModule(module: CompiledScriptModule, binding?: Compil
   return `${COMPILED_EVENT_MARKER}${Buffer.from(JSON.stringify(payload), "utf8").toString("base64url")}\n${module.source}`;
 }
 
+const COMPILED_ACTION_MARKER_SCHEMA = "kf-compiled-action/v1";
+
+interface CompiledActionMarker {
+  schema: typeof COMPILED_ACTION_MARKER_SCHEMA;
+  actionId: string;
+  sourceActionId: string;
+  ownerInstanceName: string;
+  kfEvent: string;
+  linkId: number | null;
+  phase: "event" | "after-event";
+}
+
+function parseCompiledActionMarker(input: unknown): CompiledActionMarker | undefined {
+  if (input === undefined) return undefined;
+  const record = input !== null && typeof input === "object" && !Array.isArray(input)
+    ? input as Record<string, unknown>
+    : undefined;
+  const expected = ["actionId", "kfEvent", "linkId", "ownerInstanceName", "phase", "schema", "sourceActionId"];
+  if (record === undefined || Object.keys(record).sort().join("\0") !== expected.join("\0")
+    || record["schema"] !== COMPILED_ACTION_MARKER_SCHEMA
+    || typeof record["actionId"] !== "string" || typeof record["sourceActionId"] !== "string"
+    || typeof record["ownerInstanceName"] !== "string" || typeof record["kfEvent"] !== "string"
+    || (record["linkId"] !== null && !Number.isInteger(record["linkId"]))
+    || (record["phase"] !== "event" && record["phase"] !== "after-event")) {
+    throw new ModelOutputInvalidError("compiler-owned action marker is malformed");
+  }
+  return record as unknown as CompiledActionMarker;
+}
+
+/**
+ * Compiler modules are always an ASI-delimited tail. Validate every marker and
+ * hash before removing that tail, leaving pre-existing product script bytes intact.
+ */
+function stripCompilerOwnedScriptTail(
+  source: string,
+  ownerInstanceName: string,
+  expected?: { placement: "event" | "configure-data"; kfEvent: string | null; linkId: number | null },
+): string {
+  if (!source.includes("kf-compiled-event/v1")) return source;
+  const bytes = Buffer.from(source, "utf8");
+  const marker = Buffer.from(COMPILED_EVENT_MARKER, "utf8");
+  const first = bytes.indexOf(marker);
+  if (first < 0 || (first > 0 && bytes.subarray(Math.max(0, first - 3), first).toString("utf8") !== "\n;\n")) {
+    throw new ModelOutputInvalidError("compiler marker boundary is malformed");
+  }
+  const legacyEnd = first === 0 ? 0 : first - 3;
+  let cursor = first;
+  while (cursor < bytes.length) {
+    if (bytes.indexOf(marker, cursor) !== cursor) throw new ModelOutputInvalidError("compiler module boundary is malformed");
+    const newline = bytes.indexOf(0x0a, cursor + marker.length);
+    if (newline < 0) throw new ModelOutputInvalidError("compiler marker has no body newline");
+    const encoded = bytes.subarray(cursor + marker.length, newline).toString("ascii");
+    if (!/^[A-Za-z0-9_-]+$/.test(encoded)) throw new ModelOutputInvalidError("compiler marker payload is not base64url");
+    let metadata: Record<string, unknown>;
+    try {
+      metadata = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as Record<string, unknown>;
+    } catch (error) {
+      throw new ModelOutputInvalidError("compiler marker payload is invalid JSON", { cause: error });
+    }
+    const expectedKeys = ["bodyByteLength", "bodySha256", "instanceReferences", "kfEvent", "linkId", "moduleId", "ownerInstanceName", "pageReferences", "phase", "placement", "schema", "sourceScriptId"];
+    const bodyLength = metadata["bodyByteLength"];
+    const bodyHash = metadata["bodySha256"];
+    if (Object.keys(metadata).sort().join("\0") !== expectedKeys.join("\0")
+      || metadata["schema"] !== "kf-compiled-event/v1" || typeof bodyLength !== "number"
+      || !Number.isInteger(bodyLength) || bodyLength < 1 || bodyLength > 128_000
+      || typeof bodyHash !== "string" || !/^[0-9a-f]{64}$/.test(bodyHash)
+      || metadata["ownerInstanceName"] !== ownerInstanceName) {
+      throw new ModelOutputInvalidError("compiler marker payload has an invalid owner/schema");
+    }
+    if (expected !== undefined && (metadata["placement"] !== expected.placement
+      || metadata["kfEvent"] !== expected.kfEvent || metadata["linkId"] !== expected.linkId
+      || (expected.placement === "configure-data"
+        ? metadata["phase"] !== null
+        : metadata["phase"] !== "event" && metadata["phase"] !== "after-event"))) {
+      throw new ModelOutputInvalidError("compiler-owned event identity mismatch");
+    }
+    const bodyStart = newline + 1;
+    const bodyEnd = bodyStart + bodyLength;
+    if (bodyEnd > bytes.length) throw new ModelOutputInvalidError("compiled script bodyByteLength exceeds field bytes");
+    const body = bytes.subarray(bodyStart, bodyEnd).toString("utf8");
+    if (Buffer.byteLength(body, "utf8") !== bodyLength
+      || createHash("sha256").update(body, "utf8").digest("hex") !== bodyHash) {
+      throw new ModelOutputInvalidError("compiled script hash mismatch");
+    }
+    const parsedModule = CompiledScriptModuleSchema.safeParse({
+      id: metadata["moduleId"], sourceScriptId: metadata["sourceScriptId"],
+      placement: metadata["placement"], ownerInstanceName: metadata["ownerInstanceName"],
+      instanceReferences: metadata["instanceReferences"], pageReferences: metadata["pageReferences"],
+      source: body, sourceHash: metadata["bodySha256"],
+    });
+    if (!parsedModule.success) throw new ModelOutputInvalidError("compiler marker references are invalid", { cause: parsedModule.error });
+    const canonical = {
+      schema: "kf-compiled-event/v1", moduleId: parsedModule.data.id,
+      sourceScriptId: parsedModule.data.sourceScriptId, bodySha256: parsedModule.data.sourceHash,
+      bodyByteLength: Buffer.byteLength(body, "utf8"), ownerInstanceName: parsedModule.data.ownerInstanceName,
+      placement: parsedModule.data.placement, kfEvent: metadata["kfEvent"], linkId: metadata["linkId"],
+      phase: metadata["phase"],
+      instanceReferences: [...parsedModule.data.instanceReferences].sort((left, right) => left.semanticId.localeCompare(right.semanticId, "en-US")),
+      pageReferences: [...parsedModule.data.pageReferences].sort((left, right) => left.semanticId.localeCompare(right.semanticId, "en-US")),
+    };
+    if (Buffer.from(JSON.stringify(canonical), "utf8").toString("base64url") !== encoded) {
+      throw new ModelOutputInvalidError("compiler marker payload is not canonical");
+    }
+    if (bodyEnd === bytes.length) cursor = bodyEnd;
+    else if (bytes.subarray(bodyEnd, bodyEnd + 3).toString("utf8") === "\n;\n") cursor = bodyEnd + 3;
+    else throw new ModelOutputInvalidError("compiler module boundary is malformed");
+  }
+  return bytes.subarray(0, legacyEnd).toString("utf8");
+}
+
+function serializeCompiledNativeAction(
+  action: CompiledNativeAction,
+  binding: CompiledEventBinding,
+): Record<string, unknown> {
+  if (action.ownerInstanceName !== binding.ownerInstanceName) {
+    throw new ModelOutputInvalidError(`compiled action owner mismatch: ${action.id}`);
+  }
+  if (action.kind !== "navigate-page") {
+    throw new ModelOutputInvalidError(`native action kind lacks reviewed KF 3.6 serialization: ${action.kind}`);
+  }
+  const marker: CompiledActionMarker = {
+    schema: COMPILED_ACTION_MARKER_SCHEMA,
+    actionId: action.id,
+    sourceActionId: action.sourceActionId,
+    ownerInstanceName: action.ownerInstanceName,
+    kfEvent: binding.kfEvent,
+    linkId: binding.linkId ?? null,
+    phase: binding.phase,
+  };
+  return {
+    action: "navigatePage",
+    pageId: action.targetPageGuid,
+    ...(binding.linkId === undefined ? {} : { linkId: binding.linkId }),
+    enable: true,
+    name: binding.kfEvent,
+    kfCompilerAction: marker,
+  };
+}
+
 /** Serializes compiler-owned script modules into the two reviewed KF 3.6 script fields. */
-function serializeCompiledControlScripts(
+export function serializeReviewedNativeInteractions(
   compiledControl: TemplateJson,
   serialization: CompiledControlScriptSerialization,
   expectedTarget: ExpectedCompiledControlScriptTarget,
@@ -440,7 +589,9 @@ function serializeCompiledControlScripts(
   }
   const serializationRecord = clonedSerialization as Record<string, unknown>;
   const expectedRecord = clonedExpected as Record<string, unknown>;
-  const expectedKeys = ["bindings", "capabilityId", "modules", "ownerInstanceName"];
+  const expectedKeys = serializationRecord["actions"] === undefined
+    ? ["bindings", "capabilityId", "modules", "ownerInstanceName"]
+    : ["actions", "bindings", "capabilityId", "modules", "ownerInstanceName"];
   if (Object.keys(serializationRecord).sort().length !== expectedKeys.length
     || Object.keys(serializationRecord).sort().some((key, index) => key !== expectedKeys[index])
     || Object.keys(expectedRecord).sort().join("\0") !== "capabilityId\0ownerInstanceName") {
@@ -450,15 +601,19 @@ function serializeCompiledControlScripts(
   const capabilityId = serializationRecord["capabilityId"];
   const rawModules = serializationRecord["modules"];
   const rawBindings = serializationRecord["bindings"];
+  const rawActions = serializationRecord["actions"];
   const expectedOwner = expectedRecord["ownerInstanceName"];
   const expectedCapability = expectedRecord["capabilityId"];
   if (typeof ownerInstanceName !== "string" || typeof capabilityId !== "string" || !Array.isArray(rawModules) || !Array.isArray(rawBindings)
+    || (rawActions !== undefined && !Array.isArray(rawActions))
     || typeof expectedOwner !== "string" || typeof expectedCapability !== "string") {
     throw new ModelOutputInvalidError("script serialization fields have invalid types");
   }
   if (ownerInstanceName !== expectedOwner) throw new ModelOutputInvalidError("script serialization owner does not match the authoritative control owner");
   if (capabilityId !== expectedCapability) throw new ModelOutputInvalidError("script serialization capability does not match the authoritative control capability");
-  if (rawModules.length > 200 || rawBindings.length > 32) throw new ModelOutputInvalidError("script serialization capacity exceeded");
+  if (rawModules.length > 200 || rawBindings.length > 32 || (Array.isArray(rawActions) && rawActions.length > 32)) {
+    throw new ModelOutputInvalidError("script serialization capacity exceeded");
+  }
   const modules = rawModules.map((module, index) => {
     const parsed = CompiledScriptModuleSchema.safeParse(safeCloneScriptData(module, `modules.${index}`));
     if (!parsed.success) throw new ModelOutputInvalidError(`invalid compiled script module: ${parsed.error.issues[0]?.message}`, { cause: parsed.error });
@@ -475,6 +630,16 @@ function serializeCompiledControlScripts(
     if (parsed.data.ownerInstanceName !== ownerInstanceName) throw new ModelOutputInvalidError(`compiled binding owner mismatch: ${parsed.data.id}`);
     return parsed.data;
   });
+  const actions = rawActions === undefined ? undefined : rawActions.map((action, index) => {
+    const parsed = CompiledNativeActionSchema.safeParse(safeCloneScriptData(action, `actions.${index}`));
+    if (!parsed.success) throw new ModelOutputInvalidError(`invalid compiled native action: ${parsed.error.issues[0]?.message}`, { cause: parsed.error });
+    if (parsed.data.ownerInstanceName !== ownerInstanceName) throw new ModelOutputInvalidError(`compiled action owner mismatch: ${parsed.data.id}`);
+    return parsed.data;
+  });
+  const actionById = new Map((actions ?? []).map((action) => [action.id, action]));
+  if (actionById.size !== (actions?.length ?? 0)) throw new ModelOutputInvalidError("duplicate compiled native action id");
+  const referencedActions = new Set<string>();
+  const referencedEventModules = new Set<string>();
   const phaseKeys = new Set<string>();
   for (const binding of bindings) {
     const key = `${binding.kfEvent}\u0000${binding.linkId ?? ""}\u0000${binding.phase}`;
@@ -484,19 +649,52 @@ function serializeCompiledControlScripts(
       const module = moduleById.get(id);
       if (module === undefined) throw new ModelOutputInvalidError(`missing compiled script module: ${id}`);
       if (module.placement !== "event") throw new ModelOutputInvalidError(`event binding references configureData module: ${id}`);
+      if (referencedEventModules.has(id)) throw new ModelOutputInvalidError(`compiled event module has multiple bindings: ${id}`);
+      referencedEventModules.add(id);
+    }
+    if (actions !== undefined) for (const id of binding.nativeActionIds) {
+      if (!actionById.has(id)) throw new ModelOutputInvalidError(`missing compiled native action: ${id}`);
+      if (referencedActions.has(id)) throw new ModelOutputInvalidError(`compiled native action has multiple bindings: ${id}`);
+      referencedActions.add(id);
     }
   }
+  if (modules.some((module) => module.placement === "event" && !referencedEventModules.has(module.id))) {
+    throw new ModelOutputInvalidError("orphan compiled event module");
+  }
+  if (actions?.some((action) => !referencedActions.has(action.id)) === true) {
+    throw new ModelOutputInvalidError("orphan compiled native action");
+  }
   const result = safeCloneScriptData(compiledControl, "compiledControl") as TemplateJson;
-  if (result["name"] !== expectedOwner) throw new ModelOutputInvalidError("compiled control owner does not match the authoritative script owner");
+  const actualOwner = result["name"] ?? asCompilerRecord(result["baseProperty"])["name"];
+  if (actualOwner !== expectedOwner) throw new ModelOutputInvalidError("compiled control owner does not match the authoritative script owner");
   const rawLinkMng = result["linkMng"];
   if (rawLinkMng === null || typeof rawLinkMng !== "object" || Array.isArray(rawLinkMng)) throw new ModelOutputInvalidError("compiled control linkMng must be an object");
   const linkMng = rawLinkMng as TemplateJson;
   const rawLinks = linkMng["linkList"];
   if (!Array.isArray(rawLinks)) throw new ModelOutputInvalidError("compiled control linkMng.linkList must be an array");
-  const links = rawLinks.map((link, index) => {
+  const links = rawLinks.flatMap((link, index) => {
     if (link === null || typeof link !== "object" || Array.isArray(link)) throw new ModelOutputInvalidError(`compiled control linkMng.linkList.${index} must be an object`);
-    return link as Record<string, unknown>;
+    const record = link as Record<string, unknown>;
+    const actionMarker = parseCompiledActionMarker(record["kfCompilerAction"]);
+    if (actionMarker !== undefined) {
+      if (actionMarker.ownerInstanceName !== ownerInstanceName) throw new ModelOutputInvalidError("compiler-owned action owner mismatch");
+      return [];
+    }
+    if (typeof record["script"] === "string" && record["script"].includes("kf-compiled-event/v1")) {
+      const legacy = stripCompilerOwnedScriptTail(record["script"], ownerInstanceName, {
+        placement: "event",
+        kfEvent: typeof record["name"] === "string" ? record["name"] : null,
+        linkId: typeof record["linkId"] === "number" ? record["linkId"] : null,
+      });
+      return [{ ...record, script: legacy }];
+    }
+    return [record];
   });
+  if (actions !== undefined) for (const binding of bindings) {
+    for (const actionId of binding.nativeActionIds) {
+      links.push(serializeCompiledNativeAction(actionById.get(actionId)!, binding));
+    }
+  }
   const eventGroups = new Map<string, CompiledEventBinding[]>();
   for (const binding of bindings) {
     const key = `${binding.kfEvent}\u0000${binding.linkId ?? ""}`;
@@ -504,7 +702,7 @@ function serializeCompiledControlScripts(
     group.push(binding);
     eventGroups.set(key, group);
   }
-  for (const [, group] of [...eventGroups].sort(([left], [right]) => left.localeCompare(right, "en-US"))) {
+  for (const [, group] of eventGroups) {
     group.sort((left, right) => (left.phase === right.phase ? 0 : left.phase === "event" ? -1 : 1));
     const first = group[0]!;
     const sources = group.flatMap((binding) => binding.scriptModuleIds.map((id) => serializedCompiledModule(moduleById.get(id)!, binding)));
@@ -527,7 +725,9 @@ function serializeCompiledControlScripts(
         ...current,
         ...(first.linkId === undefined ? {} : { linkId: first.linkId }),
         enable: true,
-        script: appendScript(existing ?? "", sources),
+        script: appendScript(stripCompilerOwnedScriptTail(existing ?? "", ownerInstanceName, {
+          placement: "event", kfEvent: first.kfEvent, linkId: first.linkId ?? null,
+        }), sources),
         name: first.kfEvent,
       };
       if (String(links[index]["script"]).length > 32_000) throw new ModelOutputInvalidError(`compiled event script exceeds 32000 characters: ${first.kfEvent}`);
@@ -554,9 +754,15 @@ function serializeCompiledControlScripts(
     }
     const existing = result["configureData"];
     if (typeof existing !== "string") throw new ModelOutputInvalidError("compiled control configureData must be a string");
-    const configured = appendScript(existing, configureModules.map((module) => serializedCompiledModule(module)));
+    const configured = appendScript(stripCompilerOwnedScriptTail(existing, ownerInstanceName, {
+      placement: "configure-data", kfEvent: null, linkId: null,
+    }), configureModules.map((module) => serializedCompiledModule(module)));
     if (configured.length > 32_000) throw new ModelOutputInvalidError("compiled configureData exceeds 32000 characters");
     result["configureData"] = configured;
+  } else if (typeof result["configureData"] === "string" && result["configureData"].includes("kf-compiled-event/v1")) {
+    result["configureData"] = stripCompilerOwnedScriptTail(result["configureData"], ownerInstanceName, {
+      placement: "configure-data", kfEvent: null, linkId: null,
+    });
   }
   return result;
 }
