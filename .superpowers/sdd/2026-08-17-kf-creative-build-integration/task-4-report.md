@@ -195,3 +195,68 @@ Final result: all three typechecks and lints passed; `git diff --check` passed w
 ### Residual risk after Round 1
 
 No blocking concern. Exact creative validation intentionally performs a second materialization into a temporary expected workspace, trading validation cost for a byte-exact trust boundary. Native action kinds beyond the Task 2-evidenced `navigate-page` representation remain fail-closed pending equivalent KF 3.6 evidence. The five skipped domain-client tests remain pre-existing optional golden-reference tests.
+
+---
+
+## Review Round 2 fixes (2026-08-24)
+
+### Outcome and architecture changes
+
+Both Round 1 review findings were addressed without changing the creative trust boundary, public/model `ChangePlan` mutation vocabulary, or Task 5/6 graph and rollout paths.
+
+- The shared reviewed interaction serializer now constructs each same-event/link effect stream directly from authoritative binding order. Native action IDs retain their declared array order; a binding's actions precede its scripts, matching the existing combined-binding contract; adjacent script effects share the one KF script slot. Both `event-script -> after-event action` and `event-action -> after-event script` therefore retain their exact declared order. A script/action/script stream would require two native script slots, so it fails closed with `UNREPRESENTABLE_KF_EVENT_EFFECT_ORDER` including the native event and link ID.
+- Creative native patching now owns a per-page in-memory batch from the page stage through interactions. Each materialized page is loaded or initialized once, traversed once to build runtime name/GUID and absolute-origin indexes, incrementally indexed as parents and children are created, mutated in the required stage order, and flushed once. Existing-control deltas resolve through the cached GUID index; styles/data and interactions resolve through the cached name index. Interaction serialization updates only the reviewed serializer-owned `linkMng` and `configureData` fields in place, preventing a parent control clone from invalidating indexed descendants. Signed sibling z-order runs after interactions and before the single flush.
+- Creative validation now builds one raw-control name index while performing the one per-page DFS used for signed sibling-order validation, then reuses that index for every signed control's geometry, style/data, interaction, and delta checks. Exact-candidate scope still deliberately rematerializes once, but that rematerialization uses the same bounded per-page batches.
+- Counting-only patch/validator instrumentation proves the behavior rather than inspecting source text. The scale fixture exercises the executable pipeline's 1,000-control input limit, plus a separate uploaded-existing update path; both observe exactly one load/index/flush per materialized page and exactly one validator raw-page index per materialized page.
+
+### Round 2 files
+
+- `agent-app/packages/domain-client/src/compile/control-compiler.ts`
+- `agent-app/packages/domain-client/src/compile/control-compiler.test.ts`
+- `agent-app/packages/domain-client/src/patch/client-patcher.ts`
+- `agent-app/packages/domain-client/src/patch/creative-native-materializer.test.ts`
+- `agent-app/packages/domain-client/src/validate/client-validator.ts`
+- `.superpowers/sdd/2026-08-17-kf-creative-build-integration/task-4-report.md`
+
+### Round 2 TDD evidence
+
+- Mixed-phase RED: the two same-event/link direction cases showed the `event` script moving after the `after-event` action, and the impossible script/action/script case did not reject. After linearizing effects by binding order and adding the specific representability guard, the control-compiler focused suite passed 43 tests with 3 skipped at that boundary.
+- Page-batch RED: the first 256-control behavior test observed zero instrumentation callbacks because the patcher had no true page batch boundary. After the refactor it observed `{ loads: 2, indexes: 2, flushes: 2 }`, and validation observed two page indexes for two pages.
+- Scale calibration: attempting all 5,000 materialization controls hit the upstream interaction-input schema limit of 1,000 controls; the first 1,000-control fixture then hit the independent reviewed script-context node budget because it embedded the entire plan. The final scale fixture removes the unrelated script action while retaining the full signed compile/materialize/patch/validate path at the executable 1,000-control schema boundary.
+- Uploaded-existing coverage separately proves the same two-page `2/2/2` patch counts and two validator indexes while applying exact existing deltas and authoritative style/data/interactions.
+
+Focused final command (run from `agent-app` with bundled Node):
+
+```sh
+/Users/fengjinlong/.nvm/versions/node/v22.14.0/bin/node /Users/fengjinlong/.nvm/versions/node/v22.14.0/lib/node_modules/corepack/dist/corepack.js pnpm --filter @kf/domain-client exec vitest run src/compile/control-compiler.test.ts src/patch/creative-native-materializer.test.ts
+```
+
+Result: 2 files passed; 55 tests passed, 3 skipped.
+
+Full package commands:
+
+```sh
+/Users/fengjinlong/.nvm/versions/node/v22.14.0/bin/node /Users/fengjinlong/.nvm/versions/node/v22.14.0/lib/node_modules/corepack/dist/corepack.js pnpm --filter @kf/contracts test
+/Users/fengjinlong/.nvm/versions/node/v22.14.0/bin/node /Users/fengjinlong/.nvm/versions/node/v22.14.0/lib/node_modules/corepack/dist/corepack.js pnpm --filter @kf/build-jobs test
+/Users/fengjinlong/.nvm/versions/node/v22.14.0/bin/node /Users/fengjinlong/.nvm/versions/node/v22.14.0/lib/node_modules/corepack/dist/corepack.js pnpm --filter @kf/domain-client test
+```
+
+Results: contracts 18 files/480 tests passed; build-jobs 4 files/66 tests passed; domain-client 62 files/1244 passed and 5 skipped.
+
+Typecheck/lint commands used the same bundled Node/Corepack prefix:
+
+```sh
+pnpm --filter @kf/contracts typecheck
+pnpm --filter @kf/build-jobs typecheck
+pnpm --filter @kf/domain-client typecheck
+pnpm --filter @kf/contracts lint
+pnpm --filter @kf/build-jobs lint
+pnpm --filter @kf/domain-client lint
+git diff --check
+```
+
+Final result: all three typechecks and lints passed; `git diff --check` passed with no output.
+
+### Residual risk after Round 2
+
+No blocking concern. The creative materialization contract can describe up to 5,000 controls, but the current end-to-end interaction input contract intentionally caps an executable plan at 1,000 controls; the counting regression therefore runs at the actual pipeline boundary. Exact validation still performs one additional batched materialization to preserve byte-exact scope verification. Asset publication retains its independent pinned-file, rollback-safe page rewrite path, which is already batched per bound page. Native actions beyond the Task 2-evidenced `navigate-page` form continue to fail closed.

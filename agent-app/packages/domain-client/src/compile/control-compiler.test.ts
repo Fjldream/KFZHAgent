@@ -145,6 +145,57 @@ describe("control compiler — compiled scripts", () => {
       .toEqual(["script:First", "action:second-a", "action:second-b", "action:third", "script:Third"]);
   });
 
+  it.each([
+    ["script then action", true, ["script:event-script", "action:after-action"]],
+    ["action then script", false, ["action:event-action", "script:after-script"]],
+  ] as const)("preserves exact same-slot mixed-phase order: %s", (_label, scriptFirst, expected) => {
+    const eventScript = scriptModule(scriptFirst ? "event-script" : "after-script", "const phase = 1;\n");
+    const eventAction = nativeNavigate(scriptFirst ? "after-action" : "event-action");
+    const bindings = scriptFirst ? [
+      { id: "kf$binding:event-script", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
+        phase: "event" as const, scriptModuleIds: [eventScript.id], nativeActionIds: [] },
+      { id: "kf$binding:after-action", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
+        phase: "after-event" as const, scriptModuleIds: [], nativeActionIds: [eventAction.id] },
+    ] : [
+      { id: "kf$binding:event-action", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
+        phase: "event" as const, scriptModuleIds: [], nativeActionIds: [eventAction.id] },
+      { id: "kf$binding:after-script", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
+        phase: "after-event" as const, scriptModuleIds: [eventScript.id], nativeActionIds: [] },
+    ];
+    const out = controlCompilerModule.serializeReviewedNativeInteractions(
+      compileControl(build, buttonControl, ctx),
+      { ownerInstanceName: "Button1", capabilityId: "button", modules: [eventScript], actions: [eventAction], bindings },
+      { ownerInstanceName: "Button1", capabilityId: "button" },
+    );
+    const effects = (out.linkMng as { linkList: Array<Record<string, unknown>> }).linkList
+      .filter((link) => link["name"] === "onClick")
+      .map((link) => {
+        const marker = link["kfCompilerAction"] as Record<string, unknown> | undefined;
+        if (marker !== undefined) return `action:${String(marker["sourceActionId"])}`;
+        return `script:${String(decodedModules(String(link["script"]))[0]?.metadata["moduleId"]).replace("kf$script:", "")}`;
+      });
+    expect(effects).toEqual(expected);
+  });
+
+  it("fails closed when one KF event slot cannot represent declared script-action-script order", () => {
+    const before = scriptModule("before", "const before = 1;\n");
+    const after = scriptModule("after", "const after = 1;\n");
+    const action = nativeNavigate("middle");
+    expect(() => controlCompilerModule.serializeReviewedNativeInteractions(
+      compileControl(build, buttonControl, ctx),
+      {
+        ownerInstanceName: "Button1", capabilityId: "button", modules: [before, after], actions: [action],
+        bindings: [
+          { id: "kf$binding:event", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
+            phase: "event", scriptModuleIds: [before.id], nativeActionIds: [] },
+          { id: "kf$binding:after", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
+            phase: "after-event", scriptModuleIds: [after.id], nativeActionIds: [action.id] },
+        ],
+      },
+      { ownerInstanceName: "Button1", capabilityId: "button" },
+    )).toThrow(/UNREPRESENTABLE_KF_EVENT_EFFECT_ORDER.*onClick.*200001/);
+  });
+
   it("rejects native action references without an authoritative actions table", () => {
     expect(() => compileButtonScripts({
       ownerInstanceName: "Button1", capabilityId: "button", modules: [], bindings: [{

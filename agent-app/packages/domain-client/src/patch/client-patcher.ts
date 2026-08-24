@@ -714,6 +714,14 @@ export interface ApplyPatchOptions {
   assets?: readonly DomainAssetInput[];
   /** Opaque handle emitted only after the complete creative envelope passes HMAC verification. */
   creativeMaterialization?: VerifiedCreativeMaterialization;
+  /** Counting-only observer for bounded creative page batching tests. */
+  creativeInstrumentation?: CreativePageInstrumentation;
+}
+
+export interface CreativePageInstrumentation {
+  onPageLoad?(pageGuid: string, file: string): void;
+  onPageIndex?(pageGuid: string, file: string): void;
+  onPageFlush?(pageGuid: string, file: string): void;
 }
 
 function hasTrustedTableOperation(
@@ -876,11 +884,14 @@ async function entityRootOf(
   rootDir: string,
   versionDir: string,
   loc: EntityLocation,
+  creativeBatch?: CreativePageBatch,
 ): Promise<{ doc: Record<string, unknown>; root: Record<string, unknown>; ref: EntityRef | undefined }> {
-  const doc = await readJsonFile(rootDir, versionDir, loc.file);
+  const doc = creativeBatch === undefined
+    ? await readJsonFile(rootDir, versionDir, loc.file)
+    : creativeBatch.doc;
   const ref =
     loc.kind === "control" && loc.guid !== undefined
-      ? findControlRef(doc, loc.guid)
+      ? creativeBatch === undefined ? findControlRef(doc, loc.guid) : creativeBatch.byGuid.get(loc.guid)
       : loc.kind === "variable" && loc.name !== undefined
         ? findVariableRef(doc, loc.name)
         : undefined;
@@ -910,9 +921,10 @@ async function applyUpdate(
   op: NormalizedOperation,
   workspaceId: string,
   semanticOperations: readonly TrustedSemanticOperation[],
+  creativeBatch?: CreativePageBatch,
 ): Promise<void> {
   const loc = await locateEntity(baseRoot, inspection.index, versionDir, op.entityId, op.entityType);
-  const { doc, root } = await entityRootOf(candidate, versionDir, loc);
+  const { doc, root } = await entityRootOf(candidate, versionDir, loc, creativeBatch);
   // KF 特殊节点：prototypeName 从候选节点读取（决定几何路径映射，
   // 例如 CustomCharts 几何在 pageProperty.pagePos/pageSize）。
   const prototypeName =
@@ -1033,7 +1045,8 @@ async function applyUpdate(
     }
     setByTokens(root, parseJsonPointer(resolvedPath), value);
   }
-  await writeJsonFile(candidate, versionDir, loc.file, doc);
+  if (creativeBatch === undefined) await writeJsonFile(candidate, versionDir, loc.file, doc);
+  else creativeBatch.modified = true;
 }
 
 const UNTYPED_PROTOTYPE_COMPLEX_FIELDS = new Set([
@@ -1449,6 +1462,7 @@ async function applyCreate(
   op: NormalizedOperation,
   workspaceId: string,
   semanticOperations: readonly TrustedSemanticOperation[],
+  creativeBatch?: CreativePageBatch,
 ): Promise<void> {
   const build = { seed: workspaceId };
   switch (op.entityType) {
@@ -1469,8 +1483,22 @@ async function applyCreate(
       }
       const style = parsedStyle?.data;
       const guid = deriveGuid(build, op.entityId);
-      const doc = await readJsonFile(candidate, versionDir, page.file);
+      const doc = creativeBatch === undefined
+        ? await readJsonFile(candidate, versionDir, page.file)
+        : creativeBatch.doc;
       const objects = Array.isArray(doc["objects"]) ? (doc["objects"] as unknown[]) : [];
+      const insertControl = (control: Record<string, unknown>, error: string): void => {
+        const parentId = properties["parentId"];
+        if (parentId === undefined) {
+          objects.push(control);
+          if (creativeBatch !== undefined) registerCreativeControl(creativeBatch, objects, control, { x: 0, y: 0 });
+          return;
+        }
+        const inserted = creativeBatch === undefined
+          ? pushControlIntoParent(objects, control, parentId, properties["x"] !== undefined || properties["y"] !== undefined)
+          : pushControlIntoCreativeParent(creativeBatch, control, parentId, properties["x"] !== undefined || properties["y"] !== undefined);
+        if (!inserted) throw new PatchConflictError(error);
+      };
 
       if (type === "easyui") {
         // easyui 控件：objectType=3 + uiExtendType(proto)。模板 = base + easyui-base
@@ -1523,9 +1551,7 @@ async function applyCreate(
         }
         if (style !== undefined) applyStyleToControl(control, type, style);
         // 显式 parentId 是结构契约：目标不存在或不是布局时不能悄悄改成顶层控件。
-        const parentId = properties["parentId"];
-        if (parentId === undefined) objects.push(control);
-        else if (!pushControlIntoParent(objects, control, parentId, properties["x"] !== undefined || properties["y"] !== undefined)) throw new PatchConflictError(`create easyui control: parent "${parentLabel(parentId)}" not found or is not a layout`);
+        insertControl(control, `create easyui control: parent "${parentLabel(properties["parentId"])}" not found or is not a layout`);
       } else if (type === "layout") {
         // 布局容器：objectType=2 + layoutType 顶层；几何进 baseProperty；
         // children/panels 作为整体写入 insiderObjects/dPanelsOption（嵌套 JSON patch 复杂，整体 set 最稳）。
@@ -1554,9 +1580,7 @@ async function applyCreate(
         if (properties["panels"] !== undefined) overrides["dPanelsOption"] = properties["panels"];
         const control = mergeControlTemplate(layoutTemplate, overrides);
         if (style !== undefined) applyStyleToControl(control, type, style);
-        const parentId = properties["parentId"];
-        if (parentId === undefined) objects.push(control);
-        else if (!pushControlIntoParent(objects, control, parentId, properties["x"] !== undefined || properties["y"] !== undefined)) throw new PatchConflictError(`create layout: parent "${parentLabel(parentId)}" not found or is not a layout`);
+        insertControl(control, `create layout: parent "${parentLabel(properties["parentId"])}" not found or is not a layout`);
       } else if (type === "prototype") {
         // KF 特殊节点（prototypeName 判别）：模板 = 该原型的基础字段 + 宽容
         // 透传（prototype IR 是 passthrough）。判别/身份/几何字段不透传；
@@ -1612,6 +1636,7 @@ async function applyCreate(
         const control = mergeControlTemplate(protoTemplate, overrides);
         if (style !== undefined) applyStyleToControl(control, type, style);
         objects.push(control);
+        if (creativeBatch !== undefined) registerCreativeControl(creativeBatch, objects, control, { x: 0, y: 0 });
       } else {
         const template = CONTROL_TEMPLATES[type];
         if (template === undefined) {
@@ -1658,11 +1683,10 @@ async function applyCreate(
         }
         if (style !== undefined) applyStyleToControl(control, type, style);
         // 静态控件也可用 parentId 放进布局（同 easyui 分支）
-        const parentId = properties["parentId"];
-        if (parentId === undefined) objects.push(control);
-        else if (!pushControlIntoParent(objects, control, parentId, properties["x"] !== undefined || properties["y"] !== undefined)) throw new PatchConflictError(`create control: parent "${parentLabel(parentId)}" not found or is not a layout`);
+        insertControl(control, `create control: parent "${parentLabel(properties["parentId"])}" not found or is not a layout`);
       }
-      await writeJsonFile(candidate, versionDir, page.file, doc);
+      if (creativeBatch === undefined) await writeJsonFile(candidate, versionDir, page.file, doc);
+      else creativeBatch.modified = true;
       break;
     }
     case "variable": {
@@ -1775,27 +1799,95 @@ interface NamedControlRef {
   root: Record<string, unknown>;
 }
 
-function findControlByInstanceName(node: unknown, instanceName: string): NamedControlRef | undefined {
-  if (Array.isArray(node)) {
-    for (let index = 0; index < node.length; index += 1) {
-      const value: unknown = node[index];
-      if (isObject(value)) {
-        const baseProperty = asRecord(value["baseProperty"]);
-        if (value["name"] === instanceName || baseProperty["name"] === instanceName) {
-          return { parent: node, index, root: value };
-        }
+interface CreativePageBatch {
+  pageGuid: string;
+  file: string;
+  doc: Record<string, unknown>;
+  byGuid: Map<string, NamedControlRef>;
+  byName: Map<string, NamedControlRef>;
+  origins: Map<Record<string, unknown>, { x: number; y: number }>;
+  modified: boolean;
+}
+
+function indexCreativePageBatch(batch: CreativePageBatch): void {
+  const visit = (node: unknown, parentOrigin: { x: number; y: number }): void => {
+    if (!Array.isArray(node)) return;
+    const siblings = node as unknown[];
+    for (let index = 0; index < siblings.length; index += 1) {
+      const value = siblings[index];
+      if (!isObject(value)) continue;
+      const base = asRecord(value["baseProperty"]);
+      const point = Object.keys(base).length > 0 ? asRecord(base["leftTopPt"]) : asRecord(value["leftTopPt"]);
+      const origin = { x: parentOrigin.x + asNumber(point["x"]), y: parentOrigin.y + asNumber(point["y"]) };
+      const ref = { parent: siblings, index, root: value };
+      const name = nativeControlInstanceName(value);
+      const guid = value["guid"] ?? base["guid"];
+      if (name !== undefined) {
+        if (batch.byName.has(name)) throw new PatchConflictError(`creative duplicate runtime control name: ${name}`);
+        batch.byName.set(name, ref);
       }
-      const nested = findControlByInstanceName(value, instanceName);
-      if (nested !== undefined) return nested;
+      if (typeof guid === "string") {
+        if (batch.byGuid.has(guid)) throw new PatchConflictError(`creative duplicate runtime control GUID: ${guid}`);
+        batch.byGuid.set(guid, ref);
+      }
+      batch.origins.set(value, origin);
+      for (const key of CONTROL_CONTAINER_KEYS) visit(value[key], origin);
     }
-    return undefined;
+  };
+  visit(batch.doc["objects"], { x: 0, y: 0 });
+}
+
+function registerCreativeControl(
+  batch: CreativePageBatch,
+  parent: unknown[],
+  control: Record<string, unknown>,
+  parentOrigin: { x: number; y: number },
+): void {
+  const index = parent.length - 1;
+  const ref = { parent, index, root: control };
+  const base = asRecord(control["baseProperty"]);
+  const point = Object.keys(base).length > 0 ? asRecord(base["leftTopPt"]) : asRecord(control["leftTopPt"]);
+  const origin = { x: parentOrigin.x + asNumber(point["x"]), y: parentOrigin.y + asNumber(point["y"]) };
+  const name = nativeControlInstanceName(control);
+  const guid = control["guid"] ?? base["guid"];
+  if (name !== undefined) batch.byName.set(name, ref);
+  if (typeof guid === "string") batch.byGuid.set(guid, ref);
+  batch.origins.set(control, origin);
+}
+
+function pushControlIntoCreativeParent(
+  batch: CreativePageBatch,
+  control: Record<string, unknown>,
+  parentId: unknown,
+  hasExplicitPosition: boolean,
+): boolean {
+  const target = typeof parentId === "string" ? parentId : "";
+  const parent = batch.byName.get(target) ?? batch.byGuid.get(target);
+  if (parent === undefined || typeof parent.root["layoutType"] !== "number") return false;
+  const origin = batch.origins.get(parent.root) ?? { x: 0, y: 0 };
+  const parentBase = asRecord(parent.root["baseProperty"]);
+  const childBase = asRecord(control["baseProperty"]);
+  const childIsLayout = Object.keys(childBase).length > 0;
+  const currentPoint = childIsLayout ? asRecord(childBase["leftTopPt"]) : asRecord(control["leftTopPt"]);
+  const localX = (hasExplicitPosition ? asNumber(currentPoint["x"]) : origin.x) - origin.x;
+  const localY = (hasExplicitPosition ? asNumber(currentPoint["y"]) : origin.y) - origin.y;
+  const width = childIsLayout ? asNumber(childBase["width"]) : asNumber(control["width"]);
+  const height = childIsLayout ? asNumber(childBase["height"]) : asNumber(control["height"]);
+  const parentWidth = asNumber(parentBase["width"]);
+  const parentHeight = asNumber(parentBase["height"]);
+  if (localX < 0 || localY < 0 || (parentWidth > 0 && localX + width > parentWidth)
+    || (parentHeight > 0 && localY + height > parentHeight)) return false;
+  if (childIsLayout) childBase["leftTopPt"] = { x: localX, y: localY };
+  else control["leftTopPt"] = { x: localX, y: localY };
+  if (!Array.isArray(parent.root["insiderObjects"])) parent.root["insiderObjects"] = [];
+  if (parent.root["layoutType"] === 5 && control["region"] === undefined) control["region"] = "center";
+  else if ([2, 4, 6].includes(parent.root["layoutType"]) && control["internalVertex"] === undefined) {
+    control["internalVertex"] = { left: localX, top: localY };
   }
-  if (!isObject(node)) return undefined;
-  for (const key of CONTROL_CONTAINER_KEYS) {
-    const nested = findControlByInstanceName(node[key], instanceName);
-    if (nested !== undefined) return nested;
-  }
-  return undefined;
+  const children = parent.root["insiderObjects"] as unknown[];
+  children.push(control);
+  registerCreativeControl(batch, children, control, origin);
+  return true;
 }
 
 function nativeControlInstanceName(value: unknown): string | undefined {
@@ -1867,13 +1959,26 @@ async function applyVerifiedCreativePatch(
     const defaultGroupId = typeof firstGroupId === "string"
       ? firstGroupId
       : baseInspection.summary.project.guid ?? "";
+    const pageBatches = new Map<string, CreativePageBatch>();
+    const pageIndexEntries = { ...baseInspection.index.pages };
+    const existingPageNames = new Set(Object.values(baseInspection.index.pages).map((page) => page.name));
+    const registerPageBatch = (pageGuid: string, file: string, doc: Record<string, unknown>): CreativePageBatch => {
+      options.creativeInstrumentation?.onPageLoad?.(pageGuid, file);
+      const batch: CreativePageBatch = {
+        pageGuid, file, doc, byGuid: new Map(), byName: new Map(), origins: new Map(), modified: true,
+      };
+      indexCreativePageBatch(batch);
+      options.creativeInstrumentation?.onPageIndex?.(pageGuid, file);
+      pageBatches.set(pageGuid, batch);
+      return batch;
+    };
     for (const page of materialization.pages) {
       const existing = baseInspection.index.pages[page.pageGuid];
       if (page.source === "uploaded-existing") {
         if (existing === undefined) throw new PatchConflictError(`creative page correlation missing: ${page.semanticPageId}`);
         const json = await readJsonFile(candidate, versionDir, existing.file);
         pageSizeInto(json, page.width, page.height);
-        await writeJsonFile(candidate, versionDir, existing.file, json);
+        registerPageBatch(page.pageGuid, existing.file, json);
         const entry = managerPages.find((value) => value["id"] === page.pageGuid);
         if (entry === undefined) throw new PatchConflictError(`creative page manager correlation missing: ${page.semanticPageId}`);
         entry["width"] = page.width;
@@ -1881,7 +1986,7 @@ async function applyVerifiedCreativePatch(
         entry["resolution"] = `${page.width} * ${page.height}`;
         continue;
       }
-      if (existing !== undefined || Object.values(baseInspection.index.pages).some((value) => value.name === page.semanticPageId)) {
+      if (existing !== undefined || existingPageNames.has(page.semanticPageId)) {
         throw new PatchConflictError(`creative page identity collision: ${page.semanticPageId}`);
       }
       if (/[\\/\0]/.test(page.semanticPageId)) throw new PatchConflictError(`unsafe creative page name: ${page.semanticPageId}`);
@@ -1897,7 +2002,13 @@ async function applyVerifiedCreativePatch(
         version: json["version"],
         type: json["objectType"],
       };
-      await writeJsonFile(candidate, versionDir, `project/page/${page.semanticPageId}.json`, json);
+      const file = `project/page/${page.semanticPageId}.json`;
+      registerPageBatch(page.pageGuid, file, json);
+      pageIndexEntries[page.pageGuid] = {
+        guid: page.pageGuid, id: page.semanticPageId, name: page.semanticPageId,
+        file, controlGuids: [], unknownFields: [],
+      };
+      existingPageNames.add(page.semanticPageId);
       managerPages.push({
         name: page.semanticPageId, description: "", height: page.height, width: page.width,
         positionX: 0, positionY: 0, pageType: 0, state: true,
@@ -1908,8 +2019,12 @@ async function applyVerifiedCreativePatch(
     }
     await writeJsonFile(candidate, versionDir, "project/pageManager.json", manager);
 
-    // Rebuild the entity index after page creation, then create parents before children.
-    const pageInspection = await inspectClientProject(candidate);
+    // Signed pages and the one DFS runtime indexes above replace a whole-project
+    // re-inspection; parents are then created before children in those batches.
+    const pageInspection: InspectResult = {
+      ...baseInspection,
+      index: { ...baseInspection.index, pages: pageIndexEntries },
+    };
     const pageByGuid = new Map(materialization.pages.map((page) => [page.pageGuid, page] as const));
     const styleByControl = new Map(materialization.stylesData.map((style) => [style.semanticControlId, style]));
     const controlBySemantic = new Map(materialization.controls
@@ -1962,7 +2077,7 @@ async function applyVerifiedCreativePatch(
           ...semanticNativeProperties,
           ...(control.content === undefined ? {} : { text: control.content }),
         },
-      }, materialization.workspaceId, []);
+      }, materialization.workspaceId, [], pageBatches.get(control.pageGuid));
     }
 
     // Stage 4: exact allowlisted existing deltas, then authoritative style/data.
@@ -1975,42 +2090,19 @@ async function applyVerifiedCreativePatch(
         op: "update", entityType: "control", entityId: control.nativeGuid!, properties: {},
         changes: (control.existingDeltas ?? []).map((delta) => ({ path: delta.path, value: structuredClone(delta.value) })),
         destructiveConfirmed: false,
-      }, materialization.workspaceId, []);
+      }, materialization.workspaceId, [], pageBatches.get(control.pageGuid));
     }
 
-    // Inspect once after structural edits, cache each page once, and flush once
-    // after the ordered z-order/style/data/interaction stages.
-    const finalInspection = await inspectClientProject(candidate);
-    const pageDocs = new Map<string, { file: string; doc: Record<string, unknown>; modified: boolean }>();
-    const creativePageDoc = async (pageGuid: string, semanticPageId: string) => {
-      const cached = pageDocs.get(pageGuid);
-      if (cached !== undefined) return cached;
-      const pageEntry = finalInspection.index.pages[pageGuid];
-      if (pageEntry === undefined) throw new PatchConflictError(`creative runtime page missing: ${semanticPageId}`);
-      const loaded = {
-        file: pageEntry.file,
-        doc: await readJsonFile(candidate, versionDir, pageEntry.file),
-        modified: false,
-      };
-      pageDocs.set(pageGuid, loaded);
-      return loaded;
+    const creativePageBatch = (pageGuid: string, semanticPageId: string): CreativePageBatch => {
+      const page = pageBatches.get(pageGuid);
+      if (page === undefined) throw new PatchConflictError(`creative runtime page missing: ${semanticPageId}`);
+      return page;
     };
-    const createdZOrder = new Map(newControls.map((control) => [control.instanceName, {
-      zIndex: control.zIndex,
-      order: control.order,
-    }] as const));
-    for (const pageGuid of new Set(newControls.map((control) => control.pageGuid))) {
-      const materializedPage = pageByGuid.get(pageGuid);
-      const page = await creativePageDoc(pageGuid, materializedPage?.semanticPageId ?? pageGuid);
-      applyCreativeSiblingZOrder(page.doc["objects"], createdZOrder);
-      page.modified = true;
-    }
-
     for (const style of materialization.stylesData) {
       const control = controlBySemantic.get(style.semanticControlId);
       if (control === undefined) throw new PatchConflictError(`creative style owner missing: ${style.semanticControlId}`);
-      const page = await creativePageDoc(control.pageGuid, control.semanticPageId);
-      const ref = findControlByInstanceName(page.doc["objects"], control.instanceName);
+      const page = creativePageBatch(control.pageGuid, control.semanticPageId);
+      const ref = page.byName.get(control.instanceName);
       if (ref === undefined) throw new PatchConflictError(`creative runtime control missing: ${control.semanticControlId}`);
       const implementationControl = implementationByControl.get(control.semanticControlId);
       if (implementationControl === undefined) {
@@ -2047,8 +2139,8 @@ async function applyVerifiedCreativePatch(
       const actions = actionsByOwner.get(control.instanceName) ?? [];
       const modules = scriptsByOwner.get(control.instanceName) ?? [];
       const bindings = bindingsByOwner.get(control.instanceName) ?? [];
-      const page = await creativePageDoc(control.pageGuid, control.semanticPageId);
-      const ref = findControlByInstanceName(page.doc["objects"], control.instanceName);
+      const page = creativePageBatch(control.pageGuid, control.semanticPageId);
+      const ref = page.byName.get(control.instanceName);
       if (ref === undefined) throw new PatchConflictError(`creative interaction owner missing: ${control.semanticControlId}`);
       if (actions.length === 0 && modules.length === 0 && bindings.length === 0
         && !isObject(ref.root["linkMng"]) && typeof ref.root["configureData"] !== "string") continue;
@@ -2059,11 +2151,29 @@ async function applyVerifiedCreativePatch(
         modules,
         bindings,
       }, { ownerInstanceName: control.instanceName, capabilityId: control.capabilityId });
-      ref.parent[ref.index] = serialized;
+      // The reviewed serializer clones the complete native control. Applying
+      // only the two fields it owns preserves indexed descendant identities,
+      // so a parent event cannot detach later child mutations from the batch.
+      ref.root["linkMng"] = serialized["linkMng"];
+      if ("configureData" in serialized) ref.root["configureData"] = serialized["configureData"];
+      else delete ref.root["configureData"];
       page.modified = true;
     }
-    for (const page of pageDocs.values()) {
-      if (page.modified) await writeJsonFile(candidate, versionDir, page.file, page.doc);
+    const createdZOrder = new Map(newControls.map((control) => [control.instanceName, {
+      zIndex: control.zIndex,
+      order: control.order,
+    }] as const));
+    for (const pageGuid of new Set(newControls.map((control) => control.pageGuid))) {
+      const materializedPage = pageByGuid.get(pageGuid);
+      const page = creativePageBatch(pageGuid, materializedPage?.semanticPageId ?? pageGuid);
+      applyCreativeSiblingZOrder(page.doc["objects"], createdZOrder);
+      page.modified = true;
+    }
+    for (const page of pageBatches.values()) {
+      if (page.modified) {
+        await writeJsonFile(candidate, versionDir, page.file, page.doc);
+        options.creativeInstrumentation?.onPageFlush?.(page.pageGuid, page.file);
+      }
     }
 
     const creativeAssets = new Map(materialization.stylesData.flatMap((style) => style.approvedAssets)

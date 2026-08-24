@@ -8,6 +8,7 @@ import {
   canonicalServerHash,
   workspaceAssetIdToModelId,
   type SolutionImplementationPlan,
+  type SolutionNode,
   type UIImplementationSpecV2,
 } from "@kf/contracts";
 import {
@@ -44,7 +45,7 @@ const intent = {
   height: { mode: "fixed" as const, value: 40 }, align: "start" as const,
 };
 
-function creativeInput(verifiedExisting?: VerifiedExistingRuntimeCorrelationHandle) {
+function creativeInput(verifiedExisting?: VerifiedExistingRuntimeCorrelationHandle, extraControlCount = 0) {
   const blueprint = {
     schema: "kf-design-plan/v3" as const, displayName: "工程", objective: "完成交互",
     audiences: ["客户"], scenarios: ["查看详情"],
@@ -176,6 +177,81 @@ function creativeInput(verifiedExisting?: VerifiedExistingRuntimeCorrelationHand
         ] },
     ],
   };
+  if (extraControlCount > 0) {
+    // Keep the scale fixture focused on native page materialization. Script
+    // compilation intentionally snapshots the full semantic plan into its
+    // reviewed context and has a separate 50k-node budget.
+    semanticPlan.scripts = [];
+    semanticPlan.actions = semanticPlan.actions.filter((action) => action.id !== "refresh-grid");
+    const semanticDetail = semanticPlan.pages.find((page) => page.id === "detail")!;
+    if (semanticDetail.root.kind !== "layout") throw new Error("detail layout fixture required");
+    const semanticGrid = semanticDetail.root.children.find((node) => node.id === "grid")!;
+    if (semanticGrid.kind !== "control") throw new Error("grid fixture required");
+    semanticGrid.eventBindings = [];
+    const semanticHome = semanticPlan.pages.find((page) => page.id === "home")!;
+    if (semanticHome.root.kind !== "layout") throw new Error("home layout fixture required");
+    const semanticRoot = semanticHome.root;
+    const implementationHome = implementationBase.pages.find((page) => page.id === "home")!;
+    if (implementationHome.compatibility !== "native") throw new Error("native home fixture required");
+    type SemanticLayout = Extract<SolutionNode, { kind: "layout" }>;
+    let emitted = 0;
+    const addLayout = (parent: SemanticLayout, parentId: string, depth: number): SemanticLayout => {
+      const id = `bulk-layout-${String(emitted).padStart(4, "0")}`;
+      emitted += 1;
+      const node: SemanticLayout = {
+        id, kind: "layout", layout: "column", sourceBlueprintRegionIds: ["region-home"],
+        intent: { ...structuredClone(intent), readingOrder: emitted + 2 }, children: [],
+      };
+      parent.children.push(node);
+      implementationHome.controls.push({
+        id, parentId, role: "content", capabilityId: "layout.4", depth, zIndex: emitted + 3,
+        geometry: { x: 0, y: 0, width: 1440, height: 900 }, compiledLayout: { kind: "column", overflow: "visible" },
+        nativeProperties: {}, compiledStyle: { nativeFields: {}, cssFragments: [], warnings: [] }, sourceSolutionNodeId: id,
+        sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region-home"], eventBindings: [],
+      });
+      return node;
+    };
+    const addButton = (parent: SemanticLayout, parentId: string, depth: number): void => {
+      const id = `bulk-button-${String(emitted).padStart(4, "0")}`;
+      emitted += 1;
+      parent.children.push({
+        id, kind: "control", capabilityId: "button", content: id, properties: [], tabIds: [],
+        styleRole: "content", sourceBlueprintRegionIds: ["region-home"],
+        intent: { ...structuredClone(intent), readingOrder: emitted + 2 }, eventBindings: [],
+      });
+      implementationHome.controls.push({
+        id, parentId, role: "content", capabilityId: "button", content: id,
+        depth, zIndex: emitted + 3, geometry: { x: 0, y: 0, width: 1, height: 1 }, nativeProperties: {},
+        compiledStyle: { nativeFields: {}, cssFragments: [], warnings: [] }, sourceSolutionNodeId: id,
+        sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region-home"], eventBindings: [],
+      });
+    };
+    if (extraControlCount <= 22) {
+      while (emitted < extraControlCount) addButton(semanticRoot, "root", 1);
+    } else {
+      const firstLevel = Array.from({ length: 22 }, () => addLayout(semanticRoot, "root", 1));
+      let parents = firstLevel.map((node) => ({ node, id: node.id, depth: 2 }));
+      let remaining = extraControlCount - emitted;
+      if (remaining > firstLevel.length * 24) {
+        const secondLevelCount = Math.ceil(remaining / 25);
+        const secondLevel: typeof parents = [];
+        for (let index = 0; index < secondLevelCount; index += 1) {
+          const parent = firstLevel[index % firstLevel.length]!;
+          const node = addLayout(parent, parent.id, 2);
+          secondLevel.push({ node, id: node.id, depth: 3 });
+        }
+        parents = secondLevel;
+        remaining = extraControlCount - emitted;
+      }
+      for (let index = 0; index < remaining; index += 1) {
+        const parent = parents[index % parents.length]!;
+        addButton(parent.node, parent.id, parent.depth);
+      }
+    }
+    if (emitted !== extraControlCount) throw new Error("bulk fixture count mismatch");
+    implementationBase.sourceSolutionPlanHash = canonicalServerHash(semanticPlan);
+    implementationBase.sourceModuleRegistryHash = solutionModuleRegistryHash(semanticPlan, createDefaultModuleRegistry());
+  }
   const correlated = attachRuntimeCorrelation({
     workspaceId: "workspace", baseRevisionId: "revision", implementation: implementationBase,
     ...(verifiedExisting === undefined ? {} : { verifiedExisting }),
@@ -201,9 +277,9 @@ function walkControls(value: unknown, result: Array<Record<string, unknown>> = [
   return result;
 }
 
-async function signedFixture() {
+async function signedFixture(extraControlCount = 0) {
   const facade = createHmacCreativeBuildFacade(Buffer.alloc(32, 0x41), createCreativeUIImplementationV2Compiler);
-  const result = facade.compiler.compiler.compile(creativeInput());
+  const result = facade.compiler.compiler.compile(creativeInput(undefined, extraControlCount));
   const envelope = facade.authority.sign({
     plan: result.plan, revisionId: "revision", semanticOperations: [], creative: result.trustedCreativePayload,
   });
@@ -317,14 +393,32 @@ async function existingSignedFixture(withImageAsset = false) {
 }
 
 describe("creative native materializer", () => {
-  it("pre-indexes creative controls and interactions instead of rescanning signed arrays per control", async () => {
-    const patcher = await readFile(new URL("./client-patcher.ts", import.meta.url), "utf8");
-    const validator = await readFile(new URL("../validate/client-validator.ts", import.meta.url), "utf8");
-    expect(patcher).not.toContain("materialization.controls.find(");
-    expect(patcher).not.toContain("(await inspectClientProject(candidate)).index.pages");
-    expect(patcher).not.toMatch(/materialization\.interactions\.(?:actions|scripts|eventBindings)\.filter\(/u);
-    expect(validator).not.toMatch(/materialization\.interactions\.(?:actions|scripts|eventBindings)\.filter\(/u);
-  });
+  it("loads, indexes, and flushes each creative page once as control count grows", async () => {
+    const { result, resolved, planHash } = await signedFixture(993);
+    const base = await baseWorkspace();
+    const patchCounts = { loads: 0, indexes: 0, flushes: 0 };
+    const candidate = await applyClientPatch(base.rootDir, result.plan, {
+      planHash, creativeMaterialization: resolved.creativeMaterialization,
+      creativeInstrumentation: {
+        onPageLoad: () => { patchCounts.loads += 1; },
+        onPageIndex: () => { patchCounts.indexes += 1; },
+        onPageFlush: () => { patchCounts.flushes += 1; },
+      },
+    } as ApplyPatchOptions & { creativeMaterialization: unknown; creativeInstrumentation: unknown });
+    expect(result.materialization.controls).toHaveLength(1_000);
+    expect(patchCounts).toEqual({ loads: 2, indexes: 2, flushes: 2 });
+
+    let validationIndexes = 0;
+    const report = await validateClientProject(base.rootDir, candidate, result.plan, {
+      skipRoundTrip: true, creativeMaterialization: resolved.creativeMaterialization,
+      creativeInstrumentation: { onPageIndex: () => { validationIndexes += 1; } },
+    } as Parameters<typeof validateClientProject>[3] & {
+      creativeMaterialization: unknown;
+      creativeInstrumentation: unknown;
+    });
+    expect(report.status, report.warnings.join("\n")).toBe("pass");
+    expect(validationIndexes).toBe(2);
+  }, 120_000);
 
   it("materializes the verified semantic plan through native patch, validate, package and import", async () => {
     const { result, resolved, planHash } = await signedFixture();
@@ -542,9 +636,16 @@ describe("creative native materializer", () => {
 
   it("applies signed style/data to uploaded controls while preserving unrelated native bytes", async () => {
     const { base, result, resolved, planHash } = await existingSignedFixture();
+    const patchCounts = { loads: 0, indexes: 0, flushes: 0 };
     const candidate = await applyClientPatch(base.rootDir, result.plan, {
       planHash, creativeMaterialization: resolved.creativeMaterialization,
-    } as ApplyPatchOptions & { creativeMaterialization: unknown });
+      creativeInstrumentation: {
+        onPageLoad: () => { patchCounts.loads += 1; },
+        onPageIndex: () => { patchCounts.indexes += 1; },
+        onPageFlush: () => { patchCounts.flushes += 1; },
+      },
+    } as ApplyPatchOptions & { creativeMaterialization: unknown; creativeInstrumentation: unknown });
+    expect(patchCounts).toEqual({ loads: 2, indexes: 2, flushes: 2 });
     const inspection = await inspectClientProject(candidate.rootDir);
     const detail = result.materialization.pages.find((page) => page.semanticPageId === "detail")!;
     const pageJson = inspection.raw.pages[detail.pageGuid];
@@ -561,10 +662,16 @@ describe("creative native materializer", () => {
     expect(String(native.get("Button1")!["styleDataNew"])).toContain("#legacy{color:red}");
     expect(String(native.get("Button1")!["styleDataNew"])).toContain("#domId .el-button{border-radius:8px}");
 
+    let validationIndexes = 0;
     const report = await validateClientProject(base.rootDir, candidate, result.plan, {
       skipRoundTrip: true, creativeMaterialization: resolved.creativeMaterialization,
-    } as Parameters<typeof validateClientProject>[3] & { creativeMaterialization: unknown });
+      creativeInstrumentation: { onPageIndex: () => { validationIndexes += 1; } },
+    } as Parameters<typeof validateClientProject>[3] & {
+      creativeMaterialization: unknown;
+      creativeInstrumentation: unknown;
+    });
     expect(report.status, report.warnings.join("\n")).toBe("pass");
+    expect(validationIndexes).toBe(2);
   }, 30_000);
 
   it("round-trips a Worker-resolved image and validates uploaded src as the native basename", async () => {

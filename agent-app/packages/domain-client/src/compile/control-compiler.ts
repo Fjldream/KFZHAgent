@@ -708,7 +708,26 @@ export function serializeReviewedNativeInteractions(
   }
   for (const [, group] of eventGroups) {
     const first = group[0]!;
-    const sources = group.flatMap((binding) => binding.scriptModuleIds.map((id) => serializedCompiledModule(moduleById.get(id)!, binding)));
+    const sources: string[] = [];
+    const declaredEffects: Array<{ kind: "action"; value: Record<string, unknown> } | { kind: "script" }> = [];
+    let scriptEffectStarted = false;
+    let actionAfterScript = false;
+    for (const binding of group) {
+      for (const actionId of binding.nativeActionIds) {
+        if (scriptEffectStarted) actionAfterScript = true;
+        declaredEffects.push({ kind: "action", value: serializeCompiledNativeAction(actionById.get(actionId)!, binding) });
+      }
+      if (binding.scriptModuleIds.length > 0) {
+        if (actionAfterScript) {
+          throw new ModelOutputInvalidError(
+            `UNREPRESENTABLE_KF_EVENT_EFFECT_ORDER: ${first.kfEvent}/${first.linkId ?? "none"} requires multiple native script slots`,
+          );
+        }
+        if (!scriptEffectStarted) declaredEffects.push({ kind: "script" });
+        scriptEffectStarted = true;
+        sources.push(...binding.scriptModuleIds.map((id) => serializedCompiledModule(moduleById.get(id)!, binding)));
+      }
+    }
     let current: Record<string, unknown> | undefined;
     let currentIndex: number | undefined;
     if (sources.length > 0) {
@@ -723,21 +742,15 @@ export function serializeReviewedNativeInteractions(
         current = links.splice(currentIndex, 1)[0]!;
       }
     }
-    const groupHasActions = group.some((binding) => binding.nativeActionIds.length > 0);
-    if (actions !== undefined) for (const binding of group) {
-      for (const actionId of binding.nativeActionIds) {
-        links.push(serializeCompiledNativeAction(actionById.get(actionId)!, binding));
-      }
-    }
-    if (sources.length === 0) continue;
-    if (current !== undefined) {
+    let serializedScript: Record<string, unknown> | undefined;
+    if (sources.length > 0 && current !== undefined) {
       if (first.linkId !== undefined && current["linkId"] !== undefined && current["linkId"] !== first.linkId) {
         throw new ModelOutputInvalidError(`native event linkId mismatch: ${first.kfEvent}`);
       }
       if (current["name"] !== undefined && current["name"] !== first.kfEvent) throw new ModelOutputInvalidError(`native event name mismatch: ${first.kfEvent}`);
       const existing = current["script"];
       if (existing !== undefined && typeof existing !== "string") throw new ModelOutputInvalidError(`native event script must be a string: ${first.kfEvent}`);
-      const serialized = {
+      serializedScript = {
         ...current,
         ...(first.linkId === undefined ? {} : { linkId: first.linkId }),
         enable: true,
@@ -746,17 +759,19 @@ export function serializeReviewedNativeInteractions(
         }), sources),
         name: first.kfEvent,
       };
-      if (String(serialized["script"]).length > 32_000) throw new ModelOutputInvalidError(`compiled event script exceeds 32000 characters: ${first.kfEvent}`);
-      if (!groupHasActions && currentIndex !== undefined) links.splice(currentIndex, 0, serialized);
-      else links.push(serialized);
-    } else {
-      const appended = {
+    } else if (sources.length > 0) {
+      serializedScript = {
         ...(first.linkId === undefined ? {} : { linkId: first.linkId }), enable: true,
         script: appendScript("", sources), name: first.kfEvent,
       };
-      if (appended.script.length > 32_000) throw new ModelOutputInvalidError(`compiled event script exceeds 32000 characters: ${first.kfEvent}`);
-      links.push(appended);
     }
+    if (serializedScript !== undefined && String(serializedScript["script"]).length > 32_000) {
+      throw new ModelOutputInvalidError(`compiled event script exceeds 32000 characters: ${first.kfEvent}`);
+    }
+    const serializedEffects = declaredEffects.map((effect) =>
+      effect.kind === "action" ? effect.value : serializedScript!);
+    if (currentIndex === undefined) links.push(...serializedEffects);
+    else links.splice(currentIndex, 0, ...serializedEffects);
   }
   result["linkMng"] = { ...linkMng, linkList: links };
   const configureModules = modules.filter((module) => module.placement === "configure-data")

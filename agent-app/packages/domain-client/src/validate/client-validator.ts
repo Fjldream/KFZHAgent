@@ -28,6 +28,7 @@ import {
   applyClientPatch,
   deleteOperationDigest,
   normalizeChangePlan,
+  type CreativePageInstrumentation,
   type NormalizedPlan,
 } from "../patch/client-patcher.js";
 import { deriveGuid } from "../compile/guid-factory.js";
@@ -1517,26 +1518,6 @@ async function checkBusinessRules(
 
 type VerifiedCreativePayload = ReturnType<typeof readVerifiedCreativeMaterialization>;
 
-function findRawControl(node: unknown, identity: string, byName = false): Record<string, unknown> | undefined {
-  if (Array.isArray(node)) {
-    for (const value of node) {
-      const found = findRawControl(value, identity, byName);
-      if (found !== undefined) return found;
-    }
-    return undefined;
-  }
-  if (!isObjectRecord(node)) return undefined;
-  const baseProperty = asRecord(node["baseProperty"]);
-  if (byName
-    ? node["name"] === identity || baseProperty["name"] === identity
-    : node["guid"] === identity || baseProperty["guid"] === identity) return node;
-  for (const key of ["objects", "children", "layoutItems", "insiderObjects"]) {
-    const found = findRawControl(node[key], identity, byName);
-    if (found !== undefined) return found;
-  }
-  return undefined;
-}
-
 function rawControlInstanceName(value: unknown): string | undefined {
   if (!isObjectRecord(value)) return undefined;
   const baseProperty = asRecord(value["baseProperty"]);
@@ -1544,8 +1525,9 @@ function rawControlInstanceName(value: unknown): string | undefined {
   return typeof name === "string" ? name : undefined;
 }
 
-function hasCreativeZOrderMismatch(
+function indexCreativeRawPage(
   node: unknown,
+  controlsByName: Map<string, Record<string, unknown>>,
   createdByInstanceName: ReadonlyMap<string, { readonly zIndex: number; readonly order: number }>,
 ): boolean {
   if (Array.isArray(node)) {
@@ -1558,12 +1540,23 @@ function hasCreativeZOrderMismatch(
       const rightOrder = createdByInstanceName.get(right)!;
       return leftOrder.zIndex - rightOrder.zIndex || leftOrder.order - rightOrder.order;
     });
-    if (actual.some((name, index) => name !== expected[index])) return true;
-    return node.some((value) => hasCreativeZOrderMismatch(value, createdByInstanceName));
+    let mismatch = actual.some((name, index) => name !== expected[index]);
+    for (const value of node) {
+      if (!isObjectRecord(value)) continue;
+      const name = rawControlInstanceName(value);
+      if (name !== undefined) controlsByName.set(name, value);
+      for (const key of ["objects", "children", "layoutItems", "insiderObjects"]) {
+        if (indexCreativeRawPage(value[key], controlsByName, createdByInstanceName)) mismatch = true;
+      }
+    }
+    return mismatch;
   }
   if (!isObjectRecord(node)) return false;
-  return ["objects", "children", "layoutItems", "insiderObjects"]
-    .some((key) => hasCreativeZOrderMismatch(node[key], createdByInstanceName));
+  let mismatch = false;
+  for (const key of ["objects", "children", "layoutItems", "insiderObjects"]) {
+    if (indexCreativeRawPage(node[key], controlsByName, createdByInstanceName)) mismatch = true;
+  }
+  return mismatch;
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
@@ -1573,6 +1566,7 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 async function creativeMaterializationIssues(
   candidate: string,
   verified: VerifiedCreativePayload,
+  instrumentation?: CreativePageInstrumentation,
 ): Promise<string[]> {
   const inspection = await inspectClientProject(candidate);
   const { materialization } = verified;
@@ -1607,6 +1601,25 @@ async function creativeMaterializationIssues(
   }
   const controlEntryByName = new Map(Object.values(inspection.index.controls)
     .flatMap((entry) => entry.name === undefined ? [] : [[entry.name, entry] as const]));
+  const createdZOrderByPage = new Map<string, Map<string, { zIndex: number; order: number }>>();
+  for (const control of materialization.controls) {
+    if (control.source !== "workspace-derived") continue;
+    const page = createdZOrderByPage.get(control.pageGuid)
+      ?? new Map<string, { zIndex: number; order: number }>();
+    page.set(control.instanceName, { zIndex: control.zIndex, order: control.order });
+    createdZOrderByPage.set(control.pageGuid, page);
+  }
+  const rawControlByName = new Map<string, Record<string, unknown>>();
+  const zOrderMismatchPages = new Set<string>();
+  for (const page of materialization.pages) {
+    const file = inspection.index.pages[page.pageGuid]?.file ?? page.semanticPageId;
+    instrumentation?.onPageIndex?.(page.pageGuid, file);
+    if (indexCreativeRawPage(
+      asRecord(inspection.raw.pages[page.pageGuid])["objects"],
+      rawControlByName,
+      createdZOrderByPage.get(page.pageGuid) ?? new Map(),
+    )) zOrderMismatchPages.add(page.pageGuid);
+  }
   for (const page of materialization.pages) {
     const entry = inspection.index.pages[page.pageGuid];
     const summary = pageSummaryByGuid.get(page.pageGuid);
@@ -1638,8 +1651,7 @@ async function creativeMaterializationIssues(
         issues.push(`creative control parent mismatch: ${control.semanticControlId}`);
       }
     }
-    const page = inspection.raw.pages[control.pageGuid];
-    const raw = findRawControl(asRecord(page)["objects"], control.instanceName, true);
+    const raw = rawControlByName.get(control.instanceName);
     if (raw === undefined) {
       issues.push(`creative native control missing: ${control.semanticControlId}`);
       continue;
@@ -1720,19 +1732,7 @@ async function creativeMaterializationIssues(
       issues.push(`creative asset missing: ${assetId}: ${String(error)}`);
     }
   }
-  const createdZOrderByPage = new Map<string, Map<string, { zIndex: number; order: number }>>();
-  for (const control of materialization.controls) {
-    if (control.source !== "workspace-derived") continue;
-    const page = createdZOrderByPage.get(control.pageGuid)
-      ?? new Map<string, { zIndex: number; order: number }>();
-    page.set(control.instanceName, { zIndex: control.zIndex, order: control.order });
-    createdZOrderByPage.set(control.pageGuid, page);
-  }
-  for (const [pageGuid, created] of createdZOrderByPage) {
-    if (hasCreativeZOrderMismatch(asRecord(inspection.raw.pages[pageGuid])["objects"], created)) {
-      issues.push(`creative z-order mismatch: ${pageGuid}`);
-    }
-  }
+  for (const pageGuid of zOrderMismatchPages) issues.push(`creative z-order mismatch: ${pageGuid}`);
   return issues;
 }
 
@@ -1881,6 +1881,8 @@ export interface ValidateOptions {
   assetTargetPaths?: readonly string[];
   creativeAssets?: readonly DomainAssetInput[];
   creativeMaterialization?: VerifiedCreativeMaterialization;
+  /** Counting-only observer for bounded creative page indexing tests. */
+  creativeInstrumentation?: CreativePageInstrumentation;
 }
 
 export async function validateClientProject(
@@ -1946,7 +1948,7 @@ export async function validateClientProject(
 
   const creativeIssues = verifiedCreative === undefined
     ? []
-    : await creativeMaterializationIssues(candidate, verifiedCreative);
+    : await creativeMaterializationIssues(candidate, verifiedCreative, options?.creativeInstrumentation);
   let businessRules = await checkBusinessRules(candidate, plan);
   if (creativeTrustIssue !== undefined) businessRules = fail([creativeTrustIssue]);
   else if (creativeIssues.length > 0) {
