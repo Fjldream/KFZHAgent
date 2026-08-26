@@ -61,6 +61,15 @@ function canonicalHash(value: unknown): string {
   return canonicalServerHash(value);
 }
 
+function simulateJsonbNumericTransport(value: unknown): unknown {
+  if (typeof value === "number") return Number(value.toPrecision(16));
+  if (Array.isArray(value)) return value.map(simulateJsonbNumericTransport);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, simulateJsonbNumericTransport(child)]));
+  }
+  return value;
+}
+
 function planFor(
   bundle: CapabilityCandidateBundle,
   overrides: Partial<SolutionImplementationPlan> = {},
@@ -177,6 +186,26 @@ describe("deterministic scoring", () => {
     ].sort(__capabilityRetrievalTestHooks.compareRankedCandidates).map((candidate) => candidate.id))
       .toEqual(["z-higher", "a-lower"]);
   });
+
+  it("quantizes only the server-owned transport score across repeating, exponent, and boundary values", () => {
+    expect([
+      1 / 3,
+      19.153846153846153,
+      1e-9,
+      -1e-9,
+      -1000,
+      1000,
+      999.9999999999,
+    ].map(__capabilityRetrievalTestHooks.quantizeCandidateScore)).toEqual([
+      0.333333333333,
+      19.1538461538,
+      1e-9,
+      -1e-9,
+      -1000,
+      1000,
+      1000,
+    ]);
+  });
 });
 
 describe("deterministic capability retrieval", () => {
@@ -199,6 +228,33 @@ describe("deterministic capability retrieval", () => {
     expect(CapabilityCandidateBundleSchema.parse(bundle)).toEqual(bundle);
     expect(retrieveCapabilities({ blueprint: portfolioBlueprint, knowledge: getDesignKnowledgeSnapshot() }))
       .toEqual(bundle);
+  });
+
+  it("emits a bundle whose authority hash survives JSON and JSONB numeric transport", () => {
+    const repeatingBlueprint = structuredClone(portfolioBlueprint);
+    repeatingBlueprint.pages[0]!.regions[0] = {
+      id: "portal-nav",
+      purpose: "提供品牌识别和作品、联系目的地入口",
+      semanticRoles: ["heading", "primary-action", "secondary-action"],
+      dataShape: "scalar",
+      density: "comfortable",
+      importance: "secondary",
+      content: ["叠境空间影像", "精选作品", "联系"],
+      sampleData: [],
+      interactions: ["作品入口响应并切换项目页"],
+      states: ["首页可浏览"],
+      visualIntent: "克制的顶部文字导航与宽阔横向留白",
+    };
+    repeatingBlueprint.pages[0]!.readingOrder = ["portal-nav"];
+    repeatingBlueprint.journeys[0]!.steps[0]!.regionId = "portal-nav";
+    const bundle = retrieveCapabilities({
+      blueprint: repeatingBlueprint,
+      knowledge: getDesignKnowledgeSnapshot(),
+    });
+
+    expect(bundle.regions[0]!.layouts.some((candidate) => candidate.score === 19.153846153846153)).toBe(false);
+    expect(canonicalHash(JSON.parse(JSON.stringify(bundle)))).toBe(canonicalHash(bundle));
+    expect(canonicalHash(simulateJsonbNumericTransport(bundle))).toBe(canonicalHash(bundle));
   });
 
   it("never ranks a technical record that is absent from control design knowledge", () => {
@@ -389,6 +445,15 @@ describe("solution plan candidate validation", () => {
     expect(first).toContain("NEEDS_CONTEXT/BLOCKED");
     const issues = first.replace(/^SOLUTION_PLAN_CANDIDATE_MISMATCH: /, "").split("; ");
     expect(issues).toEqual([...issues].sort());
+  });
+
+  it("still rejects a post-retrieval candidate score tamper", () => {
+    const bundle = retrieveCapabilities({ blueprint: portfolioBlueprint, knowledge: getDesignKnowledgeSnapshot() });
+    const plan = planFor(bundle);
+    const tampered = structuredClone(bundle);
+    tampered.regions[0]!.controls[0]!.score += 1e-9;
+
+    expect(() => assertSolutionPlanUsesCandidates(plan, tampered)).toThrow("candidate bundle hash");
   });
 
   it("rejects layouts and adopted recipes outside their source-region candidates", () => {

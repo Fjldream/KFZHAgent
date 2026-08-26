@@ -16,13 +16,16 @@ import {
   internalChangePlanSchema,
   modelAssetIdToWorkspaceAssetId,
   nativeControlVariantForCapability,
+  semanticPayloadHash,
   validateCreativeArtifactMaterializationProjection,
   type CapabilityReport,
   type ChangeOperation,
   type ChangePlanAssetBinding,
   type CreativeBuildArtifact,
   type InternalChangePlan,
+  type SolutionImplementationPlan,
   type TrustedNativeMaterialization,
+  type TrustedSemanticOperationInput,
   type UIImplementationControlV2,
   type UIImplementationSpecV2,
   type VerifiedCreativeAsset,
@@ -79,6 +82,8 @@ interface ServerScopedCreativePayloadIssuer {
 
 export interface CreativeUIImplementationV2CompileResult {
   readonly plan: InternalChangePlan;
+  /** Compiler-owned authorization for exact Datagrid payloads present in the emitted plan. */
+  readonly semanticOperations: readonly TrustedSemanticOperationInput[];
   readonly capabilityReport: CapabilityReport;
   readonly verifiedAssets: readonly VerifiedCreativeAsset[];
   readonly artifact: CreativeBuildArtifact;
@@ -172,9 +177,84 @@ function existingDeltaProjection(control: UIImplementationControlV2): {
   if (control.content !== undefined) candidates.push(["text", control.content]);
   const policyProjection = { capabilityId: control.capabilityId, allowedFields };
   return {
-    existingDeltas: candidates.filter(([key]) => allowed.has(key)).map(([key, value]) => ({ path: `/${key}`, value })),
+    existingDeltas: candidates.filter(([key]) => allowed.has(key)).map(([key, value]) => ({
+      path: control.capabilityId === "easyui.1" && key === "tableData" ? "/__kfModuleTableData" : `/${key}`,
+      value,
+    })),
     deltaAllowlistPolicy: { ...policyProjection, policyHash: canonicalServerHash(policyProjection) },
   };
+}
+
+function semanticRows(dataSet: SolutionImplementationPlan["mockData"][number]): Readonly<Record<string, unknown>>[] {
+  return dataSet.records.map((record) => Object.fromEntries(record.values.map((entry) => [entry.field, entry.value])));
+}
+
+/**
+ * Re-derives every authorized table payload from the validated semantic plan.
+ * Neither model output nor a caller can provide an authorization list.
+ */
+function validateTableBindings(
+  semanticPlan: SolutionImplementationPlan,
+  controls: readonly UIImplementationControlV2[],
+): ReadonlyMap<string, string> {
+  const dataById = new Map(semanticPlan.mockData.map((dataSet) => [dataSet.id, dataSet]));
+  const sourceByEntityId = new Map<string, string>();
+  for (const control of controls) {
+    const hasTableData = Object.hasOwn(control.nativeProperties, "tableData");
+    if (control.dataBinding === undefined) {
+      if (hasTableData) fail("CREATIVE_TABLE_DATA_BINDING_REQUIRED", control.id);
+      continue;
+    }
+    if (control.capabilityId !== "easyui.1") fail("CREATIVE_TABLE_DATA_BINDING_CAPABILITY_MISMATCH", control.id);
+    const dataSet = dataById.get(control.dataBinding.mockDataId);
+    if (dataSet === undefined) fail("CREATIVE_TABLE_DATA_BINDING_MISSING", control.id);
+    const rows = semanticRows(dataSet);
+    const expectedBinding = { mockDataId: dataSet.id, records: rows };
+    const expectedTableData = {
+      columns: dataSet.fields.map((field) => ({ key: field.key, label: field.label, align: "left" as const })),
+      rows,
+      pageSize: Math.min(20, rows.length),
+    };
+    if (canonicalServerHash(control.dataBinding) !== canonicalServerHash(expectedBinding)) {
+      fail("CREATIVE_TABLE_DATA_BINDING_MISMATCH", control.id);
+    }
+    // Legacy native/module materializations may carry these exact validated
+    // records only in the signed creative stylesData projection. With no
+    // ChangePlan tableData payload, no privileged semantic operation is needed.
+    if (!hasTableData) continue;
+    if (canonicalServerHash(control.nativeProperties["tableData"]) !== canonicalServerHash(expectedTableData)
+      || control.nativeProperties["pageSize"] !== expectedTableData.pageSize
+      || control.nativeProperties["pagination"] !== (rows.length > expectedTableData.pageSize)) {
+      fail("CREATIVE_TABLE_DATA_BINDING_MISMATCH", control.id);
+    }
+    sourceByEntityId.set(control.id, control.sourceSolutionNodeId);
+  }
+  return sourceByEntityId;
+}
+
+function semanticOperationsForActualPlan(
+  plan: InternalChangePlan,
+  sourceByEntityId: ReadonlyMap<string, string>,
+): readonly TrustedSemanticOperationInput[] {
+  const output: TrustedSemanticOperationInput[] = [];
+  for (const operation of plan.operations) {
+    const sourceModuleId = sourceByEntityId.get(operation.entityId);
+    if (sourceModuleId === undefined) continue;
+    if (operation.op === "create" && operation.properties["type"] === "easyui"
+      && operation.properties["proto"] === 1 && Object.hasOwn(operation.properties, "tableData")) {
+      output.push({
+        kind: "kf.table-data/v1", entityId: operation.entityId, capabilityId: "easyui.1", sourceModuleId,
+        payloadHash: semanticPayloadHash(operation.properties["tableData"]),
+      });
+    }
+    if (operation.op === "update") {
+      operation.changes.filter((change) => change.path === "/__kfModuleTableData").forEach((change) => output.push({
+        kind: "kf.table-data/v1", entityId: operation.entityId, capabilityId: "easyui.1", sourceModuleId,
+        payloadHash: semanticPayloadHash(change.value),
+      }));
+    }
+  }
+  return Object.freeze(output);
 }
 
 function topologicalControls(pages: readonly Extract<UIImplementationSpecV2["pages"][number], { compatibility: "native" }>[]): UIImplementationControlV2[] {
@@ -268,6 +348,7 @@ function compileCreativeUIImplementationV2(
   const nativePages = implementation.pages.filter((page): page is Extract<typeof page, { compatibility: "native" }> => page.compatibility === "native")
     .slice().sort((left, right) => compareCreativeIdentifiers(left.id, right.id));
   const controls = topologicalControls(nativePages);
+  const tableSourceByEntityId = validateTableBindings(semanticPlan, controls);
   const deltaProjectionByControl = new Map(controls.map((control) => [control.id, existingDeltaProjection(control)]));
   const usedAssetIds = new Set(controls.flatMap((control) => control.assetIds ?? []));
   for (const assetId of assets.keys()) {
@@ -387,6 +468,7 @@ function compileCreativeUIImplementationV2(
   validateCreativeArtifactMaterializationProjection(artifact, materialization);
   const plan = internalChangePlanSchema.parse({ schema: "kf-change-plan/v1", workspaceId, operations,
     ...(assetBindings.length === 0 ? {} : { assetBindings }), creative: { artifactHash, materializationHash: canonicalTrustedNativeMaterializationHash(materialization) } });
+  const semanticOperations = semanticOperationsForActualPlan(plan, tableSourceByEntityId);
   const selectedCapabilities = [...new Set(controls.map((control) => control.capabilityId))].sort();
   const full: string[] = [];
   const partial: string[] = [];
@@ -405,7 +487,7 @@ function compileCreativeUIImplementationV2(
     deliveryGaps: [],
   };
   const trustedCreativePayload = issuer.issue({ plan, artifact, materialization });
-  return deepFreeze({ plan, capabilityReport, verifiedAssets, artifact, materialization, trustedCreativePayload });
+  return deepFreeze({ plan, semanticOperations, capabilityReport, verifiedAssets, artifact, materialization, trustedCreativePayload });
 }
 
 export function createCreativeUIImplementationV2Compiler(

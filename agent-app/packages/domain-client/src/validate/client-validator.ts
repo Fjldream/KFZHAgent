@@ -9,6 +9,7 @@ import {
   CompilerPageGuidSchema,
   canonicalChangePlanHash,
   type DomainAssetInput,
+  type TrustedSemanticOperation,
   type ValidationReport,
 } from "@kf/contracts";
 import {
@@ -1110,7 +1111,8 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
     const ownerType = instanceTypes.get(metadata.ownerInstanceName);
     const reviewedEvent = (isUiModel(ownerType, 35) && metadata.kfEvent === "onClick" && metadata.linkId === 200001)
       || (isUiModel(ownerType, 31) && metadata.kfEvent === "Cell-click" && metadata.linkId === 200006)
-      || (isDatagrid(ownerType) && metadata.kfEvent === "onClickRow" && metadata.linkId === 200024);
+      || (isDatagrid(ownerType) && metadata.kfEvent === "onClickRow" && metadata.linkId === 200024)
+      || (isUiModel(ownerType, 47) && metadata.kfEvent === "Tab-click" && metadata.linkId === null);
     if (!reviewedEvent || metadata.phase === null) return "compiled script event is not in the evidence-backed allowlist";
   } else if (!(isUiModel(instanceTypes.get(metadata.ownerInstanceName), 31)
       || isDatagrid(instanceTypes.get(metadata.ownerInstanceName)))
@@ -1563,6 +1565,12 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+const CREATIVE_GEOMETRY_EPSILON = 1e-9;
+
+function sameCreativeGeometry(left: number, right: number): boolean {
+  return Math.abs(left - right) <= CREATIVE_GEOMETRY_EPSILON;
+}
+
 async function creativeMaterializationIssues(
   candidate: string,
   verified: VerifiedCreativePayload,
@@ -1601,6 +1609,8 @@ async function creativeMaterializationIssues(
   }
   const controlEntryByName = new Map(Object.values(inspection.index.controls)
     .flatMap((entry) => entry.name === undefined ? [] : [[entry.name, entry] as const]));
+  const materializedControlByName = new Map(materialization.controls
+    .map((control) => [control.instanceName, control] as const));
   const createdZOrderByPage = new Map<string, Map<string, { zIndex: number; order: number }>>();
   for (const control of materialization.controls) {
     if (control.source !== "workspace-derived") continue;
@@ -1640,9 +1650,16 @@ async function creativeMaterializationIssues(
       issues.push(`creative control correlation/type mismatch: ${control.semanticControlId}`);
       continue;
     }
+    const parentGeometry = control.parentInstanceName === undefined
+      ? undefined
+      : materializedControlByName.get(control.parentInstanceName)?.geometry;
+    const expectedX = control.geometry.x - (parentGeometry?.x ?? 0);
+    const expectedY = control.geometry.y - (parentGeometry?.y ?? 0);
     if (control.source === "workspace-derived"
-      && (entry.x !== control.geometry.x || entry.y !== control.geometry.y
-        || entry.width !== control.geometry.width || entry.height !== control.geometry.height)) {
+      && (!sameCreativeGeometry(entry.x, expectedX)
+        || !sameCreativeGeometry(entry.y, expectedY)
+        || !sameCreativeGeometry(entry.width, control.geometry.width)
+        || !sameCreativeGeometry(entry.height, control.geometry.height))) {
       issues.push(`creative geometry mismatch: ${control.semanticControlId}`);
     }
     if (control.parentInstanceName !== undefined) {
@@ -1741,6 +1758,7 @@ async function checkCreativeChangeScope(
   candidate: string,
   verified: VerifiedCreativePayload,
   handle: VerifiedCreativeMaterialization,
+  semanticOperations: readonly TrustedSemanticOperation[],
   assets: readonly DomainAssetInput[],
   materializationIssues: readonly string[],
 ): Promise<{ outcome: CheckOutcome; warnings: string[] }> {
@@ -1749,6 +1767,7 @@ async function checkCreativeChangeScope(
     const expected = await applyClientPatch(base, verified.plan, {
       planHash: canonicalChangePlanHash(verified.plan),
       creativeMaterialization: handle,
+      semanticOperations,
       assets,
     });
     expectedRoot = expected.rootDir;
@@ -1880,6 +1899,8 @@ export interface ValidateOptions {
   skipRoundTrip?: boolean;
   assetTargetPaths?: readonly string[];
   creativeAssets?: readonly DomainAssetInput[];
+  /** Worker-verified semantic authorizations required by exact replay validation. */
+  semanticOperations?: readonly TrustedSemanticOperation[];
   creativeMaterialization?: VerifiedCreativeMaterialization;
   /** Counting-only observer for bounded creative page indexing tests. */
   creativeInstrumentation?: CreativePageInstrumentation;
@@ -1975,6 +1996,7 @@ export async function validateClientProject(
       candidate,
       verifiedCreative,
       verifiedCreativeHandle!,
+      options?.semanticOperations ?? [],
       options?.creativeAssets ?? [],
       creativeIssues,
     );

@@ -676,6 +676,34 @@ describe("client validator (Task 7 brief Step 2)", () => {
     expect(report.checks.businessRules, report.warnings.join("\n")).toBe("pass");
   });
 
+  it("accepts only the evidence-backed Tabs Tab-click event for compiler-owned scripts", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const basePage = await readPage(base);
+    basePage.objects.push({
+      name: "Tabs1", uiModelType: 47, guid: "reviewed-tabs", leftTopPt: { x: 0, y: 0 },
+      width: 453, height: 200, linkMng: { linkList: [] },
+    });
+    await writePage(base, basePage);
+    const candidate = await applyClientPatch(base, happyPlan());
+    const page = await readPage(candidate);
+    page.objects[1]!.linkMng = { linkList: [{
+      enable: true,
+      name: "Tab-click",
+      script: markedScript("const activeTab = true;", {
+        ownerInstanceName: "Tabs1", kfEvent: "Tab-click", linkId: null,
+        instanceReferences: [{ semanticId: "profile-tabs", instanceName: "Tabs1" }],
+      }),
+    }] };
+    await writePage(candidate, page);
+    let report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.businessRules, report.warnings.join("\n")).toBe("pass");
+
+    ((page.objects[1]!.linkMng as { linkList: Array<Record<string, unknown>> }).linkList[0]!).name = "Tab-add";
+    await writePage(candidate, page);
+    report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.businessRules).toBe("fail");
+  });
+
   it("rejects semantic onClickRow record scripts that shadow the reserved runtime arguments binding", () => {
     expect(() => compileReviewedSyntax({
       rowClickSource: 'const arguments = [null, null, null, { "code": "forged" }]; const record = $event.record(); const code = record.code;',

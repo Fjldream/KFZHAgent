@@ -1,0 +1,435 @@
+{
+  "id": "industrial-dashboard",
+  "prompt": "创建华东精密制造中心的中文高密度工业控制台，以紧凑 KPI、状态筛选、主数据表、选中详情和告警覆盖层组织实时运行任务。",
+  "expect": {
+    "datagridSourceId": "industrial-main-grid",
+    "datagridTargetId": "industrial-detail-grid"
+  },
+  "blueprint": {
+    "schema": "kf-design-plan/v3",
+    "displayName": "华东精密制造运行中枢",
+    "objective": "帮助值班工程师在一屏内筛查设备状态、定位具体单元并处理高优先级告警",
+    "audiences": ["生产值班工程师", "设备保障主管"],
+    "scenarios": ["筛查需关注设备", "查看选中设备明细", "打开并关闭告警层"],
+    "pages": [
+      {
+        "id": "industrial-console-bp",
+        "title": "实时运行控制台",
+        "purpose": "汇总班次状态、紧凑指标、设备筛选、主表与当前设备详情",
+        "readingOrder": ["industrial-header", "industrial-kpis", "industrial-filter-input", "industrial-filter-action", "industrial-table", "industrial-detail", "industrial-alarm-action"],
+        "regions": [
+          {
+            "id": "industrial-header",
+            "purpose": "显示工厂、班次、数据时点和总体运行状态",
+            "semanticRoles": ["heading", "status-label"],
+            "dataShape": "scalar",
+            "density": "compact",
+            "importance": "secondary",
+            "content": ["华东精密制造中心", "白班 08:00—20:00", "数据更新 14:36:20", "总体稳定"],
+            "sampleData": [{ "班次负责人": "周立峰", "在线产线": "6 条" }],
+            "interactions": [],
+            "states": ["运行状态已同步"],
+            "visualIntent": "冷灰顶栏、单行状态和严格基线对齐"
+          },
+          {
+            "id": "industrial-kpis",
+            "purpose": "在有限高度内并列呈现设备在线率、在制工单、异常设备和小时产出",
+            "semanticRoles": ["heading", "status-label", "comparison"],
+            "dataShape": "record",
+            "density": "compact",
+            "importance": "primary",
+            "content": ["设备在线率 98.6%", "在制工单 42", "异常设备 3", "小时产出 1,286 件"],
+            "sampleData": [{ "设备在线率": "98.6%", "异常设备": "3 台", "小时产出": "1286 件" }],
+            "interactions": [],
+            "states": ["指标处于当前班次"],
+            "visualIntent": "像控制室读数而非独立卡片的连续指标带"
+          },
+          {
+            "id": "industrial-filter-input",
+            "purpose": "输入设备状态关键词作为主表筛选条件",
+            "semanticRoles": ["filter-input", "form-input"],
+            "dataShape": "record",
+            "density": "compact",
+            "importance": "secondary",
+            "content": ["设备状态", "需关注"],
+            "sampleData": [{ "筛选条件": "需关注" }],
+            "interactions": [],
+            "states": ["筛选条件已输入"],
+            "visualIntent": "紧贴主表上沿的窄输入区域"
+          },
+          {
+            "id": "industrial-filter-action",
+            "purpose": "应用当前状态条件并刷新主设备表",
+            "semanticRoles": ["primary-action"],
+            "dataShape": "action-list",
+            "density": "compact",
+            "importance": "secondary",
+            "content": ["应用筛选"],
+            "sampleData": [],
+            "interactions": ["条件应用动作响应并刷新记录"],
+            "states": ["筛选动作可用"],
+            "visualIntent": "单一紧凑动作与筛选输入并排"
+          },
+          {
+            "id": "industrial-table",
+            "purpose": "以稳定列结构显示设备编号、产线、状态、温度和当前异常，并允许定位一条记录",
+            "semanticRoles": ["structured-record-list", "comparison", "record-selection"],
+            "dataShape": "record-list",
+            "density": "compact",
+            "importance": "primary",
+            "content": ["设备编号", "所属产线", "运行状态", "主轴温度", "当前异常"],
+            "sampleData": [
+              { "设备编号": "CNC-07", "所属产线": "精加工一线", "状态": "需关注", "主轴温度": "67.4℃" },
+              { "设备编号": "ASM-12", "所属产线": "装配二线", "状态": "运行中", "主轴温度": "43.1℃" }
+            ],
+            "interactions": ["记录焦点响应并同步详情"],
+            "states": ["主表已加载", "记录可定位"],
+            "visualIntent": "主数据网格占据工作区最大面积，列密度高但可扫描"
+          },
+          {
+            "id": "industrial-detail",
+            "purpose": "在主表旁显示当前设备的同构字段详情，便于核对选中结果",
+            "semanticRoles": ["structured-record-list", "record-selection"],
+            "dataShape": "record-list",
+            "density": "compact",
+            "importance": "secondary",
+            "content": ["当前设备详情", "CNC-07", "主轴振动偏高"],
+            "sampleData": [{ "设备": "CNC-07", "状态": "需关注", "异常": "主轴振动偏高" }],
+            "interactions": [],
+            "states": ["详情与当前记录同步"],
+            "visualIntent": "窄侧栏中的同构详情表，不抢占主表焦点"
+          },
+          {
+            "id": "industrial-alarm-action",
+            "purpose": "进入当前高优先级告警处理层",
+            "semanticRoles": ["primary-action"],
+            "dataShape": "action-list",
+            "density": "compact",
+            "importance": "primary",
+            "content": ["打开 3 条高优先级告警"],
+            "sampleData": [],
+            "interactions": ["告警入口响应"],
+            "states": ["存在三条高优先级告警"],
+            "visualIntent": "侧栏顶部的琥珀色高优先级入口"
+          }
+        ]
+      },
+      {
+        "id": "industrial-alarm-bp",
+        "title": "高优先级告警",
+        "purpose": "聚焦列出当前告警并提供明确的关闭回程",
+        "readingOrder": ["industrial-alarm-shell", "industrial-alarm-records", "industrial-alarm-close"],
+        "regions": [
+          {
+            "id": "industrial-alarm-shell",
+            "purpose": "说明告警处理层的班次语境和响应要求",
+            "semanticRoles": ["heading", "narrative-content", "status-label"],
+            "dataShape": "scalar",
+            "density": "compact",
+            "importance": "secondary",
+            "content": ["高优先级告警", "请在十分钟内完成确认与派工"],
+            "sampleData": [{ "值班负责人": "周立峰", "响应目标": "10 分钟" }],
+            "interactions": [],
+            "states": ["告警层已打开"],
+            "visualIntent": "深色背景上的短标题和响应时限"
+          },
+          {
+            "id": "industrial-alarm-records",
+            "purpose": "按级别、时间、设备和内容列出待处理告警",
+            "semanticRoles": ["structured-record-list", "comparison", "status-label"],
+            "dataShape": "record-list",
+            "density": "compact",
+            "importance": "primary",
+            "content": ["严重", "14:32", "CNC-07", "主轴振动连续超限"],
+            "sampleData": [
+              { "级别": "严重", "时间": "14:32", "设备": "CNC-07", "内容": "主轴振动连续超限" },
+              { "级别": "高", "时间": "14:21", "设备": "WLD-03", "内容": "焊接气压低于下限" }
+            ],
+            "interactions": [],
+            "states": ["三条告警待处理"],
+            "visualIntent": "层叠告警记录以级别和时间形成扫描顺序"
+          },
+          {
+            "id": "industrial-alarm-close",
+            "purpose": "关闭告警处理层并返回实时控制台",
+            "semanticRoles": ["secondary-action"],
+            "dataShape": "action-list",
+            "density": "compact",
+            "importance": "secondary",
+            "content": ["关闭告警层"],
+            "sampleData": [],
+            "interactions": ["告警层关闭响应"],
+            "states": ["关闭动作可用"],
+            "visualIntent": "右上角明确但克制的关闭动作"
+          }
+        ]
+      }
+    ],
+    "journeys": [
+      {
+        "id": "industrial-inspect-journey",
+        "actor": "生产值班工程师",
+        "goal": "筛出需关注设备并将一条主表记录同步到详情",
+        "steps": [
+          { "pageId": "industrial-console-bp", "regionId": "industrial-filter-action", "action": "应用需关注筛选", "result": "主表刷新为需关注设备" },
+          { "pageId": "industrial-console-bp", "regionId": "industrial-table", "action": "定位 CNC-07 记录", "result": "侧栏详情同步 CNC-07" }
+        ],
+        "completion": "完成异常设备定位与详情核对"
+      },
+      {
+        "id": "industrial-alarm-journey",
+        "actor": "设备保障主管",
+        "goal": "打开高优先级告警层并关闭返回控制台",
+        "steps": [
+          { "pageId": "industrial-console-bp", "regionId": "industrial-alarm-action", "action": "打开高优先级告警层", "result": "显示三条告警记录" },
+          { "pageId": "industrial-alarm-bp", "regionId": "industrial-alarm-close", "action": "关闭告警层", "result": "返回实时运行控制台" }
+        ],
+        "completion": "告警层完成一次打开与关闭往返"
+      }
+    ],
+    "visualDirection": {
+      "tone": "冷静、克制、面向连续值守的工业控制室",
+      "colors": ["深石墨", "冷青", "告警琥珀", "故障红"],
+      "typography": "紧凑数字读数、清晰表头和等距设备编号",
+      "spacingAndSurfaces": "低圆角、细分隔线、高密度对齐，不使用卡片马赛克"
+    },
+    "acceptanceScenarios": ["筛选后主表数据真实刷新", "主表行响应后详情通过同构记录同步", "告警层可打开并关闭返回"],
+    "openQuestions": []
+  },
+  "plan": {
+    "schema": "kf-solution-implementation/v1",
+    "projectKey": "east-plant-operations",
+    "blueprintHash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "candidateBundleHash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "theme": {
+      "background": "#11171d",
+      "surface": "#1a232b",
+      "primary": "#36b7b4",
+      "accent": "#e8a23a",
+      "textPrimary": "#e8f0f4",
+      "textSecondary": "#8ea0aa",
+      "fontFamily": "Noto Sans SC",
+      "spacingUnit": 6,
+      "radiusScale": { "small": 2, "medium": 4, "large": 6 }
+    },
+    "roleStyles": [
+      { "role": "industrial-title", "declarations": { "fontSize": 20, "fontWeight": 700, "letterSpacing": 1, "textColor": "{theme.textPrimary}" }, "states": {} },
+      { "role": "industrial-kpi", "declarations": { "backgroundColor": "#162028", "borderBottomWidth": 1, "borderBottomColor": "#32424d", "fontSize": 18, "fontWeight": 700, "paddingHorizontal": 12, "textColor": "#dff7f5" }, "states": {} },
+      { "role": "industrial-label", "declarations": { "fontSize": 13, "lineHeight": 1.35, "textColor": "{theme.textSecondary}", "truncate": true }, "states": {} },
+      { "role": "industrial-field", "declarations": { "backgroundColor": "#11171d", "borderColor": "#42515b", "borderRadius": 2, "paddingHorizontal": 10, "textColor": "{theme.textPrimary}" }, "states": {} },
+      { "role": "industrial-action", "declarations": { "backgroundColor": "{theme.primary}", "textColor": "#071315", "borderRadius": 2, "fontWeight": 700, "paddingHorizontal": 14 }, "states": { "hover": { "opacity": 0.86 } } },
+      { "role": "industrial-alarm-action", "declarations": { "backgroundColor": "{theme.accent}", "textColor": "#1a1205", "borderRadius": 2, "fontWeight": 700, "paddingHorizontal": 12 }, "states": { "hover": { "opacity": 0.88 } } },
+      { "role": "industrial-grid", "declarations": {}, "states": {} },
+      { "role": "industrial-alarm-grid", "declarations": {}, "states": {} }
+    ],
+    "mockData": [
+      {
+        "id": "industrial-equipment-records",
+        "purpose": "主设备网格的当前班次运行记录",
+        "fields": [
+          { "key": "equipmentCode", "label": "设备编号", "type": "text" },
+          { "key": "line", "label": "所属产线", "type": "text" },
+          { "key": "name", "label": "设备名称", "type": "text" },
+          { "key": "status", "label": "运行状态", "type": "text" },
+          { "key": "temperature", "label": "主轴温度", "type": "number" },
+          { "key": "alarm", "label": "当前异常", "type": "text" }
+        ],
+        "records": [
+          { "values": [{ "field": "equipmentCode", "value": "CNC-07" }, { "field": "line", "value": "精加工一线" }, { "field": "name", "value": "七号数控单元" }, { "field": "status", "value": "需关注" }, { "field": "temperature", "value": 67.4 }, { "field": "alarm", "value": "主轴振动偏高" }] },
+          { "values": [{ "field": "equipmentCode", "value": "ASM-12" }, { "field": "line", "value": "装配二线" }, { "field": "name", "value": "十二号装配站" }, { "field": "status", "value": "运行中" }, { "field": "temperature", "value": 43.1 }, { "field": "alarm", "value": "无异常" }] },
+          { "values": [{ "field": "equipmentCode", "value": "WLD-03" }, { "field": "line", "value": "焊接一线" }, { "field": "name", "value": "三号焊接单元" }, { "field": "status", "value": "需关注" }, { "field": "temperature", "value": 58.6 }, { "field": "alarm", "value": "保护气压偏低" }] }
+        ]
+      },
+      {
+        "id": "industrial-detail-records",
+        "purpose": "当前选中设备详情的同构记录",
+        "fields": [
+          { "key": "equipmentCode", "label": "设备编号", "type": "text" },
+          { "key": "line", "label": "所属产线", "type": "text" },
+          { "key": "name", "label": "设备名称", "type": "text" },
+          { "key": "status", "label": "运行状态", "type": "text" },
+          { "key": "temperature", "label": "主轴温度", "type": "number" },
+          { "key": "alarm", "label": "当前异常", "type": "text" }
+        ],
+        "records": [
+          { "values": [{ "field": "equipmentCode", "value": "CNC-07" }, { "field": "line", "value": "精加工一线" }, { "field": "name", "value": "七号数控单元" }, { "field": "status", "value": "需关注" }, { "field": "temperature", "value": 67.4 }, { "field": "alarm", "value": "主轴振动偏高" }] }
+        ]
+      },
+      {
+        "id": "industrial-alarm-records",
+        "purpose": "当前班次高优先级告警记录",
+        "fields": [
+          { "key": "level", "label": "级别", "type": "text" },
+          { "key": "time", "label": "发生时间", "type": "text" },
+          { "key": "device", "label": "设备", "type": "text" },
+          { "key": "message", "label": "告警内容", "type": "text" },
+          { "key": "status", "label": "处理状态", "type": "text" }
+        ],
+        "records": [
+          { "values": [{ "field": "level", "value": "严重" }, { "field": "time", "value": "14:32" }, { "field": "device", "value": "CNC-07" }, { "field": "message", "value": "主轴振动连续超限" }, { "field": "status", "value": "待确认" }] },
+          { "values": [{ "field": "level", "value": "高" }, { "field": "time", "value": "14:21" }, { "field": "device", "value": "WLD-03" }, { "field": "message", "value": "焊接保护气压低于下限" }, { "field": "status", "value": "待派工" }] },
+          { "values": [{ "field": "level", "value": "高" }, { "field": "time", "value": "14:08" }, { "field": "device", "value": "HTR-02" }, { "field": "message", "value": "热处理炉升温速率异常" }, { "field": "status", "value": "处理中" }] }
+        ]
+      }
+    ],
+    "localState": [
+      { "id": "industrial-alarm-visible", "purpose": "控制高优先级告警覆盖层是否显示", "type": "boolean", "initialValue": false }
+    ],
+    "pages": [
+      {
+        "id": "industrial-console-page",
+        "title": "实时运行控制台",
+        "purpose": "高密度设备监控和定位工作区",
+        "canvas": "large-display",
+        "sourceBlueprintPageId": "industrial-console-bp",
+        "sourceBlueprintRegionIds": ["industrial-header", "industrial-kpis", "industrial-filter-input", "industrial-filter-action", "industrial-table", "industrial-detail", "industrial-alarm-action"],
+        "initialStateIds": [],
+        "root": {
+          "kind": "layout",
+          "id": "industrial-console-root",
+          "layout": "dock",
+          "sourceBlueprintRegionIds": ["industrial-header"],
+          "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 0, "density": "compact", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "viewport" }, "align": "stretch" },
+          "children": [
+            {
+              "kind": "layout",
+              "id": "industrial-header-row",
+              "layout": "row",
+              "sourceBlueprintRegionIds": ["industrial-header"],
+              "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 0, "density": "compact", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "center" },
+              "children": [
+                { "kind": "control", "id": "industrial-factory-title", "capabilityId": "text", "content": "华东精密制造中心 · 白班", "properties": [], "tabIds": [], "styleRole": "industrial-title", "eventBindings": [], "sourceBlueprintRegionIds": ["industrial-header"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 0, "density": "compact", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "start" } },
+                { "kind": "control", "id": "industrial-sync-status", "capabilityId": "text", "content": "总体稳定 · 14:36:20", "properties": [], "tabIds": [], "styleRole": "industrial-label", "eventBindings": [], "sourceBlueprintRegionIds": ["industrial-header"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 1, "density": "compact", "groupWith": [], "width": { "mode": "fixed", "value": 260 }, "height": { "mode": "content" }, "align": "end" } }
+              ]
+            },
+            {
+              "kind": "layout",
+              "id": "industrial-body-row",
+              "layout": "row",
+              "sourceBlueprintRegionIds": ["industrial-table", "industrial-detail"],
+              "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 1, "density": "compact", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fill" }, "align": "stretch" },
+              "children": [
+            {
+              "kind": "layout",
+              "id": "industrial-side-rail",
+              "layout": "scroll-region",
+              "sourceBlueprintRegionIds": ["industrial-alarm-action"],
+              "intent": { "importance": "secondary", "visualWeight": 3, "readingOrder": 1, "density": "compact", "groupWith": [], "width": { "mode": "fixed", "value": 640 }, "height": { "mode": "fill" }, "align": "stretch" },
+              "children": [
+                { "kind": "control", "id": "industrial-open-alarm", "capabilityId": "button", "content": "打开 3 条高优先级告警", "properties": [], "tabIds": [], "styleRole": "industrial-alarm-action", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["industrial-open-alarm-action"] }], "sourceBlueprintRegionIds": ["industrial-alarm-action"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 0, "density": "compact", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fixed", "value": 60 }, "align": "stretch" } },
+                { "kind": "control", "id": "industrial-detail-grid", "capabilityId": "easyui.1", "content": null, "properties": [], "tabIds": [], "mockDataId": "industrial-detail-records", "styleRole": "industrial-grid", "eventBindings": [], "sourceBlueprintRegionIds": ["industrial-detail"], "intent": { "importance": "secondary", "visualWeight": 3, "readingOrder": 1, "density": "compact", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fill" }, "align": "stretch" } }
+              ]
+            },
+            {
+              "kind": "layout",
+              "id": "industrial-main-workspace",
+              "layout": "scroll-region",
+              "sourceBlueprintRegionIds": ["industrial-kpis"],
+              "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 2, "density": "compact", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fill" }, "align": "stretch" },
+              "children": [
+                {
+                  "kind": "layout",
+                  "id": "industrial-kpi-strip",
+                  "layout": "row",
+                  "sourceBlueprintRegionIds": ["industrial-kpis"],
+                  "intent": { "importance": "primary", "visualWeight": 3, "readingOrder": 0, "density": "compact", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "stretch" },
+                  "children": [
+                    { "kind": "control", "id": "industrial-kpi-online", "capabilityId": "text", "content": "设备在线率 98.6%", "properties": [], "tabIds": [], "styleRole": "industrial-kpi", "eventBindings": [], "sourceBlueprintRegionIds": ["industrial-kpis"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 0, "density": "compact", "groupWith": [], "width": { "mode": "ratio", "value": 1 }, "height": { "mode": "fill" }, "align": "stretch" } },
+                    { "kind": "control", "id": "industrial-kpi-orders", "capabilityId": "text", "content": "在制工单 42", "properties": [], "tabIds": [], "styleRole": "industrial-kpi", "eventBindings": [], "sourceBlueprintRegionIds": ["industrial-kpis"], "intent": { "importance": "secondary", "visualWeight": 3, "readingOrder": 1, "density": "compact", "groupWith": [], "width": { "mode": "ratio", "value": 1 }, "height": { "mode": "fill" }, "align": "stretch" } },
+                    { "kind": "control", "id": "industrial-kpi-abnormal", "capabilityId": "text", "content": "异常设备 3", "properties": [], "tabIds": [], "styleRole": "industrial-kpi", "eventBindings": [], "sourceBlueprintRegionIds": ["industrial-kpis"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 2, "density": "compact", "groupWith": [], "width": { "mode": "ratio", "value": 1 }, "height": { "mode": "fill" }, "align": "stretch" } },
+                    { "kind": "control", "id": "industrial-kpi-output", "capabilityId": "text", "content": "小时产出 1,286 件", "properties": [], "tabIds": [], "styleRole": "industrial-kpi", "eventBindings": [], "sourceBlueprintRegionIds": ["industrial-kpis"], "intent": { "importance": "secondary", "visualWeight": 3, "readingOrder": 3, "density": "compact", "groupWith": [], "width": { "mode": "ratio", "value": 1 }, "height": { "mode": "fill" }, "align": "stretch" } },
+                    { "kind": "control", "id": "industrial-filter-input", "capabilityId": "input", "content": null, "properties": [{ "name": "placeholder", "value": "输入状态，例如需关注" }, { "name": "value", "value": "需关注" }], "tabIds": [], "styleRole": "industrial-field", "eventBindings": [], "sourceBlueprintRegionIds": ["industrial-filter-input"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 4, "density": "compact", "groupWith": [], "width": { "mode": "fixed", "value": 240 }, "height": { "mode": "content" }, "align": "center" } },
+                    { "kind": "control", "id": "industrial-apply-filter", "capabilityId": "button", "content": "应用筛选", "properties": [], "tabIds": [], "styleRole": "industrial-action", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["industrial-filter-action"] }], "sourceBlueprintRegionIds": ["industrial-filter-action"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 5, "density": "compact", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "center" } }
+                  ]
+                },
+                { "kind": "control", "id": "industrial-main-grid", "capabilityId": "easyui.1", "content": null, "properties": [], "tabIds": [], "mockDataId": "industrial-equipment-records", "styleRole": "industrial-grid", "eventBindings": [{ "semanticEvent": "row-click", "actionIds": ["industrial-select-row-action"] }], "sourceBlueprintRegionIds": ["industrial-table"], "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 2, "density": "compact", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fill" }, "align": "stretch" } }
+              ]
+            }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": "industrial-alarm-page",
+        "title": "高优先级告警",
+        "purpose": "告警处理覆盖层宿主页",
+        "canvas": "large-display",
+        "sourceBlueprintPageId": "industrial-alarm-bp",
+        "sourceBlueprintRegionIds": ["industrial-alarm-shell", "industrial-alarm-records", "industrial-alarm-close"],
+        "initialStateIds": ["industrial-alarm-visible"],
+        "root": {
+          "kind": "layout",
+          "id": "industrial-alarm-page-root",
+          "layout": "scroll-region",
+          "sourceBlueprintRegionIds": ["industrial-alarm-shell"],
+          "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 0, "density": "compact", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "viewport" }, "align": "stretch" },
+          "children": [
+            { "kind": "control", "id": "industrial-alarm-heading", "capabilityId": "text", "content": "高优先级告警 · 请在十分钟内完成确认与派工", "properties": [], "tabIds": [], "styleRole": "industrial-title", "eventBindings": [], "sourceBlueprintRegionIds": ["industrial-alarm-shell"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 0, "density": "compact", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "start" } },
+            { "kind": "control", "id": "industrial-alarm-page-table", "capabilityId": "easyui.1", "content": null, "properties": [], "tabIds": [], "mockDataId": "industrial-alarm-records", "styleRole": "industrial-alarm-grid", "eventBindings": [], "sourceBlueprintRegionIds": ["industrial-alarm-records"], "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 1, "density": "compact", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fixed", "value": 240 }, "align": "stretch" } },
+            { "kind": "control", "id": "industrial-alarm-page-close", "capabilityId": "button", "content": "关闭告警层并返回控制台", "properties": [], "tabIds": [], "styleRole": "industrial-action", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["industrial-close-alarm-action"] }], "sourceBlueprintRegionIds": ["industrial-alarm-close"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 2, "density": "compact", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "end" } }
+          ]
+        }
+      }
+    ],
+    "overlays": [
+      {
+        "id": "industrial-alarm-overlay",
+        "title": "高优先级告警",
+        "purpose": "叠加显示当前三条高优先级告警并提供关闭路径",
+        "presentation": "drawer",
+        "hostPageId": "industrial-alarm-page",
+        "sourceBlueprintPageId": "industrial-alarm-bp",
+        "sourceBlueprintRegionIds": ["industrial-alarm-records", "industrial-alarm-close"],
+        "visibleStateId": "industrial-alarm-visible",
+        "dismissible": true,
+        "root": {
+          "kind": "layout",
+          "id": "industrial-alarm-overlay-root",
+          "layout": "overlay-anchor",
+          "sourceBlueprintRegionIds": ["industrial-alarm-records"],
+          "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 0, "density": "compact", "groupWith": [], "width": { "mode": "fixed", "value": 980 }, "height": { "mode": "fill" }, "align": "center" },
+          "children": [
+            {
+              "kind": "layout",
+              "id": "industrial-alarm-stack",
+              "layout": "scroll-region",
+              "sourceBlueprintRegionIds": ["industrial-alarm-records"],
+              "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 0, "density": "compact", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fill" }, "align": "stretch" },
+              "children": [
+                { "kind": "control", "id": "industrial-alarm-table", "capabilityId": "easyui.1", "content": null, "properties": [], "tabIds": [], "mockDataId": "industrial-alarm-records", "styleRole": "industrial-alarm-grid", "eventBindings": [], "sourceBlueprintRegionIds": ["industrial-alarm-records"], "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 0, "density": "compact", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fill" }, "align": "stretch" } },
+                { "kind": "control", "id": "industrial-close-alarm", "capabilityId": "button", "content": "关闭告警层并返回控制台", "properties": [], "tabIds": [], "styleRole": "industrial-action", "eventBindings": [], "sourceBlueprintRegionIds": ["industrial-alarm-close"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 1, "density": "compact", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "end" } }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "actions": [
+      { "id": "industrial-filter-action", "kind": "run-script", "scriptId": "industrial-filter-script", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "industrial-inspect-journey", "stepIndex": 0 }] },
+      { "id": "industrial-select-row-action", "kind": "run-script", "scriptId": "industrial-row-detail-script", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "industrial-inspect-journey", "stepIndex": 1 }] },
+      { "id": "industrial-open-alarm-action", "kind": "navigate-page", "targetPageId": "industrial-alarm-page", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "industrial-alarm-journey", "stepIndex": 0 }] },
+      { "id": "industrial-close-alarm-action", "kind": "navigate-page", "targetPageId": "industrial-console-page", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "industrial-alarm-journey", "stepIndex": 1 }] }
+    ],
+    "scripts": [
+      {
+        "id": "industrial-filter-script",
+        "purpose": "读取状态条件并把主设备网格刷新为一条需关注记录",
+        "kind": "custom",
+        "programVersion": "semantic-js/v1",
+        "source": "const status = $control.getValue(\"industrial-filter-input\");\nconst records = [{ \"equipmentCode\": \"CNC-07\", \"line\": \"精加工一线\", \"name\": \"七号数控单元\", \"status\": String(status), \"temperature\": 67.4, \"alarm\": \"主轴振动偏高\" }];\n$control.setData(\"industrial-main-grid\", records);",
+        "inputs": [{ "name": "equipment-status-filter", "description": "设备状态筛选条件", "refKind": "control", "refId": "industrial-filter-input" }],
+        "outputs": [{ "name": "filtered-equipment-records", "description": "筛选后的主设备记录", "refKind": "control", "refId": "industrial-main-grid" }]
+      },
+      {
+        "id": "industrial-row-detail-script",
+        "purpose": "读取主设备网格当前行并通过同构记录写入侧栏详情网格",
+        "kind": "custom",
+        "programVersion": "semantic-js/v1",
+        "source": "const selectedRecord = $event.record();\nconst records = [];\nrecords.push(selectedRecord);\n$control.setData(\"industrial-detail-grid\", records);",
+        "inputs": [],
+        "outputs": [{ "name": "selected-equipment-detail", "description": "当前选中设备的同构详情记录", "refKind": "control", "refId": "industrial-detail-grid" }]
+      }
+    ]
+  }
+}

@@ -368,6 +368,7 @@ export class BuildExecutor {
         baseWorkspace: candidate.baseWorkspace,
         candidateWorkspace: candidate.candidateWorkspace,
         changePlan: candidate.planInput,
+        semanticOperations: candidate.semanticOperations,
         assets: candidate.assets,
         ...(candidate.creativeMaterialization === undefined ? {} : {
           creativeMaterialization: candidate.creativeMaterialization,
@@ -508,6 +509,7 @@ export class BuildExecutor {
     baseWorkspace: DomainWorkspace;
     candidateWorkspace: DomainWorkspace;
     planInput: InternalChangePlan;
+    semanticOperations: readonly TrustedSemanticOperation[];
     assets: readonly DomainAssetInput[];
     creativeMaterialization?: VerifiedCreativeMaterialization;
     creativeBinding?: { creativeArtifactHash: string; nativeMaterializationHash: string };
@@ -611,6 +613,7 @@ export class BuildExecutor {
           baseWorkspace,
           candidateWorkspace,
           planInput,
+          semanticOperations: resolved.semanticOperations,
           assets,
           ...(resolved.creativeMaterialization === undefined ? {} : {
             creativeMaterialization: resolved.creativeMaterialization,
@@ -650,6 +653,7 @@ export class BuildExecutor {
         baseWorkspace,
         candidateWorkspace,
         planInput,
+        semanticOperations: resolved.semanticOperations,
         assets,
         ...(resolved.creativeMaterialization === undefined ? {} : {
           creativeMaterialization: resolved.creativeMaterialization,

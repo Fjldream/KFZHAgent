@@ -582,7 +582,7 @@ export function createCreativeSolutionCompilerFromEnvironment(
         const signed = facade.authority.sign({
           plan: lowered.plan,
           revisionId: input.baseRevisionId,
-          semanticOperations: [],
+          semanticOperations: lowered.semanticOperations,
           creative: lowered.trustedCreativePayload,
         });
         const planHash = canonicalChangePlanHash(lowered.plan);

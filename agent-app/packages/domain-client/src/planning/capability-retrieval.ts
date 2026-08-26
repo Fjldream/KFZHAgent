@@ -22,6 +22,7 @@ const MAX_CONTROLS = 5;
 const MIN_LAYOUTS = 1;
 const MAX_LAYOUTS = 3;
 const MAX_RECIPES = 3;
+const CANDIDATE_SCORE_SIGNIFICANT_DIGITS = 12;
 const NATURAL_INTERACTION_MAPPINGS: ReadonlyArray<readonly [string, RegExp]> = [
   ["navigate-page", /(?:点击|打开|进入|查看).*(?:详情|明细)|(?:详情|明细).*(?:打开|查看|进入)/],
   ["change", /筛选|过滤|搜索|检索|选择|选中|更改|变更/],
@@ -162,10 +163,20 @@ function compareRankedCandidates(
   return right.score - left.score || compareCodePoints(left.id, right.id);
 }
 
+function quantizeCandidateScore(score: number): number {
+  if (!Number.isFinite(score)) throw new Error("CAPABILITY_SCORE_INVALID: score must be finite");
+  return Number(score.toPrecision(CANDIDATE_SCORE_SIGNIFICANT_DIGITS));
+}
+
+function candidateForTransport(candidate: RankedCandidate): RankedCandidate {
+  return { ...candidate, score: quantizeCandidateScore(candidate.score) };
+}
+
 /** Test-only access for proving exact scoring arithmetic and ordering. */
 export const __capabilityRetrievalTestHooks = Object.freeze({
   scoreValue,
   compareRankedCandidates,
+  quantizeCandidateScore,
 });
 
 function scoreReasons(components: ScoreComponents): readonly string[] {
@@ -378,7 +389,7 @@ export function retrieveCapabilities(input: CapabilityRetrievalInput): Capabilit
         if (selected.length === maximum) break;
         if (detailedIds.has(candidate.id) || detailedIds.size < MAX_DETAILED_CAPABILITIES) {
           detailedIds.add(candidate.id);
-          selected.push(candidate);
+          selected.push(candidateForTransport(candidate));
         }
       }
       return selected;
@@ -388,7 +399,7 @@ export function retrieveCapabilities(input: CapabilityRetrievalInput): Capabilit
       regionId: draft.query.regionId,
       controls: select(draft.controls, MAX_CONTROLS),
       layouts: select(draft.layouts, MAX_LAYOUTS),
-      recipes: [...draft.recipes.slice(0, MAX_RECIPES)],
+      recipes: draft.recipes.slice(0, MAX_RECIPES).map(candidateForTransport),
     };
   });
 

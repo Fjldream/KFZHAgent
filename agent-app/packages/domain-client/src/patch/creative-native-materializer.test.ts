@@ -45,7 +45,13 @@ const intent = {
   height: { mode: "fixed" as const, value: 40 }, align: "start" as const,
 };
 
-function creativeInput(verifiedExisting?: VerifiedExistingRuntimeCorrelationHandle, extraControlCount = 0) {
+function creativeInput(
+  verifiedExisting?: VerifiedExistingRuntimeCorrelationHandle,
+  extraControlCount = 0,
+  includePrivilegedTableData = false,
+  fractionalBoundary = false,
+  scrollOverflow = false,
+) {
   const blueprint = {
     schema: "kf-design-plan/v3" as const, displayName: "工程", objective: "完成交互",
     audiences: ["客户"], scenarios: ["查看详情"],
@@ -88,7 +94,7 @@ function creativeInput(verifiedExisting?: VerifiedExistingRuntimeCorrelationHand
     pages: [
       { id: "home", title: "首页", purpose: "首页", canvas: "desktop", sourceBlueprintPageId: "bp-home",
         sourceBlueprintRegionIds: ["region-home"], initialStateIds: [], root: {
-          id: "root", kind: "layout", layout: "column", sourceBlueprintRegionIds: ["region-home"],
+          id: "root", kind: "layout", layout: scrollOverflow ? "scroll-region" : "column", sourceBlueprintRegionIds: ["region-home"],
           intent: structuredClone(intent), children: [
             { id: "open", kind: "control", capabilityId: "button",
               content: "打开", properties: [], tabIds: [], styleRole: "content",
@@ -134,17 +140,32 @@ function creativeInput(verifiedExisting?: VerifiedExistingRuntimeCorrelationHand
       { compatibility: "native", id: "home", width: 1440, height: 900,
         sourceBlueprintPageId: "bp-home", controls: [
           { id: "open", parentId: "root", role: "content", capabilityId: "button", content: "打开",
-            depth: 1, zIndex: 2, geometry: { x: 20, y: 20, width: 120, height: 40 }, nativeProperties: {},
+            depth: 1, zIndex: 2, geometry: scrollOverflow
+              ? { x: 20, y: 140, width: 120, height: 40 }
+              : fractionalBoundary
+                ? { x: 1100.31, y: 768, width: 120, height: 30 }
+                : { x: 20, y: 20, width: 120, height: 40 },
+            nativeProperties: { parentId: "root" },
             compiledStyle: { nativeFields: {}, cssFragments: [], warnings: [] }, sourceSolutionNodeId: "open",
             sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region-home"], eventBindings: [] },
           { id: "portrait", parentId: "root", role: "content", capabilityId: "image", depth: 1, zIndex: 1,
-            geometry: { x: 40, y: 80, width: 200, height: 160 },
+            geometry: scrollOverflow
+              ? { x: 20, y: 30, width: 160, height: 60 }
+              : fractionalBoundary
+                ? { x: 1100.31, y: 688.4, width: 160, height: 60 }
+                : { x: 40, y: 80, width: 200, height: 160 },
             nativeProperties: { src: "static/images/images/image1.png" },
             compiledStyle: { nativeFields: {}, cssFragments: [], warnings: [] }, sourceSolutionNodeId: "portrait",
             sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region-home"], eventBindings: [] },
           { id: "root", role: "content", capabilityId: "layout.4", depth: 0, zIndex: 0,
-            geometry: { x: 0, y: 0, width: 1440, height: 900 },
-            compiledLayout: { kind: "column", overflow: "visible" }, nativeProperties: {},
+            geometry: scrollOverflow
+              ? { x: 20, y: 20, width: 300, height: 100 }
+              : fractionalBoundary
+                ? { x: 1100.31, y: 688.4, width: 283.69, height: 109.6 }
+                : { x: 0, y: 0, width: 1440, height: 900 },
+            compiledLayout: scrollOverflow
+              ? { kind: "scroll-region", overflow: "local-scroll", scrollContentExtent: { width: 300, height: 160 } }
+              : { kind: "column", overflow: "visible" }, nativeProperties: {},
             compiledStyle: { nativeFields: {}, cssFragments: [], warnings: [] }, sourceSolutionNodeId: "root",
             sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region-home"], eventBindings: [] },
         ] },
@@ -156,7 +177,10 @@ function creativeInput(verifiedExisting?: VerifiedExistingRuntimeCorrelationHand
             sourceSolutionNodeId: "detail-root", sourceBlueprintPageId: "bp-detail",
             sourceBlueprintRegionIds: ["region-detail"], eventBindings: [] },
           { id: "grid", parentId: "detail-root", role: "content", capabilityId: "easyui.1", depth: 1, zIndex: 0,
-            geometry: { x: 0, y: 0, width: 900, height: 500 }, nativeProperties: { pagination: true },
+            geometry: { x: 0, y: 0, width: 900, height: 500 }, nativeProperties: includePrivilegedTableData
+              ? { parentId: "detail-root", pagination: false, pageSize: 1,
+                tableData: { columns: [{ key: "id", label: "编号", align: "left" }], rows: [{ id: "1" }], pageSize: 1 } }
+              : { pagination: true },
             compiledStyle: { nativeFields: {}, cssFragments: [], warnings: [{ code: "STYLE_CAPABILITY_PRESERVE_ONLY",
               message: "Capability easyui.1 style is preserve-only; existing appearance is retained" }] },
             dataBinding: { mockDataId: "records", records: [{ id: "1" }] }, sourceSolutionNodeId: "grid",
@@ -277,11 +301,23 @@ function walkControls(value: unknown, result: Array<Record<string, unknown>> = [
   return result;
 }
 
-async function signedFixture(extraControlCount = 0) {
+async function signedFixture(
+  extraControlCount = 0,
+  includePrivilegedTableData = false,
+  fractionalBoundary = false,
+  scrollOverflow = false,
+) {
   const facade = createHmacCreativeBuildFacade(Buffer.alloc(32, 0x41), createCreativeUIImplementationV2Compiler);
-  const result = facade.compiler.compiler.compile(creativeInput(undefined, extraControlCount));
+  const result = facade.compiler.compiler.compile(creativeInput(
+    undefined,
+    extraControlCount,
+    includePrivilegedTableData,
+    fractionalBoundary,
+    scrollOverflow,
+  ));
   const envelope = facade.authority.sign({
-    plan: result.plan, revisionId: "revision", semanticOperations: [], creative: result.trustedCreativePayload,
+    plan: result.plan, revisionId: "revision", semanticOperations: result.semanticOperations,
+    creative: result.trustedCreativePayload,
   });
   const planHash = canonicalChangePlanHash(result.plan);
   const resolved = resolveStoredPlan(JSON.parse(JSON.stringify(envelope)), {
@@ -492,6 +528,64 @@ describe("creative native materializer", () => {
       && String(((control["linkMng"] as { linkList: Array<Record<string, unknown>> }).linkList)
         .find((entry) => entry["linkId"] === 200024)?.["script"]).includes(`${grid.instanceName}.SetData([])`))).toBe(true);
   }, 30_000);
+
+  it("carries exact signed Datagrid authorization through the verified creative patch path", async () => {
+    const { result, resolved, planHash } = await signedFixture(0, true);
+    const base = await baseWorkspace();
+    expect(resolved.semanticOperations).toHaveLength(1);
+
+    const candidate = await applyClientPatch(base.rootDir, result.plan, {
+      planHash,
+      semanticOperations: resolved.semanticOperations,
+      creativeMaterialization: resolved.creativeMaterialization,
+    } as ApplyPatchOptions & { creativeMaterialization: unknown });
+    const inspection = await inspectClientProject(candidate.rootDir);
+    const grid = result.materialization.controls.find((control) => control.semanticControlId === "grid")!;
+    const native = Object.values(inspection.raw.pages).flatMap((page) => walkControls(page))
+      .find((control) => control["name"] === grid.instanceName)!;
+    expect(native["data"]).toEqual([{ id: "1" }]);
+    const report = await validateClientProject(base.rootDir, candidate.rootDir, result.plan, {
+      skipRoundTrip: true,
+      semanticOperations: resolved.semanticOperations,
+      creativeMaterialization: resolved.creativeMaterialization,
+    } as Parameters<typeof validateClientProject>[3] & {
+      semanticOperations: unknown;
+      creativeMaterialization: unknown;
+    });
+    expect(report.status, report.warnings.join("\n")).toBe("pass");
+  });
+
+  it("accepts compiler geometry that lands exactly on a fractional parent boundary", async () => {
+    const { result, resolved, planHash } = await signedFixture(0, false, true);
+    const base = await baseWorkspace();
+
+    const candidate = await applyClientPatch(base.rootDir, result.plan, {
+      planHash,
+      semanticOperations: resolved.semanticOperations,
+      creativeMaterialization: resolved.creativeMaterialization,
+    } as ApplyPatchOptions & { creativeMaterialization: unknown });
+    const report = await validateClientProject(base.rootDir, candidate.rootDir, result.plan, {
+      skipRoundTrip: true,
+      creativeMaterialization: resolved.creativeMaterialization,
+    } as Parameters<typeof validateClientProject>[3] & { creativeMaterialization: unknown });
+    expect(report.status, report.warnings.join("\n")).toBe("pass");
+  });
+
+  it("materializes a child beyond a compiler-signed scroll viewport without relaxing ordinary parent bounds", async () => {
+    const { result, resolved, planHash } = await signedFixture(0, false, false, true);
+    const base = await baseWorkspace();
+
+    const candidate = await applyClientPatch(base.rootDir, result.plan, {
+      planHash,
+      semanticOperations: resolved.semanticOperations,
+      creativeMaterialization: resolved.creativeMaterialization,
+    } as ApplyPatchOptions & { creativeMaterialization: unknown });
+    const report = await validateClientProject(base.rootDir, candidate.rootDir, result.plan, {
+      skipRoundTrip: true,
+      creativeMaterialization: resolved.creativeMaterialization,
+    } as Parameters<typeof validateClientProject>[3] & { creativeMaterialization: unknown });
+    expect(report.status, report.warnings.join("\n")).toBe("pass");
+  });
 
   it("reports signed geometry and native sibling z-order tampering explicitly", async () => {
     const { result, resolved, planHash } = await signedFixture();

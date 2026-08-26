@@ -61,6 +61,8 @@ export interface DomainValidateInput {
   baseWorkspace: DomainWorkspace;
   candidateWorkspace: DomainWorkspace;
   changePlan: unknown;
+  /** Server-validated native adapter authorizations reused by exact replay validation. */
+  semanticOperations?: readonly TrustedSemanticOperation[];
   assets?: readonly DomainAssetInput[];
   /** Same verified opaque handle consumed by patch; never persisted as plan JSON. */
   creativeMaterialization?: unknown;

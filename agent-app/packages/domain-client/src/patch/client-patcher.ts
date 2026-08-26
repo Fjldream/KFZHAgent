@@ -922,6 +922,7 @@ async function applyUpdate(
   workspaceId: string,
   semanticOperations: readonly TrustedSemanticOperation[],
   creativeBatch?: CreativePageBatch,
+  semanticOperationEntityId = op.entityId,
 ): Promise<void> {
   const loc = await locateEntity(baseRoot, inspection.index, versionDir, op.entityId, op.entityType);
   const { doc, root } = await entityRootOf(candidate, versionDir, loc, creativeBatch);
@@ -955,7 +956,7 @@ async function applyUpdate(
       throw new PatchConflictError("raw style fields are read-only; use applyStyle");
     }
     if (change.path === "/__kfModuleTableData") {
-      if (!hasTrustedTableOperation(semanticOperations, op.entityId, change.value)) {
+      if (!hasTrustedTableOperation(semanticOperations, semanticOperationEntityId, change.value)) {
         throw new PatchConflictError("reviewed table data requires a trusted module compiler plan");
       }
       if (!(isControlLocation(loc) && loc.controlType === "easyui" && root["uiExtendType"] === 1)) {
@@ -1463,6 +1464,8 @@ async function applyCreate(
   workspaceId: string,
   semanticOperations: readonly TrustedSemanticOperation[],
   creativeBatch?: CreativePageBatch,
+  semanticOperationEntityId = op.entityId,
+  creativeParentContentExtent?: { readonly width: number; readonly height: number },
 ): Promise<void> {
   const build = { seed: workspaceId };
   switch (op.entityType) {
@@ -1496,7 +1499,13 @@ async function applyCreate(
         }
         const inserted = creativeBatch === undefined
           ? pushControlIntoParent(objects, control, parentId, properties["x"] !== undefined || properties["y"] !== undefined)
-          : pushControlIntoCreativeParent(creativeBatch, control, parentId, properties["x"] !== undefined || properties["y"] !== undefined);
+          : pushControlIntoCreativeParent(
+            creativeBatch,
+            control,
+            parentId,
+            properties["x"] !== undefined || properties["y"] !== undefined,
+            creativeParentContentExtent,
+          );
         if (!inserted) throw new PatchConflictError(error);
       };
 
@@ -1523,7 +1532,7 @@ async function applyCreate(
           if (value !== undefined) pass[field] = value;
         }
         if (proto === 1 && properties["tableData"] !== undefined) {
-          if (!hasTrustedTableOperation(semanticOperations, op.entityId, properties["tableData"])) {
+          if (!hasTrustedTableOperation(semanticOperations, semanticOperationEntityId, properties["tableData"])) {
             throw new PatchConflictError("reviewed table data requires a trusted module compiler plan");
           }
           try {
@@ -1809,6 +1818,8 @@ interface CreativePageBatch {
   modified: boolean;
 }
 
+const CREATIVE_GEOMETRY_EPSILON = 1e-9;
+
 function indexCreativePageBatch(batch: CreativePageBatch): void {
   const visit = (node: unknown, parentOrigin: { x: number; y: number }): void => {
     if (!Array.isArray(node)) return;
@@ -1860,6 +1871,7 @@ function pushControlIntoCreativeParent(
   control: Record<string, unknown>,
   parentId: unknown,
   hasExplicitPosition: boolean,
+  signedContentExtent?: { readonly width: number; readonly height: number },
 ): boolean {
   const target = typeof parentId === "string" ? parentId : "";
   const parent = batch.byName.get(target) ?? batch.byGuid.get(target);
@@ -1875,8 +1887,11 @@ function pushControlIntoCreativeParent(
   const height = childIsLayout ? asNumber(childBase["height"]) : asNumber(control["height"]);
   const parentWidth = asNumber(parentBase["width"]);
   const parentHeight = asNumber(parentBase["height"]);
-  if (localX < 0 || localY < 0 || (parentWidth > 0 && localX + width > parentWidth)
-    || (parentHeight > 0 && localY + height > parentHeight)) return false;
+  const contentWidth = signedContentExtent?.width ?? parentWidth;
+  const contentHeight = signedContentExtent?.height ?? parentHeight;
+  if (localX < -CREATIVE_GEOMETRY_EPSILON || localY < -CREATIVE_GEOMETRY_EPSILON
+    || (contentWidth > 0 && localX + width - contentWidth > CREATIVE_GEOMETRY_EPSILON)
+    || (contentHeight > 0 && localY + height - contentHeight > CREATIVE_GEOMETRY_EPSILON)) return false;
   if (childIsLayout) childBase["leftTopPt"] = { x: localX, y: localY };
   else control["leftTopPt"] = { x: localX, y: localY };
   if (!Array.isArray(parent.root["insiderObjects"])) parent.root["insiderObjects"] = [];
@@ -2064,8 +2079,14 @@ async function applyVerifiedCreativePatch(
       reservedGuids.set(guid, control.instanceName);
       const styleNativeFields = new Set(Object.keys(styleByControl.get(control.semanticControlId)?.compiledStyle.nativeFields ?? {}));
       const semanticNativeProperties = Object.fromEntries(
-        Object.entries(control.nativeProperties).filter(([key]) => !styleNativeFields.has(key)),
+        Object.entries(control.nativeProperties).filter(([key]) => key !== "parentId" && !styleNativeFields.has(key)),
       );
+      const parentControl = control.parentSemanticControlId === undefined
+        ? undefined
+        : controlBySemantic.get(control.parentSemanticControlId);
+      const parentContentExtent = parentControl?.compiledLayout?.kind === "scroll-region"
+        ? parentControl.compiledLayout.scrollContentExtent
+        : undefined;
       await applyCreate(candidate, versionDir, pageInspection, candidate, {
         op: "create", entityType: "control", entityId: control.instanceName,
         changes: [], destructiveConfirmed: false,
@@ -2077,7 +2098,8 @@ async function applyVerifiedCreativePatch(
           ...semanticNativeProperties,
           ...(control.content === undefined ? {} : { text: control.content }),
         },
-      }, materialization.workspaceId, [], pageBatches.get(control.pageGuid));
+      }, materialization.workspaceId, options.semanticOperations ?? [], pageBatches.get(control.pageGuid),
+      control.semanticControlId, parentContentExtent);
     }
 
     // Stage 4: exact allowlisted existing deltas, then authoritative style/data.
@@ -2090,7 +2112,8 @@ async function applyVerifiedCreativePatch(
         op: "update", entityType: "control", entityId: control.nativeGuid!, properties: {},
         changes: (control.existingDeltas ?? []).map((delta) => ({ path: delta.path, value: structuredClone(delta.value) })),
         destructiveConfirmed: false,
-      }, materialization.workspaceId, [], pageBatches.get(control.pageGuid));
+      }, materialization.workspaceId, options.semanticOperations ?? [], pageBatches.get(control.pageGuid),
+      control.semanticControlId);
     }
 
     const creativePageBatch = (pageGuid: string, semanticPageId: string): CreativePageBatch => {

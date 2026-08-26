@@ -1,0 +1,399 @@
+{
+  "id": "portal",
+  "prompt": "创建一个中文建筑与空间摄影作品门户，以编辑叙事、大片与非对称留白展示品牌、精选作品、项目详情和联系反馈。",
+  "expect": {},
+  "blueprint": {
+    "schema": "kf-design-plan/v3",
+    "displayName": "叠境空间影像",
+    "objective": "以媒体主导的编辑叙事帮助潜在客户浏览代表作品、理解项目语境并提交合作意向",
+    "audiences": ["品牌与建筑事务所客户", "展览策划人"],
+    "scenarios": ["浏览精选空间影像", "查看项目叙事", "提交拍摄合作意向"],
+    "pages": [
+      {
+        "id": "portal-home-bp",
+        "title": "叠境首页",
+        "purpose": "用品牌引言、大幅主视觉和非对称精选作品序列建立第一印象",
+        "readingOrder": ["portal-nav", "portal-nav-action", "portal-hero", "portal-gallery"],
+        "regions": [
+          {
+            "id": "portal-nav",
+            "purpose": "提供品牌识别和作品、联系目的地入口",
+            "semanticRoles": ["heading", "primary-action", "secondary-action"],
+            "dataShape": "scalar",
+            "density": "comfortable",
+            "importance": "secondary",
+            "content": ["叠境空间影像", "精选作品", "联系"],
+            "sampleData": [],
+            "interactions": ["作品入口响应并切换项目页"],
+            "states": ["首页可浏览"],
+            "visualIntent": "克制的顶部文字导航与宽阔横向留白"
+          },
+          {
+            "id": "portal-hero",
+            "purpose": "以一幅大尺度空间影像和短篇品牌宣言建立编辑叙事",
+            "semanticRoles": ["media", "heading", "narrative-content", "primary-action"],
+            "dataShape": "media-list",
+            "density": "spacious",
+            "importance": "primary",
+            "content": ["让光线成为空间的第二层结构", "上海 · 建筑与空间影像"],
+            "sampleData": [{ "项目": "海岸书屋", "地点": "秦皇岛" }],
+            "interactions": [],
+            "states": ["品牌主视觉已呈现"],
+            "visualIntent": "超大画面、偏置文案和明显不对称留白"
+          },
+          {
+            "id": "portal-nav-action",
+            "purpose": "在顶部导航中提供一个进入精选项目的明确动作",
+            "semanticRoles": ["primary-action"],
+            "dataShape": "action-list",
+            "density": "comfortable",
+            "importance": "secondary",
+            "content": ["精选作品"],
+            "sampleData": [],
+            "interactions": ["顶部作品入口响应"],
+            "states": ["顶部导航可用"],
+            "visualIntent": "与品牌字标同线但保持低干扰"
+          },
+          {
+            "id": "portal-gallery",
+            "purpose": "用不同画幅与节奏的真实作品缩略影像形成精选作品画廊",
+            "semanticRoles": ["media", "product-visual", "heading", "primary-action"],
+            "dataShape": "media-list",
+            "density": "spacious",
+            "importance": "primary",
+            "content": ["北境艺廊", "山谷民宿", "海岸书屋"],
+            "sampleData": [
+              { "作品": "北境艺廊", "地点": "北京", "年份": "2026" },
+              { "作品": "山谷民宿", "地点": "莫干山", "年份": "2025" }
+            ],
+            "interactions": ["作品焦点响应并切换完整项目页"],
+            "states": ["精选作品可选择"],
+            "visualIntent": "避免等宽卡片，用一大两小的非对称媒体编排"
+          }
+        ]
+      },
+      {
+        "id": "portal-detail-bp",
+        "title": "北境艺廊详情",
+        "purpose": "呈现单个作品的大画面、设计语境和合作联系层",
+        "readingOrder": ["portal-detail-nav", "portal-detail", "portal-contact-form", "portal-contact-submit", "portal-contact-status", "portal-contact-close"],
+        "regions": [
+          {
+            "id": "portal-detail-nav",
+            "purpose": "提供从单个作品回到精选作品序列的明确回程动作",
+            "semanticRoles": ["secondary-action"],
+            "dataShape": "action-list",
+            "density": "comfortable",
+            "importance": "secondary",
+            "content": ["返回精选作品"],
+            "sampleData": [],
+            "interactions": ["回程入口响应"],
+            "states": ["回程动作可用"],
+            "visualIntent": "单一文字动作贴近页面左上边界"
+          },
+          {
+            "id": "portal-detail",
+            "purpose": "以横向主图、项目标题和简短拍摄笔记讲述北境艺廊",
+            "semanticRoles": ["media", "heading", "narrative-content", "secondary-action"],
+            "dataShape": "record",
+            "density": "spacious",
+            "importance": "primary",
+            "content": ["北境艺廊", "晨光把清水混凝土切成缓慢移动的几何面", "返回作品"],
+            "sampleData": [{ "地点": "北京顺义", "面积": "3200 平方米", "拍摄": "2026 年 4 月" }],
+            "interactions": ["回程入口响应并切换作品首页"],
+            "states": ["项目详情可阅读"],
+            "visualIntent": "单一大图承担主视觉，文字沿窄列下沉"
+          },
+          {
+            "id": "portal-contact-form",
+            "purpose": "在作品语境内收集一条合作留言并提交",
+            "semanticRoles": ["form-input", "primary-action"],
+            "dataShape": "record",
+            "density": "comfortable",
+            "importance": "supporting",
+            "content": ["合作留言", "提交意向"],
+            "sampleData": [{ "联系人": "林悦", "机构": "栖居设计研究室", "意向": "秋季酒店拍摄" }],
+            "interactions": ["输入合作意向并提交"],
+            "states": ["联系层已打开"],
+            "visualIntent": "轻量覆盖层与首页大片形成尺度对比"
+          },
+          {
+            "id": "portal-contact-status",
+            "purpose": "紧凑呈现合作留言的当前处理状态",
+            "semanticRoles": ["structured-record-list", "status-label"],
+            "dataShape": "record-list",
+            "density": "comfortable",
+            "importance": "supporting",
+            "content": ["合作留言", "已收到"],
+            "sampleData": [{ "留言": "秋季酒店拍摄合作", "状态": "已收到" }],
+            "interactions": [],
+            "states": ["提交状态可见"],
+            "visualIntent": "一行状态记录，不形成主页面表格感"
+          },
+          {
+            "id": "portal-contact-submit",
+            "purpose": "提交当前联系留言并触发状态反馈",
+            "semanticRoles": ["primary-action"],
+            "dataShape": "action-list",
+            "density": "comfortable",
+            "importance": "supporting",
+            "content": ["提交合作意向"],
+            "sampleData": [],
+            "interactions": ["提交动作响应"],
+            "states": ["提交动作可用"],
+            "visualIntent": "覆盖层内唯一高强调动作"
+          },
+          {
+            "id": "portal-contact-close",
+            "purpose": "提供关闭联系层并回到作品详情的单一动作",
+            "semanticRoles": ["secondary-action"],
+            "dataShape": "action-list",
+            "density": "comfortable",
+            "importance": "supporting",
+            "content": ["关闭联系层"],
+            "sampleData": [],
+            "interactions": ["关闭联系层返回作品详情"],
+            "states": ["关闭动作可用"],
+            "visualIntent": "低强调度的底部回程动作"
+          }
+        ]
+      }
+    ],
+    "journeys": [
+      {
+        "id": "portal-explore-journey",
+        "actor": "展览策划人",
+        "goal": "从精选画廊进入北境艺廊并返回作品序列",
+        "steps": [
+          { "pageId": "portal-home-bp", "regionId": "portal-gallery", "action": "选择北境艺廊", "result": "进入北境艺廊详情" },
+          { "pageId": "portal-detail-bp", "regionId": "portal-detail-nav", "action": "返回作品序列", "result": "回到精选作品首页" }
+        ],
+        "completion": "完成一次作品浏览往返"
+      },
+      {
+        "id": "portal-contact-journey",
+        "actor": "品牌客户",
+        "goal": "在作品详情中提交合作意向并关闭联系层",
+        "steps": [
+          { "pageId": "portal-detail-bp", "regionId": "portal-contact-submit", "action": "提交合作留言", "result": "联系状态记录显示已收到" },
+          { "pageId": "portal-detail-bp", "regionId": "portal-contact-close", "action": "关闭联系层", "result": "返回北境艺廊详情" }
+        ],
+        "completion": "合作意向得到明确状态反馈"
+      }
+    ],
+    "visualDirection": {
+      "tone": "安静、编辑感、具有建筑杂志的留白纪律",
+      "colors": ["暖纸白", "墨黑", "陶土红"],
+      "typography": "超大标题与窄列正文形成尺度反差",
+      "spacingAndSurfaces": "以非对称留白和整幅媒体为主，不使用仪表盘卡片网格"
+    },
+    "acceptanceScenarios": ["可从精选作品进入详情并返回", "可在联系覆盖层提交中文合作留言并看到状态"],
+    "openQuestions": []
+  },
+  "plan": {
+    "schema": "kf-solution-implementation/v1",
+    "projectKey": "diejing-portal",
+    "blueprintHash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "candidateBundleHash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "theme": {
+      "background": "#f2eee7",
+      "surface": "#fffaf2",
+      "primary": "#171614",
+      "accent": "#a44732",
+      "textPrimary": "#171614",
+      "textSecondary": "#6d675f",
+      "fontFamily": "Noto Sans SC",
+      "spacingUnit": 10,
+      "radiusScale": { "small": 2, "medium": 4, "large": 8 }
+    },
+    "roleStyles": [
+      { "role": "portal-brand", "declarations": { "fontSize": 18, "fontWeight": 700, "letterSpacing": 2, "textColor": "{theme.textPrimary}" }, "states": {} },
+      { "role": "portal-display", "declarations": { "fontSize": 64, "fontWeight": 500, "lineHeight": 1.05, "letterSpacing": -2, "textColor": "{theme.textPrimary}" }, "states": {} },
+      { "role": "portal-body", "declarations": { "fontSize": 18, "lineHeight": 1.8, "textColor": "{theme.textSecondary}" }, "states": {} },
+      { "role": "portal-media", "declarations": { "borderRadius": 2 }, "states": {} },
+      { "role": "portal-action", "declarations": { "backgroundColor": "{theme.primary}", "textColor": "#fffaf2", "borderRadius": 2, "paddingHorizontal": 22, "letterSpacing": 1 }, "states": { "hover": { "opacity": 0.84 } } },
+      { "role": "portal-field", "declarations": { "backgroundColor": "#fffaf2", "borderColor": "#a8a098", "borderRadius": 2, "paddingHorizontal": 14 }, "states": {} },
+      { "role": "portal-status", "declarations": {}, "states": {} }
+    ],
+    "mockData": [
+      {
+        "id": "portal-contact-records",
+        "purpose": "联系层中的合作留言状态",
+        "fields": [
+          { "key": "id", "label": "编号", "type": "text" },
+          { "key": "message", "label": "合作留言", "type": "text" },
+          { "key": "status", "label": "状态", "type": "text" }
+        ],
+        "records": [
+          { "values": [{ "field": "id", "value": "contact-0" }, { "field": "message", "value": "希望预约秋季酒店拍摄档期" }, { "field": "status", "value": "待提交" }] }
+        ]
+      }
+    ],
+    "localState": [
+      { "id": "portal-contact-visible", "purpose": "控制详情页联系覆盖层是否显示", "type": "boolean", "initialValue": false }
+    ],
+    "pages": [
+      {
+        "id": "portal-home-page",
+        "title": "叠境空间影像",
+        "purpose": "品牌主视觉与精选作品入口",
+        "canvas": "desktop",
+        "sourceBlueprintPageId": "portal-home-bp",
+        "sourceBlueprintRegionIds": ["portal-nav", "portal-nav-action", "portal-hero", "portal-gallery"],
+        "initialStateIds": [],
+        "root": {
+          "kind": "layout",
+          "id": "portal-home-root",
+          "layout": "column",
+          "sourceBlueprintRegionIds": ["portal-nav"],
+          "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 0, "density": "spacious", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "viewport" }, "align": "stretch" },
+          "children": [
+            {
+              "kind": "layout",
+              "id": "portal-top-navigation",
+              "layout": "row",
+              "sourceBlueprintRegionIds": ["portal-nav"],
+              "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fixed", "value": 60 }, "align": "center" },
+              "children": [
+                { "kind": "control", "id": "portal-brand-name", "capabilityId": "text", "content": "叠境 / DIEJING", "properties": [], "tabIds": [], "styleRole": "portal-brand", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-nav"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "start" } },
+                { "kind": "control", "id": "portal-nav-work", "capabilityId": "button", "content": "精选作品", "properties": [], "tabIds": [], "styleRole": "portal-action", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["portal-nav-open-detail"] }], "sourceBlueprintRegionIds": ["portal-nav-action"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 1, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "fixed", "value": 60 }, "align": "center" } },
+                { "kind": "control", "id": "portal-nav-contact", "capabilityId": "button", "content": "联系 / 预约", "properties": [], "tabIds": [], "styleRole": "portal-action", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["portal-open-contact"] }], "sourceBlueprintRegionIds": ["portal-nav-action"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 2, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "fixed", "value": 60 }, "align": "center" } }
+              ]
+            },
+            {
+              "kind": "layout",
+              "id": "portal-hero-composition",
+              "layout": "asymmetric-grid",
+              "sourceBlueprintRegionIds": ["portal-hero"],
+              "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 1, "density": "spacious", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fixed", "value": 430 }, "align": "stretch" },
+              "children": [
+                { "kind": "control", "id": "portal-hero-image", "capabilityId": "image", "content": null, "properties": [{ "name": "fit", "value": "cover" }, { "name": "alt", "value": "海岸书屋清晨光影" }], "tabIds": [], "styleRole": "portal-media", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-hero"], "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 0, "density": "spacious", "groupWith": [], "width": { "mode": "ratio", "value": 3 }, "height": { "mode": "fill" }, "align": "stretch" } },
+                {
+                  "kind": "layout",
+                  "id": "portal-hero-copy",
+                  "layout": "column",
+                  "sourceBlueprintRegionIds": ["portal-hero"],
+                  "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 1, "density": "spacious", "groupWith": [], "width": { "mode": "ratio", "value": 2 }, "height": { "mode": "fill" }, "align": "end" },
+                  "children": [
+                    { "kind": "control", "id": "portal-hero-title", "capabilityId": "text", "content": "让光线成为空间的第二层结构", "properties": [], "tabIds": [], "styleRole": "portal-display", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-hero"], "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 0, "density": "spacious", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "start" } },
+                    { "kind": "control", "id": "portal-hero-note", "capabilityId": "text", "content": "上海 · 建筑与空间影像 / 2026", "properties": [], "tabIds": [], "styleRole": "portal-body", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-hero"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 1, "density": "spacious", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "start" } }
+                  ]
+                }
+              ]
+            },
+            {
+              "kind": "layout",
+              "id": "portal-gallery-composition",
+              "layout": "asymmetric-grid",
+              "sourceBlueprintRegionIds": ["portal-gallery"],
+              "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 2, "density": "spacious", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fixed", "value": 340 }, "align": "stretch" },
+              "children": [
+                { "kind": "control", "id": "portal-gallery-north-image", "capabilityId": "image", "content": null, "properties": [{ "name": "fit", "value": "cover" }, { "name": "alt", "value": "北境艺廊中庭" }], "tabIds": [], "styleRole": "portal-media", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-gallery"], "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 0, "density": "spacious", "groupWith": [], "width": { "mode": "ratio", "value": 3 }, "height": { "mode": "fill" }, "align": "stretch" } },
+                { "kind": "control", "id": "portal-gallery-valley-image", "capabilityId": "image", "content": null, "properties": [{ "name": "fit", "value": "cover" }, { "name": "alt", "value": "山谷民宿庭院" }], "tabIds": [], "styleRole": "portal-media", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-gallery"], "intent": { "importance": "secondary", "visualWeight": 3, "readingOrder": 1, "density": "spacious", "groupWith": [], "width": { "mode": "ratio", "value": 2 }, "height": { "mode": "fill" }, "align": "stretch" } },
+                { "kind": "control", "id": "portal-gallery-detail", "capabilityId": "button", "content": "北境艺廊 / 查看完整项目", "properties": [], "tabIds": [], "styleRole": "portal-action", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["portal-open-detail"] }], "sourceBlueprintRegionIds": ["portal-gallery"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 2, "density": "spacious", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "fixed", "value": 60 }, "align": "end" } }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": "portal-detail-page",
+        "title": "北境艺廊",
+        "purpose": "项目影像叙事与联系反馈",
+        "canvas": "desktop",
+        "sourceBlueprintPageId": "portal-detail-bp",
+        "sourceBlueprintRegionIds": ["portal-detail-nav", "portal-detail", "portal-contact-form", "portal-contact-submit", "portal-contact-status", "portal-contact-close"],
+        "initialStateIds": ["portal-contact-visible"],
+        "root": {
+          "kind": "layout",
+          "id": "portal-detail-root",
+          "layout": "column",
+          "sourceBlueprintRegionIds": ["portal-detail"],
+          "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 0, "density": "spacious", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "stretch" },
+          "children": [
+            { "kind": "control", "id": "portal-detail-back", "capabilityId": "button", "content": "← 返回精选作品", "properties": [], "tabIds": [], "styleRole": "portal-action", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["portal-return-home"] }], "sourceBlueprintRegionIds": ["portal-detail-nav"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 0, "density": "spacious", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "fixed", "value": 60 }, "align": "start" } },
+            {
+              "kind": "layout",
+              "id": "portal-detail-story",
+              "layout": "split",
+              "sourceBlueprintRegionIds": ["portal-detail"],
+              "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 1, "density": "spacious", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fixed", "value": 650 }, "align": "stretch" },
+              "children": [
+                { "kind": "control", "id": "portal-detail-main-image", "capabilityId": "image", "content": null, "properties": [{ "name": "fit", "value": "cover" }, { "name": "alt", "value": "北境艺廊晨光" }], "tabIds": [], "styleRole": "portal-media", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-detail"], "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 0, "density": "spacious", "groupWith": [], "width": { "mode": "ratio", "value": 4 }, "height": { "mode": "fill" }, "align": "stretch" } },
+                {
+                  "kind": "layout",
+                  "id": "portal-detail-notes",
+                  "layout": "column",
+                  "sourceBlueprintRegionIds": ["portal-detail"],
+                  "intent": { "importance": "primary", "visualWeight": 3, "readingOrder": 1, "density": "spacious", "groupWith": [], "width": { "mode": "ratio", "value": 2 }, "height": { "mode": "fill" }, "align": "end" },
+                  "children": [
+                    { "kind": "control", "id": "portal-detail-title", "capabilityId": "text", "content": "北境艺廊", "properties": [], "tabIds": [], "styleRole": "portal-display", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-detail"], "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 0, "density": "spacious", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "start" } },
+                    { "kind": "control", "id": "portal-detail-body", "capabilityId": "text", "content": "晨光把清水混凝土切成缓慢移动的几何面。镜头保持低饱和，让观者先感到尺度，再读到材料。", "properties": [], "tabIds": [], "styleRole": "portal-body", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-detail"], "intent": { "importance": "secondary", "visualWeight": 3, "readingOrder": 1, "density": "spacious", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "start" } }
+                  ]
+                }
+              ]
+            },
+            {
+              "kind": "layout",
+              "id": "portal-contact-visible-panel",
+              "layout": "column",
+              "sourceBlueprintRegionIds": ["portal-contact-form"],
+              "intent": { "importance": "supporting", "visualWeight": 3, "readingOrder": 2, "density": "comfortable", "groupWith": [], "width": { "mode": "fixed", "value": 760 }, "height": { "mode": "content" }, "align": "end" },
+              "children": [
+                { "kind": "control", "id": "portal-contact-input", "capabilityId": "input", "content": null, "properties": [{ "name": "placeholder", "value": "例如：希望预约秋季酒店拍摄档期" }, { "name": "value", "value": "秋季酒店拍摄合作" }], "tabIds": [], "styleRole": "portal-field", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-contact-form"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "stretch" } },
+                { "kind": "control", "id": "portal-contact-submit", "capabilityId": "button", "content": "提交合作意向", "properties": [], "tabIds": [], "styleRole": "portal-action", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["portal-submit-contact"] }], "sourceBlueprintRegionIds": ["portal-contact-submit"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 1, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "start" } },
+                { "kind": "control", "id": "portal-contact-status", "capabilityId": "easyui.1", "content": null, "properties": [], "tabIds": [], "mockDataId": "portal-contact-records", "styleRole": "portal-status", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-contact-status"], "intent": { "importance": "secondary", "visualWeight": 3, "readingOrder": 2, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "stretch" } },
+                { "kind": "control", "id": "portal-contact-close", "capabilityId": "button", "content": "关闭联系层", "properties": [], "tabIds": [], "styleRole": "portal-action", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["portal-close-contact"] }], "sourceBlueprintRegionIds": ["portal-contact-close"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 3, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "start" } }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "overlays": [
+      {
+        "id": "portal-contact-overlay",
+        "title": "联系叠境",
+        "purpose": "在当前作品语境中提交合作留言并查看提交状态",
+        "presentation": "drawer",
+        "hostPageId": "portal-detail-page",
+        "sourceBlueprintPageId": "portal-detail-bp",
+        "sourceBlueprintRegionIds": ["portal-contact-form", "portal-contact-submit", "portal-contact-status", "portal-contact-close"],
+        "visibleStateId": "portal-contact-visible",
+        "dismissible": true,
+        "root": {
+          "kind": "layout",
+          "id": "portal-contact-root",
+          "layout": "column",
+          "sourceBlueprintRegionIds": ["portal-contact-form"],
+          "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fixed", "value": 760 }, "height": { "mode": "content" }, "align": "end" },
+          "children": [
+            { "kind": "control", "id": "portal-contact-overlay-input", "capabilityId": "input", "content": null, "properties": [{ "name": "placeholder", "value": "联系层由受支持页面导航呈现" }], "tabIds": [], "styleRole": "portal-field", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-contact-form"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "stretch" } },
+            { "kind": "control", "id": "portal-contact-overlay-submit", "capabilityId": "button", "content": "提交合作意向", "properties": [], "tabIds": [], "styleRole": "portal-action", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-contact-submit"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 1, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "start" } },
+            { "kind": "control", "id": "portal-contact-overlay-status", "capabilityId": "easyui.1", "content": null, "properties": [], "tabIds": [], "styleRole": "portal-status", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-contact-status"], "intent": { "importance": "secondary", "visualWeight": 3, "readingOrder": 2, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "stretch" } },
+            { "kind": "control", "id": "portal-contact-overlay-close", "capabilityId": "button", "content": "关闭联系层", "properties": [], "tabIds": [], "styleRole": "portal-action", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-contact-close"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 3, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "start" } }
+          ]
+        }
+      }
+    ],
+    "actions": [
+      { "id": "portal-nav-open-detail", "kind": "navigate-page", "targetPageId": "portal-detail-page", "afterActionIds": [], "journeyStepRefs": [] },
+      { "id": "portal-open-detail", "kind": "navigate-page", "targetPageId": "portal-detail-page", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "portal-explore-journey", "stepIndex": 0 }] },
+      { "id": "portal-return-home", "kind": "navigate-page", "targetPageId": "portal-home-page", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "portal-explore-journey", "stepIndex": 1 }] },
+      { "id": "portal-open-contact", "kind": "navigate-page", "targetPageId": "portal-detail-page", "afterActionIds": [], "journeyStepRefs": [] },
+      { "id": "portal-submit-contact", "kind": "run-script", "scriptId": "portal-contact-feedback-script", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "portal-contact-journey", "stepIndex": 0 }] },
+      { "id": "portal-close-contact", "kind": "navigate-page", "targetPageId": "portal-home-page", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "portal-contact-journey", "stepIndex": 1 }] }
+    ],
+    "scripts": [
+      {
+        "id": "portal-contact-feedback-script",
+        "purpose": "读取合作留言并在联系层内写入明确的已收到状态",
+        "kind": "custom",
+        "programVersion": "semantic-js/v1",
+        "source": "const message = $control.getValue(\"portal-contact-input\");\nconst records = [{ \"id\": \"contact-1\", \"message\": String(message), \"status\": \"已收到\" }];\n$control.setData(\"portal-contact-status\", records);",
+        "inputs": [{ "name": "contact-message", "description": "客户输入的合作留言", "refKind": "control", "refId": "portal-contact-input" }],
+        "outputs": [{ "name": "contact-status", "description": "联系层提交状态记录", "refKind": "control", "refId": "portal-contact-status" }]
+      }
+    ]
+  }
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TrustedNativeMaterializationSchema, canonicalServerHash, workspaceAssetIdToModelId, type SolutionImplementationPlan, type UIImplementationSpecV2 } from "@kf/contracts";
+import { TrustedNativeMaterializationSchema, canonicalServerHash, semanticPayloadHash, workspaceAssetIdToModelId, type SolutionImplementationPlan, type UIImplementationSpecV2 } from "@kf/contracts";
 import { createCreativeUIImplementationV2Compiler } from "./ui-implementation-v2-compiler.js";
 import { compileClientProject } from "../compile/client-compiler.js";
 import { inspectClientProject } from "../inspect/client-inspector.js";
@@ -13,6 +13,7 @@ import { solutionModuleRegistryHash } from "../solution-compile/solution-provena
 
 const theme = { background: "#fff", surface: "#fff", primary: "#123456", accent: "#654321", textPrimary: "#111", textSecondary: "#555", fontFamily: "Inter", spacingUnit: 8, radiusScale: { small: 4, medium: 8, large: 16 } } as const;
 const intent = { importance: "primary" as const, visualWeight: 3, readingOrder: 0, density: "comfortable" as const, groupWith: [], width: { mode: "fixed" as const, value: 120 }, height: { mode: "fixed" as const, value: 40 }, align: "start" as const };
+const tableData = { columns: [{ key: "id", label: "编号", align: "left" as const }], rows: [{ id: "1" }], pageSize: 1 };
 const creativeFacade = createHmacCreativeBuildFacade(Buffer.alloc(32, 0x41), createCreativeUIImplementationV2Compiler);
 const authority = creativeFacade.authority;
 const compiler = creativeFacade.compiler.compiler;
@@ -52,7 +53,7 @@ function input() {
         { id: "open", parentId: "root", role: "content", capabilityId: "button", content: "打开", depth: 1, zIndex: 1, geometry: { x: 20, y: 20, width: 120, height: 40 }, nativeProperties: {}, compiledStyle: { nativeFields: {}, cssFragments: [], warnings: [] }, sourceSolutionNodeId: "open", sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region-home"], eventBindings: [] },
         { id: "root", role: "content", capabilityId: "layout.4", depth: 0, zIndex: 0, geometry: { x: 0, y: 0, width: 1440, height: 900 }, compiledLayout: { kind: "column", overflow: "visible" }, nativeProperties: {}, compiledStyle: { nativeFields: {}, cssFragments: [], warnings: [] }, sourceSolutionNodeId: "root", sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region-home"], eventBindings: [] },
       ] },
-      { compatibility: "native", id: "detail", width: 1280, height: 760, sourceBlueprintPageId: "bp-detail", controls: [{ id: "grid", role: "content", capabilityId: "easyui.1", depth: 0, zIndex: 0, geometry: { x: 0, y: 0, width: 900, height: 500 }, nativeProperties: { pagination: true }, compiledStyle: { nativeFields: {}, cssFragments: [], warnings: [{ code: "STYLE_CAPABILITY_PRESERVE_ONLY", message: "Capability easyui.1 style is preserve-only; existing appearance is retained" }] }, dataBinding: { mockDataId: "records", records: [{ id: "1" }] }, sourceSolutionNodeId: "grid", sourceBlueprintPageId: "bp-detail", sourceBlueprintRegionIds: ["region-detail"], eventBindings: [] }] },
+      { compatibility: "native", id: "detail", width: 1280, height: 760, sourceBlueprintPageId: "bp-detail", controls: [{ id: "grid", role: "content", capabilityId: "easyui.1", depth: 0, zIndex: 0, geometry: { x: 0, y: 0, width: 900, height: 500 }, nativeProperties: { pagination: false, pageSize: 1, tableData }, compiledStyle: { nativeFields: {}, cssFragments: [], warnings: [{ code: "STYLE_CAPABILITY_PRESERVE_ONLY", message: "Capability easyui.1 style is preserve-only; existing appearance is retained" }] }, dataBinding: { mockDataId: "records", records: [{ id: "1" }] }, sourceSolutionNodeId: "grid", sourceBlueprintPageId: "bp-detail", sourceBlueprintRegionIds: ["region-detail"], eventBindings: [] }] },
     ],
     compiledActions: [], compiledScripts: [],
     runtimeCorrelation: { controls: [{ semanticControlId: "open", instanceName: "Button1" }, { semanticControlId: "root", instanceName: "Layout1" }, { semanticControlId: "grid", instanceName: "Datagrid1" }], pages: [{ semanticPageId: "home", pageGuid: "k00000000-0000-4000-8000-000000000001" }, { semanticPageId: "detail", pageGuid: "k00000000-0000-4000-8000-000000000002" }] },
@@ -115,13 +116,103 @@ describe("creative UI implementation v2 compiler", () => {
     expect(result.plan.operations.slice(0, 2).every((operation) => operation.op === "create" && operation.entityType === "page")).toBe(true);
     expect(result.plan.operations.map((operation) => operation.entityId)).toEqual(["detail", "home", "grid", "root", "open"]);
     expect(JSON.stringify(result.plan.operations)).not.toContain(instanceById.get("open"));
-    const envelope = authority.sign({ plan: result.plan, revisionId: "revision", semanticOperations: [], creative: result.trustedCreativePayload });
+    expect(result.semanticOperations).toEqual([{
+      kind: "kf.table-data/v1", entityId: "grid", capabilityId: "easyui.1",
+      sourceModuleId: "grid", payloadHash: semanticPayloadHash(tableData),
+    }]);
+    const envelope = authority.sign({ plan: result.plan, revisionId: "revision", semanticOperations: result.semanticOperations, creative: result.trustedCreativePayload });
     expect(authority.verify(JSON.parse(JSON.stringify(envelope))).nativeMaterializationHash).toBe(result.plan.creative?.materializationHash);
     const otherAuthority = createHmacServerPlanAuthority(Buffer.alloc(32, 0x41));
-    expect(() => otherAuthority.sign({ plan: result.plan, revisionId: "revision", semanticOperations: [], creative: result.trustedCreativePayload }))
+    expect(() => otherAuthority.sign({ plan: result.plan, revisionId: "revision", semanticOperations: result.semanticOperations, creative: result.trustedCreativePayload }))
       .toThrow(/UNTRUSTED_CREATIVE_PAYLOAD/);
     expect(Object.isFrozen(result)).toBe(true);
     expect(result.capabilityReport).toMatchObject({ status: "warning", unsupported: [], partial: ["button", "easyui.1", "layout.4"] });
+  });
+
+  it("derives table authorization only from an exact compiler-owned binding and preserves non-creative signing", () => {
+    const unbound = input();
+    const unboundRoot = unbound.semanticPlan.pages[1]!.root;
+    if (unboundRoot.kind !== "control") throw new Error("datagrid fixture required");
+    delete unboundRoot.mockDataId;
+    const unboundPage = unbound.implementation.pages[1]!;
+    if (unboundPage.compatibility !== "native") throw new Error("native fixture required");
+    const unboundGrid = unboundPage.controls[0]!;
+    delete unboundGrid.dataBinding;
+    unboundGrid.nativeProperties = { pagination: false };
+    compileFixtureInteractions(unbound);
+    const unboundResult = compiler.compile(unbound);
+    expect(unboundResult.semanticOperations).toEqual([]);
+    expect(() => authority.sign({
+      plan: unboundResult.plan, revisionId: "revision", semanticOperations: [], creative: unboundResult.trustedCreativePayload,
+    })).not.toThrow();
+
+    const tableWithoutBinding = input();
+    const tableWithoutBindingPage = tableWithoutBinding.implementation.pages[1]!;
+    if (tableWithoutBindingPage.compatibility !== "native") throw new Error("native fixture required");
+    delete tableWithoutBindingPage.controls[0]!.dataBinding;
+    expect(() => compiler.compile(tableWithoutBinding)).toThrow(/CREATIVE_TABLE_DATA_BINDING_REQUIRED/);
+
+    const modelSuppliedAuthorization = input();
+    (modelSuppliedAuthorization.semanticPlan as SolutionImplementationPlan & { semanticOperations?: unknown }).semanticOperations = [{
+      kind: "kf.table-data/v1", entityId: "grid", capabilityId: "easyui.1", sourceModuleId: "model-forged",
+      payloadHash: semanticPayloadHash(tableData),
+    }];
+    expect(() => compiler.compile(modelSuppliedAuthorization)).toThrow();
+
+    const forged = input();
+    const forgedPage = forged.implementation.pages[1]!;
+    if (forgedPage.compatibility !== "native") throw new Error("native fixture required");
+    forgedPage.controls[0]!.nativeProperties.tableData = {
+      ...tableData,
+      rows: [{ id: "forged" }],
+    };
+    expect(() => compiler.compile(forged)).toThrow(/TABLE_DATA.*BINDING|BINDING.*TABLE_DATA/);
+
+    const result = compiler.compile(input());
+    const planWithExtraTableData = structuredClone(result.plan);
+    const open = planWithExtraTableData.operations.find((operation) => operation.entityId === "open");
+    if (open?.op !== "create") throw new Error("create fixture required");
+    open.properties.tableData = tableData;
+    expect(() => authority.sign({
+      plan: planWithExtraTableData,
+      revisionId: "revision",
+      semanticOperations: result.semanticOperations,
+      creative: result.trustedCreativePayload,
+    })).toThrow(/CREATIVE_PLAN_BINDING_MISMATCH/);
+    expect(() => authority.sign({
+      plan: result.plan,
+      revisionId: "revision",
+      semanticOperations: [...result.semanticOperations, {
+        kind: "kf.table-data/v1", entityId: "open", capabilityId: "easyui.1",
+        sourceModuleId: "forged", payloadHash: semanticPayloadHash(tableData),
+      }],
+      creative: result.trustedCreativePayload,
+    })).toThrow(/SERVER_PLAN_SEMANTIC_MISMATCH/);
+
+    const legacyPlan = { schema: "kf-change-plan/v1" as const, workspaceId: "legacy", operations: [{
+      op: "create" as const, entityType: "control" as const, entityId: "legacy-text", properties: { type: "text", text: "兼容" },
+    }] };
+    expect(authority.verify(authority.sign({ plan: legacyPlan, revisionId: "legacy-revision", semanticOperations: [] })).plan)
+      .toEqual(legacyPlan);
+    const modulePlan = { schema: "kf-change-plan/v1" as const, workspaceId: "module", operations: [{
+      op: "create" as const, entityType: "control" as const, entityId: "module-grid", properties: { type: "easyui", proto: 1, tableData },
+    }] };
+    const moduleAuthorization = [{
+      kind: "kf.table-data/v1" as const, entityId: "module-grid", capabilityId: "easyui.1" as const,
+      sourceModuleId: "module-table", payloadHash: semanticPayloadHash(tableData),
+    }];
+    expect(authority.verify(authority.sign({ plan: modulePlan, revisionId: "module-revision", semanticOperations: moduleAuthorization })).semanticOperations)
+      .toEqual(moduleAuthorization);
+    const modulePlanWithExtraTableData = structuredClone(modulePlan);
+    modulePlanWithExtraTableData.operations.push({
+      op: "create", entityType: "control", entityId: "module-extra-grid",
+      properties: { type: "easyui", proto: 1, tableData },
+    });
+    expect(() => authority.sign({
+      plan: modulePlanWithExtraTableData,
+      revisionId: "module-revision",
+      semanticOperations: moduleAuthorization,
+    })).toThrow(/SERVER_PLAN_SEMANTIC_MISMATCH/);
   });
 
   it("is deterministic and rejects missing correlation, unapproved assets, proxies and aliases", () => {
@@ -214,7 +305,7 @@ describe("creative UI implementation v2 compiler", () => {
     expect(result.plan.operations.every((operation) => operation.op === "update")).toBe(true);
     expect(result.plan.operations.map((operation) => operation.entityId)).toEqual(["detail", "home", "grid", "root", "open"]);
     const deltaPaths = (id: string) => result.materialization.controls.find((control) => control.semanticControlId === id)?.existingDeltas?.map((delta) => delta.path);
-    expect(deltaPaths("grid")).toEqual(["/x", "/y", "/width", "/height", "/pagination"]);
+    expect(deltaPaths("grid")).toEqual(["/x", "/y", "/width", "/height", "/pagination", "/pageSize"]);
     expect(deltaPaths("root")).toEqual(["/x", "/y", "/width", "/height"]);
     expect(deltaPaths("open")).toEqual(["/x", "/y", "/width", "/height", "/text"]);
     expect(result.artifact.evidence.controls.find((control) => control.semanticControlId === "grid")?.deltaAllowlistPolicy?.allowedFields)

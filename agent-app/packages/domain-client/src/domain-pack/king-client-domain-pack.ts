@@ -68,7 +68,7 @@ export function createKingClientDomainPack(options: {
       return { id: workspace.id, rootDir: workspace.rootDir, mode: "candidate" };
     },
 
-    async validate({ baseWorkspace, candidateWorkspace, changePlan, assets, creativeMaterialization }) {
+    async validate({ baseWorkspace, candidateWorkspace, changePlan, semanticOperations, assets, creativeMaterialization }) {
       return validateClientProject(
         baseWorkspace.rootDir,
         candidateWorkspace.rootDir,
@@ -77,6 +77,7 @@ export function createKingClientDomainPack(options: {
           skipRoundTrip: false,
           assetTargetPaths: assets?.map((asset) => asset.targetPath) ?? [],
           creativeAssets: assets ?? [],
+          ...(semanticOperations === undefined ? {} : { semanticOperations }),
           ...(creativeMaterialization === undefined ? {} : {
             creativeMaterialization: creativeMaterialization as VerifiedCreativeMaterialization,
           }),

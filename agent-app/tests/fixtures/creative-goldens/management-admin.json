@@ -1,0 +1,586 @@
+{
+  "id": "management-admin",
+  "prompt": "创建一个中文组织与权限管理工作台，以克制明亮侧栏、对象列表、主从详情、资料表单、页签、提交对话层和状态反馈组织管理员任务。",
+  "expect": {
+    "tabsId": "admin-profile-tabs",
+    "activityTargetId": "admin-activity-grid",
+    "submitSourceId": "admin-confirm-submit",
+    "submitTargetId": "admin-submit-status-grid"
+  },
+  "blueprint": {
+    "schema": "kf-design-plan/v3",
+    "displayName": "知序组织管理台",
+    "objective": "帮助组织管理员快速筛查成员、核对主从详情、切换资料视图并在提交层完成资料更新",
+    "audiences": ["组织管理员", "人力运营专员"],
+    "scenarios": ["筛查并定位成员", "查看资料与操作记录", "提交成员资料更新"],
+    "pages": [
+      {
+        "id": "admin-directory-bp",
+        "title": "成员目录",
+        "purpose": "以侧栏工作台承载成员筛选、主列表、当前对象预览和详情入口",
+        "readingOrder": ["admin-sidebar-brand", "admin-sidebar-action", "admin-filter-input", "admin-filter-action", "admin-member-list", "admin-member-preview", "admin-open-detail"],
+        "regions": [
+          {
+            "id": "admin-sidebar-brand",
+            "purpose": "显示知序组织、当前模块和明亮工作台导航语境",
+            "semanticRoles": ["heading", "narrative-content"],
+            "dataShape": "scalar",
+            "density": "comfortable",
+            "importance": "secondary",
+            "content": ["知序组织", "组织与权限", "成员管理"],
+            "sampleData": [{ "组织": "知序科技", "成员数": "128 人" }],
+            "interactions": [],
+            "states": ["成员管理为当前模块"],
+            "visualIntent": "白色窄侧栏、清晰模块标题和稳定纵向节奏"
+          },
+          {
+            "id": "admin-sidebar-action",
+            "purpose": "提供成员目录主导航动作",
+            "semanticRoles": ["primary-action"],
+            "dataShape": "action-list",
+            "density": "comfortable",
+            "importance": "secondary",
+            "content": ["成员目录"],
+            "sampleData": [],
+            "interactions": ["侧栏成员入口响应"],
+            "states": ["侧栏入口可用"],
+            "visualIntent": "当前模块动作保持轻量选中感"
+          },
+          {
+            "id": "admin-filter-input",
+            "purpose": "输入成员姓名作为目录条件",
+            "semanticRoles": ["filter-input", "form-input"],
+            "dataShape": "record",
+            "density": "comfortable",
+            "importance": "secondary",
+            "content": ["姓名", "陈予安"],
+            "sampleData": [{ "查询姓名": "陈予安" }],
+            "interactions": [],
+            "states": ["姓名条件已输入"],
+            "visualIntent": "列表标题下方的轻边框输入框"
+          },
+          {
+            "id": "admin-filter-action",
+            "purpose": "应用姓名条件并刷新成员列表",
+            "semanticRoles": ["primary-action"],
+            "dataShape": "action-list",
+            "density": "comfortable",
+            "importance": "secondary",
+            "content": ["应用条件"],
+            "sampleData": [],
+            "interactions": ["条件应用动作响应"],
+            "states": ["条件动作可用"],
+            "visualIntent": "与输入同行的单一主动作"
+          },
+          {
+            "id": "admin-member-list",
+            "purpose": "以稳定列结构显示成员姓名、部门、角色和状态，并定位当前对象",
+            "semanticRoles": ["structured-record-list", "record-selection", "comparison"],
+            "dataShape": "record-list",
+            "density": "comfortable",
+            "importance": "primary",
+            "content": ["成员编号", "姓名", "部门", "角色", "状态"],
+            "sampleData": [
+              { "成员编号": "U-1024", "姓名": "陈予安", "部门": "产品设计部", "角色": "部门管理员", "状态": "在职" },
+              { "成员编号": "U-1078", "姓名": "梁清", "部门": "客户成功部", "角色": "普通成员", "状态": "在职" }
+            ],
+            "interactions": ["成员记录焦点响应并同步预览"],
+            "states": ["成员列表已加载", "一条成员记录可定位"],
+            "visualIntent": "主列表承担工作区中心，不以卡片拆散记录"
+          },
+          {
+            "id": "admin-member-preview",
+            "purpose": "在列表右侧显示当前成员的同构摘要",
+            "semanticRoles": ["structured-record-list", "record-selection"],
+            "dataShape": "record-list",
+            "density": "comfortable",
+            "importance": "secondary",
+            "content": ["当前成员", "陈予安", "产品设计部", "部门管理员"],
+            "sampleData": [{ "姓名": "陈予安", "部门": "产品设计部", "角色": "部门管理员" }],
+            "interactions": [],
+            "states": ["预览与当前成员同步"],
+            "visualIntent": "窄详情列与主列表构成明确主从关系"
+          },
+          {
+            "id": "admin-open-detail",
+            "purpose": "进入当前成员的完整资料工作区和提交层",
+            "semanticRoles": ["primary-action"],
+            "dataShape": "action-list",
+            "density": "comfortable",
+            "importance": "primary",
+            "content": ["打开成员资料"],
+            "sampleData": [],
+            "interactions": ["资料入口响应"],
+            "states": ["当前成员已定位"],
+            "visualIntent": "主从预览底部的明确下一步动作"
+          }
+        ]
+      },
+      {
+        "id": "admin-detail-bp",
+        "title": "成员资料",
+        "purpose": "用资料表单、同级页签、操作记录和提交对话层完成成员更新",
+        "readingOrder": ["admin-detail-shell", "admin-tabs", "admin-profile-name", "admin-profile-role", "admin-activity", "admin-dialog-form", "admin-dialog-submit", "admin-dialog-status", "admin-dialog-close"],
+        "regions": [
+          {
+            "id": "admin-detail-shell",
+            "purpose": "显示当前成员身份、所属部门和资料更新时间",
+            "semanticRoles": ["heading", "narrative-content", "status-label"],
+            "dataShape": "record",
+            "density": "comfortable",
+            "importance": "secondary",
+            "content": ["陈予安", "产品设计部 · 部门管理员", "资料更新于 2026 年 8 月 25 日"],
+            "sampleData": [{ "员工编号": "U-1024", "直属主管": "谢南舟" }],
+            "interactions": [],
+            "states": ["成员资料已加载"],
+            "visualIntent": "明亮标题区与窄信息列保持克制层次"
+          },
+          {
+            "id": "admin-tabs",
+            "purpose": "在基本资料、操作记录和权限范围三个同级视图之间组织内容",
+            "semanticRoles": ["view-switcher", "content-grouping"],
+            "dataShape": "record-list",
+            "density": "comfortable",
+            "importance": "primary",
+            "content": ["基本资料", "操作记录", "权限范围"],
+            "sampleData": [{ "当前视图": "基本资料" }],
+            "interactions": ["同级视图入口响应并更新操作记录"],
+            "states": ["基本资料为当前视图"],
+            "visualIntent": "细下划线页签形成内容层次，不使用分离卡片"
+          },
+          {
+            "id": "admin-profile-name",
+            "purpose": "编辑当前成员姓名并提供明确的输入语境",
+            "semanticRoles": ["form-input", "text-value"],
+            "dataShape": "record",
+            "density": "comfortable",
+            "importance": "primary",
+            "content": ["姓名", "陈予安"],
+            "sampleData": [{ "姓名": "陈予安" }],
+            "interactions": [],
+            "states": ["姓名字段已填充"],
+            "visualIntent": "标签与输入对齐成清晰表单列"
+          },
+          {
+            "id": "admin-profile-role",
+            "purpose": "从受限角色集合中显示当前成员角色",
+            "semanticRoles": ["form-input", "bounded-choice"],
+            "dataShape": "record",
+            "density": "comfortable",
+            "importance": "primary",
+            "content": ["角色", "部门管理员", "普通成员", "只读访客"],
+            "sampleData": [{ "当前角色": "部门管理员" }],
+            "interactions": [],
+            "states": ["角色字段已填充"],
+            "visualIntent": "与姓名字段共享相同标签和输入宽度"
+          },
+          {
+            "id": "admin-activity",
+            "purpose": "显示当前成员最近的权限和资料操作记录",
+            "semanticRoles": ["structured-record-list", "comparison"],
+            "dataShape": "record-list",
+            "density": "comfortable",
+            "importance": "secondary",
+            "content": ["时间", "操作", "操作人"],
+            "sampleData": [{ "时间": "2026-08-25 16:42", "操作": "调整项目空间权限", "操作人": "王敏" }],
+            "interactions": [],
+            "states": ["操作记录可见"],
+            "visualIntent": "表单下方的短记录表，与资料视图保持连续"
+          },
+          {
+            "id": "admin-dialog-form",
+            "purpose": "在提交对话层中复核成员姓名并进行空白清理",
+            "semanticRoles": ["form-input", "text-value"],
+            "dataShape": "record",
+            "density": "comfortable",
+            "importance": "primary",
+            "content": ["复核姓名", "陈予安"],
+            "sampleData": [{ "复核姓名": "陈予安" }],
+            "interactions": [],
+            "states": ["复核字段已填充"],
+            "visualIntent": "对话层只保留完成提交所需字段"
+          },
+          {
+            "id": "admin-dialog-submit",
+            "purpose": "提交经过复核的成员资料并写入状态反馈",
+            "semanticRoles": ["primary-action"],
+            "dataShape": "action-list",
+            "density": "comfortable",
+            "importance": "primary",
+            "content": ["确认提交"],
+            "sampleData": [],
+            "interactions": ["资料提交动作响应"],
+            "states": ["提交动作可用"],
+            "visualIntent": "对话层内唯一高强调动作"
+          },
+          {
+            "id": "admin-dialog-status",
+            "purpose": "呈现本次成员资料提交的对象、结果和操作人",
+            "semanticRoles": ["structured-record-list", "status-label"],
+            "dataShape": "record-list",
+            "density": "comfortable",
+            "importance": "secondary",
+            "content": ["陈予安", "提交成功", "王敏"],
+            "sampleData": [{ "对象": "陈予安", "结果": "提交成功", "操作人": "王敏" }],
+            "interactions": [],
+            "states": ["提交状态可见"],
+            "visualIntent": "对话层底部的一行结果记录"
+          },
+          {
+            "id": "admin-dialog-close",
+            "purpose": "关闭提交对话层并返回成员目录",
+            "semanticRoles": ["secondary-action"],
+            "dataShape": "action-list",
+            "density": "comfortable",
+            "importance": "secondary",
+            "content": ["完成并返回目录"],
+            "sampleData": [],
+            "interactions": ["提交层关闭响应"],
+            "states": ["关闭动作可用"],
+            "visualIntent": "结果确认后的低强调回程动作"
+          }
+        ]
+      }
+    ],
+    "journeys": [
+      {
+        "id": "admin-directory-journey",
+        "actor": "组织管理员",
+        "goal": "筛查陈予安、同步当前成员预览并打开完整资料",
+        "steps": [
+          { "pageId": "admin-directory-bp", "regionId": "admin-filter-action", "action": "应用成员姓名条件", "result": "成员列表刷新为陈予安" },
+          { "pageId": "admin-directory-bp", "regionId": "admin-member-list", "action": "定位陈予安记录", "result": "右侧预览同步陈予安" },
+          { "pageId": "admin-directory-bp", "regionId": "admin-open-detail", "action": "打开成员资料", "result": "进入资料工作区并显示提交层" }
+        ],
+        "completion": "完成从目录到完整资料的主从工作流"
+      },
+      {
+        "id": "admin-submit-journey",
+        "actor": "人力运营专员",
+        "goal": "响应页签、复核资料、模拟提交并关闭对话层",
+        "steps": [
+          { "pageId": "admin-detail-bp", "regionId": "admin-tabs", "action": "响应操作记录视图", "result": "操作记录更新为当前成员数据" },
+          { "pageId": "admin-detail-bp", "regionId": "admin-dialog-submit", "action": "确认提交成员资料", "result": "提交状态显示成功" },
+          { "pageId": "admin-detail-bp", "regionId": "admin-dialog-close", "action": "完成并关闭提交层", "result": "返回成员目录" }
+        ],
+        "completion": "资料提交得到状态反馈并安全返回"
+      }
+    ],
+    "visualDirection": {
+      "tone": "明亮、克制、具有成熟企业工具的秩序感",
+      "colors": ["暖白", "深靛蓝", "冷灰", "成功绿"],
+      "typography": "中等字号标题、紧凑表头和清晰字段标签",
+      "spacingAndSurfaces": "侧栏、主从列表与表单连续组织，不使用卡片马赛克"
+    },
+    "acceptanceScenarios": ["可筛查并同步成员预览", "可进入资料页并响应页签", "可在提交层复核、模拟提交、看到状态并返回"],
+    "openQuestions": []
+  },
+  "plan": {
+    "schema": "kf-solution-implementation/v1",
+    "projectKey": "zhixu-organization-admin",
+    "blueprintHash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "candidateBundleHash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "theme": {
+      "background": "#f5f7fa",
+      "surface": "#ffffff",
+      "primary": "#263b72",
+      "accent": "#4f6db3",
+      "textPrimary": "#1b2430",
+      "textSecondary": "#647184",
+      "fontFamily": "Noto Sans SC",
+      "spacingUnit": 8,
+      "radiusScale": { "small": 4, "medium": 6, "large": 10 }
+    },
+    "roleStyles": [
+      { "role": "admin-brand", "declarations": { "fontSize": 20, "fontWeight": 700, "letterSpacing": 1, "textColor": "{theme.primary}" }, "states": {} },
+      { "role": "admin-title", "declarations": { "fontSize": 28, "fontWeight": 700, "lineHeight": 1.25, "textColor": "{theme.textPrimary}" }, "states": {} },
+      { "role": "admin-body", "declarations": { "fontSize": 14, "lineHeight": 1.6, "textColor": "{theme.textSecondary}" }, "states": {} },
+      { "role": "admin-nav", "declarations": { "backgroundColor": "#edf1fa", "textColor": "{theme.primary}", "borderLeftWidth": 3, "borderLeftColor": "{theme.primary}", "borderRadius": 0, "paddingHorizontal": 16 }, "states": { "hover": { "backgroundColor": "#e3e9f6" } } },
+      { "role": "admin-field", "declarations": { "backgroundColor": "#ffffff", "borderColor": "#cbd3df", "borderRadius": 4, "paddingHorizontal": 12, "textColor": "{theme.textPrimary}" }, "states": {} },
+      { "role": "admin-action", "declarations": { "backgroundColor": "{theme.primary}", "textColor": "#ffffff", "borderRadius": 4, "fontWeight": 600, "paddingHorizontal": 16 }, "states": { "hover": { "opacity": 0.9 } } },
+      { "role": "admin-grid", "declarations": {}, "states": {} },
+      { "role": "admin-tabs", "declarations": { "backgroundColor": "#ffffff", "borderBottomWidth": 1, "borderBottomColor": "#dce2ea", "fontSize": 15, "fontWeight": 600 }, "states": {} },
+      { "role": "admin-status", "declarations": {}, "states": {} }
+    ],
+    "mockData": [
+      {
+        "id": "admin-member-records",
+        "purpose": "组织成员主列表记录",
+        "fields": [
+          { "key": "id", "label": "成员编号", "type": "text" },
+          { "key": "name", "label": "姓名", "type": "text" },
+          { "key": "department", "label": "部门", "type": "text" },
+          { "key": "role", "label": "角色", "type": "text" },
+          { "key": "status", "label": "状态", "type": "text" }
+        ],
+        "records": [
+          { "values": [{ "field": "id", "value": "U-1024" }, { "field": "name", "value": "陈予安" }, { "field": "department", "value": "产品设计部" }, { "field": "role", "value": "部门管理员" }, { "field": "status", "value": "在职" }] },
+          { "values": [{ "field": "id", "value": "U-1078" }, { "field": "name", "value": "梁清" }, { "field": "department", "value": "客户成功部" }, { "field": "role", "value": "普通成员" }, { "field": "status", "value": "在职" }] },
+          { "values": [{ "field": "id", "value": "U-1096" }, { "field": "name", "value": "高呈" }, { "field": "department", "value": "平台研发部" }, { "field": "role", "value": "只读访客" }, { "field": "status", "value": "外协" }] }
+        ]
+      },
+      {
+        "id": "admin-preview-records",
+        "purpose": "当前成员预览的同构记录",
+        "fields": [
+          { "key": "id", "label": "成员编号", "type": "text" },
+          { "key": "name", "label": "姓名", "type": "text" },
+          { "key": "department", "label": "部门", "type": "text" },
+          { "key": "role", "label": "角色", "type": "text" },
+          { "key": "status", "label": "状态", "type": "text" }
+        ],
+        "records": [
+          { "values": [{ "field": "id", "value": "U-1024" }, { "field": "name", "value": "陈予安" }, { "field": "department", "value": "产品设计部" }, { "field": "role", "value": "部门管理员" }, { "field": "status", "value": "在职" }] }
+        ]
+      },
+      {
+        "id": "admin-activity-records",
+        "purpose": "当前成员最近操作记录",
+        "fields": [
+          { "key": "id", "label": "记录编号", "type": "text" },
+          { "key": "time", "label": "时间", "type": "text" },
+          { "key": "action", "label": "操作", "type": "text" },
+          { "key": "operator", "label": "操作人", "type": "text" }
+        ],
+        "records": [
+          { "values": [{ "field": "id", "value": "A-204" }, { "field": "time", "value": "2026-08-25 16:42" }, { "field": "action", "value": "调整项目空间权限" }, { "field": "operator", "value": "王敏" }] },
+          { "values": [{ "field": "id", "value": "A-198" }, { "field": "time", "value": "2026-08-22 10:18" }, { "field": "action", "value": "更新直属主管" }, { "field": "operator", "value": "谢南舟" }] }
+        ]
+      },
+      {
+        "id": "admin-submit-records",
+        "purpose": "成员资料提交状态记录",
+        "fields": [
+          { "key": "id", "label": "提交编号", "type": "text" },
+          { "key": "object", "label": "对象", "type": "text" },
+          { "key": "status", "label": "结果", "type": "text" },
+          { "key": "operator", "label": "操作人", "type": "text" }
+        ],
+        "records": [
+          { "values": [{ "field": "id", "value": "S-0" }, { "field": "object", "value": "陈予安" }, { "field": "status", "value": "待提交" }, { "field": "operator", "value": "王敏" }] }
+        ]
+      }
+    ],
+    "localState": [
+      { "id": "admin-submit-visible", "purpose": "控制成员资料提交对话层是否显示", "type": "boolean", "initialValue": false }
+    ],
+    "pages": [
+      {
+        "id": "admin-directory-page",
+        "title": "成员目录",
+        "purpose": "成员筛选、主列表和当前成员预览",
+        "canvas": "large-display",
+        "sourceBlueprintPageId": "admin-directory-bp",
+        "sourceBlueprintRegionIds": ["admin-sidebar-brand", "admin-sidebar-action", "admin-filter-input", "admin-filter-action", "admin-member-list", "admin-member-preview", "admin-open-detail"],
+        "initialStateIds": [],
+        "root": {
+          "kind": "layout",
+          "id": "admin-directory-root",
+          "layout": "sidebar-content",
+          "sourceBlueprintRegionIds": ["admin-sidebar-brand"],
+          "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "viewport" }, "align": "stretch" },
+          "children": [
+            {
+              "kind": "layout",
+              "id": "admin-directory-sidebar",
+              "layout": "column",
+              "sourceBlueprintRegionIds": ["admin-sidebar-brand"],
+              "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fixed", "value": 220 }, "height": { "mode": "fill" }, "align": "stretch" },
+              "children": [
+                { "kind": "control", "id": "admin-brand-title", "capabilityId": "text", "content": "知序组织", "properties": [], "tabIds": [], "styleRole": "admin-brand", "eventBindings": [], "sourceBlueprintRegionIds": ["admin-sidebar-brand"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "start" } },
+                { "kind": "control", "id": "admin-sidebar-members", "capabilityId": "button", "content": "成员目录", "properties": [], "tabIds": [], "styleRole": "admin-nav", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["admin-sidebar-home-action"] }], "sourceBlueprintRegionIds": ["admin-sidebar-action"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 1, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fixed", "value": 60 }, "align": "stretch" } }
+              ]
+            },
+            {
+              "kind": "layout",
+              "id": "admin-directory-master-detail",
+              "layout": "master-detail",
+              "sourceBlueprintRegionIds": ["admin-member-list"],
+              "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 1, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fill" }, "align": "stretch" },
+              "children": [
+                {
+                  "kind": "layout",
+                  "id": "admin-directory-master",
+                  "layout": "scroll-region",
+                  "sourceBlueprintRegionIds": ["admin-filter-input"],
+                  "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "ratio", "value": 3 }, "height": { "mode": "fill" }, "align": "stretch" },
+                  "children": [
+                    {
+                      "kind": "layout",
+                      "id": "admin-directory-filter-row",
+                      "layout": "row",
+                      "sourceBlueprintRegionIds": ["admin-filter-input"],
+                      "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "center" },
+                      "children": [
+                        { "kind": "control", "id": "admin-member-filter-input", "capabilityId": "input", "content": null, "properties": [{ "name": "placeholder", "value": "输入成员姓名" }, { "name": "value", "value": "陈予安" }], "tabIds": [], "styleRole": "admin-field", "eventBindings": [], "sourceBlueprintRegionIds": ["admin-filter-input"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fixed", "value": 300 }, "height": { "mode": "content" }, "align": "center" } },
+                        { "kind": "control", "id": "admin-apply-member-filter", "capabilityId": "button", "content": "应用条件", "properties": [], "tabIds": [], "styleRole": "admin-action", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["admin-filter-members-action"] }], "sourceBlueprintRegionIds": ["admin-filter-action"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 1, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "center" } }
+                      ]
+                    },
+                    { "kind": "control", "id": "admin-member-grid", "capabilityId": "easyui.1", "content": null, "properties": [], "tabIds": [], "mockDataId": "admin-member-records", "styleRole": "admin-grid", "eventBindings": [{ "semanticEvent": "row-click", "actionIds": ["admin-select-member-action"] }], "sourceBlueprintRegionIds": ["admin-member-list"], "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 1, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fill" }, "align": "stretch" } }
+                  ]
+                },
+                {
+                  "kind": "layout",
+                  "id": "admin-directory-detail",
+                  "layout": "scroll-region",
+                  "sourceBlueprintRegionIds": ["admin-member-preview"],
+                  "intent": { "importance": "secondary", "visualWeight": 3, "readingOrder": 1, "density": "comfortable", "groupWith": [], "width": { "mode": "ratio", "value": 2 }, "height": { "mode": "fill" }, "align": "stretch" },
+                  "children": [
+                    { "kind": "control", "id": "admin-member-preview-grid", "capabilityId": "easyui.1", "content": null, "properties": [], "tabIds": [], "mockDataId": "admin-preview-records", "styleRole": "admin-grid", "eventBindings": [], "sourceBlueprintRegionIds": ["admin-member-preview"], "intent": { "importance": "secondary", "visualWeight": 3, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fixed", "value": 240 }, "align": "stretch" } },
+                    { "kind": "control", "id": "admin-open-member-detail", "capabilityId": "button", "content": "打开成员资料", "properties": [], "tabIds": [], "styleRole": "admin-action", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["admin-open-detail-action"] }], "sourceBlueprintRegionIds": ["admin-open-detail"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 1, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "start" } }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": "admin-detail-page",
+        "title": "陈予安 · 成员资料",
+        "purpose": "成员资料表单、同级视图和提交层",
+        "canvas": "large-display",
+        "sourceBlueprintPageId": "admin-detail-bp",
+        "sourceBlueprintRegionIds": ["admin-detail-shell", "admin-tabs", "admin-profile-name", "admin-profile-role", "admin-activity", "admin-dialog-form", "admin-dialog-submit", "admin-dialog-status", "admin-dialog-close"],
+        "initialStateIds": ["admin-submit-visible"],
+        "root": {
+          "kind": "layout",
+          "id": "admin-detail-root",
+          "layout": "sidebar-content",
+          "sourceBlueprintRegionIds": ["admin-detail-shell"],
+          "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "viewport" }, "align": "stretch" },
+          "children": [
+            {
+              "kind": "layout",
+              "id": "admin-detail-sidebar",
+              "layout": "column",
+              "sourceBlueprintRegionIds": ["admin-detail-shell"],
+              "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fixed", "value": 220 }, "height": { "mode": "fill" }, "align": "stretch" },
+              "children": [
+                { "kind": "control", "id": "admin-detail-person-title", "capabilityId": "text", "content": "陈予安", "properties": [], "tabIds": [], "styleRole": "admin-title", "eventBindings": [], "sourceBlueprintRegionIds": ["admin-detail-shell"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "start" } },
+                { "kind": "control", "id": "admin-detail-person-note", "capabilityId": "text", "content": "产品设计部 · 部门管理员\n资料更新于 2026 年 8 月 25 日", "properties": [], "tabIds": [], "styleRole": "admin-body", "eventBindings": [], "sourceBlueprintRegionIds": ["admin-detail-shell"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 1, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "start" } }
+              ]
+            },
+            {
+              "kind": "layout",
+              "id": "admin-detail-master-detail",
+              "layout": "master-detail",
+              "sourceBlueprintRegionIds": ["admin-tabs"],
+              "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 1, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fill" }, "align": "stretch" },
+              "children": [
+                {
+                  "kind": "layout",
+                  "id": "admin-detail-form-column",
+                  "layout": "scroll-region",
+                  "sourceBlueprintRegionIds": ["admin-profile-name"],
+                  "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "ratio", "value": 2 }, "height": { "mode": "fill" }, "align": "stretch" },
+                  "children": [
+                    { "kind": "control", "id": "admin-profile-tabs", "capabilityId": "tabs", "content": null, "properties": [], "tabIds": ["profile-tab", "activity-tab", "permission-tab"], "styleRole": "admin-tabs", "eventBindings": [{ "semanticEvent": "tab-click", "actionIds": ["admin-switch-tab-action"] }], "sourceBlueprintRegionIds": ["admin-tabs"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fixed", "value": 453 }, "align": "stretch" } },
+                    { "kind": "control", "id": "admin-profile-name-input", "capabilityId": "input", "content": null, "properties": [{ "name": "placeholder", "value": "成员姓名" }, { "name": "value", "value": "陈予安" }], "tabIds": [], "styleRole": "admin-field", "eventBindings": [], "sourceBlueprintRegionIds": ["admin-profile-name"], "intent": { "importance": "primary", "visualWeight": 3, "readingOrder": 1, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "stretch" } },
+                    { "kind": "control", "id": "admin-profile-role-select", "capabilityId": "select", "content": null, "properties": [], "tabIds": [], "styleRole": "admin-field", "eventBindings": [], "sourceBlueprintRegionIds": ["admin-profile-role"], "intent": { "importance": "primary", "visualWeight": 3, "readingOrder": 2, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "stretch" } }
+                  ]
+                },
+                {
+                  "kind": "layout",
+                  "id": "admin-detail-submit-column",
+                  "layout": "scroll-region",
+                  "sourceBlueprintRegionIds": ["admin-activity", "admin-dialog-form", "admin-dialog-submit", "admin-dialog-status", "admin-dialog-close"],
+                  "intent": { "importance": "secondary", "visualWeight": 3, "readingOrder": 1, "density": "comfortable", "groupWith": [], "width": { "mode": "ratio", "value": 2 }, "height": { "mode": "fill" }, "align": "stretch" },
+                  "children": [
+                    { "kind": "control", "id": "admin-activity-grid", "capabilityId": "easyui.1", "content": null, "properties": [], "tabIds": [], "mockDataId": "admin-activity-records", "styleRole": "admin-grid", "eventBindings": [], "sourceBlueprintRegionIds": ["admin-activity"], "intent": { "importance": "secondary", "visualWeight": 3, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fixed", "value": 240 }, "align": "stretch" } },
+                    { "kind": "control", "id": "admin-dialog-name-input", "capabilityId": "input", "content": null, "properties": [{ "name": "placeholder", "value": "复核成员姓名" }, { "name": "value", "value": "陈予安" }], "tabIds": [], "styleRole": "admin-field", "eventBindings": [], "sourceBlueprintRegionIds": ["admin-dialog-form"], "intent": { "importance": "primary", "visualWeight": 3, "readingOrder": 1, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "stretch" } },
+                    { "kind": "control", "id": "admin-confirm-submit", "capabilityId": "button", "content": "确认提交", "properties": [], "tabIds": [], "styleRole": "admin-action", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["admin-submit-action"] }], "sourceBlueprintRegionIds": ["admin-dialog-submit"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 2, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "start" } },
+                    { "kind": "control", "id": "admin-submit-status-grid", "capabilityId": "easyui.1", "content": null, "properties": [], "tabIds": [], "mockDataId": "admin-submit-records", "styleRole": "admin-status", "eventBindings": [], "sourceBlueprintRegionIds": ["admin-dialog-status"], "intent": { "importance": "secondary", "visualWeight": 3, "readingOrder": 3, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fixed", "value": 240 }, "align": "stretch" } },
+                    { "kind": "control", "id": "admin-close-submit", "capabilityId": "button", "content": "完成并返回目录", "properties": [], "tabIds": [], "styleRole": "admin-nav", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["admin-close-submit-action"] }], "sourceBlueprintRegionIds": ["admin-dialog-close"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 4, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "start" } }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "overlays": [
+      {
+        "id": "admin-submit-overlay",
+        "title": "提交成员资料",
+        "purpose": "复核成员姓名、模拟提交、显示结果并关闭返回目录",
+        "presentation": "confirmation",
+        "hostPageId": "admin-detail-page",
+        "sourceBlueprintPageId": "admin-detail-bp",
+        "sourceBlueprintRegionIds": ["admin-dialog-form", "admin-dialog-submit", "admin-dialog-status", "admin-dialog-close"],
+        "visibleStateId": "admin-submit-visible",
+        "dismissible": true,
+        "root": {
+          "kind": "layout",
+          "id": "admin-submit-overlay-root",
+          "layout": "overlay-anchor",
+          "sourceBlueprintRegionIds": ["admin-dialog-form"],
+          "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fixed", "value": 640 }, "height": { "mode": "fill" }, "align": "center" },
+          "children": [
+            {
+              "kind": "layout",
+              "id": "admin-submit-dialog-column",
+              "layout": "scroll-region",
+              "sourceBlueprintRegionIds": ["admin-dialog-form"],
+              "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fill" }, "align": "stretch" },
+              "children": [
+                { "kind": "control", "id": "admin-dialog-name-input-overlay-copy", "capabilityId": "input", "content": null, "properties": [{ "name": "placeholder", "value": "复核成员姓名" }, { "name": "value", "value": "陈予安" }], "tabIds": [], "styleRole": "admin-field", "eventBindings": [], "sourceBlueprintRegionIds": ["admin-dialog-form"], "intent": { "importance": "primary", "visualWeight": 3, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "stretch" } },
+                { "kind": "control", "id": "admin-confirm-submit-overlay-copy", "capabilityId": "button", "content": "确认提交", "properties": [], "tabIds": [], "styleRole": "admin-action", "eventBindings": [], "sourceBlueprintRegionIds": ["admin-dialog-submit"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 1, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "start" } },
+                { "kind": "control", "id": "admin-submit-status-grid-overlay-copy", "capabilityId": "easyui.1", "content": null, "properties": [], "tabIds": [], "mockDataId": "admin-submit-records", "styleRole": "admin-status", "eventBindings": [], "sourceBlueprintRegionIds": ["admin-dialog-status"], "intent": { "importance": "secondary", "visualWeight": 3, "readingOrder": 2, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fixed", "value": 240 }, "align": "stretch" } },
+                { "kind": "control", "id": "admin-close-submit-overlay-copy", "capabilityId": "button", "content": "完成并返回目录", "properties": [], "tabIds": [], "styleRole": "admin-nav", "eventBindings": [], "sourceBlueprintRegionIds": ["admin-dialog-close"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 3, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "start" } }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "actions": [
+      { "id": "admin-sidebar-home-action", "kind": "navigate-page", "targetPageId": "admin-directory-page", "afterActionIds": [], "journeyStepRefs": [] },
+      { "id": "admin-filter-members-action", "kind": "run-script", "scriptId": "admin-filter-members-script", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "admin-directory-journey", "stepIndex": 0 }] },
+      { "id": "admin-select-member-action", "kind": "run-script", "scriptId": "admin-select-member-script", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "admin-directory-journey", "stepIndex": 1 }] },
+      { "id": "admin-open-detail-action", "kind": "navigate-page", "targetPageId": "admin-detail-page", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "admin-directory-journey", "stepIndex": 2 }] },
+      { "id": "admin-switch-tab-action", "kind": "run-script", "scriptId": "admin-tab-activity-script", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "admin-submit-journey", "stepIndex": 0 }] },
+      { "id": "admin-submit-action", "kind": "run-script", "scriptId": "admin-submit-script", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "admin-submit-journey", "stepIndex": 1 }] },
+      { "id": "admin-close-submit-action", "kind": "navigate-page", "targetPageId": "admin-directory-page", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "admin-submit-journey", "stepIndex": 2 }] }
+    ],
+    "scripts": [
+      {
+        "id": "admin-filter-members-script",
+        "purpose": "读取姓名条件并把成员主列表刷新为陈予安记录",
+        "kind": "custom",
+        "programVersion": "semantic-js/v1",
+        "source": "const name = $control.getValue(\"admin-member-filter-input\");\nconst records = [{ \"id\": \"U-1024\", \"name\": String(name), \"department\": \"产品设计部\", \"role\": \"部门管理员\", \"status\": \"在职\" }];\n$control.setData(\"admin-member-grid\", records);",
+        "inputs": [{ "name": "member-name-filter", "description": "成员姓名条件", "refKind": "control", "refId": "admin-member-filter-input" }],
+        "outputs": [{ "name": "filtered-member-records", "description": "条件应用后的成员记录", "refKind": "control", "refId": "admin-member-grid" }]
+      },
+      {
+        "id": "admin-select-member-script",
+        "purpose": "读取成员主列表当前行并同步到右侧同构预览",
+        "kind": "custom",
+        "programVersion": "semantic-js/v1",
+        "source": "const selectedRecord = $event.record();\nconst records = [];\nrecords.push(selectedRecord);\n$control.setData(\"admin-member-preview-grid\", records);",
+        "inputs": [],
+        "outputs": [{ "name": "selected-member-preview", "description": "当前成员的同构预览记录", "refKind": "control", "refId": "admin-member-preview-grid" }]
+      },
+      {
+        "id": "admin-tab-activity-script",
+        "purpose": "页签响应时写入当前成员的一条最新操作记录",
+        "kind": "custom",
+        "programVersion": "semantic-js/v1",
+        "source": "const records = [{ \"id\": \"A-205\", \"time\": \"2026-08-26 09:20\", \"action\": \"复核部门管理员权限\", \"operator\": \"王敏\" }];\n$control.setData(\"admin-activity-grid\", records);",
+        "inputs": [],
+        "outputs": [{ "name": "member-activity-view", "description": "页签响应后的成员操作记录", "refKind": "control", "refId": "admin-activity-grid" }]
+      },
+      {
+        "id": "admin-submit-script",
+        "purpose": "读取并清理复核姓名后写入成员资料提交成功状态",
+        "kind": "custom",
+        "programVersion": "semantic-js/v1",
+        "source": "const name = $control.getValue(\"admin-dialog-name-input\");\nconst normalizedName = String(name).trim();\nconst records = [{ \"id\": \"S-1\", \"object\": String(normalizedName), \"status\": \"提交成功\", \"operator\": \"王敏\" }];\n$control.setData(\"admin-submit-status-grid\", records);",
+        "inputs": [{ "name": "reviewed-member-name", "description": "对话层复核后的成员姓名", "refKind": "control", "refId": "admin-dialog-name-input" }],
+        "outputs": [{ "name": "member-submit-status", "description": "成员资料提交状态记录", "refKind": "control", "refId": "admin-submit-status-grid" }]
+      }
+    ]
+  }
+}
