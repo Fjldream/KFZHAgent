@@ -32,10 +32,16 @@ import {
 } from "./module-node-compiler.js";
 import {
   assertImplementationMatchesCompiledLayout,
+  deriveCompilerOwnedTabPaneGeometry,
+  type CompilerOwnedTabPaneRelocation,
   type CompiledLayoutNode,
   type CompiledLayoutTree,
 } from "./layout-compiler.js";
 import { normalizeSolutionRepeaterKey } from "./solution-provenance.js";
+import {
+  deriveTabPaneOwnership,
+  TabPaneOwnershipError,
+} from "../implementation/tab-pane-ownership.js";
 
 type CompilePath = readonly (string | number)[];
 
@@ -546,9 +552,94 @@ function walkNode(context: CompileContext, node: SolutionNode, walk: WalkContext
   else emitModule(context, node, walk);
 }
 
+function containsGeometry(
+  owner: UIImplementationControlV2["geometry"],
+  child: UIImplementationControlV2["geometry"],
+): boolean {
+  return child.x >= owner.x && child.y >= owner.y
+    && child.x + child.width <= owner.x + owner.width
+    && child.y + child.height <= owner.y + owner.height;
+}
+
+/**
+ * Tabs pane ownership is re-derived from the validated semantic plan and exact
+ * candidate-region evidence after ordinary layout compilation. The semantic
+ * model never supplies a native parent or raw `region` field.
+ */
+function applyCompilerOwnedTabPanes(
+  context: CompileContext,
+  bundle: CapabilityCandidateBundle,
+): readonly CompilerOwnedTabPaneRelocation[] {
+  let bindings: ReturnType<typeof deriveTabPaneOwnership>;
+  try {
+    bindings = deriveTabPaneOwnership(context.input.plan, bundle)
+      .filter((binding) => binding.semanticPageId === context.page.id);
+  } catch (error) {
+    if (error instanceof TabPaneOwnershipError) {
+      fail(error.code, [error.nodeId, "tabs"], error.message, error);
+    }
+    throw error;
+  }
+  if (bindings.length === 0) return [];
+  const controlsById = new Map(context.controls.map((control) => [control.id, control]));
+  const originalChildren = new Map<string, UIImplementationControlV2[]>();
+  context.controls.forEach((control) => {
+    if (control.parentId === undefined) return;
+    const children = originalChildren.get(control.parentId) ?? [];
+    children.push(control);
+    originalChildren.set(control.parentId, children);
+  });
+  const relocations = bindings.map((binding) => ({
+    ownerNodeId: binding.ownerSemanticControlId,
+    paneNodeId: binding.paneSemanticControlId,
+  }));
+  const relocatedGeometry = deriveCompilerOwnedTabPaneGeometry(
+    context.input.layout,
+    context.page.id,
+    relocations,
+  );
+  context.controls.forEach((control) => {
+    const geometry = relocatedGeometry.get(control.id);
+    if (geometry !== undefined) control.geometry = { ...geometry };
+  });
+  for (const binding of bindings) {
+    const owner = controlsById.get(binding.ownerSemanticControlId);
+    const pane = controlsById.get(binding.paneSemanticControlId);
+    if (owner === undefined || owner.capabilityId !== "tabs") {
+      fail("COMPONENT_TAB_OWNER_MISSING", [binding.ownerSemanticControlId], binding.semanticPageId);
+    }
+    if (pane === undefined || pane.sourceRepeaterId !== undefined) {
+      fail("COMPONENT_TAB_PANE_MISSING", [binding.ownerSemanticControlId, "tabs"], binding.paneSemanticControlId);
+    }
+    const depthDelta = owner.depth + 1 - pane.depth;
+    const pending = [pane];
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      if (visited.has(current.id)) fail("COMPONENT_TAB_PANE_OWNER_INVALID", [binding.paneSemanticControlId], "pane subtree cycle");
+      visited.add(current.id);
+      current.depth += depthDelta;
+      if (current.depth > 32) fail("COMPONENT_TAB_PANE_DEPTH_INVALID", [current.id, "depth"], String(current.depth));
+      if (!containsGeometry(owner.geometry, current.geometry)) {
+        fail("COMPONENT_TAB_PANE_GEOMETRY_INVALID", [current.id, "geometry"], binding.ownerSemanticControlId);
+      }
+      pending.push(...(originalChildren.get(current.id) ?? []));
+    }
+    pane.parentId = owner.id;
+    pane.nativeProperties = { ...pane.nativeProperties, parentId: owner.id };
+    pane.tabPane = {
+      ownerSemanticControlId: owner.id,
+      tabId: binding.tabId,
+      sourceBlueprintRegionId: binding.sourceBlueprintRegionId,
+    };
+  }
+  return relocations;
+}
+
 function validateNativePage(
   context: CompileContext,
   controls: UIImplementationControlV2[],
+  tabPaneRelocations: readonly CompilerOwnedTabPaneRelocation[],
 ): readonly UIImplementationControlV2[] {
   const parsed = UIImplementationSpecV2Schema.safeParse({
     schema: "kf-ui-implementation/v2",
@@ -567,7 +658,7 @@ function validateNativePage(
     compiledScripts: [],
   });
   if (!parsed.success) fail("UI_IMPLEMENTATION_V2_INVALID", [context.page.id], parsed.error.issues[0]?.message ?? "invalid native implementation");
-  assertImplementationMatchesCompiledLayout(parsed.data, context.page.id, context.input.layout);
+  assertImplementationMatchesCompiledLayout(parsed.data, context.page.id, context.input.layout, tabPaneRelocations);
   const nativePage = parsed.data.pages[0]!;
   if (nativePage.compatibility !== "native") fail("UI_IMPLEMENTATION_V2_INVALID", [context.page.id], "native page required");
   return nativePage.controls;
@@ -590,6 +681,11 @@ function compileRoot(
     ...(overlay === undefined ? {} : { overlay }),
   };
   walkNode(context, root, { depth: 0, currentRecords: new Map() });
+  let tabPaneRelocations: readonly CompilerOwnedTabPaneRelocation[] = [];
+  if (overlay === undefined) {
+    const bundle = verifiedBundle(input);
+    if (bundle !== undefined) tabPaneRelocations = applyCompilerOwnedTabPanes(context, bundle);
+  }
   if (overlay !== undefined) {
     const rootControl = context.controls.find((control) => control.id === root.id);
     if (rootControl === undefined) fail("OVERLAY_ROOT_CONTROL_MISSING", [overlay.id, "root"], root.id);
@@ -602,7 +698,7 @@ function compileRoot(
       initiallyVisible: false,
     };
   }
-  return validateNativePage(context, context.controls);
+  return validateNativePage(context, context.controls, tabPaneRelocations);
 }
 
 export function compileComponents(input: ComponentCompileInput): UIImplementationControlV2[] {

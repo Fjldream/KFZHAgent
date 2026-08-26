@@ -42,6 +42,10 @@ import {
   readVerifiedExistingRuntimeCorrelation,
   type VerifiedExistingRuntimeCorrelationHandle,
 } from "./runtime-correlation.js";
+import {
+  deriveTabPaneOwnership,
+  TabPaneOwnershipError,
+} from "./tab-pane-ownership.js";
 
 export interface CompileCreativeUIImplementationV2Input {
   readonly workspaceId: string;
@@ -232,6 +236,47 @@ function validateTableBindings(
   return sourceByEntityId;
 }
 
+/** Independently binds signed pane metadata to validated semantic/candidate evidence. */
+function validateTabPaneBindings(
+  semanticPlan: SolutionImplementationPlan,
+  candidateBundle: Parameters<typeof deriveTabPaneOwnership>[1],
+  pages: readonly Extract<UIImplementationSpecV2["pages"][number], { compatibility: "native" }>[],
+): void {
+  let bindings: ReturnType<typeof deriveTabPaneOwnership>;
+  try {
+    bindings = deriveTabPaneOwnership(semanticPlan, candidateBundle);
+  } catch (error) {
+    const detail = error instanceof TabPaneOwnershipError ? `${error.code}:${error.nodeId}` : "derivation failed";
+    fail("CREATIVE_TAB_PANE_BINDING_MISMATCH", detail);
+  }
+  const expected = bindings.map((binding) => ({
+    semanticPageId: binding.semanticPageId,
+    ownerSemanticControlId: binding.ownerSemanticControlId,
+    paneSemanticControlId: binding.paneSemanticControlId,
+    tabId: binding.tabId,
+    sourceBlueprintRegionId: binding.sourceBlueprintRegionId,
+  }));
+  const actual = pages.flatMap((page) => page.controls.flatMap((control) => control.tabPane === undefined ? [] : [{
+    semanticPageId: page.id,
+    ownerSemanticControlId: control.tabPane.ownerSemanticControlId,
+    paneSemanticControlId: control.sourceSolutionNodeId,
+    tabId: control.tabPane.tabId,
+    sourceBlueprintRegionId: control.tabPane.sourceBlueprintRegionId,
+  }]));
+  const key = (entry: typeof expected[number]): string => [
+    entry.semanticPageId,
+    entry.ownerSemanticControlId,
+    entry.tabId,
+    entry.paneSemanticControlId,
+    entry.sourceBlueprintRegionId,
+  ].join("\u0000");
+  expected.sort((left, right) => compareCreativeIdentifiers(key(left), key(right)));
+  actual.sort((left, right) => compareCreativeIdentifiers(key(left), key(right)));
+  if (canonicalServerHash(expected) !== canonicalServerHash(actual)) {
+    fail("CREATIVE_TAB_PANE_BINDING_MISMATCH", `${expected.length} expected / ${actual.length} actual`);
+  }
+}
+
 function semanticOperationsForActualPlan(
   plan: InternalChangePlan,
   sourceByEntityId: ReadonlyMap<string, string>,
@@ -347,6 +392,7 @@ function compileCreativeUIImplementationV2(
   const correlationPage = new Map(implementation.runtimeCorrelation.pages.map((entry) => [entry.semanticPageId, entry.pageGuid]));
   const nativePages = implementation.pages.filter((page): page is Extract<typeof page, { compatibility: "native" }> => page.compatibility === "native")
     .slice().sort((left, right) => compareCreativeIdentifiers(left.id, right.id));
+  validateTabPaneBindings(semanticPlan, candidateBundle, nativePages);
   const controls = topologicalControls(nativePages);
   const tableSourceByEntityId = validateTableBindings(semanticPlan, controls);
   const deltaProjectionByControl = new Map(controls.map((control) => [control.id, existingDeltaProjection(control)]));
@@ -450,6 +496,7 @@ function compileCreativeUIImplementationV2(
       depth: control.depth, zIndex: control.zIndex, order, geometry: control.geometry,
       ...(control.compiledLayout === undefined ? {} : { compiledLayout: control.compiledLayout }),
       ...(control.overlayHost === undefined ? {} : { overlayHost: control.overlayHost }),
+      ...(control.tabPane === undefined ? {} : { tabPane: control.tabPane }),
       nativeProperties, ...(control.content === undefined ? {} : { content: control.content }),
       ...(source === "uploaded-existing" ? { nativeGuid: verified!.nativeGuid, existingDeltas: deltaProjectionByControl.get(control.id)!.existingDeltas } : {}) };
   });

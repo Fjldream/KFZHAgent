@@ -244,57 +244,137 @@ describe("compileComponents", () => {
     expect(controls[0]!.capabilityId).toBe("layout.4");
   });
 
-  it("binds semantic tabIds to labeled tab content and derives a valid activeId", () => {
-    const tabs = control("profile-tabs");
-    if (tabs.kind !== "control") throw new Error("control fixture required");
+  function actualTabsFixture() {
+    const bundle = structuredClone(realBundle);
+    const source = bundle.regions[0]!.controls.find((candidate) => candidate.id === "text")
+      ?? bundle.regions[0]!.controls[0]!;
+    const other = bundle.regions[0]!.controls.find((candidate) => candidate.id !== source.id)!;
+    bundle.regions[0]!.controls = [source, other, { ...source, id: "tabs" }];
+    bundle.detailedCapabilityIds = [...new Set([...bundle.detailedCapabilityIds, "tabs"])].sort();
+    for (const regionId of ["profile-region", "activity-region"]) {
+      bundle.regions.push({ ...structuredClone(bundle.regions[0]!), regionId });
+    }
+    const tabs = control("profile-tabs") as Extract<SolutionNode, { kind: "control" }>;
     tabs.capabilityId = "tabs";
     tabs.content = null;
+    tabs.sourceBlueprintRegionIds = ["main"];
     tabs.tabIds = ["profile", "activity"];
-    tabs.properties = [{
-      name: "tabs",
-      value: { kind: "list", items: [
-        { kind: "record", fields: [{ name: "id", value: "profile" }, { name: "label", value: "基本资料" }] },
-        { kind: "record", fields: [{ name: "id", value: "activity" }, { name: "label", value: "操作记录" }] },
+    tabs.properties = [{ name: "tabs", value: { kind: "list", items: [
+      { kind: "record", fields: [
+        { name: "id", value: "profile" }, { name: "label", value: "基本资料" },
+        { name: "regionId", value: "profile-region" }, { name: "paneNodeId", value: "profile-pane" },
       ] },
-    }];
-    const bundle = structuredClone(realBundle);
-    const source = bundle.regions[0]!.controls[0]!;
-    bundle.regions[0]!.controls[0] = { ...source, id: "tabs" };
-    bundle.detailedCapabilityIds = [...new Set(bundle.detailedCapabilityIds.map((id) => id === source.id ? "tabs" : id))].sort();
-    const tree = compiledTree(compiledNode("profile-tabs", "control", geometry(40, 40, 600, 320)), 400);
-    const compiled = compileComponents(compileInput(plan(tabs, bundle), tree, bundle));
-    expect(compiled[0]!.nativeProperties).toEqual({
-      tabs: [{ id: "profile", label: "基本资料" }, { id: "activity", label: "操作记录" }],
+      { kind: "record", fields: [
+        { name: "id", value: "activity" }, { name: "label", value: "操作记录" },
+        { name: "regionId", value: "activity-region" }, { name: "paneNodeId", value: "activity-pane" },
+      ] },
+    ] } }, { name: "activeId", value: "profile" }];
+    const profileText = control("profile-field", "陈予安");
+    profileText.sourceBlueprintRegionIds = ["profile-region"];
+    const activityText = control("activity-field", "2026-08-25 更新权限");
+    activityText.sourceBlueprintRegionIds = ["activity-region"];
+    const profilePane = layout("profile-pane", "column", [profileText]);
+    profilePane.sourceBlueprintRegionIds = ["profile-region"];
+    const activityPane = layout("activity-pane", "column", [activityText]);
+    activityPane.sourceBlueprintRegionIds = ["activity-region"];
+    const stage = layout("tabs-stage", "column", [tabs, profilePane, activityPane]);
+    const box = geometry(40, 40, 600, 360);
+    const ownerBox = geometry(40, 40, 600, 180);
+    const tree = compiledTree(compiledNode("tabs-stage", "layout", box, [
+      compiledNode("profile-tabs", "control", ownerBox, [], undefined, 1),
+      compiledNode("profile-pane", "layout", geometry(40, 240, 600, 60), [
+        compiledNode("profile-field", "control", geometry(60, 250, 240, 40), [], undefined, 3),
+      ], "column", 2),
+      compiledNode("activity-pane", "layout", geometry(40, 320, 600, 60), [
+        compiledNode("activity-field", "control", geometry(60, 330, 320, 40), [], undefined, 4),
+      ], "column", 3),
+    ], "column"), 440);
+    return { bundle, inputPlan: plan(stage, bundle), tree, tabs, profilePane, activityPane, ownerBox };
+  }
+
+  it("compiles semantic tab ids and region-owned panes into signed native ownership", () => {
+    const fixture = actualTabsFixture();
+    const compiled = compileComponents(compileInput(fixture.inputPlan, fixture.tree, fixture.bundle));
+    expect(compiled.find((item) => item.id === "profile-tabs")!.nativeProperties).toEqual({
+      tabs: [
+        { id: "profile", label: "基本资料", regionId: "profile-region", paneNodeId: "profile-pane" },
+        { id: "activity", label: "操作记录", regionId: "activity-region", paneNodeId: "activity-pane" },
+      ],
       activeId: "profile",
+      parentId: "tabs-stage",
+    });
+    expect(compiled.find((item) => item.id === "profile-pane")).toMatchObject({
+      parentId: "profile-tabs", depth: 2,
+      geometry: fixture.ownerBox,
+      tabPane: { ownerSemanticControlId: "profile-tabs", tabId: "profile", sourceBlueprintRegionId: "profile-region" },
+      nativeProperties: { parentId: "profile-tabs" },
+    });
+    expect(compiled.find((item) => item.id === "profile-field")).toMatchObject({
+      parentId: "profile-pane", depth: 3, geometry: geometry(60, 50, 240, 40),
+    });
+    expect(compiled.find((item) => item.id === "activity-pane")).toMatchObject({
+      parentId: "profile-tabs", depth: 2,
+      geometry: fixture.ownerBox,
+      tabPane: { ownerSemanticControlId: "profile-tabs", tabId: "activity", sourceBlueprintRegionId: "activity-region" },
+    });
+    expect(compiled.find((item) => item.id === "activity-field")).toMatchObject({
+      parentId: "activity-pane", depth: 3, geometry: geometry(60, 50, 320, 40),
     });
   });
 
   it.each([
-    ["missing tab content", (tabs: Extract<SolutionNode, { kind: "control" }>) => { tabs.properties = []; }],
-    ["tab id mismatch", (tabs: Extract<SolutionNode, { kind: "control" }>) => {
-      tabs.properties = [{ name: "tabs", value: { kind: "list", items: [
-        { kind: "record", fields: [{ name: "id", value: "other" }, { name: "label", value: "其他" }] },
-      ] } }];
-    }],
-    ["invalid activeId", (tabs: Extract<SolutionNode, { kind: "control" }>) => {
-      tabs.properties.push({ name: "activeId", value: "missing" });
-    }],
-  ] as const)("rejects invalid semantic Tabs ownership: %s", (_label, mutate) => {
-    const tabs = control("profile-tabs") as Extract<SolutionNode, { kind: "control" }>;
-    tabs.capabilityId = "tabs";
-    tabs.content = null;
-    tabs.tabIds = ["profile"];
-    tabs.properties = [{ name: "tabs", value: { kind: "list", items: [
-      { kind: "record", fields: [{ name: "id", value: "profile" }, { name: "label", value: "基本资料" }] },
-    ] } }];
-    mutate(tabs);
-    const bundle = structuredClone(realBundle);
-    const source = bundle.regions[0]!.controls[0]!;
-    bundle.regions[0]!.controls[0] = { ...source, id: "tabs" };
-    bundle.detailedCapabilityIds = [...new Set(bundle.detailedCapabilityIds.map((id) => id === source.id ? "tabs" : id))].sort();
-    const tree = compiledTree(compiledNode("profile-tabs", "control", geometry(40, 40, 600, 320)), 400);
-    expect(() => compileComponents(compileInput(plan(tabs, bundle), tree, bundle)))
-      .toThrow(/COMPONENT_TAB_(?:CONTENT_REQUIRED|ID_MISMATCH|ACTIVE_ID_INVALID)/);
+    ["missing pane", (fixture: ReturnType<typeof actualTabsFixture>) => {
+      const stage = fixture.inputPlan.pages[0]!.root as LayoutNode;
+      stage.children = stage.children.filter((node) => node.id !== "activity-pane");
+    }, /COMPONENT_TAB_PANE_MISSING/],
+    ["duplicate pane", (fixture: ReturnType<typeof actualTabsFixture>) => {
+      const tabsValue = fixture.tabs.properties[0]!.value;
+      if (typeof tabsValue !== "object" || tabsValue === null || tabsValue.kind !== "list") throw new Error("tabs fixture drift");
+      const second = tabsValue.items[1];
+      if (typeof second !== "object" || second === null || second.kind !== "record") throw new Error("tabs fixture drift");
+      second.fields.find((field) => field.name === "paneNodeId")!.value = "profile-pane";
+    }, /COMPONENT_TAB_PANE_DUPLICATE/],
+    ["missing ownership", (fixture: ReturnType<typeof actualTabsFixture>) => {
+      const tabsValue = fixture.tabs.properties[0]!.value;
+      if (typeof tabsValue !== "object" || tabsValue === null || tabsValue.kind !== "list") throw new Error("tabs fixture drift");
+      const first = tabsValue.items[0];
+      if (typeof first !== "object" || first === null || first.kind !== "record") throw new Error("tabs fixture drift");
+      first.fields = first.fields.filter((field) => field.name !== "regionId");
+    }, /COMPONENT_TAB_OWNERSHIP_REQUIRED|INVALID_COMPONENT_PROPERTY/],
+    ["duplicate region", (fixture: ReturnType<typeof actualTabsFixture>) => {
+      const tabsValue = fixture.tabs.properties[0]!.value;
+      if (typeof tabsValue !== "object" || tabsValue === null || tabsValue.kind !== "list") throw new Error("tabs fixture drift");
+      const second = tabsValue.items[1];
+      if (typeof second !== "object" || second === null || second.kind !== "record") throw new Error("tabs fixture drift");
+      second.fields.find((field) => field.name === "regionId")!.value = "profile-region";
+    }, /COMPONENT_TAB_REGION_DUPLICATE/],
+    ["invalid active", (fixture: ReturnType<typeof actualTabsFixture>) => {
+      fixture.tabs.properties.find((property) => property.name === "activeId")!.value = "missing";
+    }, /COMPONENT_TAB_ACTIVE_ID_INVALID|TAB_ACTIVE_ID_UNKNOWN/],
+  ] as const)("rejects invalid native Tabs pane ownership: %s", (_label, mutate, expected) => {
+    const fixture = actualTabsFixture();
+    mutate(fixture);
+    expect(() => compileComponents(compileInput(fixture.inputPlan, fixture.tree, fixture.bundle))).toThrow(expected);
+  });
+
+  it("fails closed when a Tabs pane owner is on another semantic page", () => {
+    const fixture = actualTabsFixture();
+    const tabsValue = fixture.tabs.properties[0]!.value;
+    if (typeof tabsValue !== "object" || tabsValue === null || tabsValue.kind !== "list") throw new Error("tabs fixture drift");
+    const second = tabsValue.items[1];
+    if (typeof second !== "object" || second === null || second.kind !== "record") throw new Error("tabs fixture drift");
+    second.fields.find((field) => field.name === "paneNodeId")!.value = "foreign-pane";
+    second.fields.find((field) => field.name === "regionId")!.value = "foreign-region";
+    const foreignPane = layout("foreign-pane", "column", [control("foreign-content", "跨页")]);
+    foreignPane.sourceBlueprintRegionIds = ["foreign-region"];
+    fixture.inputPlan.pages.push({
+      id: "foreign-page", title: "其他页", purpose: "隔离 Tabs pane", canvas: "desktop",
+      sourceBlueprintPageId: "bp-foreign", sourceBlueprintRegionIds: ["foreign-region"], initialStateIds: [], root: foreignPane,
+    });
+    fixture.bundle.regions.push({ ...structuredClone(fixture.bundle.regions[0]!), pageId: "bp-foreign", regionId: "foreign-region" });
+    fixture.inputPlan.candidateBundleHash = canonicalServerHash(fixture.bundle);
+    expect(() => compileComponents(compileInput(fixture.inputPlan, fixture.tree, fixture.bundle)))
+      .toThrow(/COMPONENT_TAB_PANE_CROSS_PAGE|COMPONENT_TAB_REGION_CROSS_PAGE/);
   });
 
   it("fails closed for absent compatible candidates, wrong provenance, and stale knowledge versions", () => {

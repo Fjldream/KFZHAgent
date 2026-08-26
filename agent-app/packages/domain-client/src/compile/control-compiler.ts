@@ -437,7 +437,7 @@ function serializedCompiledModule(module: CompiledScriptModule, binding?: Compil
 }
 
 const COMPILED_ACTION_MARKER_SCHEMA = "kf-compiled-action/v1";
-const COMPILED_VISIBILITY_ACTION_MARKER_SCHEMA = "kf-compiled-action/v2";
+const COMPILED_VISIBILITY_ACTION_MARKER_SCHEMA = "kf-compiled-action/v3";
 
 interface CompiledNavigateActionMarker {
   schema: typeof COMPILED_ACTION_MARKER_SCHEMA;
@@ -494,7 +494,7 @@ function parseCompiledActionMarker(input: unknown): CompiledActionMarker | undef
 }
 
 function visibilityActionModule(marker: CompiledVisibilityActionMarker): CompiledScriptModule {
-  const source = `${marker.targetInstanceName}.Visible = ${String(marker.visible)};\n`;
+  const source = `${marker.targetInstanceName}.setVisible(${String(marker.visible)});\n`;
   return CompiledScriptModuleSchema.parse({
     id: `kf$script:action-${createHash("sha256").update(marker.actionId, "utf8").digest("hex").slice(0, 24)}`,
     sourceScriptId: marker.sourceActionId,

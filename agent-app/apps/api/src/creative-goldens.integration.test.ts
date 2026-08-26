@@ -678,9 +678,9 @@ function assertGoldenThesis(fixture) {
     expect(tabs).toBeDefined();
     const semanticTabs = unwrapSemanticValue(tabs?.properties.find((property) => property.name === "tabs")?.value);
     expect(semanticTabs, `${fixture.id}: structured tab content`).toEqual([
-      { id: "profile-tab", label: "基本资料" },
-      { id: "activity-tab", label: "操作记录" },
-      { id: "permission-tab", label: "权限范围" },
+      { id: "profile-tab", label: "基本资料", regionId: "admin-profile-name", paneNodeId: "admin-profile-pane" },
+      { id: "activity-tab", label: "操作记录", regionId: "admin-activity", paneNodeId: "admin-activity-pane" },
+      { id: "permission-tab", label: "权限范围", regionId: "admin-dialog-status", paneNodeId: "admin-permission-pane" },
     ]);
     expect(tabs?.properties.find((property) => property.name === "activeId")?.value,
       `${fixture.id}: active tab`).toBe("profile-tab");
@@ -824,10 +824,10 @@ async function runGoldenBuild(fixture, runNumber) {
     for (const overlayAction of overlayActions) {
       const owner = controlsByName.get(overlayAction.ownerInstanceName);
       const link = owner?.linkMng?.linkList?.find((entry) =>
-        entry.kfCompilerAction?.schema === "kf-compiled-action/v2"
+        entry.kfCompilerAction?.schema === "kf-compiled-action/v3"
         && entry.kfCompilerAction?.sourceActionId === overlayAction.sourceActionId);
       expect(link, `${fixture.id}: packaged overlay binding ${overlayAction.sourceActionId}`).toMatchObject({
-        script: expect.stringContaining(`${overlayAction.targetInstanceName}.Visible = ${overlayAction.kind === "open-overlay"};`),
+        script: expect.stringContaining(`${overlayAction.targetInstanceName}.setVisible(${overlayAction.kind === "open-overlay"});`),
         kfCompilerAction: {
           operation: overlayAction.kind,
           targetSemanticControlId: overlayAction.targetSemanticControlId,
@@ -917,6 +917,33 @@ async function runGoldenBuild(fixture, runNumber) {
         { name: "permission-tab", label: "权限范围" },
       ]);
       expect(controlsByName.get(tabs.instanceName)?.activeName).toBe("profile-tab");
+      const expectedPanes = [
+        { paneId: "admin-profile-pane", tabId: "profile-tab", regionId: "admin-profile-name", contentId: "admin-profile-name-input" },
+        { paneId: "admin-activity-pane", tabId: "activity-tab", regionId: "admin-activity", contentId: fixture.expect.activityTargetId },
+        { paneId: "admin-permission-pane", tabId: "permission-tab", regionId: "admin-dialog-status", contentId: "admin-submit-status-grid" },
+      ];
+      const nativeTabs = controlsByName.get(tabs.instanceName);
+      const nativePanes = nativeTabs?.insiderObjects ?? [];
+      expect(nativeTabs?.uiModelType).toBe(47);
+      expect(nativePanes).toHaveLength(expectedPanes.length);
+      for (const expectedPane of expectedPanes) {
+        const pane = materialization.controls.find((control) => control.semanticControlId === expectedPane.paneId);
+        const content = materialization.controls.find((control) => control.semanticControlId === expectedPane.contentId);
+        expect(pane, `management-admin: materialized pane ${expectedPane.paneId}`).toMatchObject({
+          parentSemanticControlId: tabs.semanticControlId,
+          parentInstanceName: tabs.instanceName,
+          tabPane: {
+            ownerSemanticControlId: tabs.semanticControlId,
+            tabId: expectedPane.tabId,
+            sourceBlueprintRegionId: expectedPane.regionId,
+          },
+        });
+        expect(content, `management-admin: pane content ${expectedPane.contentId}`).toBeDefined();
+        const nativePane = nativePanes.find((control) => nativeName(control) === pane.instanceName);
+        expect(nativePane?.region, `management-admin: native pane region ${expectedPane.paneId}`).toBe(expectedPane.tabId);
+        expect(walkControls(nativePane?.insiderObjects ?? []).some((control) => nativeName(control) === content.instanceName),
+          `management-admin: native pane content ${expectedPane.contentId}`).toBe(true);
+      }
       expect(controlsByName.get(profileContent.instanceName), "management-admin: 基本资料 tab content").toBeDefined();
       expect(controlsByName.get(activity.instanceName), "management-admin: 操作记录 tab content").toBeDefined();
       const tabClick = controlsByName.get(tabs.instanceName)?.linkMng?.linkList?.find((link) => link.name === "Tab-click");

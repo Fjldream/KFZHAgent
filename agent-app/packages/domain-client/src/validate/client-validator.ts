@@ -184,7 +184,7 @@ function compilerMetadata(value: unknown): CompilerOwnedScriptMetadata | undefin
 interface CompilerOwnedSegment { readonly metadata: CompilerOwnedScriptMetadata; readonly body: string; readonly encoded: string }
 
 interface CompilerVisibilityActionMarker {
-  readonly schema: "kf-compiled-action/v2";
+  readonly schema: "kf-compiled-action/v3";
   readonly actionId: string;
   readonly sourceActionId: string;
   readonly ownerInstanceName: string;
@@ -200,7 +200,7 @@ interface CompilerVisibilityActionMarker {
 
 function compilerVisibilityActionMarker(value: unknown): { readonly marker?: CompilerVisibilityActionMarker; readonly issue?: string } {
   const record = asRecord(value);
-  if (record["schema"] !== "kf-compiled-action/v2") return {};
+  if (record["schema"] !== "kf-compiled-action/v3") return {};
   const expected = ["actionId", "kfEvent", "linkId", "operation", "ownerInstanceName", "ownerSemanticControlId", "phase", "schema", "sourceActionId", "targetInstanceName", "targetSemanticControlId", "visible"];
   const stableId = /^[A-Za-z][A-Za-z0-9_-]{0,99}$/;
   const compilerActionId = /^kf\$action:[A-Za-z0-9][A-Za-z0-9_-]{0,89}$/;
@@ -799,9 +799,16 @@ function compilerSourceIssue(
           const receiver = factOf(object);
           const standardGlobal = objectName !== undefined && !resolvesLocal(object === undefined ? undefined : scopeByNode.get(object), objectName);
           const runtimeType = objectName === undefined ? undefined : instanceTypes.get(objectName);
-          const runtimeCall = objectName !== undefined && declaredInstances.has(objectName) && member === "SetData"
-            && (isUiModel(runtimeType, 31) || isDatagrid(runtimeType))
-            && args.length === 1;
+          const exactOverlayVisibilityCall = visibilityAction !== undefined
+            && objectName === visibilityAction.targetInstanceName
+            && runtimeType?.kind === "layout"
+            && member === "setVisible"
+            && args.length === 1
+            && args[0]?.["type"] === "Literal"
+            && args[0]["value"] === visibilityAction.visible;
+          const runtimeCall = objectName !== undefined && declaredInstances.has(objectName)
+            && (member === "SetData" && (isUiModel(runtimeType, 31) || isDatagrid(runtimeType)) && args.length === 1
+              || exactOverlayVisibilityCall);
           const mathCall = standardGlobal && (objectName === "Math" && ["abs", "ceil", "floor", "round", "trunc"].includes(member ?? "") && args.length === 1
             || objectName === "Math" && ["max", "min"].includes(member ?? "") && args.length >= 1 && args.length <= 1_000);
           const dateCall = standardGlobal && (objectName === "Date" && member === "parse" && args.length === 1
@@ -884,14 +891,7 @@ function compilerSourceIssue(
           const boundedCounter = counter !== undefined && targetFact.kind === "bounded-array"
             && activeLoops.some((loop) => loop.counter === counter && loop.maxIndex !== undefined && loop.maxIndex < targetFact.maxLength);
           const objectName = identifierName(target["object"]);
-          const member = staticMember(targetProperty);
-          const right = record["right"] as Record<string, unknown> | undefined;
-          const exactOverlayVisibility = visibilityAction !== undefined
-            && type === "AssignmentExpression" && record["operator"] === "=" && target["computed"] === false
-            && objectName === visibilityAction.targetInstanceName && member === "Visible"
-            && right?.["type"] === "Literal" && right["value"] === visibilityAction.visible;
-          if (!exactOverlayVisibility
-            && (type !== "AssignmentExpression" || record["operator"] !== "=" || target["computed"] !== true || (!literalIndex && !boundedCounter))) {
+          if (type !== "AssignmentExpression" || record["operator"] !== "=" || target["computed"] !== true || (!literalIndex && !boundedCounter)) {
             astIssue ??= "member assignment requires a proven bounded-array index";
           }
           if (objectName !== undefined) {
@@ -958,7 +958,7 @@ function compilerSourceIssue(
         || (isUiModel(runtimeType, 31) && member === "SetData" && called)
         || (isDatagrid(runtimeType) && member === "SetData" && called)
         || (visibilityAction !== undefined && runtimeType?.kind === "layout"
-          && name === visibilityAction.targetInstanceName && member === "Visible" && written && !called);
+          && name === visibilityAction.targetInstanceName && member === "setVisible" && called && !written);
       if (!supported) unsupportedRuntimeMember ??= `${name}.${member ?? "?"}`;
     },
     leave(node) {
@@ -1503,7 +1503,7 @@ async function checkBusinessRules(
           if (new Set(moduleIds).size !== moduleIds.length) issues.push(`control "${String(name)}" duplicate compiled module identity`);
           if (visibilityMarker !== undefined) {
             const segment = parsedCompilerSource.segments[0];
-            const expectedBody = `${visibilityMarker.targetInstanceName}.Visible = ${String(visibilityMarker.visible)};\n`;
+            const expectedBody = `${visibilityMarker.targetInstanceName}.setVisible(${String(visibilityMarker.visible)});\n`;
             const expectedModuleId = `kf$script:action-${createHash("sha256").update(visibilityMarker.actionId, "utf8").digest("hex").slice(0, 24)}`;
             const expectedReferences = [
               { semanticId: visibilityMarker.ownerSemanticControlId, instanceName: visibilityMarker.ownerInstanceName },
@@ -1760,6 +1760,25 @@ async function creativeMaterializationIssues(
       issues.push(`creative native control missing: ${control.semanticControlId}`);
       continue;
     }
+    if (control.tabPane !== undefined) {
+      const owner = control.parentInstanceName === undefined
+        ? undefined
+        : materializedControlByName.get(control.parentInstanceName);
+      const ownerRaw = control.parentInstanceName === undefined
+        ? undefined
+        : rawControlByName.get(control.parentInstanceName);
+      const directChildren = Array.isArray(ownerRaw?.["insiderObjects"])
+        ? ownerRaw["insiderObjects"] as unknown[]
+        : [];
+      const directMatches = directChildren.filter((child) => rawControlInstanceName(child) === control.instanceName);
+      if (owner?.semanticControlId !== control.tabPane.ownerSemanticControlId
+        || owner?.capabilityId !== "tabs"
+        || ownerRaw?.["uiModelType"] !== 47
+        || directMatches.length !== 1
+        || raw["region"] !== control.tabPane.tabId) {
+        issues.push(`creative Tabs pane region/owner mismatch: ${control.semanticControlId}`);
+      }
+    }
     if (control.overlayHost?.initiallyVisible === false) {
       const initiallyVisible = control.capabilityId.startsWith("layout.")
         ? asRecord(raw["baseProperty"])["visible"]
@@ -1851,6 +1870,26 @@ async function creativeMaterializationIssues(
       } catch (error) {
         issues.push(`creative interaction validation failed: ${control.semanticControlId}: ${String(error)}`);
       }
+    }
+  }
+  for (const owner of materialization.controls.filter((control) => control.capabilityId === "tabs")) {
+    const panes = materialization.controls.filter((control) =>
+      control.tabPane?.ownerSemanticControlId === owner.semanticControlId);
+    if (panes.length === 0) continue;
+    const ownerRaw = rawControlByName.get(owner.instanceName);
+    const directChildren = Array.isArray(ownerRaw?.["insiderObjects"])
+      ? ownerRaw["insiderObjects"] as unknown[]
+      : [];
+    const expected = panes.map((pane) => `${pane.instanceName}\u0000${pane.tabPane!.tabId}`).sort();
+    const actual = directChildren.flatMap((child) => {
+      const name = rawControlInstanceName(child);
+      const region = isObjectRecord(child) ? child["region"] : undefined;
+      return typeof name === "string" && typeof region === "string" ? [`${name}\u0000${region}`] : [];
+    }).sort();
+    if (ownerRaw?.["uiModelType"] !== 47
+      || expected.length !== actual.length
+      || expected.some((entry, index) => entry !== actual[index])) {
+      issues.push(`creative Tabs insiderObjects coverage mismatch: ${owner.semanticControlId}`);
     }
   }
   const versionDir = await resolveVersionDirName(candidate);

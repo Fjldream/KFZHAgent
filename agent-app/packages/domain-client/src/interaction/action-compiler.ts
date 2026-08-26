@@ -210,8 +210,12 @@ function targetCapabilitySupported(effect: ActionEffect, indexes: ReturnType<typ
   }
   if (effect.kind === "open-overlay" || effect.kind === "close-overlay") {
     const targetId = indexes.overlayHosts.get(effect.overlayId)?.controlId;
-    const action = profileForControl(targetId, indexes)?.actions.find((candidate) => candidate.semanticAction === semanticActionOf(effect));
-    return supported(action) && action.implementation === "restricted-action";
+    const profile = profileForControl(targetId, indexes);
+    const action = profile?.actions.find((candidate) => candidate.semanticAction === semanticActionOf(effect));
+    const method = profile?.methods.find((candidate) => candidate.semanticMethod === "set-visible");
+    return supported(action) && action.implementation === "restricted-action"
+      && supported(method) && method.kfMethod === "setVisible"
+      && method.parameters.length === 1 && method.parameters[0] === "visible" && method.returns === "void";
   }
   return true;
 }

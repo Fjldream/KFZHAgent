@@ -52,6 +52,7 @@ function creativeInput(
   fractionalBoundary = false,
   scrollOverflow = false,
   includeOverlay = false,
+  includeTabs = false,
 ) {
   const blueprint = {
     schema: "kf-design-plan/v3" as const, displayName: "工程", objective: "完成交互",
@@ -247,6 +248,64 @@ function creativeInput(
     implementationBase.sourceSolutionPlanHash = canonicalServerHash(semanticPlan);
     implementationBase.sourceModuleRegistryHash = solutionModuleRegistryHash(semanticPlan, createDefaultModuleRegistry());
   }
+  if (includeTabs) {
+    const homeBlueprint = blueprint.pages.find((page) => page.id === "bp-home")!;
+    const paneRegions = [
+      { id: "region-profile", purpose: "基本资料", semanticRoles: ["content"], dataShape: "records", density: "comfortable" as const, importance: "primary" as const, content: ["陈予安"], sampleData: [], interactions: [], states: ["ready"], visualIntent: "资料页签" },
+      { id: "region-activity", purpose: "操作记录", semanticRoles: ["content"], dataShape: "records", density: "comfortable" as const, importance: "primary" as const, content: ["更新权限"], sampleData: [], interactions: [], states: ["ready"], visualIntent: "记录页签" },
+    ];
+    homeBlueprint.regions.push(...paneRegions);
+    homeBlueprint.readingOrder.push(...paneRegions.map((region) => region.id));
+    candidateBundle.blueprintHash = canonicalServerHash(blueprint);
+    const homeCandidate = candidateBundle.regions.find((region) => region.pageId === "bp-home" && region.regionId === "region-home")!;
+    homeCandidate.controls.push(ranked("tabs"));
+    candidateBundle.regions.push(...paneRegions.map((region) => ({
+      ...structuredClone(homeCandidate), regionId: region.id,
+    })));
+    candidateBundle.detailedCapabilityIds = [...new Set([...candidateBundle.detailedCapabilityIds, "tabs"])].sort();
+    semanticPlan.blueprintHash = candidateBundle.blueprintHash;
+    semanticPlan.candidateBundleHash = canonicalServerHash(candidateBundle);
+    const semanticHome = semanticPlan.pages.find((page) => page.id === "home")!;
+    semanticHome.sourceBlueprintRegionIds.push(...paneRegions.map((region) => region.id));
+    if (semanticHome.root.kind !== "layout") throw new Error("home layout fixture required");
+    semanticHome.root.children.push({
+      id: "profile-tabs", kind: "control", capabilityId: "tabs", content: null,
+      properties: [{ name: "tabs", value: { kind: "list", items: [
+        { kind: "record", fields: [{ name: "id", value: "profile" }, { name: "label", value: "基本资料" }, { name: "regionId", value: "region-profile" }, { name: "paneNodeId", value: "profile-pane" }] },
+        { kind: "record", fields: [{ name: "id", value: "activity" }, { name: "label", value: "操作记录" }, { name: "regionId", value: "region-activity" }, { name: "paneNodeId", value: "activity-pane" }] },
+      ] } }, { name: "activeId", value: "profile" }],
+      tabIds: ["profile", "activity"], styleRole: "content", sourceBlueprintRegionIds: ["region-home"],
+      intent: { ...structuredClone(intent), readingOrder: 30 }, eventBindings: [],
+    }, {
+      id: "profile-pane", kind: "control", capabilityId: "text", content: "陈予安 · 平台管理员", properties: [], tabIds: [],
+      styleRole: "content", sourceBlueprintRegionIds: ["region-profile"], intent: { ...structuredClone(intent), readingOrder: 31 }, eventBindings: [],
+    }, {
+      id: "activity-pane", kind: "control", capabilityId: "text", content: "2026-08-25 更新权限", properties: [], tabIds: [],
+      styleRole: "content", sourceBlueprintRegionIds: ["region-activity"], intent: { ...structuredClone(intent), readingOrder: 32 }, eventBindings: [],
+    });
+    const implementationHome = implementationBase.pages.find((page) => page.id === "home")!;
+    if (implementationHome.compatibility !== "native") throw new Error("native home fixture required");
+    implementationHome.controls.push({
+      id: "profile-tabs", parentId: "root", role: "content", capabilityId: "tabs", depth: 1, zIndex: 30,
+      geometry: { x: 400, y: 200, width: 600, height: 300 }, nativeProperties: { parentId: "root", tabs: [
+        { id: "profile", label: "基本资料", regionId: "region-profile", paneNodeId: "profile-pane" },
+        { id: "activity", label: "操作记录", regionId: "region-activity", paneNodeId: "activity-pane" },
+      ], activeId: "profile" }, compiledStyle: { nativeFields: {}, cssFragments: [], warnings: [] },
+      sourceSolutionNodeId: "profile-tabs", sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region-home"], eventBindings: [],
+    }, {
+      id: "profile-pane", parentId: "profile-tabs", role: "content", capabilityId: "text", content: "陈予安 · 平台管理员", depth: 2, zIndex: 31,
+      geometry: { x: 400, y: 200, width: 600, height: 300 }, nativeProperties: { parentId: "profile-tabs", text: "陈予安 · 平台管理员" },
+      tabPane: { ownerSemanticControlId: "profile-tabs", tabId: "profile", sourceBlueprintRegionId: "region-profile" },
+      compiledStyle: { nativeFields: {}, cssFragments: [], warnings: [] }, sourceSolutionNodeId: "profile-pane", sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region-profile"], eventBindings: [],
+    }, {
+      id: "activity-pane", parentId: "profile-tabs", role: "content", capabilityId: "text", content: "2026-08-25 更新权限", depth: 2, zIndex: 32,
+      geometry: { x: 400, y: 200, width: 600, height: 300 }, nativeProperties: { parentId: "profile-tabs", text: "2026-08-25 更新权限" },
+      tabPane: { ownerSemanticControlId: "profile-tabs", tabId: "activity", sourceBlueprintRegionId: "region-activity" },
+      compiledStyle: { nativeFields: {}, cssFragments: [], warnings: [] }, sourceSolutionNodeId: "activity-pane", sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region-activity"], eventBindings: [],
+    });
+    implementationBase.sourceSolutionPlanHash = canonicalServerHash(semanticPlan);
+    implementationBase.sourceModuleRegistryHash = solutionModuleRegistryHash(semanticPlan, createDefaultModuleRegistry());
+  }
   if (extraControlCount > 0) {
     // Keep the scale fixture focused on native page materialization. Script
     // compilation intentionally snapshots the full semantic plan into its
@@ -370,6 +429,7 @@ async function signedFixture(
   fractionalBoundary = false,
   scrollOverflow = false,
   includeOverlay = false,
+  includeTabs = false,
 ) {
   const facade = createHmacCreativeBuildFacade(Buffer.alloc(32, 0x41), createCreativeUIImplementationV2Compiler);
   const result = facade.compiler.compiler.compile(creativeInput(
@@ -379,6 +439,7 @@ async function signedFixture(
     fractionalBoundary,
     scrollOverflow,
     includeOverlay,
+    includeTabs,
   ));
   const envelope = facade.authority.sign({
     plan: result.plan, revisionId: "revision", semanticOperations: result.semanticOperations,
@@ -517,10 +578,10 @@ describe("creative native materializer", () => {
       for (const [owner, operation, visible] of [[open.instanceName, "open-overlay", true], [close.instanceName, "close-overlay", false]] as const) {
         const link = visibilityLink(owner, operation);
         expect(link["kfCompilerAction"]).toMatchObject({
-          schema: "kf-compiled-action/v2", operation, targetSemanticControlId: overlay.semanticControlId,
+          schema: "kf-compiled-action/v3", operation, targetSemanticControlId: overlay.semanticControlId,
           targetInstanceName: overlay.instanceName, visible,
         });
-        expect(decodedModules(String(link["script"]))[0]?.body).toBe(`${overlay.instanceName}.Visible = ${String(visible)};\n`);
+        expect(decodedModules(String(link["script"]))[0]?.body).toBe(`${overlay.instanceName}.setVisible(${String(visible)});\n`);
       }
       return { nativeOverlay, openLink: visibilityLink(open.instanceName, "open-overlay") };
     };
@@ -547,7 +608,7 @@ describe("creative native materializer", () => {
     const tamperedOpen = pageControls.find((control) => control["name"] === open.instanceName)!;
     const tamperedOpenLink = ((tamperedOpen["linkMng"] as { linkList: Array<Record<string, unknown>> }).linkList)
       .find((link) => (link["kfCompilerAction"] as Record<string, unknown> | undefined)?.["operation"] === "open-overlay")!;
-    tamperedOpenLink["script"] = String(tamperedOpenLink["script"]).replace("Visible = true", "Visible = false");
+    tamperedOpenLink["script"] = String(tamperedOpenLink["script"]).replace("setVisible(true)", "setVisible(false)");
     await writeFile(pagePath, JSON.stringify(pageJson, null, 2));
     const tamperedReport = await pack.validate({
       baseWorkspace: base, candidateWorkspace: candidate, changePlan: result.plan,
@@ -655,6 +716,72 @@ describe("creative native materializer", () => {
     expect(importedControls.some((control) => control["name"] === grid.instanceName
       && String(((control["linkMng"] as { linkList: Array<Record<string, unknown>> }).linkList)
         .find((entry) => entry["linkId"] === 200024)?.["script"]).includes(`${grid.instanceName}.SetData([])`))).toBe(true);
+  }, 30_000);
+
+  it("materializes signed Tabs panes as native insiderObjects and preserves them through package/import", async () => {
+    const { result, resolved, planHash } = await signedFixture(0, false, false, false, false, true);
+    const base = await baseWorkspace();
+    const candidate = await applyClientPatch(base.rootDir, result.plan, {
+      planHash,
+      semanticOperations: resolved.semanticOperations,
+      creativeMaterialization: resolved.creativeMaterialization,
+    } as ApplyPatchOptions & { creativeMaterialization: unknown });
+    const tabs = result.materialization.controls.find((control) => control.semanticControlId === "profile-tabs")!;
+    const panes = result.materialization.controls.filter((control) => control.tabPane?.ownerSemanticControlId === "profile-tabs");
+    const inspectNativeTabs = async (rootDir: string) => {
+      const inspection = await inspectClientProject(rootDir);
+      const controls = Object.values(inspection.raw.pages).flatMap((page) => walkControls(page));
+      const nativeTabs = controls.find((control) => control["name"] === tabs.instanceName)!;
+      expect(nativeTabs).toMatchObject({
+        uiModelType: 47,
+        activeName: "profile",
+        tabData: [{ name: "profile", label: "基本资料" }, { name: "activity", label: "操作记录" }],
+      });
+      const children = nativeTabs["insiderObjects"] as Array<Record<string, unknown>>;
+      expect(children.map((child) => child["region"])).toEqual(["profile", "activity"]);
+      expect(children.map((child) => child["name"])).toEqual(["profile", "activity"].map((tabId) =>
+        panes.find((pane) => pane.tabPane?.tabId === tabId)!.instanceName));
+      expect(children.map((child) => child["text"])).toEqual(["陈予安 · 平台管理员", "2026-08-25 更新权限"]);
+      return { inspection, nativeTabs, children };
+    };
+    await inspectNativeTabs(candidate.rootDir);
+    const report = await validateClientProject(base.rootDir, candidate.rootDir, result.plan, {
+      skipRoundTrip: true,
+      creativeMaterialization: resolved.creativeMaterialization,
+    } as Parameters<typeof validateClientProject>[3] & { creativeMaterialization: unknown });
+    expect(report.status, report.warnings.join("\n")).toBe("pass");
+
+    const imported = await importNativeClientPackage(
+      (await createKingClientDomainPack({ nativeAccepted: true }).package({ workspace: candidate })).bytes,
+      await mkdtemp(path.join(tmpdir(), "kf-tabs-pane-import-")),
+    );
+    await inspectNativeTabs(imported);
+
+    const home = result.materialization.pages.find((page) => page.semanticPageId === "home")!;
+    const pageFile = (await inspectClientProject(candidate.rootDir)).index.pages[home.pageGuid]!.file;
+    const pagePath = path.join(candidate.rootDir, "1.0.0.1", pageFile);
+    const pageJson = JSON.parse(await readFile(pagePath, "utf8")) as Record<string, unknown>;
+    const tamperedTabs = walkControls(pageJson).find((control) => control["name"] === tabs.instanceName)!;
+    const tamperedPane = (tamperedTabs["insiderObjects"] as Array<Record<string, unknown>>)[0]!;
+    const originalRegion = tamperedPane["region"];
+    tamperedPane["region"] = "forged";
+    await writeFile(pagePath, JSON.stringify(pageJson, null, 2));
+    const tampered = await validateClientProject(base.rootDir, candidate.rootDir, result.plan, {
+      skipRoundTrip: true,
+      creativeMaterialization: resolved.creativeMaterialization,
+    } as Parameters<typeof validateClientProject>[3] & { creativeMaterialization: unknown });
+    expect(tampered.status).toBe("fail");
+    expect(tampered.warnings.join("\n")).toMatch(/Tabs|tab pane|region|materialization/i);
+
+    tamperedPane["region"] = originalRegion;
+    tamperedTabs["activeName"] = "forged";
+    await writeFile(pagePath, JSON.stringify(pageJson, null, 2));
+    const tamperedActiveName = await validateClientProject(base.rootDir, candidate.rootDir, result.plan, {
+      skipRoundTrip: true,
+      creativeMaterialization: resolved.creativeMaterialization,
+    } as Parameters<typeof validateClientProject>[3] & { creativeMaterialization: unknown });
+    expect(tamperedActiveName.status).toBe("fail");
+    expect(tamperedActiveName.warnings.join("\n")).toMatch(/Tabs|activeName|materialization/i);
   }, 30_000);
 
   it("carries exact signed Datagrid authorization through the verified creative patch path", async () => {

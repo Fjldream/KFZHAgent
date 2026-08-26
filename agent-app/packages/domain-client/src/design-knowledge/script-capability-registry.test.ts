@@ -71,11 +71,11 @@ describe("script capability knowledge", () => {
       .map((action) => action.semanticAction)).toEqual(["navigate-page", "set-variable", "open-dialog", "close-dialog"]);
   });
 
-  it("binds overlay visibility to the exact reviewed KF Visible property evidence", () => {
+  it("binds overlay visibility to the exact reviewed KF layout setVisible runtime evidence", () => {
     const expectedEvidence = {
       kind: "product-source",
-      ref: "KingFusion3.6_Center/sdb/c7f1771f-0c8f-4c75-9d71-3b8c4b6bd190/kingclient/9fdd3be0-2d91-11f1-b60a-4937cd79e5a1/project/page/设备接入_新增.json#objects.0.insiderObjects.0.insiderObjects.2.insiderObjects.4.linkMng.linkList.0.script",
-      contentSha256: "67c369d5f86cde2ac540afa78931964f826d2992752e8e09edaa7996d1b500b7",
+      ref: "KingFusion3.6_Node/kingexedb/kingclient/exe/public/javascripts/Common/Graphic/Layout/kmui_layoutcomponentbase.js",
+      contentSha256: "04831c1bd9feb0d19eaac07e0aee5af7df07bd4fba8072b6630dd1c4689b0aff",
     };
     for (const capabilityId of ["layout.2", "layout.4", "layout.5"]) {
       const profile = requireScriptCapabilityProfile(capabilityId);
@@ -84,9 +84,13 @@ describe("script capability knowledge", () => {
         expect.objectContaining({ semanticAction: "open-dialog", implementation: "restricted-action", availability: "supported", evidence: [expectedEvidence] }),
         expect.objectContaining({ semanticAction: "close-dialog", implementation: "restricted-action", availability: "supported", evidence: [expectedEvidence] }),
       ]);
-      expect(profile.properties).toEqual([
-        expect.objectContaining({ semanticProperty: "visible", kfProperty: "Visible", readable: true, writable: true, availability: "supported", evidence: [expectedEvidence] }),
+      expect(profile.methods).toEqual([
+        expect.objectContaining({ semanticMethod: "set-visible", kfMethod: "setVisible", parameters: ["visible"], returns: "void", availability: "supported", evidence: [expectedEvidence] }),
       ]);
+      expect(profile.properties).toEqual([]);
+      const runtimeSource = readEvidenceContent(expectedEvidence.ref);
+      expect(runtimeSource).toContain("KMLayoutCompBase.prototype.setVisible=function(e){e?this.thisElement.style.display=\"\":this.thisElement.style.display=\"none\",this.visible=e}");
+      expect(runtimeSource).not.toContain('defineScriptProperty(this,"Visible"');
     }
   });
 

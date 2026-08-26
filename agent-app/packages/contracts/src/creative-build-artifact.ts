@@ -13,6 +13,7 @@ import {
   ComponentStyleSpecV2Schema,
   ImplementationDataRecordSchema,
   OverlayHostMetadataSchema,
+  TabPaneOwnershipSchema,
   UIImplementationSpecV2Schema,
 } from "./ui-style.js";
 
@@ -170,6 +171,7 @@ const MaterializedControlSchema = z.object({
   geometry,
   compiledLayout: CompiledLayoutMetadataSchema.optional(),
   overlayHost: OverlayHostMetadataSchema.optional(),
+  tabPane: TabPaneOwnershipSchema.optional(),
   nativeProperties: dataRecord,
   nativeGuid: boundedId.optional(),
   content: z.string().max(2_000).optional(),
@@ -236,6 +238,20 @@ export const TrustedNativeMaterializationSchema = z.object({
       if (parent === undefined || parent.semanticPageId !== control.semanticPageId || parent.instanceName !== control.parentInstanceName || parent.depth >= control.depth) {
         ctx.addIssue({ code: "custom", path: ["controls", index, "parentSemanticControlId"], message: "parent must precede child on the same page" });
       }
+      if (control.tabPane !== undefined) {
+        const tabs = parent?.nativeProperties["tabs"];
+        const matches = Array.isArray(tabs) ? tabs.filter((candidate) => candidate !== null
+          && typeof candidate === "object" && !Array.isArray(candidate)
+          && (candidate as Record<string, unknown>)["id"] === control.tabPane!.tabId
+          && (candidate as Record<string, unknown>)["paneNodeId"] === control.sourceSolutionNodeId
+          && (candidate as Record<string, unknown>)["regionId"] === control.tabPane!.sourceBlueprintRegionId) : [];
+        if (control.parentSemanticControlId !== control.tabPane.ownerSemanticControlId
+          || parent?.capabilityId !== "tabs" || matches.length !== 1) {
+          ctx.addIssue({ code: "custom", path: ["controls", index, "tabPane"], message: "tab pane materialization provenance mismatch" });
+        }
+      }
+    } else if (control.tabPane !== undefined) {
+      ctx.addIssue({ code: "custom", path: ["controls", index, "tabPane"], message: "tab pane requires a preceding Tabs parent" });
     }
     controls.set(control.semanticControlId, control);
   });
@@ -324,6 +340,7 @@ export function validateCreativeArtifactMaterializationProjection(
       depth: control.depth, zIndex: control.zIndex, order, geometry: control.geometry,
       ...(control.compiledLayout === undefined ? {} : { compiledLayout: control.compiledLayout }),
       ...(control.overlayHost === undefined ? {} : { overlayHost: control.overlayHost }),
+      ...(control.tabPane === undefined ? {} : { tabPane: control.tabPane }),
       nativeProperties: control.nativeProperties,
       ...(control.content === undefined ? {} : { content: control.content }),
       ...(evidence?.nativeGuid === undefined ? {} : { nativeGuid: evidence.nativeGuid }),
@@ -338,6 +355,7 @@ export function validateCreativeArtifactMaterializationProjection(
     depth: control.depth, zIndex: control.zIndex, order: control.order, geometry: control.geometry,
     ...(control.compiledLayout === undefined ? {} : { compiledLayout: control.compiledLayout }),
     ...(control.overlayHost === undefined ? {} : { overlayHost: control.overlayHost }),
+    ...(control.tabPane === undefined ? {} : { tabPane: control.tabPane }),
     nativeProperties: control.nativeProperties,
     ...(control.content === undefined ? {} : { content: control.content }),
     ...(control.nativeGuid === undefined ? {} : { nativeGuid: control.nativeGuid }),

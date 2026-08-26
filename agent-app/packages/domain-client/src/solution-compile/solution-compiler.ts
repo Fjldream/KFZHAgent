@@ -17,6 +17,7 @@ import {
   type UIImplementationSpecV2,
 } from "@kf/contracts";
 import { requireControlDesignProfile } from "../design-knowledge/control-design-registry.js";
+import { deriveTabPaneOwnership } from "../implementation/tab-pane-ownership.js";
 import type { ModuleRegistry } from "../modules/module-registry.js";
 import { assertSolutionPlanUsesCandidates } from "../planning/capability-retrieval.js";
 import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
@@ -728,6 +729,9 @@ function deepFreeze<T>(value: T): T {
 export function compileSolutionImplementation(input: SolutionCompileInput): UIImplementationSpecV2 {
   const safeInput = preflightInput(input);
   const parsed = boundary("parse", "$", () => parseInput(safeInput));
+  const tabPaneOwnership = parsed.bundle === undefined
+    ? []
+    : boundary("candidate-validation", "$", () => deriveTabPaneOwnership(parsed.plan, parsed.bundle!));
   const dataSets = new Map(parsed.plan.mockData.map((dataSet) => [dataSet.id, dataSet]));
   const expansionBudget: ExpansionBudget = { remaining: MAX_EXPANDED_SOLUTION_NODES };
   const expandedPages = parsed.plan.pages.map((page) => {
@@ -818,7 +822,15 @@ export function compileSolutionImplementation(input: SolutionCompileInput): UIIm
     const page = implementation.pages.find((entry) => entry.id === compiledPage.page.id);
     if (page === undefined) fail("validation", compiledPage.page.id, "IMPLEMENTATION_PAGE_MISSING", compiledPage.page.id);
     const correlated = mergeLayoutTrees(compiledPage.layout, overlays);
-    boundary("validation", compiledPage.page.id, () => assertImplementationMatchesCompiledLayout(implementation, compiledPage.page.id, correlated));
+    const tabPaneRelocations = tabPaneOwnership
+      .filter((binding) => binding.semanticPageId === compiledPage.page.id)
+      .map((binding) => ({ ownerNodeId: binding.ownerSemanticControlId, paneNodeId: binding.paneSemanticControlId }));
+    boundary("validation", compiledPage.page.id, () => assertImplementationMatchesCompiledLayout(
+      implementation,
+      compiledPage.page.id,
+      correlated,
+      tabPaneRelocations,
+    ));
   });
   return deepFreeze(implementation);
 }

@@ -98,7 +98,92 @@ function cloneInput(source: ReturnType<typeof input>): ReturnType<typeof input> 
   return structuredClone(source);
 }
 
+function withOwnedTabs(source: ReturnType<typeof input>): ReturnType<typeof input> {
+  const homeBlueprint = source.blueprint.pages[0]!;
+  const paneRegions = [
+    { id: "region-profile", purpose: "基本资料", semanticRoles: ["content"], dataShape: "record", density: "comfortable" as const, importance: "primary" as const, content: ["姓名"], sampleData: [], interactions: [], states: ["ready"], visualIntent: "资料页签" },
+    { id: "region-activity", purpose: "操作记录", semanticRoles: ["content"], dataShape: "records", density: "comfortable" as const, importance: "primary" as const, content: ["记录"], sampleData: [], interactions: [], states: ["ready"], visualIntent: "记录页签" },
+  ];
+  homeBlueprint.regions.push(...paneRegions);
+  homeBlueprint.readingOrder.push(...paneRegions.map((region) => region.id));
+  const blueprintHash = canonicalServerHash(source.blueprint);
+  source.candidateBundle.blueprintHash = blueprintHash;
+  const homeCandidate = source.candidateBundle.regions[0]!;
+  const tabsCandidate = structuredClone(homeCandidate.controls[0]!);
+  tabsCandidate.id = "tabs";
+  homeCandidate.controls.push(tabsCandidate);
+  source.candidateBundle.regions.push(...paneRegions.map((region) => ({
+    ...structuredClone(homeCandidate), regionId: region.id,
+  })));
+  source.candidateBundle.detailedCapabilityIds = [...new Set([...source.candidateBundle.detailedCapabilityIds, "tabs"])].sort();
+  source.semanticPlan.blueprintHash = blueprintHash;
+  source.semanticPlan.candidateBundleHash = canonicalServerHash(source.candidateBundle);
+  source.semanticPlan.pages[0]!.sourceBlueprintRegionIds.push(...paneRegions.map((region) => region.id));
+  const homeRoot = source.semanticPlan.pages[0]!.root;
+  if (homeRoot.kind !== "layout") throw new Error("layout fixture required");
+  homeRoot.children.push({
+    id: "profile-tabs", kind: "control", capabilityId: "tabs", content: null,
+    properties: [{ name: "tabs", value: { kind: "list", items: [
+      { kind: "record", fields: [{ name: "id", value: "profile" }, { name: "label", value: "基本资料" }, { name: "regionId", value: "region-profile" }, { name: "paneNodeId", value: "profile-pane" }] },
+      { kind: "record", fields: [{ name: "id", value: "activity" }, { name: "label", value: "操作记录" }, { name: "regionId", value: "region-activity" }, { name: "paneNodeId", value: "activity-pane" }] },
+    ] } }, { name: "activeId", value: "profile" }],
+    tabIds: ["profile", "activity"], styleRole: "content", sourceBlueprintRegionIds: ["region-home"],
+    intent: structuredClone(intent), eventBindings: [],
+  }, {
+    id: "profile-pane", kind: "control", capabilityId: "text", content: "陈予安 · 平台管理员", properties: [], tabIds: [],
+    styleRole: "content", sourceBlueprintRegionIds: ["region-profile"], intent: structuredClone(intent), eventBindings: [],
+  }, {
+    id: "activity-pane", kind: "control", capabilityId: "text", content: "2026-08-25 更新权限", properties: [], tabIds: [],
+    styleRole: "content", sourceBlueprintRegionIds: ["region-activity"], intent: structuredClone(intent), eventBindings: [],
+  });
+  const homePage = source.implementation.pages[0]!;
+  if (homePage.compatibility !== "native") throw new Error("native fixture required");
+  homePage.controls.push({
+    id: "profile-tabs", parentId: "root", role: "content", capabilityId: "tabs", depth: 1, zIndex: 2,
+    geometry: { x: 200, y: 100, width: 600, height: 300 },
+    nativeProperties: { parentId: "root", tabs: [
+      { id: "profile", label: "基本资料", regionId: "region-profile", paneNodeId: "profile-pane" },
+      { id: "activity", label: "操作记录", regionId: "region-activity", paneNodeId: "activity-pane" },
+    ], activeId: "profile" }, compiledStyle: { nativeFields: {}, cssFragments: [], warnings: [] },
+    sourceSolutionNodeId: "profile-tabs", sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region-home"], eventBindings: [],
+  }, {
+    id: "profile-pane", parentId: "profile-tabs", role: "content", capabilityId: "text", content: "陈予安 · 平台管理员", depth: 2, zIndex: 3,
+    geometry: { x: 200, y: 100, width: 600, height: 300 }, nativeProperties: { parentId: "profile-tabs", text: "陈予安 · 平台管理员" },
+    tabPane: { ownerSemanticControlId: "profile-tabs", tabId: "profile", sourceBlueprintRegionId: "region-profile" },
+    compiledStyle: { nativeFields: {}, cssFragments: [], warnings: [] }, sourceSolutionNodeId: "profile-pane", sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region-profile"], eventBindings: [],
+  }, {
+    id: "activity-pane", parentId: "profile-tabs", role: "content", capabilityId: "text", content: "2026-08-25 更新权限", depth: 2, zIndex: 4,
+    geometry: { x: 200, y: 100, width: 600, height: 300 }, nativeProperties: { parentId: "profile-tabs", text: "2026-08-25 更新权限" },
+    tabPane: { ownerSemanticControlId: "profile-tabs", tabId: "activity", sourceBlueprintRegionId: "region-activity" },
+    compiledStyle: { nativeFields: {}, cssFragments: [], warnings: [] }, sourceSolutionNodeId: "activity-pane", sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region-activity"], eventBindings: [],
+  });
+  reattachCorrelation(source);
+  return source;
+}
+
 describe("creative UI implementation v2 compiler", () => {
+  it("re-derives signed Tabs pane ownership and rejects self-consistent model forgery", () => {
+    const source = withOwnedTabs(input());
+    const result = compiler.compile(source);
+    expect(result.materialization.controls.filter((control) => control.tabPane !== undefined).map((control) => control.tabPane))
+      .toEqual([
+        { ownerSemanticControlId: "profile-tabs", tabId: "activity", sourceBlueprintRegionId: "region-activity" },
+        { ownerSemanticControlId: "profile-tabs", tabId: "profile", sourceBlueprintRegionId: "region-profile" },
+      ]);
+
+    const forged = withOwnedTabs(input());
+    const forgedPage = forged.implementation.pages[0]!;
+    if (forgedPage.compatibility !== "native") throw new Error("native fixture required");
+    const owner = forgedPage.controls.find((control) => control.id === "profile-tabs")!;
+    const profilePane = forgedPage.controls.find((control) => control.id === "profile-pane")!;
+    const tabs = owner.nativeProperties.tabs as Array<Record<string, unknown>>;
+    tabs[0]!.regionId = "region-forged";
+    profilePane.sourceBlueprintRegionIds = ["region-forged"];
+    profilePane.tabPane!.sourceBlueprintRegionId = "region-forged";
+    reattachCorrelation(forged);
+    expect(() => compiler.compile(forged)).toThrow(/CREATIVE_TAB_PANE_BINDING_MISMATCH/);
+  });
+
   it("lowers pages before parent-first controls with exact dimensions and runtime identities", () => {
     expect(compiler).not.toHaveProperty("verifyApprovedAssets");
     const source = input(); const before = cloneInput(source);

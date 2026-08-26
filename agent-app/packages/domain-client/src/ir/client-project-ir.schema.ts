@@ -134,13 +134,37 @@ export const ImageControlIR = BaseControlIR.extend({
   alt: z.string().optional(),
 }).strict();
 
+const TabDefinitionIR = z.object({
+  id: z.string().trim().min(1),
+  label: z.string().trim().min(1),
+  /** Creative-only semantic ownership; direct/legacy IR may omit both fields. */
+  regionId: z.string().trim().min(1).max(100).optional(),
+  paneNodeId: z.string().trim().min(1).max(100).optional(),
+}).strict().superRefine((tab, ctx) => {
+  if ((tab.regionId === undefined) !== (tab.paneNodeId === undefined)) {
+    ctx.addIssue({ code: "custom", message: "COMPONENT_TAB_OWNERSHIP_REQUIRED" });
+  }
+});
+
 export const TabsControlIR = BaseControlIR.extend({
   type: z.literal("tabs"),
-  tabs: z.array(z.object({ id: z.string().trim().min(1), label: z.string().trim().min(1) }).strict()).min(1),
+  tabs: z.array(TabDefinitionIR).min(1),
   activeId: z.string().optional(),
 }).strict().superRefine((tabs, ctx) => {
   const ids = tabs.tabs.map((tab) => tab.id);
   if (new Set(ids).size !== ids.length) ctx.addIssue({ code: "custom", path: ["tabs"], message: "TAB_ID_DUPLICATE" });
+  const owned = tabs.tabs.filter((tab) => tab.regionId !== undefined && tab.paneNodeId !== undefined);
+  if (owned.length > 0 && owned.length !== tabs.tabs.length) {
+    ctx.addIssue({ code: "custom", path: ["tabs"], message: "COMPONENT_TAB_OWNERSHIP_REQUIRED" });
+  }
+  const regions = owned.map((tab) => tab.regionId!);
+  if (new Set(regions).size !== regions.length) {
+    ctx.addIssue({ code: "custom", path: ["tabs"], message: "COMPONENT_TAB_REGION_DUPLICATE" });
+  }
+  const panes = owned.map((tab) => tab.paneNodeId!);
+  if (new Set(panes).size !== panes.length) {
+    ctx.addIssue({ code: "custom", path: ["tabs"], message: "COMPONENT_TAB_PANE_DUPLICATE" });
+  }
   if (tabs.activeId !== undefined && !ids.includes(tabs.activeId)) {
     ctx.addIssue({ code: "custom", path: ["activeId"], message: "TAB_ACTIVE_ID_UNKNOWN" });
   }

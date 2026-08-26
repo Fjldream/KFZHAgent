@@ -12,6 +12,7 @@ import {
   type ComponentStyleSpec,
   type DomainAssetInput,
   type FieldPatch,
+  type TabPaneOwnership,
   type ThemeSpec,
   type TrustedSemanticOperation,
 } from "@kf/contracts";
@@ -1485,6 +1486,7 @@ async function applyCreate(
   creativeBatch?: CreativePageBatch,
   semanticOperationEntityId = op.entityId,
   creativeParentContentExtent?: { readonly width: number; readonly height: number },
+  creativeTabPane?: TabPaneOwnership,
 ): Promise<void> {
   const build = { seed: workspaceId };
   switch (op.entityType) {
@@ -1524,6 +1526,7 @@ async function applyCreate(
             parentId,
             properties["x"] !== undefined || properties["y"] !== undefined,
             creativeParentContentExtent,
+            creativeTabPane,
           );
         if (!inserted) throw new PatchConflictError(error);
       };
@@ -1892,12 +1895,15 @@ function pushControlIntoCreativeParent(
   parentId: unknown,
   hasExplicitPosition: boolean,
   signedContentExtent?: { readonly width: number; readonly height: number },
+  signedTabPane?: TabPaneOwnership,
 ): boolean {
   const target = typeof parentId === "string" ? parentId : "";
   const parent = batch.byName.get(target) ?? batch.byGuid.get(target);
-  if (parent === undefined || typeof parent.root["layoutType"] !== "number") return false;
+  if (parent === undefined) return false;
+  const isTabsPane = signedTabPane !== undefined;
+  if (isTabsPane ? parent.root["uiModelType"] !== 47 : typeof parent.root["layoutType"] !== "number") return false;
   const origin = batch.origins.get(parent.root) ?? { x: 0, y: 0 };
-  const parentBase = asRecord(parent.root["baseProperty"]);
+  const parentBase = isTabsPane ? parent.root : asRecord(parent.root["baseProperty"]);
   const childBase = asRecord(control["baseProperty"]);
   const childIsLayout = Object.keys(childBase).length > 0;
   const currentPoint = childIsLayout ? asRecord(childBase["leftTopPt"]) : asRecord(control["leftTopPt"]);
@@ -1915,8 +1921,20 @@ function pushControlIntoCreativeParent(
   if (childIsLayout) childBase["leftTopPt"] = { x: localX, y: localY };
   else control["leftTopPt"] = { x: localX, y: localY };
   if (!Array.isArray(parent.root["insiderObjects"])) parent.root["insiderObjects"] = [];
-  if (parent.root["layoutType"] === 5 && control["region"] === undefined) control["region"] = "center";
-  else if ([2, 4, 6].includes(parent.root["layoutType"]) && control["internalVertex"] === undefined) {
+  if (isTabsPane) {
+    const tabData = parent.root["tabData"];
+    const tabMatches = Array.isArray(tabData) ? tabData.filter((entry) =>
+      isObject(entry) && entry["name"] === signedTabPane.tabId) : [];
+    const activeName = parent.root["activeName"];
+    if (tabMatches.length !== 1 || typeof activeName !== "string"
+      || !Array.isArray(tabData) || !tabData.some((entry) => isObject(entry) && entry["name"] === activeName)) return false;
+    const existingChildren = parent.root["insiderObjects"] as unknown[];
+    if (existingChildren.some((entry) => isObject(entry) && entry["region"] === signedTabPane.tabId)) return false;
+    control["region"] = signedTabPane.tabId;
+  } else if (parent.root["layoutType"] === 5 && control["region"] === undefined) control["region"] = "center";
+  else if (typeof parent.root["layoutType"] === "number"
+    && [2, 4, 6].includes(parent.root["layoutType"])
+    && control["internalVertex"] === undefined) {
     control["internalVertex"] = { left: localX, top: localY };
   }
   const children = parent.root["insiderObjects"] as unknown[];
@@ -2105,6 +2123,12 @@ async function applyVerifiedCreativePatch(
       const parentContentExtent = parentControl?.compiledLayout?.kind === "scroll-region"
         ? parentControl.compiledLayout.scrollContentExtent
         : undefined;
+      if (control.tabPane !== undefined
+        && (parentControl?.semanticControlId !== control.tabPane.ownerSemanticControlId
+          || parentControl.capabilityId !== "tabs"
+          || control.parentInstanceName !== parentControl.instanceName)) {
+        throw new PatchConflictError(`creative Tabs pane owner mismatch: ${control.semanticControlId}`);
+      }
       await applyCreate(candidate, versionDir, pageInspection, candidate, {
         op: "create", entityType: "control", entityId: control.instanceName,
         changes: [], destructiveConfirmed: false,
@@ -2117,7 +2141,7 @@ async function applyVerifiedCreativePatch(
           ...(control.content === undefined ? {} : { text: control.content }),
         },
       }, materialization.workspaceId, options.semanticOperations ?? [], pageBatches.get(control.pageGuid),
-      control.semanticControlId, parentContentExtent);
+      control.semanticControlId, parentContentExtent, control.tabPane);
       if (control.overlayHost?.initiallyVisible === false) {
         const native = pageBatches.get(control.pageGuid)?.byName.get(control.instanceName)?.root;
         if (native === undefined) throw new PatchConflictError(`creative overlay runtime host missing: ${control.semanticControlId}`);

@@ -499,6 +499,13 @@ export const OverlayHostMetadataSchema = z.object({
   initiallyVisible: z.literal(false),
 }).strict();
 
+/** Compiler-owned correlation between one semantic Tabs control and one native pane. */
+export const TabPaneOwnershipSchema = z.object({
+  ownerSemanticControlId: boundedId,
+  tabId: boundedId,
+  sourceBlueprintRegionId: boundedId,
+}).strict();
+
 export const UIImplementationControlV2Schema = z.object({
   id: boundedId,
   parentId: boundedId.optional(),
@@ -518,6 +525,7 @@ export const UIImplementationControlV2Schema = z.object({
   dataBinding: DataBindingSpecSchema.optional(),
   assetIds: z.array(boundedId).max(64).optional(),
   overlayHost: OverlayHostMetadataSchema.optional(),
+  tabPane: TabPaneOwnershipSchema.optional(),
   sourceSolutionNodeId: boundedId,
   sourceRepeaterId: boundedId.optional(),
   sourceBlueprintPageId: boundedId,
@@ -818,6 +826,28 @@ export const UIImplementationSpecV2Schema = z.object({
       if (control.overlayHost !== undefined && control.overlayHost.hostPageId !== page.id) {
         ctx.addIssue({ code: "custom", path: [...path, "overlayHost", "hostPageId"], message: "overlay host must be owned by the control's implementation page" });
       }
+      if (control.tabPane !== undefined) {
+        const owner = controlsById.get(control.tabPane.ownerSemanticControlId);
+        if (control.parentId !== control.tabPane.ownerSemanticControlId) {
+          ctx.addIssue({ code: "custom", path: [...path, "tabPane", "ownerSemanticControlId"], message: "tab pane parent must be its compiler-correlated Tabs owner" });
+        }
+        if (owner === undefined || owner.capabilityId !== "tabs") {
+          ctx.addIssue({ code: "custom", path: [...path, "tabPane", "ownerSemanticControlId"], message: "tab pane owner must be a Tabs control on the same page" });
+        }
+        if (!control.sourceBlueprintRegionIds.includes(control.tabPane.sourceBlueprintRegionId)) {
+          ctx.addIssue({ code: "custom", path: [...path, "tabPane", "sourceBlueprintRegionId"], message: "tab pane region must be present in compiler provenance" });
+        }
+        const tabs = owner?.nativeProperties["tabs"];
+        const matches = Array.isArray(tabs) ? tabs.filter((candidate) => candidate !== null
+          && typeof candidate === "object"
+          && !Array.isArray(candidate)
+          && (candidate as Record<string, unknown>)["id"] === control.tabPane!.tabId
+          && (candidate as Record<string, unknown>)["regionId"] === control.tabPane!.sourceBlueprintRegionId
+          && (candidate as Record<string, unknown>)["paneNodeId"] === control.sourceSolutionNodeId) : [];
+        if (matches.length !== 1) {
+          ctx.addIssue({ code: "custom", path: [...path, "tabPane"], message: "tab pane must exactly match one compiler-owned semantic Tabs definition" });
+        }
+      }
       if (control.sourceBlueprintPageId !== page.sourceBlueprintPageId) {
         ctx.addIssue({ code: "custom", path: [...path, "sourceBlueprintPageId"], message: "control blueprint page provenance must match its implementation page" });
       }
@@ -837,6 +867,35 @@ export const UIImplementationSpecV2Schema = z.object({
           ctx.addIssue({ code: "custom", path: [...path, "assetIds"], message: `background image asset is not declared for control ${control.id}: ${assetId}` });
         }
       });
+    });
+    page.controls.filter((control) => control.capabilityId === "tabs").forEach((owner) => {
+      const tabs = owner.nativeProperties["tabs"];
+      if (!Array.isArray(tabs)) return;
+      const owned = tabs.filter((candidate) => candidate !== null && typeof candidate === "object" && !Array.isArray(candidate)
+        && ((candidate as Record<string, unknown>)["regionId"] !== undefined
+          || (candidate as Record<string, unknown>)["paneNodeId"] !== undefined));
+      if (owned.length === 0) return; // Compatibility: direct/legacy label-only Tabs remain valid.
+      const ownerPath: Array<string | number> = ["pages", pageIndex, "controls", controlIndexById.get(owner.id) ?? 0];
+      if (owned.length !== tabs.length || tabs.length < 2) {
+        ctx.addIssue({ code: "custom", path: [...ownerPath, "nativeProperties", "tabs"], message: "owned Tabs require at least two completely correlated panes" });
+        return;
+      }
+      const paneControls = page.controls.filter((control) => control.tabPane?.ownerSemanticControlId === owner.id);
+      const expected = owned.map((candidate) => {
+        const record = candidate as Record<string, unknown>;
+        return `${String(record["id"])}\u0000${String(record["regionId"])}\u0000${String(record["paneNodeId"])}`;
+      });
+      const actual = paneControls.map((pane) =>
+        `${pane.tabPane!.tabId}\u0000${pane.tabPane!.sourceBlueprintRegionId}\u0000${pane.sourceSolutionNodeId}`);
+      if (new Set(expected).size !== expected.length
+        || expected.length !== actual.length
+        || expected.some((entry, index) => entry !== actual[index])) {
+        ctx.addIssue({ code: "custom", path: [...ownerPath, "nativeProperties", "tabs"], message: "owned Tabs definitions must have one ordered pane each" });
+      }
+      const ids = owned.map((candidate) => (candidate as Record<string, unknown>)["id"]);
+      if (typeof owner.nativeProperties["activeId"] !== "string" || !ids.includes(owner.nativeProperties["activeId"])) {
+        ctx.addIssue({ code: "custom", path: [...ownerPath, "nativeProperties", "activeId"], message: "owned Tabs active id must identify a correlated pane" });
+      }
     });
   });
   const hasEventBindings = implementation.pages.some((page) =>
@@ -1047,6 +1106,7 @@ export type NativeThemeSpec = z.infer<typeof NativeThemeSpecSchema>;
 export type UIComponentSpec = z.infer<typeof UIComponentSpecSchema>;
 export type UIImplementationSpec = z.infer<typeof UIImplementationSpecSchema>;
 export type CompiledStyleSpec = z.infer<typeof CompiledStyleSpecSchema>;
+export type TabPaneOwnership = z.infer<typeof TabPaneOwnershipSchema>;
 export type UIImplementationControlV2 = z.infer<typeof UIImplementationControlV2Schema>;
 export type UIImplementationSpecV2 = z.infer<typeof UIImplementationSpecV2Schema>;
 export type AnyUIImplementationSpec = z.infer<typeof AnyUIImplementationSpecSchema>;

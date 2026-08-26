@@ -13,6 +13,7 @@ import {
   semanticValueToData,
   type SemanticDataRecord,
 } from "./module-node-compiler.js";
+import { deriveSemanticTabPaneOwnership, TabPaneOwnershipError } from "../implementation/tab-pane-ownership.js";
 
 type PlanNode = SolutionNode;
 
@@ -206,6 +207,15 @@ export function validateSolutionControlSemanticProjection(input: Readonly<{
   };
   visit(input.root, undefined, undefined, undefined, new Map());
 
+  let tabPaneBySourceNodeId: ReadonlyMap<string, ReturnType<typeof deriveSemanticTabPaneOwnership>[number]>;
+  try {
+    tabPaneBySourceNodeId = new Map(deriveSemanticTabPaneOwnership(input.plan)
+      .map((binding) => [binding.paneSemanticControlId, binding] as const));
+  } catch (error) {
+    if (error instanceof TabPaneOwnershipError) throw new SolutionProvenanceError(error.nodeId, error.code);
+    throw error;
+  }
+
   const surface = [
     ...input.plan.pages.map((page) => ({ rootId: page.root.id, sourceBlueprintPageId: page.sourceBlueprintPageId })),
     ...input.plan.overlays.map((overlay) => ({ rootId: overlay.root.id, sourceBlueprintPageId: overlay.sourceBlueprintPageId })),
@@ -219,9 +229,15 @@ export function validateSolutionControlSemanticProjection(input: Readonly<{
   }
   for (const control of input.controls.filter((candidate) => candidate.sourceModuleId === undefined)) {
     const provenance = expected.get(control.id);
+    const tabPane = tabPaneBySourceNodeId.get(control.sourceSolutionNodeId);
+    const expectedParentId = tabPane?.ownerSemanticControlId ?? provenance?.parentId;
     if (provenance === undefined
       || control.sourceSolutionNodeId !== control.id
-      || !sameOptional(control.parentId, provenance.parentId)
+      || !sameOptional(control.parentId, expectedParentId)
+      || (tabPane === undefined) !== (control.tabPane === undefined)
+      || (tabPane !== undefined && (control.tabPane?.ownerSemanticControlId !== tabPane.ownerSemanticControlId
+        || control.tabPane.tabId !== tabPane.tabId
+        || control.tabPane.sourceBlueprintRegionId !== tabPane.sourceBlueprintRegionId))
       || !sameOptional(control.sourceRepeaterId, provenance.sourceRepeaterId)
       || control.sourceBlueprintPageId !== surface.sourceBlueprintPageId
       || !sameStrings(control.sourceBlueprintRegionIds, provenance.sourceNode.sourceBlueprintRegionIds)

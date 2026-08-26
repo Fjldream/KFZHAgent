@@ -66,6 +66,16 @@ function decodedModules(source: string) {
   }
 }
 
+function replaceSingleCompiledBody(source: string, body: string): string {
+  const marker = "// kf-compiled-event/v1 ";
+  const start = source.indexOf(marker);
+  const newline = source.indexOf("\n", start);
+  const metadata = JSON.parse(Buffer.from(source.slice(start + marker.length, newline), "base64url").toString("utf8")) as Record<string, unknown>;
+  metadata["bodySha256"] = createHash("sha256").update(body, "utf8").digest("hex");
+  metadata["bodyByteLength"] = Buffer.byteLength(body, "utf8");
+  return `${source.slice(0, start)}${marker}${Buffer.from(JSON.stringify(metadata), "utf8").toString("base64url")}\n${body}`;
+}
+
 describe("control compiler — compiled scripts", () => {
   it("keeps raw script serialization module-private", () => {
     expect(controlCompilerModule).not.toHaveProperty("serializeCompiledControlScripts");
@@ -162,7 +172,7 @@ describe("control compiler — compiled scripts", () => {
   it.each([
     ["open-overlay", true],
     ["close-overlay", false],
-  ] as const)("serializes compiler-owned %s as an exact signed visibility marker script", (kind, visible) => {
+  ] as const)("serializes compiler-owned %s as an exact signed layout setVisible marker script", (kind, visible) => {
     const action = nativeOverlayVisibility(kind === "open-overlay" ? "open-contact" : "close-contact", kind);
     const binding = {
       id: `kf$binding:${kind === "open-overlay" ? "open-contact" : "close-contact"}`,
@@ -182,7 +192,7 @@ describe("control compiler — compiled scripts", () => {
     expect(link).toMatchObject({ enable: true, name: "onClick", linkId: 200001 });
     expect(link).not.toHaveProperty("action");
     expect(link["kfCompilerAction"]).toEqual({
-      schema: "kf-compiled-action/v2",
+      schema: "kf-compiled-action/v3",
       actionId: action.id,
       sourceActionId: action.sourceActionId,
       ownerInstanceName: "Button1",
@@ -196,7 +206,7 @@ describe("control compiler — compiled scripts", () => {
       phase: "event",
     });
     const [module] = decodedModules(String(link["script"]));
-    expect(module?.body).toBe(`Layout2.Visible = ${String(visible)};\n`);
+    expect(module?.body).toBe(`Layout2.setVisible(${String(visible)});\n`);
     expect(module?.metadata).toMatchObject({
       sourceScriptId: action.sourceActionId,
       ownerInstanceName: "Button1",
@@ -211,7 +221,12 @@ describe("control compiler — compiled scripts", () => {
     });
   });
 
-  it("rejects a reused visibility action marker when its exact target or boolean script is tampered", () => {
+  it.each([
+    ["property assignment", "Layout2.Visible = true;\n"],
+    ["arbitrary method", "Layout2.setRunVisible(true);\n"],
+    ["expression argument", "Layout2.setVisible(!false);\n"],
+    ["target alias", "const target = Layout2; target.setVisible(true);\n"],
+  ])("rejects a reused visibility action marker with %s", (_label, forgedBody) => {
     const action = nativeOverlayVisibility("open-contact", "open-overlay");
     const binding = {
       id: "kf$binding:open-contact", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
@@ -223,13 +238,12 @@ describe("control compiler — compiled scripts", () => {
       { ownerInstanceName: "Button1", capabilityId: "button" },
     );
     const link = (first.linkMng as { linkList: Array<Record<string, unknown>> }).linkList[0]!;
-    (link["kfCompilerAction"] as Record<string, unknown>)["targetInstanceName"] = "Layout3";
-    link["script"] = String(link["script"]).replace("Visible = true", "Visible = false");
+    link["script"] = replaceSingleCompiledBody(String(link["script"]), forgedBody);
     expect(() => controlCompilerModule.serializeReviewedNativeInteractions(
       first,
       { ownerInstanceName: "Button1", capabilityId: "button", modules: [], actions: [action], bindings: [binding] },
       { ownerInstanceName: "Button1", capabilityId: "button" },
-    )).toThrow(/MODEL_OUTPUT_INVALID.*action.*identity|compiled script hash/i);
+    )).toThrow(/MODEL_OUTPUT_INVALID.*visibility action.*identity/i);
   });
 
   it.each([

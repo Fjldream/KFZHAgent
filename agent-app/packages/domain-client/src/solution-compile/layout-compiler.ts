@@ -59,6 +59,11 @@ export interface CompiledLayoutTree {
   readonly byId: ReadonlyMap<string, CompiledLayoutNode>;
 }
 
+export interface CompilerOwnedTabPaneRelocation {
+  readonly ownerNodeId: string;
+  readonly paneNodeId: string;
+}
+
 export type LayoutCompileErrorCode = "LAYOUT_INPUT_INVALID" | "LAYOUT_UNSATISFIABLE";
 
 export interface LayoutCompileErrorDetails {
@@ -119,6 +124,7 @@ export function assertImplementationMatchesCompiledLayout(
   implementation: UIImplementationSpecV2,
   pageId: string,
   layout: CompiledLayoutTree,
+  tabPaneRelocations: readonly CompilerOwnedTabPaneRelocation[] = [],
 ): void {
   const matchingPages = implementation.pages.filter((candidate) => candidate.id === pageId);
   const page = matchingPages[0];
@@ -134,6 +140,7 @@ export function assertImplementationMatchesCompiledLayout(
     controls.push(control);
     controlsBySourceNodeId.set(control.sourceSolutionNodeId, controls);
   });
+  const relocatedGeometry = deriveCompilerOwnedTabPaneGeometry(layout, pageId, tabPaneRelocations);
   const trustedLayoutNodes = [...layout.byId.values()].filter((node) => node.layout !== undefined);
   const trustedLayoutNodeIds = new Set(trustedLayoutNodes.map((node) => node.id));
   page.controls.forEach((control) => {
@@ -156,8 +163,9 @@ export function assertImplementationMatchesCompiledLayout(
     if (metadata.overflow !== node.overflow) {
       implementationMismatch(pageId, node.id, "overflow", node.overflow, metadata.overflow);
     }
-    if (!sameGeometry(controls[0]!.geometry, node.geometry)) {
-      implementationMismatch(pageId, node.id, "geometry", formatGeometry(node.geometry), formatGeometry(controls[0]!.geometry));
+    const expectedGeometry = relocatedGeometry.get(node.id) ?? node.geometry;
+    if (!sameGeometry(controls[0]!.geometry, expectedGeometry)) {
+      implementationMismatch(pageId, node.id, "geometry", formatGeometry(expectedGeometry), formatGeometry(controls[0]!.geometry));
     }
     if (node.scrollContentExtent !== undefined) {
       if (metadata.kind !== "scroll-region") {
@@ -171,6 +179,58 @@ export function assertImplementationMatchesCompiledLayout(
       implementationMismatch(pageId, node.id, "scrollContentExtent", "absent", "present");
     }
   });
+}
+
+/**
+ * Derives the only layout exception used by native Tabs from the trusted
+ * compiled layout and compiler-validated semantic owner/pane ids. It never
+ * reads implementation geometry or model-authored native parent/region data.
+ */
+export function deriveCompilerOwnedTabPaneGeometry(
+  layout: CompiledLayoutTree,
+  pageId: string,
+  relocations: readonly CompilerOwnedTabPaneRelocation[],
+): ReadonlyMap<string, LayoutGeometry> {
+  const geometryById = new Map(
+    [...layout.byId].map(([id, node]) => [id, { ...node.geometry }] as const),
+  );
+  const relocated = new Map<string, LayoutGeometry>();
+  const paneIds = new Set<string>();
+  for (const relocation of relocations) {
+    if (paneIds.has(relocation.paneNodeId)) {
+      implementationMismatch(pageId, relocation.paneNodeId, "correlation", "one compiler-owned Tabs pane relocation", "duplicate relocation");
+    }
+    paneIds.add(relocation.paneNodeId);
+    const owner = layout.byId.get(relocation.ownerNodeId);
+    const pane = layout.byId.get(relocation.paneNodeId);
+    if (owner === undefined || owner.kind !== "control") {
+      implementationMismatch(pageId, relocation.ownerNodeId, "correlation", "compiled Tabs control node", owner === undefined ? "missing" : owner.kind);
+    }
+    if (pane === undefined || pane.layout === undefined) {
+      implementationMismatch(pageId, relocation.paneNodeId, "correlation", "compiled layout pane node", pane === undefined ? "missing" : pane.kind);
+    }
+    const ownerGeometry = geometryById.get(owner.id)!;
+    const paneGeometry = geometryById.get(pane.id)!;
+    const deltaX = ownerGeometry.x - paneGeometry.x;
+    const deltaY = ownerGeometry.y - paneGeometry.y;
+    const pending = [pane];
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      if (visited.has(current.id)) {
+        implementationMismatch(pageId, relocation.paneNodeId, "correlation", "acyclic compiled Tabs pane subtree", current.id);
+      }
+      visited.add(current.id);
+      const currentGeometry = geometryById.get(current.id)!;
+      const nextGeometry = current.id === pane.id
+        ? { ...ownerGeometry }
+        : { ...currentGeometry, x: currentGeometry.x + deltaX, y: currentGeometry.y + deltaY };
+      geometryById.set(current.id, nextGeometry);
+      relocated.set(current.id, nextGeometry);
+      pending.push(...current.children);
+    }
+  }
+  return relocated;
 }
 
 interface CompileContext {

@@ -10,10 +10,10 @@ const PRODUCT_SOURCE = (ref: string, contentSha256: string) => ({ kind: "product
 const CENTER_PROPERTY_PAGE = "KingFusion3.6_Center/sdb/c7f1771f-0c8f-4c75-9d71-3b8c4b6bd190/kingclient/9fdd3be0-2d91-11f1-b60a-4937cd79e5a1/pagerecord/recordpages/数据模型管理_属性定义20230511104433.json";
 const NODE_DATAGRID_METHOD_PAGE = "KingFusion3.6_Node/sdb/kingclient/5dd3e6c0-d181-11f0-b646-250384722929/d6271f40-e165-11f0-bc3d-dbe5f779bd94/pagerecord/recordpages/数据网格_方法20250218173552.json";
 const NODE_DATAGRID_EVENT_PAGE = "KingFusion3.6_Node/sdb/kingclient/5dd3e6c0-d181-11f0-b646-250384722929/d6271f40-e165-11f0-bc3d-dbe5f779bd94/project/page/数据网格_事件.json";
-const CENTER_OVERLAY_VISIBILITY_PAGE = "KingFusion3.6_Center/sdb/c7f1771f-0c8f-4c75-9d71-3b8c4b6bd190/kingclient/9fdd3be0-2d91-11f1-b60a-4937cd79e5a1/project/page/设备接入_新增.json";
+const NODE_LAYOUT_RUNTIME = "KingFusion3.6_Node/kingexedb/kingclient/exe/public/javascripts/Common/Graphic/Layout/kmui_layoutcomponentbase.js";
 const OVERLAY_VISIBILITY_EVIDENCE = [PRODUCT_SOURCE(
-  `${CENTER_OVERLAY_VISIBILITY_PAGE}#objects.0.insiderObjects.0.insiderObjects.2.insiderObjects.4.linkMng.linkList.0.script`,
-  "67c369d5f86cde2ac540afa78931964f826d2992752e8e09edaa7996d1b500b7",
+  NODE_LAYOUT_RUNTIME,
+  "04831c1bd9feb0d19eaac07e0aee5af7df07bd4fba8072b6630dd1c4689b0aff",
 )];
 const ACTION_IR_EVIDENCE = [
   { kind: "compiler", ref: "agent-app/packages/domain-client/src/ir/client-project-ir.schema.ts#RestrictedAction" },
@@ -69,7 +69,7 @@ const REVIEWED_PROFILES: Readonly<Record<string, unknown>> = {
     }],
     methods: [],
     initialization: { supportsConfigureData: false, lifecycleEvents: [] },
-    limitations: ["弹层动作仅可切换编译器已验证 overlay host 的 Visible 布尔属性；不接受模型脚本或任意目标。"],
+    limitations: ["弹层动作仅可调用编译器已验证 layout overlay host 的 setVisible 布尔方法；不接受模型脚本或任意目标。"],
   },
   checkbox: {
     schema: "kf-script-capability-profile/v1",
@@ -164,13 +164,12 @@ const REVIEWED_PROFILES: Readonly<Record<string, unknown>> = {
       { semanticAction: "close-dialog", implementation: "restricted-action", availability: "supported", evidence: OVERLAY_VISIBILITY_EVIDENCE },
     ],
     events: [],
-    methods: [],
-    properties: [{
-      semanticProperty: "visible", kfProperty: "Visible", readable: true, writable: true,
+    methods: [{
+      semanticMethod: "set-visible", kfMethod: "setVisible", parameters: ["visible"], returns: "void",
       availability: "supported", evidence: OVERLAY_VISIBILITY_EVIDENCE,
     }],
     initialization: { supportsConfigureData: false, lifecycleEvents: [] },
-    limitations: ["Visible 写入只允许由签名 overlay action 生成，不能作为通用脚本属性写入。"],
+    limitations: ["setVisible(bool) 只允许由签名 overlay action 对精确关联 layout 生成，不能作为通用脚本方法调用。"],
   }])),
   "easyui.1": {
     schema: "kf-script-capability-profile/v1",

@@ -476,23 +476,59 @@
                   "sourceBlueprintRegionIds": ["admin-profile-name"],
                   "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "ratio", "value": 2 }, "height": { "mode": "fill" }, "align": "stretch" },
                   "children": [
-                    { "kind": "control", "id": "admin-profile-tabs", "capabilityId": "tabs", "content": null, "properties": [{ "name": "tabs", "value": { "kind": "list", "items": [{ "kind": "record", "fields": [{ "name": "id", "value": "profile-tab" }, { "name": "label", "value": "基本资料" }] }, { "kind": "record", "fields": [{ "name": "id", "value": "activity-tab" }, { "name": "label", "value": "操作记录" }] }, { "kind": "record", "fields": [{ "name": "id", "value": "permission-tab" }, { "name": "label", "value": "权限范围" }] }] } }, { "name": "activeId", "value": "profile-tab" }], "tabIds": ["profile-tab", "activity-tab", "permission-tab"], "styleRole": "admin-tabs", "eventBindings": [{ "semanticEvent": "tab-click", "actionIds": ["admin-switch-tab-action"] }], "sourceBlueprintRegionIds": ["admin-tabs"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fixed", "value": 453 }, "align": "stretch" } },
-                    { "kind": "control", "id": "admin-profile-name-input", "capabilityId": "input", "content": null, "properties": [{ "name": "placeholder", "value": "成员姓名" }, { "name": "value", "value": "陈予安" }], "tabIds": [], "styleRole": "admin-field", "eventBindings": [], "sourceBlueprintRegionIds": ["admin-profile-name"], "intent": { "importance": "primary", "visualWeight": 3, "readingOrder": 1, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "stretch" } },
-                    { "kind": "control", "id": "admin-profile-role-select", "capabilityId": "select", "content": null, "properties": [], "tabIds": [], "styleRole": "admin-field", "eventBindings": [], "sourceBlueprintRegionIds": ["admin-profile-role"], "intent": { "importance": "primary", "visualWeight": 3, "readingOrder": 2, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "stretch" } }
+                    {
+                      "kind": "layout",
+                      "id": "admin-tabs-stage",
+                      "layout": "column",
+                      "sourceBlueprintRegionIds": ["admin-tabs"],
+                      "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 0, "density": "compact", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "stretch" },
+                      "children": [
+                        { "kind": "control", "id": "admin-profile-tabs", "capabilityId": "tabs", "content": null, "properties": [{ "name": "tabs", "value": { "kind": "list", "items": [{ "kind": "record", "fields": [{ "name": "id", "value": "profile-tab" }, { "name": "label", "value": "基本资料" }, { "name": "regionId", "value": "admin-profile-name" }, { "name": "paneNodeId", "value": "admin-profile-pane" }] }, { "kind": "record", "fields": [{ "name": "id", "value": "activity-tab" }, { "name": "label", "value": "操作记录" }, { "name": "regionId", "value": "admin-activity" }, { "name": "paneNodeId", "value": "admin-activity-pane" }] }, { "kind": "record", "fields": [{ "name": "id", "value": "permission-tab" }, { "name": "label", "value": "权限范围" }, { "name": "regionId", "value": "admin-dialog-status" }, { "name": "paneNodeId", "value": "admin-permission-pane" }] }] } }, { "name": "activeId", "value": "profile-tab" }], "tabIds": ["profile-tab", "activity-tab", "permission-tab"], "styleRole": "admin-tabs", "eventBindings": [{ "semanticEvent": "tab-click", "actionIds": ["admin-switch-tab-action"] }], "sourceBlueprintRegionIds": ["admin-tabs"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fixed", "value": 453 }, "align": "stretch" } },
+                        {
+                          "kind": "layout",
+                          "id": "admin-profile-pane",
+                          "layout": "column",
+                          "sourceBlueprintRegionIds": ["admin-profile-name"],
+                          "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 1, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "stretch" },
+                          "children": [
+                            { "kind": "control", "id": "admin-profile-name-input", "capabilityId": "input", "content": null, "properties": [{ "name": "placeholder", "value": "成员姓名" }, { "name": "value", "value": "陈予安" }], "tabIds": [], "styleRole": "admin-field", "eventBindings": [], "sourceBlueprintRegionIds": ["admin-profile-name"], "intent": { "importance": "primary", "visualWeight": 3, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "stretch" } },
+                            { "kind": "control", "id": "admin-profile-role-select", "capabilityId": "select", "content": null, "properties": [], "tabIds": [], "styleRole": "admin-field", "eventBindings": [], "sourceBlueprintRegionIds": ["admin-profile-role"], "intent": { "importance": "primary", "visualWeight": 3, "readingOrder": 1, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "stretch" } }
+                          ]
+                        },
+                        {
+                          "kind": "layout",
+                          "id": "admin-activity-pane",
+                          "layout": "column",
+                          "sourceBlueprintRegionIds": ["admin-activity"],
+                          "intent": { "importance": "secondary", "visualWeight": 3, "readingOrder": 2, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "stretch" },
+                          "children": [
+                            { "kind": "control", "id": "admin-activity-grid", "capabilityId": "easyui.1", "content": null, "properties": [], "tabIds": [], "mockDataId": "admin-activity-records", "styleRole": "admin-grid", "eventBindings": [], "sourceBlueprintRegionIds": ["admin-activity"], "intent": { "importance": "secondary", "visualWeight": 3, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fixed", "value": 240 }, "align": "stretch" } }
+                          ]
+                        },
+                        {
+                          "kind": "layout",
+                          "id": "admin-permission-pane",
+                          "layout": "column",
+                          "sourceBlueprintRegionIds": ["admin-dialog-status"],
+                          "intent": { "importance": "secondary", "visualWeight": 3, "readingOrder": 3, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "stretch" },
+                          "children": [
+                            { "kind": "control", "id": "admin-submit-status-grid", "capabilityId": "easyui.1", "content": null, "properties": [], "tabIds": [], "mockDataId": "admin-submit-records", "styleRole": "admin-status", "eventBindings": [], "sourceBlueprintRegionIds": ["admin-dialog-status"], "intent": { "importance": "secondary", "visualWeight": 3, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fixed", "value": 240 }, "align": "stretch" } }
+                          ]
+                        }
+                      ]
+                    }
                   ]
                 },
                 {
                   "kind": "layout",
                   "id": "admin-detail-submit-column",
                   "layout": "scroll-region",
-                  "sourceBlueprintRegionIds": ["admin-activity", "admin-dialog-form", "admin-dialog-submit", "admin-dialog-status", "admin-dialog-close"],
+                  "sourceBlueprintRegionIds": ["admin-dialog-form", "admin-dialog-submit", "admin-dialog-close"],
                   "intent": { "importance": "secondary", "visualWeight": 3, "readingOrder": 1, "density": "comfortable", "groupWith": [], "width": { "mode": "ratio", "value": 2 }, "height": { "mode": "fill" }, "align": "stretch" },
                   "children": [
-                    { "kind": "control", "id": "admin-activity-grid", "capabilityId": "easyui.1", "content": null, "properties": [], "tabIds": [], "mockDataId": "admin-activity-records", "styleRole": "admin-grid", "eventBindings": [], "sourceBlueprintRegionIds": ["admin-activity"], "intent": { "importance": "secondary", "visualWeight": 3, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fixed", "value": 240 }, "align": "stretch" } },
-                    { "kind": "control", "id": "admin-dialog-name-input", "capabilityId": "input", "content": null, "properties": [{ "name": "placeholder", "value": "复核成员姓名" }, { "name": "value", "value": "陈予安" }], "tabIds": [], "styleRole": "admin-field", "eventBindings": [], "sourceBlueprintRegionIds": ["admin-dialog-form"], "intent": { "importance": "primary", "visualWeight": 3, "readingOrder": 1, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "stretch" } },
-                    { "kind": "control", "id": "admin-confirm-submit", "capabilityId": "button", "content": "打开提交确认层", "properties": [], "tabIds": [], "styleRole": "admin-action", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["admin-open-submit-action"] }], "sourceBlueprintRegionIds": ["admin-dialog-submit"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 2, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "start" } },
-                    { "kind": "control", "id": "admin-submit-status-grid", "capabilityId": "easyui.1", "content": null, "properties": [], "tabIds": [], "mockDataId": "admin-submit-records", "styleRole": "admin-status", "eventBindings": [], "sourceBlueprintRegionIds": ["admin-dialog-status"], "intent": { "importance": "secondary", "visualWeight": 3, "readingOrder": 3, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fixed", "value": 240 }, "align": "stretch" } },
-                    { "kind": "control", "id": "admin-close-submit", "capabilityId": "button", "content": "返回成员目录", "properties": [], "tabIds": [], "styleRole": "admin-nav", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["admin-return-directory-action"] }], "sourceBlueprintRegionIds": ["admin-dialog-close"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 4, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "start" } }
+                    { "kind": "control", "id": "admin-dialog-name-input", "capabilityId": "input", "content": null, "properties": [{ "name": "placeholder", "value": "复核成员姓名" }, { "name": "value", "value": "陈予安" }], "tabIds": [], "styleRole": "admin-field", "eventBindings": [], "sourceBlueprintRegionIds": ["admin-dialog-form"], "intent": { "importance": "primary", "visualWeight": 3, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "stretch" } },
+                    { "kind": "control", "id": "admin-confirm-submit", "capabilityId": "button", "content": "打开提交确认层", "properties": [], "tabIds": [], "styleRole": "admin-action", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["admin-open-submit-action"] }], "sourceBlueprintRegionIds": ["admin-dialog-submit"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 1, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "start" } },
+                    { "kind": "control", "id": "admin-close-submit", "capabilityId": "button", "content": "返回成员目录", "properties": [], "tabIds": [], "styleRole": "admin-nav", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["admin-return-directory-action"] }], "sourceBlueprintRegionIds": ["admin-dialog-close"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 2, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "start" } }
                   ]
                 }
               ]
