@@ -6,6 +6,10 @@ import path from "node:path";
 import { parse } from "acorn";
 import { describe, expect, it } from "vitest";
 import type { ControlIR } from "../ir/client-project-ir.js";
+import {
+  parseReviewedTabsInitialization,
+  serializeReviewedTabsInitialization,
+} from "../implementation/component-properties.js";
 import { deriveGuid } from "./guid-factory.js";
 import * as controlCompilerModule from "./control-compiler.js";
 import {
@@ -474,6 +478,33 @@ describe("control compiler — compiled scripts", () => {
     }, { ownerInstanceName: "Datagrid1", capabilityId: "easyui.1" });
     expect(removed.configureData).toBe("legacyConfigure();");
     expect(decodedModules(String(removed.configureData))).toEqual([]);
+  });
+
+  it("does not mistake a literal compiler marker token in a Tabs label for an owned tail", () => {
+    const configureData = serializeReviewedTabsInitialization("ElementTabs1", {
+      tabs: [{ id: "overview", label: "说明 kf-compiled-event/v1 文本" }],
+      activeId: "overview",
+    });
+
+    const serialized = controlCompilerModule.serializeReviewedNativeInteractions({
+      name: "ElementTabs1",
+      configureData,
+      linkMng: { linkList: [] },
+    }, {
+      ownerInstanceName: "ElementTabs1",
+      capabilityId: "tabs",
+      modules: [],
+      bindings: [],
+    }, {
+      ownerInstanceName: "ElementTabs1",
+      capabilityId: "tabs",
+    });
+
+    expect(serialized["configureData"]).toBe(configureData);
+    expect(parseReviewedTabsInitialization(serialized["configureData"])).toMatchObject({
+      tabData: [{ name: "overview", label: "说明 kf-compiled-event/v1 文本" }],
+      activeName: "overview",
+    });
   });
 });
 

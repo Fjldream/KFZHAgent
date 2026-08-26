@@ -30,6 +30,8 @@ export interface ArtifactStorage {
   put(input: {
     tenantId: string;
     kind: ArtifactKind;
+    /** Optional server-issued key. Repeating it with identical bytes must be idempotent. */
+    artifactId?: string;
     stream: NodeJS.ReadableStream;
     maxBytes: number;
   }): Promise<StoredArtifact>;

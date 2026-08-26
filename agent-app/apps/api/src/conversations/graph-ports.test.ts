@@ -1001,7 +1001,7 @@ describe("conversation graph workspace query", () => {
     expect(entities.filter((entity) => entity.kind === "control")).toHaveLength(51);
   });
 
-  it("compiles uploaded exact-project evidence matched only at page 201/control 51 and opens once", async () => {
+  it("rejects guessed uploaded names found only at page 201/control 51 and opens once", async () => {
     const key = Buffer.alloc(32, 0x5a);
     const pack = createKingClientDomainPack({ nativeAccepted: true });
     const built = await pack.compile({
@@ -1071,25 +1071,132 @@ describe("conversation graph workspace query", () => {
       semanticPlan,
     });
 
-    expect(outcome.status, JSON.stringify(outcome)).toBe("compiled");
-    if (outcome.status !== "compiled") return;
-    const persisted = prisma.plans.get(outcome.changePlanId)!;
-    const verified = createHmacServerPlanAuthority(key).verify(persisted.plan, {
-      expectedPlanHash: outcome.planHash,
-      expectedRevisionId: "revision-creative",
-    });
-    const page = verified.trustedNativeMaterialization!.pages.find((entry) => entry.semanticPageId === "detail");
-    const control = verified.trustedNativeMaterialization!.controls.find((entry) => entry.semanticControlId === "Text51");
-    expect(page).toMatchObject({ source: "uploaded-existing", semanticPageId: "detail" });
-    expect(control).toMatchObject({
-      source: "uploaded-existing",
-      semanticControlId: "Text51",
-      semanticPageId: "detail",
-      pageGuid: page!.pageGuid,
-      nativeGuid: expect.any(String),
+    expect(outcome).toMatchObject({
+      status: "blocked",
+      diagnostics: [{ code: "CREATIVE_RUNTIME_IDENTITY_COLLISION", phase: "composition" }],
     });
     expect(storage.open).toHaveBeenCalledTimes(1);
-    expect(prisma.plans.size).toBe(1);
+    expect(prisma.plans.size).toBe(0);
+  });
+
+  it("never turns guessed native Page1/Button1 names into uploaded-existing selectors", async () => {
+    const key = Buffer.alloc(32, 0x5b);
+    const pack = createKingClientDomainPack({ nativeAccepted: true });
+    const built = await pack.compile({
+      buildSeed: "workspace",
+      projectIr: {
+        schema: "kf-client-project-ir/v1",
+        id: "guessed-native-names",
+        name: "Guessed Native Names",
+        pages: [{
+          id: "native-page",
+          name: "Page1",
+          width: 1440,
+          height: 900,
+          controls: [{
+            id: "Button1",
+            type: "button",
+            x: 40,
+            y: 40,
+            width: 160,
+            height: 48,
+            text: "原生按钮",
+          }],
+        }],
+      },
+    });
+    const artifact = await pack.package({ workspace: built });
+    const prisma = creativePrisma({
+      projects: [{ projectKey: "creative", domainKind: "kingclient", packageUrl: "guessed-package" }],
+    });
+    const fixture = creativeFixture();
+    const semanticPlan = SolutionImplementationPlanSchema.parse({
+      ...fixture.plan,
+      pages: fixture.plan.pages.map((page) => page.id !== "home" ? page : {
+        ...page,
+        id: "fresh-home",
+        root: { ...page.root, id: "Button1" },
+      }),
+    });
+    const compiler = createCreativeSolutionCompilerFromEnvironment(
+      prisma.client,
+      { open: vi.fn().mockResolvedValue(Readable.from([artifact.bytes])) } as never,
+      { resolveManyForCompilation: vi.fn().mockResolvedValue([]) },
+      { KF_SERVER_PLAN_HMAC_KEY_BASE64: key.toString("base64") },
+    );
+
+    const outcome = await compiler.compile({
+      tenantId: "tenant",
+      workspaceId: "workspace",
+      conversationId: "conversation",
+      baseRevisionId: "revision-creative",
+      projectKey: "creative",
+      domainKind: "kingclient",
+      blueprint: fixture.blueprint,
+      candidateBundle: fixture.candidates,
+      semanticPlan,
+    });
+
+    expect(outcome.status, JSON.stringify(outcome)).toBe("compiled");
+    if (outcome.status !== "compiled") return;
+    const verified = createHmacServerPlanAuthority(key).verify(
+      prisma.plans.get(outcome.changePlanId)!.plan,
+      { expectedPlanHash: outcome.planHash, expectedRevisionId: "revision-creative" },
+    );
+    const page = verified.trustedNativeMaterialization!.pages.find(
+      (entry) => entry.semanticPageId === "fresh-home",
+    );
+    const control = verified.trustedNativeMaterialization!.controls.find(
+      (entry) => entry.semanticControlId === "Button1",
+    );
+    expect(page).toMatchObject({ source: "workspace-derived", semanticPageId: "fresh-home" });
+    expect(control).toMatchObject({ source: "workspace-derived", semanticControlId: "Button1" });
+    expect(control?.instanceName).not.toBe("Button1");
+    expect(control).not.toHaveProperty("nativeGuid");
+  });
+
+  it("rejects the legal semantic id Page1 as an explicit runtime collision without selecting it", async () => {
+    const prisma = creativePrisma({
+      revision: {
+        id: "revision-creative",
+        kind: "initial",
+        state: {
+          pages: [{ id: "page-home", name: "Page1", controls: [] }],
+        },
+      },
+    });
+    const fixture = creativeFixture();
+    const semanticPlan = SolutionImplementationPlanSchema.parse({
+      ...fixture.plan,
+      pages: fixture.plan.pages.map((page) => page.id !== "home" ? page : {
+        ...page,
+        id: "Page1",
+      }),
+    });
+    const compiler = createCreativeSolutionCompilerFromEnvironment(
+      prisma.client,
+      {} as never,
+      { resolveManyForCompilation: vi.fn().mockResolvedValue([]) },
+      { KF_SERVER_PLAN_HMAC_KEY_BASE64: Buffer.alloc(32, 0x5c).toString("base64") },
+    );
+
+    const outcome = await compiler.compile({
+      tenantId: "tenant",
+      workspaceId: "workspace",
+      conversationId: "conversation",
+      baseRevisionId: "revision-creative",
+      projectKey: "creative",
+      domainKind: "kingclient",
+      blueprint: fixture.blueprint,
+      candidateBundle: fixture.candidates,
+      semanticPlan,
+    });
+
+    expect(outcome).toMatchObject({
+      status: "blocked",
+      diagnostics: [{ code: "CREATIVE_RUNTIME_IDENTITY_COLLISION", phase: "composition" }],
+    });
+    expect(prisma.plans.size).toBe(0);
   });
 
   it("compiles a traceable multi-module UI implementation with the existing KingClient tools", async () => {

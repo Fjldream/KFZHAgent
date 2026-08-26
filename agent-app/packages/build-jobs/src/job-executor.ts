@@ -27,7 +27,7 @@ import {
 import type { DomainRegistry } from "@kf/domain-registry";
 import { Prisma, type BuildJob, type PrismaClient } from "@prisma/client";
 import { Readable } from "node:stream";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -63,6 +63,12 @@ export interface BuildExecutorDeps {
   leaseMs?: number;
   /** Server-only HMAC verifier; required when a persisted internal envelope is encountered. */
   serverPlanVerifier?: Pick<ServerPlanAuthority, "verify">;
+  /** Private operator-only sink. Raw errors must never enter ValidationReport. */
+  operatorLogger?: BuildOperatorLogger;
+}
+
+export interface BuildOperatorLogger {
+  error(message: string, error: unknown): void;
 }
 
 export interface ResolvedStoredPlan {
@@ -388,6 +394,7 @@ export class BuildExecutor {
       const stored = await this.#deps.storage.put({
         tenantId: job.tenantId,
         kind: packaged.artifactKind,
+        artifactId: buildArtifactId(job.tenantId, job.id),
         stream: Readable.from([packaged.bytes]),
         maxBytes: this.#deps.maxArtifactBytes ?? DEFAULT_MAX_ARTIFACT_BYTES,
       });
@@ -721,7 +728,19 @@ export class BuildExecutor {
   ): Promise<BuildJob> {
     const details: Record<string, unknown> = {};
     if (opts.report !== undefined) details.report = opts.report;
-    if (opts.error !== undefined) details.error = describeError(opts.error);
+    let publicError: PublicBuildError | undefined;
+    if (opts.error !== undefined) {
+      publicError = {
+        code: PUBLIC_BUILD_ERROR_CODE,
+        message: PUBLIC_BUILD_ERROR_MESSAGE,
+        correlationId: randomUUID(),
+      };
+      details.error = publicError;
+      this.#deps.operatorLogger?.error(
+        `Build execution failed; jobId=${job.id}; correlationId=${publicError.correlationId}`,
+        opts.error,
+      );
+    }
 
     if (opts.status === "SUCCEEDED") {
       if (opts.stored === undefined) {
@@ -771,10 +790,7 @@ export class BuildExecutor {
       });
     }
 
-    const summary =
-      opts.error !== undefined
-        ? `build failed: ${errorMessage(opts.error)}`
-        : "validation failed";
+    const summary = publicError?.message ?? "validation failed";
     return this.#buildJobs.completeBuild({
       jobId: job.id,
       tenantId: job.tenantId,
@@ -786,16 +802,23 @@ export class BuildExecutor {
   }
 }
 
-const DEFAULT_MAX_ARTIFACT_BYTES = 256 * 1024 * 1024;
-const DEFAULT_LEASE_MS = 30_000;
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+function buildArtifactId(tenantId: string, jobId: string): string {
+  const hex = createHash("sha256")
+    .update("kf-build-artifact/v1\0")
+    .update(tenantId)
+    .update("\0")
+    .update(jobId)
+    .digest("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 
-function describeError(error: unknown): Record<string, unknown> {
-  if (error instanceof Error) {
-    return { name: error.name, message: error.message, stack: error.stack };
-  }
-  return { value: String(error) };
+const DEFAULT_MAX_ARTIFACT_BYTES = 256 * 1024 * 1024;
+const DEFAULT_LEASE_MS = 30_000;
+const PUBLIC_BUILD_ERROR_CODE = "BUILD_EXECUTION_FAILED";
+const PUBLIC_BUILD_ERROR_MESSAGE = "构建执行未完成，请使用参考编号联系管理员。";
+
+interface PublicBuildError {
+  code: typeof PUBLIC_BUILD_ERROR_CODE;
+  message: typeof PUBLIC_BUILD_ERROR_MESSAGE;
+  correlationId: string;
 }

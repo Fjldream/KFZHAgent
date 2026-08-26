@@ -32,6 +32,7 @@ describe("Postgres conversation turn lease", () => {
   it("fails fast for the same conversation without starving a one-client checkpoint pool", async () => {
     const manager = leaseManager(2);
     const conversationId = `same-${randomUUID()}`;
+    await insertConversationRows(checkpointPool, [conversationId]);
     try {
       const winner = await manager.acquire(conversationId);
       const startedAt = Date.now();
@@ -47,12 +48,14 @@ describe("Postgres conversation turn lease", () => {
       await (await manager.acquire(conversationId)).dispose();
     } finally {
       await manager.onModuleDestroy();
+      await deleteConversationRows(checkpointPool, [conversationId]);
     }
   });
 
   it("bounds a different-conversation burst while the checkpoint pool keeps progressing", async () => {
     const manager = leaseManager(2);
     const conversationIds = Array.from({ length: 4 }, () => `burst-${randomUUID()}`);
+    await insertConversationRows(checkpointPool, conversationIds);
     try {
       const attempts = await Promise.allSettled(
         conversationIds.map((conversationId) => manager.acquire(conversationId)),
@@ -73,6 +76,7 @@ describe("Postgres conversation turn lease", () => {
       await Promise.all(winners.map((lease) => lease.dispose()));
     } finally {
       await manager.onModuleDestroy();
+      await deleteConversationRows(checkpointPool, conversationIds);
     }
   });
 
@@ -224,7 +228,7 @@ describe("Postgres conversation turn lease", () => {
       await expect(first.manager.acquire(conversationId)).rejects.toBeInstanceOf(ConversationTurnBusyError);
       await expect(second.manager.acquire(conversationId)).rejects.toBeInstanceOf(ConversationTurnBusyError);
       await (await second.manager.acquire(unrelatedConversationId)).dispose();
-      expect(await fenceCount(checkpointPool, conversationId)).toBe(0);
+      expect(await fenceCount(checkpointPool, conversationId)).toBe(1);
 
       await first.manager.onModuleDestroy();
       expect(await fenceCount(checkpointPool, conversationId)).toBe(1);
@@ -235,6 +239,184 @@ describe("Postgres conversation turn lease", () => {
       await deleteConversationRows(checkpointPool, conversationIds);
     }
   });
+
+  it("keeps a live graph fenced across instances when its actual turn backend is lost", async () => {
+    const leaseApplicationName = `turn-lease-${randomUUID()}`;
+    const first = leaseRig(2, undefined, leaseApplicationName);
+    const second = leaseRig(2);
+    const conversationId = `active-backend-loss-${randomUUID()}`;
+    const unrelatedConversationId = `active-backend-loss-unrelated-${randomUUID()}`;
+    const conversationIds = [conversationId, unrelatedConversationId];
+    await insertConversationRows(checkpointPool, conversationIds);
+    let markGraphStarted!: () => void;
+    const graphStarted = new Promise<void>((resolve) => { markGraphStarted = resolve; });
+    const source = {
+      next: vi.fn(() => {
+        markGraphStarted();
+        return new Promise<IteratorResult<unknown>>(() => {});
+      }),
+      return: vi.fn(() => new Promise<IteratorReturnResult<unknown>>(() => {})),
+      [Symbol.asyncIterator]() { return this; },
+    };
+    const graph = {
+      getState: vi.fn().mockResolvedValue({ values: { stage: "design-review" }, tasks: [] }),
+      stream: vi.fn().mockResolvedValue(source),
+    };
+    const prisma = {
+      conversation: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: conversationId,
+          tenantId: "tenant",
+          workspaceId: "workspace",
+        }),
+      },
+      message: { create: vi.fn().mockResolvedValue({}) },
+    };
+    const service = conversationService(first.manager, graph, prisma, checkpointPool);
+
+    try {
+      const events = await service.startTurn(principal(), conversationId, "确认设计");
+      void events.next();
+      await within(graphStarted, 750);
+
+      await terminateNamedSessions(checkpointPool, leaseApplicationName);
+
+      await expect(second.manager.acquire(conversationId)).rejects.toBeInstanceOf(
+        ConversationTurnBusyError,
+      );
+      expect(await fenceCount(checkpointPool, conversationId)).toBe(1);
+      await (await second.manager.acquire(unrelatedConversationId)).dispose();
+    } finally {
+      await within(first.manager.onModuleDestroy(), 750);
+      await second.manager.onModuleDestroy();
+      await deleteConversationRows(checkpointPool, conversationIds);
+    }
+  });
+
+  it("releases its checked-out client and bounds shutdown when durable fence insertion fails", async () => {
+    const rig = leaseRig(1);
+    const conversationId = `forced-fence-insert-failure-${randomUUID()}`;
+    await insertConversationRows(checkpointPool, [conversationId]);
+    await installRejectingFenceTrigger(checkpointPool);
+    let unexpectedLease: Awaited<ReturnType<PostgresConversationTurnLeaseManager["acquire"]>> | undefined;
+
+    try {
+      let acquisitionError: unknown;
+      try {
+        unexpectedLease = await rig.manager.acquire(conversationId);
+      } catch (error) {
+        acquisitionError = error;
+      }
+      expect(acquisitionError).toMatchObject({
+        message: "CONVERSATION_TURN_LEASE_UNAVAILABLE",
+      });
+      await expect(within(rig.manager.onModuleDestroy(), 750)).resolves.toBeUndefined();
+      expect(rig.leasePool.totalCount).toBe(0);
+      expect(rig.ownerPool.totalCount).toBe(0);
+    } finally {
+      await removeRejectingFenceTrigger(checkpointPool);
+      await unexpectedLease?.dispose().catch(() => {});
+      await within(rig.manager.onModuleDestroy(), 750);
+      await deleteConversationRows(checkpointPool, [conversationId]);
+    }
+  });
+
+  it.each(["approve", "revise", "cancel"] as const)(
+    "uses the same cross-instance writer fence for %s resume and an ordinary message",
+    async (action) => {
+      const first = leaseRig(2);
+      const second = leaseRig(2);
+      const conversationId = `resume-message-race-${action}-${randomUUID()}`;
+      await insertConversationRows(checkpointPool, [conversationId]);
+      const planHash = "a".repeat(64);
+      let pending = true;
+      let finishResume!: () => void;
+      const resumeGate = new Promise<void>((resolve) => { finishResume = resolve; });
+      let markResumeStarted!: () => void;
+      const resumeStarted = new Promise<void>((resolve) => { markResumeStarted = resolve; });
+      let writerEffects = 0;
+      const graph = {
+        getState: vi.fn(async () => pending
+          ? {
+              values: { stage: "approval", planHash },
+              tasks: [{ interrupts: [{ value: { type: "plan-approval", planHash } }] }],
+            }
+          : {
+              values: {
+                stage: "idle",
+                planHash,
+                activeChangeRequestId: "change-request",
+                changePlanId: "change-plan",
+              },
+              tasks: [],
+            }),
+        stream: vi.fn(async () => {
+          async function* resumeSource() {
+            // Reproduce the dangerous checkpoint window: the interrupt has
+            // been cleared, but the resume graph is still draining effects.
+            pending = false;
+            markResumeStarted();
+            await resumeGate;
+            writerEffects += 1;
+            yield { resumed: true };
+          }
+          return resumeSource();
+        }),
+      };
+      const messageCreate = vi.fn().mockResolvedValue({});
+      const auditRecord = vi.fn().mockResolvedValue(undefined);
+      const transaction = vi.fn(async (work: (tx: object) => Promise<unknown>) => work({
+        $executeRaw: vi.fn().mockResolvedValue(1),
+      }));
+      const prisma = {
+        conversation: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: conversationId,
+            tenantId: "tenant",
+            workspaceId: "workspace",
+          }),
+        },
+        message: { create: messageCreate },
+        $transaction: transaction,
+      };
+      const firstService = conversationService(
+        first.manager,
+        graph,
+        prisma,
+        checkpointPool,
+        { record: auditRecord },
+      );
+      const secondService = conversationService(
+        second.manager,
+        graph,
+        prisma,
+        checkpointPool,
+        { record: auditRecord },
+      );
+      const resuming = firstService.resume(principal(), conversationId, { action, planHash });
+
+      try {
+        await within(resumeStarted, 750);
+        await expect(
+          secondService.startTurn(principal(), conversationId, "并发普通消息"),
+        ).rejects.toBeInstanceOf(ConversationTurnBusyError);
+
+        finishResume();
+        await within(resuming, 750);
+        expect(writerEffects).toBe(1);
+        expect(messageCreate).not.toHaveBeenCalled();
+        expect(graph.stream).toHaveBeenCalledTimes(1);
+        expect(auditRecord).toHaveBeenCalledTimes(1);
+        expect(await fenceCount(checkpointPool, conversationId)).toBe(0);
+      } finally {
+        finishResume();
+        await resuming.catch(() => {});
+        await first.manager.onModuleDestroy();
+        await second.manager.onModuleDestroy();
+        await deleteConversationRows(checkpointPool, [conversationId]);
+      }
+    },
+  );
 
   it("keeps the conversation fenced when its owner session dies but graph work may remain", async () => {
     const errorLog = vi.spyOn(Logger.prototype, "error").mockImplementation(() => {});
@@ -269,10 +451,11 @@ function conversationService(
   graph: object,
   prisma: object,
   checkpointPool: pg.Pool,
+  audit: object = {},
 ): ConversationService {
   const service = new ConversationService(
     prisma as never,
-    {} as never,
+    audit as never,
     {} as never,
     checkpointPool,
     manager,
@@ -305,7 +488,11 @@ function leaseManager(max: number): PostgresConversationTurnLeaseManager {
   return leaseRig(max).manager;
 }
 
-function leaseRig(max: number, ownerApplicationName?: string): {
+function leaseRig(
+  max: number,
+  ownerApplicationName?: string,
+  leaseApplicationName?: string,
+): {
   manager: PostgresConversationTurnLeaseManager;
   leasePool: pg.Pool;
   ownerPool: pg.Pool;
@@ -316,6 +503,7 @@ function leaseRig(max: number, ownerApplicationName?: string): {
     connectionTimeoutMillis: 150,
     statement_timeout: 500,
     query_timeout: 500,
+    ...(leaseApplicationName === undefined ? {} : { application_name: leaseApplicationName }),
   });
   const ownerPool = new pg.Pool({
     connectionString: process.env.DATABASE_URL,
@@ -357,6 +545,10 @@ async function fenceCount(pool: pg.Pool, conversationId: string): Promise<number
 }
 
 async function terminateOwnerSession(pool: pg.Pool, applicationName: string): Promise<void> {
+  await terminateNamedSessions(pool, applicationName);
+}
+
+async function terminateNamedSessions(pool: pg.Pool, applicationName: string): Promise<void> {
   const result = await pool.query<{ terminated: boolean }>(
     `SELECT pg_terminate_backend(pid) AS terminated
      FROM pg_stat_activity
@@ -364,7 +556,37 @@ async function terminateOwnerSession(pool: pg.Pool, applicationName: string): Pr
        AND pid <> pg_backend_pid()`,
     [applicationName],
   );
-  expect(result.rows).toEqual([{ terminated: true }]);
+  expect(result.rows.length).toBeGreaterThan(0);
+  expect(result.rows.every(({ terminated }) => terminated)).toBe(true);
+}
+
+async function installRejectingFenceTrigger(pool: pg.Pool): Promise<void> {
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION reject_test_conversation_turn_fence()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $function$
+    BEGIN
+      IF NEW."conversationId" LIKE 'forced-fence-insert-failure-%' THEN
+        RAISE EXCEPTION 'forced conversation turn fence insertion failure';
+      END IF;
+      RETURN NEW;
+    END;
+    $function$;
+    DROP TRIGGER IF EXISTS reject_test_conversation_turn_fence
+      ON "ConversationTurnFence";
+    CREATE TRIGGER reject_test_conversation_turn_fence
+      BEFORE INSERT ON "ConversationTurnFence"
+      FOR EACH ROW EXECUTE FUNCTION reject_test_conversation_turn_fence();
+  `);
+}
+
+async function removeRejectingFenceTrigger(pool: pg.Pool): Promise<void> {
+  await pool.query(`
+    DROP TRIGGER IF EXISTS reject_test_conversation_turn_fence
+      ON "ConversationTurnFence";
+    DROP FUNCTION IF EXISTS reject_test_conversation_turn_fence();
+  `);
 }
 
 async function within<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {

@@ -66,6 +66,27 @@ describe("ConversationController SSE disposal", () => {
     });
     expect(res.write).not.toHaveBeenCalled();
   });
+
+  it("maps resume contention from the shared turn fence to the same bounded conflict", async () => {
+    const controller = new ConversationController({
+      resume: vi.fn().mockRejectedValue(new ConversationTurnBusyError()),
+    } as never);
+    const { req } = httpDoubles();
+
+    const failure = await controller.resume(
+      "conversation",
+      req as never,
+      { action: "approve", planHash: "a".repeat(64) },
+    ).catch((error) => error);
+
+    expect(failure.getStatus()).toBe(409);
+    expect(failure.getResponse()).toEqual({
+      error: {
+        code: "CONVERSATION_TURN_IN_PROGRESS",
+        message: "当前对话已有工程生成任务处理中，请稍后重试。",
+      },
+    });
+  });
 });
 
 function controllerReturning(events: DisposableSseStream): ConversationController {

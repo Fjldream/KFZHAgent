@@ -10,6 +10,7 @@ import { assertSolutionPlanUsesCandidates } from "@kf/domain-client";
 import type { ModelPortContext } from "../model-port.js";
 import type { SolutionGraphDeps } from "../ports.js";
 import type { AgentGraphStateValue, AgentGraphUpdate } from "../state.js";
+import { hasCurrentDesignPlanVersion } from "../design-plan-version.js";
 
 const MAX_REJECTION_REASONS = 20;
 const MAX_REJECTION_REASON_LENGTH = 300;
@@ -77,7 +78,8 @@ export function createSolutionImplementationPlanNode(deps: SolutionGraphDeps) {
     const blueprint = parsedBlueprint.data;
     const candidates = parsedCandidates.data;
     if (
-      candidates.blueprintHash !== canonicalServerHash(blueprint)
+      !hasCurrentDesignPlanVersion(blueprint, state.designRevision, state.designPlanHash)
+      || candidates.blueprintHash !== canonicalServerHash(blueprint)
       || state.capabilityCandidatesHash !== canonicalServerHash(candidates)
     ) {
       return { ...failure(0), lastErrorCode: "SOLUTION_PLANNING_FAILED" };

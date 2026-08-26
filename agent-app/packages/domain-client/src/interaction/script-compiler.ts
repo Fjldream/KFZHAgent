@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { stringifyScriptSafeJson } from "../script-safe-json.js";
 import { types as utilTypes } from "node:util";
 import type { Node, Program } from "acorn";
 import {
@@ -222,9 +223,9 @@ function semanticApi(node: AstNode): string | undefined {
 
 function quote(value: unknown): string {
   if (typeof value === "number" && Object.is(value, -0)) return "-0";
-  const serialized = JSON.stringify(value);
+  const serialized = stringifyScriptSafeJson(value);
   if (serialized === undefined) return fail("SCRIPT_COMPILER_UNSUPPORTED_SYNTAX", "literal", "literal is not JSON serializable");
-  return serialized.replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+  return serialized;
 }
 
 function emitRegexPattern(pattern: string): string {

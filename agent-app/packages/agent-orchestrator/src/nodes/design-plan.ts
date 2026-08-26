@@ -1,13 +1,12 @@
-import { createHash } from "node:crypto";
 import {
   CustomerEffectBlueprintSchema,
   CustomerSolutionBlueprintSchema,
-  type DesignPlan,
 } from "@kf/contracts";
 import type { AgentGraphStateValue, AgentGraphUpdate } from "../state.js";
 import type { SolutionGraphDeps } from "../ports.js";
 import { assessBlueprintRevision } from "../blueprint-quality.js";
 import { encodeBlueprintMessage } from "../blueprint-message.js";
+import { hashDesignPlan } from "../design-plan-version.js";
 
 /**
  * Generates or revises a DesignPlan (spec §5.3) and hands it back to the user:
@@ -179,34 +178,6 @@ export function createDesignPlanNode(deps: SolutionGraphDeps) {
       lastErrorCode: undefined,
     };
   };
-}
-
-/**
- * Canonical sha256 over the plan plus its revision number. Keys are
- * serialised in sorted order (recursively) so the same plan always hashes the
- * same, and a revision bump always yields a new hash — even if the plan body
- * is unchanged, matching the spec's "修订产生新版本". The revision is folded
- * into the hash only; it never touches the strict DesignPlan body stored on
- * state.
- */
-function hashDesignPlan(plan: DesignPlan, revision: number): string {
-  const canonical = stableStringify({ ...plan, revision });
-  return createHash("sha256").update(canonical).digest("hex");
-}
-
-/** Deterministic JSON serialisation: object keys emitted in sorted order. */
-function stableStringify(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
-  }
-  if (value !== null && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    const parts = Object.keys(record)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`);
-    return `{${parts.join(",")}}`;
-  }
-  return JSON.stringify(value);
 }
 
 /** The latest user turn, used as the requirement text for the model. */

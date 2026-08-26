@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { stringifyScriptSafeJson } from "../script-safe-json.js";
 import { CompilerInstanceNameSchema } from "@kf/contracts";
 import { z } from "zod";
 import {
@@ -471,7 +472,11 @@ type ReviewedTabsRuntimeState = z.infer<typeof ReviewedTabsRuntimeStateSchema>;
 function serializeReviewedTabsRuntimeState(ownerInstanceName: string, input: ReviewedTabsRuntimeState): string {
   const owner = CompilerInstanceNameSchema.parse(ownerInstanceName);
   const state = ReviewedTabsRuntimeStateSchema.parse(input);
-  const body = `this.tabs(${JSON.stringify(state)});\n`;
+  const serializedState = stringifyScriptSafeJson(state);
+  if (serializedState === undefined) {
+    throw new Error("INVALID_COMPONENT_PROPERTY: tabs — initialization is not JSON serializable");
+  }
+  const body = `this.tabs(${serializedState});\n`;
   if (Buffer.byteLength(body, "utf8") > 32_000) {
     throw new Error("INVALID_COMPONENT_PROPERTY: tabs — initialization exceeds 32000 bytes");
   }
@@ -484,7 +489,7 @@ function serializeReviewedTabsRuntimeState(ownerInstanceName: string, input: Rev
     tabNames: state.tabData.map((tab) => tab.name),
     activeName: state.activeName,
   });
-  return `// ${REVIEWED_TABS_INITIALIZATION_SCHEMA} ${Buffer.from(JSON.stringify(marker), "utf8").toString("base64url")}\n${body}`;
+  return `// ${REVIEWED_TABS_INITIALIZATION_SCHEMA} ${Buffer.from(stringifyScriptSafeJson(marker)!, "utf8").toString("base64url")}\n${body}`;
 }
 
 /**

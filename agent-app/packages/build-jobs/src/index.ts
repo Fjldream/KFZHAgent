@@ -29,6 +29,7 @@ export {
 export type {
   BuildExecutorDeps,
   BuildExecutorHooks,
+  BuildOperatorLogger,
 } from "./job-executor.js";
 export type {
   BuildJobStatus,

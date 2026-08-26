@@ -3,6 +3,7 @@ import {
   BuildExecutor,
   BuildJobService,
   type BuildExecutorHooks,
+  type BuildOperatorLogger,
   type BuildJob,
   type ServerPlanAuthority,
 } from "@kf/build-jobs";
@@ -35,6 +36,7 @@ export class JobRunner {
     leaseMs?: number;
     maxArtifactBytes?: number;
     serverPlanVerifier?: Pick<ServerPlanAuthority, "verify">;
+    operatorLogger?: BuildOperatorLogger;
   }) {
     this.#leaseMs = deps.leaseMs ?? DEFAULT_LEASE_MS;
     this.#pollIntervalMs = deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
@@ -48,6 +50,7 @@ export class JobRunner {
       leaseMs: this.#leaseMs,
       ...(deps.maxArtifactBytes !== undefined ? { maxArtifactBytes: deps.maxArtifactBytes } : {}),
       ...(deps.serverPlanVerifier !== undefined ? { serverPlanVerifier: deps.serverPlanVerifier } : {}),
+      ...(deps.operatorLogger !== undefined ? { operatorLogger: deps.operatorLogger } : {}),
     });
   }
 

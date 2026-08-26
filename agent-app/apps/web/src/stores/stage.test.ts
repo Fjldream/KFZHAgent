@@ -27,6 +27,7 @@ function makeState(overrides: Partial<WorkspaceState> = {}): WorkspaceState {
     revisions: [],
     currentRevisionId: null,
     moduleDeliveryResult: null,
+    projectDelivery: null,
     ...overrides,
   };
 }

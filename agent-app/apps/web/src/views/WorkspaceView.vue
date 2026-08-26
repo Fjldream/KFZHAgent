@@ -51,8 +51,21 @@ const activeWorkspaceId = computed<string | undefined>(() => {
 });
 
 const hasWorkspace = computed(() => activeWorkspaceId.value !== undefined);
+const isCreativeWorkflow = computed(() =>
+  workspace.state.projectDelivery?.workflow === "creative-v2"
+  || workspace.state.workspace?.generationWorkflow === "creative-v2",
+);
+const creativeDownloadArtifactId = computed(() => {
+  const delivery = workspace.state.projectDelivery;
+  return delivery?.workflow === "creative-v2"
+    && delivery.status === "downloadable"
+    && delivery.download.available
+    ? delivery.artifactId ?? undefined
+    : undefined;
+});
 
 const artifact = computed(() => {
+  if (isCreativeWorkflow.value) return undefined;
   if (workspace.state.moduleDeliveryResult?.status === "blocked") return undefined;
   const items = workspace.state.artifacts;
   return items.find((item) => item.kind === "client-package") ?? items[0];
@@ -79,12 +92,13 @@ watch(
     workspace.state.previewArtifactId,
     workspace.state.pendingApproval?.previewArtifactId,
     workspace.state.moduleDeliveryResult?.status,
-  ],
-  async ([builtArtifactId, pendingArtifactId, deliveryStatus]) => {
+    isCreativeWorkflow.value,
+  ] as const,
+  async ([builtArtifactId, pendingArtifactId, deliveryStatus, creativeWorkflow]) => {
     if (previewUrl.value !== undefined) {
       previewUrl.value = undefined;
     }
-    if (deliveryStatus === "blocked") return;
+    if (deliveryStatus === "blocked" || creativeWorkflow === true) return;
     const artifactId = builtArtifactId ?? pendingArtifactId;
     if (artifactId === undefined || artifactId === "") return;
     try {
@@ -215,6 +229,25 @@ async function onUploadFile(file: File): Promise<void> {
           v-if="workspace.state.moduleDeliveryResult !== null"
           :result="workspace.state.moduleDeliveryResult"
         />
+        <section
+          v-if="workspace.state.projectDelivery?.workflow === 'creative-v2'"
+          class="creative-delivery"
+          data-testid="creative-project-delivery"
+        >
+          <strong>KingFusion 工程包交付</strong>
+          <p>
+            {{ workspace.state.projectDelivery.kf36RuntimeVerification.status }} ·
+            {{ workspace.state.projectDelivery.kf36RuntimeVerification.notice }}
+          </p>
+          <button
+            v-if="creativeDownloadArtifactId !== undefined"
+            type="button"
+            data-testid="creative-project-download"
+            @click="onDownload(creativeDownloadArtifactId)"
+          >
+            下载 KingFusion 工程包
+          </button>
+        </section>
       </section>
       <ContextPanel
         :stage="stage"
@@ -233,6 +266,7 @@ async function onUploadFile(file: File): Promise<void> {
       />
     </main>
     <PreviewBar
+      v-if="!isCreativeWorkflow"
       :preview-url="previewUrl"
       :fullscreen="previewFullscreen"
       @toggle-fullscreen="previewFullscreen = !previewFullscreen"
@@ -273,6 +307,8 @@ async function onUploadFile(file: File): Promise<void> {
 }
 .conversation-col { display: flex; flex-direction: column; gap: 0.8rem; min-height: 0; }
 .error { color: var(--color-danger); margin: 0; font-size: 0.85rem; padding: 0 0.2rem; }
+.creative-delivery { padding: 0.9rem 1rem; border: 1px solid var(--color-border); border-radius: 0.75rem; background: var(--color-surface); }
+.creative-delivery p { margin: 0.45rem 0 0.75rem; color: var(--color-text-secondary); }
 /* Task 8 删除确认弹层：复用 ApprovalSheet 的 scrim + 毛玻璃卡片模式。 */
 .delete-scrim {
   position: fixed; inset: 0; z-index: 50;

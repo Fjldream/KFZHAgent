@@ -59,6 +59,8 @@ implements ConversationTurnLeasePort, OnModuleDestroy {
       throw new ConversationTurnBusyError();
     }
 
+    const managedClient = manageTurnClient(client, this.logger);
+    const leaseId = randomUUID();
     let turnLocked = false;
     try {
       const result = await client.query<{ acquired: boolean }>(
@@ -66,23 +68,31 @@ implements ConversationTurnLeasePort, OnModuleDestroy {
         [turnLockKey(conversationId)],
       );
       if (result.rows[0]?.acquired !== true) {
-        client.release();
         throw new ConversationTurnBusyError();
       }
       turnLocked = true;
       await this.assertNoDurableFence(client, conversationId);
+      const fenced = await client.query(
+        `INSERT INTO "ConversationTurnFence"
+           ("conversationId", "ownerId", "leaseId")
+         VALUES ($1, $2, $3)
+         RETURNING "conversationId"`,
+        [conversationId, this.ownerId, leaseId],
+      );
+      if (fenced.rowCount !== 1) {
+        throw new Error("CONVERSATION_TURN_FENCE_CREATE_FAILED");
+      }
     } catch (error) {
       if (turnLocked) {
-        await releaseTurnClient(client, conversationId, this.logger);
-      } else if (!(error instanceof ConversationTurnBusyError)) {
-        client.release(true);
+        await managedClient.release(conversationId);
+      } else {
+        managedClient.destroy();
       }
       throw error instanceof ConversationTurnBusyError
         ? error
         : new Error("CONVERSATION_TURN_LEASE_UNAVAILABLE");
     }
 
-    const leaseId = randomUUID();
     let state: "active" | "quarantined" | "released" = "active";
     let operation = Promise.resolve();
     const serial = <T>(work: () => Promise<T>): Promise<T> => {
@@ -93,35 +103,39 @@ implements ConversationTurnLeasePort, OnModuleDestroy {
     const lease: ConversationTurnLease = {
       quarantine: () => serial(async () => {
         if (state !== "active") return;
-        const fenced = await client.query(
-          `INSERT INTO "ConversationTurnFence"
-             ("conversationId", "ownerId", "leaseId")
-           VALUES ($1, $2, $3)
-           ON CONFLICT ("conversationId") DO NOTHING
-           RETURNING "conversationId"`,
-          [conversationId, this.ownerId, leaseId],
-        );
-        if (fenced.rowCount !== 1) {
-          throw new Error("CONVERSATION_TURN_FENCE_CONFLICT");
-        }
-        await releaseTurnClient(client, conversationId, this.logger);
+        await managedClient.release(conversationId);
         state = "quarantined";
       }),
       dispose: () => serial(async () => {
         if (state === "released") return;
-        if (state === "active") {
-          await releaseTurnClient(client, conversationId, this.logger);
-        } else {
-          const cleared = await this.pool.query(
+        try {
+          const cleared = await (state === "active" && !managedClient.released
+            ? client.query(
+              `DELETE FROM "ConversationTurnFence"
+               WHERE "conversationId" = $1
+                 AND "ownerId" = $2
+                 AND "leaseId" = $3`,
+              [conversationId, this.ownerId, leaseId],
+            )
+            : this.pool.query(
             `DELETE FROM "ConversationTurnFence"
              WHERE "conversationId" = $1
                AND "ownerId" = $2
                AND "leaseId" = $3`,
             [conversationId, this.ownerId, leaseId],
-          );
+            ));
           if (cleared.rowCount !== 1) {
             throw new Error("CONVERSATION_TURN_FENCE_RELEASE_FAILED");
           }
+        } catch (error) {
+          if (state === "active") {
+            await managedClient.release(conversationId);
+            state = "quarantined";
+          }
+          throw error;
+        }
+        if (state === "active") {
+          await managedClient.release(conversationId);
         }
         state = "released";
         this.active.delete(lease);
@@ -243,21 +257,69 @@ export function createConversationTurnLeaseManagerFromEnvironment(
   }));
 }
 
-async function releaseTurnClient(
+interface ManagedTurnClient {
+  readonly released: boolean;
+  destroy(): void;
+  release(conversationId: string): Promise<void>;
+}
+
+function manageTurnClient(
   client: pg.PoolClient,
-  conversationId: string,
   logger: Logger,
-): Promise<void> {
-  try {
-    const result = await client.query<{ released: boolean }>(
-      "SELECT pg_advisory_unlock(hashtextextended($1, 0)) AS released",
-      [turnLockKey(conversationId)],
-    );
-    client.release(result.rows[0]?.released !== true);
-  } catch {
-    client.release(true);
+): ManagedTurnClient {
+  let released = false;
+  let warned = false;
+  const warnOnce = () => {
+    if (warned) return;
+    warned = true;
     logger.warn("Conversation turn lease connection was destroyed during cleanup");
-  }
+  };
+  const onError = () => {
+    if (!released) {
+      released = true;
+      try {
+        client.release(true);
+      } catch { /* the pool may already have removed the failed client */ }
+    }
+    // Keep this listener attached to a destroyed client: pg may emit a fatal
+    // backend error followed by a connection-terminated error.
+    warnOnce();
+  };
+  client.on("error", onError);
+
+  return {
+    get released() {
+      return released;
+    },
+    destroy() {
+      if (released) return;
+      released = true;
+      try {
+        client.release(true);
+      } catch { /* the pool may already have removed the failed client */ }
+    },
+    async release(conversationId: string) {
+      if (released) return;
+      try {
+        const result = await client.query<{ released: boolean }>(
+          "SELECT pg_advisory_unlock(hashtextextended($1, 0)) AS released",
+          [turnLockKey(conversationId)],
+        );
+        if (released) return;
+        released = true;
+        client.off("error", onError);
+        client.release(result.rows[0]?.released !== true);
+      } catch {
+        if (!released) {
+          released = true;
+          try {
+            client.release(true);
+          } catch { /* the pool may already have removed the failed client */ }
+        }
+        warnOnce();
+      }
+    },
+  };
 }
 
 function turnLockKey(conversationId: string): string {

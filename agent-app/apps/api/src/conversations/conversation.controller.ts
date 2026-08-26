@@ -175,10 +175,14 @@ export class ConversationController {
     @Req() req: AuthenticatedRequest,
     @Body() body: { action?: string; planHash?: string },
   ): Promise<Record<string, unknown>> {
-    return this.conversations.resume(req.principal, id, {
-      ...(typeof body.action === "string" ? { action: body.action } : {}),
-      ...(typeof body.planHash === "string" ? { planHash: body.planHash } : {}),
-    });
+    try {
+      return await this.conversations.resume(req.principal, id, {
+        ...(typeof body.action === "string" ? { action: body.action } : {}),
+        ...(typeof body.planHash === "string" ? { planHash: body.planHash } : {}),
+      });
+    } catch (error) {
+      this.rethrowTurnContention(error);
+    }
   }
 
   private async safeStartTurn(
@@ -197,16 +201,20 @@ export class ConversationController {
           },
         });
       }
-      if (error instanceof ConversationTurnBusyError) {
-        throw new ConflictException({
-          error: {
-            code: "CONVERSATION_TURN_IN_PROGRESS",
-            message: "当前对话已有工程生成任务处理中，请稍后重试。",
-          },
-        });
-      }
-      throw error;
+      this.rethrowTurnContention(error);
     }
+  }
+
+  private rethrowTurnContention(error: unknown): never {
+    if (error instanceof ConversationTurnBusyError) {
+      throw new ConflictException({
+        error: {
+          code: "CONVERSATION_TURN_IN_PROGRESS",
+          message: "当前对话已有工程生成任务处理中，请稍后重试。",
+        },
+      });
+    }
+    throw error;
   }
 }
 

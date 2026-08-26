@@ -6,6 +6,7 @@ import {
 } from "@kf/contracts";
 import type { CreativeCompilationDiagnostic, SolutionGraphDeps } from "../ports.js";
 import type { AgentGraphStateValue, AgentGraphUpdate } from "../state.js";
+import { hasCurrentDesignPlanVersion } from "../design-plan-version.js";
 
 const MAX_DIAGNOSTICS = 10;
 const MAX_DIAGNOSTIC_DETAIL = 500;
@@ -24,13 +25,21 @@ export function createCompileCreativeSolutionNode(deps: SolutionGraphDeps) {
     const parsedCandidates = CapabilityCandidateBundleSchema.safeParse(state.capabilityCandidates);
     const parsedSemanticPlan = SolutionImplementationPlanSchema.safeParse(state.solutionImplementationPlan);
     if (!parsedBlueprint.success || !parsedCandidates.success || !parsedSemanticPlan.success
-      || !isHash(state.designPlanHash)
+      || !hasCurrentDesignPlanVersion(parsedBlueprint.data, state.designRevision, state.designPlanHash)
       || state.capabilityCandidatesHash !== canonicalServerHash(parsedCandidates.data)
       || state.solutionImplementationPlanHash !== canonicalServerHash(parsedSemanticPlan.data)
       || parsedCandidates.data.blueprintHash !== canonicalServerHash(parsedBlueprint.data)
       || parsedSemanticPlan.data.blueprintHash !== canonicalServerHash(parsedBlueprint.data)
       || parsedSemanticPlan.data.candidateBundleHash !== canonicalServerHash(parsedCandidates.data)) {
-      return fail(deps, state, "CREATIVE_SOLUTION_INPUT_INVALID", []);
+      // A torn/stale confirmed version is rejected without any external
+      // effect: no customer-message persistence, compiler persistence, or
+      // enqueue authorization may occur from mismatched confirmation state.
+      return {
+        stage: "idle",
+        lastErrorCode: "CREATIVE_SOLUTION_INPUT_INVALID",
+        buildAuthorization: undefined,
+        resumeAction: undefined,
+      };
     }
 
     let outcome;

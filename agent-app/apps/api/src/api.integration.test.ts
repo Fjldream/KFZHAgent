@@ -1600,7 +1600,7 @@ describe("hardening fixes", () => {
     expect(res.body.message).toContain("download-token");
   });
 
-  it("serializes concurrent resumes: one approve wins and audit stays single (I1 concurrency)", async () => {
+  it("fences concurrent resumes: one approve wins and audit stays single (I1 concurrency)", async () => {
     const cookie = await login(TENANT_A_MEMBER);
     const ws = await createUploadWorkspace(cookie, "Concurrent Resume WS");
     await uploadPackage(cookie, ws.body.id, await makePackage()).expect(201);
@@ -1608,10 +1608,8 @@ describe("hardening fixes", () => {
     const planHash = await planRequirement(cookie, conv.body.id);
 
     // Three resumes of the same conversation race at the same time. The
-    // pg_advisory_xact_lock serializes them: exactly one observes the pending
-    // interrupt and succeeds; every loser re-checks after the winner commits,
-    // finds nothing pending and is rejected without running the graph or
-    // writing audit rows.
+    // The shared durable turn lease admits exactly one graph writer. Every
+    // loser fails fast before checkpoint access or audit side effects.
     const [r1, r2, r3] = await Promise.all([
       resume(cookie, conv.body.id, { action: "approve", planHash }),
       resume(cookie, conv.body.id, { action: "approve", planHash }),
@@ -1627,7 +1625,7 @@ describe("hardening fixes", () => {
     const conflicts = [r1, r2, r3].filter((r) => r.status === 409);
     expect(conflicts).toHaveLength(2);
     for (const conflict of conflicts) {
-      expect(conflict.body.error.code).toBe("NO_PENDING_APPROVAL");
+      expect(conflict.body.error.code).toBe("CONVERSATION_TURN_IN_PROGRESS");
     }
 
     const acmeId = await tenantIdOf(TENANT_A.tenant);
@@ -2482,5 +2480,59 @@ describe("task 12 api surface", () => {
       .expect(200);
     expect(report.body.outcome).toBe("pass");
     expect(report.body.summary).toBe("validation passed");
+  });
+
+  it("redacts hostile private worker diagnostics from the customer report endpoint", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createWorkspace(cookie, "Hostile Diagnostic WS");
+    const conv = await createConversation(cookie, ws.body.id, "Build");
+    const planHash = await planRequirement(cookie, conv.body.id);
+    const approved = await resume(cookie, conv.body.id, { action: "approve", planHash }).expect(200);
+    const correlationId = "11111111-2222-4333-8444-555555555555";
+    await prisma.validationReport.create({
+      data: {
+        tenantId: ws.body.tenantId,
+        buildJobId: approved.body.buildJobId,
+        outcome: "fail",
+        summary: "build failed at /Users/operator/private.ts with Bearer api-secret",
+        details: {
+          error: {
+            code: "BUILD_EXECUTION_FAILED",
+            message: "构建执行未完成，请使用参考编号联系管理员。",
+            correlationId,
+            stack: "Error: api-secret at /Users/operator/private.ts",
+            cause: { password: "database-secret" },
+          },
+          operator: { token: "should-never-be-public" },
+        },
+      },
+    });
+
+    const report = await request(server)
+      .get(`/api/build-jobs/${approved.body.buildJobId}/report`)
+      .set("Cookie", cookie)
+      .expect(200);
+
+    expect(report.body).toMatchObject({
+      outcome: "fail",
+      summary: "构建执行未完成，请使用参考编号联系管理员。",
+      details: {
+        error: {
+          code: "BUILD_EXECUTION_FAILED",
+          message: "构建执行未完成，请使用参考编号联系管理员。",
+          correlationId,
+        },
+      },
+    });
+    expect(report.body.details).toEqual({
+      error: {
+        code: "BUILD_EXECUTION_FAILED",
+        message: "构建执行未完成，请使用参考编号联系管理员。",
+        correlationId,
+      },
+    });
+    expect(JSON.stringify(report.body)).not.toMatch(
+      /Bearer|api-secret|\/Users|private|password|database-secret|token|stack|cause/i,
+    );
   });
 });

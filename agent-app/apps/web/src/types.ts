@@ -24,6 +24,8 @@ export interface Workspace {
   name: string;
   description?: string | null;
   mode: string;
+  /** Server-owned workflow discriminator; never inferred from artifact kind. */
+  generationWorkflow?: "legacy" | "module-v1" | "creative-v2";
   currentRevisionId?: string | null;
   /** 后端 SolutionWorkspace 返回含这些字段（前端仅展示用）。 */
   createdAt?: string;
@@ -110,6 +112,19 @@ export interface ModuleDeliveryResult {
   revisionDiff: { changedModules: string[]; preservedModules: string[] };
 }
 
+export interface CreativeProjectDelivery {
+  workflow: "creative-v2";
+  projectKey: string;
+  status: "downloadable" | "building" | "failed" | "blocked";
+  artifactId: string | null;
+  revisionId: string | null;
+  download: { available: boolean; tokenEndpoint: string | null };
+  kf36RuntimeVerification: {
+    status: "not_performed";
+    notice: "尚未经过人工 KingFusion 3.6 运行态验证";
+  };
+}
+
 export interface PersistedModuleDelivery {
   tenantId: string;
   workspaceId: string;
@@ -119,18 +134,7 @@ export interface PersistedModuleDelivery {
   artifactId: string | null;
   revisionId: string | null;
   result: ModuleDeliveryResult | null;
-  projectDelivery: {
-    workflow: "creative-v2";
-    projectKey: string;
-    status: "downloadable" | "building" | "failed" | "blocked";
-    artifactId: string | null;
-    revisionId: string | null;
-    download: { available: boolean; tokenEndpoint: string | null };
-    kf36RuntimeVerification: {
-      status: "not_performed";
-      notice: "尚未经过人工 KingFusion 3.6 运行态验证";
-    };
-  } | null;
+  projectDelivery: CreativeProjectDelivery | null;
   buildJob: BuildJob | null;
   artifact: ({ buildJobId: string } & Pick<ArtifactRow, "id" | "kind" | "sizeBytes" | "sha256">) | null;
   revision: Pick<Revision, "id" | "revisionNumber" | "kind"> & { parentRevisionId: string | null } | null;

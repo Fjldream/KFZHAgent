@@ -5,6 +5,7 @@ import {
 } from "@kf/contracts";
 import type { SolutionGraphDeps } from "../ports.js";
 import type { AgentGraphStateValue, AgentGraphUpdate } from "../state.js";
+import { hasCurrentDesignPlanVersion } from "../design-plan-version.js";
 
 const FAILED_UPDATE = {
   capabilityCandidates: undefined,
@@ -43,6 +44,9 @@ export function createCapabilityRetrievalNode(deps: SolutionGraphDeps) {
     if (!parsedBlueprint.success) return FAILED_UPDATE;
 
     const blueprint = parsedBlueprint.data;
+    if (!hasCurrentDesignPlanVersion(blueprint, state.designRevision, state.designPlanHash)) {
+      return FAILED_UPDATE;
+    }
     const blueprintHash = canonicalServerHash(blueprint);
     try {
       const parsedBundle = CapabilityCandidateBundleSchema.safeParse(

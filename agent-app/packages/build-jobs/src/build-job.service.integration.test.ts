@@ -170,4 +170,53 @@ describe("BuildJobService lease concurrency", () => {
     const afterLease = new Date(now.getTime() + 31_000);
     expect((await jobs.leaseNext("worker-b", afterLease))?.id).toBe(job.id);
   });
+
+  it("keeps lease query count and latency bounded across a thousand multi-tenant workspaces", async () => {
+    await prisma.$executeRawUnsafe(`
+      INSERT INTO "BuildJob" (
+        "id", "tenantId", "workspaceId", "baseRevisionId", "changePlanId",
+        "planHash", "projectKey", "domainKind", "idempotencyKey", "status",
+        "leaseOwner", "leaseExpiresAt", "attemptCount", "createdAt", "updatedAt"
+      )
+      SELECT
+        'scale-job-' || n,
+        CASE WHEN n % 2 = 0 THEN 'scale-tenant-a' ELSE 'scale-tenant-b' END,
+        'scale-workspace-' || n,
+        'scale-revision-' || n,
+        'scale-plan-' || n,
+        'hash',
+        'kingclient',
+        'kingclient',
+        'scale-key-' || n,
+        'QUEUED'::"JobStatus",
+        NULL,
+        NULL,
+        0,
+        clock_timestamp() + (n * interval '1 millisecond'),
+        clock_timestamp()
+      FROM generate_series(1, 1000) AS n
+    `);
+
+    const observed = new PrismaClient({ log: [{ emit: "event", level: "query" }] });
+    const queries: string[] = [];
+    observed.$on("query", (event) => queries.push(event.query));
+    const scaledJobs = new BuildJobService(observed, 30_000);
+    const startedAt = performance.now();
+    try {
+      const claimed = (await Promise.all(
+        Array.from({ length: 4 }, (_, index) => scaledJobs.leaseNext(`scale-worker-${index}`, new Date())),
+      )).filter((job): job is BuildJob => job !== null);
+      const elapsedMs = performance.now() - startedAt;
+
+      expect(claimed).toHaveLength(4);
+      expect(new Set(claimed.map((job) => job.workspaceId)).size).toBe(4);
+      expect(new Set(claimed.map((job) => job.tenantId))).toEqual(
+        new Set(["scale-tenant-a", "scale-tenant-b"]),
+      );
+      expect(queries.length).toBeLessThanOrEqual(100);
+      expect(elapsedMs).toBeLessThan(3_000);
+    } finally {
+      await observed.$disconnect();
+    }
+  });
 });

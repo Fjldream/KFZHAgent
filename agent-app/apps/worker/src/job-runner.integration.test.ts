@@ -51,7 +51,7 @@ import {
 } from "@kf/domain-client";
 import { DomainRegistry } from "@kf/domain-registry";
 import { PrismaClient, type Prisma } from "@prisma/client";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { JobRunner } from "./job-runner.js";
 import {
   acceptedArtifactForPlan,
@@ -533,6 +533,7 @@ class TrackingStorage implements ArtifactStorage {
   put(input: {
     tenantId: string;
     kind: string;
+    artifactId?: string;
     stream: NodeJS.ReadableStream;
     maxBytes: number;
   }): Promise<StoredArtifact> {
@@ -724,7 +725,12 @@ describe("job runner", () => {
     expect(await prisma.validationReport.findFirstOrThrow({ where: { buildJobId: queued.id } }))
       .toMatchObject({
         outcome: "fail",
-        summary: expect.stringContaining("SERVER_PLAN_CREATIVE_MISMATCH"),
+        summary: "构建执行未完成，请使用参考编号联系管理员。",
+        details: { error: {
+          code: "BUILD_EXECUTION_FAILED",
+          message: "构建执行未完成，请使用参考编号联系管理员。",
+          correlationId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+        } },
       });
   });
 
@@ -1104,7 +1110,11 @@ describe("job runner", () => {
       .toBe(seeded.revision.id);
     expect((await prisma.validationReport.findFirst({ where: { buildJobId: queued.id } }))?.details)
       .toEqual(expect.objectContaining({
-        error: expect.objectContaining({ message: expect.stringMatching(/asset.*missing|missing.*asset/i) }),
+        error: {
+          code: "BUILD_EXECUTION_FAILED",
+          message: "构建执行未完成，请使用参考编号联系管理员。",
+          correlationId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+        },
       }));
   });
 
@@ -1310,12 +1320,14 @@ describe("crash recovery (Step 7)", () => {
     // but before the database commit.
     const leased = await jobs.leaseNext("worker-a", now, leaseMs);
     expect(leased!.id).toBe(queued.id);
+    let firstStored: StoredArtifact | undefined;
     const crashingExecutor = new BuildExecutor({
       prisma,
       storage,
       registry,
       hooks: {
-        beforeCommit: async () => {
+        beforeCommit: async (stored) => {
+          firstStored = stored;
           throw new BuildWorkerCrash("simulated worker termination after artifact write");
         },
       },
@@ -1331,6 +1343,9 @@ describe("crash recovery (Step 7)", () => {
       where: { buildJobId: queued.id },
     });
     expect(artifactsAfterCrash).toHaveLength(0);
+    expect(firstStored).toBeDefined();
+    await expect(collect(await storage.open(tenant.id, firstStored!.artifactId)))
+      .resolves.toHaveLength(firstStored!.size);
     const crashedJob = await prisma.buildJob.findUnique({ where: { id: queued.id } });
     expect(["QUEUED", "RUNNING", "VALIDATING"]).toContain(crashedJob!.status);
 
@@ -1355,10 +1370,61 @@ describe("crash recovery (Step 7)", () => {
     expect(built).toHaveLength(1);
     const artifacts = await prisma.artifact.findMany({ where: { buildJobId: queued.id } });
     expect(artifacts).toHaveLength(1);
+    expect(artifacts[0]!.storageKey).toBe(firstStored!.artifactId);
+    expect(artifacts[0]!.sha256).toBe(firstStored!.sha256);
+    await expect(collect(await storage.open(tenant.id, firstStored!.artifactId)))
+      .resolves.toHaveLength(firstStored!.size);
 
     const workspaceNow = await prisma.solutionWorkspace.findUnique({
       where: { id: workspace.id },
     });
     expect(workspaceNow!.currentRevisionId).toBe(built[0]!.id);
+  });
+});
+
+describe("customer-safe worker diagnostics", () => {
+  it("persists only a public code, bounded message, and correlation id while privately logging the hostile error", async () => {
+    const seeded = await seedNewWorkspace();
+    const queued = await jobs.enqueue(enqueueInput(seeded));
+    const leased = await jobs.leaseNext("hostile-diagnostic-worker", new Date());
+    const hostilePack = clientPack();
+    const hostileRegistry = new DomainRegistry();
+    hostileRegistry.register({
+      ...hostilePack,
+      async compile() {
+        throw new Error(
+          "Authorization: Bearer worker-secret at /Users/operator/private/project.json",
+          { cause: new Error("database-password=super-secret") },
+        );
+      },
+    });
+    const operatorError = vi.fn();
+    const executor = new BuildExecutor({
+      prisma,
+      storage,
+      registry: hostileRegistry,
+      operatorLogger: { error: operatorError },
+    });
+
+    expect((await executor.execute(leased!)).status).toBe("FAILED");
+
+    const report = await prisma.validationReport.findFirstOrThrow({
+      where: { buildJobId: queued.id },
+    });
+    expect(report.details).toEqual({
+      error: {
+        code: "BUILD_EXECUTION_FAILED",
+        message: "构建执行未完成，请使用参考编号联系管理员。",
+        correlationId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      },
+    });
+    expect(`${report.summary} ${JSON.stringify(report.details)}`).not.toMatch(
+      /Bearer|worker-secret|\/Users|private|password|super-secret|stack|cause/i,
+    );
+    const correlationId = (report.details as { error: { correlationId: string } }).error.correlationId;
+    expect(operatorError).toHaveBeenCalledWith(
+      expect.stringContaining(correlationId),
+      expect.objectContaining({ message: expect.stringContaining("worker-secret") }),
+    );
   });
 });

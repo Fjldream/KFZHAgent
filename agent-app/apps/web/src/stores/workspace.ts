@@ -7,6 +7,7 @@ import type {
   BuildJobStatus,
   ChangePlanDisplay,
   ChatMessage,
+  CreativeProjectDelivery,
   ModuleDeliveryResult,
   Revision,
   ScriptChange,
@@ -60,6 +61,8 @@ export interface WorkspaceState {
   revisions: Revision[];
   currentRevisionId: string | null;
   moduleDeliveryResult: ModuleDeliveryResult | null;
+  /** Authoritative creative-v2 delivery; creative artifacts are download-only. */
+  projectDelivery: CreativeProjectDelivery | null;
 }
 
 const state: WorkspaceState = reactive({
@@ -82,6 +85,7 @@ const state: WorkspaceState = reactive({
   revisions: [],
   currentRevisionId: null,
   moduleDeliveryResult: null,
+  projectDelivery: null,
 });
 
 /** Monotonic fence: a newer load/build poll makes all older async responses stale. */
@@ -137,6 +141,10 @@ async function refreshDelivery(
     || delivery.buildJobId !== jobId
   ) return;
   applyModuleDeliveryResult(delivery.result);
+  applyProjectDelivery(delivery.projectDelivery);
+  if (delivery.projectDelivery?.workflow === "creative-v2") {
+    state.previewArtifactId = undefined;
+  }
   if (delivery.result?.status === "blocked") {
     state.previewArtifactId = undefined;
     state.artifacts = [];
@@ -173,13 +181,18 @@ async function pollBuildJob(
           if (!isCurrent()) return job.status;
           state.artifacts = artifacts;
           const clientPackage = artifacts.find((a) => a.kind === "client-package");
-          if (clientPackage !== undefined) {
+          if (clientPackage !== undefined && !isCreativeWorkflow()) {
             state.previewArtifactId = clientPackage.id;
+          } else if (isCreativeWorkflow()) {
+            state.previewArtifactId = undefined;
           }
-        } else if (state.moduleDeliveryResult !== null) {
+        } else if (state.moduleDeliveryResult !== null || isCreativeWorkflow()) {
           state.previewArtifactId = undefined;
           state.artifacts = [];
-          state.moduleDeliveryResult = failClosedDelivery(state.moduleDeliveryResult, "工程构建失败");
+          if (state.moduleDeliveryResult !== null) {
+            state.moduleDeliveryResult = failClosedDelivery(state.moduleDeliveryResult, "工程构建失败");
+          }
+          if (isCreativeWorkflow()) state.projectDelivery = null;
         }
         try {
           const report = await api.getBuildJobReport(jobId);
@@ -227,6 +240,7 @@ async function load(workspaceId: string): Promise<void> {
   state.previewArtifactId = undefined;
   state.validationReport = null;
   state.moduleDeliveryResult = null;
+  state.projectDelivery = null;
   state.workspaceId = workspaceId;
   try {
     const workspace = await api.getWorkspace(workspaceId);
@@ -255,6 +269,7 @@ async function load(workspaceId: string): Promise<void> {
     if (!isCurrentLoad() || buildPollGeneration !== expectedBuildPollGeneration) return;
     if (delivery !== null && delivery.workspaceId === workspaceId && delivery.conversationId === conversationId) {
       applyModuleDeliveryResult(delivery.result);
+      applyProjectDelivery(delivery.projectDelivery);
       const boundBuild = delivery.buildJob ?? null;
       if (boundBuild !== null && boundBuild.workspaceId === workspaceId && boundBuild.id === delivery.buildJobId) {
         state.buildJobId = boundBuild.id;
@@ -501,6 +516,15 @@ async function downloadArtifact(artifactId: string): Promise<void> {
     state.error = error.message;
     throw error;
   }
+  if (isCreativeWorkflow()
+    && (state.projectDelivery?.workflow !== "creative-v2"
+      || state.projectDelivery.status !== "downloadable"
+      || !state.projectDelivery.download.available
+      || state.projectDelivery.artifactId !== artifactId)) {
+    const error = new Error("创意工程尚未达到可下载状态");
+    state.error = error.message;
+    throw error;
+  }
   const { token } = await api.createDownloadToken(artifactId);
   const url = api.downloadUrl(token);
   const anchor = document.createElement("a");
@@ -537,6 +561,56 @@ function applyModuleDeliveryResult(input: unknown): void {
       preservedModules: [...input.revisionDiff.preservedModules],
     },
   };
+}
+
+function applyProjectDelivery(input: unknown): void {
+  if (input === null || input === undefined) {
+    state.projectDelivery = null;
+    return;
+  }
+  if (!isCreativeProjectDelivery(input)) {
+    // Delivery is server-owned security state. A malformed refresh must fail
+    // closed instead of leaving an older downloadable snapshot usable.
+    state.projectDelivery = null;
+    if (state.workspace?.generationWorkflow === "creative-v2") {
+      state.previewArtifactId = undefined;
+    }
+    return;
+  }
+  state.projectDelivery = {
+    workflow: "creative-v2",
+    projectKey: input.projectKey,
+    status: input.status,
+    artifactId: input.artifactId,
+    revisionId: input.revisionId,
+    download: { ...input.download },
+    kf36RuntimeVerification: { ...input.kf36RuntimeVerification },
+  };
+  state.previewArtifactId = undefined;
+}
+
+function isCreativeProjectDelivery(input: unknown): input is CreativeProjectDelivery {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) return false;
+  const value = input as Record<string, unknown>;
+  const download = value["download"];
+  const runtime = value["kf36RuntimeVerification"];
+  return value["workflow"] === "creative-v2"
+    && typeof value["projectKey"] === "string"
+    && ["downloadable", "building", "failed", "blocked"].includes(String(value["status"]))
+    && (value["artifactId"] === null || typeof value["artifactId"] === "string")
+    && (value["revisionId"] === null || typeof value["revisionId"] === "string")
+    && download !== null && typeof download === "object" && !Array.isArray(download)
+    && typeof (download as Record<string, unknown>)["available"] === "boolean"
+    && ((download as Record<string, unknown>)["tokenEndpoint"] === null
+      || typeof (download as Record<string, unknown>)["tokenEndpoint"] === "string")
+    && runtime !== null && typeof runtime === "object" && !Array.isArray(runtime)
+    && (runtime as Record<string, unknown>)["status"] === "not_performed"
+    && (runtime as Record<string, unknown>)["notice"] === "尚未经过人工 KingFusion 3.6 运行态验证";
+}
+
+function isCreativeWorkflow(): boolean {
+  return state.projectDelivery?.workflow === "creative-v2"
+    || state.workspace?.generationWorkflow === "creative-v2";
 }
 
 function failClosedDelivery(base: ModuleDeliveryResult, reason: string): ModuleDeliveryResult {

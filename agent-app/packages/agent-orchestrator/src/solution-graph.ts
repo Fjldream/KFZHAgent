@@ -20,6 +20,7 @@ import { createModulePlanNode } from "./nodes/module-plan.js";
 import { createCapabilityRetrievalNode } from "./nodes/capability-retrieval.js";
 import { createSolutionImplementationPlanNode } from "./nodes/solution-implementation-plan.js";
 import { createCompileCreativeSolutionNode } from "./nodes/compile-creative-solution.js";
+import { hasCurrentDesignPlanVersion } from "./design-plan-version.js";
 
 /**
  * Thrown when the caller tries to run a conversation that is paused at the
@@ -181,7 +182,9 @@ export function routeAfterDesignConfirmation(
       && state.buildJobId === undefined
       && isRetryableCreativeError(state.lastErrorCode)
       && latestUserText(state) === "重新生成工程";
-    return state.designPlan?.schema === "kf-design-plan/v3" && (firstConfirmation || explicitRetry)
+    return state.designPlan?.schema === "kf-design-plan/v3"
+      && hasCurrentDesignPlanVersion(state.designPlan, state.designRevision, state.designPlanHash)
+      && (firstConfirmation || explicitRetry)
       ? "capability-retrieval"
       : END;
   }

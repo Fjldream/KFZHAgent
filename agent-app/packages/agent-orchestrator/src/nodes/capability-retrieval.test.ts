@@ -1,6 +1,7 @@
 import { canonicalServerHash, type CapabilityCandidateBundle, type CustomerSolutionBlueprint } from "@kf/contracts";
 import { END } from "@langchain/langgraph";
 import { describe, expect, it, vi } from "vitest";
+import { hashDesignPlan } from "../design-plan-version.js";
 import { routeAfterClassify, routeAfterDesignConfirmation } from "../solution-graph.js";
 import { createCapabilityRetrievalNode } from "./capability-retrieval.js";
 
@@ -88,6 +89,13 @@ function candidates(blueprintHash = canonicalServerHash(blueprint)): CapabilityC
   };
 }
 
+function designVersionHash(
+  revision = 1,
+  value: CustomerSolutionBlueprint = blueprint,
+): string {
+  return hashDesignPlan(value, revision);
+}
+
 function state(overrides: Record<string, unknown> = {}) {
   return {
     tenantId: "tenant-1",
@@ -97,7 +105,8 @@ function state(overrides: Record<string, unknown> = {}) {
     recentMessages: [{ role: "user", content: "创建访客中心" }],
     generationWorkflow: "creative-v2",
     designPlan: blueprint,
-    designPlanHash: canonicalServerHash(blueprint),
+    designPlanHash: designVersionHash(),
+    designRevision: 1,
     stage: "design-review",
     ...overrides,
   };
@@ -138,6 +147,23 @@ describe("capability retrieval node", () => {
     const retrieve = vi.fn();
     const node = createCapabilityRetrievalNode({ capabilityRetrieval: { retrieve } } as never);
     const update = await node(state({ designPlan: { schema: "kf-design-plan/v2" } }) as never);
+
+    expect(update).toMatchObject({ stage: "idle", lastErrorCode: "CAPABILITY_RETRIEVAL_FAILED" });
+    expect(retrieve).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["stale hash", { designPlanHash: "a".repeat(64) }],
+    ["missing revision", { designRevision: undefined }],
+    ["stale revision", { designRevision: 2 }],
+    ["old blueprint with a new hash", {
+      designPlanHash: designVersionHash(1, { ...blueprint, displayName: "另一份蓝图" }),
+    }],
+  ])("rejects %s before retrieval", async (_case, overrides) => {
+    const retrieve = vi.fn().mockResolvedValue(candidates());
+    const node = createCapabilityRetrievalNode({ capabilityRetrieval: { retrieve } } as never);
+
+    const update = await node(state(overrides) as never);
 
     expect(update).toMatchObject({ stage: "idle", lastErrorCode: "CAPABILITY_RETRIEVAL_FAILED" });
     expect(retrieve).not.toHaveBeenCalled();
@@ -192,6 +218,14 @@ describe("creative-v2 routing", () => {
 
   it("rejects creative-v2 confirmation when the design is not v3", () => {
     expect(routeAfterDesignConfirmation(state({ designPlan: { schema: "kf-design-plan/v2" } }) as never)).toBe(END);
+  });
+
+  it.each([
+    ["stale hash", { designPlanHash: "a".repeat(64) }],
+    ["missing revision", { designRevision: undefined }],
+    ["stale revision", { designRevision: 2 }],
+  ])("does not route creative confirmation with %s", (_case, overrides) => {
+    expect(routeAfterDesignConfirmation(state(overrides) as never)).toBe(END);
   });
 
   it("rejects plain duplicate confirmation and permits only the explicit no-job retry phrase", () => {

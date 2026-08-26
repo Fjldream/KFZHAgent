@@ -247,6 +247,68 @@ describe("workspace store load() 会话绑定", () => {
     expect(store.state.previewArtifactId).toBe("art-pkg");
   });
 
+  it("uses creative projectDelivery as authoritative download-only state without assigning preview", async () => {
+    const projectDelivery = {
+      workflow: "creative-v2",
+      projectKey: "creative",
+      status: "downloadable",
+      artifactId: "art-creative",
+      revisionId: "rev-creative",
+      download: { available: true, tokenEndpoint: "/api/artifacts/art-creative/download-token" },
+      kf36RuntimeVerification: {
+        status: "not_performed",
+        notice: "尚未经过人工 KingFusion 3.6 运行态验证",
+      },
+    };
+    api.getBuildJob.mockResolvedValue({ id: "job-creative", workspaceId: "ws-1", status: "SUCCEEDED" });
+    api.listBuildArtifacts.mockResolvedValue([{ id: "art-creative", kind: "client-package" }]);
+    api.getBuildJobReport.mockResolvedValue({ outcome: "pass" });
+    api.getConversationDelivery.mockResolvedValue({
+      conversationId: "conv-a",
+      workspaceId: "ws-1",
+      buildJobId: "job-creative",
+      artifactId: "art-creative",
+      revisionId: "rev-creative",
+      result: null,
+      projectDelivery,
+      buildJob: { id: "job-creative", workspaceId: "ws-1", status: "SUCCEEDED" },
+    });
+    const store = useWorkspace();
+    api.getWorkspace.mockResolvedValue({ ...ws, generationWorkflow: "creative-v2" });
+    store.state.workspaceId = "ws-1";
+    store.state.conversationId = "conv-a";
+    store.state.workspace = { ...ws, generationWorkflow: "creative-v2" };
+
+    await store.pollBuildJob("job-creative");
+
+    expect(store.state.projectDelivery).toEqual(projectDelivery);
+    expect(store.state.artifacts).toEqual([{ id: "art-creative", kind: "client-package" }]);
+    expect(store.state.previewArtifactId).toBeUndefined();
+
+    api.getConversationDelivery.mockResolvedValue({
+      conversationId: "conv-a",
+      workspaceId: "ws-1",
+      buildJobId: "job-creative",
+      artifactId: "art-creative",
+      revisionId: "rev-creative",
+      result: null,
+      projectDelivery: {
+        ...projectDelivery,
+        kf36RuntimeVerification: {
+          ...projectDelivery.kf36RuntimeVerification,
+          notice: "forged runtime verification",
+        },
+      },
+      buildJob: { id: "job-creative", workspaceId: "ws-1", status: "SUCCEEDED" },
+    });
+    await store.pollBuildJob("job-creative");
+
+    expect(store.state.projectDelivery).toBeNull();
+    api.createDownloadToken.mockResolvedValue({ token: "must-not-be-used" });
+    await expect(store.downloadArtifact("art-creative")).rejects.toThrow("创意工程尚未达到可下载状态");
+    expect(api.createDownloadToken).not.toHaveBeenCalled();
+  });
+
   it("restores the latest successful build artifacts and preview when reopening a workspace", async () => {
     api.listConversations.mockResolvedValue([convA]);
     api.listMessages.mockResolvedValue([]);

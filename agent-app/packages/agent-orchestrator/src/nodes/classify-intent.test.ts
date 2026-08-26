@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createClassifyIntentNode } from "./classify-intent.js";
 import type { ClassifyIntentResult } from "../schemas/intent.js";
 import { routeAfterClassify } from "../solution-graph.js";
+import { hashDesignPlan } from "../design-plan-version.js";
 
 function makeClarifyDeps() {
   const modelPort = {
@@ -67,10 +68,12 @@ describe("classify-intent node design-review routing", () => {
       workspaceQuery: { appendMessage: vi.fn().mockResolvedValue(undefined) },
       isDomainSupported: () => true,
     };
+    const designPlan = { schema: "kf-design-plan/v3" } as const;
     const before = baseState({
       generationWorkflow: "creative-v2",
-      designPlan: { schema: "kf-design-plan/v3" },
-      designPlanHash: "a".repeat(64),
+      designPlan,
+      designPlanHash: hashDesignPlan(designPlan as never, 1),
+      designRevision: 1,
       lastErrorCode: "CREATIVE_SOLUTION_BLOCKED:LAYOUT_OVERFLOW",
       recentMessages: [{ role: "user", content: "重新生成工程" }],
     });

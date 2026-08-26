@@ -10,6 +10,8 @@ import {
   RevisionStateError,
 } from "./revision-state.js";
 
+const MAX_LEASE_CANDIDATE_WORKSPACES = 16;
+
 /**
  * Durable build-job lease and commit logic, shared by the API (enqueue) and
  * the worker (lease/execute/commit).
@@ -18,8 +20,8 @@ import {
  * idempotencyKey; the UNIQUE index on idempotencyKey is the concurrency
  * backstop.
  *
- * Leasing: `leaseNext` runs a single transaction that first serializes the
- * claim decision per candidate workspace with `pg_advisory_xact_lock`
+ * Leasing: `leaseNext` inspects one bounded workspace batch and serializes the
+ * claim decision with non-blocking `pg_try_advisory_xact_lock`
  * (transaction-scoped, auto-released), then locks one candidate row with
  * `SELECT ... FOR UPDATE SKIP LOCKED`, taking a claim (`leaseOwner` +
  * `leaseExpiresAt`) and bumping `attemptCount`. Only QUEUED/RUNNING/VALIDATING
@@ -126,61 +128,73 @@ export class BuildJobService {
    * snapshot, so a concurrent transaction's uncommitted RUNNING update is
    * invisible and two workers could claim two QUEUED jobs of the same
    * workspace. We therefore serialize the claim decision per candidate
-   * workspace with `pg_advisory_xact_lock(workspaceId)` (transaction-scoped,
-   * auto-released) before re-checking against committed state.
+   * workspace with a bounded `pg_try_advisory_xact_lock(workspaceId)` loop
+   * (transaction-scoped, auto-released) before re-checking committed state.
    */
   async leaseNext(owner: string, now: Date, leaseMs?: number): Promise<BuildJob | null> {
     const ttl = leaseMs ?? this.leaseMs;
     const expiry = new Date(now.getTime() + ttl);
     return this.prisma.$transaction(async (tx) => {
-      // Candidate workspaces: any workspace holding a claimable row. Sorted so
-      // every worker takes advisory locks in the same order (no deadlocks).
+      // Select only the oldest bounded workspace batch. One tenant can add an
+      // arbitrarily large backlog without increasing this transaction's lock
+      // count or database round trips beyond the fixed batch size.
       const workspaces = await tx.$queryRaw<{ workspaceId: string }[]>`
-        SELECT DISTINCT "workspaceId"
-        FROM "BuildJob"
-        WHERE "status" IN ('QUEUED', 'RUNNING', 'VALIDATING')
-          AND ("leaseExpiresAt" IS NULL
-               OR extract(epoch from "leaseExpiresAt") < extract(epoch from ${now}))
-        ORDER BY "workspaceId"
-      `;
-      for (const ws of workspaces) {
-        await tx.$executeRaw`
-          SELECT pg_advisory_xact_lock(hashtextextended(${ws.workspaceId}, 0))
-        `;
-      }
-
-      // Re-check against committed state now that no other lease transaction
-      // can be mid-claim for the same workspace.
-      const rows = await tx.$queryRaw<BuildJobRow[]>`
-        SELECT * FROM "BuildJob"
-        WHERE "status" IN ('QUEUED', 'RUNNING', 'VALIDATING')
-          AND ("leaseExpiresAt" IS NULL
-               OR extract(epoch from "leaseExpiresAt") < extract(epoch from ${now}))
+        SELECT candidate."workspaceId"
+        FROM "BuildJob" AS candidate
+        WHERE candidate."status" IN ('QUEUED', 'RUNNING', 'VALIDATING')
+          AND (candidate."leaseExpiresAt" IS NULL
+               OR extract(epoch from candidate."leaseExpiresAt") < extract(epoch from ${now}))
           AND NOT EXISTS (
             SELECT 1 FROM "BuildJob" AS active
-            WHERE active."workspaceId" = "BuildJob"."workspaceId"
+            WHERE active."workspaceId" = candidate."workspaceId"
               AND active."status" IN ('RUNNING', 'VALIDATING')
               AND active."leaseExpiresAt" IS NOT NULL
               AND extract(epoch from active."leaseExpiresAt") >= extract(epoch from ${now})
-              AND active."id" <> "BuildJob"."id"
           )
-        ORDER BY "createdAt" ASC
-        LIMIT 1
-        FOR UPDATE SKIP LOCKED
+        GROUP BY candidate."workspaceId"
+        ORDER BY MIN(candidate."createdAt") ASC, candidate."workspaceId" ASC
+        LIMIT ${MAX_LEASE_CANDIDATE_WORKSPACES}
       `;
-      if (rows.length === 0) return null;
-      const row = rows[0];
-      if (row === undefined) return null;
-      await this.#debugHooks.beforeClaim?.();
-      return tx.buildJob.update({
-        where: { id: row.id },
-        data: {
-          status: "RUNNING",
-          leaseOwner: owner,
-          leaseExpiresAt: expiry,
-          attemptCount: { increment: 1 },
-        },
-      });
+      for (const ws of workspaces) {
+        const lock = await tx.$queryRaw<{ acquired: boolean }[]>`
+          SELECT pg_try_advisory_xact_lock(hashtextextended(${ws.workspaceId}, 0)) AS "acquired"
+        `;
+        if (lock[0]?.acquired !== true) continue;
+
+        // Re-check after acquiring this workspace's lock. A competing claimant
+        // may have committed between the bounded candidate query and here.
+        const rows = await tx.$queryRaw<BuildJobRow[]>`
+          SELECT * FROM "BuildJob" AS candidate
+          WHERE candidate."workspaceId" = ${ws.workspaceId}
+            AND candidate."status" IN ('QUEUED', 'RUNNING', 'VALIDATING')
+            AND (candidate."leaseExpiresAt" IS NULL
+                 OR extract(epoch from candidate."leaseExpiresAt") < extract(epoch from ${now}))
+            AND NOT EXISTS (
+              SELECT 1 FROM "BuildJob" AS active
+              WHERE active."workspaceId" = candidate."workspaceId"
+                AND active."status" IN ('RUNNING', 'VALIDATING')
+                AND active."leaseExpiresAt" IS NOT NULL
+                AND extract(epoch from active."leaseExpiresAt") >= extract(epoch from ${now})
+                AND active."id" <> candidate."id"
+            )
+          ORDER BY candidate."createdAt" ASC, candidate."id" ASC
+          LIMIT 1
+          FOR UPDATE OF candidate SKIP LOCKED
+        `;
+        const row = rows[0];
+        if (row === undefined) continue;
+        await this.#debugHooks.beforeClaim?.();
+        return tx.buildJob.update({
+          where: { id: row.id },
+          data: {
+            status: "RUNNING",
+            leaseOwner: owner,
+            leaseExpiresAt: expiry,
+            attemptCount: { increment: 1 },
+          },
+        });
+      }
+      return null;
     });
   }
 

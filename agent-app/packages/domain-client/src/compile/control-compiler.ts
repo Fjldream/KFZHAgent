@@ -416,9 +416,6 @@ function appendScript(existing: string, additions: readonly string[]): string {
 const COMPILED_EVENT_MARKER = "// kf-compiled-event/v1 ";
 
 function serializedCompiledModule(module: CompiledScriptModule, binding?: CompiledEventBinding): string {
-  if (module.source.includes("kf-compiled-event/v1")) {
-    throw new ModelOutputInvalidError(`compiled script body contains the reserved marker token: ${module.id}`);
-  }
   const payload = {
     schema: "kf-compiled-event/v1",
     moduleId: module.id,
@@ -531,13 +528,11 @@ function stripCompilerOwnedScriptTail(
   ownerInstanceName: string,
   expected?: { placement: "event" | "configure-data"; kfEvent: string | null; linkId: number | null },
 ): string {
-  if (!source.includes("kf-compiled-event/v1")) return source;
+  if (!hasCompilerOwnedScriptTail(source)) return source;
   const bytes = Buffer.from(source, "utf8");
   const marker = Buffer.from(COMPILED_EVENT_MARKER, "utf8");
-  const first = bytes.indexOf(marker);
-  if (first < 0 || (first > 0 && bytes.subarray(Math.max(0, first - 3), first).toString("utf8") !== "\n;\n")) {
-    throw new ModelOutputInvalidError("compiler marker boundary is malformed");
-  }
+  const first = firstCompilerTailMarker(bytes, marker);
+  if (first < 0) return source;
   const legacyEnd = first === 0 ? 0 : first - 3;
   let cursor = first;
   while (cursor < bytes.length) {
@@ -601,6 +596,21 @@ function stripCompilerOwnedScriptTail(
     else throw new ModelOutputInvalidError("compiler module boundary is malformed");
   }
   return bytes.subarray(0, legacyEnd).toString("utf8");
+}
+
+function hasCompilerOwnedScriptTail(source: string): boolean {
+  return source.startsWith(COMPILED_EVENT_MARKER)
+    || source.includes(`\n;\n${COMPILED_EVENT_MARKER}`);
+}
+
+function firstCompilerTailMarker(source: Buffer, marker: Buffer): number {
+  let cursor = 0;
+  for (;;) {
+    const found = source.indexOf(marker, cursor);
+    if (found < 0) return -1;
+    if (found === 0 || (found >= 3 && source.subarray(found - 3, found).toString("utf8") === "\n;\n")) return found;
+    cursor = found + marker.length;
+  }
 }
 
 function serializeCompiledNativeAction(
@@ -775,7 +785,7 @@ export function serializeReviewedNativeInteractions(
       }
       return [];
     }
-    if (typeof record["script"] === "string" && record["script"].includes("kf-compiled-event/v1")) {
+    if (typeof record["script"] === "string" && hasCompilerOwnedScriptTail(record["script"])) {
       const legacy = stripCompilerOwnedScriptTail(record["script"], ownerInstanceName, {
         placement: "event",
         kfEvent: typeof record["name"] === "string" ? record["name"] : null,
@@ -878,7 +888,7 @@ export function serializeReviewedNativeInteractions(
     }), configureModules.map((module) => serializedCompiledModule(module)));
     if (configured.length > 32_000) throw new ModelOutputInvalidError("compiled configureData exceeds 32000 characters");
     result["configureData"] = configured;
-  } else if (typeof result["configureData"] === "string" && result["configureData"].includes("kf-compiled-event/v1")) {
+  } else if (typeof result["configureData"] === "string" && hasCompilerOwnedScriptTail(result["configureData"])) {
     result["configureData"] = stripCompilerOwnedScriptTail(result["configureData"], ownerInstanceName, {
       placement: "configure-data", kfEvent: null, linkId: null,
     });

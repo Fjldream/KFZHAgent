@@ -80,7 +80,7 @@ export class BuildJobController {
     if (report === null) {
       throw new NotFoundException();
     }
-    return report;
+    return publicValidationReport(report);
   }
 
   /** A terminal status is irreversible, so recording once per job is enough. */
@@ -98,4 +98,37 @@ export class BuildJobController {
       detail: { status: job.status, workspaceId: job.workspaceId },
     });
   }
+}
+
+const PUBLIC_BUILD_ERROR_CODE = "BUILD_EXECUTION_FAILED";
+const PUBLIC_BUILD_ERROR_MESSAGE = "构建执行未完成，请使用参考编号联系管理员。";
+const CORRELATION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function publicValidationReport(report: ValidationReport): ValidationReport {
+  const details = jsonRecord(report.details);
+  if (details !== undefined && Object.hasOwn(details, "error")) {
+    const error = jsonRecord(details.error);
+    const candidate = error?.["correlationId"];
+    const correlationId = typeof candidate === "string" && CORRELATION_ID_RE.test(candidate)
+      ? candidate.toLowerCase()
+      : report.id;
+    return {
+      ...report,
+      summary: PUBLIC_BUILD_ERROR_MESSAGE,
+      details: {
+        error: {
+          code: PUBLIC_BUILD_ERROR_CODE,
+          message: PUBLIC_BUILD_ERROR_MESSAGE,
+          correlationId,
+        },
+      },
+    };
+  }
+  return report;
+}
+
+function jsonRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
 }

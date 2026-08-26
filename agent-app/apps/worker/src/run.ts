@@ -49,6 +49,11 @@ async function main(): Promise<never> {
     pollIntervalMs: 1_000,
     leaseMs: 30_000,
     serverPlanVerifier: serverPlanAuthority,
+    operatorLogger: {
+      error(message, error) {
+        console.error(`[worker] ${message}`, error);
+      },
+    },
   });
   const workerInstanceId = createWorkerInstanceId();
   console.log(`[worker] KF Solution Agent worker started (${workerInstanceId})`);

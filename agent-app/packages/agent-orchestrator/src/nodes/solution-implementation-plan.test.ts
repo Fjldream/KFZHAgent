@@ -8,6 +8,7 @@ import {
 } from "@kf/contracts";
 import { assertSolutionPlanUsesCandidates } from "@kf/domain-client";
 import { describe, expect, it, vi } from "vitest";
+import { hashDesignPlan } from "../design-plan-version.js";
 import { createSolutionImplementationPlanNode } from "./solution-implementation-plan.js";
 
 const blueprint: CustomerSolutionBlueprint = {
@@ -152,7 +153,8 @@ function state(overrides: Record<string, unknown> = {}) {
     revisionSummary: "当前为空工程。",
     generationWorkflow: "creative-v2",
     designPlan: blueprint,
-    designPlanHash: canonicalServerHash(blueprint),
+    designPlanHash: hashDesignPlan(blueprint, 1),
+    designRevision: 1,
     capabilityCandidates,
     capabilityCandidatesHash: canonicalServerHash(capabilityCandidates),
     stage: "implementation-planning",
@@ -328,6 +330,23 @@ describe("solution implementation planning node", () => {
 
     expect(stale).toMatchObject({ stage: "idle", lastErrorCode: "SOLUTION_PLANNING_FAILED" });
     expect(nonV3).toMatchObject({ stage: "idle", lastErrorCode: "SOLUTION_PLANNING_FAILED" });
+    expect(modelPort.createSolutionImplementationPlan).not.toHaveBeenCalled();
+    expect(modelPort.reviseSolutionImplementationSubtree).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["stale hash", { designPlanHash: "a".repeat(64) }],
+    ["missing revision", { designRevision: undefined }],
+    ["stale revision", { designRevision: 2 }],
+    ["old blueprint with a new hash", {
+      designPlanHash: hashDesignPlan({ ...blueprint, displayName: "另一份蓝图" }, 1),
+    }],
+  ])("rejects %s before asset or semantic model access", async (_case, overrides) => {
+    const { node, modelPort } = bed(plan());
+
+    const update = await node(state(overrides) as never);
+
+    expect(update).toMatchObject({ stage: "idle", lastErrorCode: "SOLUTION_PLANNING_FAILED" });
     expect(modelPort.createSolutionImplementationPlan).not.toHaveBeenCalled();
     expect(modelPort.reviseSolutionImplementationSubtree).not.toHaveBeenCalled();
   });

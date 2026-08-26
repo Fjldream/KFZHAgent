@@ -8,6 +8,7 @@ import {
   type SolutionImplementationPlan,
 } from "@kf/contracts";
 import { describe, expect, it, vi } from "vitest";
+import { hashDesignPlan } from "../design-plan-version.js";
 import type { CreativeSolutionCompilerPort, SolutionGraphDeps } from "../ports.js";
 import type { AgentGraphStateValue } from "../state.js";
 import { createCompileCreativeSolutionNode } from "./compile-creative-solution.js";
@@ -143,7 +144,8 @@ function state(overrides: Partial<AgentGraphStateValue> = {}): AgentGraphStateVa
     currentRevisionId: "revision-1",
     generationWorkflow: "creative-v2",
     designPlan: blueprint,
-    designPlanHash: canonicalServerHash(blueprint),
+    designPlanHash: hashDesignPlan(blueprint, 1),
+    designRevision: 1,
     capabilityCandidates: candidates,
     capabilityCandidatesHash: canonicalServerHash(candidates),
     solutionImplementationPlan: semanticPlan,
@@ -257,6 +259,27 @@ describe("compile creative solution node", () => {
     });
     expect(missing.compile).not.toHaveBeenCalled();
     expect(stale.compile).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["stale hash", { designPlanHash: "a".repeat(64) }],
+    ["missing revision", { designRevision: undefined }],
+    ["stale revision", { designRevision: 2 }],
+    ["old blueprint with a new hash", {
+      designPlanHash: hashDesignPlan({ ...blueprint, displayName: "另一份蓝图" }, 1),
+    }],
+  ])("rejects %s before compiler persistence or enqueue authorization", async (_case, overrides) => {
+    const fixture = bed();
+
+    const result = await createCompileCreativeSolutionNode(fixture.deps)(state(overrides));
+
+    expect(result).toMatchObject({
+      stage: "idle",
+      lastErrorCode: "CREATIVE_SOLUTION_INPUT_INVALID",
+      buildAuthorization: undefined,
+    });
+    expect(fixture.compile).not.toHaveBeenCalled();
+    expect(fixture.messages).toEqual([]);
   });
 
   it("rejects a contradictory compiled outcome whose capability report still fails", async () => {

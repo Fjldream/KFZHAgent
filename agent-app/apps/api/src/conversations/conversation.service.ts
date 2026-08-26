@@ -270,16 +270,9 @@ export class ConversationService {
    * planHash the user was shown.
    *
    * Safety (I1): a resume is only meaningful while an approval interrupt is
-   * actually pending. The check-then-act (getState → graph resume → audit)
-   * sequence is serialized per conversation with a Postgres advisory lock
-   * (`pg_advisory_xact_lock`, transaction-scoped, auto-released — the same
-   * pattern Task 9 uses for build leases). Two concurrent resumes of the same
-   * conversation can therefore never both observe a pending interrupt: the
-   * loser waits on the lock, re-checks after the winner committed, finds no
-   * pending interrupt and is rejected with 409 NO_PENDING_APPROVAL *without*
-   * running the graph or writing audit rows. Audit writes land in the same
-   * transaction as the lock, so PLAN_CONFIRMED / BUILD_START can never be
-   * fabricated by replay (sequential or concurrent).
+   * actually pending. Every graph entry uses the same durable turn lease as a
+   * normal message, so the pending/hash check, graph drain, final checkpoint,
+   * and audit transaction have one cross-instance writer boundary.
    *
    * A planHash mismatch is surfaced as a 409 conflict with
    * PLAN_HASH_MISMATCH (graph returns to idle with no side effects). Graph
@@ -303,18 +296,13 @@ export class ConversationService {
     const conversation = await this.get(principal.tenantId, conversationId);
     const graph = await this.getGraph();
     const config = threadConfig(conversationId);
+    const lease = await this.turnLeases.acquire(conversationId);
 
-    return this.prisma.$transaction(
-      async (tx) => {
-        // Serialize resume processing per conversation. Every concurrent
-        // resume takes the same advisory lock; only one proceeds past this
-        // point at a time.
-        await tx.$executeRaw`
-          SELECT pg_advisory_xact_lock(hashtextextended(${conversationId}, 0))
-        `;
-
-        // Lock-internal re-check: any committed state from a winner (including
-        // the checkpoint of the graph resume) is visible now.
+    try {
+      const result = await this.prisma.$transaction(
+        async (tx) => {
+        // Lease-internal re-check: every graph entry observes the prior
+        // writer's committed checkpoint before it can enter the graph.
         const snapshot = (await graph.getState(config)) as unknown as StateSnapshotLike;
         if (!hasPendingInterrupt(snapshot)) {
           throw new ConflictException(
@@ -428,11 +416,17 @@ export class ConversationService {
           );
         }
         return result;
-      },
-      // The graph resume is fast (no LLM call), but keep a generous bound so
-      // a stalled checkpoint write cannot pin the advisory lock forever.
-      { timeout: 30_000 },
-    );
+        },
+        // The graph resume is fast (no LLM call), but keep a generous bound so
+        // a stalled checkpoint write cannot pin the durable turn lease forever.
+        { timeout: 30_000 },
+      );
+      await lease.dispose();
+      return result;
+    } catch (error) {
+      await lease.dispose().catch(() => {});
+      throw error;
+    }
   }
 
   private async getGraph(): Promise<CompiledGraph> {

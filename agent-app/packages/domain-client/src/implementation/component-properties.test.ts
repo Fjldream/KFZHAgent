@@ -33,6 +33,20 @@ describe("reviewed KF Tabs initialization", () => {
     });
   });
 
+  it.each([
+    ["line separator", "概览\u2028详情", "\\u2028"],
+    ["paragraph separator", "概览\u2029详情", "\\u2029"],
+  ])("round-trips a %s with script-safe JSON", (_name, label, escaped) => {
+    const source = serializeReviewedTabsInitialization(OWNER, {
+      tabs: [{ id: "overview", label }],
+      activeId: "overview",
+    });
+
+    expect(source).toContain(escaped);
+    expect(source).not.toContain(label);
+    expect(parseReviewedTabsInitialization(source).tabData).toEqual([{ name: "overview", label }]);
+  });
+
   it("rejects unbounded tab lists and active ids outside the tab list", () => {
     expect(() => serializeReviewedTabsInitialization(OWNER, {
       tabs: Array.from({ length: 33 }, (_, index) => ({ id: `tab-${index}`, label: `页签 ${index}` })),

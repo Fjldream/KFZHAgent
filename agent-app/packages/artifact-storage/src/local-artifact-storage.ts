@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { mkdir, open as fsOpen, rename, stat, unlink } from "node:fs/promises";
+import { link, mkdir, open as fsOpen, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import type { ArtifactKind, ArtifactStorage, StoredArtifact } from "./artifact-storage.js";
 
@@ -20,7 +20,7 @@ export class ArtifactStorageError extends Error {
  *
  * Layout: `<root>/<tenantId>/<artifactId>` where artifactId is an opaque UUID.
  * Writes go to a create-exclusive temp file (`wx`), are fsynced, and are then
- * atomically renamed into place. Absolute filesystem paths are never exposed
+ * atomically linked into place. Absolute filesystem paths are never exposed
  * through public return types.
  */
 export class LocalArtifactStorage implements ArtifactStorage {
@@ -29,6 +29,7 @@ export class LocalArtifactStorage implements ArtifactStorage {
   async put(input: {
     tenantId: string;
     kind: ArtifactKind;
+    artifactId?: string;
     stream: NodeJS.ReadableStream;
     maxBytes: number;
   }): Promise<StoredArtifact> {
@@ -43,8 +44,9 @@ export class LocalArtifactStorage implements ArtifactStorage {
     const tenantDir = this.tenantDir(tenantId);
     await mkdir(tenantDir, { recursive: true });
 
-    const artifactId = randomUUID();
-    const tmpPath = path.join(tenantDir, `.put-${artifactId}.tmp`);
+    const artifactId = input.artifactId ?? randomUUID();
+    assertArtifactId(artifactId);
+    const tmpPath = path.join(tenantDir, `.put-${artifactId}-${randomUUID()}.tmp`);
     const finalPath = path.join(tenantDir, artifactId);
 
     let handle: Awaited<ReturnType<typeof fsOpen>> | undefined;
@@ -70,10 +72,23 @@ export class LocalArtifactStorage implements ArtifactStorage {
       await handle.sync();
       await handle.close();
       handle = undefined;
-      await rename(tmpPath, finalPath);
-      await fsyncDirectory(tenantDir);
+      const sha256 = hash.digest("hex");
+      try {
+        // Hard-link publication is create-exclusive and atomic: an existing
+        // deterministic key can never be overwritten by a retry or collision.
+        await link(tmpPath, finalPath);
+        await fsyncDirectory(tenantDir);
+      } catch (error) {
+        if (!isFileExists(error)) throw error;
+        const existing = await inspectArtifact(finalPath);
+        if (existing.size !== size || existing.sha256 !== sha256) {
+          throw new ArtifactStorageError(
+            `ARTIFACT_ID_CONFLICT: artifact ${artifactId} already contains different bytes`,
+          );
+        }
+      }
 
-      return { artifactId, sha256: hash.digest("hex"), size };
+      return { artifactId, sha256, size };
     } finally {
       if (handle !== undefined) {
         await handle.close().catch(() => {});
@@ -106,11 +121,7 @@ export class LocalArtifactStorage implements ArtifactStorage {
 
   private artifactPath(tenantId: string, artifactId: string): string {
     assertTenantId(tenantId);
-    if (!ARTIFACT_ID_RE.test(artifactId)) {
-      throw new ArtifactStorageError(
-        "INVALID_ARTIFACT_ID: artifactId must be a lowercase UUID",
-      );
-    }
+    assertArtifactId(artifactId);
     return this.resolveWithin(tenantId, artifactId);
   }
 
@@ -134,8 +145,32 @@ function assertTenantId(tenantId: string): void {
   }
 }
 
+function assertArtifactId(artifactId: string): void {
+  if (!ARTIFACT_ID_RE.test(artifactId)) {
+    throw new ArtifactStorageError(
+      "INVALID_ARTIFACT_ID: artifactId must be a lowercase UUID",
+    );
+  }
+}
+
+function isFileExists(error: unknown): boolean {
+  return error !== null
+    && typeof error === "object"
+    && "code" in error
+    && error.code === "EEXIST";
+}
+
+async function inspectArtifact(filePath: string): Promise<{ sha256: string; size: number }> {
+  const metadata = await stat(filePath);
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(filePath) as AsyncIterable<Buffer | string>) {
+    hash.update(chunk);
+  }
+  return { sha256: hash.digest("hex"), size: metadata.size };
+}
+
 /**
- * Best-effort fsync of a directory so the rename that just landed in it is
+ * Best-effort fsync of a directory so the publication that just landed is
  * durably recorded. Not supported on every platform, hence errors are ignored
  * (the artifact file itself was already fsynced before the rename).
  */

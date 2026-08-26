@@ -99,6 +99,40 @@ describe("LocalArtifactStorage", () => {
     await expect(readAll(stream)).resolves.toBe("hello-a");
   });
 
+  it("idempotently adopts a trusted artifact id without overwriting different bytes", async () => {
+    const root = await tempRoot();
+    const storage = new LocalArtifactStorage(root);
+    const artifactId = "11111111-2222-4333-8444-555555555555";
+
+    const first = await storage.put({
+      tenantId: "tenant-a",
+      kind: KIND,
+      artifactId,
+      stream: Readable.from(["deterministic-package"]),
+      maxBytes: 1024,
+    });
+    const adopted = await storage.put({
+      tenantId: "tenant-a",
+      kind: KIND,
+      artifactId,
+      stream: Readable.from(["deterministic-package"]),
+      maxBytes: 1024,
+    });
+
+    expect(adopted).toEqual(first);
+    expect((await readdir(path.join(root, "tenant-a"))).filter((name) => !name.startsWith(".put-")))
+      .toEqual([artifactId]);
+
+    await expect(storage.put({
+      tenantId: "tenant-a",
+      kind: KIND,
+      artifactId,
+      stream: Readable.from(["different-package"]),
+      maxBytes: 1024,
+    })).rejects.toThrow("ARTIFACT_ID_CONFLICT");
+    await expect(readAll(await storage.open("tenant-a", artifactId))).resolves.toBe("deterministic-package");
+  });
+
   it("rejects path components containing .. in tenantId and artifactId", async () => {
     const root = await tempRoot();
     const storage = new LocalArtifactStorage(root);

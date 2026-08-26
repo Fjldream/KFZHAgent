@@ -25,7 +25,6 @@ import {
   inspectClientProject,
   getDesignKnowledgeSnapshot,
   retrieveCapabilities,
-  verifyExistingRuntimeCorrelation,
   SolutionCompileError,
   type InspectResult,
   type VerifiedExistingRuntimeCorrelationHandle,
@@ -510,7 +509,6 @@ export function createCreativeSolutionCompilerFromEnvironment(
           baseRevisionId: input.baseRevisionId,
           implementation,
           editableEntities: evidence.editableEntities,
-          ...(evidence.inspection === undefined ? {} : { inspection: evidence.inspection }),
         });
         const interactions = compileInteractions({
           blueprint: input.blueprint,
@@ -690,77 +688,37 @@ function correlateCreativeImplementation(input: {
   baseRevisionId: string;
   implementation: UIImplementationSpecV2;
   editableEntities: readonly EditableEntity[];
-  inspection?: InspectResult;
 }): { implementation: UIImplementationSpecV2; verifiedExisting?: VerifiedExistingRuntimeCorrelationHandle } {
   const derived = attachRuntimeCorrelation({
     workspaceId: input.workspaceId,
     baseRevisionId: input.baseRevisionId,
     implementation: input.implementation,
   });
-  const pageEntities = uniqueEditableEntities(input.editableEntities, "page");
-  const controlEntities = uniqueEditableEntities(input.editableEntities, "control");
-  const implementationPages = input.implementation.pages.filter((page) => page.compatibility === "native");
-  const hasExistingMatch = implementationPages.some((page) => pageEntities.has(page.id)
-    || page.controls.some((control) => controlEntities.has(control.id)));
-  if (!hasExistingMatch) return { implementation: derived };
-
-  const inspected = input.inspection;
-  if (inspected === undefined) throw new Error("CREATIVE_BASE_REVISION_EVIDENCE_MISSING");
-  const derivedPage = new Map(derived.runtimeCorrelation!.pages.map((entry) => [entry.semanticPageId, entry.pageGuid]));
-  const derivedControl = new Map(derived.runtimeCorrelation!.controls.map((entry) => [entry.semanticControlId, entry.instanceName]));
-  const pages = implementationPages.map((page) => {
-    const entity = pageEntities.get(page.id);
-    if (entity === undefined) {
-      return { source: "workspace-derived" as const, semanticPageId: page.id, pageGuid: derivedPage.get(page.id)! };
+  const existingPageNames = new Set(input.editableEntities
+    .filter((entity) => entity.kind === "page")
+    .map((entity) => entity.name.toLocaleLowerCase("en-US")));
+  const existingPageGuids = new Set(input.editableEntities
+    .filter((entity) => entity.kind === "page")
+    .map((entity) => entity.guid.toLocaleLowerCase("en-US")));
+  const existingControlNames = new Set(input.editableEntities
+    .filter((entity) => entity.kind === "control")
+    .map((entity) => entity.name.toLocaleLowerCase("en-US")));
+  for (const page of derived.runtimeCorrelation!.pages) {
+    if (existingPageNames.has(page.semanticPageId.toLocaleLowerCase("en-US"))
+      || existingPageGuids.has(page.pageGuid.toLocaleLowerCase("en-US"))) {
+      throw new Error("CREATIVE_RUNTIME_IDENTITY_COLLISION");
     }
-    const inspectedPage = inspected.index.pages[entity.guid];
-    if (inspectedPage === undefined || inspectedPage.name !== entity.name) {
-      throw new Error("CREATIVE_EDITABLE_ENTITY_EVIDENCE_MISMATCH");
-    }
-    return { source: "uploaded-existing" as const, semanticPageId: page.id, pageGuid: entity.guid };
-  });
-  const pageById = new Map(pages.map((page) => [page.semanticPageId, page]));
-  const controls = implementationPages.flatMap((page) => page.controls.map((control) => {
-    const entity = controlEntities.get(control.id);
-    if (entity === undefined) {
-      return { source: "workspace-derived" as const, semanticControlId: control.id, instanceName: derivedControl.get(control.id)! };
-    }
-    const inspectedControl = inspected.index.controls[entity.guid];
-    const owner = pageById.get(page.id);
-    if (inspectedControl === undefined || inspectedControl.name !== entity.name
-      || inspectedControl.capabilityId !== entity.type || owner?.source !== "uploaded-existing"
-      || inspectedControl.pageGuid !== owner.pageGuid) {
-      throw new Error("CREATIVE_EDITABLE_ENTITY_EVIDENCE_MISMATCH");
-    }
-    return { source: "uploaded-existing" as const, semanticControlId: control.id, instanceName: entity.name };
-  }));
-  const verifiedExisting = verifyExistingRuntimeCorrelation({
-    workspaceId: input.workspaceId,
-    baseRevisionId: input.baseRevisionId,
-    inspection: inspected,
-    correlations: { pages, controls },
-  });
-  return {
-    verifiedExisting,
-    implementation: attachRuntimeCorrelation({
-      workspaceId: input.workspaceId,
-      baseRevisionId: input.baseRevisionId,
-      implementation: input.implementation,
-      verifiedExisting,
-    }),
-  };
-}
-
-function uniqueEditableEntities(
-  entities: readonly EditableEntity[],
-  kind: EditableEntity["kind"],
-): Map<string, EditableEntity> {
-  const result = new Map<string, EditableEntity>();
-  for (const entity of entities.filter((candidate) => candidate.kind === kind)) {
-    if (result.has(entity.name)) throw new Error("CREATIVE_EDITABLE_ENTITY_AMBIGUOUS");
-    result.set(entity.name, entity);
   }
-  return result;
+  for (const control of derived.runtimeCorrelation!.controls) {
+    if (existingControlNames.has(control.instanceName.toLocaleLowerCase("en-US"))) {
+      throw new Error("CREATIVE_RUNTIME_IDENTITY_COLLISION");
+    }
+  }
+  // Existing-runtime reuse is intentionally absent without a server-issued
+  // opaque semantic/runtime provenance handle. Native names discovered by
+  // inspection are collision evidence only; model semantic text never selects
+  // an uploaded entity.
+  return { implementation: derived };
 }
 
 async function resolveCreativeEvidence(input: {
@@ -1059,6 +1017,7 @@ const SAFE_CREATIVE_REASON_CODES = new Set([
   "CREATIVE_MATERIALIZATION_INCOMPLETE",
   "CREATIVE_PERSISTENCE_OWNERSHIP_MISMATCH",
   "CREATIVE_PROJECT_IDENTITY_MISMATCH",
+  "CREATIVE_RUNTIME_IDENTITY_COLLISION",
   "EXPANSION_BUDGET_EXCEEDED",
   "IMPLEMENTATION_PAGE_MISSING",
   "INPUT_ACCESSOR_FORBIDDEN",

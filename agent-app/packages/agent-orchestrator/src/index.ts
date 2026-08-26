@@ -54,6 +54,7 @@ export {
 } from "./module-compilation-coordinator.js";
 export { compileSolutionGraph, ApprovalResumeRequiredError } from "./solution-graph.js";
 export { assessBlueprintRevision } from "./blueprint-quality.js";
+export { hashDesignPlan, hasCurrentDesignPlanVersion } from "./design-plan-version.js";
 export {
   encodeBlueprintMessage,
   decodeBlueprintMessage,

@@ -1209,7 +1209,12 @@ describe("domain pack delegation", () => {
       where: { buildJobId: queued.id },
     })).toMatchObject({
       outcome: "fail",
-      summary: expect.stringContaining("invalid solution revision state"),
+      summary: "构建执行未完成，请使用参考编号联系管理员。",
+      details: { error: {
+        code: "BUILD_EXECUTION_FAILED",
+        message: "构建执行未完成，请使用参考编号联系管理员。",
+        correlationId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      } },
     });
   });
 
@@ -1275,7 +1280,12 @@ describe("domain pack delegation", () => {
       where: { buildJobId: queued.id },
     })).toMatchObject({
       outcome: "fail",
-      summary: expect.stringContaining("invalid solution revision state"),
+      summary: "构建执行未完成，请使用参考编号联系管理员。",
+      details: { error: {
+        code: "BUILD_EXECUTION_FAILED",
+        message: "构建执行未完成，请使用参考编号联系管理员。",
+        correlationId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      } },
     });
   });
 
@@ -1385,7 +1395,12 @@ describe("domain pack delegation", () => {
       where: { buildJobId: queued.id },
     })).toMatchObject({
       outcome: "fail",
-      summary: expect.stringContaining("projectKey shared belongs to domain kingclient"),
+      summary: "构建执行未完成，请使用参考编号联系管理员。",
+      details: { error: {
+        code: "BUILD_EXECUTION_FAILED",
+        message: "构建执行未完成，请使用参考编号联系管理员。",
+        correlationId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      } },
     });
   });
 
