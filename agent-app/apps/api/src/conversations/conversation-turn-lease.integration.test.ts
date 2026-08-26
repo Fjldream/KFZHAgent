@@ -210,7 +210,7 @@ describe("Postgres conversation turn lease", () => {
     expect(rig.ownerPool.totalCount).toBe(0);
   });
 
-  it("keeps a live-owner fence across API managers and clears it on shutdown", async () => {
+  it("keeps an unconfirmed fence across API managers and owner shutdown", async () => {
     const first = leaseRig(2);
     const second = leaseRig(2);
     const conversationId = `live-owner-${randomUUID()}`;
@@ -219,17 +219,16 @@ describe("Postgres conversation turn lease", () => {
     await insertConversationRows(checkpointPool, conversationIds);
 
     try {
-      const stuck = await first.manager.acquire(conversationId);
-      await stuck.quarantine();
+      await first.manager.acquire(conversationId);
 
       await expect(first.manager.acquire(conversationId)).rejects.toBeInstanceOf(ConversationTurnBusyError);
       await expect(second.manager.acquire(conversationId)).rejects.toBeInstanceOf(ConversationTurnBusyError);
       await (await second.manager.acquire(unrelatedConversationId)).dispose();
-      expect(await fenceCount(checkpointPool, conversationId)).toBe(1);
+      expect(await fenceCount(checkpointPool, conversationId)).toBe(0);
 
       await first.manager.onModuleDestroy();
-      expect(await fenceCount(checkpointPool, conversationId)).toBe(0);
-      await (await second.manager.acquire(conversationId)).dispose();
+      expect(await fenceCount(checkpointPool, conversationId)).toBe(1);
+      await expect(second.manager.acquire(conversationId)).rejects.toBeInstanceOf(ConversationTurnBusyError);
     } finally {
       await first.manager.onModuleDestroy();
       await second.manager.onModuleDestroy();
@@ -237,13 +236,15 @@ describe("Postgres conversation turn lease", () => {
     }
   });
 
-  it("recovers a stale fence only after the owning API session dies", async () => {
+  it("keeps the conversation fenced when its owner session dies but graph work may remain", async () => {
     const errorLog = vi.spyOn(Logger.prototype, "error").mockImplementation(() => {});
     const ownerApplicationName = `turn-owner-${randomUUID()}`;
     const first = leaseRig(2, ownerApplicationName);
     const second = leaseRig(2);
     const conversationId = `dead-owner-${randomUUID()}`;
-    await insertConversationRows(checkpointPool, [conversationId]);
+    const unrelatedConversationId = `dead-owner-unrelated-${randomUUID()}`;
+    const conversationIds = [conversationId, unrelatedConversationId];
+    await insertConversationRows(checkpointPool, conversationIds);
 
     try {
       const stuck = await first.manager.acquire(conversationId);
@@ -251,13 +252,13 @@ describe("Postgres conversation turn lease", () => {
       await expect(second.manager.acquire(conversationId)).rejects.toBeInstanceOf(ConversationTurnBusyError);
 
       await terminateOwnerSession(checkpointPool, ownerApplicationName);
-      const recovered = await within(second.manager.acquire(conversationId), 750);
-      expect(await fenceCount(checkpointPool, conversationId)).toBe(0);
-      await recovered.dispose();
+      await expect(second.manager.acquire(conversationId)).rejects.toBeInstanceOf(ConversationTurnBusyError);
+      expect(await fenceCount(checkpointPool, conversationId)).toBe(1);
+      await (await second.manager.acquire(unrelatedConversationId)).dispose();
     } finally {
       await first.manager.onModuleDestroy();
       await second.manager.onModuleDestroy();
-      await deleteConversationRows(checkpointPool, [conversationId]);
+      await deleteConversationRows(checkpointPool, conversationIds);
       errorLog.mockRestore();
     }
   });

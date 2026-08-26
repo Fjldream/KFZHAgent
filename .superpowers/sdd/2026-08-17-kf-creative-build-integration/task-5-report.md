@@ -467,3 +467,84 @@ The first API full run had two transient existing audit HTTP failures (`Parse Er
 ### Round-4 residual risk
 
 No Task 5 blocker is known. PostgreSQL owner-session liveness is the distributed stale-fence authority: losing that session poisons the local manager, while another instance may reclaim its exact durable rows. Durable rows consume no checked-out admission clients and are removed on cancellation completion, conversation deletion, owner shutdown, or proven-dead-owner CAS recovery. Task 6 rollout, new-workspace production entry, and preview implementation remain untouched.
+
+---
+
+## Fix round 5/5 — re-review round 4 closure
+
+### Important — owner-session loss no longer authorizes fence recovery
+
+- Removed automatic stale-owner recovery. Admission now takes the conversation advisory lock and rejects any matching durable `ConversationTurnFence`; it never probes a recorded owner's advisory lock and never deletes a fence based on owner-session loss.
+- Losing the independent owner session still poisons that local manager against new admissions, but it does not change the durable fence. A second API manager therefore continues to reject the same conversation even while it can admit unrelated conversations.
+- There is no TTL and no inferred process-death recovery. A durable fence can be cleared only by `dispose()` on the exact owner/lease token after graph `return(done: true)` and the active read have settled. A future audited operational recovery path remains intentionally outside Task 5.
+
+### Shutdown is fail-closed without graph-exit evidence
+
+- `PostgresConversationTurnLeaseManager` cannot prove that Nest module shutdown means every graph iterator has stopped. It therefore no longer calls `dispose()` on active leases and no longer bulk-deletes rows by owner.
+- Shutdown first sets `closing`, then converts any still-active session advisory lease into the same durable fence while the session lock is held. Existing quarantines remain untouched. Only after those handoffs does it close its admission and owner pools.
+- This releases bounded PostgreSQL resources without letting another API instance overlap the old graph. If a cancellation-confirmed cleanup races shutdown, lease-operation serialization still lets that exact token delete its own fence; otherwise the single conversation remains intentionally fail-closed.
+
+### Round-5 TDD evidence
+
+The first RED terminated the recorded owner session while leaving the original manager and quarantined work alive. The second manager incorrectly returned a new lease instead of rejecting. Replacing stale-owner CAS recovery with an unconditional durable-fence check made the same manager reject while an unrelated conversation still completed.
+
+The second RED shut down an owner with an unconfirmed turn and observed the fence count drop from one to zero. Shutdown now performs an active-lock-to-durable-fence handoff and preserves that row; the second manager remains rejected after shutdown.
+
+Focused command:
+
+```sh
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app/apps/api exec vitest run \
+  src/conversations/conversation-turn-lease.integration.test.ts \
+  src/conversations/conversation.service.test.ts \
+  src/conversations/conversation.controller.test.ts
+# 3 files, 17 tests passed
+```
+
+The focused set proves:
+
+- forced owner-session loss does not make a still-running/hanging graph recoverable;
+- same-conversation admission remains rejected by a second manager while unrelated conversations run;
+- shutdown converts an unconfirmed active lock to a durable fence and does not clear it;
+- multiple hanging aborts still do not consume admission-pool clients;
+- normal confirmed cancellation still clears the exact token and permits later admission;
+- rejected/hanging cancellation, active-read ordering, header/write/abort cleanup, and checkpoint-pool independence remain intact.
+
+### Round-5 full verification
+
+```sh
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app/apps/api test
+# 15 files, 311 tests passed
+
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app/packages/agent-orchestrator test
+# 17 files, 162 tests passed
+
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app/apps/api typecheck
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app/apps/api lint
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app/packages/agent-orchestrator typecheck
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app/packages/agent-orchestrator lint
+# all passed
+
+DATABASE_URL=${TEST_DATABASE_URL:-postgresql://postgres@127.0.0.1:5432/kf_agent_test} \
+  PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app exec prisma migrate status
+DATABASE_URL=${TEST_DATABASE_URL:-postgresql://postgres@127.0.0.1:5432/kf_agent_test} \
+  PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app exec prisma validate
+# migration up to date; schema valid
+
+git diff --check
+git diff --cached --check
+```
+
+API full tests printed the existing non-blocking external trace-upload 429 warning; all 311 tests passed. The focused test cleanup left zero durable fence rows in the shared test database.
+
+### Round-5 residual risk
+
+Safety deliberately wins over automatic recovery: if cancellation never confirms or an API process disappears after persisting a fence, that one conversation remains unavailable until the conversation is deleted or a future explicitly audited operational recovery clears it. The fence holds no PostgreSQL client and does not block unrelated conversations. Task 6 rollout, public recovery APIs, and preview implementation remain untouched.

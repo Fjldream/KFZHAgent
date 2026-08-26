@@ -70,7 +70,7 @@ implements ConversationTurnLeasePort, OnModuleDestroy {
         throw new ConversationTurnBusyError();
       }
       turnLocked = true;
-      await this.clearDeadOwnerFenceOrThrow(client, conversationId);
+      await this.assertNoDurableFence(client, conversationId);
     } catch (error) {
       if (turnLocked) {
         await releaseTurnClient(client, conversationId, this.logger);
@@ -136,40 +136,20 @@ implements ConversationTurnLeasePort, OnModuleDestroy {
     return this.destroyPromise;
   }
 
-  private async clearDeadOwnerFenceOrThrow(
+  private async assertNoDurableFence(
     client: pg.PoolClient,
     conversationId: string,
   ): Promise<void> {
-    for (;;) {
-      const fence = (await client.query<{ ownerId: string; leaseId: string }>(
-        `SELECT "ownerId", "leaseId"
-         FROM "ConversationTurnFence"
-         WHERE "conversationId" = $1`,
-        [conversationId],
-      )).rows[0];
-      if (fence === undefined) return;
-      if (fence.ownerId === this.ownerId) throw new ConversationTurnBusyError();
-
-      const ownerLock = await client.query<{ acquired: boolean }>(
-        "SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS acquired",
-        [ownerLockKey(fence.ownerId)],
-      );
-      if (ownerLock.rows[0]?.acquired !== true) throw new ConversationTurnBusyError();
-      try {
-        await client.query(
-          `DELETE FROM "ConversationTurnFence"
-           WHERE "conversationId" = $1
-             AND "ownerId" = $2
-             AND "leaseId" = $3`,
-          [conversationId, fence.ownerId, fence.leaseId],
-        );
-      } finally {
-        await client.query(
-          "SELECT pg_advisory_unlock(hashtextextended($1, 0))",
-          [ownerLockKey(fence.ownerId)],
-        );
-      }
-    }
+    const fence = await client.query(
+      `SELECT 1
+       FROM "ConversationTurnFence"
+       WHERE "conversationId" = $1`,
+      [conversationId],
+    );
+    // Owner-session loss is not proof that the old graph stopped. Durable
+    // fences therefore remain fail-closed until their exact lease confirms
+    // cancellation; automatic stale-owner recovery is intentionally absent.
+    if ((fence.rowCount ?? 0) > 0) throw new ConversationTurnBusyError();
   }
 
   private async ensureOwnerSession(): Promise<pg.PoolClient> {
@@ -210,11 +190,11 @@ implements ConversationTurnLeasePort, OnModuleDestroy {
 
   private async destroy(): Promise<void> {
     this.closing = true;
-    await Promise.allSettled([...this.active].map((lease) => lease.dispose()));
-    await this.pool.query(
-      `DELETE FROM "ConversationTurnFence" WHERE "ownerId" = $1`,
-      [this.ownerId],
-    ).catch(() => {});
+    // This manager cannot prove that every graph iterator stopped merely
+    // because Nest shutdown began. Convert active session locks to durable
+    // fences and retain existing quarantines; only confirmed graph cleanup
+    // may call dispose() and delete its exact lease token.
+    await Promise.allSettled([...this.active].map((lease) => lease.quarantine()));
 
     const ownerClient = this.ownerClient;
     this.ownerClient = undefined;
