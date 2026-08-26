@@ -628,23 +628,33 @@ function disposableSseStream(
   moduleArtifactAuthority: ModuleArtifactAuthority,
 ): DisposableSseStream {
   let disposal: Promise<void> | undefined;
+  let cancellation: Promise<boolean> | undefined;
   let cleanup: Promise<void> | undefined;
+  let stalledHandoff: Promise<void> | undefined;
   let activeRead: Promise<IteratorResult<unknown>> | undefined;
   let finalEmitted = false;
   const dispose = (): Promise<void> => {
     const readAtCancellation = activeRead;
-    cleanup ??= (async () => {
+    cancellation ??= (async () => {
       const [cancelled] = await Promise.all([
         cancelIterator(source),
         settleActiveRead(readAtCancellation),
       ]);
-      // A rejected or indefinitely pending iterator cancellation does not
-      // prove the old graph stopped. Keep the durable admission lease in that
-      // fail-closed state so a retry cannot overlap the same thread.
-      if (cancelled) await lease.dispose();
+      return cancelled;
     })();
+    cleanup ??= cancellation.then(async (cancelled) => {
+      if (cancelled) await lease.dispose();
+      else await lease.quarantine();
+    });
+    stalledHandoff ??= quarantineAfterGrace(
+      cancellation,
+      cleanup,
+      lease,
+      SSE_CANCELLATION_GRACE_MS,
+    );
     void cleanup.catch(() => {});
-    disposal ??= waitForCleanupGrace(cleanup, SSE_CANCELLATION_GRACE_MS);
+    void stalledHandoff.catch(() => {});
+    disposal ??= Promise.race([cleanup, stalledHandoff]);
     return disposal;
   };
   return {
@@ -707,15 +717,23 @@ async function settleActiveRead(read: Promise<IteratorResult<unknown>> | undefin
   await read.catch(() => {});
 }
 
-async function waitForCleanupGrace(cleanup: Promise<void>, graceMs: number): Promise<void> {
+async function quarantineAfterGrace(
+  cancellation: Promise<boolean>,
+  cleanup: Promise<void>,
+  lease: ConversationTurnLease,
+  graceMs: number,
+): Promise<void> {
+  const STALLED = Symbol("STALLED");
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await Promise.race([
-      cleanup,
-      new Promise<void>((resolve) => {
-        timer = setTimeout(resolve, graceMs);
+    const result = await Promise.race([
+      cancellation,
+      new Promise<typeof STALLED>((resolve) => {
+        timer = setTimeout(() => resolve(STALLED), graceMs);
       }),
     ]);
+    if (result === STALLED) await lease.quarantine();
+    else await cleanup;
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }

@@ -383,3 +383,87 @@ git diff --cached --check
 ### Round-3 residual risk
 
 No same-thread overlap remains in the tested cancellation paths. A graph iterator that never confirms cancellation intentionally retains one slot in the dedicated lease pool until process shutdown; this is the fail-closed alternative to racing checkpoint writes. The pool's existing bounded connection timeout converts saturation to retryable conflicts. Task 6 rollout and preview remain untouched.
+
+---
+
+## Fix round 4/5 — re-review round 3 closure
+
+### Important — durable conversation fencing no longer pins admission clients
+
+- Added the additive `ConversationTurnFence` table. Its primary/foreign key is the real `Conversation.id`; each row stores an opaque API owner id, an exact lease id, and the fence timestamp. Cascading conversation deletion bounds the durable state to real conversations.
+- Each API manager now owns one independent, single-client owner-liveness pool/session and holds one owner advisory lock for its lifetime. This resource is O(API instances), not O(stuck conversations), and remains separate from both the bounded turn-admission pool and `PostgresSaver` checkpoint pool.
+- Normal admission first takes the conversation advisory lock and then checks the durable fence while still holding that lock. A live fence owner makes both the same manager and another manager fail fast. A different manager may clear a stale row only after it successfully takes the recorded owner's advisory lock, proving that owner session is no longer live, and the exact owner/lease CAS delete occurs while the conversation lock is still held.
+- When iterator cancellation rejects or remains unsettled through the 250 ms grace, the lease writes its durable fence while the original conversation advisory lock is still held, then releases/destroys that admission client. This overlap makes the handoff gap-free. Later confirmed cancellation deletes only the matching owner/lease row.
+- Cancellation that confirms within the grace retains the round-3 order: iterator `return(done: true)` and the active read settle before the ordinary advisory unlock. An explicit rejection now waits for the durable handoff before `events.dispose()` returns; a genuinely hanging iterator returns after the bounded handoff.
+- Shutdown first closes admission, serially disposes active/quarantined leases, clears any remaining rows for the exact owner, then releases the owner session and ends both owned pools. An owner-session error destroys its checked-out client and poisons that manager against new admissions.
+
+### Round-4 TDD evidence
+
+The first real-PostgreSQL RED used an admission pool of two and four distinct never-returning graph iterators. The third hanging turn failed in `pool.connect()` with `CONVERSATION_TURN_IN_PROGRESS`, proving that the round-3 implementation pinned every lease client. After the durable handoff GREEN, all four conversations fenced successfully and an unrelated fifth conversation ran.
+
+The cross-instance RED then exposed that a terminated owner session remained checked out, causing `ownerPool.end()` to hang during shutdown. Destroying that failed client made crash-owner recovery and shutdown bounded. A final unit RED held the fence persistence promise open after rejected `iterator.return()` and proved `events.dispose()` returned before the known handoff; the grace watcher now awaits the same cleanup promise whenever cancellation has already settled.
+
+Focused command:
+
+```sh
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app/apps/api exec vitest run \
+  src/conversations/conversation-turn-lease.integration.test.ts \
+  src/conversations/conversation.service.test.ts \
+  src/conversations/conversation.controller.test.ts
+# 3 files, 17 tests passed
+```
+
+The focused set proves:
+
+- four hanging aborts exceed `pool.max = 2` without denying an unrelated conversation;
+- all admission clients return to the pool, only one owner session exists, and both pools reach zero clients after shutdown;
+- live-owner fences reject the same manager and a second manager while unrelated work continues;
+- a second manager cannot clear a live-owner fence, but can CAS-recover it after the owner session is terminated;
+- graceful shutdown clears owned durable fences and makes the conversation reusable by another manager;
+- delayed cancellation remains fenced until it settles, rejected cancellation durably hands off before disposal returns, and hanging cancellation remains same-thread fail-closed;
+- the one-client checkpoint pool continues to progress independently.
+
+### Round-4 migration and full verification
+
+```sh
+DATABASE_URL=${TEST_DATABASE_URL:-postgresql://postgres@127.0.0.1:5432/kf_agent_test} \
+  PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app exec prisma migrate deploy
+# applied 20260826170000_conversation_turn_fence
+
+DATABASE_URL=${TEST_DATABASE_URL:-postgresql://postgres@127.0.0.1:5432/kf_agent_test} \
+  PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app exec prisma migrate status
+DATABASE_URL=${TEST_DATABASE_URL:-postgresql://postgres@127.0.0.1:5432/kf_agent_test} \
+  PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app exec prisma validate
+# schema up to date and valid
+
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app/apps/api test
+# 15 files, 311 tests passed
+
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app/packages/agent-orchestrator test
+# 17 files, 162 tests passed
+
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app/apps/api typecheck
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app/apps/api lint
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app/packages/agent-orchestrator typecheck
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app/packages/agent-orchestrator lint
+# all passed
+
+git diff --check
+git diff --cached --check
+```
+
+The first API full run had two transient existing audit HTTP failures (`Parse Error` and `ECONNRESET`) while the external trace uploader also reported its known 429 quota warning. The audit-focused rerun passed 3/3, and the required second API full run passed all 311 tests. The successful full run still printed non-blocking external trace-upload 429 warnings.
+
+### Round-4 residual risk
+
+No Task 5 blocker is known. PostgreSQL owner-session liveness is the distributed stale-fence authority: losing that session poisons the local manager, while another instance may reclaim its exact durable rows. Durable rows consume no checked-out admission clients and are removed on cancellation completion, conversation deletion, owner shutdown, or proven-dead-owner CAS recovery. Task 6 rollout, new-workspace production entry, and preview implementation remain untouched.

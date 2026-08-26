@@ -86,10 +86,25 @@ model Conversation {
   workspaceId String
   title       String
   summary     String?
+  turnFence   ConversationTurnFence?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   @@index([tenantId, workspaceId])
+}
+
+/// Durable fail-closed marker used only when graph cancellation cannot be
+/// confirmed before the bounded SSE cleanup deadline. The owning API process
+/// proves liveness with one independent session advisory lock; no fence row
+/// owns a PostgreSQL pool client.
+model ConversationTurnFence {
+  conversationId String       @id
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  ownerId        String
+  leaseId        String       @unique
+  fencedAt       DateTime     @default(now())
+
+  @@index([ownerId])
 }
 
 /// Short-lived single-use artifact download tokens (Task 11). Only the

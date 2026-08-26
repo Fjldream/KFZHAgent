@@ -217,6 +217,7 @@ describe("ConversationService graph dependency wiring", () => {
     await activeNext;
 
     expect(order).toEqual(["return-start", "return-settled", "lease-release"]);
+    expect(leasePort.quarantine).not.toHaveBeenCalled();
     const retry = await service.startTurn(
       { userId: "user", tenantId: "tenant", role: "member", sessionId: "session" },
       "conversation",
@@ -227,6 +228,8 @@ describe("ConversationService graph dependency wiring", () => {
 
   it("keeps same-thread admission closed when iterator cancellation fails", async () => {
     const order: string[] = [];
+    let finishQuarantine!: () => void;
+    const quarantineGate = new Promise<void>((resolve) => { finishQuarantine = resolve; });
     let finishNext!: (value: IteratorResult<unknown>) => void;
     const source = {
       next: vi.fn(() => new Promise<IteratorResult<unknown>>((resolve) => { finishNext = resolve; })),
@@ -241,7 +244,10 @@ describe("ConversationService graph dependency wiring", () => {
       getState: vi.fn().mockResolvedValue({ values: { stage: "design-review" }, tasks: [] }),
       stream: vi.fn().mockResolvedValue(source),
     });
-    const leasePort = turnLeasePort({ onRelease: () => order.push("lease-release") });
+    const leasePort = turnLeasePort({
+      onRelease: () => order.push("lease-release"),
+      quarantineOperation: () => quarantineGate,
+    });
     const service = await createService({
       leasePort,
       prisma: {
@@ -258,11 +264,15 @@ describe("ConversationService graph dependency wiring", () => {
     const activeNext = events.next();
     await vi.waitFor(() => expect(source.next).toHaveBeenCalledTimes(1));
 
-    await events.dispose();
+    const disposal = events.dispose();
     await activeNext;
 
     expect(order).toEqual(["return-failed"]);
     expect(leasePort.release).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(leasePort.quarantine).toHaveBeenCalledTimes(1));
+    await expect(settlesWithin(disposal, 25)).rejects.toThrow("disposal timed out");
+    finishQuarantine();
+    await disposal;
     await expect(service.startTurn(
       { userId: "user", tenantId: "tenant", role: "member", sessionId: "session" },
       "conversation",
@@ -306,6 +316,7 @@ describe("ConversationService graph dependency wiring", () => {
 
     await expect(settlesWithin(events.dispose(), 500)).resolves.toBeUndefined();
     expect(leasePort.release).not.toHaveBeenCalled();
+    expect(leasePort.quarantine).toHaveBeenCalledTimes(1);
     await expect(service.startTurn(
       { userId: "user", tenantId: "tenant", role: "member", sessionId: "session" },
       "conversation",
@@ -352,18 +363,24 @@ describe("ConversationService graph dependency wiring", () => {
   });
 });
 
-function turnLeasePort(options: { releaseError?: Error; onRelease?: () => void } = {}) {
+function turnLeasePort(options: {
+  releaseError?: Error;
+  onRelease?: () => void;
+  quarantineOperation?: () => Promise<void>;
+} = {}) {
   let active = false;
   const release = vi.fn(async () => {
     options.onRelease?.();
     active = false;
     if (options.releaseError !== undefined) throw options.releaseError;
   });
+  const quarantine = vi.fn(async () => options.quarantineOperation?.());
   const acquire = vi.fn(async () => {
     if (active) throw new ConversationTurnBusyError();
     active = true;
     let disposed = false;
     return {
+      quarantine,
       dispose: async () => {
         if (disposed) return;
         disposed = true;
@@ -371,7 +388,10 @@ function turnLeasePort(options: { releaseError?: Error; onRelease?: () => void }
       },
     };
   });
-  return { acquire, release } satisfies ConversationTurnLeasePort & { release: typeof release };
+  return { acquire, release, quarantine } satisfies ConversationTurnLeasePort & {
+    release: typeof release;
+    quarantine: typeof quarantine;
+  };
 }
 
 async function createService(input: { leasePort: ConversationTurnLeasePort; prisma: object }) {
