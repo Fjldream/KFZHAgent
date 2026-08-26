@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { CompilerInstanceNameSchema } from "@kf/contracts";
 import { z } from "zod";
 import {
   ButtonControlIR,
@@ -439,4 +441,104 @@ export function toNativeTabsProperties(properties: Record<string, unknown>): Rea
       .map((tab) => Object.freeze({ name: tab.id, label: tab.label }))),
     activeName: activeId,
   });
+}
+
+const REVIEWED_TABS_INITIALIZATION_SCHEMA = "kf-compiled-tabs/v1";
+const ReviewedRuntimeTabSchema = z.object({
+  name: z.string().trim().min(1).max(100).regex(/^[A-Za-z][A-Za-z0-9_-]*$/),
+  label: z.string().trim().min(1).max(2_000),
+}).strict();
+const ReviewedTabsRuntimeStateSchema = z.object({
+  tabData: z.array(ReviewedRuntimeTabSchema).min(1).max(32),
+  activeName: z.string().trim().min(1).max(100).regex(/^[A-Za-z][A-Za-z0-9_-]*$/),
+}).strict().superRefine((state, ctx) => {
+  const names = state.tabData.map((tab) => tab.name);
+  if (new Set(names).size !== names.length) ctx.addIssue({ code: "custom", path: ["tabData"], message: "TAB_ID_DUPLICATE" });
+  if (!names.includes(state.activeName)) ctx.addIssue({ code: "custom", path: ["activeName"], message: "TAB_ACTIVE_ID_UNKNOWN" });
+});
+const ReviewedTabsInitializationMarkerSchema = z.object({
+  schema: z.literal(REVIEWED_TABS_INITIALIZATION_SCHEMA),
+  ownerInstanceName: CompilerInstanceNameSchema,
+  uiModelType: z.literal(47),
+  bodySha256: z.string().regex(/^[0-9a-f]{64}$/),
+  bodyByteLength: z.number().int().positive().max(32_000),
+  tabNames: z.array(z.string().min(1).max(100)).min(1).max(32),
+  activeName: z.string().min(1).max(100),
+}).strict();
+
+type ReviewedTabsRuntimeState = z.infer<typeof ReviewedTabsRuntimeStateSchema>;
+
+function serializeReviewedTabsRuntimeState(ownerInstanceName: string, input: ReviewedTabsRuntimeState): string {
+  const owner = CompilerInstanceNameSchema.parse(ownerInstanceName);
+  const state = ReviewedTabsRuntimeStateSchema.parse(input);
+  const body = `this.tabs(${JSON.stringify(state)});\n`;
+  if (Buffer.byteLength(body, "utf8") > 32_000) {
+    throw new Error("INVALID_COMPONENT_PROPERTY: tabs — initialization exceeds 32000 bytes");
+  }
+  const marker = ReviewedTabsInitializationMarkerSchema.parse({
+    schema: REVIEWED_TABS_INITIALIZATION_SCHEMA,
+    ownerInstanceName: owner,
+    uiModelType: 47,
+    bodySha256: createHash("sha256").update(body, "utf8").digest("hex"),
+    bodyByteLength: Buffer.byteLength(body, "utf8"),
+    tabNames: state.tabData.map((tab) => tab.name),
+    activeName: state.activeName,
+  });
+  return `// ${REVIEWED_TABS_INITIALIZATION_SCHEMA} ${Buffer.from(JSON.stringify(marker), "utf8").toString("base64url")}\n${body}`;
+}
+
+/**
+ * Exact compiler-owned KF 3.6 Tabs initialization. The checked-in runtime
+ * creates Vue from defaultData before evaluating configureData, and `tabs(e)`
+ * is its only reviewed path for assigning tabData/activeName into `$vm`.
+ */
+export function serializeReviewedTabsInitialization(
+  ownerInstanceName: string,
+  properties: Record<string, unknown>,
+): string {
+  const native = toNativeTabsProperties(properties) as Readonly<{
+    tabData: readonly Readonly<{ name: string; label: string }>[];
+    activeName: string;
+  }>;
+  return serializeReviewedTabsRuntimeState(ownerInstanceName, {
+    tabData: native.tabData.map((tab) => ({ ...tab })),
+    activeName: native.activeName,
+  });
+}
+
+/** Parses only the exact compiler form; it is not a general JS/configureData parser. */
+export function parseReviewedTabsInitialization(source: unknown): Readonly<{
+  ownerInstanceName: string;
+  uiModelType: 47;
+  tabData: readonly Readonly<{ name: string; label: string }>[];
+  activeName: string;
+}> {
+  try {
+    if (typeof source !== "string" || source.length > 64_000) throw new Error("source");
+    const prefix = `// ${REVIEWED_TABS_INITIALIZATION_SCHEMA} `;
+    if (!source.startsWith(prefix)) throw new Error("marker");
+    const newline = source.indexOf("\n");
+    if (newline < prefix.length) throw new Error("marker line");
+    const marker = ReviewedTabsInitializationMarkerSchema.parse(JSON.parse(
+      Buffer.from(source.slice(prefix.length, newline), "base64url").toString("utf8"),
+    ));
+    const body = source.slice(newline + 1);
+    if (Buffer.byteLength(body, "utf8") !== marker.bodyByteLength
+      || createHash("sha256").update(body, "utf8").digest("hex") !== marker.bodySha256) throw new Error("body binding");
+    const match = /^this\.tabs\((\{.*\})\);\n$/.exec(body);
+    if (match === null) throw new Error("method");
+    const state = ReviewedTabsRuntimeStateSchema.parse(JSON.parse(match[1]!));
+    if (marker.activeName !== state.activeName
+      || marker.tabNames.length !== state.tabData.length
+      || marker.tabNames.some((name, index) => name !== state.tabData[index]!.name)
+      || serializeReviewedTabsRuntimeState(marker.ownerInstanceName, state) !== source) throw new Error("canonical binding");
+    return Object.freeze({
+      ownerInstanceName: marker.ownerInstanceName,
+      uiModelType: 47 as const,
+      tabData: Object.freeze(state.tabData.map((tab) => Object.freeze({ ...tab }))),
+      activeName: state.activeName,
+    });
+  } catch (error) {
+    throw new Error("INVALID_REVIEWED_TABS_INITIALIZATION", { cause: error });
+  }
 }

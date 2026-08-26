@@ -423,6 +423,56 @@ function decodedModules(source: string) {
   }
 }
 
+function runFaithfulTabsInitialization(nativeTabs: Record<string, unknown>) {
+  const markerPrefix = "// kf-compiled-tabs/v1 ";
+  const source = nativeTabs["configureData"];
+  if (typeof source !== "string" || !source.startsWith(markerPrefix)) throw new Error("missing compiler-owned Tabs initialization");
+  const newline = source.indexOf("\n");
+  const metadata = JSON.parse(Buffer.from(source.slice(markerPrefix.length, newline), "base64url").toString("utf8")) as Record<string, unknown>;
+  const body = source.slice(newline + 1);
+  if (metadata["schema"] !== "kf-compiled-tabs/v1"
+    || metadata["uiModelType"] !== 47
+    || metadata["ownerInstanceName"] !== nativeTabs["name"]
+    || metadata["bodyByteLength"] !== Buffer.byteLength(body, "utf8")
+    || metadata["bodySha256"] !== createHash("sha256").update(body, "utf8").digest("hex")) {
+    throw new Error("invalid compiler-owned Tabs initialization marker");
+  }
+  const match = /^this\.tabs\((\{.*\})\);\n$/.exec(body);
+  if (match === null) throw new Error("invalid Tabs initialization method");
+  const payload = JSON.parse(match[1]!) as Record<string, unknown>;
+  const $vm: Record<string, unknown> = {
+    activeName: "1",
+    type: "card",
+    tabData: [{ name: "1", label: "首页签1" }, { name: "2", label: "首页签2" }],
+    closable: false,
+    addable: false,
+    tabPosition: "top",
+    stretch: false,
+  };
+  // Faithful form of checked-in ElementUI_Tabs.tabs(e): only existing Vue
+  // keys are assigned after initialVue(defaultData).
+  for (const [key, value] of Object.entries(payload)) if ($vm[key] !== undefined) $vm[key] = value;
+  const children = nativeTabs["insiderObjects"] as Array<Record<string, unknown>>;
+  const componentMap = new Map(children.map((child) => [String(child["region"]), child]));
+  return { metadata, body, $vm, componentMap, selected: componentMap.get(String($vm["activeName"])) };
+}
+
+function selfConsistentTabsInitializationTamper(
+  source: string,
+  body: string,
+  tabNames: readonly string[],
+  activeName: string,
+): string {
+  const prefix = "// kf-compiled-tabs/v1 ";
+  const newline = source.indexOf("\n");
+  const metadata = JSON.parse(Buffer.from(source.slice(prefix.length, newline), "base64url").toString("utf8")) as Record<string, unknown>;
+  metadata["bodySha256"] = createHash("sha256").update(body, "utf8").digest("hex");
+  metadata["bodyByteLength"] = Buffer.byteLength(body, "utf8");
+  metadata["tabNames"] = [...tabNames];
+  metadata["activeName"] = activeName;
+  return `${prefix}${Buffer.from(JSON.stringify(metadata), "utf8").toString("base64url")}\n${body}`;
+}
+
 async function signedFixture(
   extraControlCount = 0,
   includePrivilegedTableData = false,
@@ -732,16 +782,29 @@ describe("creative native materializer", () => {
       const inspection = await inspectClientProject(rootDir);
       const controls = Object.values(inspection.raw.pages).flatMap((page) => walkControls(page));
       const nativeTabs = controls.find((control) => control["name"] === tabs.instanceName)!;
-      expect(nativeTabs).toMatchObject({
-        uiModelType: 47,
-        activeName: "profile",
-        tabData: [{ name: "profile", label: "基本资料" }, { name: "activity", label: "操作记录" }],
-      });
+      expect(nativeTabs).toMatchObject({ uiModelType: 47 });
+      expect(nativeTabs).not.toHaveProperty("activeName");
+      expect(nativeTabs).not.toHaveProperty("tabData");
       const children = nativeTabs["insiderObjects"] as Array<Record<string, unknown>>;
       expect(children.map((child) => child["region"])).toEqual(["profile", "activity"]);
       expect(children.map((child) => child["name"])).toEqual(["profile", "activity"].map((tabId) =>
         panes.find((pane) => pane.tabPane?.tabId === tabId)!.instanceName));
       expect(children.map((child) => child["text"])).toEqual(["陈予安 · 平台管理员", "2026-08-25 更新权限"]);
+      const runtime = runFaithfulTabsInitialization(nativeTabs);
+      expect(runtime.metadata).toMatchObject({
+        schema: "kf-compiled-tabs/v1",
+        ownerInstanceName: tabs.instanceName,
+        uiModelType: 47,
+        tabNames: ["profile", "activity"],
+        activeName: "profile",
+      });
+      expect(runtime.body).toBe('this.tabs({"tabData":[{"name":"profile","label":"基本资料"},{"name":"activity","label":"操作记录"}],"activeName":"profile"});\n');
+      expect(runtime.$vm).toMatchObject({
+        activeName: "profile",
+        tabData: [{ name: "profile", label: "基本资料" }, { name: "activity", label: "操作记录" }],
+      });
+      expect([...runtime.componentMap.keys()]).toEqual(["profile", "activity"]);
+      expect(runtime.selected?.["text"]).toBe("陈予安 · 平台管理员");
       return { inspection, nativeTabs, children };
     };
     await inspectNativeTabs(candidate.rootDir);
@@ -774,14 +837,35 @@ describe("creative native materializer", () => {
     expect(tampered.warnings.join("\n")).toMatch(/Tabs|tab pane|region|materialization/i);
 
     tamperedPane["region"] = originalRegion;
-    tamperedTabs["activeName"] = "forged";
-    await writeFile(pagePath, JSON.stringify(pageJson, null, 2));
-    const tamperedActiveName = await validateClientProject(base.rootDir, candidate.rootDir, result.plan, {
-      skipRoundTrip: true,
-      creativeMaterialization: resolved.creativeMaterialization,
-    } as Parameters<typeof validateClientProject>[3] & { creativeMaterialization: unknown });
-    expect(tamperedActiveName.status).toBe("fail");
-    expect(tamperedActiveName.warnings.join("\n")).toMatch(/Tabs|activeName|materialization/i);
+    const originalInitialization = String(tamperedTabs["configureData"]);
+    const expectInitializationTamperRejected = async (source: string) => {
+      tamperedTabs["configureData"] = source;
+      await writeFile(pagePath, JSON.stringify(pageJson, null, 2));
+      const tamperedInitialization = await validateClientProject(base.rootDir, candidate.rootDir, result.plan, {
+        skipRoundTrip: true,
+        creativeMaterialization: resolved.creativeMaterialization,
+      } as Parameters<typeof validateClientProject>[3] & { creativeMaterialization: unknown });
+      expect(tamperedInitialization.status).toBe("fail");
+      expect(tamperedInitialization.warnings.join("\n")).toMatch(/Tabs|initialization|configureData|materialization/i);
+    };
+    await expectInitializationTamperRejected(selfConsistentTabsInitializationTamper(
+      originalInitialization,
+      'this.tabs({"tabData":[{"name":"profile","label":"基本资料"}],"activeName":"profile"});\n',
+      ["profile"],
+      "profile",
+    ));
+    await expectInitializationTamperRejected(selfConsistentTabsInitializationTamper(
+      originalInitialization,
+      'this.tabs({"tabData":[{"name":"profile","label":"基本资料"},{"name":"activity","label":"操作记录"}],"activeName":"forged"});\n',
+      ["profile", "activity"],
+      "forged",
+    ));
+    await expectInitializationTamperRejected(selfConsistentTabsInitializationTamper(
+      originalInitialization,
+      'this.tree({"tabData":[{"name":"profile","label":"基本资料"},{"name":"activity","label":"操作记录"}],"activeName":"profile"});\n',
+      ["profile", "activity"],
+      "profile",
+    ));
   }, 30_000);
 
   it("carries exact signed Datagrid authorization through the verified creative patch path", async () => {

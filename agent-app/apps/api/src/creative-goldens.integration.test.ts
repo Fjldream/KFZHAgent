@@ -326,6 +326,46 @@ function nativeName(control) {
   return control.name ?? control.baseProperty?.name;
 }
 
+function runPackagedTabsInitialization(nativeTabs) {
+  const prefix = "// kf-compiled-tabs/v1 ";
+  const source = nativeTabs.configureData;
+  if (typeof source !== "string" || !source.startsWith(prefix)) {
+    throw new Error("missing compiler-owned Tabs initialization");
+  }
+  const newline = source.indexOf("\n");
+  const metadata = JSON.parse(Buffer.from(source.slice(prefix.length, newline), "base64url").toString("utf8"));
+  const body = source.slice(newline + 1);
+  if (metadata.schema !== "kf-compiled-tabs/v1"
+    || metadata.uiModelType !== 47
+    || metadata.ownerInstanceName !== nativeName(nativeTabs)
+    || metadata.bodyByteLength !== Buffer.byteLength(body, "utf8")
+    || metadata.bodySha256 !== createHash("sha256").update(body, "utf8").digest("hex")) {
+    throw new Error("invalid compiler-owned Tabs initialization marker");
+  }
+  const match = /^this\.tabs\((\{.*\})\);\n$/.exec(body);
+  if (match === null) throw new Error("invalid Tabs initialization method");
+  const payload = JSON.parse(match[1]);
+  const $vm = {
+    activeName: "1",
+    type: "card",
+    tabData: [{ name: "1", label: "首页签1" }, { name: "2", label: "首页签2" }],
+    closable: false,
+    addable: false,
+    tabPosition: "top",
+    stretch: false,
+  };
+  // Faithful checked-in KMElementUITabs.tabs(e): changePropertyName followed
+  // by assignment only when the initialized Vue key already exists.
+  for (const [key, value] of Object.entries(payload)) {
+    const runtimeKey = key.split("-")
+      .map((part, index) => index === 0 ? part : `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+      .join("");
+    if ($vm[runtimeKey] !== undefined) $vm[runtimeKey] = value;
+  }
+  const componentMap = new Map((nativeTabs.insiderObjects ?? []).map((child) => [String(child.region), child]));
+  return { metadata, body, $vm, componentMap, selected: componentMap.get(String($vm.activeName)) };
+}
+
 async function loadFixture(name) {
   try {
     return JSON.parse(await readFile(new URL(`${name}.json`, FIXTURE_ROOT), "utf8"));
@@ -911,12 +951,6 @@ async function runGoldenBuild(fixture, runNumber) {
       expect(activity).toBeDefined();
       expect(submit).toBeDefined();
       expect(status).toBeDefined();
-      expect(controlsByName.get(tabs.instanceName)?.tabData).toEqual([
-        { name: "profile-tab", label: "基本资料" },
-        { name: "activity-tab", label: "操作记录" },
-        { name: "permission-tab", label: "权限范围" },
-      ]);
-      expect(controlsByName.get(tabs.instanceName)?.activeName).toBe("profile-tab");
       const expectedPanes = [
         { paneId: "admin-profile-pane", tabId: "profile-tab", regionId: "admin-profile-name", contentId: "admin-profile-name-input" },
         { paneId: "admin-activity-pane", tabId: "activity-tab", regionId: "admin-activity", contentId: fixture.expect.activityTargetId },
@@ -925,6 +959,8 @@ async function runGoldenBuild(fixture, runNumber) {
       const nativeTabs = controlsByName.get(tabs.instanceName);
       const nativePanes = nativeTabs?.insiderObjects ?? [];
       expect(nativeTabs?.uiModelType).toBe(47);
+      expect(nativeTabs).not.toHaveProperty("tabData");
+      expect(nativeTabs).not.toHaveProperty("activeName");
       expect(nativePanes).toHaveLength(expectedPanes.length);
       for (const expectedPane of expectedPanes) {
         const pane = materialization.controls.find((control) => control.semanticControlId === expectedPane.paneId);
@@ -944,6 +980,27 @@ async function runGoldenBuild(fixture, runNumber) {
         expect(walkControls(nativePane?.insiderObjects ?? []).some((control) => nativeName(control) === content.instanceName),
           `management-admin: native pane content ${expectedPane.contentId}`).toBe(true);
       }
+      const tabsRuntime = runPackagedTabsInitialization(nativeTabs);
+      expect(tabsRuntime.metadata).toMatchObject({
+        schema: "kf-compiled-tabs/v1",
+        ownerInstanceName: tabs.instanceName,
+        uiModelType: 47,
+        tabNames: ["profile-tab", "activity-tab", "permission-tab"],
+        activeName: "profile-tab",
+      });
+      expect(tabsRuntime.body).toBe('this.tabs({"tabData":[{"name":"profile-tab","label":"基本资料"},{"name":"activity-tab","label":"操作记录"},{"name":"permission-tab","label":"权限范围"}],"activeName":"profile-tab"});\n');
+      expect(tabsRuntime.$vm).toMatchObject({
+        tabData: [
+          { name: "profile-tab", label: "基本资料" },
+          { name: "activity-tab", label: "操作记录" },
+          { name: "permission-tab", label: "权限范围" },
+        ],
+        activeName: "profile-tab",
+      });
+      expect([...tabsRuntime.componentMap.keys()].sort()).toEqual(["activity-tab", "permission-tab", "profile-tab"]);
+      expect(nativeName(tabsRuntime.selected)).toBe(
+        materialization.controls.find((control) => control.semanticControlId === "admin-profile-pane").instanceName,
+      );
       expect(controlsByName.get(profileContent.instanceName), "management-admin: 基本资料 tab content").toBeDefined();
       expect(controlsByName.get(activity.instanceName), "management-admin: 操作记录 tab content").toBeDefined();
       const tabClick = controlsByName.get(tabs.instanceName)?.linkMng?.linkList?.find((link) => link.name === "Tab-click");

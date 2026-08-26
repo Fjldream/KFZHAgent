@@ -34,7 +34,7 @@ import {
   type CreativePageInstrumentation,
   type NormalizedPlan,
 } from "../patch/client-patcher.js";
-import { toNativeTabsProperties } from "../implementation/component-properties.js";
+import { serializeReviewedTabsInitialization } from "../implementation/component-properties.js";
 import { parseTableData, toNativeTableProperties } from "../modules/definitions/native-data-adapters.js";
 import { deriveGuid } from "../compile/guid-factory.js";
 import { serializeReviewedNativeInteractions } from "../compile/control-compiler.js";
@@ -1811,9 +1811,10 @@ async function creativeMaterializationIssues(
       }
       if (control.nativeProperties.tabs !== undefined) {
         try {
-          const expected = toNativeTabsProperties(control.nativeProperties);
-          for (const [field, value] of Object.entries(expected)) {
-            if (!isDeepStrictEqual(raw[field], value)) issues.push(`creative Tabs adapter mismatch: ${control.semanticControlId}.${field}`);
+          const expected = serializeReviewedTabsInitialization(control.instanceName, control.nativeProperties);
+          if (raw["configureData"] !== expected) issues.push(`creative Tabs initialization mismatch: ${control.semanticControlId}.configureData`);
+          for (const inertField of ["tabData", "activeName"]) {
+            if (Object.hasOwn(raw, inertField)) issues.push(`creative Tabs runtime-inert field leaked: ${control.semanticControlId}.${inertField}`);
           }
         } catch {
           issues.push(`creative Tabs adapter input invalid: ${control.semanticControlId}`);

@@ -36,6 +36,8 @@ import { assertStyleCompilationAccepted, compileControlStyle, compileResolvedSty
 import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
 import { mergeManagedStyleData } from "../style/style-data-merge.js";
 import {
+  parseReviewedTabsInitialization,
+  serializeReviewedTabsInitialization,
   toNativeTabsProperties,
   validateCreateComponentProperties,
   validateGeneratedComponentProperties,
@@ -1692,7 +1694,10 @@ async function applyCreate(
           const value = properties[key];
           if (value !== undefined) (overrides as Record<string, unknown>)[key] = value;
         }
-        if (type === "tabs" && Array.isArray(properties["tabs"])) Object.assign(overrides, toNativeTabsProperties(properties));
+        if (type === "tabs" && Array.isArray(properties["tabs"])) {
+          if (creativeBatch === undefined) Object.assign(overrides, toNativeTabsProperties(properties));
+          else overrides["configureData"] = serializeReviewedTabsInitialization(op.entityId, properties);
+        }
         const control = normalizeNativeSizePolicy(
           mergeControlTemplate(mergeControlTemplate(BASE_FIELDS, template), overrides),
         );
@@ -1922,12 +1927,16 @@ function pushControlIntoCreativeParent(
   else control["leftTopPt"] = { x: localX, y: localY };
   if (!Array.isArray(parent.root["insiderObjects"])) parent.root["insiderObjects"] = [];
   if (isTabsPane) {
-    const tabData = parent.root["tabData"];
-    const tabMatches = Array.isArray(tabData) ? tabData.filter((entry) =>
-      isObject(entry) && entry["name"] === signedTabPane.tabId) : [];
-    const activeName = parent.root["activeName"];
-    if (tabMatches.length !== 1 || typeof activeName !== "string"
-      || !Array.isArray(tabData) || !tabData.some((entry) => isObject(entry) && entry["name"] === activeName)) return false;
+    let initialization: ReturnType<typeof parseReviewedTabsInitialization>;
+    try {
+      initialization = parseReviewedTabsInitialization(parent.root["configureData"]);
+    } catch {
+      return false;
+    }
+    const tabMatches = initialization.tabData.filter((entry) => entry.name === signedTabPane.tabId);
+    if (initialization.ownerInstanceName !== target || initialization.uiModelType !== 47
+      || tabMatches.length !== 1
+      || !initialization.tabData.some((entry) => entry.name === initialization.activeName)) return false;
     const existingChildren = parent.root["insiderObjects"] as unknown[];
     if (existingChildren.some((entry) => isObject(entry) && entry["region"] === signedTabPane.tabId)) return false;
     control["region"] = signedTabPane.tabId;
