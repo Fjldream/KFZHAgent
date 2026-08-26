@@ -23,6 +23,8 @@ import { ConversationService } from "./conversation.service.js";
 import type { DisposableSseStream } from "./conversation.service.js";
 import { ConversationTurnBusyError } from "./conversation-turn-lease.js";
 
+const CLIENT_DISCONNECTED = Symbol("CLIENT_DISCONNECTED");
+
 /**
  * Conversation endpoints behind the tenant guard. thread_id is the
  * conversation id (brief contract). POST messages streams graph updates over
@@ -110,8 +112,13 @@ export class ConversationController {
     let events: DisposableSseStream | undefined;
     let disconnected = false;
     let sseStarted = false;
+    let signalDisconnected!: () => void;
+    const disconnectedSignal = new Promise<typeof CLIENT_DISCONNECTED>((resolve) => {
+      signalDisconnected = () => resolve(CLIENT_DISCONNECTED);
+    });
     const onClose = (): void => {
       disconnected = true;
+      signalDisconnected();
       void events?.dispose().catch(() => {});
     };
     res.on("close", onClose);
@@ -128,7 +135,12 @@ export class ConversationController {
 
       for (;;) {
         if (disconnected) break;
-        const next = await events.next();
+        const pendingNext = events.next();
+        const next = await Promise.race([pendingNext, disconnectedSignal]);
+        if (next === CLIENT_DISCONNECTED) {
+          void pendingNext.catch(() => {});
+          break;
+        }
         if (next.done) break;
         safeWrite(res, `event: ${next.value.event}\n`);
         safeWrite(res, `data: ${JSON.stringify(next.value.data ?? null)}\n\n`);

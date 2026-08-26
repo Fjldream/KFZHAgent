@@ -68,6 +68,7 @@ interface ApprovalInterruptLike {
 }
 
 const DEFAULT_CONVERSATION_TITLE = "New conversation";
+const SSE_CANCELLATION_GRACE_MS = 250;
 const CUSTOMER_ERROR_CODES = new Set([
   "ACCEPTED_BLUEPRINT_CONFIRMATION_FAILED",
   "ACCEPTED_BLUEPRINT_CONFIRMATION_NOT_CONFIGURED",
@@ -252,26 +253,16 @@ export class ConversationService {
       } satisfies AgentGraphUpdate;
       const stream = (await graph.stream(input, config)) as AsyncGenerator<unknown>;
       return disposableSseStream(
-        this.forwardStream(stream, graph, config),
         stream,
+        graph,
+        config,
         lease,
+        this.moduleArtifactAuthority,
       );
     } catch (error) {
       await lease.dispose().catch(() => {});
       throw error;
     }
-  }
-
-  private async *forwardStream(
-    stream: AsyncGenerator<unknown>,
-    graph: CompiledGraph,
-    config: Record<string, unknown>,
-  ): AsyncGenerator<SseEvent> {
-    for await (const chunk of stream) {
-      yield { event: "state", data: customerProgressFrame(chunk) };
-    }
-    const final = (await graph.getState(config)) as unknown as StateSnapshotLike;
-    yield { event: "done", data: finalStateData(final, this.moduleArtifactAuthority) };
   }
 
   /**
@@ -630,30 +621,58 @@ function apiError(code: string, message: string): { error: { code: string; messa
 }
 
 function disposableSseStream(
-  stream: AsyncGenerator<SseEvent>,
   source: AsyncGenerator<unknown>,
+  graph: CompiledGraph,
+  config: Record<string, unknown>,
   lease: ConversationTurnLease,
+  moduleArtifactAuthority: ModuleArtifactAuthority,
 ): DisposableSseStream {
   let disposal: Promise<void> | undefined;
+  let cleanup: Promise<void> | undefined;
+  let activeRead: Promise<IteratorResult<unknown>> | undefined;
+  let finalEmitted = false;
   const dispose = (): Promise<void> => {
-    disposal ??= (async () => {
-      try {
-        void Promise.resolve(source.return(undefined)).catch(() => {});
-      } catch { /* a hostile iterator cannot prevent lease cleanup */ }
-      try {
-        void Promise.resolve(stream.return(undefined)).catch(() => {});
-      } catch { /* a hostile projection cannot prevent lease cleanup */ }
-      await lease.dispose();
+    const readAtCancellation = activeRead;
+    cleanup ??= (async () => {
+      const [cancelled] = await Promise.all([
+        cancelIterator(source),
+        settleActiveRead(readAtCancellation),
+      ]);
+      // A rejected or indefinitely pending iterator cancellation does not
+      // prove the old graph stopped. Keep the durable admission lease in that
+      // fail-closed state so a retry cannot overlap the same thread.
+      if (cancelled) await lease.dispose();
     })();
+    void cleanup.catch(() => {});
+    disposal ??= waitForCleanupGrace(cleanup, SSE_CANCELLATION_GRACE_MS);
     return disposal;
   };
   return {
     async next() {
       if (disposal !== undefined) return { done: true, value: undefined };
       try {
-        const next = await stream.next();
-        if (next.done) await dispose();
-        return next;
+        if (finalEmitted) {
+          await dispose();
+          return { done: true, value: undefined };
+        }
+        const pendingRead = source.next();
+        activeRead = pendingRead;
+        let next: IteratorResult<unknown>;
+        try {
+          next = await pendingRead;
+        } finally {
+          if (activeRead === pendingRead) activeRead = undefined;
+        }
+        if (disposal !== undefined) return { done: true, value: undefined };
+        if (!next.done) {
+          return { done: false, value: { event: "state", data: customerProgressFrame(next.value) } };
+        }
+        const final = (await graph.getState(config)) as unknown as StateSnapshotLike;
+        finalEmitted = true;
+        return {
+          done: false,
+          value: { event: "done", data: finalStateData(final, moduleArtifactAuthority) },
+        };
       } catch (error) {
         await dispose().catch(() => {});
         throw error;
@@ -672,4 +691,32 @@ function disposableSseStream(
       return this;
     },
   };
+}
+
+async function cancelIterator(iterator: AsyncGenerator<unknown>): Promise<boolean> {
+  try {
+    const result = await iterator.return(undefined);
+    return result.done === true;
+  } catch {
+    return false;
+  }
+}
+
+async function settleActiveRead(read: Promise<IteratorResult<unknown>> | undefined): Promise<void> {
+  if (read === undefined) return;
+  await read.catch(() => {});
+}
+
+async function waitForCleanupGrace(cleanup: Promise<void>, graceMs: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      cleanup,
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, graceMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }

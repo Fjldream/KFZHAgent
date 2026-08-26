@@ -75,13 +75,16 @@ describe("Postgres conversation turn lease", () => {
     }
   });
 
-  it("releases the real lease when a client aborts an active SSE turn", async () => {
-    const manager = leaseManager(1);
+  it("retains the real lease across delayed active SSE abort cancellation", async () => {
+    const manager = leaseManager(2);
     const conversationId = `abort-${randomUUID()}`;
     let resolveNext!: (value: IteratorResult<unknown>) => void;
+    let finishCancellation!: () => void;
+    const cancellation = new Promise<void>((resolve) => { finishCancellation = resolve; });
     const source = {
       next: vi.fn(() => new Promise<IteratorResult<unknown>>((resolve) => { resolveNext = resolve; })),
       return: vi.fn(async () => {
+        await cancellation;
         resolveNext({ done: true, value: undefined });
         return { done: true as const, value: undefined };
       }),
@@ -136,7 +139,10 @@ describe("Postgres conversation turn lease", () => {
       await within(sending, 750);
 
       expect(source.return).toHaveBeenCalledTimes(1);
-      await (await within(manager.acquire(conversationId), 750)).dispose();
+      await expect(manager.acquire(conversationId)).rejects.toBeInstanceOf(ConversationTurnBusyError);
+
+      finishCancellation();
+      await (await within(acquireEventually(manager, conversationId), 750)).dispose();
     } finally {
       await manager.onModuleDestroy();
     }
@@ -164,5 +170,19 @@ async function within<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
     ]);
   } finally {
     if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+async function acquireEventually(
+  manager: PostgresConversationTurnLeaseManager,
+  conversationId: string,
+): ReturnType<PostgresConversationTurnLeaseManager["acquire"]> {
+  for (;;) {
+    try {
+      return await manager.acquire(conversationId);
+    } catch (error) {
+      if (!(error instanceof ConversationTurnBusyError)) throw error;
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
   }
 }

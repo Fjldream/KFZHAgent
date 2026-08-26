@@ -316,3 +316,70 @@ API full tests printed the existing best-effort external trace-upload `429` warn
 ### Round-2 residual risk
 
 No Task 5 blocker is known. The independent lease pool is intentionally small and rejects saturation instead of queueing; deployments can tune its positive bounded size/timeouts through `KF_CONVERSATION_TURN_LEASE_*`. Task 6 rollout, new-workspace production entry, and preview implementation remain untouched.
+
+---
+
+## Fix round 3/5 — re-review round 2 closure
+
+### Important — graph cancellation now fences same-thread admission
+
+- SSE disposal is now two-phase. Controller/socket cleanup waits at most a 250 ms grace, but the conversation lease is released only after the actual LangGraph source iterator's `return()` resolves with `done: true` and the active source read has settled.
+- A delayed cancellation therefore keeps the PostgreSQL advisory lease while the old graph is still cancelling or checkpointing. Same-conversation retries continue to fail fast with `CONVERSATION_TURN_IN_PROGRESS`; once cancellation succeeds, the background cleanup releases the lease and a retry can enter.
+- A rejected or indefinitely pending `return()` is fail-closed: the bounded HTTP/SSE cleanup returns, but the lease remains held. This deliberately quarantines that conversation instead of permitting old/new graph overlap. The dedicated lease pool remains bounded, so broader saturation also fails fast rather than consuming PostgresSaver connections.
+- The projection wrapper is no longer a second async generator. `DisposableSseStream` now projects state/final events directly from the one LangGraph source iterator, so there is one authoritative cancellation boundary rather than two queued `return()` operations.
+- The controller races each active `events.next()` against its response-close signal. A client abort can therefore leave the response loop within the grace even when the old graph's `next()`/`return()` remains pending; cancellation continues in the background under the still-held lease.
+- Header failure, write failure, pre-start close, never-enter disposal, normal completion, and legacy/module graph behavior continue to use the same disposal boundary.
+
+### Round-3 TDD evidence
+
+The initial service RED proved both review cases: a delayed active iterator released the lease before its controlled cancellation boundary, and a hanging iterator allowed a same-thread retry immediately. After the first ordering fix, the real PostgreSQL abort test exposed a second RED: the controller itself remained blocked on an already-active `events.next()` even after the disposal grace elapsed. Racing that read against `Response.close` completed the bounded socket path without weakening the lease fence.
+
+Focused command:
+
+```sh
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app/apps/api exec vitest run \
+  src/conversations/conversation.service.test.ts \
+  src/conversations/conversation.controller.test.ts \
+  src/conversations/conversation-turn-lease.integration.test.ts
+# 3 files, 14 tests passed
+```
+
+The focused set proves:
+
+- active delayed `return()` ordering: `return-start → return-settled/active-read-settled → lease-release`;
+- no same-thread admission before that boundary and successful admission after it;
+- rejected `return()` leaves admission closed;
+- pending cancellation returns socket cleanup within the 250 ms grace while admission remains closed;
+- never-enter cancellation settles before lease release;
+- real PostgreSQL delayed abort rejects a same-conversation contender and reacquires only after cancellation;
+- controller header/write/pre-start-close disposal and bounded 409 projection remain intact.
+
+### Round-3 full verification
+
+```sh
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app/packages/agent-orchestrator exec vitest run
+# 17 files, 162 tests passed
+
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app/apps/api exec vitest run
+# 15 files, 308 tests passed
+
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app --filter @kf/api typecheck
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app --filter @kf/agent-orchestrator typecheck
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app --filter @kf/api lint
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app --filter @kf/agent-orchestrator lint
+# all passed
+
+git diff --check
+git diff --cached --check
+```
+
+### Round-3 residual risk
+
+No same-thread overlap remains in the tested cancellation paths. A graph iterator that never confirms cancellation intentionally retains one slot in the dedicated lease pool until process shutdown; this is the fail-closed alternative to racing checkpoint writes. The pool's existing bounded connection timeout converts saturation to retryable conflicts. Task 6 rollout and preview remain untouched.

@@ -130,7 +130,11 @@ describe("ConversationService graph dependency wiring", () => {
   });
 
   it("eagerly releases the lease when a returned stream is disposed before iteration", async () => {
-    const streamReturn = vi.fn().mockResolvedValue({ done: true, value: undefined });
+    const order: string[] = [];
+    const streamReturn = vi.fn(async () => {
+      order.push("return-settled");
+      return { done: true as const, value: undefined };
+    });
     mocks.compileSolutionGraph.mockReturnValue({
       getState: vi.fn().mockResolvedValue({ values: { stage: "design-review" }, tasks: [] }),
       stream: vi.fn().mockResolvedValue({
@@ -139,7 +143,7 @@ describe("ConversationService graph dependency wiring", () => {
         [Symbol.asyncIterator]() { return this; },
       }),
     });
-    const leasePort = turnLeasePort();
+    const leasePort = turnLeasePort({ onRelease: () => order.push("lease-release") });
     const service = await createService({
       leasePort,
       prisma: {
@@ -158,17 +162,130 @@ describe("ConversationService graph dependency wiring", () => {
 
     expect(streamReturn).toHaveBeenCalledTimes(1);
     expect(leasePort.release).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["return-settled", "lease-release"]);
   });
 
-  it("does not retain the lease when a graph iterator ignores cancellation", async () => {
-    const streamReturn = vi.fn().mockReturnValue(new Promise(() => {}));
+  it("does not admit a same-thread retry until delayed active graph cancellation completes", async () => {
+    const order: string[] = [];
+    let finishCancellation!: () => void;
+    const cancellation = new Promise<void>((resolve) => { finishCancellation = resolve; });
+    let finishNext!: (value: IteratorResult<unknown>) => void;
+    const source = {
+      next: vi.fn(() => new Promise<IteratorResult<unknown>>((resolve) => { finishNext = resolve; })),
+      return: vi.fn(async () => {
+        order.push("return-start");
+        await cancellation;
+        order.push("return-settled");
+        finishNext({ done: true, value: undefined });
+        return { done: true as const, value: undefined };
+      }),
+      [Symbol.asyncIterator]() { return this; },
+    };
+    async function* emptySource() { /* later retry */ }
     mocks.compileSolutionGraph.mockReturnValue({
       getState: vi.fn().mockResolvedValue({ values: { stage: "design-review" }, tasks: [] }),
-      stream: vi.fn().mockResolvedValue({
-        next: vi.fn(),
-        return: streamReturn,
-        [Symbol.asyncIterator]() { return this; },
+      stream: vi.fn().mockResolvedValueOnce(source).mockResolvedValueOnce(emptySource()),
+    });
+    const leasePort = turnLeasePort({ onRelease: () => order.push("lease-release") });
+    const service = await createService({
+      leasePort,
+      prisma: {
+        solutionWorkspace: {},
+        conversation: { findFirst: vi.fn().mockResolvedValue({ id: "conversation", tenantId: "tenant", workspaceId: "workspace" }) },
+        message: { create: vi.fn().mockResolvedValue({}) },
+      },
+    });
+    const events = await service.startTurn(
+      { userId: "user", tenantId: "tenant", role: "member", sessionId: "session" },
+      "conversation",
+      "确认设计",
+    );
+    const activeNext = events.next();
+    await vi.waitFor(() => expect(source.next).toHaveBeenCalledTimes(1));
+
+    const disposing = events.dispose();
+    await vi.waitFor(() => expect(source.return).toHaveBeenCalledTimes(1));
+    expect(leasePort.release).not.toHaveBeenCalled();
+    await expect(service.startTurn(
+      { userId: "user", tenantId: "tenant", role: "member", sessionId: "session" },
+      "conversation",
+      "再次确认设计",
+    )).rejects.toBeInstanceOf(ConversationTurnBusyError);
+
+    finishCancellation();
+    await disposing;
+    await activeNext;
+
+    expect(order).toEqual(["return-start", "return-settled", "lease-release"]);
+    const retry = await service.startTurn(
+      { userId: "user", tenantId: "tenant", role: "member", sessionId: "session" },
+      "conversation",
+      "再次确认设计",
+    );
+    await retry.dispose();
+  });
+
+  it("keeps same-thread admission closed when iterator cancellation fails", async () => {
+    const order: string[] = [];
+    let finishNext!: (value: IteratorResult<unknown>) => void;
+    const source = {
+      next: vi.fn(() => new Promise<IteratorResult<unknown>>((resolve) => { finishNext = resolve; })),
+      return: vi.fn(async () => {
+        order.push("return-failed");
+        finishNext({ done: true, value: undefined });
+        throw new Error("iterator cleanup rejected");
       }),
+      [Symbol.asyncIterator]() { return this; },
+    };
+    mocks.compileSolutionGraph.mockReturnValue({
+      getState: vi.fn().mockResolvedValue({ values: { stage: "design-review" }, tasks: [] }),
+      stream: vi.fn().mockResolvedValue(source),
+    });
+    const leasePort = turnLeasePort({ onRelease: () => order.push("lease-release") });
+    const service = await createService({
+      leasePort,
+      prisma: {
+        solutionWorkspace: {},
+        conversation: { findFirst: vi.fn().mockResolvedValue({ id: "conversation", tenantId: "tenant", workspaceId: "workspace" }) },
+        message: { create: vi.fn().mockResolvedValue({}) },
+      },
+    });
+    const events = await service.startTurn(
+      { userId: "user", tenantId: "tenant", role: "member", sessionId: "session" },
+      "conversation",
+      "确认设计",
+    );
+    const activeNext = events.next();
+    await vi.waitFor(() => expect(source.next).toHaveBeenCalledTimes(1));
+
+    await events.dispose();
+    await activeNext;
+
+    expect(order).toEqual(["return-failed"]);
+    expect(leasePort.release).not.toHaveBeenCalled();
+    await expect(service.startTurn(
+      { userId: "user", tenantId: "tenant", role: "member", sessionId: "session" },
+      "conversation",
+      "再次确认设计",
+    )).rejects.toBeInstanceOf(ConversationTurnBusyError);
+  });
+
+  it("bounds socket cleanup but retains admission when graph cancellation remains pending", async () => {
+    let finishCancellation!: () => void;
+    const cancellation = new Promise<void>((resolve) => { finishCancellation = resolve; });
+    let finishNext!: (value: IteratorResult<unknown>) => void;
+    const source = {
+      next: vi.fn(() => new Promise<IteratorResult<unknown>>((resolve) => { finishNext = resolve; })),
+      return: vi.fn(async () => {
+        await cancellation;
+        finishNext({ done: true, value: undefined });
+        return { done: true as const, value: undefined };
+      }),
+      [Symbol.asyncIterator]() { return this; },
+    };
+    mocks.compileSolutionGraph.mockReturnValue({
+      getState: vi.fn().mockResolvedValue({ values: { stage: "design-review" }, tasks: [] }),
+      stream: vi.fn().mockResolvedValue(source),
     });
     const leasePort = turnLeasePort();
     const service = await createService({
@@ -184,10 +301,20 @@ describe("ConversationService graph dependency wiring", () => {
       "conversation",
       "确认设计",
     );
+    const activeNext = events.next();
+    await vi.waitFor(() => expect(source.next).toHaveBeenCalledTimes(1));
 
-    await expect(settlesWithin(events.dispose(), 100)).resolves.toBeUndefined();
-    expect(streamReturn).toHaveBeenCalledTimes(1);
-    expect(leasePort.release).toHaveBeenCalledTimes(1);
+    await expect(settlesWithin(events.dispose(), 500)).resolves.toBeUndefined();
+    expect(leasePort.release).not.toHaveBeenCalled();
+    await expect(service.startTurn(
+      { userId: "user", tenantId: "tenant", role: "member", sessionId: "session" },
+      "conversation",
+      "再次确认设计",
+    )).rejects.toBeInstanceOf(ConversationTurnBusyError);
+
+    finishCancellation();
+    await activeNext;
+    await vi.waitFor(() => expect(leasePort.release).toHaveBeenCalledTimes(1));
   });
 
   it("preserves the graph failure when lease disposal also fails", async () => {
@@ -225,9 +352,10 @@ describe("ConversationService graph dependency wiring", () => {
   });
 });
 
-function turnLeasePort(options: { releaseError?: Error } = {}) {
+function turnLeasePort(options: { releaseError?: Error; onRelease?: () => void } = {}) {
   let active = false;
   const release = vi.fn(async () => {
+    options.onRelease?.();
     active = false;
     if (options.releaseError !== undefined) throw options.releaseError;
   });
