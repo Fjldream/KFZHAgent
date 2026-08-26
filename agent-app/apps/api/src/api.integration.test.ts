@@ -12,7 +12,7 @@ import { Test } from "@nestjs/testing";
 import cookieParser from "cookie-parser";
 import type { ArtifactStorage, StoredArtifact } from "@kf/artifact-storage";
 import { BuildExecutor, BuildJobService } from "@kf/build-jobs";
-import { canonicalModuleCompilationHash } from "@kf/contracts";
+import { canonicalModuleCompilationHash, canonicalServerHash } from "@kf/contracts";
 import { decodeBlueprintMessage } from "@kf/agent-orchestrator";
 import {
   createKingClientDomainPack,
@@ -23,6 +23,7 @@ import {
 import { DomainRegistry } from "@kf/domain-registry";
 import request from "supertest";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -188,7 +189,49 @@ class FakeModelPort {
     };
   }
   async createDesignPlan(input) {
-    void input;
+    if (input.generationWorkflow === "creative-v2") {
+      return {
+        schema: "kf-design-plan/v3",
+        displayName: "访客协同中心",
+        objective: "帮助园区前台处理访客预约",
+        audiences: ["园区前台"],
+        scenarios: ["预约审核"],
+        pages: [{
+          id: "visitor-overview",
+          title: "访客总览",
+          purpose: "处理当日预约",
+          readingOrder: ["visitor-list"],
+          regions: [{
+            id: "visitor-list",
+            purpose: "进入访客详情",
+            semanticRoles: ["primary-action"],
+            dataShape: "action-list",
+            density: "comfortable",
+            importance: "primary",
+            content: ["查看访客详情"],
+            sampleData: [],
+            interactions: [],
+            states: ["待审核"],
+            visualIntent: "清晰可信",
+          }],
+        }],
+        journeys: [{
+          id: "review-visitor",
+          actor: "园区前台",
+          goal: "审核预约",
+          steps: [{ pageId: "visitor-overview", regionId: "visitor-list", action: "选择预约", result: "显示详情" }],
+          completion: "完成预约审核",
+        }],
+        visualDirection: {
+          tone: "专业友好",
+          colors: ["深海蓝"],
+          typography: "层级清晰",
+          spacingAndSurfaces: "舒适留白",
+        },
+        acceptanceScenarios: ["可以查看并审核预约"],
+        openQuestions: [],
+      };
+    }
     return {
       schema: "kf-design-plan/v2",
       displayName: "集成测试客户效果方案",
@@ -224,6 +267,68 @@ class FakeModelPort {
       acceptanceCriteria: ["完整展示核心信息"],
       openQuestions: [],
     };
+  }
+  async createSolutionImplementationPlan(input) {
+    const blueprint = input.confirmedSolutionBlueprint;
+    const candidates = input.capabilityCandidates;
+    const actionCapabilityId = candidates.regions[0].controls.find((candidate) => candidate.id === "button").id;
+    const intent = {
+      importance: "primary",
+      visualWeight: 4,
+      readingOrder: 0,
+      density: "comfortable",
+      groupWith: [],
+      width: { mode: "fill" },
+      height: { mode: "content" },
+      align: "stretch",
+    };
+    return {
+      schema: "kf-solution-implementation/v1",
+      projectKey: "visitor-center",
+      blueprintHash: canonicalServerHash(blueprint),
+      candidateBundleHash: canonicalServerHash(candidates),
+      theme: {
+        background: "#f4f7fb", surface: "#ffffff", primary: "#163a5f", accent: "#e47b32",
+        textPrimary: "#14212b", textSecondary: "#52616d", fontFamily: "Inter", spacingUnit: 8,
+        radiusScale: { small: 4, medium: 8, large: 16 },
+      },
+      roleStyles: [{ role: "record-title", declarations: {}, states: {} }],
+      mockData: [],
+      localState: [],
+      pages: [{
+        id: "visitor-solution-page",
+        title: "访客总览",
+        purpose: "查看当日预约",
+        canvas: "responsive",
+        sourceBlueprintPageId: "visitor-overview",
+        sourceBlueprintRegionIds: ["visitor-list"],
+        initialStateIds: [],
+        root: {
+          kind: "control",
+          id: "visitor-open-detail",
+          sourceBlueprintRegionIds: ["visitor-list"],
+          intent,
+          capabilityId: actionCapabilityId,
+          content: "查看访客详情",
+          properties: [],
+          tabIds: [],
+          styleRole: "record-title",
+          eventBindings: [{ semanticEvent: "click", actionIds: ["open-visitor-detail"] }],
+        },
+      }],
+      overlays: [],
+      actions: [{
+        id: "open-visitor-detail",
+        kind: "navigate-page",
+        targetPageId: "visitor-solution-page",
+        afterActionIds: [],
+        journeyStepRefs: [{ journeyId: "review-visitor", stepIndex: 0 }],
+      }],
+      scripts: [],
+    };
+  }
+  async reviseSolutionImplementationSubtree(input) {
+    return this.createSolutionImplementationPlan(input);
   }
   async createProjectDesign(input) {
     void input;
@@ -2002,57 +2107,45 @@ describe("task 12 api surface", () => {
     });
   });
 
-  it("exposes a creative build as a downloadable project without claiming KF 3.6 runtime verification", async () => {
+  it("delivers real Worker-produced creative bytes through projection, token issuance, and HTTP consumption", async () => {
     const cookie = await login(TENANT_A_MEMBER);
     const ws = await createWorkspace(cookie, "Creative downloadable delivery", "creative-v2");
     const conv = await createConversation(cookie, ws.body.id, "Creative delivery");
     const tenantId = await tenantIdOf(TENANT_A.tenant);
-    const planHash = "a".repeat(64);
-    const creativeArtifactHash = "b".repeat(64);
-    const nativeMaterializationHash = "c".repeat(64);
-    const changePlanId = `creative-delivery-${++counter}`;
-    const job = await prisma.buildJob.create({ data: {
-      tenantId, workspaceId: ws.body.id, baseRevisionId: ws.body.currentRevisionId,
-      changePlanId, planHash, projectKey: "creative", domainKind: "kingclient",
-      idempotencyKey: `${conv.body.id}:creative:${changePlanId}:${planHash}`, status: "SUCCEEDED",
-    } });
-    const latest = await prisma.solutionRevision.findFirstOrThrow({
-      where: { tenantId, workspaceId: ws.body.id }, orderBy: { revisionNumber: "desc" },
-    });
-    const packageHash = "d".repeat(64);
-    const revision = await prisma.solutionRevision.create({ data: {
-      tenantId, workspaceId: ws.body.id, changePlanId,
-      revisionNumber: latest.revisionNumber + 1, kind: "built", parentRevisionId: job.baseRevisionId,
-      state: { plan: null, mode: "compile", build: { packageHash, creativeArtifactHash, nativeMaterializationHash } },
-    } });
-    const artifact = await prisma.artifact.create({ data: {
-      tenantId, buildJobId: job.id, solutionRevisionId: revision.id,
-      creativeArtifactHash, nativeMaterializationHash,
-      kind: "client-package", mediaType: "application/zip", fileExtension: ".zip",
-      storageKey: "creative-downloadable-package", sha256: packageHash,
-    } });
-    await prisma.domainProjectRevision.create({ data: {
-      tenantId, solutionRevisionId: revision.id, projectKey: "creative", domainKind: "kingclient",
-      kind: "client-package", mediaType: "application/zip", fileExtension: ".zip",
-      packageUrl: artifact.storageKey, packageHash,
-    } });
-    await prisma.solutionWorkspace.update({ where: { id: ws.body.id }, data: { currentRevisionId: revision.id } });
-    const graph = await app.get(ConversationService)["getGraph"]();
-    await graph.updateState({ configurable: { thread_id: conv.body.id } }, {
-      tenantId, workspaceId: ws.body.id, conversationId: conv.body.id,
-      generationWorkflow: "creative-v2", buildJobId: job.id,
-      changePlanId, planHash, currentRevisionId: revision.id,
+
+    fakeModel.queueIntent("NEW_REQUIREMENT");
+    const proposed = doneEvent((await sendMessage(cookie, conv.body.id, "创建园区访客协同中心").expect(200)).text);
+    expect(proposed.data.stage).toBe("design-review");
+    fakeModel.queueIntent("CONFIRM_DESIGN");
+    const confirmed = doneEvent((await sendMessage(cookie, conv.body.id, "确认设计").expect(200)).text);
+    expect(confirmed.data).toMatchObject({ stage: "building", buildJobId: expect.any(String) });
+    await request(server)
+      .get(`/api/conversations/${conv.body.id}/delivery?buildJobId=${confirmed.data.buildJobId}`)
+      .set("Cookie", cookie)
+      .expect(200)
+      .expect(({ body }) => expect(body.projectDelivery).toMatchObject({
+        workflow: "creative-v2",
+        status: "building",
+        download: { available: false, tokenEndpoint: null },
+      }));
+
+    const built = await runNextBuild("creative-delivery-e2e");
+    expect(built).toMatchObject({ id: confirmed.data.buildJobId, status: "SUCCEEDED" });
+    const artifact = await prisma.artifact.findFirstOrThrow({ where: { tenantId, buildJobId: built.id } });
+    const revision = await prisma.solutionRevision.findUniqueOrThrow({ where: { id: artifact.solutionRevisionId! } });
+    const project = await prisma.domainProjectRevision.findFirstOrThrow({
+      where: { tenantId, solutionRevisionId: revision.id, projectKey: built.projectKey, domainKind: built.domainKind },
     });
 
     const delivered = await request(server)
-      .get(`/api/conversations/${conv.body.id}/delivery?buildJobId=${job.id}`)
+      .get(`/api/conversations/${conv.body.id}/delivery?buildJobId=${built.id}`)
       .set("Cookie", cookie).expect(200);
     expect(delivered.body).toMatchObject({
       artifactId: artifact.id,
       revisionId: revision.id,
       projectDelivery: {
         workflow: "creative-v2",
-        projectKey: "creative",
+        projectKey: built.projectKey,
         status: "downloadable",
         artifactId: artifact.id,
         revisionId: revision.id,
@@ -2067,7 +2160,31 @@ describe("task 12 api surface", () => {
       },
     });
     expect(delivered.body.projectDelivery).not.toHaveProperty("preview");
-    await request(server).post(`/api/artifacts/${artifact.id}/download-token`).set("Cookie", cookie).expect(200);
+    const issued = await request(server)
+      .post(`/api/artifacts/${artifact.id}/download-token`)
+      .set("Cookie", cookie)
+      .expect(200);
+    const downloaded = await request(server)
+      .get(`/api/artifacts/download/${issued.body.token}`)
+      .set("Cookie", cookie)
+      .buffer(true)
+      .parse(parseBinary)
+      .expect(200);
+    expect(createHash("sha256").update(downloaded.body).digest("hex")).toBe(artifact.sha256);
+    expect(project).toMatchObject({ packageUrl: artifact.storageKey, packageHash: artifact.sha256 });
+    const importRoot = await mkdtemp(path.join(tmpdir(), "kf-creative-http-import-"));
+    try {
+      const imported = await importNativeClientPackage(downloaded.body, importRoot);
+      const inspection = await inspectClientProject(imported);
+      expect(Object.keys(inspection.index.pages)).not.toHaveLength(0);
+    } finally {
+      await rm(importRoot, { recursive: true, force: true });
+    }
+
+    const issuedBeforeTamper = await request(server)
+      .post(`/api/artifacts/${artifact.id}/download-token`)
+      .set("Cookie", cookie)
+      .expect(200);
 
     await prisma.artifact.update({
       where: { id: artifact.id },
@@ -2079,6 +2196,28 @@ describe("task 12 api surface", () => {
       data: { creativeArtifactHash: null },
     });
     await request(server).post(`/api/artifacts/${artifact.id}/download-token`).set("Cookie", cookie).expect(409);
+    await prisma.artifact.update({
+      where: { id: artifact.id },
+      data: { nativeMaterializationHash: null },
+    });
+    await request(server).post(`/api/artifacts/${artifact.id}/download-token`).set("Cookie", cookie).expect(409);
+    await request(server)
+      .get(`/api/conversations/${conv.body.id}/delivery?buildJobId=${built.id}`)
+      .set("Cookie", cookie)
+      .expect(200)
+      .expect(({ body }) => expect(body).toMatchObject({
+        artifactId: null,
+        revisionId: null,
+        projectDelivery: {
+          workflow: "creative-v2",
+          status: "blocked",
+          download: { available: false, tokenEndpoint: null },
+        },
+      }));
+    await request(server)
+      .get(`/api/artifacts/download/${issuedBeforeTamper.body.token}`)
+      .set("Cookie", cookie)
+      .expect(409);
   });
 
   it("compiles every confirmed blueprint module instead of persisting a Text1-only plan", async () => {

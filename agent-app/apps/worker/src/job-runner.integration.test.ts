@@ -7,7 +7,7 @@ process.env.DATABASE_URL =
   process.env.TEST_DATABASE_URL ?? "postgresql://postgres@127.0.0.1:5432/kf_agent_test";
 
 import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -17,7 +17,9 @@ import {
   CustomerSolutionBlueprintSchema,
   ModulePlanSchema,
   SolutionImplementationPlanSchema,
+  canonicalChangePlanHash,
   canonicalServerHash,
+  canonicalServerPlanSigningBytes,
   workspaceAssetIdToModelId,
   type ModulePlan,
 } from "@kf/contracts";
@@ -313,7 +315,12 @@ async function seedNewWorkspace(ir = INITIAL_IR): Promise<Seeded> {
   const suffix = `${Date.now()}-${counter}`;
   const tenant = await prisma.tenant.create({ data: { name: `W-Tenant-${suffix}` } });
   const workspace = await prisma.solutionWorkspace.create({
-    data: { tenantId: tenant.id, name: `W-Workspace-${suffix}`, mode: "new" },
+    data: {
+      tenantId: tenant.id,
+      name: `W-Workspace-${suffix}`,
+      mode: "new",
+      generationWorkflow: "legacy",
+    },
   });
   const revision = await prisma.solutionRevision.create({
     data: {
@@ -561,6 +568,41 @@ async function advanceWorkspacePastBase(seeded: Seeded): Promise<void> {
 }
 
 describe("job runner", () => {
+  it.each(["plain plan", "signed non-creative envelope"])(
+    "rejects a creative-v2 workspace downgrade through a %s",
+    async (variant) => {
+      const seeded = await seedNewWorkspace();
+      const authority = createHmacServerPlanAuthority(Buffer.alloc(32, 0x72));
+      await prisma.solutionWorkspace.update({
+        where: { id: seeded.workspace.id },
+        data: { generationWorkflow: "creative-v2" },
+      });
+      if (variant === "signed non-creative envelope") {
+        const stored = await prisma.changePlan.findUniqueOrThrow({ where: { id: seeded.plan.id } });
+        const envelope = authority.sign({
+          plan: stored.plan as never,
+          revisionId: seeded.revision.id,
+          semanticOperations: [],
+        });
+        await prisma.changePlan.update({
+          where: { id: seeded.plan.id },
+          data: { planHash: envelope.planHash, plan: envelope as Prisma.InputJsonValue },
+        });
+        seeded.hash = envelope.planHash;
+      }
+      const queued = await jobs.enqueue(enqueueInput(seeded));
+      const runner = new JobRunner({ prisma, storage, registry, serverPlanVerifier: authority });
+
+      expect((await runner.runOnce(`creative-downgrade-${++counter}`, new Date()))?.status).toBe("FAILED");
+      expect(await prisma.solutionRevision.count({
+        where: { workspaceId: seeded.workspace.id, changePlanId: seeded.plan.id },
+      })).toBe(0);
+      expect(await prisma.artifact.count({ where: { buildJobId: queued.id } })).toBe(0);
+      expect((await prisma.solutionWorkspace.findUniqueOrThrow({ where: { id: seeded.workspace.id } })).currentRevisionId)
+        .toBe(seeded.revision.id);
+    },
+  );
+
   it("delivers a signed creative envelope through the real Worker and atomically binds its downloadable package", async () => {
     const seeded = await seedCreativeBuild();
     const queued = await jobs.enqueue({
@@ -619,6 +661,73 @@ describe("job runner", () => {
       .toEqual(expect.arrayContaining(seeded.expectedControlNames));
   });
 
+  it("rejects a signed creative materialization bound to another workspace at the materialization boundary", async () => {
+    const seeded = await seedCreativeBuild();
+    const otherWorkspace = await prisma.solutionWorkspace.create({ data: {
+      tenantId: seeded.tenant.id,
+      name: `Foreign-workspace-${Date.now()}-${++counter}`,
+      mode: "new",
+      generationWorkflow: "creative-v2",
+    } });
+    const stored = await prisma.changePlan.findUniqueOrThrow({ where: { id: seeded.plan.id } });
+    const envelope = structuredClone(stored.plan) as Record<string, unknown>;
+    const innerPlan = envelope["plan"] as Record<string, unknown>;
+    innerPlan["workspaceId"] = otherWorkspace.id;
+    envelope["planHash"] = canonicalChangePlanHash(innerPlan);
+    envelope["signature"] = createHmac("sha256", Buffer.alloc(32, 0x71))
+      .update(canonicalServerPlanSigningBytes(envelope as never))
+      .digest("hex");
+    await prisma.$transaction([
+      prisma.solutionWorkspace.update({
+        where: { id: seeded.workspace.id },
+        data: { currentRevisionId: null },
+      }),
+      prisma.solutionRevision.update({
+        where: { id: seeded.revision.id },
+        data: { workspaceId: otherWorkspace.id },
+      }),
+      prisma.solutionWorkspace.update({
+        where: { id: otherWorkspace.id },
+        data: { currentRevisionId: seeded.revision.id },
+      }),
+      prisma.changePlan.update({
+        where: { id: seeded.plan.id },
+        data: {
+          workspaceId: otherWorkspace.id,
+          planHash: envelope["planHash"] as string,
+          plan: envelope as Prisma.InputJsonValue,
+        },
+      }),
+    ]);
+    const queued = await jobs.enqueue({
+      ...enqueueInput({
+        ...seeded,
+        workspace: otherWorkspace,
+        hash: envelope["planHash"] as string,
+      }),
+      projectKey: "creative",
+    });
+    const runner = new JobRunner({
+      prisma,
+      storage,
+      registry,
+      serverPlanVerifier: seeded.authority,
+    });
+
+    expect((await runner.runOnce(`creative-workspace-mismatch-${++counter}`, new Date()))?.status).toBe("FAILED");
+    expect(await prisma.solutionRevision.count({
+      where: { workspaceId: otherWorkspace.id, changePlanId: seeded.plan.id },
+    })).toBe(0);
+    expect(await prisma.artifact.count({ where: { buildJobId: queued.id } })).toBe(0);
+    expect((await prisma.solutionWorkspace.findUniqueOrThrow({ where: { id: otherWorkspace.id } })).currentRevisionId)
+      .toBe(seeded.revision.id);
+    expect(await prisma.validationReport.findFirstOrThrow({ where: { buildJobId: queued.id } }))
+      .toMatchObject({
+        outcome: "fail",
+        summary: expect.stringContaining("SERVER_PLAN_CREATIVE_MISMATCH"),
+      });
+  });
+
   it.each([
     ["tenant", async (seeded: Awaited<ReturnType<typeof seedCreativeBuild>>) => {
       const otherTenant = await prisma.tenant.create({ data: { name: `Foreign-${Date.now()}-${++counter}` } });
@@ -628,20 +737,6 @@ describe("job runner", () => {
     }],
     ["project", async (seeded: Awaited<ReturnType<typeof seedCreativeBuild>>) =>
       jobs.enqueue({ ...enqueueInput(seeded), projectKey: "different-project" })],
-    ["workspace", async (seeded: Awaited<ReturnType<typeof seedCreativeBuild>>) => {
-      const queued = await jobs.enqueue({ ...enqueueInput(seeded), projectKey: "creative" });
-      const otherWorkspace = await prisma.solutionWorkspace.create({ data: {
-        tenantId: seeded.tenant.id,
-        name: `Foreign-workspace-${Date.now()}-${++counter}`,
-        mode: "new",
-        generationWorkflow: "creative-v2",
-      } });
-      await prisma.$transaction([
-        prisma.changePlan.update({ where: { id: seeded.plan.id }, data: { workspaceId: otherWorkspace.id } }),
-        prisma.buildJob.update({ where: { id: queued.id }, data: { workspaceId: otherWorkspace.id } }),
-      ]);
-      return queued;
-    }],
     ["plan hash", async (seeded: Awaited<ReturnType<typeof seedCreativeBuild>>) => {
       const queued = await jobs.enqueue({ ...enqueueInput(seeded), projectKey: "creative" });
       const wrongHash = "f".repeat(64);

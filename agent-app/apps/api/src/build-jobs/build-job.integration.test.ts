@@ -264,6 +264,13 @@ async function seedWorkspace(mode = "new") {
     name: `Workspace-${Date.now()}-${counter}`,
     mode,
   });
+  if (mode === "new") {
+    await prisma.solutionWorkspace.update({
+      where: { id: result.workspace.id },
+      data: { generationWorkflow: "legacy" },
+    });
+    result.workspace.generationWorkflow = "legacy";
+  }
   return { tenant, ...result };
 }
 

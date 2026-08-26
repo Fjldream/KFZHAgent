@@ -69,6 +69,11 @@ export class DeliverySnapshotService {
   async getForConversation(tenantId: string, conversationId: string, expectedBuildJobId?: string): Promise<PersistedDeliverySnapshot | null> {
     const conversation = await this.prisma.conversation.findFirst({ where: { id: conversationId, tenantId } });
     if (conversation === null) throw new NotFoundException("conversation");
+    const workspace = await this.prisma.solutionWorkspace.findFirst({
+      where: { id: conversation.workspaceId, tenantId },
+      select: { generationWorkflow: true },
+    });
+    if (workspace === null) throw new NotFoundException("workspace");
     const values = await this.checkpointValues(conversationId);
     if (values === undefined) return null;
     if (values["tenantId"] !== tenantId || values["workspaceId"] !== conversation.workspaceId || values["conversationId"] !== conversationId) {
@@ -83,7 +88,14 @@ export class DeliverySnapshotService {
       return hasModuleState(values) ? failClosedSnapshot(tenantId, conversation.workspaceId, conversationId, values, "构建与会话绑定校验失败") : null;
     }
     if (!hasModuleState(values)) {
-      return job === null ? null : this.recoverNonModule(tenantId, conversation.workspaceId, conversationId, job, values);
+      return job === null ? null : this.recoverNonModule(
+        tenantId,
+        conversation.workspaceId,
+        conversationId,
+        job,
+        values,
+        workspace.generationWorkflow === "creative-v2",
+      );
     }
     const result = projectModuleDeliveryResult(values, this.authority, job?.baseRevisionId);
     if (result === undefined) return failClosedSnapshot(tenantId, conversation.workspaceId, conversationId, values, "交付快照校验失败", undefined, job);
@@ -123,7 +135,14 @@ export class DeliverySnapshotService {
     if (artifact === null) return; // DomainProjectRevision/source upload compatibility is handled by its owning route.
     const job = await this.prisma.buildJob.findFirst({ where: { id: artifact.buildJobId, tenantId } });
     if (job === null) throw new ConflictException("artifact has no trusted build binding");
-    if (artifact.creativeArtifactHash !== null || artifact.nativeMaterializationHash !== null) {
+    const workspace = await this.prisma.solutionWorkspace.findFirst({
+      where: { id: job.workspaceId, tenantId },
+      select: { generationWorkflow: true },
+    });
+    if (workspace === null) throw new ConflictException("artifact has no trusted workspace binding");
+    if (workspace.generationWorkflow === "creative-v2"
+      || artifact.creativeArtifactHash !== null
+      || artifact.nativeMaterializationHash !== null) {
       await this.assertCreativeArtifactBinding(job, artifact);
     }
     const conversations = await this.prisma.conversation.findMany({ where: { tenantId, workspaceId: job.workspaceId }, select: { id: true } });
@@ -153,25 +172,36 @@ export class DeliverySnapshotService {
     conversationId: string,
     job: BuildJob,
     values: Record<string, unknown>,
+    creativeWorkspace: boolean,
   ): Promise<PersistedDeliverySnapshot> {
-    if (job.status !== "SUCCEEDED") return snapshot(tenantId, workspaceId, conversationId, job, null, null, null);
+    if (job.status !== "SUCCEEDED") {
+      return creativeWorkspace
+        ? projectUnavailableSnapshot(
+            tenantId,
+            workspaceId,
+            conversationId,
+            job,
+            job.status === "FAILED" ? "failed" : "building",
+          )
+        : snapshot(tenantId, workspaceId, conversationId, job, null, null, null);
+    }
     const [artifact, revisions] = await Promise.all([
       this.prisma.artifact.findFirst({ where: { tenantId, buildJobId: job.id, kind: "client-package" }, orderBy: { createdAt: "desc" } }),
       this.prisma.solutionRevision.findMany({ where: { tenantId, workspaceId, changePlanId: job.changePlanId, parentRevisionId: job.baseRevisionId }, orderBy: { revisionNumber: "desc" }, take: 2 }),
     ]);
     const revision = revisions.length === 1 ? revisions[0]! : null;
-    if (artifact === null || (artifact.creativeArtifactHash === null
-      && artifact.nativeMaterializationHash === null)) {
+    if (!creativeWorkspace && (artifact === null || (artifact.creativeArtifactHash === null
+      && artifact.nativeMaterializationHash === null))) {
       return snapshot(tenantId, workspaceId, conversationId, job, artifact, revision, null);
     }
-    if (revision === null || (values["currentRevisionId"] !== job.baseRevisionId
+    if (artifact === null || revision === null || (values["currentRevisionId"] !== job.baseRevisionId
       && values["currentRevisionId"] !== revision.id)) {
-      return projectBlockedSnapshot(tenantId, workspaceId, conversationId, job);
+      return projectUnavailableSnapshot(tenantId, workspaceId, conversationId, job, "blocked");
     }
     try {
       await this.assertCreativeArtifactBinding(job, artifact, revision);
     } catch {
-      return projectBlockedSnapshot(tenantId, workspaceId, conversationId, job);
+      return projectUnavailableSnapshot(tenantId, workspaceId, conversationId, job, "blocked");
     }
     return snapshot(tenantId, workspaceId, conversationId, job, artifact, revision, null, {
       workflow: "creative-v2",
@@ -207,16 +237,32 @@ export class DeliverySnapshotService {
       || artifact.solutionRevisionId === null || artifact.sha256 === null) {
       throw new ConflictException("creative artifact has no complete delivery binding");
     }
-    const revision = knownRevision ?? await this.prisma.solutionRevision.findFirst({
-      where: {
-        id: artifact.solutionRevisionId,
-        tenantId: job.tenantId,
-        workspaceId: job.workspaceId,
-        changePlanId: job.changePlanId,
-        parentRevisionId: job.baseRevisionId,
-      },
-      select: { id: true, state: true },
-    });
+    const [revision, changePlan] = await Promise.all([
+      knownRevision === undefined
+        ? this.prisma.solutionRevision.findFirst({
+            where: {
+              id: artifact.solutionRevisionId,
+              tenantId: job.tenantId,
+              workspaceId: job.workspaceId,
+              changePlanId: job.changePlanId,
+              parentRevisionId: job.baseRevisionId,
+            },
+            select: { id: true, state: true },
+          })
+        : Promise.resolve(knownRevision),
+      this.prisma.changePlan.findFirst({
+        where: {
+          id: job.changePlanId,
+          tenantId: job.tenantId,
+          workspaceId: job.workspaceId,
+          planHash: job.planHash,
+        },
+        select: { id: true },
+      }),
+    ]);
+    if (changePlan === null) {
+      throw new ConflictException("creative artifact change-plan binding is invalid");
+    }
     if (revision === null || revision.id !== artifact.solutionRevisionId) {
       throw new ConflictException("creative artifact revision binding is invalid");
     }
@@ -333,16 +379,17 @@ function snapshot(tenantId: string, workspaceId: string, conversationId: string,
   };
 }
 
-function projectBlockedSnapshot(
+function projectUnavailableSnapshot(
   tenantId: string,
   workspaceId: string,
   conversationId: string,
   job: BuildJob,
+  status: "building" | "failed" | "blocked",
 ): PersistedDeliverySnapshot {
   return snapshot(tenantId, workspaceId, conversationId, job, null, null, null, {
     workflow: "creative-v2",
     projectKey: job.projectKey,
-    status: "blocked",
+    status,
     artifactId: null,
     revisionId: null,
     download: { available: false, tokenEndpoint: null },

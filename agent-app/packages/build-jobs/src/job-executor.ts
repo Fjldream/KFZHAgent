@@ -518,6 +518,10 @@ export class BuildExecutor {
       expectedRevisionId: job.baseRevisionId,
     }, this.#deps.serverPlanVerifier);
     const planInput = resolved.plan;
+    if (workspace.generationWorkflow === "creative-v2"
+      && (resolved.creativeMaterialization === undefined || planInput.creative === undefined)) {
+      throw new Error("CREATIVE_WORKFLOW_REQUIRES_SIGNED_MATERIALIZATION");
+    }
     if (planInput.workspaceId !== job.workspaceId) {
       throw new Error("stored change plan belongs to another workspace");
     }
