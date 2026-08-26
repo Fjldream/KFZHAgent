@@ -4,6 +4,7 @@ import {
   ClassifyIntentResultSchema,
   type ClassifyIntentResult,
 } from "../schemas/intent.js";
+import { decodeBlueprintConfirmation } from "../blueprint-message.js";
 
 /**
  * 澄清追问轮数上限（Task 5）：state.clarificationCount 达到该值后，模型再
@@ -63,6 +64,9 @@ const PREVIEW_SMALL_CHANGE_WORDS = [
 export function createClassifyIntentNode(deps: SolutionGraphDeps) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
     const requirementText = latestUserMessage(state);
+    const blueprintConfirmation = requirementText === undefined
+      ? null
+      : decodeBlueprintConfirmation(requirementText.trim());
     const isImplementationRetry =
       state.designPlanHash !== undefined
       && state.lastErrorCode?.startsWith("UI_IMPLEMENTATION_INVALID") === true
@@ -80,7 +84,7 @@ export function createClassifyIntentNode(deps: SolutionGraphDeps) {
         "CREATIVE_SOLUTION_PERSIST_FAILED",
       ].includes(creativeErrorCode ?? "");
     let result: ClassifyIntentResult;
-    if (isImplementationRetry || isCreativeCompilationRetry) {
+    if (blueprintConfirmation !== null || isImplementationRetry || isCreativeCompilationRetry) {
       // This exact phrase is emitted by our own UI after a persisted
       // implementation failure. Route it deterministically so an old approved
       // plan/build checkpoint cannot hijack the retry and no classifier call

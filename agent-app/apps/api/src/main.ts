@@ -10,6 +10,7 @@ import { AppModule } from "./app.module.js";
  */
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
+  app.enableShutdownHooks();
 
   const originList = (process.env.CORS_ORIGINS ?? "http://localhost:5173,http://localhost:4173")
     .split(",")

@@ -20,10 +20,12 @@ it("disables the composer while an approval request is busy", () => {
 });
 
 function blueprintMessage(revision = 1): string {
+  const designPlanHash = revision === 1 ? "a".repeat(64) : "b".repeat(64);
   return `KF_BLUEPRINT_MESSAGE/1\n${JSON.stringify({
     kind: "kf-customer-effect-blueprint",
     version: 1,
     revision,
+    designPlanHash,
     blueprint: {
       schema: "kf-design-plan/v2",
       displayName: "个人求职作品集",
@@ -65,10 +67,12 @@ function blueprintMessage(revision = 1): string {
 }
 
 function solutionBlueprintMessage(revision = 1): string {
+  const designPlanHash = revision === 1 ? "c".repeat(64) : "d".repeat(64);
   return `KF_BLUEPRINT_MESSAGE/1\n${JSON.stringify({
     kind: "kf-customer-effect-blueprint",
     version: 1,
     revision,
+    designPlanHash,
     blueprint: {
       schema: "kf-design-plan/v3",
       displayName: "园区访客协同中心",
@@ -368,7 +372,9 @@ describe("ConversationPanel enriched rendering", () => {
     expect(wrapper.text()).not.toContain("kf-design-plan/v2");
 
     await wrapper.get('[data-testid="blueprint-confirm"]').trigger("click");
-    expect(wrapper.emitted("send")?.[0]?.[0]).toBe("确认");
+    expect(wrapper.emitted("send")?.[0]?.[0]).toBe(
+      `KF_BLUEPRINT_CONFIRM/1\n${JSON.stringify({ revision: 1, designPlanHash: "a".repeat(64) })}`,
+    );
   });
 
   it("renders every customer-review boundary of a v3 blueprint and emits its confirmation", async () => {
@@ -390,7 +396,9 @@ describe("ConversationPanel enriched rendering", () => {
     expect(text).not.toContain("kf-design-plan/v3");
 
     await card.get('[data-testid="blueprint-confirm"]').trigger("click");
-    expect(wrapper.emitted("send")?.[0]?.[0]).toBe("确认");
+    expect(wrapper.emitted("send")?.[0]?.[0]).toBe(
+      `KF_BLUEPRINT_CONFIRM/1\n${JSON.stringify({ revision: 1, designPlanHash: "c".repeat(64) })}`,
+    );
   });
 
   it("does not let a confirmed historical blueprint submit another confirmation", () => {
@@ -398,7 +406,7 @@ describe("ConversationPanel enriched rendering", () => {
       props: {
         messages: [
           { id: "blueprint-1", role: "assistant", content: blueprintMessage() },
-          { id: "confirm-1", role: "user", content: "确认" },
+          { id: "confirm-1", role: "user", content: `KF_BLUEPRINT_CONFIRM/1\n${JSON.stringify({ revision: 1, designPlanHash: "a".repeat(64) })}` },
           { id: "preview-1", role: "assistant", content: "预览已生成，您可以查看实际效果。" },
         ],
       },
@@ -414,7 +422,7 @@ describe("ConversationPanel enriched rendering", () => {
       props: {
         messages: [
           { id: "blueprint-1", role: "assistant", content: blueprintMessage() },
-          { id: "confirm-1", role: "user", content: "确认" },
+          { id: "confirm-1", role: "user", content: `KF_BLUEPRINT_CONFIRM/1\n${JSON.stringify({ revision: 1, designPlanHash: "a".repeat(64) })}` },
           {
             id: "failure-1",
             role: "assistant",

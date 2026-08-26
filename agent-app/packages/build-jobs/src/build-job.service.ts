@@ -20,8 +20,9 @@ const MAX_LEASE_CANDIDATE_WORKSPACES = 16;
  * idempotencyKey; the UNIQUE index on idempotencyKey is the concurrency
  * backstop.
  *
- * Leasing: `leaseNext` inspects one bounded workspace batch and serializes the
- * claim decision with non-blocking `pg_try_advisory_xact_lock`
+ * Leasing: `leaseNext` advances a persistent cross-tenant round-robin cursor,
+ * inspects at most one candidate workspace per bounded tenant batch, and
+ * serializes each workspace claim with non-blocking `pg_try_advisory_xact_lock`
  * (transaction-scoped, auto-released), then locks one candidate row with
  * `SELECT ... FOR UPDATE SKIP LOCKED`, taking a claim (`leaseOwner` +
  * `leaseExpiresAt`) and bumping `attemptCount`. Only QUEUED/RUNNING/VALIDATING
@@ -135,26 +136,62 @@ export class BuildJobService {
     const ttl = leaseMs ?? this.leaseMs;
     const expiry = new Date(now.getTime() + ttl);
     return this.prisma.$transaction(async (tx) => {
-      // Select only the oldest bounded workspace batch. One tenant can add an
-      // arbitrarily large backlog without increasing this transaction's lock
-      // count or database round trips beyond the fixed batch size.
-      const workspaces = await tx.$queryRaw<{ workspaceId: string }[]>`
-        SELECT candidate."workspaceId"
+      // Serialize only the small scheduling decision. The persisted cursor
+      // makes every call begin after the last tenant that actually won a
+      // claim, so one old backlog cannot occupy every candidate batch.
+      await tx.$executeRaw`
+        INSERT INTO "BuildSchedulerCursor" ("id", "lastTenantId", "updatedAt")
+        VALUES (1, '', ${now})
+        ON CONFLICT ("id") DO NOTHING
+      `;
+      const cursorRows = await tx.$queryRaw<{ lastTenantId: string }[]>`
+        SELECT "lastTenantId" FROM "BuildSchedulerCursor"
+        WHERE "id" = 1 FOR UPDATE
+      `;
+      const lastTenantId = cursorRows[0]?.lastTenantId ?? "";
+      const after = await tx.$queryRaw<{ tenantId: string }[]>`
+        SELECT DISTINCT candidate."tenantId"
         FROM "BuildJob" AS candidate
-        WHERE candidate."status" IN ('QUEUED', 'RUNNING', 'VALIDATING')
+        WHERE candidate."tenantId" > ${lastTenantId}
+          AND candidate."status" IN ('QUEUED', 'RUNNING', 'VALIDATING')
           AND (candidate."leaseExpiresAt" IS NULL
-               OR extract(epoch from candidate."leaseExpiresAt") < extract(epoch from ${now}))
-          AND NOT EXISTS (
-            SELECT 1 FROM "BuildJob" AS active
-            WHERE active."workspaceId" = candidate."workspaceId"
-              AND active."status" IN ('RUNNING', 'VALIDATING')
-              AND active."leaseExpiresAt" IS NOT NULL
-              AND extract(epoch from active."leaseExpiresAt") >= extract(epoch from ${now})
-          )
-        GROUP BY candidate."workspaceId"
-        ORDER BY MIN(candidate."createdAt") ASC, candidate."workspaceId" ASC
+               OR candidate."leaseExpiresAt" < (${now} AT TIME ZONE 'UTC'))
+        ORDER BY candidate."tenantId" ASC
         LIMIT ${MAX_LEASE_CANDIDATE_WORKSPACES}
       `;
+      const remaining = MAX_LEASE_CANDIDATE_WORKSPACES - after.length;
+      const wrapped = remaining === 0 ? [] : await tx.$queryRaw<{ tenantId: string }[]>`
+        SELECT DISTINCT candidate."tenantId"
+        FROM "BuildJob" AS candidate
+        WHERE candidate."tenantId" <= ${lastTenantId}
+          AND candidate."status" IN ('QUEUED', 'RUNNING', 'VALIDATING')
+          AND (candidate."leaseExpiresAt" IS NULL
+               OR candidate."leaseExpiresAt" < (${now} AT TIME ZONE 'UTC'))
+        ORDER BY candidate."tenantId" ASC
+        LIMIT ${remaining}
+      `;
+      const tenants = [...after, ...wrapped];
+      const workspaces: Array<{ tenantId: string; workspaceId: string }> = [];
+      for (const tenant of tenants) {
+        const candidate = await tx.$queryRaw<{ tenantId: string; workspaceId: string }[]>`
+          SELECT candidate."tenantId", candidate."workspaceId"
+          FROM "BuildJob" AS candidate
+          WHERE candidate."tenantId" = ${tenant.tenantId}
+            AND candidate."status" IN ('QUEUED', 'RUNNING', 'VALIDATING')
+            AND (candidate."leaseExpiresAt" IS NULL
+                 OR candidate."leaseExpiresAt" < (${now} AT TIME ZONE 'UTC'))
+            AND NOT EXISTS (
+              SELECT 1 FROM "BuildJob" AS active
+              WHERE active."workspaceId" = candidate."workspaceId"
+                AND active."status" IN ('RUNNING', 'VALIDATING')
+                AND active."leaseExpiresAt" IS NOT NULL
+                AND active."leaseExpiresAt" >= (${now} AT TIME ZONE 'UTC')
+            )
+          ORDER BY candidate."createdAt" ASC, candidate."id" ASC
+          LIMIT 1
+        `;
+        if (candidate[0] !== undefined) workspaces.push(candidate[0]);
+      }
       for (const ws of workspaces) {
         const lock = await tx.$queryRaw<{ acquired: boolean }[]>`
           SELECT pg_try_advisory_xact_lock(hashtextextended(${ws.workspaceId}, 0)) AS "acquired"
@@ -168,13 +205,13 @@ export class BuildJobService {
           WHERE candidate."workspaceId" = ${ws.workspaceId}
             AND candidate."status" IN ('QUEUED', 'RUNNING', 'VALIDATING')
             AND (candidate."leaseExpiresAt" IS NULL
-                 OR extract(epoch from candidate."leaseExpiresAt") < extract(epoch from ${now}))
+                 OR candidate."leaseExpiresAt" < (${now} AT TIME ZONE 'UTC'))
             AND NOT EXISTS (
               SELECT 1 FROM "BuildJob" AS active
               WHERE active."workspaceId" = candidate."workspaceId"
                 AND active."status" IN ('RUNNING', 'VALIDATING')
                 AND active."leaseExpiresAt" IS NOT NULL
-                AND extract(epoch from active."leaseExpiresAt") >= extract(epoch from ${now})
+                AND active."leaseExpiresAt" >= (${now} AT TIME ZONE 'UTC')
                 AND active."id" <> candidate."id"
             )
           ORDER BY candidate."createdAt" ASC, candidate."id" ASC
@@ -184,7 +221,7 @@ export class BuildJobService {
         const row = rows[0];
         if (row === undefined) continue;
         await this.#debugHooks.beforeClaim?.();
-        return tx.buildJob.update({
+        const claimed = await tx.buildJob.update({
           where: { id: row.id },
           data: {
             status: "RUNNING",
@@ -193,6 +230,20 @@ export class BuildJobService {
             attemptCount: { increment: 1 },
           },
         });
+        await tx.$executeRaw`
+          UPDATE "BuildSchedulerCursor"
+          SET "lastTenantId" = ${ws.tenantId}, "updatedAt" = ${now}
+          WHERE "id" = 1
+        `;
+        return claimed;
+      }
+      const lastConsidered = tenants.at(-1)?.tenantId;
+      if (lastConsidered !== undefined) {
+        await tx.$executeRaw`
+          UPDATE "BuildSchedulerCursor"
+          SET "lastTenantId" = ${lastConsidered}, "updatedAt" = ${now}
+          WHERE "id" = 1
+        `;
       }
       return null;
     });

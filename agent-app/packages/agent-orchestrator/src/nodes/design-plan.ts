@@ -139,7 +139,7 @@ export function createDesignPlanNode(deps: SolutionGraphDeps) {
     const plan = parsed.data;
     const revision = (state.designRevision ?? 0) + 1;
     const hash = hashDesignPlan(plan, revision);
-    const rendered = encodeBlueprintMessage(plan, revision);
+    const rendered = encodeBlueprintMessage(plan, revision, hash);
     await deps.workspaceQuery.appendMessage({
       tenantId: state.tenantId,
       conversationId: state.conversationId,

@@ -159,7 +159,11 @@ describe("design-plan node", () => {
       { revising: false },
     );
     const encoded = workspaceQuery.appendMessage.mock.calls[0]?.[0]?.content as string;
-    expect(decodeBlueprintMessage(encoded)).toEqual({ blueprint: creativeBlueprint, revision: 1 });
+    expect(decodeBlueprintMessage(encoded)).toEqual({
+      blueprint: creativeBlueprint,
+      revision: 1,
+      designPlanHash: update.designPlanHash,
+    });
   });
 
   it("does not accept a v3 blueprint from module-v1 or legacy design planning", async () => {
@@ -255,7 +259,11 @@ describe("design-plan node", () => {
     );
     const message = workspaceQuery.appendMessage.mock.calls[0]?.[0];
     expect(message).toEqual(expect.objectContaining({ tenantId: "t1", conversationId: "c1", role: "assistant" }));
-    expect(decodeBlueprintMessage(message?.content as string)).toEqual({ blueprint: designPlan, revision: 1 });
+    expect(decodeBlueprintMessage(message?.content as string)).toEqual({
+      blueprint: designPlan,
+      revision: 1,
+      designPlanHash: update.designPlanHash,
+    });
   });
 
   it("supplies only the stable planning catalog when a server-owned module workflow creates the blueprint", async () => {

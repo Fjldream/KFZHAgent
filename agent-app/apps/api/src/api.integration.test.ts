@@ -13,7 +13,7 @@ import cookieParser from "cookie-parser";
 import type { ArtifactStorage, StoredArtifact } from "@kf/artifact-storage";
 import { BuildExecutor, BuildJobService } from "@kf/build-jobs";
 import { canonicalModuleCompilationHash, canonicalServerHash } from "@kf/contracts";
-import { decodeBlueprintMessage } from "@kf/agent-orchestrator";
+import { decodeBlueprintMessage, encodeBlueprintConfirmation } from "@kf/agent-orchestrator";
 import {
   createKingClientDomainPack,
   importNativeClientPackage,
@@ -2114,8 +2114,11 @@ describe("task 12 api surface", () => {
     fakeModel.queueIntent("NEW_REQUIREMENT");
     const proposed = doneEvent((await sendMessage(cookie, conv.body.id, "创建园区访客协同中心").expect(200)).text);
     expect(proposed.data.stage).toBe("design-review");
-    fakeModel.queueIntent("CONFIRM_DESIGN");
-    const confirmed = doneEvent((await sendMessage(cookie, conv.body.id, "确认设计").expect(200)).text);
+    const confirmed = doneEvent((await sendMessage(
+      cookie,
+      conv.body.id,
+      encodeBlueprintConfirmation(proposed.data.designRevision, proposed.data.designPlanHash),
+    ).expect(200)).text);
     expect(confirmed.data).toMatchObject({ stage: "building", buildJobId: expect.any(String) });
     await request(server)
       .get(`/api/conversations/${conv.body.id}/delivery?buildJobId=${confirmed.data.buildJobId}`)

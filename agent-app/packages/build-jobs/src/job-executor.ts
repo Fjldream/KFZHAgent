@@ -415,16 +415,23 @@ export class BuildExecutor {
           creativeBinding: candidate.creativeBinding,
         }),
       });
-      await this.cleanupUnadoptedArtifact(job, stored);
+      if (completed.status === "FAILED" && completed.attemptCount === job.attemptCount) {
+        await this.cleanupAuthoritativeFailedArtifact(job, stored);
+      }
       return completed;
     } catch (error) {
       await heartbeat.stop();
       if (error instanceof BuildWorkerCrash) throw error;
-      if (storedArtifact !== undefined) {
-        await this.cleanupUnadoptedArtifact(job, storedArtifact);
-      }
       try {
-        return await this.complete(job, { status: "FAILED", error });
+        const completed = await this.complete(job, { status: "FAILED", error });
+        if (
+          storedArtifact !== undefined
+          && completed.status === "FAILED"
+          && completed.attemptCount === job.attemptCount
+        ) {
+          await this.cleanupAuthoritativeFailedArtifact(job, storedArtifact);
+        }
+        return completed;
       } catch {
         // The cleanup/failure-recording path is compensating work. If it also
         // fails (for example because this attempt lost its lease), preserve
@@ -485,7 +492,7 @@ export class BuildExecutor {
    * it. A lookup failure is ambiguous, so the conservative choice is to keep
    * the blob; delete itself is best-effort and never replaces the job result.
    */
-  private async cleanupUnadoptedArtifact(
+  private async cleanupAuthoritativeFailedArtifact(
     job: BuildJob,
     stored: StoredArtifact,
   ): Promise<void> {

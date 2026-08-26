@@ -30,6 +30,7 @@ import { deflateSync } from "node:zlib";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { JobRunner } from "../../worker/src/job-runner.js";
+import { encodeBlueprintConfirmation } from "@kf/agent-orchestrator";
 import { AppModule } from "./app.module.js";
 import { ARTIFACT_STORAGE } from "./artifacts/artifact-storage.js";
 import { PasswordService } from "./auth/password.service.js";
@@ -742,13 +743,13 @@ async function runGoldenBuild(fixture, runNumber) {
     .set("Cookie", cookie)
     .send({ content: fixture.prompt })
     .expect(200);
-  expect(doneEvent(proposed.text).stage).toBe("design-review");
+  const proposal = doneEvent(proposed.text);
+  expect(proposal.stage).toBe("design-review");
 
-  model.queueIntent("CONFIRM_DESIGN");
   const confirmed = await request(server)
     .post(`/api/conversations/${conversation.body.id}/messages`)
     .set("Cookie", cookie)
-    .send({ content: "确认设计并生成工程" })
+    .send({ content: encodeBlueprintConfirmation(proposal.designRevision, proposal.designPlanHash) })
     .expect(200);
   const building = doneEvent(confirmed.text);
   const diagnosticMessages = building.stage === "building" ? [] : await prisma.message.findMany({

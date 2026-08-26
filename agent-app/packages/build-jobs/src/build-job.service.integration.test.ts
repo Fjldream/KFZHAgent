@@ -24,6 +24,7 @@ const TABLES = [
   "AuditLog",
   "ValidationReport",
   "Artifact",
+  "BuildSchedulerCursor",
   "BuildJob",
   "DomainProjectRevision",
   "SolutionRevision",
@@ -218,5 +219,39 @@ describe("BuildJobService lease concurrency", () => {
     } finally {
       await observed.$disconnect();
     }
+  });
+
+  it("rotates to a quiet tenant despite an older noisy-tenant backlog", async () => {
+    await prisma.$executeRawUnsafe(`
+      INSERT INTO "BuildJob" (
+        "id", "tenantId", "workspaceId", "baseRevisionId", "changePlanId",
+        "planHash", "projectKey", "domainKind", "idempotencyKey", "status",
+        "leaseOwner", "leaseExpiresAt", "attemptCount", "createdAt", "updatedAt"
+      )
+      SELECT
+        'fair-noisy-job-' || n, 'fair-tenant-a', 'fair-noisy-workspace-' || n,
+        'fair-revision-' || n, 'fair-plan-' || n, 'hash', 'kingclient', 'kingclient',
+        'fair-noisy-key-' || n, 'QUEUED'::"JobStatus", NULL, NULL, 0,
+        clock_timestamp() - interval '1 hour' + (n * interval '1 millisecond'),
+        clock_timestamp()
+      FROM generate_series(1, 24) AS n
+    `);
+    await prisma.$executeRawUnsafe(`
+      INSERT INTO "BuildJob" (
+        "id", "tenantId", "workspaceId", "baseRevisionId", "changePlanId",
+        "planHash", "projectKey", "domainKind", "idempotencyKey", "status",
+        "leaseOwner", "leaseExpiresAt", "attemptCount", "createdAt", "updatedAt"
+      ) VALUES (
+        'fair-quiet-job', 'fair-tenant-z', 'fair-quiet-workspace', 'fair-quiet-revision',
+        'fair-quiet-plan', 'hash', 'kingclient', 'kingclient', 'fair-quiet-key',
+        'QUEUED', NULL, NULL, 0, clock_timestamp(), clock_timestamp()
+      )
+    `);
+
+    const first = await jobs.leaseNext("fair-worker-a", new Date());
+    const second = await jobs.leaseNext("fair-worker-b", new Date());
+
+    expect(first?.tenantId).toBe("fair-tenant-a");
+    expect(second?.tenantId).toBe("fair-tenant-z");
   });
 });

@@ -102,6 +102,7 @@ model ConversationTurnFence {
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   ownerId        String
   leaseId        String       @unique
+  state          String       @default("PENDING")
   fencedAt       DateTime     @default(now())
 
   @@index([ownerId])
@@ -206,8 +207,16 @@ model BuildJob {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  @@index([status, leaseExpiresAt])
+  @@index([status, leaseExpiresAt, createdAt, tenantId, workspaceId])
+  @@index([tenantId, status, leaseExpiresAt, createdAt, workspaceId])
   @@index([tenantId, workspaceId])
+}
+
+/// Persistent round-robin cursor for bounded cross-tenant build scheduling.
+model BuildSchedulerCursor {
+  id           Int      @id
+  lastTenantId String   @default("")
+  updatedAt    DateTime @updatedAt
 }
 
 model Artifact {

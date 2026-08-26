@@ -3,6 +3,7 @@ import { createClassifyIntentNode } from "./classify-intent.js";
 import type { ClassifyIntentResult } from "../schemas/intent.js";
 import { routeAfterClassify } from "../solution-graph.js";
 import { hashDesignPlan } from "../design-plan-version.js";
+import { encodeBlueprintConfirmation } from "../blueprint-message.js";
 
 function makeClarifyDeps() {
   const modelPort = {
@@ -60,6 +61,23 @@ describe("classify-intent node CLARIFY gate", () => {
 });
 
 describe("classify-intent node design-review routing", () => {
+  it("classifies a structured blueprint receipt without calling the model", async () => {
+    const deps = {
+      modelPort: { classifyIntent: vi.fn() },
+      workspaceQuery: { appendMessage: vi.fn().mockResolvedValue(undefined) },
+      isDomainSupported: () => true,
+    };
+    const receipt = encodeBlueprintConfirmation(2, "c".repeat(64));
+
+    const update = await createClassifyIntentNode(deps as never)(baseState({
+      stage: "design-review",
+      generationWorkflow: "creative-v2",
+      recentMessages: [{ role: "user", content: receipt }],
+    }) as never);
+
+    expect(update.intent).toBe("CONFIRM_DESIGN");
+    expect(deps.modelPort.classifyIntent).not.toHaveBeenCalled();
+  });
   it("preserves the retry reason until the creative explicit-retry edge consumes it", async () => {
     const deps = {
       modelPort: {

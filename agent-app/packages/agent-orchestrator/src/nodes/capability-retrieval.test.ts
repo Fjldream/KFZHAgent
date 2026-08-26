@@ -2,6 +2,7 @@ import { canonicalServerHash, type CapabilityCandidateBundle, type CustomerSolut
 import { END } from "@langchain/langgraph";
 import { describe, expect, it, vi } from "vitest";
 import { hashDesignPlan } from "../design-plan-version.js";
+import { encodeBlueprintConfirmation } from "../blueprint-message.js";
 import { routeAfterClassify, routeAfterDesignConfirmation } from "../solution-graph.js";
 import { createCapabilityRetrievalNode } from "./capability-retrieval.js";
 
@@ -102,7 +103,7 @@ function state(overrides: Record<string, unknown> = {}) {
     userId: "user-1",
     workspaceId: "workspace-1",
     conversationId: "conversation-1",
-    recentMessages: [{ role: "user", content: "创建访客中心" }],
+    recentMessages: [{ role: "user", content: encodeBlueprintConfirmation(1, designVersionHash()) }],
     generationWorkflow: "creative-v2",
     designPlan: blueprint,
     designPlanHash: designVersionHash(),

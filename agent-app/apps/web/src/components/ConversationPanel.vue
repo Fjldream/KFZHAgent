@@ -75,7 +75,7 @@ const renderedMessages = computed<RenderedMessage[]>(() =>
   })),
 );
 
-const BLUEPRINT_CONFIRMATIONS = new Set(["确认", "确认蓝图", "确认效果蓝图"]);
+const BLUEPRINT_CONFIRM_PREFIX = "KF_BLUEPRINT_CONFIRM/1\n";
 const BLUEPRINT_RETRY_REQUEST = "重新生成工程实施计划";
 const IMPLEMENTATION_FAILURE_PREFIX = "工程实施计划暂未生成：";
 
@@ -93,7 +93,7 @@ function isBlueprintConfirmed(index: number): boolean {
   tail.forEach((message, offset) => {
     if (
       message.role === "user"
-      && (BLUEPRINT_CONFIRMATIONS.has(message.content.trim())
+      && (matchesBlueprintConfirmation(message.content, renderedMessages.value[index]?.blueprint ?? null)
         || message.content.trim() === BLUEPRINT_RETRY_REQUEST)
     ) {
       latestSubmission = offset;
@@ -112,7 +112,7 @@ function needsImplementationRetry(index: number): boolean {
   tail.forEach((message, offset) => {
     if (
       message.role === "user"
-      && (BLUEPRINT_CONFIRMATIONS.has(message.content.trim())
+      && (matchesBlueprintConfirmation(message.content, renderedMessages.value[index]?.blueprint ?? null)
         || message.content.trim() === BLUEPRINT_RETRY_REQUEST)
     ) {
       latestSubmission = offset;
@@ -134,7 +134,26 @@ function blueprintActionLabel(index: number): string {
 }
 
 function submitBlueprint(index: number): void {
-  sendOption(needsImplementationRetry(index) ? BLUEPRINT_RETRY_REQUEST : "确认");
+  const blueprint = renderedMessages.value[index]?.blueprint;
+  if (needsImplementationRetry(index)) {
+    sendOption(BLUEPRINT_RETRY_REQUEST);
+  } else if (blueprint !== null && blueprint !== undefined) {
+    sendOption(`${BLUEPRINT_CONFIRM_PREFIX}${JSON.stringify({
+      revision: blueprint.revision,
+      designPlanHash: blueprint.designPlanHash,
+    })}`);
+  }
+}
+
+function matchesBlueprintConfirmation(content: string, blueprint: CustomerBlueprintView | null): boolean {
+  if (blueprint === null || !content.startsWith(BLUEPRINT_CONFIRM_PREFIX)) return false;
+  try {
+    const receipt = JSON.parse(content.slice(BLUEPRINT_CONFIRM_PREFIX.length)) as Record<string, unknown>;
+    return receipt["revision"] === blueprint.revision
+      && receipt["designPlanHash"] === blueprint.designPlanHash;
+  } catch {
+    return false;
+  }
 }
 
 const draft = ref("");
@@ -181,6 +200,9 @@ watch(
 );
 
 function displayContent(message: RenderedMessage): string {
+  if (message.role === "user" && message.content.startsWith(BLUEPRINT_CONFIRM_PREFIX)) {
+    return "确认效果蓝图";
+  }
   if (message.content.startsWith("KF_BLUEPRINT_MESSAGE/1\n")) {
     return "这份效果蓝图暂时无法显示，请重新生成。";
   }

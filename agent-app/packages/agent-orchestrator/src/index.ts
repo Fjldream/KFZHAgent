@@ -58,5 +58,8 @@ export { hashDesignPlan, hasCurrentDesignPlanVersion } from "./design-plan-versi
 export {
   encodeBlueprintMessage,
   decodeBlueprintMessage,
+  encodeBlueprintConfirmation,
+  decodeBlueprintConfirmation,
   type DecodedBlueprintMessage,
+  type BlueprintConfirmation,
 } from "./blueprint-message.js";

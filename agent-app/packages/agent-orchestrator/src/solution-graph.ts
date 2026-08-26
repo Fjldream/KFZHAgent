@@ -21,6 +21,7 @@ import { createCapabilityRetrievalNode } from "./nodes/capability-retrieval.js";
 import { createSolutionImplementationPlanNode } from "./nodes/solution-implementation-plan.js";
 import { createCompileCreativeSolutionNode } from "./nodes/compile-creative-solution.js";
 import { hasCurrentDesignPlanVersion } from "./design-plan-version.js";
+import { decodeBlueprintConfirmation } from "./blueprint-message.js";
 
 /**
  * Thrown when the caller tries to run a conversation that is paused at the
@@ -177,6 +178,10 @@ export function routeAfterDesignConfirmation(
   if (state.generationWorkflow === "creative-v2") {
     const firstConfirmation = state.stage === "design-review"
       && state.creativeConfirmationId === undefined;
+    const receipt = decodeBlueprintConfirmation(latestUserText(state) ?? "");
+    const confirmsDisplayedBlueprint = firstConfirmation
+      && receipt?.revision === state.designRevision
+      && receipt?.designPlanHash === state.designPlanHash;
     const explicitRetry = state.stage === "idle"
       && state.changePlanId === undefined
       && state.buildJobId === undefined
@@ -184,7 +189,7 @@ export function routeAfterDesignConfirmation(
       && latestUserText(state) === "重新生成工程";
     return state.designPlan?.schema === "kf-design-plan/v3"
       && hasCurrentDesignPlanVersion(state.designPlan, state.designRevision, state.designPlanHash)
-      && (firstConfirmation || explicitRetry)
+      && (confirmsDisplayedBlueprint || explicitRetry)
       ? "capability-retrieval"
       : END;
   }

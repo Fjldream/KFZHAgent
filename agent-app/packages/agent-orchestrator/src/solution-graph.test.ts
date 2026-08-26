@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Command, MemorySaver } from "@langchain/langgraph";
+import { encodeBlueprintConfirmation } from "./blueprint-message.js";
 import { deriveGuid, getDesignKnowledgeSnapshot, planHash, retrieveCapabilities } from "@kf/domain-client";
 import {
   canonicalChangePlanHash,
@@ -26,7 +27,7 @@ import type {
   WorkspaceQueryPort,
 } from "./ports.js";
 import type { ModelPort, ModelPortContext } from "./model-port.js";
-import type { GraphMessage, ApprovalInterrupt } from "./state.js";
+import type { AgentGraphStateValue, GraphMessage, ApprovalInterrupt } from "./state.js";
 import type { Intent } from "./schemas/intent.js";
 import { compileSolutionGraph, ApprovalResumeRequiredError } from "./solution-graph.js";
 import { decodeBlueprintMessage } from "./blueprint-message.js";
@@ -729,6 +730,15 @@ async function sendUser(bed: Bed, ctx: Ctx, text: string): Promise<void> {
   });
 }
 
+async function sendCreativeConfirmation(bed: Bed, ctx: Ctx, design: AgentGraphStateValue): Promise<string> {
+  if (design.designRevision === undefined || design.designPlanHash === undefined) {
+    throw new Error("creative design receipt requires a persisted revision and hash");
+  }
+  const receipt = encodeBlueprintConfirmation(design.designRevision, design.designPlanHash);
+  await sendUser(bed, ctx, receipt);
+  return receipt;
+}
+
 async function interruptPayload(bed: Bed, ctx: Ctx): Promise<ApprovalInterrupt | undefined> {
   // Under vitest's module transform an invoke() result whose return value is
   // never referenced can let the final checkpoint flush be skipped, so the
@@ -781,8 +791,7 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
     const design = await bed.graph.invoke(input(ctx), config(ctx));
     expect(design).toMatchObject({ stage: "design-review", designPlan: creativeBlueprint() });
 
-    bed.model.queueIntent("CONFIRM_DESIGN");
-    await sendUser(bed, ctx, "确认设计");
+    await sendCreativeConfirmation(bed, ctx, design);
     const planned = await bed.graph.invoke({ ...input(ctx), stage: "design-review" }, config(ctx));
 
     expect(planned).toMatchObject({
@@ -838,9 +847,8 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
 
       bed.model.queueIntent("NEW_REQUIREMENT");
       await sendUser(bed, ctx, "创建园区访客协同中心");
-      await bed.graph.invoke(input(ctx), config(ctx));
-      bed.model.queueIntent("CONFIRM_DESIGN");
-      await sendUser(bed, ctx, "确认设计");
+      const design = await bed.graph.invoke(input(ctx), config(ctx));
+      await sendCreativeConfirmation(bed, ctx, design);
       const result = await bed.graph.invoke({ ...input(ctx), stage: "design-review" }, config(ctx));
 
       expect(result.stage).toBe("idle");
@@ -875,9 +883,8 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
 
     bed.model.queueIntent("NEW_REQUIREMENT");
     await sendUser(bed, ctx, "创建园区访客协同中心");
-    await bed.graph.invoke({ ...input(ctx), ...preservedLegacy }, config(ctx));
-    bed.model.queueIntent("CONFIRM_DESIGN");
-    await sendUser(bed, ctx, "确认设计");
+    const design = await bed.graph.invoke({ ...input(ctx), ...preservedLegacy }, config(ctx));
+    await sendCreativeConfirmation(bed, ctx, design);
     const ready = await bed.graph.invoke({ ...input(ctx), stage: "design-review" }, config(ctx));
     expect(ready.stage).toBe("building");
     const previousBlueprint = ready.designPlan;
@@ -928,9 +935,8 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
 
     bed.model.queueIntent("NEW_REQUIREMENT");
     await sendUser(bed, ctx, "创建园区访客协同中心");
-    await bed.graph.invoke(input(ctx), config(ctx));
-    bed.model.queueIntent("CONFIRM_DESIGN");
-    await sendUser(bed, ctx, "确认设计");
+    const design = await bed.graph.invoke(input(ctx), config(ctx));
+    await sendCreativeConfirmation(bed, ctx, design);
     const ready = await bed.graph.invoke({ ...input(ctx), stage: "design-review" }, config(ctx));
     expect(ready.stage).toBe("building");
 
@@ -980,13 +986,11 @@ describe("SolutionGraph single-agent workflow (unit, MemorySaver)", () => {
 
     bed.model.queueIntent("NEW_REQUIREMENT");
     await sendUser(bed, ctx, "创建园区访客协同中心");
-    await bed.graph.invoke(input(ctx), config(ctx));
-    bed.model.queueIntent("CONFIRM_DESIGN");
-    await sendUser(bed, ctx, "确认设计");
+    const design = await bed.graph.invoke(input(ctx), config(ctx));
+    const receipt = await sendCreativeConfirmation(bed, ctx, design);
     const first = await bed.graph.invoke({ ...input(ctx), stage: "design-review" }, config(ctx));
 
-    bed.model.queueIntent("CONFIRM_DESIGN");
-    await sendUser(bed, ctx, "再次确认设计");
+    await sendUser(bed, ctx, receipt);
     const duplicate = await bed.graph.invoke(input(ctx), config(ctx));
 
     expect(first.creativeConfirmationId).toMatch(/^[0-9a-f]{64}$/);

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { CustomerEffectBlueprint } from "@kf/contracts";
-import { decodeBlueprintMessage, encodeBlueprintMessage } from "./blueprint-message.js";
+import {
+  decodeBlueprintConfirmation,
+  decodeBlueprintMessage,
+  encodeBlueprintConfirmation,
+  encodeBlueprintMessage,
+} from "./blueprint-message.js";
 
 const blueprint: CustomerEffectBlueprint = {
   schema: "kf-design-plan/v2",
@@ -35,12 +40,25 @@ const blueprint: CustomerEffectBlueprint = {
 
 describe("blueprint message codec", () => {
   it("round-trips a detailed blueprint and customer revision", () => {
-    const encoded = encodeBlueprintMessage(blueprint, 2);
-    expect(decodeBlueprintMessage(encoded)).toEqual({ blueprint, revision: 2 });
+    const designPlanHash = "a".repeat(64);
+    const encoded = encodeBlueprintMessage(blueprint, 2, designPlanHash);
+    expect(decodeBlueprintMessage(encoded)).toEqual({ blueprint, revision: 2, designPlanHash });
   });
 
   it("ignores ordinary and malformed assistant messages", () => {
     expect(decodeBlueprintMessage("您好，请补充需求")).toBeNull();
     expect(decodeBlueprintMessage("KF_BLUEPRINT_MESSAGE/1\n{broken")).toBeNull();
+  });
+
+  it("round-trips an exact displayed-blueprint confirmation receipt", () => {
+    const designPlanHash = "b".repeat(64);
+    const encoded = encodeBlueprintConfirmation(3, designPlanHash);
+    expect(decodeBlueprintConfirmation(encoded)).toEqual({ revision: 3, designPlanHash });
+  });
+
+  it("rejects malformed confirmation receipts", () => {
+    expect(decodeBlueprintConfirmation("确认")).toBeNull();
+    expect(decodeBlueprintConfirmation("KF_BLUEPRINT_CONFIRM/1\n{broken")).toBeNull();
+    expect(decodeBlueprintConfirmation(`KF_BLUEPRINT_CONFIRM/1\n${JSON.stringify({ revision: 1, designPlanHash: "short" })}`)).toBeNull();
   });
 });

@@ -1219,7 +1219,7 @@ describe("job runner", () => {
       .not.toHaveLength(0);
   });
 
-  it("deletes a losing blob when another completion already made the job terminal", async () => {
+  it("retains a deterministic losing blob when another completion already made the job terminal", async () => {
     const seeded = await seedNewWorkspace();
     const queued = await jobs.enqueue(enqueueInput(seeded));
     const leased = await jobs.leaseNext("terminal-loser", new Date());
@@ -1264,12 +1264,11 @@ describe("job runner", () => {
     expect((await executor.execute(leased!)).status).toBe("SUCCEEDED");
     expect(await prisma.artifact.count({ where: { buildJobId: queued.id } })).toBe(1);
     expect(losingArtifact).toBeDefined();
-    await expect(storage.open(seeded.tenant.id, losingArtifact!.artifactId)).rejects.toThrow(
-      "ARTIFACT_NOT_FOUND",
-    );
+    expect(await collect(await storage.open(seeded.tenant.id, losingArtifact!.artifactId)))
+      .not.toHaveLength(0);
   });
 
-  it("cleans the stored blob when completion throws without masking that error", async () => {
+  it("retains the deterministic blob when completion loses its lease", async () => {
     const seeded = await seedNewWorkspace();
     await jobs.enqueue(enqueueInput(seeded));
     const leased = await jobs.leaseNext("completion-error", new Date());
@@ -1293,9 +1292,8 @@ describe("job runner", () => {
       "lease was lost or expired before completion",
     );
     expect(stored).toBeDefined();
-    await expect(storage.open(seeded.tenant.id, stored!.artifactId)).rejects.toThrow(
-      "ARTIFACT_NOT_FOUND",
-    );
+    expect(await collect(await storage.open(seeded.tenant.id, stored!.artifactId)))
+      .not.toHaveLength(0);
   });
 });
 

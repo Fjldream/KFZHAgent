@@ -217,6 +217,7 @@ export interface DesignPlanView {
 export interface CustomerEffectBlueprintView {
   schema: "kf-design-plan/v2";
   revision: number;
+  designPlanHash: string;
   displayName: string;
   overview: {
     objective: string;
@@ -249,6 +250,7 @@ export interface CustomerEffectBlueprintView {
 export interface CustomerSolutionBlueprintView {
   schema: "kf-design-plan/v3";
   revision: number;
+  designPlanHash: string;
   displayName: string;
   objective: string;
   audiences: string[];
@@ -386,17 +388,20 @@ export function parseCustomerEffectBlueprint(
       return null;
     }
     const revision = envelope["revision"];
+    const designPlanHash = envelope["designPlanHash"];
     const blueprint = envelope["blueprint"];
     if (
       typeof revision !== "number" ||
       !Number.isInteger(revision) ||
       revision < 1 ||
+      typeof designPlanHash !== "string" ||
+      !/^[a-f0-9]{64}$/.test(designPlanHash) ||
       !isRecord(blueprint)
     ) {
       return null;
     }
     if (blueprint["schema"] === "kf-design-plan/v3") {
-      return parseCustomerSolutionBlueprint(blueprint, revision);
+      return parseCustomerSolutionBlueprint(blueprint, revision, designPlanHash);
     }
     if (blueprint["schema"] !== "kf-design-plan/v2") return null;
 
@@ -451,6 +456,7 @@ export function parseCustomerEffectBlueprint(
     return {
       schema: "kf-design-plan/v2",
       revision,
+      designPlanHash,
       displayName: blueprint["displayName"],
       overview: {
         objective: overview["objective"],
@@ -515,6 +521,7 @@ function boundedIdArray(value: unknown, min = 0, max = SOLUTION_LIST_MAX): strin
 function parseCustomerSolutionBlueprint(
   blueprint: Record<string, unknown>,
   revision: number,
+  designPlanHash: string,
 ): CustomerSolutionBlueprintView | null {
   const displayName = boundedText(blueprint["displayName"]);
   const objective = boundedText(blueprint["objective"]);
@@ -567,6 +574,7 @@ function parseCustomerSolutionBlueprint(
   return {
     schema: "kf-design-plan/v3",
     revision,
+    designPlanHash,
     displayName,
     objective,
     audiences,

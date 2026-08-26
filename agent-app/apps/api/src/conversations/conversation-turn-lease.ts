@@ -7,6 +7,7 @@ export const CONVERSATION_TURN_LEASE = Symbol("CONVERSATION_TURN_LEASE");
 const DEFAULT_POOL_MAX = 4;
 const DEFAULT_CONNECTION_TIMEOUT_MS = 250;
 const DEFAULT_STATEMENT_TIMEOUT_MS = 1_000;
+const SHUTDOWN_ACQUIRE_WAIT_MS = 2_000;
 
 export interface ConversationTurnLease {
   dispose(): Promise<void>;
@@ -35,6 +36,8 @@ export class PostgresConversationTurnLeaseManager
 implements ConversationTurnLeasePort, OnModuleDestroy {
   private readonly logger = new Logger(PostgresConversationTurnLeaseManager.name);
   private readonly active = new Set<ConversationTurnLease>();
+  private readonly inFlight = new Set<Promise<void>>();
+  private readonly provisioning = new Set<ManagedTurnClient>();
   private readonly ownerId: string;
   private ownerClient: pg.PoolClient | undefined;
   private ownerConnection: Promise<pg.PoolClient> | undefined;
@@ -51,7 +54,20 @@ implements ConversationTurnLeasePort, OnModuleDestroy {
 
   async acquire(conversationId: string): Promise<ConversationTurnLease> {
     if (this.closing) throw new ConversationTurnBusyError();
+    let markSettled!: () => void;
+    const settled = new Promise<void>((resolve) => { markSettled = resolve; });
+    this.inFlight.add(settled);
+    try {
+      return await this.acquireLease(conversationId);
+    } finally {
+      this.inFlight.delete(settled);
+      markSettled();
+    }
+  }
+
+  private async acquireLease(conversationId: string): Promise<ConversationTurnLease> {
     await this.ensureOwnerSession();
+    if (this.closing) throw new ConversationTurnBusyError();
     let client: pg.PoolClient;
     try {
       client = await this.pool.connect();
@@ -60,8 +76,10 @@ implements ConversationTurnLeasePort, OnModuleDestroy {
     }
 
     const managedClient = manageTurnClient(client, this.logger);
+    this.provisioning.add(managedClient);
     const leaseId = randomUUID();
     let turnLocked = false;
+    let fenceAttempted = false;
     try {
       const result = await client.query<{ acquired: boolean }>(
         "SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS acquired",
@@ -72,22 +90,42 @@ implements ConversationTurnLeasePort, OnModuleDestroy {
       }
       turnLocked = true;
       await this.assertNoDurableFence(client, conversationId);
+      fenceAttempted = true;
       const fenced = await client.query(
         `INSERT INTO "ConversationTurnFence"
-           ("conversationId", "ownerId", "leaseId")
-         VALUES ($1, $2, $3)
+           ("conversationId", "ownerId", "leaseId", "state")
+         VALUES ($1, $2, $3, 'PENDING')
          RETURNING "conversationId"`,
         [conversationId, this.ownerId, leaseId],
       );
       if (fenced.rowCount !== 1) {
         throw new Error("CONVERSATION_TURN_FENCE_CREATE_FAILED");
       }
+      if (this.closing) throw new ConversationTurnBusyError();
+      const admitted = await client.query(
+        `UPDATE "ConversationTurnFence"
+         SET "state" = 'ADMITTED'
+         WHERE "conversationId" = $1
+           AND "ownerId" = $2
+           AND "leaseId" = $3
+           AND "state" = 'PENDING'`,
+        [conversationId, this.ownerId, leaseId],
+      );
+      if (admitted.rowCount !== 1 || this.closing) {
+        throw this.closing
+          ? new ConversationTurnBusyError()
+          : new Error("CONVERSATION_TURN_FENCE_ADMISSION_FAILED");
+      }
     } catch (error) {
+      if (fenceAttempted) {
+        await this.cleanupNeverAdmittedFence(client, conversationId, leaseId);
+      }
       if (turnLocked) {
         await managedClient.release(conversationId);
       } else {
         managedClient.destroy();
       }
+      this.provisioning.delete(managedClient);
       throw error instanceof ConversationTurnBusyError
         ? error
         : new Error("CONVERSATION_TURN_LEASE_UNAVAILABLE");
@@ -103,6 +141,18 @@ implements ConversationTurnLeasePort, OnModuleDestroy {
     const lease: ConversationTurnLease = {
       quarantine: () => serial(async () => {
         if (state !== "active") return;
+        try {
+          await client.query(
+            `UPDATE "ConversationTurnFence"
+             SET "state" = 'QUARANTINED'
+             WHERE "conversationId" = $1
+               AND "ownerId" = $2
+               AND "leaseId" = $3`,
+            [conversationId, this.ownerId, leaseId],
+          );
+        } catch {
+          // ADMITTED is already fail-closed; releasing the session remains safe.
+        }
         await managedClient.release(conversationId);
         state = "quarantined";
       }),
@@ -142,6 +192,7 @@ implements ConversationTurnLeasePort, OnModuleDestroy {
       }),
     };
     this.active.add(lease);
+    this.provisioning.delete(managedClient);
     return lease;
   }
 
@@ -154,16 +205,64 @@ implements ConversationTurnLeasePort, OnModuleDestroy {
     client: pg.PoolClient,
     conversationId: string,
   ): Promise<void> {
-    const fence = await client.query(
-      `SELECT 1
+    const fence = await client.query<{ ownerId: string; leaseId: string; state: string }>(
+      `SELECT "ownerId", "leaseId", "state"
        FROM "ConversationTurnFence"
        WHERE "conversationId" = $1`,
       [conversationId],
     );
-    // Owner-session loss is not proof that the old graph stopped. Durable
-    // fences therefore remain fail-closed until their exact lease confirms
-    // cancellation; automatic stale-owner recovery is intentionally absent.
-    if ((fence.rowCount ?? 0) > 0) throw new ConversationTurnBusyError();
+    // Only PENDING means the lease was never handed to graph execution. It is
+    // recoverable after the exact owner session is proven gone. ADMITTED and
+    // QUARANTINED remain fail-closed because graph work may have started.
+    const row = fence.rows[0];
+    if (row === undefined) return;
+    if (row.state === "PENDING") {
+      const owner = await client.query<{ acquired: boolean }>(
+        "SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS acquired",
+        [ownerLockKey(row.ownerId)],
+      );
+      if (owner.rows[0]?.acquired === true) {
+        try {
+          await client.query(
+            `DELETE FROM "ConversationTurnFence"
+             WHERE "conversationId" = $1
+               AND "ownerId" = $2
+               AND "leaseId" = $3
+               AND "state" = 'PENDING'`,
+            [conversationId, row.ownerId, row.leaseId],
+          );
+          return;
+        } finally {
+          await client.query(
+            "SELECT pg_advisory_unlock(hashtextextended($1, 0))",
+            [ownerLockKey(row.ownerId)],
+          );
+        }
+      }
+    }
+    throw new ConversationTurnBusyError();
+  }
+
+  private async cleanupNeverAdmittedFence(
+    client: pg.PoolClient,
+    conversationId: string,
+    leaseId: string,
+  ): Promise<void> {
+    const query = `DELETE FROM "ConversationTurnFence"
+      WHERE "conversationId" = $1 AND "ownerId" = $2 AND "leaseId" = $3`;
+    try {
+      await client.query(query, [conversationId, this.ownerId, leaseId]);
+      return;
+    } catch {
+      // A lost INSERT response can still mean the row committed. Destroy the
+      // uncertain session, then reconcile the exact never-returned token.
+      try { client.release(true); } catch { /* already removed */ }
+    }
+    try {
+      await this.pool.query(query, [conversationId, this.ownerId, leaseId]);
+    } catch {
+      // A PENDING row is explicitly recoverable once this owner is no longer live.
+    }
   }
 
   private async ensureOwnerSession(): Promise<pg.PoolClient> {
@@ -204,6 +303,13 @@ implements ConversationTurnLeasePort, OnModuleDestroy {
 
   private async destroy(): Promise<void> {
     this.closing = true;
+    const acquisitions = Promise.allSettled([...this.inFlight]);
+    await Promise.race([
+      acquisitions,
+      new Promise<void>((resolve) => setTimeout(resolve, SHUTDOWN_ACQUIRE_WAIT_MS)),
+    ]);
+    for (const client of this.provisioning) client.destroy();
+    this.provisioning.clear();
     // This manager cannot prove that every graph iterator stopped merely
     // because Nest shutdown began. Convert active session locks to durable
     // fences and retain existing quarantines; only confirmed graph cleanup

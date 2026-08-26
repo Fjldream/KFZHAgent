@@ -321,6 +321,47 @@ describe("Postgres conversation turn lease", () => {
     }
   });
 
+  it("closes admission while acquire is in flight and bounds shutdown without returning a lease", async () => {
+    const rig = leaseRig(1);
+    const conversationId = `slow-fence-insert-${randomUUID()}`;
+    await insertConversationRows(checkpointPool, [conversationId]);
+    await installSlowFenceTrigger(checkpointPool);
+    try {
+      const acquiring = rig.manager.acquire(conversationId);
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+      const shuttingDown = rig.manager.onModuleDestroy();
+
+      await expect(within(acquiring, 1_000)).rejects.toBeInstanceOf(ConversationTurnBusyError);
+      await expect(within(shuttingDown, 1_000)).resolves.toBeUndefined();
+      expect(rig.leasePool.totalCount).toBe(0);
+      expect(rig.ownerPool.totalCount).toBe(0);
+      expect(await fenceCount(checkpointPool, conversationId)).toBe(0);
+    } finally {
+      await removeSlowFenceTrigger(checkpointPool);
+      await rig.manager.onModuleDestroy();
+      await deleteConversationRows(checkpointPool, [conversationId]);
+    }
+  });
+
+  it("recovers only a never-admitted PENDING fence whose owner session is gone", async () => {
+    const rig = leaseRig(1);
+    const conversationId = `pending-recovery-${randomUUID()}`;
+    await insertConversationRows(checkpointPool, [conversationId]);
+    await checkpointPool.query(
+      `INSERT INTO "ConversationTurnFence" ("conversationId", "ownerId", "leaseId", "state")
+       VALUES ($1, $2, $3, 'PENDING')`,
+      [conversationId, `dead-owner-${randomUUID()}`, randomUUID()],
+    );
+    try {
+      const recovered = await rig.manager.acquire(conversationId);
+      await recovered.dispose();
+      expect(await fenceCount(checkpointPool, conversationId)).toBe(0);
+    } finally {
+      await rig.manager.onModuleDestroy();
+      await deleteConversationRows(checkpointPool, [conversationId]);
+    }
+  });
+
   it.each(["approve", "revise", "cancel"] as const)(
     "uses the same cross-instance writer fence for %s resume and an ordinary message",
     async (action) => {
@@ -586,6 +627,35 @@ async function removeRejectingFenceTrigger(pool: pg.Pool): Promise<void> {
     DROP TRIGGER IF EXISTS reject_test_conversation_turn_fence
       ON "ConversationTurnFence";
     DROP FUNCTION IF EXISTS reject_test_conversation_turn_fence();
+  `);
+}
+
+async function installSlowFenceTrigger(pool: pg.Pool): Promise<void> {
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION slow_test_conversation_turn_fence()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $function$
+    BEGIN
+      IF NEW."conversationId" LIKE 'slow-fence-insert-%' THEN
+        PERFORM pg_sleep(0.25);
+      END IF;
+      RETURN NEW;
+    END;
+    $function$;
+    DROP TRIGGER IF EXISTS slow_test_conversation_turn_fence
+      ON "ConversationTurnFence";
+    CREATE TRIGGER slow_test_conversation_turn_fence
+      BEFORE INSERT ON "ConversationTurnFence"
+      FOR EACH ROW EXECUTE FUNCTION slow_test_conversation_turn_fence();
+  `);
+}
+
+async function removeSlowFenceTrigger(pool: pg.Pool): Promise<void> {
+  await pool.query(`
+    DROP TRIGGER IF EXISTS slow_test_conversation_turn_fence
+      ON "ConversationTurnFence";
+    DROP FUNCTION IF EXISTS slow_test_conversation_turn_fence();
   `);
 }
 
