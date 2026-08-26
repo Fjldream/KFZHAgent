@@ -61,6 +61,65 @@ describe("compileNativeActions", () => {
     expect(result.actions[0]).toMatchObject({ kind: "navigate-page", targetPageGuid });
   });
 
+  it("compiles same-page overlay open and close through the reviewed Visible target with semantic provenance", async () => {
+    const { normalizeActionGraph } = await import("./action-graph.js");
+    const { compileNativeActions } = await import("./action-compiler.js");
+    const data = fixture();
+    const homePage = data.plan.pages[0]!;
+    if (homePage.root.kind !== "control") throw new Error("control trigger fixture required");
+    homePage.root.eventBindings = [{ semanticEvent: "click", actionIds: ["open-overlay"] }];
+    data.plan.localState.push({ id: "overlay-visible", purpose: "弹层可见", type: "boolean", initialValue: false });
+    data.plan.overlays.push({
+      id: "contact-overlay", title: "联系", purpose: "联系编辑", presentation: "dialog", hostPageId: "home",
+      sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region"], visibleStateId: "overlay-visible", dismissible: true,
+      root: {
+        id: "contact-overlay-root", kind: "layout", layout: "column", sourceBlueprintRegionIds: ["region"],
+        intent: { importance: "primary", visualWeight: 5, readingOrder: 0, density: "comfortable", groupWith: [], width: { mode: "fixed", value: 560 }, height: { mode: "fixed", value: 320 }, align: "center" },
+        children: [{
+          id: "close-overlay-button", kind: "control", capabilityId: "button", content: "关闭", properties: [], tabIds: [], styleRole: "action",
+          sourceBlueprintRegionIds: ["region"], intent: { importance: "secondary", visualWeight: 2, readingOrder: 1, density: "comfortable", groupWith: [], width: { mode: "fixed", value: 96 }, height: { mode: "fixed", value: 40 }, align: "end" },
+          eventBindings: [{ semanticEvent: "click", actionIds: ["close-overlay"] }],
+        }],
+      },
+    });
+    data.plan.actions = [
+      { id: "open-overlay", kind: "open-overlay", overlayId: "contact-overlay", afterActionIds: [] },
+      { id: "close-overlay", kind: "close-overlay", overlayId: "contact-overlay", afterActionIds: [] },
+    ];
+    const homeImplementation = data.implementation.pages[0]!;
+    if (homeImplementation.compatibility !== "native") throw new Error("native fixture required");
+    homeImplementation.controls.push(
+      {
+        id: "contact-overlay-root", role: "layout", capabilityId: "layout.4", depth: 0, zIndex: 10,
+        geometry: { x: 360, y: 160, width: 560, height: 320 }, compiledLayout: { kind: "column", overflow: "visible" }, nativeProperties: {},
+        sourceSolutionNodeId: "contact-overlay-root", sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region"], eventBindings: [],
+        overlayHost: { overlayId: "contact-overlay", hostPageId: "home", presentation: "dialog", visibleStateId: "overlay-visible", dismissible: true, initiallyVisible: false },
+      },
+      {
+        id: "close-overlay-button", parentId: "contact-overlay-root", role: "action", capabilityId: "button", depth: 1, zIndex: 11,
+        geometry: { x: 760, y: 420, width: 96, height: 40 }, nativeProperties: { parentId: "contact-overlay-root" },
+        sourceSolutionNodeId: "close-overlay-button", sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region"], eventBindings: [],
+      },
+    );
+    data.implementation.runtimeCorrelation!.controls.push(
+      { semanticControlId: "contact-overlay-root", instanceName: "Layout2" },
+      { semanticControlId: "close-overlay-button", instanceName: "Button2" },
+    );
+
+    const result = compileNativeActions({ normalized: normalizeActionGraph(data) });
+    expect(result.scriptRequests).toEqual([]);
+    expect(result.actions).toEqual([
+      expect.objectContaining({
+        kind: "close-overlay", ownerSemanticControlId: "close-overlay-button", ownerInstanceName: "Button2",
+        targetSemanticControlId: "contact-overlay-root", targetInstanceName: "Layout2",
+      }),
+      expect.objectContaining({
+        kind: "open-overlay", ownerSemanticControlId: "go", ownerInstanceName: "Button1",
+        targetSemanticControlId: "contact-overlay-root", targetInstanceName: "Layout2",
+      }),
+    ]);
+  });
+
   it("accepts only the exact trusted normalized object and rejects clones or forgeries", async () => {
     const { normalizeActionGraph } = await import("./action-graph.js");
     const { compileNativeActions } = await import("./action-compiler.js");

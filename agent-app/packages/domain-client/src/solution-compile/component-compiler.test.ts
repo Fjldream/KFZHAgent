@@ -244,6 +244,59 @@ describe("compileComponents", () => {
     expect(controls[0]!.capabilityId).toBe("layout.4");
   });
 
+  it("binds semantic tabIds to labeled tab content and derives a valid activeId", () => {
+    const tabs = control("profile-tabs");
+    if (tabs.kind !== "control") throw new Error("control fixture required");
+    tabs.capabilityId = "tabs";
+    tabs.content = null;
+    tabs.tabIds = ["profile", "activity"];
+    tabs.properties = [{
+      name: "tabs",
+      value: { kind: "list", items: [
+        { kind: "record", fields: [{ name: "id", value: "profile" }, { name: "label", value: "基本资料" }] },
+        { kind: "record", fields: [{ name: "id", value: "activity" }, { name: "label", value: "操作记录" }] },
+      ] },
+    }];
+    const bundle = structuredClone(realBundle);
+    const source = bundle.regions[0]!.controls[0]!;
+    bundle.regions[0]!.controls[0] = { ...source, id: "tabs" };
+    bundle.detailedCapabilityIds = [...new Set(bundle.detailedCapabilityIds.map((id) => id === source.id ? "tabs" : id))].sort();
+    const tree = compiledTree(compiledNode("profile-tabs", "control", geometry(40, 40, 600, 320)), 400);
+    const compiled = compileComponents(compileInput(plan(tabs, bundle), tree, bundle));
+    expect(compiled[0]!.nativeProperties).toEqual({
+      tabs: [{ id: "profile", label: "基本资料" }, { id: "activity", label: "操作记录" }],
+      activeId: "profile",
+    });
+  });
+
+  it.each([
+    ["missing tab content", (tabs: Extract<SolutionNode, { kind: "control" }>) => { tabs.properties = []; }],
+    ["tab id mismatch", (tabs: Extract<SolutionNode, { kind: "control" }>) => {
+      tabs.properties = [{ name: "tabs", value: { kind: "list", items: [
+        { kind: "record", fields: [{ name: "id", value: "other" }, { name: "label", value: "其他" }] },
+      ] } }];
+    }],
+    ["invalid activeId", (tabs: Extract<SolutionNode, { kind: "control" }>) => {
+      tabs.properties.push({ name: "activeId", value: "missing" });
+    }],
+  ] as const)("rejects invalid semantic Tabs ownership: %s", (_label, mutate) => {
+    const tabs = control("profile-tabs") as Extract<SolutionNode, { kind: "control" }>;
+    tabs.capabilityId = "tabs";
+    tabs.content = null;
+    tabs.tabIds = ["profile"];
+    tabs.properties = [{ name: "tabs", value: { kind: "list", items: [
+      { kind: "record", fields: [{ name: "id", value: "profile" }, { name: "label", value: "基本资料" }] },
+    ] } }];
+    mutate(tabs);
+    const bundle = structuredClone(realBundle);
+    const source = bundle.regions[0]!.controls[0]!;
+    bundle.regions[0]!.controls[0] = { ...source, id: "tabs" };
+    bundle.detailedCapabilityIds = [...new Set(bundle.detailedCapabilityIds.map((id) => id === source.id ? "tabs" : id))].sort();
+    const tree = compiledTree(compiledNode("profile-tabs", "control", geometry(40, 40, 600, 320)), 400);
+    expect(() => compileComponents(compileInput(plan(tabs, bundle), tree, bundle)))
+      .toThrow(/COMPONENT_TAB_(?:CONTENT_REQUIRED|ID_MISMATCH|ACTIVE_ID_INVALID)/);
+  });
+
   it("fails closed for absent compatible candidates, wrong provenance, and stale knowledge versions", () => {
     const absent = structuredClone(realBundle);
     absent.regions[0]!.layouts = [absent.regions[0]!.layouts.find((candidate) => candidate.id === "layout.5")!];

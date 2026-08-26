@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { parse } from "acorn";
 import { walk } from "estree-walker";
 import {
@@ -29,9 +30,12 @@ import {
   applyClientPatch,
   deleteOperationDigest,
   normalizeChangePlan,
+  projectCreativeNativeProperties,
   type CreativePageInstrumentation,
   type NormalizedPlan,
 } from "../patch/client-patcher.js";
+import { toNativeTabsProperties } from "../implementation/component-properties.js";
+import { parseTableData, toNativeTableProperties } from "../modules/definitions/native-data-adapters.js";
 import { deriveGuid } from "../compile/guid-factory.js";
 import { serializeReviewedNativeInteractions } from "../compile/control-compiler.js";
 import { compileResolvedStyle } from "../style/style-engine.js";
@@ -120,6 +124,11 @@ function walkControls(
   }
 }
 
+function nativeInstanceName(control: Readonly<Record<string, unknown>>): string | undefined {
+  const name = control["name"] ?? asRecord(control["baseProperty"])["name"];
+  return typeof name === "string" ? name : undefined;
+}
+
 function rootPath(candidate: string, versionDir: string): string {
   return versionDir === "." ? candidate : path.join(candidate, versionDir);
 }
@@ -173,6 +182,44 @@ function compilerMetadata(value: unknown): CompilerOwnedScriptMetadata | undefin
 }
 
 interface CompilerOwnedSegment { readonly metadata: CompilerOwnedScriptMetadata; readonly body: string; readonly encoded: string }
+
+interface CompilerVisibilityActionMarker {
+  readonly schema: "kf-compiled-action/v2";
+  readonly actionId: string;
+  readonly sourceActionId: string;
+  readonly ownerInstanceName: string;
+  readonly ownerSemanticControlId: string;
+  readonly targetSemanticControlId: string;
+  readonly targetInstanceName: string;
+  readonly operation: "open-overlay" | "close-overlay";
+  readonly visible: boolean;
+  readonly kfEvent: string;
+  readonly linkId: number | null;
+  readonly phase: "event" | "after-event";
+}
+
+function compilerVisibilityActionMarker(value: unknown): { readonly marker?: CompilerVisibilityActionMarker; readonly issue?: string } {
+  const record = asRecord(value);
+  if (record["schema"] !== "kf-compiled-action/v2") return {};
+  const expected = ["actionId", "kfEvent", "linkId", "operation", "ownerInstanceName", "ownerSemanticControlId", "phase", "schema", "sourceActionId", "targetInstanceName", "targetSemanticControlId", "visible"];
+  const stableId = /^[A-Za-z][A-Za-z0-9_-]{0,99}$/;
+  const compilerActionId = /^kf\$action:[A-Za-z0-9][A-Za-z0-9_-]{0,89}$/;
+  const instanceName = /^[A-Za-z_$][A-Za-z0-9_$]*[0-9]$/;
+  if (Object.keys(record).sort().join("\0") !== expected.join("\0")
+    || typeof record["actionId"] !== "string" || !compilerActionId.test(record["actionId"])
+    || typeof record["sourceActionId"] !== "string" || !stableId.test(record["sourceActionId"])
+    || typeof record["ownerSemanticControlId"] !== "string" || !stableId.test(record["ownerSemanticControlId"])
+    || typeof record["targetSemanticControlId"] !== "string" || !stableId.test(record["targetSemanticControlId"])
+    || typeof record["ownerInstanceName"] !== "string" || !instanceName.test(record["ownerInstanceName"])
+    || typeof record["targetInstanceName"] !== "string" || !instanceName.test(record["targetInstanceName"])
+    || (record["operation"] !== "open-overlay" && record["operation"] !== "close-overlay")
+    || typeof record["visible"] !== "boolean" || record["visible"] !== (record["operation"] === "open-overlay")
+    || typeof record["kfEvent"] !== "string" || (record["linkId"] !== null && !Number.isInteger(record["linkId"]))
+    || (record["phase"] !== "event" && record["phase"] !== "after-event")) {
+    return { issue: "compiler-owned visibility action marker is malformed" };
+  }
+  return { marker: record as unknown as CompilerVisibilityActionMarker };
+}
 
 function canonicalCompilerMetadata(metadata: CompilerOwnedScriptMetadata): string {
   return JSON.stringify({
@@ -233,7 +280,11 @@ function compilerOwnedSegments(source: string): { readonly segments: readonly Co
   return { segments };
 }
 
-function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: ReadonlyMap<string, RuntimeControlType>): string | undefined {
+function compilerSourceIssue(
+  segment: CompilerOwnedSegment,
+  instanceTypes: ReadonlyMap<string, RuntimeControlType>,
+  visibilityAction?: CompilerVisibilityActionMarker,
+): string | undefined {
   const { body: source, metadata } = segment;
   if (!/^[0-9a-f]{64}$/.test(metadata.bodySha256)) return "compiled script bodySha256 is malformed";
   if (Buffer.byteLength(source, "utf8") !== metadata.bodyByteLength) return "compiled script bodyByteLength mismatch";
@@ -832,10 +883,17 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
           const counter = identifierName(targetProperty);
           const boundedCounter = counter !== undefined && targetFact.kind === "bounded-array"
             && activeLoops.some((loop) => loop.counter === counter && loop.maxIndex !== undefined && loop.maxIndex < targetFact.maxLength);
-          if (type !== "AssignmentExpression" || record["operator"] !== "=" || target["computed"] !== true || (!literalIndex && !boundedCounter)) {
+          const objectName = identifierName(target["object"]);
+          const member = staticMember(targetProperty);
+          const right = record["right"] as Record<string, unknown> | undefined;
+          const exactOverlayVisibility = visibilityAction !== undefined
+            && type === "AssignmentExpression" && record["operator"] === "=" && target["computed"] === false
+            && objectName === visibilityAction.targetInstanceName && member === "Visible"
+            && right?.["type"] === "Literal" && right["value"] === visibilityAction.visible;
+          if (!exactOverlayVisibility
+            && (type !== "AssignmentExpression" || record["operator"] !== "=" || target["computed"] !== true || (!literalIndex && !boundedCounter))) {
             astIssue ??= "member assignment requires a proven bounded-array index";
           }
-          const objectName = identifierName(target["object"]);
           if (objectName !== undefined) {
             recordMutation(objectName);
             if (activeLoops.some((loop) => loop.iteratedRoots !== undefined && aliasesIntersect(objectName, loop.iteratedRoots))) astIssue ??= "iterated array element is mutated";
@@ -898,7 +956,9 @@ function compilerSourceIssue(segment: CompilerOwnedSegment, instanceTypes: Reado
       const runtimeType = instanceTypes.get(name);
       const supported = (isUiModel(runtimeType, 38) && member === "Value" && !called && !written)
         || (isUiModel(runtimeType, 31) && member === "SetData" && called)
-        || (isDatagrid(runtimeType) && member === "SetData" && called);
+        || (isDatagrid(runtimeType) && member === "SetData" && called)
+        || (visibilityAction !== undefined && runtimeType?.kind === "layout"
+          && name === visibilityAction.targetInstanceName && member === "Visible" && written && !called);
       if (!supported) unsupportedRuntimeMember ??= `${name}.${member ?? "?"}`;
     },
     leave(node) {
@@ -1222,7 +1282,8 @@ async function checkReferences(candidate: string): Promise<CheckOutcome> {
   const instanceNames = new Set<string>();
   for (const tree of Object.values(rawPages)) {
     walkControls(tree, "instances", (control) => {
-      if (typeof control["name"] === "string") instanceNames.add(control["name"]);
+      const name = nativeInstanceName(control);
+      if (name !== undefined) instanceNames.add(name);
     });
   }
 
@@ -1342,10 +1403,11 @@ async function checkBusinessRules(
     const pageInstances = new Map<string, Array<{ readonly runtimeType: RuntimeControlType; readonly where: string }>>();
     walkControls(tree, `page ${pageGuid}`, (control, where) => {
       const classification = classifyNativeRuntimeControl(control);
-      if (typeof control["name"] !== "string" || classification.kind !== "valid") return;
+      const instanceName = nativeInstanceName(control);
+      if (instanceName === undefined || classification.kind !== "valid") return;
       const runtimeType = classification.nativeType;
-      pageInstances.set(control["name"], [
-        ...(pageInstances.get(control["name"]) ?? []),
+      pageInstances.set(instanceName, [
+        ...(pageInstances.get(instanceName) ?? []),
         { runtimeType, where: `${pageGuid} ${where}` },
       ]);
     });
@@ -1391,7 +1453,7 @@ async function checkBusinessRules(
         issues.push(`unknown runtime control type at ${pageGuid} ${where}`);
         return;
       }
-      const name = typeof control["name"] === "string" ? (control["name"]) : control["guid"];
+      const name = nativeInstanceName(control) ?? control["guid"];
       if (typeof pageWidth === "number" && typeof pageHeight === "number") {
         const leftTop = asRecord(control["leftTopPt"]);
         const x = typeof leftTop["x"] === "number" ? (leftTop["x"]) : 0;
@@ -1414,6 +1476,9 @@ async function checkBusinessRules(
         const link = asRecord(rawLink);
         const action = link["action"];
         const script = link["script"];
+        const visibilityMarkerResult = compilerVisibilityActionMarker(link["kfCompilerAction"]);
+        if (visibilityMarkerResult.issue !== undefined) issues.push(`control "${String(name)}" ${visibilityMarkerResult.issue}`);
+        const visibilityMarker = visibilityMarkerResult.marker;
         const parsedCompilerSource = typeof script === "string" ? compilerOwnedSegments(script) : { segments: [] as readonly CompilerOwnedSegment[] };
         if (parsedCompilerSource.issue !== undefined || parsedCompilerSource.segments.length > 0) {
           if (typeof script === "string" && script.length > 32_000) issues.push(`control "${String(name)}" compiled event script exceeds 32000 characters`);
@@ -1421,7 +1486,7 @@ async function checkBusinessRules(
           for (const segment of parsedCompilerSource.segments) {
             if (compilerModuleIds.has(segment.metadata.moduleId)) issues.push(`control "${String(name)}" duplicate compiled module identity`);
             compilerModuleIds.add(segment.metadata.moduleId);
-            const sourceIssue = compilerSourceIssue(segment, pageInstanceTypes);
+            const sourceIssue = compilerSourceIssue(segment, pageInstanceTypes, visibilityMarker);
             if (sourceIssue !== undefined) issues.push(`control "${String(name)}" ${sourceIssue}`);
             const metadata = segment.metadata;
             if (metadata.placement !== "event") issues.push(`control "${String(name)}" event contains a non-event compiled module`);
@@ -1436,6 +1501,28 @@ async function checkBusinessRules(
           if (link["enable"] !== true) issues.push(`control "${String(name)}" compiler-owned event must set enable true`);
           const moduleIds = parsedCompilerSource.segments.map((segment) => segment.metadata.moduleId);
           if (new Set(moduleIds).size !== moduleIds.length) issues.push(`control "${String(name)}" duplicate compiled module identity`);
+          if (visibilityMarker !== undefined) {
+            const segment = parsedCompilerSource.segments[0];
+            const expectedBody = `${visibilityMarker.targetInstanceName}.Visible = ${String(visibilityMarker.visible)};\n`;
+            const expectedModuleId = `kf$script:action-${createHash("sha256").update(visibilityMarker.actionId, "utf8").digest("hex").slice(0, 24)}`;
+            const expectedReferences = [
+              { semanticId: visibilityMarker.ownerSemanticControlId, instanceName: visibilityMarker.ownerInstanceName },
+              { semanticId: visibilityMarker.targetSemanticControlId, instanceName: visibilityMarker.targetInstanceName },
+            ].sort((left, right) => left.semanticId.localeCompare(right.semanticId, "en-US"));
+            if (parsedCompilerSource.segments.length !== 1 || segment === undefined
+              || segment.body !== expectedBody || segment.metadata.moduleId !== expectedModuleId
+              || segment.metadata.sourceScriptId !== visibilityMarker.sourceActionId
+              || segment.metadata.ownerInstanceName !== visibilityMarker.ownerInstanceName
+              || segment.metadata.kfEvent !== visibilityMarker.kfEvent || segment.metadata.linkId !== visibilityMarker.linkId
+              || segment.metadata.phase !== visibilityMarker.phase
+              || JSON.stringify(segment.metadata.instanceReferences) !== JSON.stringify(expectedReferences)
+              || segment.metadata.pageReferences.length !== 0
+              || visibilityMarker.ownerInstanceName !== name
+              || visibilityMarker.kfEvent !== link["name"] || visibilityMarker.linkId !== (link["linkId"] ?? null)
+              || link["action"] !== undefined) {
+              issues.push(`control "${String(name)}" compiler-owned visibility action provenance mismatch`);
+            }
+          }
           let afterEventSeen = false;
           for (const segment of parsedCompilerSource.segments) {
             if (segment.metadata.phase === "after-event") afterEventSeen = true;
@@ -1673,23 +1760,59 @@ async function creativeMaterializationIssues(
       issues.push(`creative native control missing: ${control.semanticControlId}`);
       continue;
     }
-    if (control.source === "workspace-derived") for (const [field, value] of Object.entries(control.nativeProperties)) {
-      const expected = field === "src" ? assetRuntimeSrcByControl.get(control.semanticControlId) ?? value : value;
-      if (JSON.stringify(raw[field]) !== JSON.stringify(expected)) issues.push(`creative native field mismatch: ${control.semanticControlId}.${field}`);
+    if (control.overlayHost?.initiallyVisible === false) {
+      const initiallyVisible = control.capabilityId.startsWith("layout.")
+        ? asRecord(raw["baseProperty"])["visible"]
+        : raw["runVisible"];
+      if (initiallyVisible !== false) issues.push(`creative overlay initial visibility mismatch: ${control.semanticControlId}`);
+    }
+    const style = styleByControl.get(control.semanticControlId);
+    if (control.source === "workspace-derived") {
+      const directNative = projectCreativeNativeProperties(
+        control.nativeProperties,
+        new Set(Object.keys(style?.compiledStyle.nativeFields ?? {})),
+        "native-direct",
+      );
+      for (const [field, value] of Object.entries(directNative)) {
+        const expected = field === "src" ? assetRuntimeSrcByControl.get(control.semanticControlId) ?? value : value;
+        if (!isDeepStrictEqual(raw[field], expected)) issues.push(`creative native field mismatch: ${control.semanticControlId}.${field}`);
+      }
+      for (const semanticOnly of ["parentId", "tableData", "tabs", "activeId"]) {
+        if (Object.hasOwn(raw, semanticOnly)) issues.push(`creative semantic field leaked into native control: ${control.semanticControlId}.${semanticOnly}`);
+      }
+      if (control.nativeProperties.tableData !== undefined) {
+        try {
+          const expected = toNativeTableProperties(parseTableData(control.nativeProperties.tableData));
+          for (const [field, value] of Object.entries(expected)) {
+            if (!isDeepStrictEqual(raw[field], value)) issues.push(`creative table adapter mismatch: ${control.semanticControlId}.${field}`);
+          }
+        } catch {
+          issues.push(`creative table adapter input invalid: ${control.semanticControlId}`);
+        }
+      }
+      if (control.nativeProperties.tabs !== undefined) {
+        try {
+          const expected = toNativeTabsProperties(control.nativeProperties);
+          for (const [field, value] of Object.entries(expected)) {
+            if (!isDeepStrictEqual(raw[field], value)) issues.push(`creative Tabs adapter mismatch: ${control.semanticControlId}.${field}`);
+          }
+        } catch {
+          issues.push(`creative Tabs adapter input invalid: ${control.semanticControlId}`);
+        }
+      }
     }
     if (control.source === "uploaded-existing") for (const delta of control.existingDeltas ?? []) {
       const field = delta.path.slice(1);
       const actual = field === "x" ? entry.x : field === "y" ? entry.y
         : field === "width" ? entry.width : field === "height" ? entry.height : raw[field];
       const expected = field === "src" ? assetRuntimeSrcByControl.get(control.semanticControlId) ?? delta.value : delta.value;
-      if (JSON.stringify(actual) !== JSON.stringify(expected)) issues.push(`creative existing delta mismatch: ${control.semanticControlId}${delta.path}`);
+      if (!isDeepStrictEqual(actual, expected)) issues.push(`creative existing delta mismatch: ${control.semanticControlId}${delta.path}`);
     }
-    const style = styleByControl.get(control.semanticControlId);
     if (style !== undefined) {
       for (const [field, value] of Object.entries(style.compiledStyle.nativeFields)) {
-        if (JSON.stringify(raw[field]) !== JSON.stringify(value)) issues.push(`creative style field mismatch: ${control.semanticControlId}.${field}`);
+        if (!isDeepStrictEqual(raw[field], value)) issues.push(`creative style field mismatch: ${control.semanticControlId}.${field}`);
       }
-      if (style.dataBinding?.records !== undefined && JSON.stringify(raw["data"]) !== JSON.stringify(style.dataBinding.records)) {
+      if (style.dataBinding?.records !== undefined && !isDeepStrictEqual(raw["data"], style.dataBinding.records)) {
         issues.push(`creative data binding mismatch: ${control.semanticControlId}`);
       }
       const implementation = implementationByControl.get(control.semanticControlId);
@@ -1724,7 +1847,7 @@ async function creativeMaterializationIssues(
           ownerInstanceName: control.instanceName, capabilityId: control.capabilityId,
           actions, modules, bindings,
         }, { ownerInstanceName: control.instanceName, capabilityId: control.capabilityId });
-        if (JSON.stringify(expected) !== JSON.stringify(raw)) issues.push(`creative interaction materialization mismatch: ${control.semanticControlId}`);
+        if (!isDeepStrictEqual(expected, raw)) issues.push(`creative interaction materialization mismatch: ${control.semanticControlId}`);
       } catch (error) {
         issues.push(`creative interaction validation failed: ${control.semanticControlId}: ${String(error)}`);
       }

@@ -134,6 +134,19 @@ const easyuiTextboxProperties = z.object({
   parentId,
 }).strict();
 
+const tabsProperties = z.object({
+  tabs: TabsControlIR.shape.tabs.optional(),
+  activeId: TabsControlIR.shape.activeId,
+  parentId,
+}).strict().superRefine((value, ctx) => {
+  if (value.tabs === undefined) return;
+  const ids = value.tabs.map((tab) => tab.id);
+  if (new Set(ids).size !== ids.length) ctx.addIssue({ code: "custom", path: ["tabs"], message: "TAB_ID_DUPLICATE" });
+  if (value.activeId !== undefined && !ids.includes(value.activeId)) {
+    ctx.addIssue({ code: "custom", path: ["activeId"], message: "TAB_ACTIVE_ID_UNKNOWN" });
+  }
+});
+
 const GENERATED_COMPONENT_PROPERTY_SCHEMAS: Readonly<Record<string, z.ZodType<Record<string, unknown>>>> = Object.freeze({
   button: z.object({
     text: ButtonControlIR.shape.text.optional(),
@@ -246,11 +259,7 @@ const GENERATED_COMPONENT_PROPERTY_SCHEMAS: Readonly<Record<string, z.ZodType<Re
     format: dateFormat,
     parentId,
   }).strict(),
-  tabs: z.object({
-    tabs: TabsControlIR.shape.tabs.optional(),
-    activeId: TabsControlIR.shape.activeId,
-    parentId,
-  }).strict(),
+  tabs: tabsProperties,
   spacer: z.object({ axis: SpacerControlIR.shape.axis.optional(), parentId }).strict(),
   timeline: z.object({ items: TimelineControlIR.shape.items.optional(), parentId }).strict(),
   transfer: z.object({
@@ -410,4 +419,24 @@ export function validateCreateComponentProperties(
   properties: Record<string, unknown>,
 ): Record<string, unknown> {
   return validateProperties(capabilityId, properties, CREATE_COMPONENT_PROPERTY_SCHEMAS);
+}
+
+/** Exact reviewed KF 3.6 Tabs adapter: semantic ids become native tab names. */
+export function toNativeTabsProperties(properties: Record<string, unknown>): Readonly<Record<string, unknown>> {
+  const semantic = {
+    ...(properties.tabs === undefined ? {} : { tabs: properties.tabs }),
+    ...(properties.activeId === undefined ? {} : { activeId: properties.activeId }),
+    ...(properties.parentId === undefined ? {} : { parentId: properties.parentId }),
+  };
+  const validated = validateGeneratedComponentProperties("tabs", semantic);
+  const tabs = validated.tabs;
+  if (!Array.isArray(tabs) || tabs.length === 0) throw new Error("INVALID_COMPONENT_PROPERTY: tabs — tabs are required");
+  const activeId = typeof validated.activeId === "string"
+    ? validated.activeId
+    : (tabs[0] as { id: string }).id;
+  return Object.freeze({
+    tabData: Object.freeze((tabs as Array<{ id: string; label: string }>)
+      .map((tab) => Object.freeze({ name: tab.id, label: tab.label }))),
+    activeName: activeId,
+  });
 }

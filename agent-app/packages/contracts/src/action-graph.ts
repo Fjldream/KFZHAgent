@@ -643,8 +643,8 @@ const compiledActionBase = {
 
 export const CompiledNativeActionSchema = z.discriminatedUnion("kind", [
   z.object({ ...compiledActionBase, kind: z.literal("navigate-page"), targetPageGuid: CompilerPageGuidSchema }).strict(),
-  z.object({ ...compiledActionBase, kind: z.literal("open-overlay"), targetInstanceName: CompilerInstanceNameSchema }).strict(),
-  z.object({ ...compiledActionBase, kind: z.literal("close-overlay"), targetInstanceName: CompilerInstanceNameSchema }).strict(),
+  z.object({ ...compiledActionBase, kind: z.literal("open-overlay"), ownerSemanticControlId: StableSemanticIdSchema, targetSemanticControlId: StableSemanticIdSchema, targetInstanceName: CompilerInstanceNameSchema }).strict(),
+  z.object({ ...compiledActionBase, kind: z.literal("close-overlay"), ownerSemanticControlId: StableSemanticIdSchema, targetSemanticControlId: StableSemanticIdSchema, targetInstanceName: CompilerInstanceNameSchema }).strict(),
   z.object({ ...compiledActionBase, kind: z.literal("set-visibility"), targetInstanceName: CompilerInstanceNameSchema, visible: z.boolean() }).strict(),
   z.object({ ...compiledActionBase, kind: z.literal("switch-tab"), targetInstanceName: CompilerInstanceNameSchema, tabId: StableSemanticIdSchema }).strict(),
   z.object({ ...compiledActionBase, kind: z.literal("set-state"), stateId: StableSemanticIdSchema, value: ActionValueSchema }).strict(),

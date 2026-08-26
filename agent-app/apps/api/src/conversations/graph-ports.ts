@@ -34,6 +34,7 @@ import type { ArtifactStorage } from "@kf/artifact-storage";
 import {
   canonicalChangePlanHash,
   canonicalServerHash,
+  modelAssetIdToWorkspaceAssetId,
   type ChangePlan,
   type CustomerSolutionBlueprint,
   type ServerPlanEnvelope,
@@ -662,7 +663,21 @@ function collectCreativeAssetIds(plan: SolutionImplementationPlan): string[] {
       value.forEach((entry) => pending.push(entry));
       continue;
     }
-    for (const [key, nested] of Object.entries(value)) {
+    const record = value as Record<string, unknown>;
+    if (record["kind"] === "control" && record["capabilityId"] === "image" && Array.isArray(record["properties"])) {
+      for (const property of record["properties"]) {
+        if (property === null || typeof property !== "object" || Array.isArray(property)) continue;
+        const propertyRecord = property as Record<string, unknown>;
+        if (propertyRecord["name"] !== "src" || typeof propertyRecord["value"] !== "string") continue;
+        try {
+          modelAssetIdToWorkspaceAssetId(propertyRecord["value"]);
+          ids.add(propertyRecord["value"]);
+        } catch {
+          // Invalid public asset aliases remain unauthorized and fail at semantic compilation.
+        }
+      }
+    }
+    for (const [key, nested] of Object.entries(record)) {
       if (key === "assetId" && typeof nested === "string" && nested.startsWith("asset-")) ids.add(nested);
       else pending.push(nested);
     }

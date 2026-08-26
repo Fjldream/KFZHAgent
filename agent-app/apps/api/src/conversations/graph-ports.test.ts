@@ -22,6 +22,117 @@ import {
 } from "./graph-ports.js";
 
 describe("conversation graph workspace query", () => {
+  it("resolves only an image control's canonical src semantic property for creative compilation", async () => {
+    const assetId = "asset-00000000000040008000000000000001";
+    const fixture = creativeFixture();
+    const imagePlan = SolutionImplementationPlanSchema.parse({
+      ...fixture.plan,
+      pages: fixture.plan.pages.map((page) => page.id === "detail" ? {
+        ...page,
+        root: {
+          ...page.root,
+          capabilityId: "image",
+          content: null,
+          properties: [{ name: "src", value: assetId }],
+          intent: {
+            ...page.root.intent,
+            width: { mode: "fixed", value: 320 },
+            height: { mode: "fixed", value: 240 },
+          },
+        },
+      } : page),
+    });
+    const assets = {
+      resolveManyForCompilation: vi.fn().mockResolvedValue([{
+        id: assetId,
+        workspaceAssetId: "00000000-0000-4000-8000-000000000001",
+        kind: "image",
+        name: "portrait.png",
+        mimeType: "image/png",
+        description: "Uploaded workspace image",
+        sha256: "1".repeat(64),
+        sizeBytes: 128,
+        targetPath: `project/res/images/${"1".repeat(64)}.png`,
+      }]),
+    };
+    const compiler = createCreativeSolutionCompilerFromEnvironment(
+      creativePrisma().client,
+      {} as never,
+      assets,
+      { KF_SERVER_PLAN_HMAC_KEY_BASE64: Buffer.alloc(32, 0x50).toString("base64") },
+    );
+
+    const outcome = await compiler.compile({
+      tenantId: "tenant-creative",
+      workspaceId: "workspace-creative",
+      conversationId: "conversation-creative",
+      baseRevisionId: "revision-creative",
+      projectKey: imagePlan.projectKey,
+      domainKind: "kingclient",
+      blueprint: fixture.blueprint,
+      candidateBundle: fixture.candidates,
+      semanticPlan: imagePlan,
+    });
+
+    expect(assets.resolveManyForCompilation).toHaveBeenCalledWith({
+      tenantId: "tenant-creative",
+      workspaceId: "workspace-creative",
+      assetIds: [assetId],
+    });
+    expect(
+      outcome.status,
+      outcome.status === "blocked" ? JSON.stringify(outcome.diagnostics) : undefined,
+    ).toBe("compiled");
+  });
+
+  it("does not authorize an asset id nested in a non-src semantic property", async () => {
+    const assetId = "asset-00000000000040008000000000000001";
+    const fixture = creativeFixture();
+    const plan = SolutionImplementationPlanSchema.parse({
+      ...fixture.plan,
+      pages: fixture.plan.pages.map((page) => page.id === "detail" ? {
+        ...page,
+        root: {
+          ...page.root,
+          properties: [{
+            name: "metadata",
+            value: { kind: "record", fields: [{ name: "src", value: assetId }] },
+          }],
+        },
+      } : page),
+    });
+    const assets = { resolveManyForCompilation: vi.fn().mockResolvedValue([]) };
+    const compiler = createCreativeSolutionCompilerFromEnvironment(
+      creativePrisma().client,
+      {} as never,
+      assets,
+      { KF_SERVER_PLAN_HMAC_KEY_BASE64: Buffer.alloc(32, 0x50).toString("base64") },
+    );
+    const errorLog = vi.spyOn(Logger.prototype, "error").mockImplementation(() => undefined);
+
+    try {
+      await compiler.compile({
+        tenantId: "tenant-creative",
+        workspaceId: "workspace-creative",
+        conversationId: "conversation-creative",
+        baseRevisionId: "revision-creative",
+        projectKey: plan.projectKey,
+        domainKind: "kingclient",
+        blueprint: fixture.blueprint,
+        candidateBundle: fixture.candidates,
+        semanticPlan: plan,
+      });
+    } finally {
+      errorLog.mockRestore();
+    }
+
+    expect(assets.resolveManyForCompilation).toHaveBeenCalledWith({
+      tenantId: "tenant-creative",
+      workspaceId: "workspace-creative",
+      assetIds: [],
+    });
+  });
+
   it("composes the server-scoped creative compiler through lowering, signing, and verification", async () => {
     const key = Buffer.alloc(32, 0x51);
     const prisma = creativePrisma();

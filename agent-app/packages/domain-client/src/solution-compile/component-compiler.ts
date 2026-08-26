@@ -380,11 +380,37 @@ function styleAssetIds(context: CompileContext, node: ControlNode, path: Compile
   return ids;
 }
 
+function bindSemanticTabs(
+  node: ControlNode,
+  capabilityId: string,
+  properties: MutableSemanticDataRecord,
+  path: CompilePath,
+): void {
+  if (capabilityId !== "tabs") return;
+  const tabs = properties.tabs;
+  if (!Array.isArray(tabs) || tabs.length === 0) {
+    fail("COMPONENT_TAB_CONTENT_REQUIRED", [...path, "properties", "tabs"], node.id);
+  }
+  const ids = tabs.map((tab) => tab !== null && typeof tab === "object" && !Array.isArray(tab)
+    ? (tab as Record<string, unknown>)["id"]
+    : undefined);
+  if (node.tabIds.length !== ids.length || node.tabIds.some((id, index) => id !== ids[index])) {
+    fail("COMPONENT_TAB_ID_MISMATCH", [...path, "tabIds"], `${node.tabIds.join(",")} != ${ids.join(",")}`);
+  }
+  const activeId = properties.activeId ?? node.tabIds[0];
+  if (typeof activeId !== "string" || !node.tabIds.includes(activeId)) {
+    fail("COMPONENT_TAB_ACTIVE_ID_INVALID", [...path, "properties", "activeId"],
+      typeof activeId === "string" ? activeId : `invalid-${typeof activeId}`);
+  }
+  properties.activeId = activeId;
+}
+
 function emitControl(context: CompileContext, node: ControlNode, walk: WalkContext): void {
   const id = expandedId(node.id, walk.idPrefix);
   const compiled = compiledGeometry(context, id, [id, "geometry"]);
   const capabilityId = controlCapability(context, node, [id, "capabilityId"]);
   const properties = semanticProperties(node, walk, [id]);
+  bindSemanticTabs(node, capabilityId, properties, [id]);
   const assetIds = styleAssetIds(context, node, [id]);
   if (typeof properties.src === "string" && properties.src.startsWith("asset-")) {
     const modelId = properties.src;

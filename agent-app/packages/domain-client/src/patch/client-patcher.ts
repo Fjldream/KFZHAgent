@@ -35,6 +35,7 @@ import { assertStyleCompilationAccepted, compileControlStyle, compileResolvedSty
 import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
 import { mergeManagedStyleData } from "../style/style-data-merge.js";
 import {
+  toNativeTabsProperties,
   validateCreateComponentProperties,
   validateGeneratedComponentProperties,
 } from "../implementation/component-properties.js";
@@ -673,7 +674,7 @@ const CREATE_PASS_THROUGH: Readonly<Record<string, readonly string[]>> = {
   radio: ["options", "value"],
   select: ["options", "value", "multiple", "placeholder"],
   image: ["src", "fit", "alt"],
-  tabs: ["tabs", "activeId"],
+  tabs: [],
   table: [],
   richtext: ["text"],
   spacer: ["axis"],
@@ -698,6 +699,24 @@ const CREATE_PASS_THROUGH: Readonly<Record<string, readonly string[]>> = {
   timeline: ["items"],
   steps: ["active", "direction", "processStatus"],
 };
+
+const CREATIVE_SEMANTIC_ADAPTER_FIELDS = new Set(["tableData", "tabs", "activeId"]);
+
+/**
+ * Signed semantic properties enter reviewed adapters during create, but only
+ * direct native-owned fields may be replayed after creation. Runtime parent
+ * correlation, table payloads, and Tabs payloads each have a single owner.
+ */
+export function projectCreativeNativeProperties(
+  nativeProperties: Readonly<Record<string, unknown>>,
+  styleNativeFields: ReadonlySet<string>,
+  phase: "adapter-input" | "native-direct",
+): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(nativeProperties).filter(([field]) =>
+    field !== "parentId"
+    && !styleNativeFields.has(field)
+    && (phase === "adapter-input" || !CREATIVE_SEMANTIC_ADAPTER_FIELDS.has(field))));
+}
 
 // ---------------------------------------------------------------------------
 // Application
@@ -1670,6 +1689,7 @@ async function applyCreate(
           const value = properties[key];
           if (value !== undefined) (overrides as Record<string, unknown>)[key] = value;
         }
+        if (type === "tabs" && Array.isArray(properties["tabs"])) Object.assign(overrides, toNativeTabsProperties(properties));
         const control = normalizeNativeSizePolicy(
           mergeControlTemplate(mergeControlTemplate(BASE_FIELDS, template), overrides),
         );
@@ -2078,9 +2098,7 @@ async function applyVerifiedCreativePatch(
       if (collision !== undefined) throw new PatchConflictError(`GENERATED_GUID_COLLISION: ${control.instanceName} collides with ${collision}`);
       reservedGuids.set(guid, control.instanceName);
       const styleNativeFields = new Set(Object.keys(styleByControl.get(control.semanticControlId)?.compiledStyle.nativeFields ?? {}));
-      const semanticNativeProperties = Object.fromEntries(
-        Object.entries(control.nativeProperties).filter(([key]) => key !== "parentId" && !styleNativeFields.has(key)),
-      );
+      const semanticNativeProperties = projectCreativeNativeProperties(control.nativeProperties, styleNativeFields, "adapter-input");
       const parentControl = control.parentSemanticControlId === undefined
         ? undefined
         : controlBySemantic.get(control.parentSemanticControlId);
@@ -2100,6 +2118,12 @@ async function applyVerifiedCreativePatch(
         },
       }, materialization.workspaceId, options.semanticOperations ?? [], pageBatches.get(control.pageGuid),
       control.semanticControlId, parentContentExtent);
+      if (control.overlayHost?.initiallyVisible === false) {
+        const native = pageBatches.get(control.pageGuid)?.byName.get(control.instanceName)?.root;
+        if (native === undefined) throw new PatchConflictError(`creative overlay runtime host missing: ${control.semanticControlId}`);
+        if (control.capabilityId.startsWith("layout.")) asRecord(native["baseProperty"])["visible"] = false;
+        else native["runVisible"] = false;
+      }
     }
 
     // Stage 4: exact allowlisted existing deltas, then authoritative style/data.
@@ -2148,7 +2172,11 @@ async function applyVerifiedCreativePatch(
         throw new PatchConflictError(`creative compiled style mismatch: ${control.semanticControlId}`);
       }
       if (control.source === "workspace-derived") {
-        for (const [field, value] of Object.entries(control.nativeProperties)) ref.root[field] = structuredClone(value);
+        for (const [field, value] of Object.entries(projectCreativeNativeProperties(
+          control.nativeProperties,
+          new Set(Object.keys(style.compiledStyle.nativeFields)),
+          "native-direct",
+        ))) ref.root[field] = structuredClone(value);
       }
       for (const [field, value] of Object.entries(style.compiledStyle.nativeFields)) ref.root[field] = structuredClone(value);
       if (compiled.styleDataNew !== "") ref.root["styleDataNew"] = mergeManagedStyleData(ref.root["styleDataNew"], compiled.styleDataNew);

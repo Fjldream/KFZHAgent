@@ -35,6 +35,20 @@ const nativeNavigate = (id: string, ownerInstanceName = "Button1") => ({
   targetPageGuid: "k00000000-0000-4000-8000-000000000001",
 });
 
+const nativeOverlayVisibility = (
+  id: string,
+  kind: "open-overlay" | "close-overlay",
+  targetInstanceName = "Layout2",
+) => ({
+  id: `kf$action:${id}`,
+  sourceActionId: id,
+  ownerInstanceName: "Button1",
+  ownerSemanticControlId: "contact-trigger",
+  kind,
+  targetSemanticControlId: "contact-overlay-root",
+  targetInstanceName,
+});
+
 function decodedModules(source: string) {
   const marker = "// kf-compiled-event/v1 ";
   const result: Array<{ metadata: Record<string, unknown>; body: string }> = [];
@@ -143,6 +157,79 @@ describe("control compiler — compiled scripts", () => {
       ? `script:${String(link.name)}`
       : `action:${String((link.kfCompilerAction as Record<string, unknown>)["sourceActionId"])}`))
       .toEqual(["script:First", "action:second-a", "action:second-b", "action:third", "script:Third"]);
+  });
+
+  it.each([
+    ["open-overlay", true],
+    ["close-overlay", false],
+  ] as const)("serializes compiler-owned %s as an exact signed visibility marker script", (kind, visible) => {
+    const action = nativeOverlayVisibility(kind === "open-overlay" ? "open-contact" : "close-contact", kind);
+    const binding = {
+      id: `kf$binding:${kind === "open-overlay" ? "open-contact" : "close-contact"}`,
+      ownerInstanceName: "Button1",
+      kfEvent: "onClick",
+      linkId: 200001,
+      phase: "event" as const,
+      scriptModuleIds: [],
+      nativeActionIds: [action.id],
+    };
+    const output = controlCompilerModule.serializeReviewedNativeInteractions(
+      compileControl(build, buttonControl, ctx),
+      { ownerInstanceName: "Button1", capabilityId: "button", modules: [], actions: [action], bindings: [binding] },
+      { ownerInstanceName: "Button1", capabilityId: "button" },
+    );
+    const link = (output.linkMng as { linkList: Array<Record<string, unknown>> }).linkList[0]!;
+    expect(link).toMatchObject({ enable: true, name: "onClick", linkId: 200001 });
+    expect(link).not.toHaveProperty("action");
+    expect(link["kfCompilerAction"]).toEqual({
+      schema: "kf-compiled-action/v2",
+      actionId: action.id,
+      sourceActionId: action.sourceActionId,
+      ownerInstanceName: "Button1",
+      ownerSemanticControlId: "contact-trigger",
+      targetSemanticControlId: "contact-overlay-root",
+      targetInstanceName: "Layout2",
+      operation: kind,
+      visible,
+      kfEvent: "onClick",
+      linkId: 200001,
+      phase: "event",
+    });
+    const [module] = decodedModules(String(link["script"]));
+    expect(module?.body).toBe(`Layout2.Visible = ${String(visible)};\n`);
+    expect(module?.metadata).toMatchObject({
+      sourceScriptId: action.sourceActionId,
+      ownerInstanceName: "Button1",
+      instanceReferences: [
+        { semanticId: "contact-overlay-root", instanceName: "Layout2" },
+        { semanticId: "contact-trigger", instanceName: "Button1" },
+      ],
+      placement: "event",
+      kfEvent: "onClick",
+      linkId: 200001,
+      phase: "event",
+    });
+  });
+
+  it("rejects a reused visibility action marker when its exact target or boolean script is tampered", () => {
+    const action = nativeOverlayVisibility("open-contact", "open-overlay");
+    const binding = {
+      id: "kf$binding:open-contact", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
+      phase: "event" as const, scriptModuleIds: [], nativeActionIds: [action.id],
+    };
+    const first = controlCompilerModule.serializeReviewedNativeInteractions(
+      compileControl(build, buttonControl, ctx),
+      { ownerInstanceName: "Button1", capabilityId: "button", modules: [], actions: [action], bindings: [binding] },
+      { ownerInstanceName: "Button1", capabilityId: "button" },
+    );
+    const link = (first.linkMng as { linkList: Array<Record<string, unknown>> }).linkList[0]!;
+    (link["kfCompilerAction"] as Record<string, unknown>)["targetInstanceName"] = "Layout3";
+    link["script"] = String(link["script"]).replace("Visible = true", "Visible = false");
+    expect(() => controlCompilerModule.serializeReviewedNativeInteractions(
+      first,
+      { ownerInstanceName: "Button1", capabilityId: "button", modules: [], actions: [action], bindings: [binding] },
+      { ownerInstanceName: "Button1", capabilityId: "button" },
+    )).toThrow(/MODEL_OUTPUT_INVALID.*action.*identity|compiled script hash/i);
   });
 
   it.each([

@@ -437,8 +437,9 @@ function serializedCompiledModule(module: CompiledScriptModule, binding?: Compil
 }
 
 const COMPILED_ACTION_MARKER_SCHEMA = "kf-compiled-action/v1";
+const COMPILED_VISIBILITY_ACTION_MARKER_SCHEMA = "kf-compiled-action/v2";
 
-interface CompiledActionMarker {
+interface CompiledNavigateActionMarker {
   schema: typeof COMPILED_ACTION_MARKER_SCHEMA;
   actionId: string;
   sourceActionId: string;
@@ -448,21 +449,77 @@ interface CompiledActionMarker {
   phase: "event" | "after-event";
 }
 
+interface CompiledVisibilityActionMarker {
+  schema: typeof COMPILED_VISIBILITY_ACTION_MARKER_SCHEMA;
+  actionId: string;
+  sourceActionId: string;
+  ownerInstanceName: string;
+  ownerSemanticControlId: string;
+  targetSemanticControlId: string;
+  targetInstanceName: string;
+  operation: "open-overlay" | "close-overlay";
+  visible: boolean;
+  kfEvent: string;
+  linkId: number | null;
+  phase: "event" | "after-event";
+}
+
+type CompiledActionMarker = CompiledNavigateActionMarker | CompiledVisibilityActionMarker;
+
 function parseCompiledActionMarker(input: unknown): CompiledActionMarker | undefined {
   if (input === undefined) return undefined;
   const record = input !== null && typeof input === "object" && !Array.isArray(input)
     ? input as Record<string, unknown>
     : undefined;
-  const expected = ["actionId", "kfEvent", "linkId", "ownerInstanceName", "phase", "schema", "sourceActionId"];
+  const schema = record?.["schema"];
+  const expected = schema === COMPILED_VISIBILITY_ACTION_MARKER_SCHEMA
+    ? ["actionId", "kfEvent", "linkId", "operation", "ownerInstanceName", "ownerSemanticControlId", "phase", "schema", "sourceActionId", "targetInstanceName", "targetSemanticControlId", "visible"]
+    : ["actionId", "kfEvent", "linkId", "ownerInstanceName", "phase", "schema", "sourceActionId"];
   if (record === undefined || Object.keys(record).sort().join("\0") !== expected.join("\0")
-    || record["schema"] !== COMPILED_ACTION_MARKER_SCHEMA
+    || (schema !== COMPILED_ACTION_MARKER_SCHEMA && schema !== COMPILED_VISIBILITY_ACTION_MARKER_SCHEMA)
     || typeof record["actionId"] !== "string" || typeof record["sourceActionId"] !== "string"
     || typeof record["ownerInstanceName"] !== "string" || typeof record["kfEvent"] !== "string"
     || (record["linkId"] !== null && !Number.isInteger(record["linkId"]))
     || (record["phase"] !== "event" && record["phase"] !== "after-event")) {
     throw new ModelOutputInvalidError("compiler-owned action marker is malformed");
   }
+  if (schema === COMPILED_VISIBILITY_ACTION_MARKER_SCHEMA
+    && (typeof record["ownerSemanticControlId"] !== "string" || typeof record["targetSemanticControlId"] !== "string" || typeof record["targetInstanceName"] !== "string"
+      || (record["operation"] !== "open-overlay" && record["operation"] !== "close-overlay")
+      || typeof record["visible"] !== "boolean"
+      || record["visible"] !== (record["operation"] === "open-overlay"))) {
+    throw new ModelOutputInvalidError("compiler-owned visibility action marker is malformed");
+  }
   return record as unknown as CompiledActionMarker;
+}
+
+function visibilityActionModule(marker: CompiledVisibilityActionMarker): CompiledScriptModule {
+  const source = `${marker.targetInstanceName}.Visible = ${String(marker.visible)};\n`;
+  return CompiledScriptModuleSchema.parse({
+    id: `kf$script:action-${createHash("sha256").update(marker.actionId, "utf8").digest("hex").slice(0, 24)}`,
+    sourceScriptId: marker.sourceActionId,
+    placement: "event",
+    ownerInstanceName: marker.ownerInstanceName,
+    instanceReferences: [
+      { semanticId: marker.ownerSemanticControlId, instanceName: marker.ownerInstanceName },
+      { semanticId: marker.targetSemanticControlId, instanceName: marker.targetInstanceName },
+    ],
+    pageReferences: [],
+    source,
+    sourceHash: createHash("sha256").update(source, "utf8").digest("hex"),
+  });
+}
+
+function serializedVisibilityActionScript(marker: CompiledVisibilityActionMarker): string {
+  return serializedCompiledModule(visibilityActionModule(marker), {
+    id: `kf$binding:${createHash("sha256").update(marker.actionId, "utf8").digest("hex").slice(0, 24)}`,
+    ownerInstanceName: marker.ownerInstanceName,
+    kfEvent: marker.kfEvent,
+    ...(marker.linkId === null ? {} : { linkId: marker.linkId }),
+    phase: marker.phase,
+    scriptModuleIds: [],
+    nativeActionIds: [marker.actionId],
+  });
 }
 
 /**
@@ -553,10 +610,33 @@ function serializeCompiledNativeAction(
   if (action.ownerInstanceName !== binding.ownerInstanceName) {
     throw new ModelOutputInvalidError(`compiled action owner mismatch: ${action.id}`);
   }
+  if (action.kind === "open-overlay" || action.kind === "close-overlay") {
+    const marker: CompiledVisibilityActionMarker = {
+      schema: COMPILED_VISIBILITY_ACTION_MARKER_SCHEMA,
+      actionId: action.id,
+      sourceActionId: action.sourceActionId,
+      ownerInstanceName: action.ownerInstanceName,
+      ownerSemanticControlId: action.ownerSemanticControlId,
+      targetSemanticControlId: action.targetSemanticControlId,
+      targetInstanceName: action.targetInstanceName,
+      operation: action.kind,
+      visible: action.kind === "open-overlay",
+      kfEvent: binding.kfEvent,
+      linkId: binding.linkId ?? null,
+      phase: binding.phase,
+    };
+    return {
+      ...(binding.linkId === undefined ? {} : { linkId: binding.linkId }),
+      enable: true,
+      script: serializedVisibilityActionScript(marker),
+      name: binding.kfEvent,
+      kfCompilerAction: marker,
+    };
+  }
   if (action.kind !== "navigate-page") {
     throw new ModelOutputInvalidError(`native action kind lacks reviewed KF 3.6 serialization: ${action.kind}`);
   }
-  const marker: CompiledActionMarker = {
+  const marker: CompiledNavigateActionMarker = {
     schema: COMPILED_ACTION_MARKER_SCHEMA,
     actionId: action.id,
     sourceActionId: action.sourceActionId,
@@ -683,9 +763,15 @@ export function serializeReviewedNativeInteractions(
       const enclosingLinkId = typeof record["linkId"] === "number" ? record["linkId"] : null;
       if (actionMarker.ownerInstanceName !== ownerInstanceName
         || actionMarker.kfEvent !== record["name"]
-        || actionMarker.linkId !== enclosingLinkId
-        || record["action"] !== "navigatePage") {
+        || actionMarker.linkId !== enclosingLinkId) {
         throw new ModelOutputInvalidError("compiler-owned action enclosing identity mismatch");
+      }
+      if (actionMarker.schema === COMPILED_ACTION_MARKER_SCHEMA && record["action"] !== "navigatePage") {
+        throw new ModelOutputInvalidError("compiler-owned action enclosing identity mismatch");
+      }
+      if (actionMarker.schema === COMPILED_VISIBILITY_ACTION_MARKER_SCHEMA
+        && (record["action"] !== undefined || record["script"] !== serializedVisibilityActionScript(actionMarker))) {
+        throw new ModelOutputInvalidError("compiler-owned visibility action enclosing identity mismatch");
       }
       return [];
     }

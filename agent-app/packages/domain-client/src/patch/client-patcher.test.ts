@@ -247,6 +247,38 @@ describe("client patcher (Task 7 brief Step 1)", () => {
     expect(await controlField(updated, dropdownGuid, "options")).toEqual(options);
   });
 
+  it("adapts semantic Tabs data to exact native tabData/activeName without leaking semantic fields", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const candidate = await applyClientPatch(base, plan([{
+      op: "create", entityType: "control", entityId: "ProfileTabs",
+      properties: {
+        pageId: "page-guid-1", type: "tabs", x: 20, y: 20, width: 600, height: 320,
+        tabs: [{ id: "profile", label: "基本资料" }, { id: "activity", label: "操作记录" }],
+        activeId: "profile",
+      },
+    }]));
+    const guid = deriveGuid({ seed: "w-test" }, "ProfileTabs");
+    const native = await wholeControl(candidate, guid);
+    expect(native["tabData"]).toEqual([
+      { name: "profile", label: "基本资料" },
+      { name: "activity", label: "操作记录" },
+    ]);
+    expect(native["activeName"]).toBe("profile");
+    expect(native).not.toHaveProperty("tabs");
+    expect(native).not.toHaveProperty("activeId");
+  });
+
+  it.each([
+    [[{ id: "same", label: "一" }, { id: "same", label: "二" }], "same"],
+    [[{ id: "profile", label: "基本资料" }], "missing"],
+  ] as const)("rejects invalid semantic Tabs ids before native patch", async (tabs, activeId) => {
+    const base = await copyFixture("client-unknown-field");
+    await expect(applyClientPatch(base, plan([{
+      op: "create", entityType: "control", entityId: "InvalidTabs",
+      properties: { pageId: "page-guid-1", type: "tabs", tabs, activeId },
+    }]))).rejects.toThrow(/TAB_ID_DUPLICATE|TAB_ACTIVE_ID_UNKNOWN|invalid.*tabs|change plan/i);
+  });
+
   it("rejects descendant mutation of a complex field that has a reviewed whole-value schema", async () => {
     const base = await copyFixture("client-unknown-field");
     const seeded = await applyClientPatch(base, plan([{

@@ -136,9 +136,15 @@ export const ImageControlIR = BaseControlIR.extend({
 
 export const TabsControlIR = BaseControlIR.extend({
   type: z.literal("tabs"),
-  tabs: z.array(z.object({ id: z.string().min(1), label: z.string() }).strict()).min(1),
+  tabs: z.array(z.object({ id: z.string().trim().min(1), label: z.string().trim().min(1) }).strict()).min(1),
   activeId: z.string().optional(),
-}).strict();
+}).strict().superRefine((tabs, ctx) => {
+  const ids = tabs.tabs.map((tab) => tab.id);
+  if (new Set(ids).size !== ids.length) ctx.addIssue({ code: "custom", path: ["tabs"], message: "TAB_ID_DUPLICATE" });
+  if (tabs.activeId !== undefined && !ids.includes(tabs.activeId)) {
+    ctx.addIssue({ code: "custom", path: ["activeId"], message: "TAB_ACTIVE_ID_UNKNOWN" });
+  }
+});
 
 export const TableControlIR = BaseControlIR.extend({
   type: z.literal("table"),

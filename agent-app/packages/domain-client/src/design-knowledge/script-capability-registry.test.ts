@@ -64,13 +64,30 @@ describe("script capability knowledge", () => {
   it("records the reviewed button restricted actions", () => {
     const button = requireScriptCapabilityProfile("button");
     expect(button.actions.map((action) => action.semanticAction)).toEqual([
-      "navigate-page", "set-variable", "open-dialog",
+      "navigate-page", "set-variable", "open-dialog", "close-dialog",
     ]);
     expect(button.actions.every((action) => action.implementation === "restricted-action")).toBe(true);
-    expect(button.actions.find((action) => action.semanticAction === "open-dialog")?.availability)
-      .toBe("planned");
     expect(button.actions.filter((action) => action.availability === "supported")
-      .map((action) => action.semanticAction)).toEqual(["navigate-page", "set-variable"]);
+      .map((action) => action.semanticAction)).toEqual(["navigate-page", "set-variable", "open-dialog", "close-dialog"]);
+  });
+
+  it("binds overlay visibility to the exact reviewed KF Visible property evidence", () => {
+    const expectedEvidence = {
+      kind: "product-source",
+      ref: "KingFusion3.6_Center/sdb/c7f1771f-0c8f-4c75-9d71-3b8c4b6bd190/kingclient/9fdd3be0-2d91-11f1-b60a-4937cd79e5a1/project/page/设备接入_新增.json#objects.0.insiderObjects.0.insiderObjects.2.insiderObjects.4.linkMng.linkList.0.script",
+      contentSha256: "67c369d5f86cde2ac540afa78931964f826d2992752e8e09edaa7996d1b500b7",
+    };
+    for (const capabilityId of ["layout.2", "layout.4", "layout.5"]) {
+      const profile = requireScriptCapabilityProfile(capabilityId);
+      expect(profile.availability).toBe("supported");
+      expect(profile.actions).toEqual([
+        expect.objectContaining({ semanticAction: "open-dialog", implementation: "restricted-action", availability: "supported", evidence: [expectedEvidence] }),
+        expect.objectContaining({ semanticAction: "close-dialog", implementation: "restricted-action", availability: "supported", evidence: [expectedEvidence] }),
+      ]);
+      expect(profile.properties).toEqual([
+        expect.objectContaining({ semanticProperty: "visible", kfProperty: "Visible", readable: true, writable: true, availability: "supported", evidence: [expectedEvidence] }),
+      ]);
+    }
   });
 
   it("promotes the exact product-evidenced button click trigger", () => {

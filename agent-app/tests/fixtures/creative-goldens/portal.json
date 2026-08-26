@@ -165,7 +165,7 @@
         "actor": "展览策划人",
         "goal": "从精选画廊进入北境艺廊并返回作品序列",
         "steps": [
-          { "pageId": "portal-home-bp", "regionId": "portal-gallery", "action": "选择北境艺廊", "result": "进入北境艺廊详情" },
+          { "pageId": "portal-home-bp", "regionId": "portal-nav-action", "action": "选择北境艺廊入口", "result": "进入北境艺廊详情" },
           { "pageId": "portal-detail-bp", "regionId": "portal-detail-nav", "action": "返回作品序列", "result": "回到精选作品首页" }
         ],
         "completion": "完成一次作品浏览往返"
@@ -173,10 +173,11 @@
       {
         "id": "portal-contact-journey",
         "actor": "品牌客户",
-        "goal": "在作品详情中提交合作意向并关闭联系层",
+        "goal": "在作品详情中打开联系层、提交合作意向并关闭",
         "steps": [
+          { "pageId": "portal-detail-bp", "regionId": "portal-contact-submit", "action": "打开合作联系层", "result": "当前详情页显示联系覆盖层" },
           { "pageId": "portal-detail-bp", "regionId": "portal-contact-submit", "action": "提交合作留言", "result": "联系状态记录显示已收到" },
-          { "pageId": "portal-detail-bp", "regionId": "portal-contact-close", "action": "关闭联系层", "result": "返回北境艺廊详情" }
+          { "pageId": "portal-detail-bp", "regionId": "portal-contact-close", "action": "关闭联系层", "result": "覆盖层隐藏并保留北境艺廊详情" }
         ],
         "completion": "合作意向得到明确状态反馈"
       }
@@ -257,7 +258,7 @@
               "children": [
                 { "kind": "control", "id": "portal-brand-name", "capabilityId": "text", "content": "叠境 / DIEJING", "properties": [], "tabIds": [], "styleRole": "portal-brand", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-nav"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "start" } },
                 { "kind": "control", "id": "portal-nav-work", "capabilityId": "button", "content": "精选作品", "properties": [], "tabIds": [], "styleRole": "portal-action", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["portal-nav-open-detail"] }], "sourceBlueprintRegionIds": ["portal-nav-action"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 1, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "fixed", "value": 60 }, "align": "center" } },
-                { "kind": "control", "id": "portal-nav-contact", "capabilityId": "button", "content": "联系 / 预约", "properties": [], "tabIds": [], "styleRole": "portal-action", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["portal-open-contact"] }], "sourceBlueprintRegionIds": ["portal-nav-action"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 2, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "fixed", "value": 60 }, "align": "center" } }
+                { "kind": "control", "id": "portal-nav-contact", "capabilityId": "button", "content": "联系 / 预约", "properties": [], "tabIds": [], "styleRole": "portal-action", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["portal-nav-contact-detail"] }], "sourceBlueprintRegionIds": ["portal-nav-action"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 2, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "fixed", "value": 60 }, "align": "center" } }
               ]
             },
             {
@@ -267,7 +268,7 @@
               "sourceBlueprintRegionIds": ["portal-hero"],
               "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 1, "density": "spacious", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fixed", "value": 430 }, "align": "stretch" },
               "children": [
-                { "kind": "control", "id": "portal-hero-image", "capabilityId": "image", "content": null, "properties": [{ "name": "fit", "value": "cover" }, { "name": "alt", "value": "海岸书屋清晨光影" }], "tabIds": [], "styleRole": "portal-media", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-hero"], "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 0, "density": "spacious", "groupWith": [], "width": { "mode": "ratio", "value": 3 }, "height": { "mode": "fill" }, "align": "stretch" } },
+                { "kind": "control", "id": "portal-hero-image", "capabilityId": "image", "content": null, "properties": [{ "name": "src", "value": "asset-70000000000040008000000000000101" }, { "name": "fit", "value": "cover" }, { "name": "alt", "value": "海岸书屋清晨光影" }], "tabIds": [], "styleRole": "portal-media", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-hero"], "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 0, "density": "spacious", "groupWith": [], "width": { "mode": "ratio", "value": 3 }, "height": { "mode": "fill" }, "align": "stretch" } },
                 {
                   "kind": "layout",
                   "id": "portal-hero-copy",
@@ -288,9 +289,9 @@
               "sourceBlueprintRegionIds": ["portal-gallery"],
               "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 2, "density": "spacious", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fixed", "value": 340 }, "align": "stretch" },
               "children": [
-                { "kind": "control", "id": "portal-gallery-north-image", "capabilityId": "image", "content": null, "properties": [{ "name": "fit", "value": "cover" }, { "name": "alt", "value": "北境艺廊中庭" }], "tabIds": [], "styleRole": "portal-media", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-gallery"], "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 0, "density": "spacious", "groupWith": [], "width": { "mode": "ratio", "value": 3 }, "height": { "mode": "fill" }, "align": "stretch" } },
-                { "kind": "control", "id": "portal-gallery-valley-image", "capabilityId": "image", "content": null, "properties": [{ "name": "fit", "value": "cover" }, { "name": "alt", "value": "山谷民宿庭院" }], "tabIds": [], "styleRole": "portal-media", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-gallery"], "intent": { "importance": "secondary", "visualWeight": 3, "readingOrder": 1, "density": "spacious", "groupWith": [], "width": { "mode": "ratio", "value": 2 }, "height": { "mode": "fill" }, "align": "stretch" } },
-                { "kind": "control", "id": "portal-gallery-detail", "capabilityId": "button", "content": "北境艺廊 / 查看完整项目", "properties": [], "tabIds": [], "styleRole": "portal-action", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["portal-open-detail"] }], "sourceBlueprintRegionIds": ["portal-gallery"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 2, "density": "spacious", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "fixed", "value": 60 }, "align": "end" } }
+                { "kind": "control", "id": "portal-gallery-north-image", "capabilityId": "image", "content": null, "properties": [{ "name": "src", "value": "asset-70000000000040008000000000000102" }, { "name": "fit", "value": "cover" }, { "name": "alt", "value": "北境艺廊中庭" }], "tabIds": [], "styleRole": "portal-media", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-gallery"], "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 0, "density": "spacious", "groupWith": [], "width": { "mode": "ratio", "value": 3 }, "height": { "mode": "fill" }, "align": "stretch" } },
+                { "kind": "control", "id": "portal-gallery-valley-image", "capabilityId": "image", "content": null, "properties": [{ "name": "src", "value": "asset-70000000000040008000000000000103" }, { "name": "fit", "value": "cover" }, { "name": "alt", "value": "山谷民宿庭院" }], "tabIds": [], "styleRole": "portal-media", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-gallery"], "intent": { "importance": "secondary", "visualWeight": 3, "readingOrder": 1, "density": "spacious", "groupWith": [], "width": { "mode": "ratio", "value": 2 }, "height": { "mode": "fill" }, "align": "stretch" } },
+                { "kind": "control", "id": "portal-gallery-detail", "capabilityId": "button", "content": "北境艺廊 / 查看完整项目", "properties": [], "tabIds": [], "styleRole": "portal-action", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["portal-open-detail"] }], "sourceBlueprintRegionIds": ["portal-nav-action"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 2, "density": "spacious", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "fixed", "value": 60 }, "align": "end" } }
               ]
             }
           ]
@@ -319,7 +320,7 @@
               "sourceBlueprintRegionIds": ["portal-detail"],
               "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 1, "density": "spacious", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fixed", "value": 650 }, "align": "stretch" },
               "children": [
-                { "kind": "control", "id": "portal-detail-main-image", "capabilityId": "image", "content": null, "properties": [{ "name": "fit", "value": "cover" }, { "name": "alt", "value": "北境艺廊晨光" }], "tabIds": [], "styleRole": "portal-media", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-detail"], "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 0, "density": "spacious", "groupWith": [], "width": { "mode": "ratio", "value": 4 }, "height": { "mode": "fill" }, "align": "stretch" } },
+                { "kind": "control", "id": "portal-detail-main-image", "capabilityId": "image", "content": null, "properties": [{ "name": "src", "value": "asset-70000000000040008000000000000104" }, { "name": "fit", "value": "cover" }, { "name": "alt", "value": "北境艺廊晨光" }], "tabIds": [], "styleRole": "portal-media", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-detail"], "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 0, "density": "spacious", "groupWith": [], "width": { "mode": "ratio", "value": 4 }, "height": { "mode": "fill" }, "align": "stretch" } },
                 {
                   "kind": "layout",
                   "id": "portal-detail-notes",
@@ -341,9 +342,9 @@
               "intent": { "importance": "supporting", "visualWeight": 3, "readingOrder": 2, "density": "comfortable", "groupWith": [], "width": { "mode": "fixed", "value": 760 }, "height": { "mode": "content" }, "align": "end" },
               "children": [
                 { "kind": "control", "id": "portal-contact-input", "capabilityId": "input", "content": null, "properties": [{ "name": "placeholder", "value": "例如：希望预约秋季酒店拍摄档期" }, { "name": "value", "value": "秋季酒店拍摄合作" }], "tabIds": [], "styleRole": "portal-field", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-contact-form"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "stretch" } },
-                { "kind": "control", "id": "portal-contact-submit", "capabilityId": "button", "content": "提交合作意向", "properties": [], "tabIds": [], "styleRole": "portal-action", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["portal-submit-contact"] }], "sourceBlueprintRegionIds": ["portal-contact-submit"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 1, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "start" } },
+                { "kind": "control", "id": "portal-contact-submit", "capabilityId": "button", "content": "打开合作联系层", "properties": [], "tabIds": [], "styleRole": "portal-action", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["portal-open-contact"] }], "sourceBlueprintRegionIds": ["portal-contact-submit"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 1, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "start" } },
                 { "kind": "control", "id": "portal-contact-status", "capabilityId": "easyui.1", "content": null, "properties": [], "tabIds": [], "mockDataId": "portal-contact-records", "styleRole": "portal-status", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-contact-status"], "intent": { "importance": "secondary", "visualWeight": 3, "readingOrder": 2, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "stretch" } },
-                { "kind": "control", "id": "portal-contact-close", "capabilityId": "button", "content": "关闭联系层", "properties": [], "tabIds": [], "styleRole": "portal-action", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["portal-close-contact"] }], "sourceBlueprintRegionIds": ["portal-contact-close"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 3, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "start" } }
+                { "kind": "control", "id": "portal-contact-close", "capabilityId": "button", "content": "返回作品叙事", "properties": [], "tabIds": [], "styleRole": "portal-action", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-contact-close"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 3, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "start" } }
               ]
             }
           ]
@@ -369,20 +370,21 @@
           "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fixed", "value": 760 }, "height": { "mode": "content" }, "align": "end" },
           "children": [
             { "kind": "control", "id": "portal-contact-overlay-input", "capabilityId": "input", "content": null, "properties": [{ "name": "placeholder", "value": "联系层由受支持页面导航呈现" }], "tabIds": [], "styleRole": "portal-field", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-contact-form"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "stretch" } },
-            { "kind": "control", "id": "portal-contact-overlay-submit", "capabilityId": "button", "content": "提交合作意向", "properties": [], "tabIds": [], "styleRole": "portal-action", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-contact-submit"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 1, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "start" } },
-            { "kind": "control", "id": "portal-contact-overlay-status", "capabilityId": "easyui.1", "content": null, "properties": [], "tabIds": [], "styleRole": "portal-status", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-contact-status"], "intent": { "importance": "secondary", "visualWeight": 3, "readingOrder": 2, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "stretch" } },
-            { "kind": "control", "id": "portal-contact-overlay-close", "capabilityId": "button", "content": "关闭联系层", "properties": [], "tabIds": [], "styleRole": "portal-action", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-contact-close"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 3, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "start" } }
+            { "kind": "control", "id": "portal-contact-overlay-submit", "capabilityId": "button", "content": "提交合作意向", "properties": [], "tabIds": [], "styleRole": "portal-action", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["portal-submit-contact"] }], "sourceBlueprintRegionIds": ["portal-contact-submit"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 1, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "start" } },
+            { "kind": "control", "id": "portal-contact-overlay-status", "capabilityId": "easyui.1", "content": null, "properties": [], "tabIds": [], "mockDataId": "portal-contact-records", "styleRole": "portal-status", "eventBindings": [], "sourceBlueprintRegionIds": ["portal-contact-status"], "intent": { "importance": "secondary", "visualWeight": 3, "readingOrder": 2, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "stretch" } },
+            { "kind": "control", "id": "portal-contact-overlay-close", "capabilityId": "button", "content": "关闭联系层", "properties": [], "tabIds": [], "styleRole": "portal-action", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["portal-close-contact"] }], "sourceBlueprintRegionIds": ["portal-contact-close"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 3, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "start" } }
           ]
         }
       }
     ],
     "actions": [
       { "id": "portal-nav-open-detail", "kind": "navigate-page", "targetPageId": "portal-detail-page", "afterActionIds": [], "journeyStepRefs": [] },
+      { "id": "portal-nav-contact-detail", "kind": "navigate-page", "targetPageId": "portal-detail-page", "afterActionIds": [], "journeyStepRefs": [] },
       { "id": "portal-open-detail", "kind": "navigate-page", "targetPageId": "portal-detail-page", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "portal-explore-journey", "stepIndex": 0 }] },
       { "id": "portal-return-home", "kind": "navigate-page", "targetPageId": "portal-home-page", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "portal-explore-journey", "stepIndex": 1 }] },
-      { "id": "portal-open-contact", "kind": "navigate-page", "targetPageId": "portal-detail-page", "afterActionIds": [], "journeyStepRefs": [] },
-      { "id": "portal-submit-contact", "kind": "run-script", "scriptId": "portal-contact-feedback-script", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "portal-contact-journey", "stepIndex": 0 }] },
-      { "id": "portal-close-contact", "kind": "navigate-page", "targetPageId": "portal-home-page", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "portal-contact-journey", "stepIndex": 1 }] }
+      { "id": "portal-open-contact", "kind": "open-overlay", "overlayId": "portal-contact-overlay", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "portal-contact-journey", "stepIndex": 0 }] },
+      { "id": "portal-submit-contact", "kind": "run-script", "scriptId": "portal-contact-feedback-script", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "portal-contact-journey", "stepIndex": 1 }] },
+      { "id": "portal-close-contact", "kind": "close-overlay", "overlayId": "portal-contact-overlay", "result": "dismissed", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "portal-contact-journey", "stepIndex": 2 }] }
     ],
     "scripts": [
       {
@@ -390,9 +392,9 @@
         "purpose": "读取合作留言并在联系层内写入明确的已收到状态",
         "kind": "custom",
         "programVersion": "semantic-js/v1",
-        "source": "const message = $control.getValue(\"portal-contact-input\");\nconst records = [{ \"id\": \"contact-1\", \"message\": String(message), \"status\": \"已收到\" }];\n$control.setData(\"portal-contact-status\", records);",
-        "inputs": [{ "name": "contact-message", "description": "客户输入的合作留言", "refKind": "control", "refId": "portal-contact-input" }],
-        "outputs": [{ "name": "contact-status", "description": "联系层提交状态记录", "refKind": "control", "refId": "portal-contact-status" }]
+        "source": "const message = $control.getValue(\"portal-contact-overlay-input\");\nconst records = [{ \"id\": \"contact-1\", \"message\": String(message), \"status\": \"已收到\" }];\n$control.setData(\"portal-contact-overlay-status\", records);",
+        "inputs": [{ "name": "contact-message", "description": "客户输入的合作留言", "refKind": "control", "refId": "portal-contact-overlay-input" }],
+        "outputs": [{ "name": "contact-status", "description": "联系层提交状态记录", "refKind": "control", "refId": "portal-contact-overlay-status" }]
       }
     ]
   }

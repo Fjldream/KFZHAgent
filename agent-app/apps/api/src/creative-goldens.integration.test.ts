@@ -14,6 +14,7 @@ import {
   canonicalServerHash,
   CustomerSolutionBlueprintSchema,
   SolutionImplementationPlanSchema,
+  workspaceAssetIdToModelId,
 } from "@kf/contracts";
 import {
   createKingClientDomainPack,
@@ -25,6 +26,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { deflateSync } from "node:zlib";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { JobRunner } from "../../worker/src/job-runner.js";
@@ -45,6 +47,16 @@ const TEST_USER = {
 };
 const FIXED_WORKSPACE_ID = "70000000-0000-4000-8000-000000000001";
 const FIXED_BASE_REVISION_ID = "70000000-0000-4000-8000-000000000002";
+const PORTAL_ASSET_SPECS = [
+  { workspaceAssetId: "70000000-0000-4000-8000-000000000101", name: "coast-bookshop-dawn.png", seed: 11 },
+  { workspaceAssetId: "70000000-0000-4000-8000-000000000102", name: "northern-gallery-courtyard.png", seed: 23 },
+  { workspaceAssetId: "70000000-0000-4000-8000-000000000103", name: "valley-lodge-garden.png", seed: 37 },
+  { workspaceAssetId: "70000000-0000-4000-8000-000000000104", name: "northern-gallery-morning.png", seed: 53 },
+].map((asset) => ({
+  ...asset,
+  assetId: workspaceAssetIdToModelId(asset.workspaceAssetId),
+  bytes: portalFixturePng(asset.seed),
+}));
 const TABLES = [
   "DownloadToken",
   "AuditLog",
@@ -70,13 +82,67 @@ const CHECKPOINT_TABLES = [
   "checkpoint_migrations",
 ];
 
+function pngCrc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ ((crc & 1) === 1 ? 0xedb88320 : 0);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type, data) {
+  const kind = Buffer.from(type, "ascii");
+  const chunk = Buffer.alloc(12 + data.length);
+  chunk.writeUInt32BE(data.length, 0);
+  kind.copy(chunk, 4);
+  data.copy(chunk, 8);
+  chunk.writeUInt32BE(pngCrc32(Buffer.concat([kind, data])), 8 + data.length);
+  return chunk;
+}
+
+/** Small deterministic scene rasters: sky, architecture, horizon and textured foreground; never baked UI. */
+function portalFixturePng(seed) {
+  const width = 96;
+  const height = 64;
+  const raw = Buffer.alloc(height * (1 + width * 4));
+  for (let y = 0; y < height; y += 1) {
+    const row = y * (1 + width * 4);
+    raw[row] = 0;
+    for (let x = 0; x < width; x += 1) {
+      const offset = row + 1 + x * 4;
+      const texture = (x * 17 + y * 31 + seed * 13) % 19;
+      const sky = y < 31;
+      const building = x > 13 + seed % 9 && x < 72 + seed % 13 && y > 20 + seed % 7 && y < 47;
+      const aperture = building && ((x + seed) % 23 < 7) && y > 27 && y < 41;
+      const base = sky ? 196 - Math.floor(y * 1.8) : 74 + Math.floor((y - 31) * 1.2);
+      raw[offset] = aperture ? 218 : building ? 72 + seed % 36 : Math.max(0, Math.min(255, base + texture));
+      raw[offset + 1] = aperture ? 173 : building ? 75 + seed % 28 : Math.max(0, Math.min(255, base + 14 + seed % 23));
+      raw[offset + 2] = aperture ? 106 : building ? 70 + seed % 17 : Math.max(0, Math.min(255, sky ? base + 23 : base - 18));
+      raw[offset + 3] = 255;
+    }
+  }
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr.set([8, 6, 0, 0, 0], 8);
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk("IHDR", ihdr),
+    pngChunk("IDAT", deflateSync(raw, { level: 9 })),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
 class GoldenModelPort extends DeterministicFakeModelPort {
   fixture = undefined;
   intents = [];
+  rejections = [];
 
   selectFixture(fixture) {
     this.fixture = fixture;
     this.intents = [];
+    this.rejections = [];
   }
 
   queueIntent(...intents) {
@@ -105,6 +171,7 @@ class GoldenModelPort extends DeterministicFakeModelPort {
   }
 
   reviseSolutionImplementationSubtree(input) {
+    this.rejections.push(...(input.solutionPlanRejectionReasons ?? []));
     return this.createSolutionImplementationPlan(input);
   }
 }
@@ -194,6 +261,35 @@ async function createConversation(cookie, workspaceId, fixtureId) {
     .expect(201);
 }
 
+async function seedPortalAssets(cookie, tenantId, workspaceId) {
+  for (const asset of PORTAL_ASSET_SPECS) {
+    const uploaded = await request(server)
+      .post(`/api/workspaces/${workspaceId}/assets`)
+      .query({ name: asset.name })
+      .set("Cookie", cookie)
+      .set("Content-Type", "application/octet-stream")
+      .send(asset.bytes)
+      .expect(201);
+    expect(uploaded.body).toMatchObject({
+      type: "image", name: asset.name, mediaType: "image/png", width: 96, height: 64,
+    });
+    await prisma.workspaceAsset.update({
+      where: { id: uploaded.body.id },
+      data: { id: asset.workspaceAssetId },
+    });
+    const persisted = await prisma.workspaceAsset.findFirstOrThrow({
+      where: { id: asset.workspaceAssetId, tenantId, workspaceId },
+    });
+    expect(persisted).toMatchObject({
+      name: asset.name,
+      sha256: createHash("sha256").update(asset.bytes).digest("hex"),
+      sizeBytes: asset.bytes.byteLength,
+      width: 96,
+      height: 64,
+    });
+  }
+}
+
 function parseSse(text) {
   return text.split("\n\n").flatMap((block) => {
     const lines = block.split("\n");
@@ -248,24 +344,281 @@ function walkPlanNodes(root, result = []) {
   return result;
 }
 
-function designSignature(fixture) {
-  const nodes = [
-    ...fixture.plan.pages.flatMap((page) => walkPlanNodes(page.root)),
-    ...fixture.plan.overlays.flatMap((overlay) => walkPlanNodes(overlay.root)),
+function unwrapSemanticValue(value) {
+  if (value === null || typeof value !== "object") return value;
+  if (value.kind === "list") return value.items.map(unwrapSemanticValue);
+  if (value.kind === "record") return Object.fromEntries(value.fields.map((field) => [field.name, unwrapSemanticValue(field.value)]));
+  return value;
+}
+
+function renamedFixtureIdentifiers(fixture) {
+  const renamed = structuredClone(fixture);
+  const allNodes = [
+    ...renamed.plan.pages.flatMap((page) => walkPlanNodes(page.root)),
+    ...renamed.plan.overlays.flatMap((overlay) => walkPlanNodes(overlay.root)),
   ];
+  const indexed = (values, prefix) => new Map([...new Set(values)].map((value, index) => [value, `${prefix}-${index}`]));
+  const blueprintPages = indexed(renamed.blueprint.pages.map((page) => page.id), "bp");
+  const regions = indexed(renamed.blueprint.pages.flatMap((page) => page.regions.map((region) => region.id)), "region");
+  const journeys = indexed(renamed.blueprint.journeys.map((journey) => journey.id), "journey");
+  const pages = indexed(renamed.plan.pages.map((page) => page.id), "page");
+  const overlays = indexed(renamed.plan.overlays.map((overlay) => overlay.id), "overlay");
+  const actions = indexed(renamed.plan.actions.map((action) => action.id), "action");
+  const scripts = indexed(renamed.plan.scripts.map((script) => script.id), "script");
+  const states = indexed(renamed.plan.localState.map((state) => state.id), "state");
+  const mockData = indexed(renamed.plan.mockData.map((data) => data.id), "data");
+  const nodes = indexed(allNodes.map((node) => node.id), "node");
+  const roles = indexed([
+    ...renamed.plan.roleStyles.map((style) => style.role),
+    ...renamed.blueprint.pages.flatMap((page) => page.regions.flatMap((region) => region.semanticRoles)),
+  ], "role");
+  const replace = (map, value) => map.get(value) ?? value;
+
+  for (const page of renamed.blueprint.pages) {
+    page.id = replace(blueprintPages, page.id);
+    page.readingOrder = page.readingOrder.map((id) => replace(regions, id));
+    for (const region of page.regions) {
+      region.id = replace(regions, region.id);
+      region.semanticRoles = region.semanticRoles.map((role) => replace(roles, role));
+    }
+  }
+  for (const journey of renamed.blueprint.journeys) {
+    journey.id = replace(journeys, journey.id);
+    for (const step of journey.steps) {
+      step.pageId = replace(blueprintPages, step.pageId);
+      step.regionId = replace(regions, step.regionId);
+    }
+  }
+  for (const style of renamed.plan.roleStyles) style.role = replace(roles, style.role);
+  for (const data of renamed.plan.mockData) data.id = replace(mockData, data.id);
+  for (const state of renamed.plan.localState) state.id = replace(states, state.id);
+  for (const page of renamed.plan.pages) {
+    page.id = replace(pages, page.id);
+    page.sourceBlueprintPageId = replace(blueprintPages, page.sourceBlueprintPageId);
+    page.sourceBlueprintRegionIds = page.sourceBlueprintRegionIds.map((id) => replace(regions, id));
+  }
+  for (const overlay of renamed.plan.overlays) {
+    overlay.id = replace(overlays, overlay.id);
+    overlay.hostPageId = replace(pages, overlay.hostPageId);
+    overlay.sourceBlueprintPageId = replace(blueprintPages, overlay.sourceBlueprintPageId);
+    overlay.sourceBlueprintRegionIds = overlay.sourceBlueprintRegionIds.map((id) => replace(regions, id));
+    overlay.visibleStateId = replace(states, overlay.visibleStateId);
+  }
+  for (const node of allNodes) {
+    node.id = replace(nodes, node.id);
+    node.sourceBlueprintRegionIds = node.sourceBlueprintRegionIds.map((id) => replace(regions, id));
+    node.intent.groupWith = node.intent.groupWith.map((id) => replace(nodes, id));
+    if (node.kind === "control") {
+      node.styleRole = replace(roles, node.styleRole);
+      if (node.mockDataId !== undefined) node.mockDataId = replace(mockData, node.mockDataId);
+      for (const binding of node.eventBindings) {
+        binding.actionIds = binding.actionIds.map((id) => replace(actions, id));
+      }
+    } else if (node.kind === "registered-module") {
+      node.eventBindings.forEach((binding) => {
+        binding.actionIds = binding.actionIds.map((id) => replace(actions, id));
+      });
+    } else if (node.kind === "repeater") {
+      node.mockDataId = replace(mockData, node.mockDataId);
+    }
+  }
+  for (const action of renamed.plan.actions) {
+    action.id = replace(actions, action.id);
+    action.afterActionIds = action.afterActionIds.map((id) => replace(actions, id));
+    action.journeyStepRefs = action.journeyStepRefs.map((ref) => ({
+      ...ref,
+      journeyId: replace(journeys, ref.journeyId),
+    }));
+    if (action.targetPageId !== undefined) action.targetPageId = replace(pages, action.targetPageId);
+    if (action.overlayId !== undefined) action.overlayId = replace(overlays, action.overlayId);
+    if (action.scriptId !== undefined) action.scriptId = replace(scripts, action.scriptId);
+  }
+  for (const script of renamed.plan.scripts) {
+    script.id = replace(scripts, script.id);
+    for (const ref of [...script.inputs, ...script.outputs]) {
+      ref.refId = ref.refKind === "control" ? replace(nodes, ref.refId)
+        : ref.refKind === "local-state" ? replace(states, ref.refId)
+          : ref.refKind === "mock-data" ? replace(mockData, ref.refId) : ref.refId;
+    }
+  }
+  return renamed;
+}
+
+function semanticValueStructure(value) {
+  if (value === null) return "null";
+  if (typeof value !== "object") return typeof value;
+  if (value.kind === "list") return { kind: "list", items: value.items.map(semanticValueStructure) };
+  if (value.kind === "record") return { kind: "record", fields: value.fields.map((field) => semanticValueStructure(field.value)) };
+  if (value.kind === "repeater-field") return { kind: "repeater-field" };
+  return "object";
+}
+
+function designSignature(fixture) {
+  const { blueprint, plan } = fixture;
+  const planPageIndex = new Map(plan.pages.map((page, index) => [page.id, index]));
+  const blueprintPageIndex = new Map(blueprint.pages.map((page, index) => [page.id, index]));
+  const blueprintRegionAddress = new Map(blueprint.pages.flatMap((page, pageIndex) =>
+    page.regions.map((region, regionIndex) => [region.id, { page: pageIndex, region: regionIndex }])));
+  const overlayIndex = new Map(plan.overlays.map((overlay, index) => [overlay.id, index]));
+  const actionIndex = new Map(plan.actions.map((action, index) => [action.id, index]));
+  const scriptIndex = new Map(plan.scripts.map((script, index) => [script.id, index]));
+  const journeyIndex = new Map(blueprint.journeys.map((journey, index) => [journey.id, index]));
+  const stateIndex = new Map(plan.localState.map((state, index) => [state.id, index]));
+  const mockDataIndex = new Map(plan.mockData.map((data, index) => [data.id, index]));
+  const roleStyleByName = new Map(plan.roleStyles.map((style) => [style.role, {
+    declarations: style.declarations,
+    states: style.states,
+  }]));
+  const nodeAddress = new Map();
+  const nodesInStructuralOrder = [];
+  const indexNode = (node, address, depth) => {
+    nodeAddress.set(node.id, address);
+    nodesInStructuralOrder.push({ node, address, depth });
+    if (node.kind === "layout") node.children.forEach((child, index) => indexNode(child, `${address}/child:${index}`, depth + 1));
+    else if (node.kind === "registered-module") node.slots.forEach((slot, slotIndex) =>
+      slot.children.forEach((child, childIndex) => indexNode(child, `${address}/slot:${slotIndex}/child:${childIndex}`, depth + 1)));
+    else if (node.kind === "repeater") indexNode(node.template, `${address}/template`, depth + 1);
+  };
+  plan.pages.forEach((page, index) => indexNode(page.root, `page:${index}/root`, 0));
+  plan.overlays.forEach((overlay, index) => indexNode(overlay.root, `overlay:${index}/root`, 0));
+
+  const regionRefs = (ids) => ids.map((id) => blueprintRegionAddress.get(id) ?? "unresolved");
+  const normalizedIntent = (intent) => ({
+    importance: intent.importance,
+    visualWeight: intent.visualWeight,
+    readingOrder: intent.readingOrder,
+    density: intent.density,
+    groupedWith: intent.groupWith.map((id) => nodeAddress.get(id) ?? "unresolved").sort(),
+    width: intent.width,
+    height: intent.height,
+    align: intent.align,
+  });
+  const normalizedBindings = (bindings) => bindings.map((binding) => ({
+    event: binding.semanticEvent,
+    actions: binding.actionIds.map((id) => actionIndex.get(id) ?? "unresolved"),
+  }));
+  const normalizedNode = (node) => {
+    const common = {
+      kind: node.kind,
+      blueprintRegions: regionRefs(node.sourceBlueprintRegionIds),
+      intent: normalizedIntent(node.intent),
+    };
+    if (node.kind === "layout") return {
+      ...common,
+      layout: node.layout,
+      children: node.children.map(normalizedNode),
+    };
+    if (node.kind === "control") return {
+      ...common,
+      capability: node.capabilityId,
+      content: semanticValueStructure(node.content),
+      properties: node.properties.map((property) => ({
+        name: property.name,
+        value: semanticValueStructure(property.value),
+      })),
+      tabCount: node.tabIds.length,
+      dataSource: node.mockDataId === undefined ? null : mockDataIndex.get(node.mockDataId) ?? "unresolved",
+      visualRole: roleStyleByName.get(node.styleRole) ?? "unresolved",
+      styleOverride: node.styleOverride ?? null,
+      bindings: normalizedBindings(node.eventBindings),
+    };
+    if (node.kind === "registered-module") return {
+      ...common,
+      moduleKind: node.moduleKind,
+      templateVersion: node.templateVersion,
+      variant: node.variant,
+      content: semanticValueStructure(node.content),
+      hasAsset: node.assetId !== undefined,
+      bindings: normalizedBindings(node.eventBindings),
+      slots: node.slots.map((slot) => slot.children.map(normalizedNode)),
+    };
+    return {
+      ...common,
+      dataSource: mockDataIndex.get(node.mockDataId) ?? "unresolved",
+      maxItems: node.maxItems,
+      template: normalizedNode(node.template),
+    };
+  };
+  const refTopology = (ref) => ({
+    kind: ref.refKind,
+    target: ref.refKind === "control" ? nodeAddress.get(ref.refId) ?? "unresolved"
+      : ref.refKind === "local-state" ? stateIndex.get(ref.refId) ?? "unresolved"
+        : ref.refKind === "mock-data" ? mockDataIndex.get(ref.refId) ?? "unresolved" : "external",
+  });
+  const ownersByAction = plan.actions.map(() => []);
+  for (const { node, address } of nodesInStructuralOrder) {
+    if (node.kind !== "control" && node.kind !== "registered-module") continue;
+    for (const binding of node.eventBindings) for (const actionId of binding.actionIds) {
+      const index = actionIndex.get(actionId);
+      if (index !== undefined) ownersByAction[index].push({ node: address, event: binding.semanticEvent });
+    }
+  }
+  const density = nodesInStructuralOrder.reduce((counts, { node }) => ({
+    ...counts,
+    [node.intent.density]: (counts[node.intent.density] ?? 0) + 1,
+  }), {});
+
   return {
-    informationArchitecture: fixture.blueprint.pages.map((page) => ({
-      page: page.id,
-      regions: page.readingOrder,
+    informationArchitecture: blueprint.pages.map((page) => ({
+      regionReadingOrder: page.readingOrder.map((id) => blueprintRegionAddress.get(id)?.region ?? "unresolved"),
+      regions: page.regions.map((region) => ({
+        dataShape: region.dataShape,
+        density: region.density,
+        importance: region.importance,
+        semanticRoleCount: region.semanticRoles.length,
+        contentCount: region.content.length,
+        sampleCount: region.sampleData.length,
+        interactionCount: region.interactions.length,
+        stateCount: region.states.length,
+      })),
     })),
-    layoutTree: fixture.plan.pages.map((page) => walkPlanNodes(page.root)
-      .filter((node) => node.kind === "layout").map((node) => node.layout)),
-    density: nodes.reduce((counts, node) => ({
-      ...counts,
-      [node.intent.density]: (counts[node.intent.density] ?? 0) + 1,
-    }), {}),
-    visualRoles: fixture.plan.roleStyles.map((style) => style.role).sort(),
-    interactionGraph: fixture.plan.actions.map((action) => action.kind).sort(),
+    layoutTree: {
+      pages: plan.pages.map((page) => normalizedNode(page.root)),
+      overlays: plan.overlays.map((overlay) => ({
+        presentation: overlay.presentation,
+        dismissible: overlay.dismissible,
+        hostPage: planPageIndex.get(overlay.hostPageId) ?? "unresolved",
+        visibleState: stateIndex.get(overlay.visibleStateId) ?? "unresolved",
+        root: normalizedNode(overlay.root),
+      })),
+    },
+    density,
+    visualHierarchy: nodesInStructuralOrder.map(({ node, depth }) => ({
+      depth,
+      kind: node.kind,
+      importance: node.intent.importance,
+      visualWeight: node.intent.visualWeight,
+      readingOrder: node.intent.readingOrder,
+      density: node.intent.density,
+    })),
+    visualRoleSystem: plan.roleStyles.map((style) => ({
+      declarations: style.declarations,
+      states: style.states,
+    })).sort((left, right) => canonicalServerHash(left).localeCompare(canonicalServerHash(right), "en-US")),
+    interactionTopology: {
+      journeys: blueprint.journeys.map((journey) => journey.steps.map((step) => ({
+        page: blueprintPageIndex.get(step.pageId) ?? "unresolved",
+        region: blueprintRegionAddress.get(step.regionId)?.region ?? "unresolved",
+      }))),
+      actions: plan.actions.map((action, index) => ({
+        kind: action.kind,
+        owners: ownersByAction[index],
+        targetPage: action.targetPageId === undefined ? null : planPageIndex.get(action.targetPageId) ?? "unresolved",
+        targetOverlay: action.overlayId === undefined ? null : overlayIndex.get(action.overlayId) ?? "unresolved",
+        script: action.scriptId === undefined ? null : scriptIndex.get(action.scriptId) ?? "unresolved",
+        after: action.afterActionIds.map((id) => actionIndex.get(id) ?? "unresolved"),
+        journeySteps: action.journeyStepRefs.map((ref) => ({
+          journey: journeyIndex.get(ref.journeyId) ?? "unresolved",
+          step: ref.stepIndex,
+        })),
+      })),
+      scripts: plan.scripts.map((script) => ({
+        kind: script.kind,
+        programVersion: script.programVersion,
+        inputs: script.inputs.map(refTopology),
+        outputs: script.outputs.map(refTopology),
+      })),
+    },
   };
 }
 
@@ -286,9 +639,31 @@ function assertGoldenThesis(fixture) {
   expect(plan.scripts.length, `${fixture.id}: constrained scripts`).toBeGreaterThanOrEqual(1);
   expect(plan.roleStyles.some((style) => Object.keys(style.declarations).length > 0), `${fixture.id}: structured CSS`).toBe(true);
   expect(plan.mockData.some((data) => data.records.some((record) => record.values.some((value) => /[\u3400-\u9fff]/u.test(String(value.value))))), `${fixture.id}: Chinese mock data`).toBe(true);
+  const bindingsByAction = new Map();
+  for (const node of nodes) {
+    if (node.kind !== "control") continue;
+    for (const binding of node.eventBindings) {
+      for (const actionId of binding.actionIds) bindingsByAction.set(actionId, { nodeId: node.id, event: binding.semanticEvent });
+    }
+  }
+  for (const overlay of plan.overlays) {
+    const open = plan.actions.find((action) => action.kind === "open-overlay" && action.overlayId === overlay.id);
+    const close = plan.actions.find((action) => action.kind === "close-overlay" && action.overlayId === overlay.id);
+    expect(open, `${fixture.id}: real overlay open action`).toBeDefined();
+    expect(close, `${fixture.id}: real overlay close action`).toBeDefined();
+    expect(bindingsByAction.get(open?.id), `${fixture.id}: bound overlay open`).toBeDefined();
+    expect(bindingsByAction.get(close?.id), `${fixture.id}: bound overlay close`).toBeDefined();
+    expect(plan.localState.find((state) => state.id === overlay.visibleStateId)?.initialValue,
+      `${fixture.id}: overlay initially hidden`).toBe(false);
+  }
 
   if (fixture.id === "portal") {
-    expect(controls.filter((node) => node.capabilityId === "image").length).toBeGreaterThanOrEqual(3);
+    const images = controls.filter((node) => node.capabilityId === "image");
+    expect(images).toHaveLength(4);
+    const boundAssetIds = images.map((node) => node.properties.find((property) => property.name === "src")?.value);
+    expect(boundAssetIds.every((assetId) => typeof assetId === "string" && assetId.startsWith("asset-")),
+      `${fixture.id}: every image uses an approved asset id`).toBe(true);
+    expect(new Set(boundAssetIds).size, `${fixture.id}: distinct approved media`).toBeGreaterThanOrEqual(3);
     expect(nodes.some((node) => node.kind === "layout" && node.layout === "asymmetric-grid")).toBe(true);
     expect(nodes.filter((node) => node.intent.density === "spacious").length).toBeGreaterThan(nodes.filter((node) => node.intent.density === "compact").length);
     expect(plan.pages[0].root.layout).not.toBe("grid");
@@ -299,7 +674,16 @@ function assertGoldenThesis(fixture) {
   } else {
     expect(nodes.some((node) => node.kind === "layout" && node.layout === "sidebar-content")).toBe(true);
     expect(nodes.some((node) => node.kind === "layout" && node.layout === "master-detail")).toBe(true);
-    expect(controls.some((node) => node.capabilityId === "tabs")).toBe(true);
+    const tabs = controls.find((node) => node.capabilityId === "tabs");
+    expect(tabs).toBeDefined();
+    const semanticTabs = unwrapSemanticValue(tabs?.properties.find((property) => property.name === "tabs")?.value);
+    expect(semanticTabs, `${fixture.id}: structured tab content`).toEqual([
+      { id: "profile-tab", label: "基本资料" },
+      { id: "activity-tab", label: "操作记录" },
+      { id: "permission-tab", label: "权限范围" },
+    ]);
+    expect(tabs?.properties.find((property) => property.name === "activeId")?.value,
+      `${fixture.id}: active tab`).toBe("profile-tab");
   }
 }
 
@@ -309,6 +693,7 @@ async function runGoldenBuild(fixture, runNumber) {
   model.selectFixture(fixture);
   const cookie = await login();
   const workspaceId = await createDeterministicWorkspace(cookie, fixture.id);
+  if (fixture.id === "portal") await seedPortalAssets(cookie, tenantId, workspaceId);
   const conversation = await createConversation(cookie, workspaceId, fixture.id);
 
   model.queueIntent("NEW_REQUIREMENT");
@@ -326,7 +711,10 @@ async function runGoldenBuild(fixture, runNumber) {
     .send({ content: "确认设计并生成工程" })
     .expect(200);
   const building = doneEvent(confirmed.text);
-  expect(building, confirmed.text).toMatchObject({
+  const diagnosticMessages = building.stage === "building" ? [] : await prisma.message.findMany({
+    where: { conversationId: conversation.body.id }, orderBy: { createdAt: "asc" }, select: { role: true, content: true },
+  });
+  expect(building, `${confirmed.text}\nrejections: ${JSON.stringify(model.rejections)}\nmessages: ${JSON.stringify(diagnosticMessages)}`).toMatchObject({
     stage: "building",
     buildJobId: expect.any(String),
   });
@@ -427,6 +815,33 @@ async function runGoldenBuild(fixture, runNumber) {
     expect(materialization.interactions.scripts.length).toBeGreaterThanOrEqual(1);
     expect(materialization.controls.some((control) => control.overlayHost !== undefined)).toBe(true);
 
+    const overlayActions = materialization.interactions.actions.filter((action) =>
+      action.kind === "open-overlay" || action.kind === "close-overlay");
+    expect(overlayActions.filter((action) => action.kind === "open-overlay"),
+      `${fixture.id}: compiled overlay open`).toHaveLength(fixture.plan.overlays.length);
+    expect(overlayActions.filter((action) => action.kind === "close-overlay"),
+      `${fixture.id}: compiled overlay close`).toHaveLength(fixture.plan.overlays.length);
+    for (const overlayAction of overlayActions) {
+      const owner = controlsByName.get(overlayAction.ownerInstanceName);
+      const link = owner?.linkMng?.linkList?.find((entry) =>
+        entry.kfCompilerAction?.schema === "kf-compiled-action/v2"
+        && entry.kfCompilerAction?.sourceActionId === overlayAction.sourceActionId);
+      expect(link, `${fixture.id}: packaged overlay binding ${overlayAction.sourceActionId}`).toMatchObject({
+        script: expect.stringContaining(`${overlayAction.targetInstanceName}.Visible = ${overlayAction.kind === "open-overlay"};`),
+        kfCompilerAction: {
+          operation: overlayAction.kind,
+          targetSemanticControlId: overlayAction.targetSemanticControlId,
+          targetInstanceName: overlayAction.targetInstanceName,
+          visible: overlayAction.kind === "open-overlay",
+        },
+      });
+      expect(link).not.toHaveProperty("action");
+    }
+    for (const overlay of materialization.controls.filter((control) => control.overlayHost !== undefined)) {
+      const rawOverlay = controlsByName.get(overlay.instanceName);
+      expect(rawOverlay?.baseProperty?.visible, `${fixture.id}: packaged overlay initially hidden`).toBe(false);
+    }
+
     const navigationActions = materialization.interactions.actions.filter((action) => action.kind === "navigate-page");
     expect(navigationActions.length, `${fixture.id}: navigation actions`).toBeGreaterThanOrEqual(1);
     navigationActions.forEach((navigation) => {
@@ -435,6 +850,34 @@ async function runGoldenBuild(fixture, runNumber) {
         link.action === "navigatePage" && link.pageId === navigation.targetPageGuid),
       `${fixture.id}: packaged navigation ${navigation.sourceActionId}`).toBe(true);
     });
+
+    if (fixture.id === "portal") {
+      const bindings = envelope.plan.assetBindings ?? [];
+      const expectedById = new Map(PORTAL_ASSET_SPECS.map((asset) => [asset.assetId, asset]));
+      expect(bindings).toHaveLength(4);
+      expect(new Set(bindings.map((binding) => binding.assetId)).size).toBe(4);
+      expect(new Set(bindings.map((binding) => binding.workspaceAssetId)).size).toBe(4);
+      expect(new Set(bindings.map((binding) => binding.sha256)).size).toBe(4);
+      expect(new Set(bindings.map((binding) => binding.targetPath)).size).toBe(4);
+      for (const binding of bindings) {
+        const expected = expectedById.get(binding.assetId);
+        expect(expected, `portal: approved asset ${binding.assetId}`).toBeDefined();
+        expect(binding).toMatchObject({
+          workspaceAssetId: expected.workspaceAssetId,
+          mediaType: "image/png",
+          sha256: createHash("sha256").update(expected.bytes).digest("hex"),
+          sizeBytes: expected.bytes.byteLength,
+        });
+        expect(binding.targetPath).toBe(`project/res/images/${binding.sha256}.png`);
+        expect(await readFile(path.join(imported, "1.0.0.1", binding.targetPath))).toEqual(expected.bytes);
+        const compiledImage = materialization.controls.find((control) => control.semanticControlId === binding.controlId);
+        expect(compiledImage?.capabilityId).toBe("image");
+        expect(controlsByName.get(compiledImage.instanceName)?.src).toBe(path.basename(binding.targetPath));
+        expect(materialization.stylesData.find((style) => style.semanticControlId === binding.controlId)
+          ?.approvedAssets.some((approved) => approved.assetId === binding.assetId
+            && approved.approvedAsset.sha256 === binding.sha256)).toBe(true);
+      }
+    }
 
     const styled = materialization.stylesData.find((style) => style.compiledStyle.cssFragments.length > 0);
     expect(styled, `${fixture.id}: compiled CSS fragment`).toBeDefined();
@@ -459,15 +902,26 @@ async function runGoldenBuild(fixture, runNumber) {
 
     if (fixture.id === "management-admin") {
       const tabs = materialization.controls.find((control) => control.semanticControlId === fixture.expect.tabsId);
+      const profileContent = materialization.controls.find((control) => control.semanticControlId === "admin-profile-name-input");
       const activity = materialization.controls.find((control) => control.semanticControlId === fixture.expect.activityTargetId);
       const submit = materialization.controls.find((control) => control.semanticControlId === fixture.expect.submitSourceId);
       const status = materialization.controls.find((control) => control.semanticControlId === fixture.expect.submitTargetId);
       expect(tabs).toBeDefined();
+      expect(profileContent).toBeDefined();
       expect(activity).toBeDefined();
       expect(submit).toBeDefined();
       expect(status).toBeDefined();
+      expect(controlsByName.get(tabs.instanceName)?.tabData).toEqual([
+        { name: "profile-tab", label: "基本资料" },
+        { name: "activity-tab", label: "操作记录" },
+        { name: "permission-tab", label: "权限范围" },
+      ]);
+      expect(controlsByName.get(tabs.instanceName)?.activeName).toBe("profile-tab");
+      expect(controlsByName.get(profileContent.instanceName), "management-admin: 基本资料 tab content").toBeDefined();
+      expect(controlsByName.get(activity.instanceName), "management-admin: 操作记录 tab content").toBeDefined();
       const tabClick = controlsByName.get(tabs.instanceName)?.linkMng?.linkList?.find((link) => link.name === "Tab-click");
       expect(String(tabClick?.script)).toContain(`${activity.instanceName}.SetData(`);
+      expect(String(tabClick?.script)).toContain("复核部门管理员权限");
       expect(String(tabClick?.script)).toContain("kf-compiled-event/v1");
       const submitClick = controlsByName.get(submit.instanceName)?.linkMng?.linkList?.find((link) => link.name === "onClick");
       expect(String(submitClick?.script)).toContain("String(name).trim()");
@@ -497,6 +951,11 @@ describe("KF creative golden projects", () => {
     });
     if (loaded.some((fixture) => fixture === null)) return;
     loaded.forEach(assertGoldenThesis);
+    for (const fixture of loaded) {
+      expect(canonicalServerHash(designSignature(renamedFixtureIdentifiers(fixture))),
+        `${fixture.id}: fingerprint ignores raw ids and role names`)
+        .toBe(canonicalServerHash(designSignature(fixture)));
+    }
     expect(new Set(loaded.map((fixture) => canonicalServerHash(designSignature(fixture))).values()).size).toBe(3);
 
     for (const fixture of loaded) {

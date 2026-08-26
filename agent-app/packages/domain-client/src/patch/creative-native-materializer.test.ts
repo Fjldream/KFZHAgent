@@ -51,6 +51,7 @@ function creativeInput(
   includePrivilegedTableData = false,
   fractionalBoundary = false,
   scrollOverflow = false,
+  includeOverlay = false,
 ) {
   const blueprint = {
     schema: "kf-design-plan/v3" as const, displayName: "工程", objective: "完成交互",
@@ -201,6 +202,51 @@ function creativeInput(
         ] },
     ],
   };
+  if (includeOverlay) {
+    const semanticDetail = semanticPlan.pages.find((page) => page.id === "detail")!;
+    if (semanticDetail.root.kind !== "layout") throw new Error("detail layout fixture required");
+    const semanticStyled = semanticDetail.root.children.find((node) => node.id === "styled")!;
+    if (semanticStyled.kind !== "control") throw new Error("styled control fixture required");
+    semanticStyled.eventBindings = [{ semanticEvent: "click", actionIds: ["open-review-overlay"] }];
+    semanticPlan.localState.push({ id: "review-overlay-visible", purpose: "控制审核弹层显隐", type: "boolean", initialValue: false });
+    semanticPlan.overlays.push({
+      id: "review-overlay", title: "审核确认", purpose: "确认处理结果", presentation: "dialog",
+      hostPageId: "detail", sourceBlueprintPageId: "bp-detail", sourceBlueprintRegionIds: ["region-detail"],
+      visibleStateId: "review-overlay-visible", dismissible: true,
+      root: {
+        id: "review-overlay-root", kind: "layout", layout: "column", sourceBlueprintRegionIds: ["region-detail"],
+        intent: { ...structuredClone(intent), readingOrder: 20 },
+        children: [{
+          id: "review-overlay-close", kind: "control", capabilityId: "button", content: "关闭", properties: [], tabIds: [],
+          styleRole: "content", sourceBlueprintRegionIds: ["region-detail"], intent: { ...structuredClone(intent), readingOrder: 21 },
+          eventBindings: [{ semanticEvent: "click", actionIds: ["close-review-overlay"] }],
+        }],
+      },
+    });
+    semanticPlan.actions.push(
+      { id: "open-review-overlay", kind: "open-overlay", overlayId: "review-overlay", afterActionIds: [], journeyStepRefs: [] },
+      { id: "close-review-overlay", kind: "close-overlay", overlayId: "review-overlay", afterActionIds: [], journeyStepRefs: [] },
+    );
+    const implementationDetail = implementationBase.pages.find((page) => page.id === "detail")!;
+    if (implementationDetail.compatibility !== "native") throw new Error("native detail fixture required");
+    implementationDetail.controls.push(
+      {
+        id: "review-overlay-root", role: "layout", capabilityId: "layout.4", depth: 0, zIndex: 10,
+        geometry: { x: 320, y: 160, width: 640, height: 360 }, compiledLayout: { kind: "column", overflow: "visible" }, nativeProperties: {},
+        compiledStyle: { nativeFields: {}, cssFragments: [], warnings: [] }, sourceSolutionNodeId: "review-overlay-root",
+        sourceBlueprintPageId: "bp-detail", sourceBlueprintRegionIds: ["region-detail"], eventBindings: [],
+        overlayHost: { overlayId: "review-overlay", hostPageId: "detail", presentation: "dialog", visibleStateId: "review-overlay-visible", dismissible: true, initiallyVisible: false },
+      },
+      {
+        id: "review-overlay-close", parentId: "review-overlay-root", role: "content", capabilityId: "button", content: "关闭",
+        depth: 1, zIndex: 11, geometry: { x: 760, y: 440, width: 96, height: 40 }, nativeProperties: { parentId: "review-overlay-root" },
+        compiledStyle: { nativeFields: {}, cssFragments: [], warnings: [] }, sourceSolutionNodeId: "review-overlay-close",
+        sourceBlueprintPageId: "bp-detail", sourceBlueprintRegionIds: ["region-detail"], eventBindings: [],
+      },
+    );
+    implementationBase.sourceSolutionPlanHash = canonicalServerHash(semanticPlan);
+    implementationBase.sourceModuleRegistryHash = solutionModuleRegistryHash(semanticPlan, createDefaultModuleRegistry());
+  }
   if (extraControlCount > 0) {
     // Keep the scale fixture focused on native page materialization. Script
     // compilation intentionally snapshots the full semantic plan into its
@@ -301,11 +347,29 @@ function walkControls(value: unknown, result: Array<Record<string, unknown>> = [
   return result;
 }
 
+function decodedModules(source: string) {
+  const marker = "// kf-compiled-event/v1 ";
+  const result: Array<{ metadata: Record<string, unknown>; body: string }> = [];
+  let cursor = 0;
+  while (true) {
+    const start = source.indexOf(marker, cursor);
+    if (start < 0) return result;
+    const newline = source.indexOf("\n", start);
+    const metadata = JSON.parse(Buffer.from(source.slice(start + marker.length, newline), "base64url").toString("utf8")) as Record<string, unknown>;
+    const bodyStartBytes = Buffer.byteLength(source.slice(0, newline + 1));
+    const all = Buffer.from(source, "utf8");
+    const body = all.subarray(bodyStartBytes, bodyStartBytes + Number(metadata["bodyByteLength"])).toString("utf8");
+    result.push({ metadata, body });
+    cursor = Buffer.from(source, "utf8").subarray(0, bodyStartBytes + Number(metadata["bodyByteLength"])).toString("utf8").length;
+  }
+}
+
 async function signedFixture(
   extraControlCount = 0,
   includePrivilegedTableData = false,
   fractionalBoundary = false,
   scrollOverflow = false,
+  includeOverlay = false,
 ) {
   const facade = createHmacCreativeBuildFacade(Buffer.alloc(32, 0x41), createCreativeUIImplementationV2Compiler);
   const result = facade.compiler.compiler.compile(creativeInput(
@@ -314,6 +378,7 @@ async function signedFixture(
     includePrivilegedTableData,
     fractionalBoundary,
     scrollOverflow,
+    includeOverlay,
   ));
   const envelope = facade.authority.sign({
     plan: result.plan, revisionId: "revision", semanticOperations: result.semanticOperations,
@@ -429,6 +494,69 @@ async function existingSignedFixture(withImageAsset = false) {
 }
 
 describe("creative native materializer", () => {
+  it("packages an initially hidden overlay with exact compiler-authored open and close visibility scripts", async () => {
+    const { result, resolved, planHash } = await signedFixture(0, false, false, false, true);
+    const base = await baseWorkspace();
+    const pack = createKingClientDomainPack({ nativeAccepted: true });
+    const candidate = await pack.patch({
+      baseWorkspace: base, changePlan: result.plan, expectedPlanHash: planHash,
+      creativeMaterialization: resolved.creativeMaterialization,
+    });
+    const overlay = result.materialization.controls.find((control) => control.semanticControlId === "review-overlay-root")!;
+    const open = result.materialization.controls.find((control) => control.semanticControlId === "styled")!;
+    const close = result.materialization.controls.find((control) => control.semanticControlId === "review-overlay-close")!;
+    const inspectOverlay = (inspection: Awaited<ReturnType<typeof inspectClientProject>>) => {
+      const controls = Object.values(inspection.raw.pages).flatMap((page) => walkControls(page));
+      const nativeOverlay = controls.find((control) => control["baseProperty"] !== undefined
+        && (control["baseProperty"] as Record<string, unknown>)["name"] === overlay.instanceName)!;
+      const nativeByName = (name: string) => controls.find((control) => control["name"] === name)!;
+      const visibilityLink = (owner: string, operation: "open-overlay" | "close-overlay") =>
+        ((nativeByName(owner)["linkMng"] as { linkList: Array<Record<string, unknown>> }).linkList)
+          .find((link) => (link["kfCompilerAction"] as Record<string, unknown> | undefined)?.["operation"] === operation)!;
+      expect((nativeOverlay["baseProperty"] as Record<string, unknown>)["visible"]).toBe(false);
+      for (const [owner, operation, visible] of [[open.instanceName, "open-overlay", true], [close.instanceName, "close-overlay", false]] as const) {
+        const link = visibilityLink(owner, operation);
+        expect(link["kfCompilerAction"]).toMatchObject({
+          schema: "kf-compiled-action/v2", operation, targetSemanticControlId: overlay.semanticControlId,
+          targetInstanceName: overlay.instanceName, visible,
+        });
+        expect(decodedModules(String(link["script"]))[0]?.body).toBe(`${overlay.instanceName}.Visible = ${String(visible)};\n`);
+      }
+      return { nativeOverlay, openLink: visibilityLink(open.instanceName, "open-overlay") };
+    };
+    const inspection = await inspectClientProject(candidate.rootDir);
+    inspectOverlay(inspection);
+    const report = await pack.validate({
+      baseWorkspace: base, candidateWorkspace: candidate, changePlan: result.plan,
+      creativeMaterialization: resolved.creativeMaterialization,
+    });
+    expect(report.status, report.warnings.join("\n")).toBe("pass");
+    const imported = await importNativeClientPackage(
+      (await pack.package({ workspace: candidate })).bytes,
+      await mkdtemp(path.join(tmpdir(), "kf-overlay-import-")),
+    );
+    inspectOverlay(await inspectClientProject(imported));
+
+    const detailPage = inspection.index.pages[overlay.pageGuid]!;
+    const pagePath = path.join(candidate.rootDir, "1.0.0.1", detailPage.file);
+    const pageJson = JSON.parse(await readFile(pagePath, "utf8")) as Record<string, unknown>;
+    const pageControls = walkControls(pageJson);
+    const tamperedOverlay = pageControls.find((control) =>
+      (control["baseProperty"] as Record<string, unknown> | undefined)?.["name"] === overlay.instanceName)!;
+    (tamperedOverlay["baseProperty"] as Record<string, unknown>)["visible"] = true;
+    const tamperedOpen = pageControls.find((control) => control["name"] === open.instanceName)!;
+    const tamperedOpenLink = ((tamperedOpen["linkMng"] as { linkList: Array<Record<string, unknown>> }).linkList)
+      .find((link) => (link["kfCompilerAction"] as Record<string, unknown> | undefined)?.["operation"] === "open-overlay")!;
+    tamperedOpenLink["script"] = String(tamperedOpenLink["script"]).replace("Visible = true", "Visible = false");
+    await writeFile(pagePath, JSON.stringify(pageJson, null, 2));
+    const tamperedReport = await pack.validate({
+      baseWorkspace: base, candidateWorkspace: candidate, changePlan: result.plan,
+      creativeMaterialization: resolved.creativeMaterialization,
+    });
+    expect(tamperedReport.status).toBe("fail");
+    expect(tamperedReport.warnings.join("\n")).toMatch(/overlay|compiled script|materialization|hash/i);
+  }, 30_000);
+
   it("loads, indexes, and flushes each creative page once as control count grows", async () => {
     const { result, resolved, planHash } = await signedFixture(993);
     const base = await baseWorkspace();
@@ -541,9 +669,20 @@ describe("creative native materializer", () => {
     } as ApplyPatchOptions & { creativeMaterialization: unknown });
     const inspection = await inspectClientProject(candidate.rootDir);
     const grid = result.materialization.controls.find((control) => control.semanticControlId === "grid")!;
-    const native = Object.values(inspection.raw.pages).flatMap((page) => walkControls(page))
+    const parent = result.materialization.controls.find((control) => control.semanticControlId === "detail-root")!;
+    const controls = Object.values(inspection.raw.pages).flatMap((page) => walkControls(page));
+    const native = controls
       .find((control) => control["name"] === grid.instanceName)!;
+    const nativeParent = controls.find((control) =>
+      (control["baseProperty"] as Record<string, unknown> | undefined)?.["name"] === parent.instanceName)!;
+    expect(grid.parentInstanceName).toBe(parent.instanceName);
+    expect((nativeParent["insiderObjects"] as Array<Record<string, unknown>>)
+      .some((child) => child["name"] === grid.instanceName)).toBe(true);
     expect(native["data"]).toEqual([{ id: "1" }]);
+    expect(native["columns"]).toEqual([[expect.objectContaining({ field: "id", title: "编号" })]]);
+    expect(native["pageSize"]).toBe(1);
+    expect(native).not.toHaveProperty("parentId");
+    expect(native).not.toHaveProperty("tableData");
     const report = await validateClientProject(base.rootDir, candidate.rootDir, result.plan, {
       skipRoundTrip: true,
       semanticOperations: resolved.semanticOperations,
@@ -553,6 +692,39 @@ describe("creative native materializer", () => {
       creativeMaterialization: unknown;
     });
     expect(report.status, report.warnings.join("\n")).toBe("pass");
+
+    const imported = await importNativeClientPackage(
+      (await createKingClientDomainPack({ nativeAccepted: true }).package({ workspace: candidate })).bytes,
+      await mkdtemp(path.join(tmpdir(), "kf-table-parent-import-")),
+    );
+    const importedControls = Object.values((await inspectClientProject(imported)).raw.pages)
+      .flatMap((page) => walkControls(page));
+    const importedGrid = importedControls.find((control) => control["name"] === grid.instanceName)!;
+    const importedParent = importedControls.find((control) =>
+      (control["baseProperty"] as Record<string, unknown> | undefined)?.["name"] === parent.instanceName)!;
+    expect((importedParent["insiderObjects"] as Array<Record<string, unknown>>)
+      .some((child) => child["name"] === grid.instanceName)).toBe(true);
+    expect(importedGrid).toMatchObject({ data: [{ id: "1" }], pageSize: 1 });
+    expect(importedGrid).not.toHaveProperty("parentId");
+    expect(importedGrid).not.toHaveProperty("tableData");
+
+    const page = inspection.index.pages[grid.pageGuid]!;
+    const pagePath = path.join(candidate.rootDir, "1.0.0.1", page.file);
+    const pageJson = JSON.parse(await readFile(pagePath, "utf8")) as Record<string, unknown>;
+    const injected = walkControls(pageJson).find((control) => control["name"] === grid.instanceName)!;
+    injected["parentId"] = "detail-root";
+    injected["tableData"] = { columns: [{ key: "id", label: "伪造" }], rows: [{ id: "forged" }] };
+    await writeFile(pagePath, JSON.stringify(pageJson, null, 2));
+    const injectedReport = await validateClientProject(base.rootDir, candidate.rootDir, result.plan, {
+      skipRoundTrip: true,
+      semanticOperations: resolved.semanticOperations,
+      creativeMaterialization: resolved.creativeMaterialization,
+    } as Parameters<typeof validateClientProject>[3] & {
+      semanticOperations: unknown;
+      creativeMaterialization: unknown;
+    });
+    expect(injectedReport.status).toBe("fail");
+    expect(injectedReport.warnings.join("\n")).toMatch(/parentId|tableData|native candidate|materialization/i);
   });
 
   it("accepts compiler geometry that lands exactly on a fractional parent boundary", async () => {
@@ -817,5 +989,87 @@ describe("creative native materializer", () => {
     });
     expect(tamperedReport.status).toBe("fail");
     expect(tamperedReport.warnings.join("\n")).toMatch(/creative asset bytes mismatch/);
+  }, 30_000);
+
+  it("validates signed interactions after an image rewrite canonicalizes the containing page JSON", async () => {
+    const compilerInput = creativeInput();
+    const assetBytes = Buffer.from("reviewed generated-page image bytes");
+    const workspaceAssetId = "00000000-0000-4000-8000-000000000002";
+    const assetId = workspaceAssetIdToModelId(workspaceAssetId);
+    const sha256 = createHash("sha256").update(assetBytes).digest("hex");
+    const assetFacts = {
+      assetId,
+      approvedAsset: {
+        workspaceAssetId,
+        targetPath: `project/res/images/${sha256}.png`,
+        mediaType: "image/png" as const,
+        sha256,
+        sizeBytes: assetBytes.byteLength,
+      },
+    };
+    const semanticHome = compilerInput.semanticPlan.pages.find((page) => page.id === "home")!;
+    if (semanticHome.root.kind !== "layout") throw new Error("home layout fixture required");
+    const semanticImage = semanticHome.root.children.find((node) => node.id === "portrait")!;
+    if (semanticImage.kind !== "control") throw new Error("image control fixture required");
+    semanticImage.properties = [{ name: "src", value: assetId }];
+    const implementationHome = compilerInput.implementation.pages.find((page) => page.id === "home")!;
+    if (implementationHome.compatibility !== "native") throw new Error("native home fixture required");
+    const implementationImage = implementationHome.controls.find((control) => control.id === "portrait")!;
+    implementationImage.assetIds = [assetId];
+    implementationImage.nativeProperties.src = assetFacts.approvedAsset.targetPath;
+    compilerInput.implementation.sourceSolutionPlanHash = canonicalServerHash(compilerInput.semanticPlan);
+
+    const facade = createHmacCreativeBuildFacade(Buffer.alloc(32, 0x43), createCreativeUIImplementationV2Compiler);
+    const result = facade.compiler.compiler.compile({
+      ...compilerInput,
+      verifiedAssets: facade.compiler.assetProofResolver.attestResolvedAssets({
+        workspaceId: "workspace",
+        assets: [assetFacts],
+      }),
+    });
+    const envelope = facade.authority.sign({
+      plan: result.plan,
+      revisionId: "revision",
+      semanticOperations: result.semanticOperations,
+      creative: result.trustedCreativePayload,
+    });
+    const planHash = canonicalChangePlanHash(result.plan);
+    const resolved = resolveStoredPlan(JSON.parse(JSON.stringify(envelope)), {
+      expectedPlanHash: planHash,
+      expectedRevisionId: "revision",
+    }, facade.authority) as ReturnType<typeof resolveStoredPlan> & { creativeMaterialization: unknown };
+    const workerAssets = await resolveBuildAssets({
+      tenantId: "tenant",
+      workspaceId: "workspace",
+      prisma: { workspaceAsset: { findMany: async () => [{
+        id: workspaceAssetId,
+        type: "image",
+        mediaType: "image/png",
+        storageKey: "generated-page-image",
+        sha256,
+        sizeBytes: assetBytes.byteLength,
+      }] } },
+      storage: { open: async () => Readable.from([assetBytes]) },
+      bindings: result.plan.assetBindings!,
+    });
+    const base = await baseWorkspace();
+    const pack = createKingClientDomainPack({ nativeAccepted: true });
+    const candidate = await pack.patch({
+      baseWorkspace: base,
+      changePlan: result.plan,
+      expectedPlanHash: planHash,
+      assets: workerAssets,
+      creativeMaterialization: resolved.creativeMaterialization,
+    });
+
+    const report = await pack.validate({
+      baseWorkspace: base,
+      candidateWorkspace: candidate,
+      changePlan: result.plan,
+      assets: workerAssets,
+      creativeMaterialization: resolved.creativeMaterialization,
+    });
+
+    expect(report.status, report.warnings.join("\n")).toBe("pass");
   }, 30_000);
 });

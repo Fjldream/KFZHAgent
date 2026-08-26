@@ -182,7 +182,7 @@
         "goal": "打开高优先级告警层并关闭返回控制台",
         "steps": [
           { "pageId": "industrial-console-bp", "regionId": "industrial-alarm-action", "action": "打开高优先级告警层", "result": "显示三条告警记录" },
-          { "pageId": "industrial-alarm-bp", "regionId": "industrial-alarm-close", "action": "关闭告警层", "result": "返回实时运行控制台" }
+          { "pageId": "industrial-console-bp", "regionId": "industrial-alarm-action", "action": "关闭告警层", "result": "告警覆盖层隐藏并保留实时运行控制台" }
         ],
         "completion": "告警层完成一次打开与关闭往返"
       }
@@ -367,7 +367,7 @@
           "children": [
             { "kind": "control", "id": "industrial-alarm-heading", "capabilityId": "text", "content": "高优先级告警 · 请在十分钟内完成确认与派工", "properties": [], "tabIds": [], "styleRole": "industrial-title", "eventBindings": [], "sourceBlueprintRegionIds": ["industrial-alarm-shell"], "intent": { "importance": "primary", "visualWeight": 4, "readingOrder": 0, "density": "compact", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "start" } },
             { "kind": "control", "id": "industrial-alarm-page-table", "capabilityId": "easyui.1", "content": null, "properties": [], "tabIds": [], "mockDataId": "industrial-alarm-records", "styleRole": "industrial-alarm-grid", "eventBindings": [], "sourceBlueprintRegionIds": ["industrial-alarm-records"], "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 1, "density": "compact", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fixed", "value": 240 }, "align": "stretch" } },
-            { "kind": "control", "id": "industrial-alarm-page-close", "capabilityId": "button", "content": "关闭告警层并返回控制台", "properties": [], "tabIds": [], "styleRole": "industrial-action", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["industrial-close-alarm-action"] }], "sourceBlueprintRegionIds": ["industrial-alarm-close"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 2, "density": "compact", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "end" } }
+            { "kind": "control", "id": "industrial-alarm-page-close", "capabilityId": "button", "content": "返回实时运行控制台", "properties": [], "tabIds": [], "styleRole": "industrial-action", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["industrial-return-console-action"] }], "sourceBlueprintRegionIds": ["industrial-alarm-close"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 2, "density": "compact", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "end" } }
           ]
         }
       }
@@ -378,27 +378,27 @@
         "title": "高优先级告警",
         "purpose": "叠加显示当前三条高优先级告警并提供关闭路径",
         "presentation": "drawer",
-        "hostPageId": "industrial-alarm-page",
-        "sourceBlueprintPageId": "industrial-alarm-bp",
-        "sourceBlueprintRegionIds": ["industrial-alarm-records", "industrial-alarm-close"],
+        "hostPageId": "industrial-console-page",
+        "sourceBlueprintPageId": "industrial-console-bp",
+        "sourceBlueprintRegionIds": ["industrial-table", "industrial-alarm-action"],
         "visibleStateId": "industrial-alarm-visible",
         "dismissible": true,
         "root": {
           "kind": "layout",
           "id": "industrial-alarm-overlay-root",
           "layout": "overlay-anchor",
-          "sourceBlueprintRegionIds": ["industrial-alarm-records"],
+          "sourceBlueprintRegionIds": ["industrial-table"],
           "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 0, "density": "compact", "groupWith": [], "width": { "mode": "fixed", "value": 980 }, "height": { "mode": "fill" }, "align": "center" },
           "children": [
             {
               "kind": "layout",
               "id": "industrial-alarm-stack",
               "layout": "scroll-region",
-              "sourceBlueprintRegionIds": ["industrial-alarm-records"],
+              "sourceBlueprintRegionIds": ["industrial-table"],
               "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 0, "density": "compact", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fill" }, "align": "stretch" },
               "children": [
-                { "kind": "control", "id": "industrial-alarm-table", "capabilityId": "easyui.1", "content": null, "properties": [], "tabIds": [], "mockDataId": "industrial-alarm-records", "styleRole": "industrial-alarm-grid", "eventBindings": [], "sourceBlueprintRegionIds": ["industrial-alarm-records"], "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 0, "density": "compact", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fill" }, "align": "stretch" } },
-                { "kind": "control", "id": "industrial-close-alarm", "capabilityId": "button", "content": "关闭告警层并返回控制台", "properties": [], "tabIds": [], "styleRole": "industrial-action", "eventBindings": [], "sourceBlueprintRegionIds": ["industrial-alarm-close"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 1, "density": "compact", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "end" } }
+                { "kind": "control", "id": "industrial-alarm-table", "capabilityId": "easyui.1", "content": null, "properties": [], "tabIds": [], "mockDataId": "industrial-alarm-records", "styleRole": "industrial-alarm-grid", "eventBindings": [], "sourceBlueprintRegionIds": ["industrial-table"], "intent": { "importance": "primary", "visualWeight": 5, "readingOrder": 0, "density": "compact", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fill" }, "align": "stretch" } },
+                { "kind": "control", "id": "industrial-close-alarm", "capabilityId": "button", "content": "关闭告警层", "properties": [], "tabIds": [], "styleRole": "industrial-action", "eventBindings": [{ "semanticEvent": "click", "actionIds": ["industrial-close-alarm-action"] }], "sourceBlueprintRegionIds": ["industrial-alarm-action"], "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 1, "density": "compact", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "end" } }
               ]
             }
           ]
@@ -408,8 +408,9 @@
     "actions": [
       { "id": "industrial-filter-action", "kind": "run-script", "scriptId": "industrial-filter-script", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "industrial-inspect-journey", "stepIndex": 0 }] },
       { "id": "industrial-select-row-action", "kind": "run-script", "scriptId": "industrial-row-detail-script", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "industrial-inspect-journey", "stepIndex": 1 }] },
-      { "id": "industrial-open-alarm-action", "kind": "navigate-page", "targetPageId": "industrial-alarm-page", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "industrial-alarm-journey", "stepIndex": 0 }] },
-      { "id": "industrial-close-alarm-action", "kind": "navigate-page", "targetPageId": "industrial-console-page", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "industrial-alarm-journey", "stepIndex": 1 }] }
+      { "id": "industrial-open-alarm-action", "kind": "open-overlay", "overlayId": "industrial-alarm-overlay", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "industrial-alarm-journey", "stepIndex": 0 }] },
+      { "id": "industrial-close-alarm-action", "kind": "close-overlay", "overlayId": "industrial-alarm-overlay", "result": "dismissed", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "industrial-alarm-journey", "stepIndex": 1 }] },
+      { "id": "industrial-return-console-action", "kind": "navigate-page", "targetPageId": "industrial-console-page", "afterActionIds": [], "journeyStepRefs": [] }
     ],
     "scripts": [
       {

@@ -154,7 +154,13 @@ function compileEffect(
     case "close-overlay": {
       const target = indexes.overlayHosts.get(effect.overlayId);
       const targetInstanceName = target === undefined ? undefined : indexes.controls.get(target.controlId)?.instanceName;
-      return targetInstanceName === undefined ? undefined : parseNativeAction({ ...base, kind: effect.kind, targetInstanceName }, action.id);
+      return targetInstanceName === undefined || target === undefined ? undefined : parseNativeAction({
+        ...base,
+        kind: effect.kind,
+        ownerSemanticControlId: action.trigger.controlId,
+        targetSemanticControlId: target.controlId,
+        targetInstanceName,
+      }, action.id);
     }
     case "set-visibility": {
       const targetInstanceName = indexes.controls.get(effect.targetId)?.instanceName;

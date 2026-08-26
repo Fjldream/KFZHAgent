@@ -10,6 +10,11 @@ const PRODUCT_SOURCE = (ref: string, contentSha256: string) => ({ kind: "product
 const CENTER_PROPERTY_PAGE = "KingFusion3.6_Center/sdb/c7f1771f-0c8f-4c75-9d71-3b8c4b6bd190/kingclient/9fdd3be0-2d91-11f1-b60a-4937cd79e5a1/pagerecord/recordpages/数据模型管理_属性定义20230511104433.json";
 const NODE_DATAGRID_METHOD_PAGE = "KingFusion3.6_Node/sdb/kingclient/5dd3e6c0-d181-11f0-b646-250384722929/d6271f40-e165-11f0-bc3d-dbe5f779bd94/pagerecord/recordpages/数据网格_方法20250218173552.json";
 const NODE_DATAGRID_EVENT_PAGE = "KingFusion3.6_Node/sdb/kingclient/5dd3e6c0-d181-11f0-b646-250384722929/d6271f40-e165-11f0-bc3d-dbe5f779bd94/project/page/数据网格_事件.json";
+const CENTER_OVERLAY_VISIBILITY_PAGE = "KingFusion3.6_Center/sdb/c7f1771f-0c8f-4c75-9d71-3b8c4b6bd190/kingclient/9fdd3be0-2d91-11f1-b60a-4937cd79e5a1/project/page/设备接入_新增.json";
+const OVERLAY_VISIBILITY_EVIDENCE = [PRODUCT_SOURCE(
+  `${CENTER_OVERLAY_VISIBILITY_PAGE}#objects.0.insiderObjects.0.insiderObjects.2.insiderObjects.4.linkMng.linkList.0.script`,
+  "67c369d5f86cde2ac540afa78931964f826d2992752e8e09edaa7996d1b500b7",
+)];
 const ACTION_IR_EVIDENCE = [
   { kind: "compiler", ref: "agent-app/packages/domain-client/src/ir/client-project-ir.schema.ts#RestrictedAction" },
   { kind: "compiler", ref: "agent-app/packages/domain-client/src/compile/control-compiler.ts#compileAction" },
@@ -48,7 +53,8 @@ const REVIEWED_PROFILES: Readonly<Record<string, unknown>> = {
     actions: [
       { semanticAction: "navigate-page", implementation: "restricted-action", availability: "supported", evidence: actionEvidence("navigatePage") },
       { semanticAction: "set-variable", implementation: "restricted-action", availability: "supported", evidence: actionEvidence("setVariable") },
-      { semanticAction: "open-dialog", implementation: "restricted-action", availability: "planned", evidence: [] },
+      { semanticAction: "open-dialog", implementation: "restricted-action", availability: "supported", evidence: OVERLAY_VISIBILITY_EVIDENCE },
+      { semanticAction: "close-dialog", implementation: "restricted-action", availability: "supported", evidence: OVERLAY_VISIBILITY_EVIDENCE },
     ],
     events: [{
       semanticEvent: "click",
@@ -63,7 +69,7 @@ const REVIEWED_PROFILES: Readonly<Record<string, unknown>> = {
     }],
     methods: [],
     initialization: { supportsConfigureData: false, lifecycleEvents: [] },
-    limitations: ["当前受限动作 DSL 只可生成页面跳转和变量赋值，不能生成弹窗打开动作。"],
+    limitations: ["弹层动作仅可切换编译器已验证 overlay host 的 Visible 布尔属性；不接受模型脚本或任意目标。"],
   },
   checkbox: {
     schema: "kf-script-capability-profile/v1",
@@ -148,6 +154,24 @@ const REVIEWED_PROFILES: Readonly<Record<string, unknown>> = {
     initialization: { supportsConfigureData: false, lifecycleEvents: [] },
     limitations: ["标签事件可识别，但尚未提供事件脚本编译器。"],
   },
+  ...Object.fromEntries(["layout.2", "layout.4", "layout.5"].map((capabilityId) => [capabilityId, {
+    schema: "kf-script-capability-profile/v1",
+    capabilityId,
+    version: "1.0.0",
+    availability: "supported",
+    actions: [
+      { semanticAction: "open-dialog", implementation: "restricted-action", availability: "supported", evidence: OVERLAY_VISIBILITY_EVIDENCE },
+      { semanticAction: "close-dialog", implementation: "restricted-action", availability: "supported", evidence: OVERLAY_VISIBILITY_EVIDENCE },
+    ],
+    events: [],
+    methods: [],
+    properties: [{
+      semanticProperty: "visible", kfProperty: "Visible", readable: true, writable: true,
+      availability: "supported", evidence: OVERLAY_VISIBILITY_EVIDENCE,
+    }],
+    initialization: { supportsConfigureData: false, lifecycleEvents: [] },
+    limitations: ["Visible 写入只允许由签名 overlay action 生成，不能作为通用脚本属性写入。"],
+  }])),
   "easyui.1": {
     schema: "kf-script-capability-profile/v1",
     capabilityId: "easyui.1",
