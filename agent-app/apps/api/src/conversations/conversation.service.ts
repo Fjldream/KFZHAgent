@@ -29,12 +29,21 @@ import { MODULE_ARTIFACT_AUTHORITY, SERVER_PLAN_AUTHORITY } from "./server-plan-
 import type { ModuleArtifactAuthority, ServerPlanAuthority } from "@kf/build-jobs";
 import { AssetService } from "../assets/asset.service.js";
 import { DeliverySnapshotService, projectModuleDeliveryResult } from "../delivery/delivery-snapshot.service.js";
+import {
+  CONVERSATION_TURN_LEASE,
+  type ConversationTurnLease,
+  type ConversationTurnLeasePort,
+} from "./conversation-turn-lease.js";
 
 type CompiledGraph = ReturnType<typeof compileSolutionGraph>;
 
 export interface SseEvent {
   event: string;
   data: unknown;
+}
+
+export interface DisposableSseStream extends AsyncIterableIterator<SseEvent> {
+  dispose(): Promise<void>;
 }
 
 export interface SessionPrincipalLike {
@@ -117,6 +126,8 @@ export class ConversationService {
     private readonly audit: AuditService,
     @Inject(MODEL_PORT) private readonly modelPort: SolutionGraphDeps["modelPort"],
     @Inject(PG_POOL) private readonly pool: pg.Pool,
+    @Inject(CONVERSATION_TURN_LEASE)
+    private readonly turnLeases: ConversationTurnLeasePort,
     @Inject(ARTIFACT_STORAGE) private readonly artifactStorage: ArtifactStorage,
     @Inject(SERVER_PLAN_AUTHORITY) private readonly serverPlanAuthority: ServerPlanAuthority,
     @Inject(CREATIVE_SOLUTION_COMPILER_PORT)
@@ -194,7 +205,7 @@ export class ConversationService {
     principal: SessionPrincipalLike,
     conversationId: string,
     content: string,
-  ): Promise<AsyncGenerator<SseEvent>> {
+  ): Promise<DisposableSseStream> {
     const conversation = await this.get(principal.tenantId, conversationId);
     const text = typeof content === "string" ? content.trim() : "";
     if (text.length === 0) {
@@ -202,16 +213,11 @@ export class ConversationService {
     }
     const graph = await this.getGraph();
     const config = threadConfig(conversationId);
-    const lockClient = await this.pool.connect();
+    const lease = await this.turnLeases.acquire(conversationId);
     try {
-      await lockClient.query(
-        "SELECT pg_advisory_lock(hashtextextended($1, 0))",
-        [conversationId],
-      );
-
-      // The re-check and the entire graph stream occur while holding the same
-      // session lock. Sequential/concurrent duplicate confirmations therefore
-      // observe the winner's committed checkpoint and cannot compile twice.
+      // The lock-internal re-check and complete stream guarantee a later turn
+      // observes the winner's committed checkpoint. Contenders fail fast at
+      // the dedicated lease boundary instead of consuming checkpoint clients.
       const snapshot = (await graph.getState(config)) as unknown as StateSnapshotLike;
       if (hasPendingInterrupt(snapshot)) {
         throw new ApprovalResumeRequiredError(conversationId);
@@ -245,24 +251,14 @@ export class ConversationService {
         recentMessages: [],
       } satisfies AgentGraphUpdate;
       const stream = (await graph.stream(input, config)) as AsyncGenerator<unknown>;
-      return this.forwardLockedStream(stream, graph, config, lockClient, conversationId);
+      return disposableSseStream(
+        this.forwardStream(stream, graph, config),
+        stream,
+        lease,
+      );
     } catch (error) {
-      await releaseConversationLock(lockClient, conversationId);
+      await lease.dispose().catch(() => {});
       throw error;
-    }
-  }
-
-  private async *forwardLockedStream(
-    stream: AsyncGenerator<unknown>,
-    graph: CompiledGraph,
-    config: Record<string, unknown>,
-    lockClient: pg.PoolClient,
-    conversationId: string,
-  ): AsyncGenerator<SseEvent> {
-    try {
-      yield* this.forwardStream(stream, graph, config);
-    } finally {
-      await releaseConversationLock(lockClient, conversationId);
     }
   }
 
@@ -633,17 +629,47 @@ function apiError(code: string, message: string): { error: { code: string; messa
   return { error: { code, message } };
 }
 
-async function releaseConversationLock(client: pg.PoolClient, conversationId: string): Promise<void> {
-  try {
-    await client.query(
-      "SELECT pg_advisory_unlock(hashtextextended($1, 0))",
-      [conversationId],
-    );
-    client.release();
-  } catch {
-    // A session lock whose unlock result is unknown must never return to the
-    // pool. Destroying that client also avoids masking the graph failure that
-    // triggered cleanup.
-    client.release(true);
-  }
+function disposableSseStream(
+  stream: AsyncGenerator<SseEvent>,
+  source: AsyncGenerator<unknown>,
+  lease: ConversationTurnLease,
+): DisposableSseStream {
+  let disposal: Promise<void> | undefined;
+  const dispose = (): Promise<void> => {
+    disposal ??= (async () => {
+      try {
+        void Promise.resolve(source.return(undefined)).catch(() => {});
+      } catch { /* a hostile iterator cannot prevent lease cleanup */ }
+      try {
+        void Promise.resolve(stream.return(undefined)).catch(() => {});
+      } catch { /* a hostile projection cannot prevent lease cleanup */ }
+      await lease.dispose();
+    })();
+    return disposal;
+  };
+  return {
+    async next() {
+      if (disposal !== undefined) return { done: true, value: undefined };
+      try {
+        const next = await stream.next();
+        if (next.done) await dispose();
+        return next;
+      } catch (error) {
+        await dispose().catch(() => {});
+        throw error;
+      }
+    },
+    async return(value?: unknown) {
+      await dispose();
+      return { done: true, value } as IteratorReturnResult<SseEvent>;
+    },
+    async throw(error?: unknown) {
+      await dispose().catch(() => {});
+      throw error;
+    },
+    dispose,
+    [Symbol.asyncIterator]() {
+      return this;
+    },
+  };
 }

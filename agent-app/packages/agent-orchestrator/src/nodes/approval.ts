@@ -83,6 +83,7 @@ export function createCancelPlanNode(deps: { changePlanRepository: ChangePlanRep
     if (state.activeChangeRequestId !== undefined) {
       await deps.changePlanRepository.setChangeRequestStatus({
         tenantId: state.tenantId,
+        workspaceId: state.workspaceId,
         changeRequestId: state.activeChangeRequestId,
         status: "CLOSED",
       });

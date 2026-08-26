@@ -257,11 +257,28 @@ export function createGraphPorts(
     },
     async verifyPersistedCreativePlan({ tenantId, workspaceId, changePlanId, changeRequestId, planHash, revisionId }) {
       if (serverPlanAuthority === undefined) return false;
-      const stored = await prisma.changePlan.findFirst({
-        where: { id: changePlanId, tenantId, workspaceId, changeRequestId, planHash },
-        select: { plan: true, changeRequestId: true },
+      const { stored, request } = await prisma.$transaction(async (tx) => {
+        const [persistedPlan, persistedRequest] = await Promise.all([
+          tx.changePlan.findFirst({
+            where: { id: changePlanId, tenantId, workspaceId, changeRequestId, planHash },
+            select: { plan: true, changeRequestId: true },
+          }),
+          tx.changeRequest.findFirst({
+            where: {
+              id: changeRequestId,
+              tenantId,
+              workspaceId,
+              status: { in: ["OPEN", "APPROVED"] },
+            },
+            select: { id: true, tenantId: true, workspaceId: true, status: true },
+          }),
+        ]);
+        return { stored: persistedPlan, request: persistedRequest };
       });
-      if (stored?.plan === null || stored?.plan === undefined || stored.changeRequestId !== changeRequestId) return false;
+      if (stored?.plan === null || stored?.plan === undefined || stored.changeRequestId !== changeRequestId
+        || request === null || request.id !== changeRequestId || request.tenantId !== tenantId
+        || request.workspaceId !== workspaceId
+        || (request.status !== "OPEN" && request.status !== "APPROVED")) return false;
       try {
         const verified = serverPlanAuthority.verify(JSON.parse(JSON.stringify(stored.plan)), {
           expectedPlanHash: planHash,
@@ -275,11 +292,12 @@ export function createGraphPorts(
         return false;
       }
     },
-    async setChangeRequestStatus({ tenantId, changeRequestId, status }) {
-      await prisma.changeRequest.updateMany({
-        where: { id: changeRequestId, tenantId },
+    async setChangeRequestStatus({ tenantId, workspaceId, changeRequestId, status }) {
+      const result = await prisma.changeRequest.updateMany({
+        where: { id: changeRequestId, tenantId, workspaceId },
         data: { status },
       });
+      if (result.count !== 1) throw new Error("CHANGE_REQUEST_STATUS_SYNC_FAILED");
     },
   };
 

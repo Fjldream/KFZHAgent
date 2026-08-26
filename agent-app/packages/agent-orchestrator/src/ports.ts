@@ -148,6 +148,7 @@ export interface ChangePlanRepository {
   }): Promise<boolean>;
   setChangeRequestStatus(input: {
     tenantId: string;
+    workspaceId: string;
     changeRequestId: string;
     status: string;
   }): Promise<void>;

@@ -218,3 +218,101 @@ The final gate is re-run after these report/ledger edits and recorded in the com
 ### Round-1 residual risk
 
 No Task 5 blocker is known. PostgreSQL session advisory locks serialize all turns in one conversation for correctness; this intentionally trades same-conversation concurrency for exactly-once graph effects. Post-enqueue metadata/message repair is identified by `BUILD_POST_ENQUEUE_SYNC_FAILED` but no new outbox was introduced because Task 5 has no existing outbox boundary. Task 6 production rollout and preview implementation remain untouched.
+
+---
+
+## Fix round 2/5 — re-review round 1 closure
+
+This round supersedes the Round-1 residual statement about session locks using the checkpoint pool.
+
+### Critical — independent bounded turn lease and eager SSE cleanup
+
+- `ConversationService` no longer checks a long-lived advisory-lock client out of `PG_POOL`. `ConversationsModule` creates a separate `PostgresConversationTurnLeaseManager` with its own small pool, bounded acquisition timeout, statement/query timeout, and non-blocking `pg_try_advisory_lock`.
+- Same-conversation contention and lease-pool saturation fail fast with a bounded `409 CONVERSATION_TURN_IN_PROGRESS`; no raw PostgreSQL error reaches the client.
+- The returned SSE stream has an explicit idempotent `dispose()`. It initiates graph cancellation and releases the lease even if the graph iterator is unentered or refuses to resolve `return()`.
+- The controller registers `Response.close` before awaiting `startTurn`, disposes on pre-header abort, header/flush failure, write failure, normal completion, and client abort, and removes the listener in all cases.
+- A real PostgreSQL test uses a one-client `PostgresSaver` pool alongside the independent two-client lease pool. It proves same-conversation fail-fast behavior, a four-request different-conversation burst with bounded rejection, continued checkpoint progress while leases are held, and actual controller/service abort followed by reacquisition of the same advisory lock.
+
+### Important — durable ChangeRequest provenance and status synchronization
+
+- `verifyPersistedCreativePlan` now reads the scoped ChangePlan and the exact ChangeRequest in one Prisma transaction. The request must match ID, tenant, workspace, and one of the only allowed pre-enqueue states (`OPEN` or replay-safe `APPROVED`) before the HMAC envelope can authorize enqueue.
+- Missing, wrong-workspace, wrong-tenant, and `CLOSED` ChangeRequests all fail closed.
+- `setChangeRequestStatus` now binds tenant + workspace + request ID and requires exactly one affected row. A zero-row update throws the fixed `CHANGE_REQUEST_STATUS_SYNC_FAILED` boundary error.
+- The existing post-enqueue isolation converts that zero-row failure to `BUILD_POST_ENQUEUE_SYNC_FAILED` while preserving the returned job ID, `stage=building`, and consumed authorization; replay remains unable to enqueue again.
+
+### Minor — creative compiler full-index evidence path
+
+- The legacy workspace-query page-201/control-51 test remains unchanged.
+- A new regression builds and uploads an exact-project KingClient package whose only relevant existing match is page 201 / control 51 (`detail` / `Text51`), invokes `createCreativeSolutionCompilerFromEnvironment(...).compile`, HMAC-verifies the persisted envelope, and proves both materialization entries use `uploaded-existing` correlation. The artifact storage package is opened exactly once and exactly one plan is persisted.
+
+### Round-2 TDD evidence
+
+Observed REDs before production changes:
+
+- all four missing/misowned/disallowed ChangeRequest cases returned `true`;
+- status synchronization omitted workspace and silently accepted `{ count: 0 }`;
+- controller header/write/abort paths never invoked explicit disposal;
+- the new turn-lease integration could not load because no independent port existed;
+- an uncooperative graph iterator kept the lease past the 100 ms cleanup bound;
+- the real creative compile path initially exposed an invalid native test identity, then passed after the fixture used the valid 51st native instance without changing production behavior.
+
+Focused GREEN commands:
+
+```sh
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app/apps/api exec vitest run \
+  src/conversations/conversation.service.test.ts \
+  src/conversations/conversation.controller.test.ts \
+  src/conversations/conversation-turn-lease.integration.test.ts \
+  src/conversations/graph-ports.test.ts
+# 4 files, 37 tests passed
+
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app/packages/agent-orchestrator exec vitest run src/nodes/enqueue-build.test.ts
+# 1 file, 9 tests passed
+```
+
+The initial attempt with the NVM x64 Node failed before collection because this arm64 checkout's SWC binding could not load. All evidence below uses the installed bundled arm64 Cursor Node (`v22.22.1`).
+
+### Round-2 full verification
+
+```sh
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app/packages/agent-orchestrator exec vitest run
+# 17 files, 162 tests passed
+
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app/apps/api exec vitest run
+# 15 files, 306 tests passed
+
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app/packages/build-jobs exec vitest run
+# 4 files, 66 tests passed
+
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app/packages/domain-client exec vitest run
+# 62 files, 1,244 tests passed; 5 pre-existing optional tests skipped
+
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app/packages/contracts exec vitest run
+# 18 files, 480 tests passed
+
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app --filter @kf/agent-orchestrator typecheck
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app --filter @kf/api typecheck
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app --filter @kf/agent-orchestrator lint
+PATH=/Applications/Cursor.app/Contents/Resources/app/resources/helpers:$PATH \
+  pnpm --dir agent-app --filter @kf/api lint
+# all passed
+
+git diff --check
+git diff --cached --check
+```
+
+API full tests printed the existing best-effort external trace-upload `429` warnings; all 306 assertions passed and the command exited zero.
+
+### Round-2 residual risk
+
+No Task 5 blocker is known. The independent lease pool is intentionally small and rejects saturation instead of queueing; deployments can tune its positive bounded size/timeouts through `KF_CONVERSATION_TURN_LEASE_*`. Task 6 rollout, new-workspace production entry, and preview implementation remain untouched.

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { SolutionGraphDeps } from "../ports.js";
 import type { AgentGraphStateValue } from "../state.js";
 import { createEnqueueBuildNode } from "./enqueue-build.js";
@@ -36,6 +36,8 @@ describe("enqueue build authorization", () => {
   it("accepts only a persisted creative-solution origin and keeps the queued input small", async () => {
     const accepted = bed();
     accepted.deps.changePlanRepository.verifyPersistedCreativePlan = async () => true;
+    const setStatus = vi.fn().mockResolvedValue(undefined);
+    accepted.deps.changePlanRepository.setChangeRequestStatus = setStatus;
     const result = await createEnqueueBuildNode(accepted.deps)(state({
       generationWorkflow: "creative-v2",
       buildAuthorization: "creative-solution",
@@ -53,6 +55,12 @@ describe("enqueue build authorization", () => {
       idempotencyKey: expect.any(String),
     }]);
     expect(JSON.stringify(accepted.enqueues)).not.toMatch(/creativeArtifact|materialization|signature/);
+    expect(setStatus).toHaveBeenCalledWith({
+      tenantId: "tenant",
+      workspaceId: "workspace",
+      changeRequestId: "request",
+      status: "APPROVED",
+    });
     expect(accepted.messages.at(-1)).toContain("工程包");
     expect(accepted.messages.at(-1)).not.toContain("预览");
 
@@ -120,14 +128,14 @@ describe("enqueue build authorization", () => {
     expect(testBed.messages.at(-1)).not.toMatch(/预览|构建/);
   });
 
-  it.each(["status", "message"] as const)(
+  it.each(["status-zero-row", "message"] as const)(
     "preserves the durable job and never re-enqueues when the post-enqueue %s write fails",
     async (failure) => {
       const testBed = bed();
       testBed.deps.changePlanRepository.verifyPersistedCreativePlan = async () => true;
-      if (failure === "status") {
+      if (failure === "status-zero-row") {
         testBed.deps.changePlanRepository.setChangeRequestStatus = async () => {
-          throw new Error("postgres path /private/db secret=token");
+          throw new Error("CHANGE_REQUEST_STATUS_SYNC_FAILED");
         };
       } else {
         testBed.deps.workspaceQuery.appendMessage = async () => {

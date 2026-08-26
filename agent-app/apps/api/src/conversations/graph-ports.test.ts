@@ -71,9 +71,15 @@ describe("conversation graph workspace query", () => {
     expect(verified.creativeArtifactHash).toBe(verified.plan.creative!.artifactHash);
     expect(verified.nativeMaterializationHash).toBe(verified.plan.creative!.materializationHash);
     const authority = createHmacServerPlanAuthority(key);
-    const persistedPorts = createGraphPorts({
-      changePlan: { findFirst: vi.fn().mockResolvedValue({ plan: persisted.plan, changeRequestId: persisted.changeRequestId }) },
-    } as never, {} as never, undefined, undefined, undefined, authority);
+    const persistedPorts = createGraphPorts(verificationPrisma({
+      plan: persisted.plan,
+      changeRequestId: persisted.changeRequestId,
+    }, {
+      id: outcome.changeRequestId,
+      tenantId: "tenant-creative",
+      workspaceId: "workspace-creative",
+      status: "OPEN",
+    }) as never, {} as never, undefined, undefined, undefined, authority);
     await expect(persistedPorts.changePlanRepository.verifyPersistedCreativePlan({
       tenantId: "tenant-creative",
       workspaceId: "workspace-creative",
@@ -82,9 +88,32 @@ describe("conversation graph workspace query", () => {
       planHash: outcome.planHash,
       revisionId: "revision-creative",
     })).resolves.toBe(true);
-    const wrongOwnerPorts = createGraphPorts({
-      changePlan: { findFirst: vi.fn().mockResolvedValue({ plan: persisted.plan, changeRequestId: "different-request" }) },
-    } as never, {} as never, undefined, undefined, undefined, authority);
+    const approvedPorts = createGraphPorts(verificationPrisma({
+      plan: persisted.plan,
+      changeRequestId: persisted.changeRequestId,
+    }, {
+      id: outcome.changeRequestId,
+      tenantId: "tenant-creative",
+      workspaceId: "workspace-creative",
+      status: "APPROVED",
+    }) as never, {} as never, undefined, undefined, undefined, authority);
+    await expect(approvedPorts.changePlanRepository.verifyPersistedCreativePlan({
+      tenantId: "tenant-creative",
+      workspaceId: "workspace-creative",
+      changePlanId: outcome.changePlanId,
+      changeRequestId: outcome.changeRequestId,
+      planHash: outcome.planHash,
+      revisionId: "revision-creative",
+    })).resolves.toBe(true);
+    const wrongOwnerPorts = createGraphPorts(verificationPrisma({
+      plan: persisted.plan,
+      changeRequestId: "different-request",
+    }, {
+      id: outcome.changeRequestId,
+      tenantId: "tenant-creative",
+      workspaceId: "workspace-creative",
+      status: "OPEN",
+    }) as never, {} as never, undefined, undefined, undefined, authority);
     await expect(wrongOwnerPorts.changePlanRepository.verifyPersistedCreativePlan({
       tenantId: "tenant-creative",
       workspaceId: "workspace-creative",
@@ -93,14 +122,15 @@ describe("conversation graph workspace query", () => {
       planHash: outcome.planHash,
       revisionId: "revision-creative",
     })).resolves.toBe(false);
-    const forgedPorts = createGraphPorts({
-      changePlan: {
-        findFirst: vi.fn().mockResolvedValue({
-          plan: { ...persisted.plan, signature: "0".repeat(64) },
-          changeRequestId: persisted.changeRequestId,
-        }),
-      },
-    } as never, {} as never, undefined, undefined, undefined, authority);
+    const forgedPorts = createGraphPorts(verificationPrisma({
+      plan: { ...persisted.plan, signature: "0".repeat(64) },
+      changeRequestId: persisted.changeRequestId,
+    }, {
+      id: outcome.changeRequestId,
+      tenantId: "tenant-creative",
+      workspaceId: "workspace-creative",
+      status: "OPEN",
+    }) as never, {} as never, undefined, undefined, undefined, authority);
     await expect(forgedPorts.changePlanRepository.verifyPersistedCreativePlan({
       tenantId: "tenant-creative",
       workspaceId: "workspace-creative",
@@ -117,6 +147,71 @@ describe("conversation graph workspace query", () => {
     expect(Reflect.ownKeys(compiler)).toEqual(["compile"]);
     expect(JSON.stringify(outcome)).not.toContain("trustedCreativePayload");
     expect(JSON.stringify(outcome)).not.toMatch(/signature|creativeArtifact|materialization/i);
+  });
+
+  it.each([
+    ["missing", null],
+    ["wrong workspace", { tenantId: "tenant", workspaceId: "other-workspace", status: "OPEN" }],
+    ["wrong tenant", { tenantId: "other-tenant", workspaceId: "workspace", status: "OPEN" }],
+    ["closed", { tenantId: "tenant", workspaceId: "workspace", status: "CLOSED" }],
+  ])("rejects a persisted creative plan whose ChangeRequest is %s", async (_case, requestFields) => {
+    const key = Buffer.alloc(32, 0x59);
+    const fixture = creativeFixture();
+    const compilerPrisma = creativePrisma();
+    const compiled = await createCreativeSolutionCompilerFromEnvironment(
+      compilerPrisma.client,
+      {} as never,
+      { resolveManyForCompilation: vi.fn().mockResolvedValue([]) },
+      { KF_SERVER_PLAN_HMAC_KEY_BASE64: key.toString("base64") },
+    ).compile({
+      tenantId: "tenant",
+      workspaceId: "workspace",
+      conversationId: "conversation",
+      baseRevisionId: "revision-creative",
+      projectKey: fixture.plan.projectKey,
+      domainKind: "kingclient",
+      blueprint: fixture.blueprint,
+      candidateBundle: fixture.candidates,
+      semanticPlan: fixture.plan,
+    });
+    expect(compiled.status).toBe("compiled");
+    if (compiled.status !== "compiled") return;
+    const row = compilerPrisma.plans.get(compiled.changePlanId)!;
+    const ports = createGraphPorts(verificationPrisma({
+      plan: row.plan,
+      changeRequestId: compiled.changeRequestId,
+    }, requestFields === null ? null : {
+      id: compiled.changeRequestId,
+      ...requestFields,
+    }) as never, {} as never, undefined, undefined, undefined, createHmacServerPlanAuthority(key));
+
+    await expect(ports.changePlanRepository.verifyPersistedCreativePlan({
+      tenantId: "tenant",
+      workspaceId: "workspace",
+      changePlanId: compiled.changePlanId,
+      changeRequestId: compiled.changeRequestId,
+      planHash: compiled.planHash,
+      revisionId: "revision-creative",
+    })).resolves.toBe(false);
+  });
+
+  it("binds status updates to workspace and rejects a zero-row update", async () => {
+    const updateMany = vi.fn().mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
+    const ports = createGraphPorts({ changeRequest: { updateMany } } as never, {} as never);
+    const input = {
+      tenantId: "tenant",
+      workspaceId: "workspace",
+      changeRequestId: "request",
+      status: "APPROVED",
+    };
+
+    await expect(ports.changePlanRepository.setChangeRequestStatus(input)).resolves.toBeUndefined();
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: "request", tenantId: "tenant", workspaceId: "workspace" },
+      data: { status: "APPROVED" },
+    });
+    await expect(ports.changePlanRepository.setChangeRequestStatus(input))
+      .rejects.toThrow("CHANGE_REQUEST_STATUS_SYNC_FAILED");
   });
 
   it("fails closed on a wrong-workspace base revision before compilation or persistence", async () => {
@@ -795,6 +890,97 @@ describe("conversation graph workspace query", () => {
     expect(entities.filter((entity) => entity.kind === "control")).toHaveLength(51);
   });
 
+  it("compiles uploaded exact-project evidence matched only at page 201/control 51 and opens once", async () => {
+    const key = Buffer.alloc(32, 0x5a);
+    const pack = createKingClientDomainPack({ nativeAccepted: true });
+    const built = await pack.compile({
+      buildSeed: "workspace",
+      projectIr: {
+        schema: "kf-client-project-ir/v1",
+        id: "creative-full-index-project",
+        name: "Creative Full Index Project",
+        pages: Array.from({ length: 201 }, (_, pageIndex) => ({
+          id: pageIndex === 200 ? "detail-native" : `page-${pageIndex + 1}`,
+          name: pageIndex === 200 ? "detail" : `Page${pageIndex + 1}`,
+          width: 1440,
+          height: 900,
+          controls: pageIndex === 200
+            ? Array.from({ length: 51 }, (_, controlIndex) => controlIndex === 50
+              ? {
+                  id: "Text51",
+                  type: "text" as const,
+                  x: 40,
+                  y: 40,
+                  width: 160,
+                  height: 48,
+                  text: "详情内容",
+                }
+              : {
+                  id: `hidden-${controlIndex + 1}`,
+                  type: "text" as const,
+                  x: 10,
+                  y: controlIndex * 12,
+                  width: 100,
+                  height: 10,
+                  text: String(controlIndex + 1),
+                })
+            : [],
+        })),
+      },
+    });
+    const artifact = await pack.package({ workspace: built });
+    const prisma = creativePrisma({
+      projects: [{ projectKey: "creative", domainKind: "kingclient", packageUrl: "full-index-package" }],
+    });
+    const storage = { open: vi.fn().mockResolvedValue(Readable.from([artifact.bytes])) };
+    const fixture = creativeFixture();
+    const semanticPlan = SolutionImplementationPlanSchema.parse({
+      ...fixture.plan,
+      pages: fixture.plan.pages.map((page) => page.id !== "detail" ? page : {
+        ...page,
+        root: { ...page.root, id: "Text51" },
+      }),
+    });
+    const compiler = createCreativeSolutionCompilerFromEnvironment(
+      prisma.client,
+      storage as never,
+      { resolveManyForCompilation: vi.fn().mockResolvedValue([]) },
+      { KF_SERVER_PLAN_HMAC_KEY_BASE64: key.toString("base64") },
+    );
+
+    const outcome = await compiler.compile({
+      tenantId: "tenant",
+      workspaceId: "workspace",
+      conversationId: "conversation",
+      baseRevisionId: "revision-creative",
+      projectKey: "creative",
+      domainKind: "kingclient",
+      blueprint: fixture.blueprint,
+      candidateBundle: fixture.candidates,
+      semanticPlan,
+    });
+
+    expect(outcome.status, JSON.stringify(outcome)).toBe("compiled");
+    if (outcome.status !== "compiled") return;
+    const persisted = prisma.plans.get(outcome.changePlanId)!;
+    const verified = createHmacServerPlanAuthority(key).verify(persisted.plan, {
+      expectedPlanHash: outcome.planHash,
+      expectedRevisionId: "revision-creative",
+    });
+    const page = verified.trustedNativeMaterialization!.pages.find((entry) => entry.semanticPageId === "detail");
+    const control = verified.trustedNativeMaterialization!.controls.find((entry) => entry.semanticControlId === "Text51");
+    expect(page).toMatchObject({ source: "uploaded-existing", semanticPageId: "detail" });
+    expect(control).toMatchObject({
+      source: "uploaded-existing",
+      semanticControlId: "Text51",
+      semanticPageId: "detail",
+      pageGuid: page!.pageGuid,
+      nativeGuid: expect.any(String),
+    });
+    expect(storage.open).toHaveBeenCalledTimes(1);
+    expect(prisma.plans.size).toBe(1);
+  });
+
   it("compiles a traceable multi-module UI implementation with the existing KingClient tools", async () => {
     const ports = createGraphPorts({} as never, {} as never);
     const result = await ports.uiImplementationCompiler.compile({
@@ -908,6 +1094,17 @@ function creativePrisma(options: {
     },
   };
   return { client, requests, plans, solutionRevision, domainProjectRevision };
+}
+
+function verificationPrisma(plan: unknown, request: unknown) {
+  const scoped = {
+    changePlan: { findFirst: vi.fn().mockResolvedValue(plan) },
+    changeRequest: { findFirst: vi.fn().mockResolvedValue(request) },
+  };
+  return {
+    ...scoped,
+    $transaction: vi.fn(async (run) => run(scoped)),
+  };
 }
 
 async function packageForEvidence(workspaceId: string): Promise<Uint8Array> {

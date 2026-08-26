@@ -23,6 +23,11 @@ import { DeliverySnapshotService } from "../delivery/delivery-snapshot.service.j
 import { PrismaService } from "../prisma/prisma.service.js";
 import { PG_POOL } from "./checkpointer.js";
 import { ConversationService } from "./conversation.service.js";
+import {
+  CONVERSATION_TURN_LEASE,
+  ConversationTurnBusyError,
+  type ConversationTurnLeasePort,
+} from "./conversation-turn-lease.js";
 import { CAPABILITY_RETRIEVAL_PORT, CREATIVE_SOLUTION_COMPILER_PORT } from "./graph-ports.js";
 import { MODEL_PORT } from "./model-port.js";
 import { MODULE_ARTIFACT_AUTHORITY, SERVER_PLAN_AUTHORITY } from "./server-plan-authority.js";
@@ -43,6 +48,7 @@ describe("ConversationService graph dependency wiring", () => {
         { provide: AuditService, useValue: {} },
         { provide: MODEL_PORT, useValue: {} },
         { provide: PG_POOL, useValue: {} },
+        { provide: CONVERSATION_TURN_LEASE, useValue: turnLeasePort() },
         { provide: ARTIFACT_STORAGE, useValue: {} },
         { provide: SERVER_PLAN_AUTHORITY, useValue: {} },
         { provide: CREATIVE_SOLUTION_COMPILER_PORT, useValue: creativeSolutionCompiler },
@@ -65,7 +71,7 @@ describe("ConversationService graph dependency wiring", () => {
     );
   });
 
-  it("serializes concurrent confirmations for one conversation through the complete graph stream", async () => {
+  it("fails fast on a concurrent confirmation and lets a later replay observe the winner", async () => {
     let stage = "design-review";
     const effects = { compile: 0, persist: 0, enqueue: 0 };
     const graph = {
@@ -84,7 +90,7 @@ describe("ConversationService graph dependency wiring", () => {
       }),
     };
     mocks.compileSolutionGraph.mockReturnValue(graph);
-    const pool = advisoryLockPool();
+    const leasePort = turnLeasePort();
     const prisma = {
       solutionWorkspace: {},
       conversation: { findFirst: vi.fn().mockResolvedValue({ id: "conversation", tenantId: "tenant", workspaceId: "workspace" }) },
@@ -96,7 +102,8 @@ describe("ConversationService graph dependency wiring", () => {
         { provide: PrismaService, useValue: prisma },
         { provide: AuditService, useValue: {} },
         { provide: MODEL_PORT, useValue: {} },
-        { provide: PG_POOL, useValue: pool },
+        { provide: PG_POOL, useValue: {} },
+        { provide: CONVERSATION_TURN_LEASE, useValue: leasePort },
         { provide: ARTIFACT_STORAGE, useValue: {} },
         { provide: SERVER_PLAN_AUTHORITY, useValue: {} },
         { provide: CREATIVE_SOLUTION_COMPILER_PORT, useValue: { compile: vi.fn() } },
@@ -110,31 +117,85 @@ describe("ConversationService graph dependency wiring", () => {
     const principal = { userId: "user", tenantId: "tenant", role: "member" as const, sessionId: "session" };
 
     const first = await service.startTurn(principal, "conversation", "确认设计");
-    let secondSettled = false;
-    const secondPromise = service.startTurn(principal, "conversation", "确认设计")
-      .then((value) => { secondSettled = true; return value; });
-    await Promise.resolve();
-    expect(secondSettled).toBe(false);
+    await expect(service.startTurn(principal, "conversation", "确认设计"))
+      .rejects.toBeInstanceOf(ConversationTurnBusyError);
     for await (const event of first) void event;
-    const second = await secondPromise;
-    for await (const event of second) void event;
+    const replay = await service.startTurn(principal, "conversation", "确认设计");
+    for await (const event of replay) void event;
 
     expect(effects).toEqual({ compile: 1, persist: 1, enqueue: 1 });
     expect(graph.stream).toHaveBeenCalledTimes(2);
-    expect(pool.lockCalls).toBe(2);
-    expect(pool.unlockCalls).toBe(2);
+    expect(leasePort.acquire).toHaveBeenCalledTimes(3);
+    expect(leasePort.release).toHaveBeenCalledTimes(2);
   });
 
-  it("preserves the graph failure and destroys the connection when advisory unlock fails", async () => {
+  it("eagerly releases the lease when a returned stream is disposed before iteration", async () => {
+    const streamReturn = vi.fn().mockResolvedValue({ done: true, value: undefined });
+    mocks.compileSolutionGraph.mockReturnValue({
+      getState: vi.fn().mockResolvedValue({ values: { stage: "design-review" }, tasks: [] }),
+      stream: vi.fn().mockResolvedValue({
+        next: vi.fn(),
+        return: streamReturn,
+        [Symbol.asyncIterator]() { return this; },
+      }),
+    });
+    const leasePort = turnLeasePort();
+    const service = await createService({
+      leasePort,
+      prisma: {
+        solutionWorkspace: {},
+        conversation: { findFirst: vi.fn().mockResolvedValue({ id: "conversation", tenantId: "tenant", workspaceId: "workspace" }) },
+        message: { create: vi.fn().mockResolvedValue({}) },
+      },
+    });
+
+    const events = await service.startTurn(
+      { userId: "user", tenantId: "tenant", role: "member", sessionId: "session" },
+      "conversation",
+      "确认设计",
+    );
+    await events.dispose();
+
+    expect(streamReturn).toHaveBeenCalledTimes(1);
+    expect(leasePort.release).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retain the lease when a graph iterator ignores cancellation", async () => {
+    const streamReturn = vi.fn().mockReturnValue(new Promise(() => {}));
+    mocks.compileSolutionGraph.mockReturnValue({
+      getState: vi.fn().mockResolvedValue({ values: { stage: "design-review" }, tasks: [] }),
+      stream: vi.fn().mockResolvedValue({
+        next: vi.fn(),
+        return: streamReturn,
+        [Symbol.asyncIterator]() { return this; },
+      }),
+    });
+    const leasePort = turnLeasePort();
+    const service = await createService({
+      leasePort,
+      prisma: {
+        solutionWorkspace: {},
+        conversation: { findFirst: vi.fn().mockResolvedValue({ id: "conversation", tenantId: "tenant", workspaceId: "workspace" }) },
+        message: { create: vi.fn().mockResolvedValue({}) },
+      },
+    });
+    const events = await service.startTurn(
+      { userId: "user", tenantId: "tenant", role: "member", sessionId: "session" },
+      "conversation",
+      "确认设计",
+    );
+
+    await expect(settlesWithin(events.dispose(), 100)).resolves.toBeUndefined();
+    expect(streamReturn).toHaveBeenCalledTimes(1);
+    expect(leasePort.release).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves the graph failure when lease disposal also fails", async () => {
     const graphFailure = new Error("checkpoint unavailable");
     mocks.compileSolutionGraph.mockReturnValue({
       getState: vi.fn().mockRejectedValue(graphFailure),
     });
-    const release = vi.fn();
-    const query = vi.fn()
-      .mockResolvedValueOnce({ rows: [] })
-      .mockRejectedValueOnce(new Error("advisory unlock failed"));
-    const pool = { connect: vi.fn().mockResolvedValue({ query, release }) };
+    const leasePort = turnLeasePort({ releaseError: new Error("advisory unlock failed") });
     const prisma = {
       solutionWorkspace: {},
       conversation: { findFirst: vi.fn().mockResolvedValue({ id: "conversation", tenantId: "tenant", workspaceId: "workspace" }) },
@@ -145,7 +206,8 @@ describe("ConversationService graph dependency wiring", () => {
         { provide: PrismaService, useValue: prisma },
         { provide: AuditService, useValue: {} },
         { provide: MODEL_PORT, useValue: {} },
-        { provide: PG_POOL, useValue: pool },
+        { provide: PG_POOL, useValue: {} },
+        { provide: CONVERSATION_TURN_LEASE, useValue: leasePort },
         { provide: ARTIFACT_STORAGE, useValue: {} },
         { provide: SERVER_PLAN_AUTHORITY, useValue: {} },
         { provide: CREATIVE_SOLUTION_COMPILER_PORT, useValue: { compile: vi.fn() } },
@@ -159,33 +221,62 @@ describe("ConversationService graph dependency wiring", () => {
     const principal = { userId: "user", tenantId: "tenant", role: "member" as const, sessionId: "session" };
 
     await expect(service.startTurn(principal, "conversation", "确认设计")).rejects.toBe(graphFailure);
-    expect(release).toHaveBeenCalledWith(true);
+    expect(leasePort.release).toHaveBeenCalledTimes(1);
   });
 });
 
-function advisoryLockPool() {
-  let locked = false;
-  const waiters: Array<() => void> = [];
-  const pool = {
-    lockCalls: 0,
-    unlockCalls: 0,
-    async connect() {
-      return {
-        async query(sql: string) {
-          if (sql.includes("pg_advisory_lock(")) {
-            pool.lockCalls += 1;
-            if (locked) await new Promise<void>((resolve) => waiters.push(resolve));
-            locked = true;
-          } else if (sql.includes("pg_advisory_unlock(")) {
-            pool.unlockCalls += 1;
-            locked = false;
-            waiters.shift()?.();
-          }
-          return { rows: [] };
-        },
-        release: vi.fn(),
-      };
-    },
-  };
-  return pool;
+function turnLeasePort(options: { releaseError?: Error } = {}) {
+  let active = false;
+  const release = vi.fn(async () => {
+    active = false;
+    if (options.releaseError !== undefined) throw options.releaseError;
+  });
+  const acquire = vi.fn(async () => {
+    if (active) throw new ConversationTurnBusyError();
+    active = true;
+    let disposed = false;
+    return {
+      dispose: async () => {
+        if (disposed) return;
+        disposed = true;
+        await release();
+      },
+    };
+  });
+  return { acquire, release } satisfies ConversationTurnLeasePort & { release: typeof release };
+}
+
+async function createService(input: { leasePort: ConversationTurnLeasePort; prisma: object }) {
+  const moduleRef = await Test.createTestingModule({
+    providers: [
+      ConversationService,
+      { provide: PrismaService, useValue: input.prisma },
+      { provide: AuditService, useValue: {} },
+      { provide: MODEL_PORT, useValue: {} },
+      { provide: PG_POOL, useValue: {} },
+      { provide: CONVERSATION_TURN_LEASE, useValue: input.leasePort },
+      { provide: ARTIFACT_STORAGE, useValue: {} },
+      { provide: SERVER_PLAN_AUTHORITY, useValue: {} },
+      { provide: CREATIVE_SOLUTION_COMPILER_PORT, useValue: { compile: vi.fn() } },
+      { provide: MODULE_ARTIFACT_AUTHORITY, useValue: {} },
+      { provide: AssetService, useValue: {} },
+      { provide: DeliverySnapshotService, useValue: {} },
+      { provide: CAPABILITY_RETRIEVAL_PORT, useValue: { retrieve: vi.fn() } },
+    ],
+  }).compile();
+  return moduleRef.get(ConversationService);
+}
+
+async function settlesWithin(promise: Promise<void>, timeoutMs: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      promise,
+      new Promise<void>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("disposal timed out")), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }

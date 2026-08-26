@@ -18,12 +18,20 @@ import { PrismaService } from "../prisma/prisma.service.js";
 import { ARTIFACT_STORAGE } from "../artifacts/artifact-storage.js";
 import type { ArtifactStorage } from "@kf/artifact-storage";
 import { AssetService } from "../assets/asset.service.js";
+import {
+  CONVERSATION_TURN_LEASE,
+  createConversationTurnLeaseManagerFromEnvironment,
+} from "./conversation-turn-lease.js";
 
 @Module({
   imports: [ArtifactsModule, AssetsModule, DeliveryModule],
   controllers: [ConversationController, ChangePlanController],
   providers: [
     ConversationService,
+    {
+      provide: CONVERSATION_TURN_LEASE,
+      useFactory: createConversationTurnLeaseManagerFromEnvironment,
+    },
     {
       provide: CAPABILITY_RETRIEVAL_PORT,
       useValue: LOCAL_CAPABILITY_RETRIEVAL_PORT,

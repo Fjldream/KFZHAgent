@@ -20,6 +20,8 @@ import {
 import type { Response } from "express";
 import { TenantGuard, type AuthenticatedRequest } from "../auth/tenant.guard.js";
 import { ConversationService } from "./conversation.service.js";
+import type { DisposableSseStream } from "./conversation.service.js";
+import { ConversationTurnBusyError } from "./conversation-turn-lease.js";
 
 /**
  * Conversation endpoints behind the tenant guard. thread_id is the
@@ -105,42 +107,47 @@ export class ConversationController {
     @Body() body: { content?: string },
     @Res() res: Response,
   ): Promise<void> {
-    const events = await this.safeStartTurn(req, id, body.content ?? "");
-    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
-    res.setHeader("Cache-Control", "no-cache, no-transform");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("X-Accel-Buffering", "no");
-    res.flushHeaders();
-
-    const iterator = events[Symbol.asyncIterator]();
+    let events: DisposableSseStream | undefined;
     let disconnected = false;
+    let sseStarted = false;
     const onClose = (): void => {
       disconnected = true;
+      void events?.dispose().catch(() => {});
     };
-    req.on("close", onClose);
+    res.on("close", onClose);
 
     try {
+      events = await this.safeStartTurn(req, id, body.content ?? "");
+      if (disconnected) return;
+      res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+      res.setHeader("Cache-Control", "no-cache, no-transform");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      sseStarted = true;
+      res.flushHeaders();
+
       for (;;) {
-        if (disconnected) {
-          await iterator.return?.(undefined);
-          break;
-        }
-        const next = await iterator.next();
+        if (disconnected) break;
+        const next = await events.next();
         if (next.done) break;
-        res.write(`event: ${next.value.event}\n`);
-        res.write(`data: ${JSON.stringify(next.value.data ?? null)}\n\n`);
+        safeWrite(res, `event: ${next.value.event}\n`);
+        safeWrite(res, `data: ${JSON.stringify(next.value.data ?? null)}\n\n`);
         flushIfSupported(res);
       }
-    } catch {
-      res.write(
-        `event: error\ndata: ${JSON.stringify({
+    } catch (error) {
+      if (!sseStarted) throw error;
+      try {
+        safeWrite(res, `event: error\ndata: ${JSON.stringify({
           code: "CONVERSATION_FAILED",
           message: "对话处理失败，请重试",
-        })}\n\n`,
-      );
+        })}\n\n`);
+      } catch { /* the socket is already unusable */ }
     } finally {
-      req.off("close", onClose);
-      res.end();
+      await events?.dispose().catch(() => {});
+      res.off("close", onClose);
+      if (sseStarted && !res.writableEnded) {
+        try { res.end(); } catch { /* the socket is already unusable */ }
+      }
     }
   }
 
@@ -178,9 +185,21 @@ export class ConversationController {
           },
         });
       }
+      if (error instanceof ConversationTurnBusyError) {
+        throw new ConflictException({
+          error: {
+            code: "CONVERSATION_TURN_IN_PROGRESS",
+            message: "当前对话已有工程生成任务处理中，请稍后重试。",
+          },
+        });
+      }
       throw error;
     }
   }
+}
+
+function safeWrite(res: Response, value: string): void {
+  res.write(value);
 }
 
 function flushIfSupported(res: Response): void {

@@ -116,6 +116,7 @@ export function createEnqueueBuildNode(deps: SolutionGraphDeps) {
     try {
       await deps.changePlanRepository.setChangeRequestStatus({
         tenantId: state.tenantId,
+        workspaceId: state.workspaceId,
         changeRequestId: state.activeChangeRequestId,
         status: "APPROVED",
       });
