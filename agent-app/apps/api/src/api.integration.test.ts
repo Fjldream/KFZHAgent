@@ -447,17 +447,18 @@ async function login(
   return cookie;
 }
 
-async function createWorkspace(cookie: string, name: string, generationWorkflow: "legacy" | "module-v1" = "legacy") {
+async function createWorkspace(cookie: string, name: string, generationWorkflow: "legacy" | "module-v1" | "creative-v2" = "legacy") {
   const response = await request(server)
     .post("/api/workspaces")
     .set("Cookie", cookie)
     .send({ name })
     .expect(201);
   // Most historical cases in this suite model workspaces created before the
-  // module-v1 rollout. Persist that server state explicitly; product creation
-  // tests opt in to module-v1 and exercise the real default unchanged.
-  if (generationWorkflow === "legacy") {
-    await prisma.solutionWorkspace.update({ where: { id: response.body.id }, data: { generationWorkflow: "legacy" } });
+  // creative-v2 rollout. Persist historical workflow state explicitly; the
+  // product creation test opts in to creative-v2 and exercises the real
+  // server-owned default unchanged.
+  if (generationWorkflow !== "creative-v2") {
+    await prisma.solutionWorkspace.update({ where: { id: response.body.id }, data: { generationWorkflow } });
   }
   return response;
 }
@@ -622,13 +623,13 @@ describe("api contract", () => {
 
   it("assigns workflow ownership on the server when creating workspaces", async () => {
     const cookie = await login(TENANT_A_MEMBER);
-    const generated = await createWorkspace(cookie, "Server-owned module workflow", "module-v1");
+    const generated = await createWorkspace(cookie, "Server-owned creative workflow", "creative-v2");
     const imported = await createUploadWorkspace(cookie, "Server-owned legacy workflow");
 
-    expect(generated.body).toMatchObject({ mode: "new", generationWorkflow: "module-v1" });
+    expect(generated.body).toMatchObject({ mode: "new", generationWorkflow: "creative-v2" });
     expect(imported.body).toMatchObject({ mode: "upload", generationWorkflow: "legacy" });
     await expect(prisma.solutionWorkspace.findUniqueOrThrow({ where: { id: generated.body.id } }))
-      .resolves.toMatchObject({ generationWorkflow: "module-v1" });
+      .resolves.toMatchObject({ generationWorkflow: "creative-v2" });
     await expect(prisma.solutionWorkspace.findUniqueOrThrow({ where: { id: imported.body.id } }))
       .resolves.toMatchObject({ generationWorkflow: "legacy" });
     await request(server)
@@ -636,7 +637,7 @@ describe("api contract", () => {
       .set("Cookie", cookie)
       .send({ name: "Client cannot select workflow", generationWorkflow: "legacy" })
       .expect(201)
-      .expect(({ body }) => expect(body.generationWorkflow).toBe("module-v1"));
+      .expect(({ body }) => expect(body.generationWorkflow).toBe("creative-v2"));
     const initial = await prisma.solutionRevision.findFirstOrThrow({ where: { workspaceId: generated.body.id } });
     expect(initial.state).toMatchObject({ pages: [{ name: "Page1", controls: [] }] });
   });
@@ -1999,6 +2000,85 @@ describe("task 12 api surface", () => {
       conversationId: conv.body.id, buildJobId: built.id, artifactId: expect.any(String), revisionId: expect.any(String),
       result: null, buildJob: { id: built.id, status: "SUCCEEDED" }, artifact: { buildJobId: built.id, kind: "client-package" },
     });
+  });
+
+  it("exposes a creative build as a downloadable project without claiming KF 3.6 runtime verification", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createWorkspace(cookie, "Creative downloadable delivery", "creative-v2");
+    const conv = await createConversation(cookie, ws.body.id, "Creative delivery");
+    const tenantId = await tenantIdOf(TENANT_A.tenant);
+    const planHash = "a".repeat(64);
+    const creativeArtifactHash = "b".repeat(64);
+    const nativeMaterializationHash = "c".repeat(64);
+    const changePlanId = `creative-delivery-${++counter}`;
+    const job = await prisma.buildJob.create({ data: {
+      tenantId, workspaceId: ws.body.id, baseRevisionId: ws.body.currentRevisionId,
+      changePlanId, planHash, projectKey: "creative", domainKind: "kingclient",
+      idempotencyKey: `${conv.body.id}:creative:${changePlanId}:${planHash}`, status: "SUCCEEDED",
+    } });
+    const latest = await prisma.solutionRevision.findFirstOrThrow({
+      where: { tenantId, workspaceId: ws.body.id }, orderBy: { revisionNumber: "desc" },
+    });
+    const packageHash = "d".repeat(64);
+    const revision = await prisma.solutionRevision.create({ data: {
+      tenantId, workspaceId: ws.body.id, changePlanId,
+      revisionNumber: latest.revisionNumber + 1, kind: "built", parentRevisionId: job.baseRevisionId,
+      state: { plan: null, mode: "compile", build: { packageHash, creativeArtifactHash, nativeMaterializationHash } },
+    } });
+    const artifact = await prisma.artifact.create({ data: {
+      tenantId, buildJobId: job.id, solutionRevisionId: revision.id,
+      creativeArtifactHash, nativeMaterializationHash,
+      kind: "client-package", mediaType: "application/zip", fileExtension: ".zip",
+      storageKey: "creative-downloadable-package", sha256: packageHash,
+    } });
+    await prisma.domainProjectRevision.create({ data: {
+      tenantId, solutionRevisionId: revision.id, projectKey: "creative", domainKind: "kingclient",
+      kind: "client-package", mediaType: "application/zip", fileExtension: ".zip",
+      packageUrl: artifact.storageKey, packageHash,
+    } });
+    await prisma.solutionWorkspace.update({ where: { id: ws.body.id }, data: { currentRevisionId: revision.id } });
+    const graph = await app.get(ConversationService)["getGraph"]();
+    await graph.updateState({ configurable: { thread_id: conv.body.id } }, {
+      tenantId, workspaceId: ws.body.id, conversationId: conv.body.id,
+      generationWorkflow: "creative-v2", buildJobId: job.id,
+      changePlanId, planHash, currentRevisionId: revision.id,
+    });
+
+    const delivered = await request(server)
+      .get(`/api/conversations/${conv.body.id}/delivery?buildJobId=${job.id}`)
+      .set("Cookie", cookie).expect(200);
+    expect(delivered.body).toMatchObject({
+      artifactId: artifact.id,
+      revisionId: revision.id,
+      projectDelivery: {
+        workflow: "creative-v2",
+        projectKey: "creative",
+        status: "downloadable",
+        artifactId: artifact.id,
+        revisionId: revision.id,
+        download: {
+          available: true,
+          tokenEndpoint: `/api/artifacts/${artifact.id}/download-token`,
+        },
+        kf36RuntimeVerification: {
+          status: "not_performed",
+          notice: "尚未经过人工 KingFusion 3.6 运行态验证",
+        },
+      },
+    });
+    expect(delivered.body.projectDelivery).not.toHaveProperty("preview");
+    await request(server).post(`/api/artifacts/${artifact.id}/download-token`).set("Cookie", cookie).expect(200);
+
+    await prisma.artifact.update({
+      where: { id: artifact.id },
+      data: { creativeArtifactHash: "e".repeat(64) },
+    });
+    await request(server).post(`/api/artifacts/${artifact.id}/download-token`).set("Cookie", cookie).expect(409);
+    await prisma.artifact.update({
+      where: { id: artifact.id },
+      data: { creativeArtifactHash: null },
+    });
+    await request(server).post(`/api/artifacts/${artifact.id}/download-token`).set("Cookie", cookie).expect(409);
   });
 
   it("compiles every confirmed blueprint module instead of persisting a Text1-only plan", async () => {

@@ -12,17 +12,30 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { LocalArtifactStorage, type ArtifactStorage, type StoredArtifact } from "@kf/artifact-storage";
-import { ModulePlanSchema, workspaceAssetIdToModelId, type ModulePlan } from "@kf/contracts";
+import {
+  CapabilityCandidateBundleSchema,
+  CustomerSolutionBlueprintSchema,
+  ModulePlanSchema,
+  SolutionImplementationPlanSchema,
+  canonicalServerHash,
+  workspaceAssetIdToModelId,
+  type ModulePlan,
+} from "@kf/contracts";
 import {
   BuildExecutor,
   BuildJobService,
   BuildWorkerCrash,
+  createHmacCreativeBuildFacade,
   createHmacServerPlanAuthority,
 } from "@kf/build-jobs";
 import {
+  attachRuntimeCorrelation,
+  compileInteractions,
+  compileSolutionImplementation,
   compileUiImplementation,
   compileModulePlan,
   compileClientProject,
+  createCreativeUIImplementationV2Compiler,
   createDefaultModuleRegistry,
   createKingClientDomainPack,
   deriveGuid,
@@ -175,6 +188,118 @@ const INITIAL_IR = {
   scripts: [],
 };
 
+function creativeFixture() {
+  const blueprint = CustomerSolutionBlueprintSchema.parse({
+    schema: "kf-design-plan/v3",
+    displayName: "创意工程",
+    objective: "帮助客户从首页进入详情",
+    audiences: ["客户"],
+    scenarios: ["查看详情"],
+    pages: ["home", "detail"].map((id) => ({
+      id: `bp-${id}`,
+      title: id === "home" ? "首页" : "详情",
+      purpose: id === "home" ? "引导查看" : "展示详情",
+      readingOrder: [`region-${id}`],
+      regions: [{
+        id: `region-${id}`,
+        purpose: id === "home" ? "引导查看" : "展示详情",
+        semanticRoles: [id === "home" ? "action" : "content"],
+        dataShape: "content",
+        density: "comfortable",
+        importance: "primary",
+        content: [id === "home" ? "打开详情" : "详情内容"],
+        sampleData: [],
+        interactions: id === "home" ? ["点击打开详情"] : [],
+        states: ["ready"],
+        visualIntent: "清晰",
+      }],
+    })),
+    journeys: [{
+      id: "open-detail",
+      actor: "客户",
+      goal: "查看详情",
+      steps: [{ pageId: "bp-home", regionId: "region-home", action: "点击", result: "详情可见" }],
+      completion: "详情可见",
+    }],
+    visualDirection: {
+      tone: "专业",
+      colors: ["蓝色"],
+      typography: "清晰",
+      spacingAndSurfaces: "舒适",
+    },
+    acceptanceScenarios: ["详情可见"],
+    openQuestions: [],
+  });
+  const ranked = (id: string, score: number) => ({
+    id, score, reasons: ["适用"], limitations: [], knowledgeVersion: "1.0.0",
+  });
+  const candidates = CapabilityCandidateBundleSchema.parse({
+    schema: "kf-capability-candidates/v1",
+    knowledgeCatalogVersion: "1.0.0",
+    blueprintHash: canonicalServerHash(blueprint),
+    regions: ["home", "detail"].map((id) => ({
+      pageId: `bp-${id}`,
+      regionId: `region-${id}`,
+      controls: [ranked("button", 3), ranked("text", 2), ranked("image", 1)],
+      layouts: [ranked("layout.4", 3)],
+      recipes: [ranked("content.hero", 3)],
+    })),
+    detailedCapabilityIds: ["button", "image", "layout.4", "text"],
+    generatedAtPolicy: "deterministic-no-timestamp",
+  });
+  const intent = {
+    importance: "primary",
+    visualWeight: 3,
+    readingOrder: 0,
+    density: "comfortable",
+    groupWith: [],
+    width: { mode: "fixed", value: 160 },
+    height: { mode: "content" },
+    align: "start",
+  } as const;
+  const plan = SolutionImplementationPlanSchema.parse({
+    schema: "kf-solution-implementation/v1",
+    projectKey: "creative",
+    blueprintHash: canonicalServerHash(blueprint),
+    candidateBundleHash: canonicalServerHash(candidates),
+    theme: {
+      background: "#ffffff", surface: "#ffffff", primary: "#123456", accent: "#654321",
+      textPrimary: "#111111", textSecondary: "#555555", fontFamily: "Inter", spacingUnit: 8,
+      radiusScale: { small: 4, medium: 8, large: 16 },
+    },
+    roleStyles: [
+      { role: "action", declarations: {}, states: {} },
+      { role: "content", declarations: {}, states: {} },
+    ],
+    mockData: [],
+    localState: [],
+    pages: [{
+      id: "home", title: "首页", purpose: "引导查看", canvas: "desktop",
+      sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region-home"], initialStateIds: [],
+      root: {
+        id: "open", kind: "control", capabilityId: "button", content: "打开详情",
+        properties: [], tabIds: [], styleRole: "action", sourceBlueprintRegionIds: ["region-home"],
+        intent, eventBindings: [{ semanticEvent: "click", actionIds: ["navigate"] }],
+      },
+    }, {
+      id: "detail", title: "详情", purpose: "展示详情", canvas: "desktop",
+      sourceBlueprintPageId: "bp-detail", sourceBlueprintRegionIds: ["region-detail"], initialStateIds: [],
+      root: {
+        id: "detail-content", kind: "control", capabilityId: "text", content: "详情内容",
+        properties: [], tabIds: [], styleRole: "content", sourceBlueprintRegionIds: ["region-detail"],
+        intent, eventBindings: [],
+      },
+    }],
+    overlays: [],
+    actions: [{
+      id: "navigate", kind: "navigate-page", targetPageId: "detail", afterActionIds: [],
+      journeyStepRefs: [{ journeyId: "open-detail", stepIndex: 0 }],
+    }],
+    scripts: [],
+  });
+  return { blueprint, candidates, plan };
+}
+
 interface Seeded {
   tenant: { id: string };
   workspace: { id: string };
@@ -223,6 +348,84 @@ async function seedNewWorkspace(ir = INITIAL_IR): Promise<Seeded> {
     data: { tenantId: tenant.id, workspaceId: workspace.id, planHash: hash, plan: planObj },
   });
   return { tenant, workspace, revision, plan, hash };
+}
+
+async function seedCreativeBuild(): Promise<Seeded & {
+  authority: ReturnType<typeof createHmacServerPlanAuthority>;
+  creativeArtifactHash: string;
+  materializationHash: string;
+  expectedControlNames: string[];
+}> {
+  const seeded = await seedNewWorkspace();
+  const fixture = creativeFixture();
+  const implementation = compileSolutionImplementation({
+    plan: fixture.plan,
+    candidateBundle: fixture.candidates,
+    moduleRegistry: createDefaultModuleRegistry(),
+    approvedAssets: [],
+    activeCatalogVersion: fixture.candidates.knowledgeCatalogVersion,
+  });
+  const correlated = attachRuntimeCorrelation({
+    workspaceId: seeded.workspace.id,
+    baseRevisionId: seeded.revision.id,
+    implementation,
+  });
+  const interactions = compileInteractions({
+    blueprint: fixture.blueprint,
+    plan: fixture.plan,
+    implementation: correlated,
+  });
+  expect(interactions.diagnostics.errors).toEqual([]);
+  expect(interactions.diagnostics.requests).toEqual([]);
+  const facade = createHmacCreativeBuildFacade(
+    Buffer.alloc(32, 0x71),
+    createCreativeUIImplementationV2Compiler,
+  );
+  const lowered = facade.compiler.compiler.compile({
+    workspaceId: seeded.workspace.id,
+    baseRevisionId: seeded.revision.id,
+    blueprint: fixture.blueprint,
+    candidateBundle: fixture.candidates,
+    semanticPlan: fixture.plan,
+    implementation: interactions.implementation,
+    compilerVersion: "1.0.0",
+    evidenceVersion: "1.0.0",
+    verifiedAssets: facade.compiler.assetProofResolver.attestResolvedAssets({
+      workspaceId: seeded.workspace.id,
+      assets: [],
+    }),
+  });
+  const envelope = facade.authority.sign({
+    plan: lowered.plan,
+    revisionId: seeded.revision.id,
+    semanticOperations: [],
+    creative: lowered.trustedCreativePayload,
+  });
+  await prisma.$transaction([
+    prisma.solutionWorkspace.update({
+      where: { id: seeded.workspace.id },
+      data: { generationWorkflow: "creative-v2" },
+    }),
+    prisma.changePlan.update({
+      where: { id: seeded.plan.id },
+      data: {
+        planHash: envelope.planHash,
+        plan: JSON.parse(JSON.stringify(envelope)) as Prisma.InputJsonValue,
+      },
+    }),
+  ]);
+  const verified = facade.authority.verify(JSON.parse(JSON.stringify(envelope)), {
+    expectedPlanHash: envelope.planHash,
+    expectedRevisionId: seeded.revision.id,
+  });
+  return {
+    ...seeded,
+    hash: envelope.planHash,
+    authority: facade.authority,
+    creativeArtifactHash: verified.creativeArtifactHash!,
+    materializationHash: verified.nativeMaterializationHash!,
+    expectedControlNames: verified.trustedNativeMaterialization!.controls.map((control) => control.instanceName),
+  };
 }
 
 function enqueueInput({ tenant, workspace, revision, plan, hash }: Seeded) {
@@ -358,6 +561,139 @@ async function advanceWorkspacePastBase(seeded: Seeded): Promise<void> {
 }
 
 describe("job runner", () => {
+  it("delivers a signed creative envelope through the real Worker and atomically binds its downloadable package", async () => {
+    const seeded = await seedCreativeBuild();
+    const queued = await jobs.enqueue({
+      ...enqueueInput(seeded),
+      projectKey: "creative",
+    });
+    const runner = new JobRunner({
+      prisma,
+      storage,
+      registry,
+      serverPlanVerifier: seeded.authority,
+    });
+
+    const done = await runner.runOnce(`creative-worker-${++counter}`, new Date());
+
+    expect(done).toMatchObject({ id: queued.id, status: "SUCCEEDED" });
+    const revision = await prisma.solutionRevision.findFirstOrThrow({
+      where: {
+        tenantId: seeded.tenant.id,
+        workspaceId: seeded.workspace.id,
+        changePlanId: seeded.plan.id,
+        parentRevisionId: seeded.revision.id,
+      },
+    });
+    const artifact = await prisma.artifact.findFirstOrThrow({
+      where: { tenantId: seeded.tenant.id, buildJobId: queued.id },
+    });
+    const project = await prisma.domainProjectRevision.findFirstOrThrow({
+      where: {
+        tenantId: seeded.tenant.id,
+        solutionRevisionId: revision.id,
+        projectKey: "creative",
+        domainKind: "kingclient",
+      },
+    });
+    expect(artifact).toMatchObject({
+      solutionRevisionId: revision.id,
+      creativeArtifactHash: seeded.creativeArtifactHash,
+      sha256: project.packageHash,
+      storageKey: project.packageUrl,
+    });
+    expect(revision.state).toMatchObject({
+      build: {
+        creativeArtifactHash: seeded.creativeArtifactHash,
+        nativeMaterializationHash: seeded.materializationHash,
+        packageHash: project.packageHash,
+      },
+    });
+    const packaged = await storage.open(seeded.tenant.id, artifact.storageKey);
+    const unpacked = await importNativeClientPackage(
+      await collect(packaged),
+      await mkdtemp(path.join(tmpdir(), "kf-creative-worker-download-")),
+    );
+    const inspection = await inspectClientProject(unpacked);
+    expect(Object.values(inspection.index.controls).map((control) => control.name))
+      .toEqual(expect.arrayContaining(seeded.expectedControlNames));
+  });
+
+  it.each([
+    ["tenant", async (seeded: Awaited<ReturnType<typeof seedCreativeBuild>>) => {
+      const otherTenant = await prisma.tenant.create({ data: { name: `Foreign-${Date.now()}-${++counter}` } });
+      const queued = await jobs.enqueue({ ...enqueueInput(seeded), projectKey: "creative" });
+      await prisma.changePlan.update({ where: { id: seeded.plan.id }, data: { tenantId: otherTenant.id } });
+      return queued;
+    }],
+    ["project", async (seeded: Awaited<ReturnType<typeof seedCreativeBuild>>) =>
+      jobs.enqueue({ ...enqueueInput(seeded), projectKey: "different-project" })],
+    ["workspace", async (seeded: Awaited<ReturnType<typeof seedCreativeBuild>>) => {
+      const queued = await jobs.enqueue({ ...enqueueInput(seeded), projectKey: "creative" });
+      const otherWorkspace = await prisma.solutionWorkspace.create({ data: {
+        tenantId: seeded.tenant.id,
+        name: `Foreign-workspace-${Date.now()}-${++counter}`,
+        mode: "new",
+        generationWorkflow: "creative-v2",
+      } });
+      await prisma.$transaction([
+        prisma.changePlan.update({ where: { id: seeded.plan.id }, data: { workspaceId: otherWorkspace.id } }),
+        prisma.buildJob.update({ where: { id: queued.id }, data: { workspaceId: otherWorkspace.id } }),
+      ]);
+      return queued;
+    }],
+    ["plan hash", async (seeded: Awaited<ReturnType<typeof seedCreativeBuild>>) => {
+      const queued = await jobs.enqueue({ ...enqueueInput(seeded), projectKey: "creative" });
+      const wrongHash = "f".repeat(64);
+      await prisma.$transaction([
+        prisma.changePlan.update({ where: { id: seeded.plan.id }, data: { planHash: wrongHash } }),
+        prisma.buildJob.update({ where: { id: queued.id }, data: { planHash: wrongHash } }),
+      ]);
+      return queued;
+    }],
+    ["base revision", async (seeded: Awaited<ReturnType<typeof seedCreativeBuild>>) => {
+      const queued = await jobs.enqueue({ ...enqueueInput(seeded), projectKey: "creative" });
+      const otherBase = await prisma.solutionRevision.create({ data: {
+        tenantId: seeded.tenant.id, workspaceId: seeded.workspace.id,
+        revisionNumber: 2, kind: "initial", state: INITIAL_IR,
+      } });
+      return prisma.buildJob.update({ where: { id: queued.id }, data: { baseRevisionId: otherBase.id } });
+    }],
+    ["creative artifact hash", async (seeded: Awaited<ReturnType<typeof seedCreativeBuild>>) => {
+      const queued = await jobs.enqueue({ ...enqueueInput(seeded), projectKey: "creative" });
+      const stored = await prisma.changePlan.findUniqueOrThrow({ where: { id: seeded.plan.id } });
+      const envelope = structuredClone(stored.plan) as Record<string, unknown>;
+      envelope["creativeArtifactHash"] = "e".repeat(64);
+      await prisma.changePlan.update({ where: { id: seeded.plan.id }, data: { plan: envelope as Prisma.InputJsonValue } });
+      return queued;
+    }],
+    ["native materialization hash", async (seeded: Awaited<ReturnType<typeof seedCreativeBuild>>) => {
+      const queued = await jobs.enqueue({ ...enqueueInput(seeded), projectKey: "creative" });
+      const stored = await prisma.changePlan.findUniqueOrThrow({ where: { id: seeded.plan.id } });
+      const envelope = structuredClone(stored.plan) as Record<string, unknown>;
+      envelope["nativeMaterializationHash"] = "d".repeat(64);
+      await prisma.changePlan.update({ where: { id: seeded.plan.id }, data: { plan: envelope as Prisma.InputJsonValue } });
+      return queued;
+    }],
+  ])("fails closed for a signed creative %s binding mismatch without a successful revision or artifact", async (_binding, arrange) => {
+    const seeded = await seedCreativeBuild();
+    const queued = await arrange(seeded);
+    const runner = new JobRunner({
+      prisma,
+      storage,
+      registry,
+      serverPlanVerifier: seeded.authority,
+    });
+
+    expect((await runner.runOnce(`creative-mismatch-${++counter}`, new Date()))?.status).toBe("FAILED");
+    expect(await prisma.solutionRevision.count({
+      where: { workspaceId: seeded.workspace.id, changePlanId: seeded.plan.id },
+    })).toBe(0);
+    expect(await prisma.artifact.count({ where: { buildJobId: queued.id } })).toBe(0);
+    expect((await prisma.solutionWorkspace.findUniqueOrThrow({ where: { id: seeded.workspace.id } })).currentRevisionId)
+      .toBe(seeded.revision.id);
+  });
+
   it.each(["personal-portal", "admin-console"])("packages the %s golden into a native round-trip artifact", async (name) => {
     const built = await buildGoldenPackage(name);
     expect(built.compiled.status).toBe("compiled");

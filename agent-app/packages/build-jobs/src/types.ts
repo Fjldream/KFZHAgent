@@ -32,6 +32,10 @@ export interface SuccessfulBuildResult {
   fileExtension: string;
   packageHash: string;
   packageUrl: string;
+  creativeBinding?: {
+    creativeArtifactHash: string;
+    nativeMaterializationHash: string;
+  };
   artifact: {
     kind: string;
     mediaType: string;

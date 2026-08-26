@@ -84,7 +84,11 @@ export class BuildJobService {
       throw new BuildJobNotFoundError("base revision");
     }
     const plan = await this.prisma.changePlan.findFirst({
-      where: { id: input.changePlanId, workspaceId: input.workspaceId },
+      where: {
+        id: input.changePlanId,
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+      },
     });
     if (plan === null) {
       throw new BuildJobNotFoundError("change plan");
@@ -266,6 +270,11 @@ export class BuildJobService {
           throw new BuildJobConflictError("SUCCEEDED completion requires a build result");
         }
         const { result, validationReport } = input;
+        if (result.creativeBinding !== undefined
+          && (!isSha256(result.creativeBinding.creativeArtifactHash)
+            || !isSha256(result.creativeBinding.nativeMaterializationHash))) {
+          return recordBuildConflict(tx, job, "creative delivery binding contains an invalid hash");
+        }
         const baseRevision = await tx.solutionRevision.findFirst({
           where: {
             id: job.baseRevisionId,
@@ -372,6 +381,11 @@ export class BuildJobService {
           data: {
             tenantId: job.tenantId,
             buildJobId: job.id,
+            solutionRevisionId: revision.id,
+            ...(result.creativeBinding === undefined ? {} : {
+              creativeArtifactHash: result.creativeBinding.creativeArtifactHash,
+              nativeMaterializationHash: result.creativeBinding.nativeMaterializationHash,
+            }),
             kind: result.artifact.kind,
             mediaType: result.artifact.mediaType,
             fileExtension: result.artifact.fileExtension,
@@ -427,6 +441,10 @@ export class BuildJobService {
       where: { idempotencyKey, tenantId },
     });
   }
+}
+
+function isSha256(value: string): boolean {
+  return /^[0-9a-f]{64}$/.test(value);
 }
 
 interface BuildJobRow {

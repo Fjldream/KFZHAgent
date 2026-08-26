@@ -25,6 +25,22 @@ export interface DeliveryResultProjection {
   revisionDiff: { changedModules: string[]; preservedModules: string[] };
 }
 
+export interface CreativeProjectDeliveryProjection {
+  workflow: "creative-v2";
+  projectKey: string;
+  status: "downloadable" | "building" | "failed" | "blocked";
+  artifactId: string | null;
+  revisionId: string | null;
+  download: {
+    available: boolean;
+    tokenEndpoint: string | null;
+  };
+  kf36RuntimeVerification: {
+    status: "not_performed";
+    notice: "尚未经过人工 KingFusion 3.6 运行态验证";
+  };
+}
+
 export interface PersistedDeliverySnapshot {
   tenantId: string;
   workspaceId: string;
@@ -34,6 +50,7 @@ export interface PersistedDeliverySnapshot {
   artifactId: string | null;
   revisionId: string | null;
   result: DeliveryResultProjection | null;
+  projectDelivery: CreativeProjectDeliveryProjection | null;
   buildJob: { id: string; workspaceId: string; status: BuildJob["status"]; planHash: string; baseRevisionId: string; changePlanId: string; projectKey: string } | null;
   artifact: { id: string; buildJobId: string; kind: string; sizeBytes: number | null; sha256: string | null } | null;
   revision: { id: string; revisionNumber: number; kind: string; parentRevisionId: string | null } | null;
@@ -66,7 +83,7 @@ export class DeliverySnapshotService {
       return hasModuleState(values) ? failClosedSnapshot(tenantId, conversation.workspaceId, conversationId, values, "构建与会话绑定校验失败") : null;
     }
     if (!hasModuleState(values)) {
-      return job === null ? null : this.recoverLegacy(tenantId, conversation.workspaceId, conversationId, job);
+      return job === null ? null : this.recoverNonModule(tenantId, conversation.workspaceId, conversationId, job, values);
     }
     const result = projectModuleDeliveryResult(values, this.authority, job?.baseRevisionId);
     if (result === undefined) return failClosedSnapshot(tenantId, conversation.workspaceId, conversationId, values, "交付快照校验失败", undefined, job);
@@ -106,6 +123,9 @@ export class DeliverySnapshotService {
     if (artifact === null) return; // DomainProjectRevision/source upload compatibility is handled by its owning route.
     const job = await this.prisma.buildJob.findFirst({ where: { id: artifact.buildJobId, tenantId } });
     if (job === null) throw new ConflictException("artifact has no trusted build binding");
+    if (artifact.creativeArtifactHash !== null || artifact.nativeMaterializationHash !== null) {
+      await this.assertCreativeArtifactBinding(job, artifact);
+    }
     const conversations = await this.prisma.conversation.findMany({ where: { tenantId, workspaceId: job.workspaceId }, select: { id: true } });
     const conversationId = conversations.find(({ id }) => buildJobBelongsToConversation(job, id))?.id ?? null;
     if (conversationId === null) return; // Trusted server-created legacy/non-graph job; enqueue is not publicly exposed.
@@ -127,13 +147,98 @@ export class DeliverySnapshotService {
     return values !== null && typeof values === "object" && !Array.isArray(values) ? values : undefined;
   }
 
-  private async recoverLegacy(tenantId: string, workspaceId: string, conversationId: string, job: BuildJob): Promise<PersistedDeliverySnapshot> {
+  private async recoverNonModule(
+    tenantId: string,
+    workspaceId: string,
+    conversationId: string,
+    job: BuildJob,
+    values: Record<string, unknown>,
+  ): Promise<PersistedDeliverySnapshot> {
     if (job.status !== "SUCCEEDED") return snapshot(tenantId, workspaceId, conversationId, job, null, null, null);
-    const [artifact, revision] = await Promise.all([
+    const [artifact, revisions] = await Promise.all([
       this.prisma.artifact.findFirst({ where: { tenantId, buildJobId: job.id, kind: "client-package" }, orderBy: { createdAt: "desc" } }),
-      this.prisma.solutionRevision.findFirst({ where: { tenantId, workspaceId, changePlanId: job.changePlanId, parentRevisionId: job.baseRevisionId }, orderBy: { revisionNumber: "desc" } }),
+      this.prisma.solutionRevision.findMany({ where: { tenantId, workspaceId, changePlanId: job.changePlanId, parentRevisionId: job.baseRevisionId }, orderBy: { revisionNumber: "desc" }, take: 2 }),
     ]);
-    return snapshot(tenantId, workspaceId, conversationId, job, artifact, revision, null);
+    const revision = revisions.length === 1 ? revisions[0]! : null;
+    if (artifact === null || (artifact.creativeArtifactHash === null
+      && artifact.nativeMaterializationHash === null)) {
+      return snapshot(tenantId, workspaceId, conversationId, job, artifact, revision, null);
+    }
+    if (revision === null || (values["currentRevisionId"] !== job.baseRevisionId
+      && values["currentRevisionId"] !== revision.id)) {
+      return projectBlockedSnapshot(tenantId, workspaceId, conversationId, job);
+    }
+    try {
+      await this.assertCreativeArtifactBinding(job, artifact, revision);
+    } catch {
+      return projectBlockedSnapshot(tenantId, workspaceId, conversationId, job);
+    }
+    return snapshot(tenantId, workspaceId, conversationId, job, artifact, revision, null, {
+      workflow: "creative-v2",
+      projectKey: job.projectKey,
+      status: "downloadable",
+      artifactId: artifact.id,
+      revisionId: revision.id,
+      download: {
+        available: true,
+        tokenEndpoint: `/api/artifacts/${artifact.id}/download-token`,
+      },
+      kf36RuntimeVerification: {
+        status: "not_performed",
+        notice: "尚未经过人工 KingFusion 3.6 运行态验证",
+      },
+    });
+  }
+
+  private async assertCreativeArtifactBinding(
+    job: BuildJob,
+    artifact: {
+      id: string;
+      buildJobId: string;
+      solutionRevisionId: string | null;
+      creativeArtifactHash: string | null;
+      nativeMaterializationHash: string | null;
+      storageKey: string;
+      sha256: string | null;
+    },
+    knownRevision?: { id: string; state: unknown },
+  ): Promise<void> {
+    if (artifact.creativeArtifactHash === null || artifact.nativeMaterializationHash === null
+      || artifact.solutionRevisionId === null || artifact.sha256 === null) {
+      throw new ConflictException("creative artifact has no complete delivery binding");
+    }
+    const revision = knownRevision ?? await this.prisma.solutionRevision.findFirst({
+      where: {
+        id: artifact.solutionRevisionId,
+        tenantId: job.tenantId,
+        workspaceId: job.workspaceId,
+        changePlanId: job.changePlanId,
+        parentRevisionId: job.baseRevisionId,
+      },
+      select: { id: true, state: true },
+    });
+    if (revision === null || revision.id !== artifact.solutionRevisionId) {
+      throw new ConflictException("creative artifact revision binding is invalid");
+    }
+    const binding = creativeBuildState(revision.state, job.projectKey);
+    if (binding === undefined
+      || binding.packageHash !== artifact.sha256
+      || binding.creativeArtifactHash !== artifact.creativeArtifactHash
+      || binding.nativeMaterializationHash !== artifact.nativeMaterializationHash) {
+      throw new ConflictException("creative artifact hash binding is invalid");
+    }
+    const project = await this.prisma.domainProjectRevision.findFirst({
+      where: {
+        tenantId: job.tenantId,
+        solutionRevisionId: revision.id,
+        projectKey: job.projectKey,
+        domainKind: job.domainKind,
+      },
+    });
+    if (project === null || project.packageUrl !== artifact.storageKey
+      || project.packageHash !== artifact.sha256) {
+      throw new ConflictException("creative project package binding is invalid");
+    }
   }
 }
 
@@ -213,7 +318,7 @@ function hasModuleState(values: Record<string, unknown>): boolean {
   return ["modulePlan", "modulePlanHash", "moduleCompilationArtifact", "moduleDeliveryReport"].some((key) => values[key] !== undefined);
 }
 
-function snapshot(tenantId: string, workspaceId: string, conversationId: string, job: BuildJob | null, artifact: { id: string; buildJobId: string; kind: string; sizeBytes: number | null; sha256: string | null } | null, revision: { id: string; revisionNumber: number; kind: string; parentRevisionId: string | null } | null, result: DeliveryResultProjection | null): PersistedDeliverySnapshot {
+function snapshot(tenantId: string, workspaceId: string, conversationId: string, job: BuildJob | null, artifact: { id: string; buildJobId: string; kind: string; sizeBytes: number | null; sha256: string | null } | null, revision: { id: string; revisionNumber: number; kind: string; parentRevisionId: string | null } | null, result: DeliveryResultProjection | null, projectDelivery: CreativeProjectDeliveryProjection | null = null): PersistedDeliverySnapshot {
   return {
     tenantId, workspaceId, conversationId,
     buildJobId: job?.id ?? null,
@@ -221,10 +326,62 @@ function snapshot(tenantId: string, workspaceId: string, conversationId: string,
     artifactId: artifact?.id ?? null,
     revisionId: revision?.id ?? null,
     result,
+    projectDelivery,
     buildJob: job === null ? null : { id: job.id, workspaceId: job.workspaceId, status: job.status, planHash: job.planHash, baseRevisionId: job.baseRevisionId, changePlanId: job.changePlanId, projectKey: job.projectKey },
     artifact,
     revision,
   };
+}
+
+function projectBlockedSnapshot(
+  tenantId: string,
+  workspaceId: string,
+  conversationId: string,
+  job: BuildJob,
+): PersistedDeliverySnapshot {
+  return snapshot(tenantId, workspaceId, conversationId, job, null, null, null, {
+    workflow: "creative-v2",
+    projectKey: job.projectKey,
+    status: "blocked",
+    artifactId: null,
+    revisionId: null,
+    download: { available: false, tokenEndpoint: null },
+    kf36RuntimeVerification: {
+      status: "not_performed",
+      notice: "尚未经过人工 KingFusion 3.6 运行态验证",
+    },
+  });
+}
+
+function creativeBuildState(state: unknown, projectKey: string): {
+  packageHash: string;
+  creativeArtifactHash: string;
+  nativeMaterializationHash: string;
+} | undefined {
+  if (state === null || typeof state !== "object" || Array.isArray(state)) return undefined;
+  const record = state as Record<string, unknown>;
+  let candidate = record["build"];
+  if (record["schema"] === "kf-solution-revision-state/v1" && Array.isArray(record["projects"])) {
+    const projects = record["projects"] as unknown[];
+    const project: unknown = projects.find((value) => value !== null && typeof value === "object"
+      && !Array.isArray(value) && (value as Record<string, unknown>)["projectKey"] === projectKey);
+    candidate = project !== null && typeof project === "object" && !Array.isArray(project)
+      ? (project as Record<string, unknown>)["buildState"]
+      : undefined;
+    if (candidate !== null && typeof candidate === "object" && !Array.isArray(candidate)) {
+      candidate = (candidate as Record<string, unknown>)["build"];
+    }
+  }
+  if (candidate === null || typeof candidate !== "object" || Array.isArray(candidate)) return undefined;
+  const binding = candidate as Record<string, unknown>;
+  return isHash(binding["packageHash"]) && isHash(binding["creativeArtifactHash"])
+    && isHash(binding["nativeMaterializationHash"])
+    ? {
+      packageHash: binding["packageHash"],
+      creativeArtifactHash: binding["creativeArtifactHash"],
+      nativeMaterializationHash: binding["nativeMaterializationHash"],
+    }
+    : undefined;
 }
 
 function failClosedSnapshot(tenantId: string, workspaceId: string, conversationId: string, values: Record<string, unknown>, reason: string, base?: DeliveryResultProjection, job: BuildJob | null = null): PersistedDeliverySnapshot {

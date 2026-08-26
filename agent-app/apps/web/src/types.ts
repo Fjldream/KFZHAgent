@@ -119,6 +119,18 @@ export interface PersistedModuleDelivery {
   artifactId: string | null;
   revisionId: string | null;
   result: ModuleDeliveryResult | null;
+  projectDelivery: {
+    workflow: "creative-v2";
+    projectKey: string;
+    status: "downloadable" | "building" | "failed" | "blocked";
+    artifactId: string | null;
+    revisionId: string | null;
+    download: { available: boolean; tokenEndpoint: string | null };
+    kf36RuntimeVerification: {
+      status: "not_performed";
+      notice: "尚未经过人工 KingFusion 3.6 运行态验证";
+    };
+  } | null;
   buildJob: BuildJob | null;
   artifact: ({ buildJobId: string } & Pick<ArtifactRow, "id" | "kind" | "sizeBytes" | "sha256">) | null;
   revision: Pick<Revision, "id" | "revisionNumber" | "kind"> & { parentRevisionId: string | null } | null;

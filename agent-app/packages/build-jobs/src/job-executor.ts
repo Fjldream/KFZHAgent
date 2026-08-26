@@ -323,6 +323,17 @@ export class BuildExecutor {
           error: new Error(`base revision not found: ${job.baseRevisionId}`),
         });
       }
+      const workspace = await this.#deps.prisma.solutionWorkspace.findFirst({
+        where: { id: job.workspaceId, tenantId: job.tenantId },
+        select: { generationWorkflow: true },
+      });
+      if (workspace === null) {
+        await heartbeat.stop();
+        return this.complete(job, {
+          status: "FAILED",
+          error: new Error(`workspace not found: ${job.workspaceId}`),
+        });
+      }
       validateRevisionProjectBinding(
         baseRevision.state,
         job.projectKey,
@@ -331,15 +342,22 @@ export class BuildExecutor {
       const plan = await this.#deps.prisma.changePlan.findUnique({
         where: { id: job.changePlanId },
       });
-      if (plan === null || plan.workspaceId !== job.workspaceId) {
+      if (plan === null || plan.tenantId !== job.tenantId || plan.workspaceId !== job.workspaceId) {
         await heartbeat.stop();
         return this.complete(job, {
           status: "FAILED",
           error: new Error(`change plan not found: ${job.changePlanId}`),
         });
       }
+      if (plan.planHash !== job.planHash) {
+        await heartbeat.stop();
+        return this.complete(job, {
+          status: "FAILED",
+          error: new Error(`change plan hash does not match job: ${job.changePlanId}`),
+        });
+      }
 
-      const candidate = await this.buildCandidate(job, baseRevision, plan, pack);
+      const candidate = await this.buildCandidate(job, baseRevision, plan, workspace, pack);
       ownedWorkspaceRoots.push(
         candidate.baseWorkspace.cleanupRoot ?? candidate.baseWorkspace.rootDir,
         candidate.candidateWorkspace.cleanupRoot ?? candidate.candidateWorkspace.rootDir,
@@ -385,6 +403,9 @@ export class BuildExecutor {
         planInput: candidate.planInput,
         mode: candidate.mode,
         packaged,
+        ...(candidate.creativeBinding === undefined ? {} : {
+          creativeBinding: candidate.creativeBinding,
+        }),
       });
       await this.cleanupUnadoptedArtifact(job, stored);
       return completed;
@@ -481,6 +502,7 @@ export class BuildExecutor {
     job: BuildJob,
     baseRevision: { id: string; kind: string; state: Prisma.JsonValue | null },
     plan: { plan: Prisma.JsonValue | null },
+    workspace: { generationWorkflow: string },
     pack: DomainPack,
   ): Promise<{
     baseWorkspace: DomainWorkspace;
@@ -488,6 +510,7 @@ export class BuildExecutor {
     planInput: InternalChangePlan;
     assets: readonly DomainAssetInput[];
     creativeMaterialization?: VerifiedCreativeMaterialization;
+    creativeBinding?: { creativeArtifactHash: string; nativeMaterializationHash: string };
     mode: string;
   }> {
     const resolved = resolveStoredPlan(plan.plan ?? {}, {
@@ -495,6 +518,25 @@ export class BuildExecutor {
       expectedRevisionId: job.baseRevisionId,
     }, this.#deps.serverPlanVerifier);
     const planInput = resolved.plan;
+    if (planInput.workspaceId !== job.workspaceId) {
+      throw new Error("stored change plan belongs to another workspace");
+    }
+    let creativeBinding: { creativeArtifactHash: string; nativeMaterializationHash: string } | undefined;
+    if (resolved.creativeMaterialization !== undefined) {
+      const verified = readVerifiedCreativeMaterialization(resolved.creativeMaterialization);
+      if (workspace.generationWorkflow !== "creative-v2") {
+        throw new Error("creative build requires an explicitly enrolled creative-v2 workspace");
+      }
+      if (verified.materialization.workspaceId !== job.workspaceId
+        || verified.materialization.baseRevisionId !== job.baseRevisionId
+        || verified.artifact.semanticPlan.projectKey !== job.projectKey) {
+        throw new Error("creative tenant/workspace/project binding mismatch");
+      }
+      creativeBinding = {
+        creativeArtifactHash: verified.materialization.creativeArtifactHash,
+        nativeMaterializationHash: planInput.creative!.materializationHash,
+      };
+    }
     const creativeAssetBindings = creativeAssetResolutionBindings(resolved.creativeMaterialization);
     const allAssetBindings = new Map<string, AssetResolutionBinding>();
     for (const binding of [...(planInput.assetBindings ?? []), ...creativeAssetBindings]) {
@@ -569,6 +611,7 @@ export class BuildExecutor {
           ...(resolved.creativeMaterialization === undefined ? {} : {
             creativeMaterialization: resolved.creativeMaterialization,
           }),
+          ...(creativeBinding === undefined ? {} : { creativeBinding }),
           mode: "compile",
         };
       } catch (error) {
@@ -607,6 +650,7 @@ export class BuildExecutor {
         ...(resolved.creativeMaterialization === undefined ? {} : {
           creativeMaterialization: resolved.creativeMaterialization,
         }),
+        ...(creativeBinding === undefined ? {} : { creativeBinding }),
         mode: "patch",
       };
     } catch (error) {
@@ -664,6 +708,7 @@ export class BuildExecutor {
       planInput?: InternalChangePlan;
       mode?: string;
       packaged?: PackagedDomainArtifact;
+      creativeBinding?: { creativeArtifactHash: string; nativeMaterializationHash: string };
     },
   ): Promise<BuildJob> {
     const details: Record<string, unknown> = {};
@@ -694,6 +739,10 @@ export class BuildExecutor {
           state: {
             plan: opts.planInput ?? null,
             mode: opts.mode ?? "patch",
+            build: {
+              packageHash: stored.sha256,
+              ...(opts.creativeBinding === undefined ? {} : opts.creativeBinding),
+            },
           },
           domainKind: job.domainKind,
           domainProjectKind: packaged.domainProjectKind,
@@ -701,6 +750,7 @@ export class BuildExecutor {
           fileExtension: packaged.fileExtension,
           packageHash: stored.sha256,
           packageUrl: stored.artifactId,
+          ...(opts.creativeBinding === undefined ? {} : { creativeBinding: opts.creativeBinding }),
           artifact: {
             kind: packaged.artifactKind,
             mediaType: packaged.mediaType,

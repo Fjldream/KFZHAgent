@@ -109,7 +109,7 @@ export class WorkspaceService {
             name,
             description,
             mode,
-            generationWorkflow: mode === "new" ? "module-v1" : "legacy",
+            generationWorkflow: mode === "new" ? "creative-v2" : "legacy",
           },
         });
         if (mode !== "new") {
