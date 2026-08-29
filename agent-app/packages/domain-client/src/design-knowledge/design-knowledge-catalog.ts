@@ -2,6 +2,7 @@ import { getControlCapability } from "../style/control-capability-registry.js";
 import { getStyleAdapter } from "../style/adapters/base-adapters.js";
 import { listCompositionRecipes } from "./composition-recipe-registry.js";
 import { listControlDesignProfiles } from "./control-design-registry.js";
+import { listNativeActionCapabilities } from "./native-action-capability-registry.js";
 import { listScriptCapabilityProfiles } from "./script-capability-registry.js";
 import { listStyleCapabilityProfiles } from "./style-capability-registry.js";
 
@@ -11,6 +12,7 @@ export interface DesignKnowledgeSnapshot {
   readonly controlDesignProfiles: ReturnType<typeof listControlDesignProfiles>;
   readonly styleCapabilityProfiles: ReturnType<typeof listStyleCapabilityProfiles>;
   readonly scriptCapabilityProfiles: ReturnType<typeof listScriptCapabilityProfiles>;
+  readonly nativeActionCapabilities: ReturnType<typeof listNativeActionCapabilities>;
   readonly compositionRecipes: ReturnType<typeof listCompositionRecipes>;
 }
 
@@ -18,6 +20,7 @@ interface DesignKnowledgeSources {
   readonly controlDesignProfiles: ReturnType<typeof listControlDesignProfiles>;
   readonly styleCapabilityProfiles: ReturnType<typeof listStyleCapabilityProfiles>;
   readonly scriptCapabilityProfiles: ReturnType<typeof listScriptCapabilityProfiles>;
+  readonly nativeActionCapabilities?: ReturnType<typeof listNativeActionCapabilities>;
   readonly compositionRecipes: ReturnType<typeof listCompositionRecipes>;
 }
 
@@ -68,12 +71,14 @@ function collectDesignKnowledgeIssues(
   const controlProfiles = sources.controlDesignProfiles;
   const styleProfiles = sources.styleCapabilityProfiles;
   const scriptProfiles = sources.scriptCapabilityProfiles;
+  const nativeActionCapabilities = sources.nativeActionCapabilities ?? [];
   const recipes = sources.compositionRecipes;
   const controlProfileIds = new Set(controlProfiles.map((profile) => profile.capabilityId));
   const issues: string[] = [
     ...collectListIssues("control-design", controlProfiles, (profile) => profile.capabilityId),
     ...collectListIssues("style-capability", styleProfiles, (profile) => profile.capabilityId),
     ...collectListIssues("script-capability", scriptProfiles, (profile) => profile.capabilityId),
+    ...collectListIssues("native-action-capability", nativeActionCapabilities, (capability) => capability.semanticAction),
     ...collectListIssues("composition-recipe", recipes, (recipe) => recipe.id),
   ];
 
@@ -134,6 +139,12 @@ function collectDesignKnowledgeIssues(
     }
   }
 
+  for (const capability of nativeActionCapabilities) {
+    if (capability.availability === "supported" && capability.evidence.length === 0) {
+      issues.push(`native-action-capability ${capability.semanticAction}: supported action has no evidence`);
+    }
+  }
+
   for (const recipe of recipes) {
     const roles = [...recipe.requiredRoles, ...recipe.optionalRoles];
     const seenRoles = new Set<string>();
@@ -177,6 +188,7 @@ const DEFAULT_SOURCES: DesignKnowledgeSources = Object.freeze({
   controlDesignProfiles: listControlDesignProfiles(),
   styleCapabilityProfiles: listStyleCapabilityProfiles(),
   scriptCapabilityProfiles: listScriptCapabilityProfiles(),
+  nativeActionCapabilities: listNativeActionCapabilities(),
   compositionRecipes: listCompositionRecipes(),
 });
 
@@ -203,6 +215,7 @@ const SNAPSHOT: DesignKnowledgeSnapshot = deepFreeze({
   controlDesignProfiles: DEFAULT_SOURCES.controlDesignProfiles,
   styleCapabilityProfiles: DEFAULT_SOURCES.styleCapabilityProfiles,
   scriptCapabilityProfiles: DEFAULT_SOURCES.scriptCapabilityProfiles,
+  nativeActionCapabilities: DEFAULT_SOURCES.nativeActionCapabilities!,
   compositionRecipes: DEFAULT_SOURCES.compositionRecipes,
 });
 

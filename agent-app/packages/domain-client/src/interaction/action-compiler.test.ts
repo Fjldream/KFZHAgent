@@ -61,6 +61,25 @@ describe("compileNativeActions", () => {
     expect(result.actions[0]).toMatchObject({ kind: "navigate-page", targetPageGuid });
   });
 
+  it("allows a reviewed Datagrid event to trigger reviewed navigation", async () => {
+    const { normalizeActionGraph } = await import("./action-graph.js");
+    const { compileNativeActions } = await import("./action-compiler.js");
+    const data = fixture();
+    const root = data.plan.pages[0]!.root;
+    if (root.kind !== "control") throw new Error("control trigger fixture required");
+    root.capabilityId = "easyui.1";
+    root.eventBindings = [{ semanticEvent: "row-click", actionIds: ["navigate"] }];
+    const homePage = data.implementation.pages[0]!;
+    if (homePage.compatibility !== "native") throw new Error("native fixture required");
+    homePage.controls[0]!.capabilityId = "easyui.1";
+    data.implementation.runtimeCorrelation!.controls[0]!.instanceName = "Datagrid1";
+
+    const result = compileNativeActions({ normalized: normalizeActionGraph(data) });
+
+    expect(result.actions).toEqual([expect.objectContaining({ kind: "navigate-page" })]);
+    expect(result.scriptRequests).toEqual([]);
+  });
+
   it("compiles same-page overlay open and close through the reviewed Visible target with semantic provenance", async () => {
     const { normalizeActionGraph } = await import("./action-graph.js");
     const { compileNativeActions } = await import("./action-compiler.js");
@@ -154,7 +173,7 @@ describe("compileNativeActions", () => {
     expect(result.scriptRequests).toEqual([]);
   });
 
-  it("compiles navigation only when the trusted registry reports supported event and action evidence", async () => {
+  it("compiles navigation only when the trusted trigger registry reports supported event evidence", async () => {
     vi.doMock("../design-knowledge/script-capability-registry.js", () => ({
       requireScriptCapabilityProfile: () => ({
         schema: "kf-script-capability-profile/v1", capabilityId: "button", version: "1.0.0", availability: "supported",
@@ -197,7 +216,7 @@ describe("compileNativeActions", () => {
     expect(result.scriptRequests[0]).toMatchObject({ reason: "TRIGGER_EVENT_UNSUPPORTED" });
   });
 
-  it("keeps supported local state assignment distinct from legacy setVariable", async () => {
+  it("keeps planned local state assignment out of native output", async () => {
     vi.doMock("../design-knowledge/script-capability-registry.js", () => ({
       requireScriptCapabilityProfile: () => ({
         schema: "kf-script-capability-profile/v1", capabilityId: "button", version: "1.0.0", availability: "supported",
@@ -212,10 +231,8 @@ describe("compileNativeActions", () => {
     data.plan.localState.push({ id: "allowed", purpose: "允许", type: "boolean", initialValue: false });
     data.plan.actions = [{ id: "navigate", kind: "set-state", stateId: "allowed", value: true, afterActionIds: [] }];
     const result = compileNativeActions({ normalized: normalizeActionGraph(data) });
-    expect(result.actions).toEqual([{
-      id: "kf$action:navigate", sourceActionId: "navigate", ownerInstanceName: "Button1", kind: "set-state", stateId: "allowed", value: true,
-    }]);
-    expect(JSON.stringify(result.actions)).not.toContain("setVariable");
+    expect(result.actions).toEqual([]);
+    expect(result.scriptRequests[0]).toMatchObject({ reason: "ACTION_CAPABILITY_UNSUPPORTED" });
   });
 
   it("requires exact supported target capability evidence for visibility", async () => {
@@ -236,7 +253,7 @@ describe("compileNativeActions", () => {
     data.plan.actions = [{ id: "navigate", kind: "set-visibility", targetId: "go", visible: true, afterActionIds: [] }];
     const result = compileNativeActions({ normalized: normalizeActionGraph(data) });
     expect(result.actions).toEqual([]);
-    expect(result.scriptRequests[0]).toMatchObject({ reason: "TARGET_CAPABILITY_UNSUPPORTED" });
+    expect(result.scriptRequests[0]).toMatchObject({ reason: "ACTION_CAPABILITY_UNSUPPORTED" });
   });
 
   it("rejects stale runtime correlation rather than treating semantic ids as instance names", async () => {
@@ -325,7 +342,7 @@ describe("compileNativeActions", () => {
       if (root.kind !== "control") throw new Error("control fixture required");
       root.eventBindings = count === 0 ? [] : [{ semanticEvent: "click", actionIds: ["action-0"] }];
       data.plan.actions = Array.from({ length: count }, (_, index) => ({
-        id: `action-${index}`, kind: "show-feedback" as const, level: "info" as const, message: `步骤 ${index}`,
+        id: `action-${index}`, kind: "navigate-page" as const, targetPageId: "detail-page",
         afterActionIds: index + 1 < count ? [`action-${index + 1}`] : [],
       }));
       const normalized = normalizeActionGraph(data);
@@ -345,7 +362,7 @@ describe("compileNativeActions", () => {
     }
   });
 
-  it("rejects same-action cross-page targets even with supported member evidence", async () => {
+  it("rejects an action without a reviewed global native serialization", async () => {
     vi.doMock("../design-knowledge/script-capability-registry.js", () => ({
       requireScriptCapabilityProfile: (capabilityId: string) => capabilityId === "button" ? ({
         schema: "kf-script-capability-profile/v1", capabilityId, version: "1.0.0", availability: "supported",
@@ -361,10 +378,10 @@ describe("compileNativeActions", () => {
     const { normalizeActionGraph } = await import("./action-graph.js");
     const { compileNativeActions } = await import("./action-compiler.js");
     const data = fixture();
-    data.plan.actions = [{ id: "navigate", kind: "set-visibility", targetId: "detail", visible: true, afterActionIds: [] }];
+    data.plan.actions = [{ id: "navigate", kind: "set-visibility", targetId: "go", visible: true, afterActionIds: [] }];
     const result = compileNativeActions({ normalized: normalizeActionGraph(data) });
     expect(result.actions).toEqual([]);
-    expect(result.scriptRequests[0]).toMatchObject({ reason: "ACTION_CONTEXT_CROSS_PAGE" });
+    expect(result.scriptRequests[0]).toMatchObject({ reason: "ACTION_CAPABILITY_UNSUPPORTED" });
 
   });
 
@@ -483,7 +500,7 @@ describe("compileNativeActions", () => {
     data.plan.actions = [{ id: "navigate", kind: "set-visibility", targetId: "same-page-target", visible: true, afterActionIds: [] }];
     const result = compileNativeActions({ normalized: normalizeActionGraph(data) });
     expect(result.actions).toEqual([]);
-    expect(result.scriptRequests[0]).toMatchObject({ reason: "TARGET_CAPABILITY_UNSUPPORTED" });
+    expect(result.scriptRequests[0]).toMatchObject({ reason: "ACTION_CAPABILITY_UNSUPPORTED" });
   });
 
   it("normalizes compiled binding contract failures instead of leaking Zod errors", async () => {
@@ -506,7 +523,7 @@ describe("compileNativeActions", () => {
     vi.doMock("../design-knowledge/script-capability-registry.js", () => ({
       requireScriptCapabilityProfile: () => ({
         schema: "kf-script-capability-profile/v1", capabilityId: "button", version: "1.0.0", availability: "supported",
-        actions: [{ semanticAction: "show-feedback", implementation: "restricted-action", availability: "supported", evidence: [{ kind: "compiler", ref: "reviewed#feedback" }] }],
+        actions: [],
         events: ["click", "change"].map((semanticEvent) => ({ semanticEvent, kfEvent: "Click", linkId: 7, availability: "supported", arguments: [], evidence: [{ kind: "template", ref: "reviewed#click" }] })),
         methods: [], properties: [], initialization: { supportsConfigureData: false, lifecycleEvents: [] }, limitations: [],
       }),
@@ -522,7 +539,7 @@ describe("compileNativeActions", () => {
         { semanticEvent: "change", actionIds: ["right-0"] },
       ];
       const chain = (prefix: string, count: number) => Array.from({ length: count }, (_, index) => ({
-        id: `${prefix}-${index}`, kind: "show-feedback" as const, level: "info" as const, message: `${prefix} ${index}`,
+        id: `${prefix}-${index}`, kind: "navigate-page" as const, targetPageId: "detail-page",
         afterActionIds: index + 1 < count ? [`${prefix}-${index + 1}`] : [],
       }));
       data.plan.actions = [...chain("left", leftCount), ...chain("right", rightCount)];

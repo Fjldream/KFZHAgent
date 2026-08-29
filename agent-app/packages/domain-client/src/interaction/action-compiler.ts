@@ -9,6 +9,7 @@ import {
   type ScriptCapabilityProfile,
 } from "@kf/contracts";
 import { requireScriptCapabilityProfile } from "../design-knowledge/script-capability-registry.js";
+import { requireNativeActionCapability } from "../design-knowledge/native-action-capability-registry.js";
 import {
   getTrustedActionCompilationContext,
   type NormalizedActionGraph,
@@ -68,15 +69,6 @@ function compilerId(kind: "action" | "binding", semanticId: string): string {
 
 function supported<T extends { availability: string; evidence: readonly unknown[] }>(member: T | undefined): member is T {
   return member?.availability === "supported" && member.evidence.length > 0;
-}
-
-function semanticActionOf(effect: ActionEffect): string {
-  switch (effect.kind) {
-    case "open-overlay": return "open-dialog";
-    case "close-overlay": return "close-dialog";
-    case "set-control-value": return "set-value";
-    default: return effect.kind;
-  }
 }
 
 function semanticReferences(effect: ActionEffect): string[] {
@@ -205,16 +197,13 @@ function targetCapabilitySupported(effect: ActionEffect, indexes: ReturnType<typ
     return supported(property) && property.writable;
   }
   if (effect.kind === "switch-tab") {
-    const action = profileForControl(effect.targetId, indexes)?.actions.find((candidate) => candidate.semanticAction === "switch-tab");
-    return supported(action) && action.implementation === "restricted-action";
+    return false;
   }
   if (effect.kind === "open-overlay" || effect.kind === "close-overlay") {
     const targetId = indexes.overlayHosts.get(effect.overlayId)?.controlId;
     const profile = profileForControl(targetId, indexes);
-    const action = profile?.actions.find((candidate) => candidate.semanticAction === semanticActionOf(effect));
     const method = profile?.methods.find((candidate) => candidate.semanticMethod === "set-visible");
-    return supported(action) && action.implementation === "restricted-action"
-      && supported(method) && method.kfMethod === "setVisible"
+    return supported(method) && method.kfMethod === "setVisible"
       && method.parameters.length === 1 && method.parameters[0] === "visible" && method.returns === "void";
   }
   return true;
@@ -290,7 +279,7 @@ export function compileNativeActions(input: CompileNativeActionsInput): NativeAc
       continue;
     }
     const groupActions: CompiledNativeAction[] = [];
-    for (const { action, owner, profile } of group) {
+    for (const { action, owner } of group) {
       if (action.effects.some((effect) => effect.kind === "run-script")) {
         requests.push(request(action, "RUN_SCRIPT_REQUIRES_VALIDATION", scriptsById));
         continue;
@@ -304,8 +293,14 @@ export function compileNativeActions(input: CompileNativeActionsInput): NativeAc
         requests.push(request(action, "ACTION_CONTEXT_CROSS_PAGE", scriptsById));
         continue;
       }
-      const actionCapability = profile.actions.find((candidate) => candidate.semanticAction === semanticActionOf(effect));
-      if (!supported(actionCapability) || actionCapability.implementation !== "restricted-action") {
+      let actionCapability;
+      try {
+        actionCapability = requireNativeActionCapability(effect.kind);
+      } catch {
+        requests.push(request(action, "ACTION_CAPABILITY_UNSUPPORTED", scriptsById));
+        continue;
+      }
+      if (!supported(actionCapability)) {
         requests.push(request(action, "ACTION_CAPABILITY_UNSUPPORTED", scriptsById));
         continue;
       }

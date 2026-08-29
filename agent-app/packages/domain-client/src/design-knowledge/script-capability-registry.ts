@@ -5,6 +5,8 @@ import {
 import { listControlDesignProfiles } from "./control-design-registry.js";
 import { createKnowledgeRegistry } from "./registry.js";
 
+export type ScriptCapabilityEvidence = ScriptCapabilityProfile["events"][number]["evidence"][number];
+
 const TEMPLATE = (ref: string) => ({ kind: "template", ref });
 const PRODUCT_SOURCE = (ref: string, contentSha256: string) => ({ kind: "product-source", ref, contentSha256 });
 const CENTER_PROPERTY_PAGE = "KingFusion3.6_Center/sdb/c7f1771f-0c8f-4c75-9d71-3b8c4b6bd190/kingclient/9fdd3be0-2d91-11f1-b60a-4937cd79e5a1/pagerecord/recordpages/数据模型管理_属性定义20230511104433.json";
