@@ -700,6 +700,25 @@ describe("KF UI style contracts", () => {
     expect(UIImplementationSpecV2Schema.safeParse(navigationFixture(upperUuid)).success).toBe(true);
   });
 
+  it("accepts complete state correlation and rejects case-insensitive aliases", () => {
+    const fixture = { ...structuredClone(v2Fixture), runtimeCorrelation: {
+      controls: [
+        { semanticControlId: "hero", instanceName: "Layout1" },
+        { semanticControlId: "hero-title", instanceName: "Text1" },
+        { semanticControlId: "visitor-dialog", instanceName: "Window1" },
+      ],
+      pages: [{ semanticPageId: "home", pageGuid: "k00000000-0000-4000-8000-000000000001" }],
+      states: [{ semanticStateId: "filter-tech", variableName: "$kf_filter_tech_bf69ca90a12d" }],
+    } };
+    expect(UIImplementationSpecV2Schema.safeParse(fixture).success).toBe(true);
+
+    fixture.runtimeCorrelation.states.push({
+      semanticStateId: "Filter-Tech",
+      variableName: "$KF_FILTER_TECH_BF69CA90A12D",
+    });
+    expect(UIImplementationSpecV2Schema.safeParse(fixture).success).toBe(false);
+  });
+
   it("accepts a compiler-owned native solution-plan hash and forbids it on adapted v1", () => {
     expect(UIImplementationSpecV2Schema.safeParse(v2Fixture).success).toBe(true);
     expect(UIImplementationSpecV2Schema.safeParse({ ...v2Fixture, sourceSolutionPlanHash: "A".repeat(64) }).success).toBe(false);

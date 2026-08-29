@@ -229,6 +229,12 @@ function validateCreativeEnvelope(envelope: ServerPlanEnvelope, expected: Server
 
 export function validateCreativePlanMaterializationProjection(plan: InternalChangePlan, materialization: NonNullable<ServerPlanEnvelope["trustedNativeMaterialization"]>): void {
   const expected: InternalChangePlan["operations"] = [];
+  for (const state of materialization.states ?? []) {
+    expected.push({
+      op: "create", entityType: "variable", entityId: state.variableName,
+      properties: { semanticStateId: state.semanticStateId, stateType: state.stateType, dataType: state.dataType, defaultValue: state.defaultValue, comment: state.comment },
+    });
+  }
   for (const page of materialization.pages) {
     expected.push(page.source === "workspace-derived"
       ? { op: "create", entityType: "page", entityId: page.semanticPageId, properties: { width: page.width, height: page.height } }

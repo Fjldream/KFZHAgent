@@ -33,6 +33,7 @@ export interface AttachRuntimeCorrelationInput {
   readonly workspaceId: string;
   readonly baseRevisionId: string;
   readonly implementation: UIImplementationSpecV2;
+  readonly semanticStateIds?: readonly string[];
   readonly verifiedExisting?: VerifiedExistingRuntimeCorrelationHandle;
 }
 export interface VerifiedExistingRuntimeCorrelationProjection {
@@ -208,6 +209,17 @@ function acceptsNativeType(descriptor: RuntimeCapabilityDescriptor, actual: Serv
 }
 function runtimePageGuid(workspaceId: string, semanticPageId: string): string { return `k${deriveGuid({ seed: workspaceId }, semanticPageId)}`; }
 
+/** Derives a bounded compiler-owned KF variable name from exact semantic identity. */
+export function runtimeVariableName(workspaceId: string, stateId: string): string {
+  const exactWorkspaceId = nonEmptyString(workspaceId, "workspaceId");
+  const exactStateId = nonEmptyString(stateId, "semanticStateId", 100);
+  if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(exactStateId)) fail("INVALID_SEMANTIC_STATE_ID", exactStateId);
+  const prefix = exactStateId.toLocaleLowerCase("en-US").replace(/[-_]+/g, "_").slice(0, 80);
+  const digest = createHash("sha256").update(exactWorkspaceId, "utf8").update("\0", "utf8")
+    .update(exactStateId, "utf8").digest("hex").slice(0, 12);
+  return `$kf_${prefix}_${digest}`;
+}
+
 function parseDisposition(raw: unknown): CanonicalDisposition {
   const root = record(raw, "correlations"); exactKeys(root, ["controls", "pages"], "correlations");
   if (!Array.isArray(root.controls) || !Array.isArray(root.pages)) fail("INPUT_INVALID", "correlation collections must be arrays");
@@ -317,14 +329,19 @@ export function readVerifiedExistingRuntimeCorrelation(
 
 /** Attaches server-owned KF runtime identities before interaction compilation. */
 export function attachRuntimeCorrelation(input: AttachRuntimeCorrelationInput): UIImplementationSpecV2 {
-  const root = rootDescriptors(input, ["workspaceId", "baseRevisionId", "implementation", "verifiedExisting"], "$input");
+  const root = rootDescriptors(input, ["workspaceId", "baseRevisionId", "implementation", "semanticStateIds", "verifiedExisting"], "$input");
   if (!root.has("workspaceId") || !root.has("baseRevisionId") || !root.has("implementation")) fail("INPUT_INVALID", "attach input is incomplete");
   let verifiedPayload: VerifiedDispositionPayload | undefined;
   if (root.has("verifiedExisting")) {
     const handle = root.get("verifiedExisting");
     if (typeof handle !== "object" || handle === null || (verifiedPayload = verifiedDispositionByHandle.get(handle)) === undefined) fail("INVALID_VERIFIED_HANDLE", "verifiedExisting was not issued by the verifier");
   }
-  const safe = record(clonePlainData({ workspaceId: root.get("workspaceId"), baseRevisionId: root.get("baseRevisionId"), implementation: root.get("implementation") }), "$input");
+  const safe = record(clonePlainData({
+    workspaceId: root.get("workspaceId"),
+    baseRevisionId: root.get("baseRevisionId"),
+    implementation: root.get("implementation"),
+    ...(root.has("semanticStateIds") ? { semanticStateIds: root.get("semanticStateIds") } : {}),
+  }), "$input");
   const workspaceId = nonEmptyString(safe.workspaceId, "workspaceId");
   const baseRevisionId = nonEmptyString(safe.baseRevisionId, "baseRevisionId");
   if (verifiedPayload !== undefined && (verifiedPayload.workspaceId !== workspaceId || verifiedPayload.baseRevisionId !== baseRevisionId)) {
@@ -347,12 +364,16 @@ export function attachRuntimeCorrelation(input: AttachRuntimeCorrelationInput): 
   if (parsed.data.compatibility !== "native") fail("NATIVE_IMPLEMENTATION_REQUIRED", "adapted-v1 is not supported");
   const implementation = parsed.data; const pageIds = implementation.pages.map((page) => page.id);
   const controlIds = implementation.pages.flatMap((page) => page.compatibility === "native" ? page.controls.map((control) => control.id) : []);
+  if (safe.semanticStateIds !== undefined && !Array.isArray(safe.semanticStateIds)) fail("INPUT_INVALID", "semanticStateIds must be an array");
+  const semanticStateIds = (safe.semanticStateIds as unknown[] | undefined)?.map((value, index) =>
+    nonEmptyString(value, `semanticStateIds[${index}]`, 100)) ?? [];
   const pageByControlId = new Map(implementation.pages.flatMap((page) => page.compatibility === "native"
     ? page.controls.map((control) => [control.id, page.id] as const) : []));
   const capabilityByControlId = new Map(implementation.pages.flatMap((page) => page.compatibility === "native"
     ? page.controls.map((control) => [control.id, control.capabilityId] as const) : []));
   capabilityByControlId.forEach((capabilityId) => { runtimeDescriptor(capabilityId); });
   assertNoSemanticCaseAliases([...pageIds, ...controlIds]);
+  assertNoSemanticCaseAliases(semanticStateIds);
   let controls: Array<{ semanticControlId: string; instanceName: string }>; let pages: Array<{ semanticPageId: string; pageGuid: string }>;
   if (verified === undefined) {
     controls = [...controlIds].sort((a, b) => a.localeCompare(b, "en-US")).map((semanticControlId) => ({
@@ -382,8 +403,21 @@ export function attachRuntimeCorrelation(input: AttachRuntimeCorrelationInput): 
     controls = verified.controls.map(({ semanticControlId, instanceName }) => ({ semanticControlId, instanceName }));
     pages = verified.pages.map(({ semanticPageId, pageGuid }) => ({ semanticPageId, pageGuid }));
   }
-  const expectedCorrelation = { controls, pages };
-  if (priorCorrelation !== undefined && JSON.stringify(priorCorrelation) !== JSON.stringify(expectedCorrelation)) fail(verified === undefined ? "EXISTING_CORRELATION_PROOF_REQUIRED" : "EXISTING_CORRELATION_MISMATCH", "existing runtime correlation differs from verified identities");
+  const stateVariableNames = new Set<string>();
+  const states = [...semanticStateIds].sort((a, b) => a.localeCompare(b, "en-US")).map((semanticStateId) => {
+    const variableName = runtimeVariableName(workspaceId, semanticStateId);
+    const folded = variableName.toLocaleLowerCase("en-US");
+    if (stateVariableNames.has(folded)) fail("RUNTIME_IDENTITY_ALIAS", `state ${variableName}`);
+    stateVariableNames.add(folded);
+    return { semanticStateId, variableName };
+  });
+  const expectedCorrelation = { controls, pages, states };
+  let comparablePrior = priorCorrelation;
+  if (comparablePrior !== undefined) {
+    const priorRecord = record(comparablePrior, "runtimeCorrelation");
+    comparablePrior = Object.hasOwn(priorRecord, "states") ? priorRecord : { ...priorRecord, states: [] };
+  }
+  if (comparablePrior !== undefined && JSON.stringify(comparablePrior) !== JSON.stringify(expectedCorrelation)) fail(verified === undefined ? "EXISTING_CORRELATION_PROOF_REQUIRED" : "EXISTING_CORRELATION_MISMATCH", "existing runtime correlation differs from verified identities");
   const result = UIImplementationSpecV2Schema.safeParse({ ...implementation, runtimeCorrelation: expectedCorrelation });
   if (!result.success) fail("CORRELATION_INVALID", result.error.issues[0]?.message ?? "invalid runtime correlation");
   return deepFreeze(result.data);

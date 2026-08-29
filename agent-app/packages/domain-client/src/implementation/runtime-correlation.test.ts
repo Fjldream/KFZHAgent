@@ -13,6 +13,7 @@ import { inspectClientProject, serverOwnedRuntimeIdentitySnapshot, type InspectR
 import {
   attachRuntimeCorrelation,
   readVerifiedExistingRuntimeCorrelation,
+  runtimeVariableName,
   verifyExistingRuntimeCorrelation,
   type ExistingRuntimeCorrelationDisposition,
   type VerifiedExistingRuntimeCorrelationHandle,
@@ -191,6 +192,28 @@ describe("attachRuntimeCorrelation", () => {
     expect(Object.isFrozen(result)).toBe(true);
     expect(Object.isFrozen(result.runtimeCorrelation)).toBe(true);
     expect(Object.isFrozen(result.runtimeCorrelation!.controls[0])).toBe(true);
+  });
+
+  it("derives deterministic state variables and rejects case-insensitive semantic aliases", () => {
+    expect(runtimeVariableName("workspace", "filter-tech"))
+      .toBe("$kf_filter_tech_bf69ca90a12d");
+    const result = attachRuntimeCorrelation({
+      workspaceId: "workspace",
+      baseRevisionId: BASE_REVISION_ID,
+      implementation: implementation(),
+      semanticStateIds: ["selected-row", "filter-tech"],
+    });
+    expect(result.runtimeCorrelation!.states).toEqual([
+      { semanticStateId: "filter-tech", variableName: "$kf_filter_tech_bf69ca90a12d" },
+      { semanticStateId: "selected-row", variableName: "$kf_selected_row_abcf19b026c5" },
+    ]);
+    expect(Object.isFrozen(result.runtimeCorrelation!.states![0])).toBe(true);
+    expect(() => attachRuntimeCorrelation({
+      workspaceId: "workspace",
+      baseRevisionId: BASE_REVISION_ID,
+      implementation: implementation(),
+      semanticStateIds: ["filter-tech", "Filter-Tech"],
+    })).toThrow(/SEMANTIC_CASE_ALIAS/);
   });
 
   it("is idempotent, enumeration-order independent, and insertion-stable", () => {

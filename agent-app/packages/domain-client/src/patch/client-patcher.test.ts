@@ -42,6 +42,14 @@ async function resolveVersionDir(root: string): Promise<string> {
   return version ? join(root, version.name) : root;
 }
 
+async function appendFixtureVariable(root: string, variable: Record<string, unknown>): Promise<void> {
+  const projectRoot = await resolveVersionDir(root);
+  const variableFile = join(projectRoot, "project", "Tag", "variables", "group-guid-1.json");
+  const document = JSON.parse(await readFile(variableFile, "utf8")) as { Variables: Array<Record<string, unknown>> };
+  document.Variables.push(variable);
+  await writeFile(variableFile, JSON.stringify(document, null, 2));
+}
+
 async function rootDirOf(root: Root): Promise<string> {
   return typeof root === "string" ? root : root.rootDir;
 }
@@ -869,6 +877,43 @@ describe("client patcher (Task 7 brief Step 1)", () => {
     expect(variables[0]?.comment).toBe("patched comment");
   });
 
+  it.each([
+    { path: "/defaultValue", value: "forged" },
+    { path: "/dataType", value: 1 },
+  ])("rejects generic compiler-owned state variable update at $path", async ({ path: fieldPath, value }) => {
+    const base = await copyFixture("client-unknown-field");
+    await appendFixtureVariable(base, {
+      name: "$kf_filter_tech_bf69ca90a12d", dataType: 3, id: 12,
+      comment: "筛选条件", defaultValue: "all", isMap: false,
+    });
+    await expect(applyClientPatch(base, plan([
+      updateOperation("$kf_filter_tech_bf69ca90a12d", [{ path: fieldPath, value }], { entityType: "variable" }),
+    ]))).rejects.toThrow(/compiler-owned state variable.*generic update/i);
+  });
+
+  it("rejects generic compiler-owned state variable deletion", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const variableName = "$kf_filter_tech_bf69ca90a12d";
+    await appendFixtureVariable(base, {
+      name: variableName, dataType: 3, id: 12,
+      comment: "筛选条件", defaultValue: "all", isMap: false,
+    });
+    await expect(applyClientPatch(base, plan([{
+      op: "delete", entityId: variableName, destructiveConfirmed: true,
+      digest: deleteOperationDigest(variableName),
+    }]))).rejects.toThrow(/compiler-owned state variable.*generic delete/i);
+  });
+
+  it("keeps ordinary variables available to confirmed generic deletion", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const candidate = await applyClientPatch(base, plan([{
+      op: "delete", entityId: "$TestVar", destructiveConfirmed: true,
+      digest: deleteOperationDigest("$TestVar"),
+    }]));
+    const result = await inspectClientProject(await rootDirOf(candidate));
+    expect(Object.values(result.index.variables).some((variable) => variable.name === "$TestVar")).toBe(false);
+  });
+
   it("creates a variable into the located group file (not a hard-coded name)", async () => {
     const base = await copyFixture("client-unknown-field");
     const candidate = await applyClientPatch(base, plan([
@@ -888,6 +933,27 @@ describe("client patcher (Task 7 brief Step 1)", () => {
     const entry = variables.find((v) => v.name === "$NewVar");
     expect(entry).toMatchObject({ dataType: 1, comment: "new", defaultValue: 7 });
     expect(typeof entry?.id).toBe("number");
+  });
+
+  it("writes compiler-owned semantic variables and rejects inconsistent type metadata", async () => {
+    const base = await copyFixture("client-unknown-field");
+    const candidate = await applyClientPatch(base, plan([{
+      op: "create", entityType: "variable", entityId: "$kf_selected_rows_6f6cea6e0dbc",
+      properties: { semanticStateId: "selected-rows", stateType: "record-key-list", dataType: 3, defaultValue: "[\"row-1\"]", comment: "选中记录列表" },
+    }]));
+    const result = await inspectClientProject(await rootDirOf(candidate));
+    const variables = (result.raw.variables["group-guid-1"] as { Variables: Array<Record<string, unknown>> }).Variables;
+    expect(variables.find((entry) => entry.name === "$kf_selected_rows_6f6cea6e0dbc"))
+      .toMatchObject({ dataType: 3, defaultValue: "[\"row-1\"]", comment: "选中记录列表" });
+
+    await expect(applyClientPatch(base, plan([{
+      op: "create", entityType: "variable", entityId: "$kf_bad_deadbeef0000",
+      properties: { semanticStateId: "bad", stateType: "boolean", dataType: 3, defaultValue: true, comment: "错误" },
+    }]))).rejects.toThrow(/semantic variable.*dataType/i);
+    await expect(applyClientPatch(base, plan([{
+      op: "create", entityType: "variable", entityId: "$kf_forged_000000000000",
+      properties: { dataType: 3, defaultValue: "forged", comment: "伪造" },
+    }]))).rejects.toThrow(/semantic variable requires exact/i);
   });
 
   it("accepts a plan whose planHash matches", async () => {

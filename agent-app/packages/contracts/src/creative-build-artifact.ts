@@ -205,6 +205,34 @@ const MaterializedStyleDataSchema = z.object({
   approvedAssets: z.array(VerifiedCreativeAssetSchema).max(64),
 }).strict();
 
+const MaterializedStateSchema = z.object({
+  semanticStateId: boundedId,
+  variableName: z.string().trim().min(1).max(100).regex(/^\$kf_[a-z0-9_]+_[0-9a-f]{12}$/),
+  stateType: z.enum(["boolean", "number", "text", "record-key", "record-key-list"]),
+  dataType: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+  defaultValue: z.union([z.boolean(), z.number().finite(), z.string().max(2_000), z.null()]),
+  comment: z.string().min(1).max(2_000),
+}).strict().superRefine((state, ctx) => {
+  const compatible = state.stateType === "boolean" && state.dataType === 1 && typeof state.defaultValue === "boolean"
+    || state.stateType === "number" && state.dataType === 2 && typeof state.defaultValue === "number"
+    || state.stateType === "text" && state.dataType === 3 && typeof state.defaultValue === "string"
+    || state.stateType === "record-key" && state.dataType === 3 && (typeof state.defaultValue === "string" || state.defaultValue === null)
+    || state.stateType === "record-key-list" && state.dataType === 3 && typeof state.defaultValue === "string";
+  if (!compatible) ctx.addIssue({ code: "custom", path: ["defaultValue"], message: "materialized state value does not match KF data type" });
+  if (state.stateType === "record-key-list" && typeof state.defaultValue === "string") {
+    try {
+      const parsed = JSON.parse(state.defaultValue) as unknown;
+      if (!Array.isArray(parsed) || parsed.length > 100
+        || parsed.some((value) => typeof value !== "string" || !/^[A-Za-z][A-Za-z0-9_-]*$/.test(value))
+        || new Set(parsed).size !== parsed.length || JSON.stringify(parsed) !== state.defaultValue) {
+        ctx.addIssue({ code: "custom", path: ["defaultValue"], message: "record-key-list must be canonical bounded JSON text" });
+      }
+    } catch {
+      ctx.addIssue({ code: "custom", path: ["defaultValue"], message: "record-key-list must be canonical bounded JSON text" });
+    }
+  }
+});
+
 export const TrustedNativeMaterializationSchema = z.object({
   schema: z.literal("kf-trusted-native-materialization/v1"),
   workspaceId: boundedId,
@@ -213,6 +241,7 @@ export const TrustedNativeMaterializationSchema = z.object({
   implementationHash: hash,
   pages: z.array(MaterializedPageSchema).min(1).max(32),
   controls: z.array(MaterializedControlSchema).min(1).max(5_000),
+  states: z.array(MaterializedStateSchema).max(64).optional(),
   stylesData: z.array(MaterializedStyleDataSchema).max(5_000),
   interactions: z.object({
     actions: z.array(CompiledNativeActionSchema).max(3_200),
@@ -301,6 +330,7 @@ export function validateCreativeArtifactMaterializationProjection(
   }
   const pageGuid = new Map(implementation.runtimeCorrelation!.pages.map((entry) => [entry.semanticPageId, entry.pageGuid]));
   const instanceName = new Map(implementation.runtimeCorrelation!.controls.map((entry) => [entry.semanticControlId, entry.instanceName]));
+  const variableName = new Map((implementation.runtimeCorrelation!.states ?? []).map((entry) => [entry.semanticStateId, entry.variableName]));
   const pages = implementation.pages.filter((page): page is Extract<typeof page, { compatibility: "native" }> => page.compatibility === "native")
     .slice().sort((left, right) => compareCreativeIdentifiers(left.id, right.id));
   const pageEvidence = new Map(artifact.evidence.pages.map((page) => [page.semanticPageId, page]));
@@ -314,6 +344,17 @@ export function validateCreativeArtifactMaterializationProjection(
   }));
   const actualPages = materialization.pages.map(({ source, semanticPageId, pageGuid: guid, width, height, order }) => ({ source, semanticPageId, pageGuid: guid, width, height, order }));
   if (stableJson(expectedPages) !== stableJson(actualPages)) throw new Error("CREATIVE_MATERIALIZATION_PROJECTION_MISMATCH: pages");
+  const expectedStates = [...artifact.semanticPlan.localState].sort((left, right) => compareCreativeIdentifiers(left.id, right.id)).map((state) => ({
+    semanticStateId: state.id,
+    variableName: variableName.get(state.id),
+    stateType: state.type,
+    dataType: state.type === "boolean" ? 1 : state.type === "number" ? 2 : 3,
+    defaultValue: state.type === "record-key-list" ? JSON.stringify(state.initialValue) : state.initialValue,
+    comment: state.purpose,
+  }));
+  if (stableJson(expectedStates) !== stableJson(materialization.states ?? [])) {
+    throw new Error("CREATIVE_MATERIALIZATION_PROJECTION_MISMATCH: states");
+  }
   const pageIndex = new Map(pages.map((page, index) => [page.id, index]));
   const pageByControl = new Map(pages.flatMap((page) => page.controls.map((control) => [control.id, page] as const)));
   const controls = pages.flatMap((page) => page.controls).slice().sort((left, right) =>

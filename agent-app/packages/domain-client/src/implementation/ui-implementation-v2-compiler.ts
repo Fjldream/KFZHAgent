@@ -40,6 +40,7 @@ import { compileInteractions } from "../interaction/interaction-compiler.js";
 import {
   attachRuntimeCorrelation,
   readVerifiedExistingRuntimeCorrelation,
+  runtimeVariableName,
   type VerifiedExistingRuntimeCorrelationHandle,
 } from "./runtime-correlation.js";
 import {
@@ -339,7 +340,7 @@ function compileCreativeUIImplementationV2(
     || !("runtimeCorrelation" in plain.implementation)) {
     fail("RUNTIME_CORRELATION_REQUIRED", "native final implementation must have complete runtime correlation");
   }
-  const implementation = UIImplementationSpecV2Schema.parse(plain.implementation);
+  let implementation = UIImplementationSpecV2Schema.parse(plain.implementation);
   if (implementation.compatibility !== "native" || implementation.runtimeCorrelation === undefined) fail("RUNTIME_CORRELATION_REQUIRED", "native final implementation must have complete runtime correlation");
   const correlationInput: UIImplementationSpecV2 = {
     ...implementation,
@@ -351,14 +352,25 @@ function compileCreativeUIImplementationV2(
   };
   delete correlationInput.runtimeCorrelation;
   const trustedCorrelation = attachRuntimeCorrelation({ workspaceId, baseRevisionId, implementation: correlationInput,
+    semanticStateIds: semanticPlan.localState.map((state) => state.id),
     ...(handle === undefined ? {} : { verifiedExisting: handle }) }).runtimeCorrelation;
   const normalizedCorrelation = (correlation: NonNullable<UIImplementationSpecV2["runtimeCorrelation"]>) => ({
     controls: [...correlation.controls].sort((left, right) => compareCreativeIdentifiers(left.semanticControlId, right.semanticControlId)),
     pages: [...correlation.pages].sort((left, right) => compareCreativeIdentifiers(left.semanticPageId, right.semanticPageId)),
+    states: [...(correlation.states ?? [])].sort((left, right) => compareCreativeIdentifiers(left.semanticStateId, right.semanticStateId)),
   });
-  if (canonicalServerHash(normalizedCorrelation(implementation.runtimeCorrelation)) !== canonicalServerHash(normalizedCorrelation(trustedCorrelation!))) {
+  const suppliedCorrelation = normalizedCorrelation(implementation.runtimeCorrelation);
+  const authoritativeCorrelation = normalizedCorrelation(trustedCorrelation!);
+  const suppliedRuntimeIdentity = { controls: suppliedCorrelation.controls, pages: suppliedCorrelation.pages };
+  const authoritativeRuntimeIdentity = { controls: authoritativeCorrelation.controls, pages: authoritativeCorrelation.pages };
+  if (canonicalServerHash(suppliedRuntimeIdentity) !== canonicalServerHash(authoritativeRuntimeIdentity)
+    || (suppliedCorrelation.states.length > 0
+      && canonicalServerHash(suppliedCorrelation.states) !== canonicalServerHash(authoritativeCorrelation.states))) {
     fail("RUNTIME_CORRELATION_PROVENANCE_MISMATCH", "runtime identities were not issued by the Task-2 correlator");
   }
+  implementation = UIImplementationSpecV2Schema.parse({ ...implementation, runtimeCorrelation: trustedCorrelation });
+  const runtimeCorrelation = implementation.runtimeCorrelation;
+  if (runtimeCorrelation === undefined) fail("RUNTIME_CORRELATION_REQUIRED", "trusted runtime correlation was not attached");
   const interactionInput: UIImplementationSpecV2 = {
     ...implementation,
     pages: implementation.pages.map((page) => page.compatibility === "native"
@@ -388,8 +400,8 @@ function compileCreativeUIImplementationV2(
   const projection = handle === undefined ? undefined : readVerifiedExistingRuntimeCorrelation(handle, workspaceId, baseRevisionId);
   const controlSource = new Map(projection?.controls.map((entry) => [entry.semanticControlId, entry]));
   const pageSource = new Map(projection?.pages.map((entry) => [entry.semanticPageId, entry]));
-  const correlationControl = new Map(implementation.runtimeCorrelation.controls.map((entry) => [entry.semanticControlId, entry.instanceName]));
-  const correlationPage = new Map(implementation.runtimeCorrelation.pages.map((entry) => [entry.semanticPageId, entry.pageGuid]));
+  const correlationControl = new Map(runtimeCorrelation.controls.map((entry) => [entry.semanticControlId, entry.instanceName]));
+  const correlationPage = new Map(runtimeCorrelation.pages.map((entry) => [entry.semanticPageId, entry.pageGuid]));
   const nativePages = implementation.pages.filter((page): page is Extract<typeof page, { compatibility: "native" }> => page.compatibility === "native")
     .slice().sort((left, right) => compareCreativeIdentifiers(left.id, right.id));
   validateTabPaneBindings(semanticPlan, candidateBundle, nativePages);
@@ -456,6 +468,32 @@ function compileCreativeUIImplementationV2(
   });
   const artifactHash = canonicalCreativeBuildArtifactHash(artifact);
   const operations: ChangeOperation[] = [];
+  const materializedStates: Array<{
+    semanticStateId: string; variableName: string;
+    stateType: "boolean" | "number" | "text" | "record-key" | "record-key-list";
+    dataType: 1 | 2 | 3; defaultValue: boolean | number | string | null; comment: string;
+  }> = [];
+  const stateCorrelation = new Map((runtimeCorrelation.states ?? []).map((entry) => [entry.semanticStateId, entry.variableName]));
+  for (const state of [...semanticPlan.localState].sort((left, right) => compareCreativeIdentifiers(left.id, right.id))) {
+    const variableName = stateCorrelation.get(state.id);
+    if (variableName === undefined || variableName !== runtimeVariableName(workspaceId, state.id)) {
+      fail("CREATIVE_STATE_CORRELATION_MISMATCH", state.id);
+    }
+    const dataType = state.type === "boolean" ? 1 : state.type === "number" ? 2 : 3;
+    const defaultValue = state.type === "record-key-list" ? JSON.stringify(state.initialValue) : state.initialValue;
+    const typeCompatible = (state.type === "boolean" && dataType === 1 && typeof defaultValue === "boolean")
+      || (state.type === "number" && dataType === 2 && typeof defaultValue === "number" && Number.isFinite(defaultValue))
+      || (state.type === "text" && dataType === 3 && typeof defaultValue === "string")
+      || (state.type === "record-key" && dataType === 3 && (typeof defaultValue === "string" || defaultValue === null))
+      || (state.type === "record-key-list" && dataType === 3 && typeof defaultValue === "string"
+        && defaultValue === JSON.stringify(state.initialValue));
+    if (!typeCompatible) fail("CREATIVE_STATE_VALUE_INVALID", state.id);
+    operations.push({
+      op: "create", entityType: "variable", entityId: variableName,
+      properties: { semanticStateId: state.id, stateType: state.type, dataType, defaultValue, comment: state.purpose },
+    });
+    materializedStates.push({ semanticStateId: state.id, variableName, stateType: state.type, dataType, defaultValue, comment: state.purpose });
+  }
   const materializedPages = nativePages.map((page, order) => {
     const pageGuid = correlationPage.get(page.id)!; const source = pageSource.get(page.id)?.source ?? "workspace-derived";
     operations.push(source === "workspace-derived"
@@ -509,7 +547,7 @@ function compileCreativeUIImplementationV2(
   const eventBindings = implementation.pages.flatMap((page) => page.compatibility === "native" ? page.controls.flatMap((control) => control.eventBindings) : []);
   const materialization = TrustedNativeMaterializationSchema.parse({
     schema: "kf-trusted-native-materialization/v1", workspaceId, baseRevisionId, creativeArtifactHash: artifactHash,
-    implementationHash: artifact.hashes.implementationHash, pages: materializedPages, controls: materializedControls, stylesData,
+    implementationHash: artifact.hashes.implementationHash, pages: materializedPages, controls: materializedControls, states: materializedStates, stylesData,
     interactions: { actions: implementation.compiledActions, scripts: implementation.compiledScripts, eventBindings },
   });
   validateCreativeArtifactMaterializationProjection(artifact, materialization);

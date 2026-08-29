@@ -581,7 +581,27 @@ const RuntimeCorrelationSchema = z.object({
     semanticPageId: stableId,
     pageGuid: CompilerPageGuidSchema,
   }).strict()).max(32),
-}).strict();
+  states: z.array(z.object({
+    semanticStateId: stableId,
+    variableName: z.string().trim().min(1).max(100)
+      .regex(/^\$kf_[a-z0-9_]+_[0-9a-f]{12}$/),
+  }).strict()).max(64).optional(),
+}).strict().superRefine((correlation, ctx) => {
+  const semanticStates = new Set<string>();
+  const variableNames = new Set<string>();
+  (correlation.states ?? []).forEach((entry, index) => {
+    const semanticKey = entry.semanticStateId.toLocaleLowerCase("en-US");
+    const variableKey = entry.variableName.toLocaleLowerCase("en-US");
+    if (semanticStates.has(semanticKey)) {
+      ctx.addIssue({ code: "custom", path: ["states", index, "semanticStateId"], message: `duplicate correlated state: ${entry.semanticStateId}` });
+    }
+    if (variableNames.has(variableKey)) {
+      ctx.addIssue({ code: "custom", path: ["states", index, "variableName"], message: `compiler variable mapped to multiple states: ${entry.variableName}` });
+    }
+    semanticStates.add(semanticKey);
+    variableNames.add(variableKey);
+  });
+});
 
 function containsGeometry(
   outer: { x: number; y: number; width: number; height: number },

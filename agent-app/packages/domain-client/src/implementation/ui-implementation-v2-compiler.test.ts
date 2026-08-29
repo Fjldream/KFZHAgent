@@ -214,6 +214,54 @@ describe("creative UI implementation v2 compiler", () => {
     expect(result.capabilityReport).toMatchObject({ status: "warning", unsupported: [], partial: ["button", "easyui.1", "layout.4"] });
   });
 
+  it("materializes every semantic local state as one compiler-owned KF variable", () => {
+    const source = input();
+    source.semanticPlan.localState = [
+      { id: "enabled", purpose: "是否启用", type: "boolean", initialValue: true },
+      { id: "threshold", purpose: "阈值", type: "number", initialValue: 12.5 },
+      { id: "filter-tech", purpose: "筛选条件", type: "text", initialValue: "all" },
+      { id: "selected-row", purpose: "选中记录", type: "record-key", initialValue: "row-1", mockDataId: "records", keyField: "id" },
+      { id: "selected-rows", purpose: "选中记录列表", type: "record-key-list", initialValue: ["row-1"], mockDataId: "records", keyField: "id" },
+    ];
+    source.semanticPlan.mockData[0]!.records[0]!.values[0]!.value = "row-1";
+    const gridPage = source.implementation.pages[1]!;
+    if (gridPage.compatibility !== "native") throw new Error("native grid fixture required");
+    gridPage.controls[0]!.nativeProperties.tableData = { ...tableData, rows: [{ id: "row-1" }] };
+    gridPage.controls[0]!.dataBinding = { mockDataId: "records", records: [{ id: "row-1" }] };
+    source.semanticPlan.pages[0]!.initialStateIds = ["enabled", "threshold", "filter-tech"];
+    source.semanticPlan.pages[1]!.initialStateIds = ["selected-row", "selected-rows"];
+    compileFixtureInteractions(source);
+
+    const result = compiler.compile(source);
+    const stateOperations = result.plan.operations.filter((operation): operation is Extract<typeof operation, { op: "create" }> =>
+      operation.op === "create" && operation.entityType === "variable");
+    expect(stateOperations).toEqual([
+      { op: "create", entityType: "variable", entityId: "$kf_enabled_ec05f10156e8", properties: { semanticStateId: "enabled", stateType: "boolean", dataType: 1, defaultValue: true, comment: "是否启用" } },
+      { op: "create", entityType: "variable", entityId: "$kf_filter_tech_bf69ca90a12d", properties: { semanticStateId: "filter-tech", stateType: "text", dataType: 3, defaultValue: "all", comment: "筛选条件" } },
+      { op: "create", entityType: "variable", entityId: "$kf_selected_row_abcf19b026c5", properties: { semanticStateId: "selected-row", stateType: "record-key", dataType: 3, defaultValue: "row-1", comment: "选中记录" } },
+      { op: "create", entityType: "variable", entityId: "$kf_selected_rows_cc5ccd53fd14", properties: { semanticStateId: "selected-rows", stateType: "record-key-list", dataType: 3, defaultValue: "[\"row-1\"]", comment: "选中记录列表" } },
+      { op: "create", entityType: "variable", entityId: "$kf_threshold_30ef317db6bb", properties: { semanticStateId: "threshold", stateType: "number", dataType: 2, defaultValue: 12.5, comment: "阈值" } },
+    ]);
+    expect(result.artifact.implementation.runtimeCorrelation!.states).toEqual(stateOperations.map((operation) => ({
+      semanticStateId: operation.properties.semanticStateId,
+      variableName: operation.entityId,
+    })));
+    expect(result.materialization.states).toEqual(stateOperations.map((operation) => ({
+      semanticStateId: operation.properties.semanticStateId,
+      variableName: operation.entityId,
+      stateType: operation.properties.stateType,
+      dataType: operation.properties.dataType,
+      defaultValue: operation.properties.defaultValue,
+      comment: operation.properties.comment,
+    })));
+
+    const forged = cloneInput(source);
+    forged.implementation.runtimeCorrelation!.states = [{
+      semanticStateId: "filter-tech", variableName: "$kf_filter_tech_000000000000",
+    }];
+    expect(() => compiler.compile(forged)).toThrow(/RUNTIME_CORRELATION_PROVENANCE_MISMATCH/);
+  });
+
   it("derives table authorization only from an exact compiler-owned binding and preserves non-creative signing", () => {
     const unbound = input();
     const unboundRoot = unbound.semanticPlan.pages[1]!.root;

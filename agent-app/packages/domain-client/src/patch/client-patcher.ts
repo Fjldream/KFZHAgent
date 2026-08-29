@@ -44,6 +44,7 @@ import {
 } from "../implementation/component-properties.js";
 import { parseTableData, toNativeTableProperties } from "../modules/definitions/native-data-adapters.js";
 import { controlGeometryIssues, MAX_CONTROL_GEOMETRY } from "../implementation/control-geometry.js";
+import { runtimeVariableName } from "../implementation/runtime-correlation.js";
 import { materializeClientAssets } from "../assets/materialize-client-assets.js";
 import { mergeControlTemplate, type TemplateJson } from "../templates/merge-template.js";
 import baseFieldsJson from "../templates/base-fields.json" with { type: "json" };
@@ -947,6 +948,9 @@ async function applyUpdate(
   semanticOperationEntityId = op.entityId,
 ): Promise<void> {
   const loc = await locateEntity(baseRoot, inspection.index, versionDir, op.entityId, op.entityType);
+  if (loc.kind === "variable" && loc.name?.toLocaleLowerCase("en-US").startsWith("$kf_") === true) {
+    throw new PatchConflictError(`compiler-owned state variable "${loc.name}" cannot be changed through a generic update`);
+  }
   const { doc, root } = await entityRootOf(candidate, versionDir, loc, creativeBatch);
   // KF 特殊节点：prototypeName 从候选节点读取（决定几何路径映射，
   // 例如 CustomCharts 几何在 pageProperty.pagePos/pageSize）。
@@ -1380,6 +1384,9 @@ async function applyDelete(
     );
   }
   const loc = await locateEntity(baseRoot, inspection.index, versionDir, op.entityId, op.entityType);
+  if (loc.kind === "variable" && loc.name?.toLocaleLowerCase("en-US").startsWith("$kf_") === true) {
+    throw new PatchConflictError(`compiler-owned state variable "${loc.name}" cannot be removed through a generic delete`);
+  }
   if (loc.kind === "control" || loc.kind === "variable") {
     const { doc, ref } = await entityRootOf(candidate, versionDir, loc);
     if (ref === undefined) {
@@ -1727,6 +1734,53 @@ async function applyCreate(
       break;
     }
     case "variable": {
+      const semanticKeys = ["semanticStateId", "stateType", "dataType", "defaultValue", "comment"] as const;
+      const hasSemanticMetadata = op.entityId.startsWith("$kf_")
+        || Object.hasOwn(op.properties, "semanticStateId") || Object.hasOwn(op.properties, "stateType");
+      if (hasSemanticMetadata) {
+        const actualKeys = Object.keys(op.properties).sort();
+        const expectedKeys = [...semanticKeys].sort();
+        if (actualKeys.length !== expectedKeys.length || actualKeys.some((key, index) => key !== expectedKeys[index])) {
+          throw new PatchConflictError("semantic variable requires exact state identity, type, initial value, and comment metadata");
+        }
+        const semanticStateId = op.properties["semanticStateId"];
+        const stateType = op.properties["stateType"];
+        const dataType = op.properties["dataType"];
+        const defaultValue = op.properties["defaultValue"];
+        const comment = op.properties["comment"];
+        if (typeof semanticStateId !== "string" || !/^[A-Za-z][A-Za-z0-9_-]*$/.test(semanticStateId)) {
+          throw new PatchConflictError("semantic variable has an invalid semanticStateId");
+        }
+        if (stateType !== "boolean" && stateType !== "number" && stateType !== "text"
+          && stateType !== "record-key" && stateType !== "record-key-list") {
+          throw new PatchConflictError("semantic variable has an invalid stateType");
+        }
+        const expectedDataType = stateType === "boolean" ? 1 : stateType === "number" ? 2 : 3;
+        if (dataType !== expectedDataType) {
+          throw new PatchConflictError("semantic variable dataType does not match stateType");
+        }
+        let initialValueMatches = (stateType === "boolean" && typeof defaultValue === "boolean")
+          || (stateType === "number" && typeof defaultValue === "number" && Number.isFinite(defaultValue))
+          || (stateType === "text" && typeof defaultValue === "string" && defaultValue.length <= 2_000)
+          || (stateType === "record-key" && (typeof defaultValue === "string" || defaultValue === null));
+        if (stateType === "record-key-list" && typeof defaultValue === "string") {
+          try {
+            const parsed = JSON.parse(defaultValue) as unknown;
+            initialValueMatches = Array.isArray(parsed) && parsed.length <= 100
+              && parsed.every((value) => typeof value === "string" && /^[A-Za-z][A-Za-z0-9_-]*$/.test(value))
+              && new Set(parsed).size === parsed.length && JSON.stringify(parsed) === defaultValue;
+          } catch {
+            initialValueMatches = false;
+          }
+        }
+        if (!initialValueMatches) throw new PatchConflictError("semantic variable initial value does not match stateType");
+        if (typeof comment !== "string" || comment.length === 0 || comment.length > 2_000) {
+          throw new PatchConflictError("semantic variable comment is invalid");
+        }
+        if (op.entityId !== runtimeVariableName(workspaceId, semanticStateId)) {
+          throw new PatchConflictError("semantic variable name does not match compiler-owned state identity");
+        }
+      }
       const groupFile = await resolveVariableGroupFile(inspection.index, baseRoot, versionDir);
       const doc = await readJsonFile(candidate, versionDir, groupFile);
       const variables = Array.isArray(doc["Variables"]) ? (doc["Variables"] as unknown[]) : [];

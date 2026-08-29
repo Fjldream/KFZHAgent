@@ -121,6 +121,12 @@ describe("creative build contracts", () => {
     expect(canonicalTrustedNativeMaterializationHash(TrustedNativeMaterializationSchema.parse(css))).not.toBe(first);
     const action = structuredClone(base); action.interactions.actions[0]!.targetPageGuid = "k00000000-0000-4000-8000-000000000002";
     expect(canonicalTrustedNativeMaterializationHash(TrustedNativeMaterializationSchema.parse(action))).not.toBe(first);
+    const state = structuredClone(base) as ReturnType<typeof materialization> & { states: Array<Record<string, unknown>> };
+    state.states = [{ semanticStateId: "filter-tech", variableName: "$kf_filter_tech_bf69ca90a12d", stateType: "text", dataType: 3, defaultValue: "all", comment: "筛选条件" }];
+    const stateHash = canonicalTrustedNativeMaterializationHash(TrustedNativeMaterializationSchema.parse(state));
+    expect(stateHash).not.toBe(first);
+    state.states[0]!.defaultValue = "forged";
+    expect(canonicalTrustedNativeMaterializationHash(TrustedNativeMaterializationSchema.parse(state))).not.toBe(stateHash);
     const script = structuredClone(base); const source = "Button1.Click();\n"; const scriptId = "kf$script:refresh";
     (script.interactions.scripts as Array<unknown>).push({ id: scriptId, sourceScriptId: "refresh", placement: "event", ownerInstanceName: "Button1", instanceReferences: [{ semanticId: "open", instanceName: "Button1" }], pageReferences: [], source, sourceHash: createHash("sha256").update(source).digest("hex") });
     (script.interactions.eventBindings[0]!.scriptModuleIds as string[]) = [scriptId];
@@ -291,5 +297,20 @@ describe("creative build contracts", () => {
     tampered.plan.creative.materializationHash = tampered.nativeMaterializationHash;
     tampered.planHash = canonicalChangePlanHash(tampered.plan);
     expect(() => validateServerPlanEnvelopeData(tampered)).toThrow(/PROJECTION_MISMATCH/);
+  });
+
+  it("binds semantic variable operations into plan hashing and signing bytes", () => {
+    const variable = {
+      op: "create" as const, entityType: "variable", entityId: "$kf_filter_tech_bf69ca90a12d",
+      properties: { semanticStateId: "filter-tech", stateType: "text", dataType: 3, defaultValue: "all", comment: "筛选条件" },
+    };
+    const basePlan = { schema: "kf-change-plan/v1" as const, workspaceId: "workspace", operations: [variable] };
+    const tamperedPlan = structuredClone(basePlan);
+    tamperedPlan.operations[0]!.properties.defaultValue = "forged";
+    expect(canonicalChangePlanHash(tamperedPlan)).not.toBe(canonicalChangePlanHash(basePlan));
+
+    const baseEnvelope = { schema: "kf-server-plan-envelope/v1" as const, plan: basePlan, planHash: canonicalChangePlanHash(basePlan), revisionId: "revision", semanticOperations: [], signature: "0".repeat(64) };
+    const tamperedEnvelope = { ...baseEnvelope, plan: tamperedPlan, planHash: canonicalChangePlanHash(tamperedPlan) };
+    expect(canonicalServerPlanSigningBytes(tamperedEnvelope)).not.toEqual(canonicalServerPlanSigningBytes(baseEnvelope));
   });
 });
