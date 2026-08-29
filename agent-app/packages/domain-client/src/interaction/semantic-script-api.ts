@@ -284,7 +284,12 @@ export function createSemanticScriptApiContext(input: unknown): SemanticScriptAp
       if (sourceNode === undefined || control.sourceBlueprintPageId !== page.sourceBlueprintPageId) {
         return invalidContext(control.id, "implementation control page ownership or provenance does not match the authoritative plan");
       }
-      if (sourceNode.kind === "control" && sourceNode.capabilityId !== control.capabilityId) {
+      const reviewedInteractiveText = sourceNode.kind === "control"
+        && sourceNode.capabilityId === "text"
+        && control.capabilityId === "button"
+        && control.role === "interactive-text"
+        && sourceNode.eventBindings.some((binding) => binding.semanticEvent === "click");
+      if (sourceNode.kind === "control" && sourceNode.capabilityId !== control.capabilityId && !reviewedInteractiveText) {
         return invalidContext(control.id, "implementation control capability does not match the authoritative plan");
       }
       if (control.overlayHost !== undefined) {

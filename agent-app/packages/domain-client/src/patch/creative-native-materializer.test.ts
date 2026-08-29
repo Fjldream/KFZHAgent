@@ -22,6 +22,7 @@ import { inspectClientProject } from "../inspect/client-inspector.js";
 import { createCreativeUIImplementationV2Compiler } from "../implementation/ui-implementation-v2-compiler.js";
 import {
   attachRuntimeCorrelation,
+  runtimeVariableName,
   verifyExistingRuntimeCorrelation,
   type VerifiedExistingRuntimeCorrelationHandle,
 } from "../implementation/runtime-correlation.js";
@@ -605,6 +606,40 @@ async function existingSignedFixture(withImageAsset = false) {
 }
 
 describe("creative native materializer", () => {
+  it("blocks a missing non-Image closure during the authoritative V2 recompile", () => {
+    const input = creativeInput();
+    input.semanticPlan.localState.push({
+      id: "opened", purpose: "记录无可见结果的按钮操作", type: "boolean", initialValue: false,
+    });
+    input.semanticPlan.actions[0] = {
+      id: "navigate", kind: "set-state", stateId: "opened", value: true, afterActionIds: [],
+      journeyStepRefs: [{ journeyId: "open-detail", stepIndex: 0 }],
+    };
+    input.implementation.sourceSolutionPlanHash = canonicalServerHash(input.semanticPlan);
+    input.implementation.sourceModuleRegistryHash = solutionModuleRegistryHash(input.semanticPlan, createDefaultModuleRegistry());
+    input.implementation.runtimeCorrelation!.states = [{
+      semanticStateId: "opened", variableName: runtimeVariableName(input.workspaceId, "opened"),
+    }];
+    const authoritativeInput: UIImplementationSpecV2 = {
+      ...input.implementation,
+      compiledActions: [],
+      compiledScripts: [],
+      pages: input.implementation.pages.map((page) => page.compatibility !== "native" ? page : ({
+        ...page, controls: page.controls.map((control) => ({ ...control, eventBindings: [] })),
+      })),
+    };
+    const compiled = compileInteractions({
+      blueprint: input.blueprint, plan: input.semanticPlan, implementation: authoritativeInput,
+    });
+    expect(compiled.diagnostics.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "INTERACTION_CLOSURE_MISSING", nodeId: "navigate" }),
+    ]));
+    input.implementation = structuredClone(compiled.implementation);
+    const facade = createHmacCreativeBuildFacade(Buffer.alloc(32, 0x42), createCreativeUIImplementationV2Compiler);
+
+    expect(() => facade.compiler.compiler.compile(input)).toThrow(/CREATIVE_INTERACTION_COMPILATION_BLOCKED/);
+  });
+
   it("packages an initially hidden overlay with exact compiler-authored open and close visibility scripts", async () => {
     const { result, resolved, planHash } = await signedFixture(0, false, false, false, true);
     const base = await baseWorkspace();
@@ -637,6 +672,11 @@ describe("creative native materializer", () => {
     };
     const inspection = await inspectClientProject(candidate.rootDir);
     inspectOverlay(inspection);
+    for (const state of result.materialization.states ?? []) {
+      expect(Object.values(inspection.index.variables)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: state.variableName }),
+      ]));
+    }
     const report = await pack.validate({
       baseWorkspace: base, candidateWorkspace: candidate, changePlan: result.plan,
       creativeMaterialization: resolved.creativeMaterialization,
@@ -646,7 +686,13 @@ describe("creative native materializer", () => {
       (await pack.package({ workspace: candidate })).bytes,
       await mkdtemp(path.join(tmpdir(), "kf-overlay-import-")),
     );
-    inspectOverlay(await inspectClientProject(imported));
+    const importedInspection = await inspectClientProject(imported);
+    inspectOverlay(importedInspection);
+    for (const state of result.materialization.states ?? []) {
+      expect(Object.values(importedInspection.index.variables)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: state.variableName }),
+      ]));
+    }
 
     const detailPage = inspection.index.pages[overlay.pageGuid]!;
     const pagePath = path.join(candidate.rootDir, "1.0.0.1", detailPage.file);

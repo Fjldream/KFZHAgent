@@ -276,8 +276,9 @@ describe("conversation graph workspace query", () => {
         afterActionIds: [], journeyStepRefs: [],
       }],
     });
+    const prisma = creativePrisma();
     const compiler = createCreativeSolutionCompilerFromEnvironment(
-      creativePrisma().client,
+      prisma.client,
       {} as never,
       { resolveManyForCompilation: vi.fn().mockResolvedValue([]) },
       { KF_SERVER_PLAN_HMAC_KEY_BASE64: Buffer.alloc(32, 0x61).toString("base64") },
@@ -299,6 +300,12 @@ describe("conversation graph workspace query", () => {
       outcome.status,
       outcome.status === "blocked" ? JSON.stringify(outcome.diagnostics) : undefined,
     ).toBe("compiled");
+    if (outcome.status !== "compiled") return;
+    const persisted = prisma.plans.get(outcome.changePlanId)!;
+    const envelope = persisted.plan as { plan: { operations: Array<Record<string, unknown>> } };
+    expect(envelope.plan.operations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ op: "create", entityType: "variable" }),
+    ]));
   });
 
   it.each([

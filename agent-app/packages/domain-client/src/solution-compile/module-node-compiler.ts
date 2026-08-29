@@ -472,6 +472,19 @@ export function adaptReviewedComponentProperties(
   asset: Readonly<{ facts: ApprovedAssetFacts }> | undefined,
 ): Readonly<{ nativeProperties: UIImplementationControlV2["nativeProperties"]; content?: string }> {
   const candidate: { [key: string]: SemanticData } = { ...properties };
+  // These fields are authoritative interaction-design metadata consumed by
+  // reviewed intent lowering. They are deliberately not native KF component
+  // properties and must never be forwarded to the native property adapter.
+  const interactionMetadata = capabilityId === "select"
+    ? ["filterField", "filterMode"]
+    : capabilityId === "easyui.1"
+      ? ["filterCombine"]
+      : capabilityId === "input"
+        ? ["required", "validationMessage"]
+        : capabilityId === "button"
+          ? ["successMessage", "feedbackMessage", "feedbackLevel"]
+          : [];
+  interactionMetadata.forEach((key) => { delete candidate[key]; });
   if (candidate.src === "asset") {
     if (asset === undefined) fail("MODULE_ASSET_NOT_APPROVED", [capabilityId, "src"], "asset marker has no approved binding");
     candidate.src = asset.facts.targetPath;

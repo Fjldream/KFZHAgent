@@ -516,25 +516,65 @@ export function createCreativeSolutionCompilerFromEnvironment(
           plan: input.semanticPlan,
           implementation: correlated.implementation,
         });
-        const warnings = interactions.diagnostics.warnings.map((diagnostic) => ({
+        const explicitlyUnresolvedImageClickActions = new Set<string>();
+        const collectImageClicks = (node: SolutionImplementationPlan["pages"][number]["root"]): void => {
+          if (node.kind === "layout") {
+            node.children.forEach(collectImageClicks);
+            return;
+          }
+          if (node.kind === "registered-module") {
+            node.slots.forEach((slot) => slot.children.forEach(collectImageClicks));
+            return;
+          }
+          if (node.kind === "repeater") {
+            collectImageClicks(node.template);
+            return;
+          }
+          if (node.capabilityId !== "image") return;
+          node.eventBindings
+            .filter((binding) => binding.semanticEvent === "click")
+            .forEach((binding) => binding.actionIds.forEach((actionId) => explicitlyUnresolvedImageClickActions.add(actionId)));
+        };
+        input.semanticPlan.pages.forEach((page) => collectImageClicks(page.root));
+        input.semanticPlan.overlays.forEach((overlay) => collectImageClicks(overlay.root));
+        const recoverableRequests = interactions.diagnostics.requests
+          .filter((request) => request.reason === "TRIGGER_EVENT_UNSUPPORTED"
+            && explicitlyUnresolvedImageClickActions.has(request.actionId));
+        const recoverableActionIds = new Set(recoverableRequests.map((request) => request.actionId));
+        const recoverableErrors = interactions.diagnostics.errors
+          .filter((diagnostic) => diagnostic.code === "INTERACTION_CLOSURE_MISSING"
+            && recoverableActionIds.has(diagnostic.nodeId));
+        const warnings = [
+          ...interactions.diagnostics.warnings,
+          ...recoverableErrors,
+          ...recoverableRequests.map((request) => ({
+            code: "INTERACTION_COMPILATION_REQUEST",
+            nodeId: request.actionId,
+            message: request.reason,
+          })),
+        ].map((diagnostic) => ({
           code: diagnostic.code,
           nodeId: diagnostic.nodeId,
           message: "工程能力已采用受支持的兼容处理",
           phase: "interaction",
         }));
         const blocking: CreativeCompilationDiagnostic[] = [
-          ...interactions.diagnostics.errors.map((diagnostic) => ({
+          ...interactions.diagnostics.errors
+            .filter((diagnostic) => !recoverableErrors.includes(diagnostic))
+            .map((diagnostic) => ({
             code: diagnostic.code,
             nodeId: diagnostic.nodeId,
             message: "交互工程能力校验未通过",
             phase: "interaction",
           })),
-          ...interactions.diagnostics.requests.map((request) => ({
-            code: "INTERACTION_COMPILATION_REQUEST",
-            nodeId: request.actionId,
-            message: "交互需要补充明确的可执行能力",
-            phase: "interaction",
-          })),
+          ...interactions.diagnostics.requests
+            .filter((request) => !recoverableRequests.includes(request))
+            .map((request) => ({
+              code: "INTERACTION_COMPILATION_REQUEST",
+              nodeId: request.actionId,
+              message: "交互需要补充明确的可执行能力",
+              phase: "interaction" as const,
+            })),
         ];
         if (blocking.length > 0) return { status: "blocked" as const, diagnostics: blocking, warnings };
 

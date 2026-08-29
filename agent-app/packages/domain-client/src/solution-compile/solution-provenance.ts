@@ -245,7 +245,13 @@ export function validateSolutionControlSemanticProjection(input: Readonly<{
       throw new SolutionProvenanceError(control.id, "expanded source, repeater, or parent correlation mismatch");
     }
     if (provenance.kind === "control" && provenance.sourceNode.kind === "control") {
-      if (control.capabilityId !== provenance.sourceNode.capabilityId) throw new SolutionProvenanceError(control.id, "control capability mismatch");
+      const reviewedInteractiveText = provenance.sourceNode.capabilityId === "text"
+        && control.capabilityId === "button"
+        && control.role === "interactive-text"
+        && provenance.sourceNode.eventBindings.some((binding) => binding.semanticEvent === "click");
+      if (control.capabilityId !== provenance.sourceNode.capabilityId && !reviewedInteractiveText) {
+        throw new SolutionProvenanceError(control.id, "control capability mismatch");
+      }
       if (!exactAssetIds(control, expectedControlAssetIds(provenance.sourceNode, recordsByControl.get(control.id)!))) {
         throw new SolutionProvenanceError(control.id, "control asset ownership mismatch");
       }

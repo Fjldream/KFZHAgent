@@ -61,6 +61,22 @@ export interface CompileCreativeUIImplementationV2Input {
   readonly verifiedExisting?: VerifiedExistingRuntimeCorrelationHandle;
 }
 
+function explicitlyUnresolvedImageClickActions(plan: SolutionImplementationPlan): ReadonlySet<string> {
+  const actions = new Set<string>();
+  const collect = (node: SolutionImplementationPlan["pages"][number]["root"]): void => {
+    if (node.kind === "layout") { node.children.forEach(collect); return; }
+    if (node.kind === "registered-module") { node.slots.forEach((slot) => slot.children.forEach(collect)); return; }
+    if (node.kind === "repeater") { collect(node.template); return; }
+    if (node.capabilityId !== "image") return;
+    node.eventBindings
+      .filter((binding) => binding.semanticEvent === "click")
+      .forEach((binding) => binding.actionIds.forEach((actionId) => actions.add(actionId)));
+  };
+  plan.pages.forEach((page) => collect(page.root));
+  plan.overlays.forEach((overlay) => collect(overlay.root));
+  return actions;
+}
+
 declare const verifiedCreativeAssetProofBrand: unique symbol;
 export interface VerifiedCreativeAssetProofHandle { readonly [verifiedCreativeAssetProofBrand]: true }
 
@@ -380,7 +396,14 @@ function compileCreativeUIImplementationV2(
     compiledScripts: [],
   };
   const authoritativeInteractions = compileInteractions({ blueprint, plan: semanticPlan, implementation: interactionInput });
-  if (authoritativeInteractions.diagnostics.errors.length > 0 || authoritativeInteractions.diagnostics.requests.length > 0) {
+  const imageClickActions = explicitlyUnresolvedImageClickActions(semanticPlan);
+  const recoverableRequestActionIds = new Set(authoritativeInteractions.diagnostics.requests
+    .filter((request) => request.reason === "TRIGGER_EVENT_UNSUPPORTED" && imageClickActions.has(request.actionId))
+    .map((request) => request.actionId));
+  const hasBlockingInteraction = authoritativeInteractions.diagnostics.errors.some((diagnostic) =>
+    diagnostic.code !== "INTERACTION_CLOSURE_MISSING" || !recoverableRequestActionIds.has(diagnostic.nodeId))
+    || authoritativeInteractions.diagnostics.requests.some((request) => !recoverableRequestActionIds.has(request.actionId));
+  if (hasBlockingInteraction) {
     fail("CREATIVE_INTERACTION_COMPILATION_BLOCKED", canonicalServerHash(authoritativeInteractions.diagnostics));
   }
   if (canonicalServerHash(authoritativeInteractions.implementation) !== canonicalServerHash(implementation)) {

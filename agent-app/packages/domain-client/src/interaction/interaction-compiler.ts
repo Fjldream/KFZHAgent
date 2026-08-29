@@ -353,8 +353,10 @@ export function compileInteractions(input: unknown): InteractionCompilationResul
   const actionOrder = new Map(normalized.executionOrder.map((id, index) => [id, index]));
   for (const request of [...native.scriptRequests].sort((left, right) => (actionOrder.get(left.actionId) ?? 0) - (actionOrder.get(right.actionId) ?? 0))) {
     if (request.reason !== "RUN_SCRIPT_REQUIRES_VALIDATION" || request.sourceScriptId === undefined) {
-      errors.push(diagnostic("INTERACTION_SCRIPT_BLOCKED", request.actionId, request.reason));
       requests.push(requestDiagnostic(request, request.reason));
+      if (request.reason !== "TRIGGER_EVENT_UNSUPPORTED") {
+        errors.push(diagnostic("INTERACTION_SCRIPT_BLOCKED", request.actionId, request.reason));
+      }
       continue;
     }
     const script = scriptById.get(request.sourceScriptId);
@@ -397,7 +399,7 @@ export function compileInteractions(input: unknown): InteractionCompilationResul
       if (compiled.binding !== undefined) scriptBindings.push(compiled.binding);
       scheduledByScript.set(script.id, compiled.scheduledScriptIds);
       if (calls.some((call) => isVisibleCall(call) && call.execution !== "conditional")
-        || (calls.length === 0 && /\.(?:SetData|SetValue|SetVisible)\s*\(/.test(compiled.module.source))) visibleScriptIds.add(script.id);
+        || (calls.length === 0 && /(?:\.(?:SetData|SetValue|SetVisible)|\bShowMessage)\s*\(/.test(compiled.module.source))) visibleScriptIds.add(script.id);
       if (calls.some((call) => isVisibleCall(call) && call.execution === "conditional")
         && !calls.some((call) => isVisibleCall(call) && call.execution !== "conditional")) {
         errors.push(diagnostic("INTERACTION_CLOSURE_MISSING", script.id, "conditional visible effects do not prove every branch terminates visibly"));

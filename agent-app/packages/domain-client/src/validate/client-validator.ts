@@ -289,6 +289,29 @@ function canonicalFeedbackSource(marker: CompilerFeedbackActionMarker): string {
   return `ShowMessage(${JSON.stringify({ message: marker.message, type: marker.level })});`;
 }
 
+function isCanonicalShowMessageCall(value: Record<string, unknown> | undefined): boolean {
+  if (value?.["type"] !== "CallExpression") return false;
+  const callee = value["callee"] as Record<string, unknown> | undefined;
+  const args = value["arguments"] as Array<Record<string, unknown>> | undefined;
+  if (callee?.["type"] !== "Identifier" || callee["name"] !== "ShowMessage" || args?.length !== 1) return false;
+  const argument = args[0];
+  const properties = argument?.["type"] === "ObjectExpression"
+    ? argument["properties"] as Array<Record<string, unknown>> | undefined
+    : undefined;
+  if (properties?.length !== 2) return false;
+  const fields = new Map(properties.flatMap((property) => {
+    if (property["type"] !== "Property" || property["computed"] === true || property["kind"] !== "init") return [];
+    const key = property["key"] as Record<string, unknown> | undefined;
+    const field = key?.["type"] === "Identifier" ? key["name"] : key?.["type"] === "Literal" ? key["value"] : undefined;
+    const literal = property["value"] as Record<string, unknown> | undefined;
+    return typeof field === "string" && literal?.["type"] === "Literal" ? [[field, literal["value"]] as const] : [];
+  }));
+  const message = fields.get("message");
+  const level = fields.get("type");
+  return fields.size === 2 && typeof message === "string" && message.length >= 1 && message.length <= 2_000
+    && typeof level === "string" && ["success", "info", "warning", "error"].includes(level);
+}
+
 function compilerMarkerNamespaceIssue(value: unknown): string | undefined {
   const schema = asRecord(value)["schema"];
   if (typeof schema !== "string" || !schema.startsWith("kf-compiled-")) return undefined;
@@ -358,6 +381,7 @@ function compilerOwnedSegments(source: string): { readonly segments: readonly Co
 function compilerSourceIssue(
   segment: CompilerOwnedSegment,
   instanceTypes: ReadonlyMap<string, RuntimeControlType>,
+  variableNames: ReadonlySet<string>,
   visibilityAction?: CompilerVisibilityActionMarker,
 ): string | undefined {
   const { body: source, metadata } = segment;
@@ -835,6 +859,8 @@ function compilerSourceIssue(
             || ((parentRecord?.["type"] === "FunctionDeclaration" || parentRecord?.["type"] === "FunctionExpression" || parentRecord?.["type"] === "ArrowFunctionExpression")
               && Array.isArray(parentRecord["params"]) && parentRecord["params"].includes(node));
           const allowedGlobal = ["String", "Number", "Boolean", "Math", "Date"].includes(name)
+            || (name === "ShowMessage" && parentRecord?.["callee"] === node && isCanonicalShowMessageCall(parentRecord))
+            || name === "$Variable"
             || (name === "arguments" && metadata.placement === "event" && isDatagrid(instanceTypes.get(metadata.ownerInstanceName)) && metadata.kfEvent === "onClickRow")
             || declaredInstances.has(name) && instanceTypes.has(name);
           if (!isProperty && !isObjectKey && !isDeclaration && !resolvesLocal(scopeByNode.get(node), name) && !allowedGlobal) {
@@ -858,7 +884,9 @@ function compilerSourceIssue(
         const callee = record["callee"] as Record<string, unknown> | undefined;
         if (callee?.["type"] === "Identifier") {
           const name = typeof callee["name"] === "string" ? callee["name"] : undefined;
-          if (name === undefined || (!resolvesCallable(scopeByNode.get(node), name) && !["String", "Number", "Boolean"].includes(name))) astIssue ??= "dynamic or unknown direct call";
+          if (name === undefined || (!resolvesCallable(scopeByNode.get(node), name)
+            && !["String", "Number", "Boolean"].includes(name)
+            && !(name === "ShowMessage" && isCanonicalShowMessageCall(record)))) astIssue ??= "dynamic or unknown direct call";
           if (name !== undefined && resolvesCallable(scopeByNode.get(node), name)) {
             const edges = functionCalls.get(currentFunction) ?? new Set<string>(); edges.add(name); functionCalls.set(currentFunction, edges);
             const start = typeof record["start"] === "number" ? record["start"] : Number.MAX_SAFE_INTEGER;
@@ -883,6 +911,7 @@ function compilerSourceIssue(
             && args[0]["value"] === visibilityAction.visible;
           const runtimeCall = objectName !== undefined && declaredInstances.has(objectName)
             && (member === "SetData" && (isUiModel(runtimeType, 31) || isDatagrid(runtimeType)) && args.length === 1
+              || member === "GetCheckedNodes" && isUiModel(runtimeType, 44) && args.length === 0
               || exactOverlayVisibilityCall);
           const mathCall = standardGlobal && (objectName === "Math" && ["abs", "ceil", "floor", "round", "trunc"].includes(member ?? "") && args.length === 1
             || objectName === "Math" && ["max", "min"].includes(member ?? "") && args.length >= 1 && args.length <= 1_000);
@@ -966,7 +995,11 @@ function compilerSourceIssue(
           const boundedCounter = counter !== undefined && targetFact.kind === "bounded-array"
             && activeLoops.some((loop) => loop.counter === counter && loop.maxIndex !== undefined && loop.maxIndex < targetFact.maxLength);
           const objectName = identifierName(target["object"]);
-          if (type !== "AssignmentExpression" || record["operator"] !== "=" || target["computed"] !== true || (!literalIndex && !boundedCounter)) {
+          const stateVariableWrite = type === "AssignmentExpression" && record["operator"] === "="
+            && objectName === "$Variable" && target["computed"] === false
+            && typeof staticMember(targetProperty) === "string" && variableNames.has(staticMember(targetProperty)!);
+          if (!stateVariableWrite
+            && (type !== "AssignmentExpression" || record["operator"] !== "=" || target["computed"] !== true || (!literalIndex && !boundedCounter))) {
             astIssue ??= "member assignment requires a proven bounded-array index";
           }
           if (objectName !== undefined) {
@@ -1032,6 +1065,7 @@ function compilerSourceIssue(
       const supported = (isUiModel(runtimeType, 38) && member === "Value" && !called && !written)
         || (isUiModel(runtimeType, 31) && member === "SetData" && called)
         || (isDatagrid(runtimeType) && member === "SetData" && called)
+        || (isUiModel(runtimeType, 44) && member === "GetCheckedNodes" && called && !written)
         || (visibilityAction !== undefined && runtimeType?.kind === "layout"
           && name === visibilityAction.targetInstanceName && member === "setVisible" && called && !written);
       if (!supported) unsupportedRuntimeMember ??= `${name}.${member ?? "?"}`;
@@ -1247,6 +1281,7 @@ function compilerSourceIssue(
     const reviewedEvent = (isUiModel(ownerType, 35) && metadata.kfEvent === "onClick" && metadata.linkId === 200001)
       || (isUiModel(ownerType, 31) && metadata.kfEvent === "Cell-click" && metadata.linkId === 200006)
       || (isDatagrid(ownerType) && metadata.kfEvent === "onClickRow" && metadata.linkId === 200024)
+      || (isUiModel(ownerType, 44) && metadata.kfEvent === "Change" && metadata.linkId === null)
       || (isUiModel(ownerType, 47) && metadata.kfEvent === "Tab-click" && metadata.linkId === null);
     if (!reviewedEvent || metadata.phase === null) return "compiled script event is not in the evidence-backed allowlist";
   } else if (!(isUiModel(instanceTypes.get(metadata.ownerInstanceName), 31)
@@ -1495,6 +1530,7 @@ async function checkBusinessRules(
   });
   const compilerModuleIds = new Set<string>();
   const compilerActionMarkerIds = new Set<string>();
+  const variableNames = new Set(Object.values(inspection.index.variables).map((variable) => variable.name));
 
   for (const [pageGuid, tree] of Object.entries(inspection.raw.pages)) {
     const pageInstanceTypes = instanceTypesByPage.get(pageGuid) ?? new Map<string, RuntimeControlType>();
@@ -1598,7 +1634,7 @@ async function checkBusinessRules(
           for (const segment of parsedCompilerSource.segments) {
             if (compilerModuleIds.has(segment.metadata.moduleId)) issues.push(`control "${String(name)}" duplicate compiled module identity`);
             compilerModuleIds.add(segment.metadata.moduleId);
-            const sourceIssue = compilerSourceIssue(segment, pageInstanceTypes, visibilityMarker);
+            const sourceIssue = compilerSourceIssue(segment, pageInstanceTypes, variableNames, visibilityMarker);
             if (sourceIssue !== undefined) issues.push(`control "${String(name)}" ${sourceIssue}`);
             const metadata = segment.metadata;
             if (metadata.placement !== "event") issues.push(`control "${String(name)}" event contains a non-event compiled module`);
@@ -1682,7 +1718,7 @@ async function checkBusinessRules(
         for (const segment of parsedConfigure.segments) {
           if (compilerModuleIds.has(segment.metadata.moduleId)) issues.push(`control "${String(name)}" duplicate compiled module identity`);
           compilerModuleIds.add(segment.metadata.moduleId);
-          const sourceIssue = compilerSourceIssue(segment, pageInstanceTypes);
+          const sourceIssue = compilerSourceIssue(segment, pageInstanceTypes, variableNames);
           if (sourceIssue !== undefined) issues.push(`control "${String(name)}" ${sourceIssue}`);
           if (segment.metadata.placement !== "configure-data" || segment.metadata.kfEvent !== null
             || segment.metadata.linkId !== null || segment.metadata.phase !== null) {

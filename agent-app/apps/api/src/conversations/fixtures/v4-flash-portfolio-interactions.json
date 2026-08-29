@@ -1,0 +1,318 @@
+{
+  "fixtureProvenance": {
+    "description": "Sanitized semantic subset derived from /tmp/kf-solution-output-3.json",
+    "sanitized": true
+  },
+  "blueprint": {
+    "schema": "kf-design-plan/v3",
+    "displayName": "脱敏交互作品集",
+    "objective": "验证筛选、表单、导航与弹层的前端交互闭环",
+    "audiences": ["演示用户"],
+    "scenarios": ["筛选作品并提交联系信息"],
+    "pages": [
+      { "id": "bp-home", "title": "作品概览", "purpose": "筛选和操作作品", "readingOrder": ["region-home", "region-form"], "regions": [
+        { "id": "region-home", "purpose": "作品交互", "semanticRoles": ["content", "action"], "dataShape": "records", "density": "comfortable", "importance": "primary", "content": ["作品列表", "联系表单"], "sampleData": [], "interactions": ["筛选作品", "打开弹层", "进入详情"], "states": ["ready", "filtered"], "visualIntent": "专业清晰" },
+        { "id": "region-form", "purpose": "联系表单", "semanticRoles": ["action"], "dataShape": "form", "density": "comfortable", "importance": "secondary", "content": ["联系表单"], "sampleData": [], "interactions": ["校验并提交联系表单"], "states": ["ready", "submitted"], "visualIntent": "简洁" }
+      ] },
+      { "id": "bp-detail", "title": "项目详情", "purpose": "展示项目详情", "readingOrder": ["region-detail"], "regions": [
+        { "id": "region-detail", "purpose": "项目内容", "semanticRoles": ["content"], "dataShape": "content", "density": "comfortable", "importance": "primary", "content": ["项目详情"], "sampleData": [], "interactions": [], "states": ["ready"], "visualIntent": "清晰" }
+      ] }
+    ],
+    "journeys": [{ "id": "open-detail", "actor": "演示用户", "goal": "查看项目详情", "steps": [{ "pageId": "bp-home", "regionId": "region-home", "action": "点击详情入口", "result": "详情页可见" }], "completion": "详情页可见" }],
+    "visualDirection": { "tone": "专业", "colors": ["深蓝", "橙色"], "typography": "清晰", "spacingAndSurfaces": "舒适" },
+    "acceptanceScenarios": ["筛选、提交、导航和弹层均可演示"],
+    "openQuestions": []
+  },
+  "candidateBundle": {
+    "schema": "kf-capability-candidates/v1",
+    "knowledgeCatalogVersion": "1.0.0",
+    "blueprintHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "regions": [
+      { "pageId": "bp-home", "regionId": "region-home", "controls": [
+        { "id": "button", "score": 3, "reasons": ["交互测试所需"], "limitations": [], "knowledgeVersion": "1.0.0" },
+        { "id": "easyui.1", "score": 3, "reasons": ["交互测试所需"], "limitations": [], "knowledgeVersion": "1.0.0" },
+        { "id": "image", "score": 3, "reasons": ["交互测试所需"], "limitations": [], "knowledgeVersion": "1.0.0" },
+        { "id": "select", "score": 3, "reasons": ["交互测试所需"], "limitations": [], "knowledgeVersion": "1.0.0" },
+        { "id": "text", "score": 3, "reasons": ["交互测试所需"], "limitations": [], "knowledgeVersion": "1.0.0" }
+      ], "layouts": [{ "id": "layout.4", "score": 3, "reasons": ["交互测试所需"], "limitations": [], "knowledgeVersion": "1.0.0" }], "recipes": [{ "id": "content.hero", "score": 3, "reasons": ["交互测试所需"], "limitations": [], "knowledgeVersion": "1.0.0" }] },
+      { "pageId": "bp-home", "regionId": "region-form", "controls": [
+        { "id": "button", "score": 3, "reasons": ["交互测试所需"], "limitations": [], "knowledgeVersion": "1.0.0" },
+        { "id": "input", "score": 3, "reasons": ["交互测试所需"], "limitations": [], "knowledgeVersion": "1.0.0" },
+        { "id": "text", "score": 3, "reasons": ["交互测试所需"], "limitations": [], "knowledgeVersion": "1.0.0" }
+      ], "layouts": [{ "id": "layout.4", "score": 3, "reasons": ["交互测试所需"], "limitations": [], "knowledgeVersion": "1.0.0" }], "recipes": [{ "id": "form.contact", "score": 3, "reasons": ["交互测试所需"], "limitations": [], "knowledgeVersion": "1.0.0" }] },
+      { "pageId": "bp-detail", "regionId": "region-detail", "controls": [
+        { "id": "text", "score": 3, "reasons": ["交互测试所需"], "limitations": [], "knowledgeVersion": "1.0.0" },
+        { "id": "button", "score": 3, "reasons": ["交互测试所需"], "limitations": [], "knowledgeVersion": "1.0.0" },
+        { "id": "image", "score": 3, "reasons": ["交互测试所需"], "limitations": [], "knowledgeVersion": "1.0.0" }
+      ], "layouts": [{ "id": "layout.4", "score": 3, "reasons": ["交互测试所需"], "limitations": [], "knowledgeVersion": "1.0.0" }], "recipes": [{ "id": "content.hero", "score": 3, "reasons": ["交互测试所需"], "limitations": [], "knowledgeVersion": "1.0.0" }] }
+    ],
+    "detailedCapabilityIds": ["button", "easyui.1", "image", "input", "layout.4", "select", "text"],
+    "generatedAtPolicy": "deterministic-no-timestamp"
+  },
+  "semanticPlan": {
+    "schema": "kf-solution-implementation/v1",
+    "projectKey": "advanced-interactions-fixture",
+    "blueprintHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "candidateBundleHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "theme": {
+      "background": "#f4f7fb",
+      "surface": "#ffffff",
+      "primary": "#163a5f",
+      "accent": "#e47b32",
+      "textPrimary": "#14212b",
+      "textSecondary": "#52616d",
+      "fontFamily": "Inter",
+      "spacingUnit": 8,
+      "radiusScale": { "small": 4, "medium": 8, "large": 16 }
+    },
+    "roleStyles": [
+      { "role": "content", "declarations": {}, "states": {} },
+      { "role": "action", "declarations": { "backgroundColor": "#163a5f", "textColor": "#ffffff", "padding": 8 }, "states": {} }
+    ],
+    "mockData": [{
+      "id": "portfolio-records",
+      "purpose": "示例作品记录",
+      "fields": [
+        { "key": "id", "label": "编号", "type": "text" },
+        { "key": "status", "label": "状态", "type": "text" },
+        { "key": "name", "label": "名称", "type": "text" }
+      ],
+      "records": [
+        { "values": [{ "field": "id", "value": "p1" }, { "field": "status", "value": "运行中" }, { "field": "name", "value": "示例项目甲" }] },
+        { "values": [{ "field": "id", "value": "p2" }, { "field": "status", "value": "已停止" }, { "field": "name", "value": "示例项目乙" }] }
+      ]
+    }],
+    "localState": [
+      { "id": "details-opened", "purpose": "记录详情入口状态", "type": "boolean", "initialValue": false },
+      { "id": "form-submitted", "purpose": "记录表单提交状态", "type": "boolean", "initialValue": false },
+      { "id": "contact-visible", "purpose": "控制联系弹层显示", "type": "boolean", "initialValue": false },
+      { "id": "avatar-visible", "purpose": "控制头像弹层显示", "type": "boolean", "initialValue": false }
+    ],
+    "pages": [
+      {
+        "id": "home",
+        "title": "作品概览",
+        "purpose": "筛选项目并进入详情",
+        "canvas": "desktop",
+        "sourceBlueprintPageId": "bp-home",
+        "sourceBlueprintRegionIds": ["region-home", "region-form"],
+        "initialStateIds": ["details-opened", "form-submitted", "contact-visible", "avatar-visible"],
+        "root": {
+          "id": "home-root",
+          "kind": "layout",
+          "layout": "column",
+          "sourceBlueprintRegionIds": ["region-home", "region-form"],
+          "intent": { "importance": "primary", "visualWeight": 3, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fill" }, "align": "start" },
+          "children": [
+            {
+              "id": "details-link",
+              "kind": "control",
+              "capabilityId": "text",
+              "content": "查看项目详情",
+              "properties": [],
+              "tabIds": [],
+              "styleRole": "action",
+              "sourceBlueprintRegionIds": ["region-home"],
+              "intent": { "importance": "primary", "visualWeight": 3, "readingOrder": 1, "density": "comfortable", "groupWith": [], "width": { "mode": "fixed", "value": 180 }, "height": { "mode": "fixed", "value": 40 }, "align": "start" },
+              "eventBindings": [{ "semanticEvent": "click", "actionIds": ["mark-details-opened"] }]
+            },
+            {
+              "id": "avatar-image",
+              "kind": "control",
+              "capabilityId": "image",
+              "content": null,
+              "properties": [],
+              "tabIds": [],
+              "styleRole": "content",
+              "sourceBlueprintRegionIds": ["region-home"],
+              "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 2, "density": "comfortable", "groupWith": [], "width": { "mode": "fixed", "value": 200 }, "height": { "mode": "fixed", "value": 200 }, "align": "start" },
+              "eventBindings": [{ "semanticEvent": "click", "actionIds": ["action-open-avatar-overlay"] }]
+            },
+            {
+              "id": "status-select",
+              "kind": "control",
+              "capabilityId": "select",
+              "content": null,
+              "properties": [{ "name": "filterField", "value": "status" }, { "name": "filterMode", "value": "equals" }],
+              "tabIds": [],
+              "styleRole": "action",
+              "sourceBlueprintRegionIds": ["region-home"],
+              "intent": { "importance": "primary", "visualWeight": 2, "readingOrder": 3, "density": "comfortable", "groupWith": [], "width": { "mode": "fixed", "value": 220 }, "height": { "mode": "fixed", "value": 40 }, "align": "start" },
+              "eventBindings": [{ "semanticEvent": "change", "actionIds": ["filter-records"] }]
+            },
+            {
+              "id": "portfolio-grid",
+              "kind": "control",
+              "capabilityId": "easyui.1",
+              "content": null,
+              "properties": [{ "name": "filterCombine", "value": "all" }],
+              "mockDataId": "portfolio-records",
+              "tabIds": [],
+              "styleRole": "content",
+              "sourceBlueprintRegionIds": ["region-home"],
+              "intent": { "importance": "primary", "visualWeight": 3, "readingOrder": 4, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "fixed", "value": 240 }, "align": "start" },
+              "eventBindings": []
+            },
+            {
+              "id": "contact-name",
+              "kind": "control",
+              "capabilityId": "input",
+              "content": null,
+              "properties": [{ "name": "placeholder", "value": "联系人姓名" }, { "name": "required", "value": true }, { "name": "validationMessage", "value": "请输入联系人姓名" }],
+              "tabIds": [],
+              "styleRole": "content",
+              "sourceBlueprintRegionIds": ["region-form"],
+              "intent": { "importance": "primary", "visualWeight": 2, "readingOrder": 5, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "stretch" },
+              "eventBindings": []
+            },
+            {
+              "id": "submit-contact",
+              "kind": "control",
+              "capabilityId": "button",
+              "content": "提交联系信息",
+              "properties": [{ "name": "successMessage", "value": "联系信息已模拟提交" }],
+              "tabIds": [],
+              "styleRole": "action",
+              "sourceBlueprintRegionIds": ["region-form"],
+              "intent": { "importance": "primary", "visualWeight": 3, "readingOrder": 6, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "start" },
+              "eventBindings": [{ "semanticEvent": "click", "actionIds": ["submit-form"] }]
+            },
+            {
+              "id": "open-contact",
+              "kind": "control",
+              "capabilityId": "button",
+              "content": "打开联系弹层",
+              "properties": [],
+              "tabIds": [],
+              "styleRole": "action",
+              "sourceBlueprintRegionIds": ["region-form"],
+              "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 7, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "start" },
+              "eventBindings": [{ "semanticEvent": "click", "actionIds": ["open-contact-overlay"] }]
+            },
+            {
+              "id": "feedback-contact",
+              "kind": "control",
+              "capabilityId": "button",
+              "content": "显示提交反馈",
+              "properties": [{ "name": "feedbackMessage", "value": "联系信息已模拟提交" }, { "name": "feedbackLevel", "value": "success" }],
+              "tabIds": [],
+              "styleRole": "action",
+              "sourceBlueprintRegionIds": ["region-form"],
+              "intent": { "importance": "secondary", "visualWeight": 2, "readingOrder": 8, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "start" },
+              "eventBindings": [{ "semanticEvent": "click", "actionIds": ["submit-feedback"] }]
+            }
+          ]
+        }
+      },
+      {
+        "id": "detail",
+        "title": "项目详情",
+        "purpose": "展示项目详情",
+        "canvas": "desktop",
+        "sourceBlueprintPageId": "bp-detail",
+        "sourceBlueprintRegionIds": ["region-detail"],
+        "initialStateIds": [],
+        "root": {
+          "id": "detail-copy",
+          "kind": "control",
+          "capabilityId": "text",
+          "content": "这是经过脱敏的示例项目详情。",
+          "properties": [],
+          "tabIds": [],
+          "styleRole": "content",
+          "sourceBlueprintRegionIds": ["region-detail"],
+          "intent": { "importance": "primary", "visualWeight": 3, "readingOrder": 0, "density": "comfortable", "groupWith": [], "width": { "mode": "fill" }, "height": { "mode": "content" }, "align": "start" },
+          "eventBindings": []
+        }
+      }
+    ],
+    "overlays": [
+      {
+        "id": "contact-overlay",
+        "title": "联系确认",
+        "purpose": "确认联系信息",
+        "presentation": "dialog",
+        "hostPageId": "home",
+        "sourceBlueprintPageId": "bp-home",
+        "sourceBlueprintRegionIds": ["region-form"],
+        "visibleStateId": "contact-visible",
+        "dismissible": true,
+        "root": {
+          "id": "contact-overlay-root",
+          "kind": "layout",
+          "layout": "column",
+          "sourceBlueprintRegionIds": ["region-form"],
+          "intent": { "importance": "primary", "visualWeight": 3, "readingOrder": 20, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "center" },
+          "children": [{
+            "id": "close-contact",
+            "kind": "control",
+            "capabilityId": "button",
+            "content": "关闭",
+            "properties": [],
+            "tabIds": [],
+            "styleRole": "action",
+            "sourceBlueprintRegionIds": ["region-form"],
+            "intent": { "importance": "primary", "visualWeight": 2, "readingOrder": 21, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "end" },
+            "eventBindings": [{ "semanticEvent": "click", "actionIds": ["close-contact-overlay"] }]
+          }]
+        }
+      },
+      {
+        "id": "avatar-overlay",
+        "title": "头像预览",
+        "purpose": "预览示例头像",
+        "presentation": "dialog",
+        "hostPageId": "home",
+        "sourceBlueprintPageId": "bp-home",
+        "sourceBlueprintRegionIds": ["region-home"],
+        "visibleStateId": "avatar-visible",
+        "dismissible": true,
+        "root": {
+          "id": "avatar-overlay-copy",
+          "kind": "control",
+          "capabilityId": "text",
+          "content": "头像预览占位内容",
+          "properties": [],
+          "tabIds": [],
+          "styleRole": "content",
+          "sourceBlueprintRegionIds": ["region-home"],
+          "intent": { "importance": "primary", "visualWeight": 3, "readingOrder": 30, "density": "comfortable", "groupWith": [], "width": { "mode": "content" }, "height": { "mode": "content" }, "align": "center" },
+          "eventBindings": []
+        }
+      }
+    ],
+    "actions": [
+      { "id": "mark-details-opened", "kind": "set-state", "stateId": "details-opened", "value": true, "afterActionIds": ["navigate-detail"], "journeyStepRefs": [{ "journeyId": "open-detail", "stepIndex": 0 }] },
+      { "id": "navigate-detail", "kind": "navigate-page", "targetPageId": "detail", "afterActionIds": [], "journeyStepRefs": [{ "journeyId": "open-detail", "stepIndex": 0 }] },
+      { "id": "action-open-avatar-overlay", "kind": "open-overlay", "overlayId": "avatar-overlay", "afterActionIds": [], "journeyStepRefs": [] },
+      { "id": "filter-records", "kind": "run-script", "scriptId": "filter-script", "afterActionIds": [], "journeyStepRefs": [] },
+    { "id": "submit-form", "kind": "run-script", "scriptId": "submit-script", "afterActionIds": [], "journeyStepRefs": [] },
+    { "id": "submit-feedback", "kind": "show-feedback", "level": "success", "message": "联系信息已模拟提交", "afterActionIds": [], "journeyStepRefs": [] },
+      { "id": "open-contact-overlay", "kind": "open-overlay", "overlayId": "contact-overlay", "afterActionIds": [], "journeyStepRefs": [] },
+      { "id": "close-contact-overlay", "kind": "close-overlay", "overlayId": "contact-overlay", "result": "cancelled", "afterActionIds": [], "journeyStepRefs": [] }
+    ],
+    "scripts": [
+      {
+        "id": "filter-script",
+        "kind": "custom",
+        "purpose": "筛选作品记录",
+        "programVersion": "declarative-steps/v1",
+        "inputs": [
+          { "name": "records", "description": "原始作品记录", "refKind": "mock-data", "refId": "portfolio-records" },
+          { "name": "criterion-1-value", "description": "状态筛选值", "refKind": "control", "refId": "status-select" }
+        ],
+        "outputs": [{ "name": "view", "description": "筛选结果表格", "refKind": "control", "refId": "portfolio-grid" }],
+        "steps": [{ "order": 1, "intent": "按已声明条件筛选记录并更新表格", "inputNames": ["records", "criterion-1-value"], "outputNames": ["view"] }]
+      },
+      {
+        "id": "submit-script",
+        "kind": "custom",
+        "purpose": "校验表单并提交",
+        "programVersion": "declarative-steps/v1",
+        "inputs": [{ "name": "field-1", "description": "联系人姓名", "refKind": "control", "refId": "contact-name" }],
+        "outputs": [{ "name": "submitted", "description": "提交状态", "refKind": "local-state", "refId": "form-submitted" }],
+        "steps": [{ "order": 1, "intent": "校验已声明字段并模拟提交", "inputNames": ["field-1"], "outputNames": ["submitted"] }]
+      }
+    ]
+  }
+}

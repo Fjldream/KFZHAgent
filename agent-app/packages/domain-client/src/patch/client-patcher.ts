@@ -1799,6 +1799,7 @@ async function applyCreate(
         isMap: false,
         basicItem: { defaultValue, maxValue: 999999, minValue: -999999, deadZone: 0 },
       });
+      doc["Variables"] = variables;
       await writeJsonFile(candidate, versionDir, groupFile, doc);
       break;
     }
@@ -2059,11 +2060,35 @@ async function applyVerifiedCreativePatch(
     throw new PatchConflictError("verified creative materialization does not bind the supplied ChangePlan");
   }
   const { artifact, materialization } = verified;
+  const normalizedPlan = normalizeChangePlan(verified.plan);
   const versionDir = await resolveVersionDirName(base);
   const baseInspection = await inspectClientProject(base);
   const candidate = await mkdtemp(path.join(options.workRoot ?? tmpdir(), "kf-client-candidate-"));
   try {
     await cp(base, candidate, { recursive: true });
+
+    // Stage 0: materialize every signed semantic state as a native KF
+    // variable before event actions or compiled scripts can reference it.
+    const materializedStates = materialization.states ?? [];
+    const variableOperations = normalizedPlan.operations.filter((operation) =>
+      operation.op === "create" && operation.entityType === "variable");
+    if (variableOperations.length !== materializedStates.length) {
+      throw new PatchConflictError("creative semantic state operation count mismatch");
+    }
+    for (const state of materializedStates) {
+      const matches = variableOperations.filter((operation) => operation.entityId === state.variableName);
+      if (matches.length !== 1) throw new PatchConflictError(`creative semantic state operation mismatch: ${state.semanticStateId}`);
+      const operation = matches[0]!;
+      if (canonicalServerHash(operation.properties) !== canonicalServerHash({
+        semanticStateId: state.semanticStateId,
+        stateType: state.stateType,
+        dataType: state.dataType,
+        defaultValue: state.defaultValue,
+        comment: state.comment,
+      })) throw new PatchConflictError(`creative semantic state payload mismatch: ${state.semanticStateId}`);
+      await applyCreate(candidate, versionDir, baseInspection, base, operation,
+        materialization.workspaceId, options.semanticOperations ?? []);
+    }
 
     // Stage 1: pages. New pages use the signed k-GUID and dimensions exactly;
     // existing pages retain all other native fields.

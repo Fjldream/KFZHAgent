@@ -22,6 +22,7 @@ import {
   canonicalServerPlanSigningBytes,
   workspaceAssetIdToModelId,
   type ModulePlan,
+  type TrustedNativeMaterialization,
 } from "@kf/contracts";
 import {
   BuildExecutor,
@@ -170,6 +171,57 @@ function containsDirectProperty(value: unknown, key: string, expected: unknown):
   return record[key] === expected || Object.values(record).some((entry) => containsDirectProperty(entry, key, expected));
 }
 
+function walkNativeControls(value: unknown, result: Record<string, unknown>[] = []): Record<string, unknown>[] {
+  if (Array.isArray(value)) value.forEach((entry) => walkNativeControls(entry, result));
+  else if (value !== null && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if (typeof record["name"] === "string" || record["baseProperty"] !== undefined) result.push(record);
+    for (const key of ["objects", "children", "layoutItems", "insiderObjects"]) walkNativeControls(record[key], result);
+  }
+  return result;
+}
+
+function nativeControlName(control: Record<string, unknown>): string | undefined {
+  const base = control["baseProperty"] as Record<string, unknown> | undefined;
+  const name = control["name"] ?? base?.["name"];
+  return typeof name === "string" ? name : undefined;
+}
+
+function nativeLinks(control: Record<string, unknown>): Record<string, unknown>[] {
+  const manager = control["linkMng"] as Record<string, unknown> | undefined;
+  return Array.isArray(manager?.["linkList"]) ? manager["linkList"] as Record<string, unknown>[] : [];
+}
+
+function decodedCompilerModules(source: string): Array<{ metadata: Record<string, unknown>; body: string }> {
+  const marker = "// kf-compiled-event/v1 ";
+  const result: Array<{ metadata: Record<string, unknown>; body: string }> = [];
+  let cursor = 0;
+  const bytes = Buffer.from(source, "utf8");
+  while (true) {
+    const start = source.indexOf(marker, cursor);
+    if (start < 0) return result;
+    const newline = source.indexOf("\n", start);
+    if (newline < 0) throw new Error("compiler marker has no body newline");
+    const metadata = JSON.parse(Buffer.from(source.slice(start + marker.length, newline), "base64url").toString("utf8")) as Record<string, unknown>;
+    const bodyStart = Buffer.byteLength(source.slice(0, newline + 1), "utf8");
+    const bodyEnd = bodyStart + Number(metadata["bodyByteLength"]);
+    const body = bytes.subarray(bodyStart, bodyEnd).toString("utf8");
+    result.push({ metadata, body });
+    cursor = bytes.subarray(0, bodyEnd).toString("utf8").length;
+  }
+}
+
+function recursivelyCollectedKeys(value: unknown, result = new Set<string>()): Set<string> {
+  if (Array.isArray(value)) value.forEach((entry) => recursivelyCollectedKeys(entry, result));
+  else if (value !== null && typeof value === "object") {
+    Object.entries(value as Record<string, unknown>).forEach(([key, entry]) => {
+      result.add(key);
+      recursivelyCollectedKeys(entry, result);
+    });
+  }
+  return result;
+}
+
 const INITIAL_IR = {
   schema: "kf-client-project-ir/v1",
   id: "solution",
@@ -302,6 +354,26 @@ function creativeFixture() {
   return { blueprint, candidates, plan };
 }
 
+async function advancedCreativeFixture() {
+  const fixtureUrl = new URL("../../api/src/conversations/fixtures/v4-flash-portfolio-interactions.json", import.meta.url);
+  const raw = JSON.parse(await readFile(fixtureUrl, "utf8")) as {
+    blueprint: unknown;
+    candidateBundle: Record<string, unknown>;
+    semanticPlan: Record<string, unknown>;
+  };
+  const blueprint = CustomerSolutionBlueprintSchema.parse(raw.blueprint);
+  const candidates = CapabilityCandidateBundleSchema.parse({
+    ...raw.candidateBundle,
+    blueprintHash: canonicalServerHash(blueprint),
+  });
+  const plan = SolutionImplementationPlanSchema.parse({
+    ...raw.semanticPlan,
+    blueprintHash: canonicalServerHash(blueprint),
+    candidateBundleHash: canonicalServerHash(candidates),
+  });
+  return { blueprint, candidates, plan };
+}
+
 interface Seeded {
   tenant: { id: string };
   workspace: { id: string };
@@ -357,14 +429,17 @@ async function seedNewWorkspace(ir = INITIAL_IR): Promise<Seeded> {
   return { tenant, workspace, revision, plan, hash };
 }
 
-async function seedCreativeBuild(): Promise<Seeded & {
+async function seedCreativeBuild(
+  fixture = creativeFixture(),
+  expectedRequestActionId?: string,
+): Promise<Seeded & {
   authority: ReturnType<typeof createHmacServerPlanAuthority>;
   creativeArtifactHash: string;
   materializationHash: string;
   expectedControlNames: string[];
+  expectedMaterialization: TrustedNativeMaterialization;
 }> {
   const seeded = await seedNewWorkspace();
-  const fixture = creativeFixture();
   const implementation = compileSolutionImplementation({
     plan: fixture.plan,
     candidateBundle: fixture.candidates,
@@ -376,14 +451,21 @@ async function seedCreativeBuild(): Promise<Seeded & {
     workspaceId: seeded.workspace.id,
     baseRevisionId: seeded.revision.id,
     implementation,
+    semanticStateIds: fixture.plan.localState.map((state) => state.id),
   });
   const interactions = compileInteractions({
     blueprint: fixture.blueprint,
     plan: fixture.plan,
     implementation: correlated,
   });
-  expect(interactions.diagnostics.errors).toEqual([]);
-  expect(interactions.diagnostics.requests).toEqual([]);
+  expect(expectedRequestActionId === undefined
+    ? interactions.diagnostics.errors
+    : interactions.diagnostics.errors.filter((entry) =>
+      ["INTERACTION_SCRIPT_BLOCKED", "INTERACTION_OUTPUT_CONSUMER_MISSING"].includes(entry.code)))
+    .toEqual([]);
+  expect(interactions.diagnostics.requests).toEqual(expectedRequestActionId === undefined ? [] : [
+    expect.objectContaining({ actionId: expectedRequestActionId, reason: "TRIGGER_EVENT_UNSUPPORTED" }),
+  ]);
   const facade = createHmacCreativeBuildFacade(
     Buffer.alloc(32, 0x71),
     createCreativeUIImplementationV2Compiler,
@@ -402,10 +484,14 @@ async function seedCreativeBuild(): Promise<Seeded & {
       assets: [],
     }),
   });
+  if (fixture.plan.localState.length > 0) {
+    expect(lowered.plan.operations.filter((operation) => operation.op === "create" && operation.entityType === "variable"))
+      .toHaveLength(fixture.plan.localState.length);
+  }
   const envelope = facade.authority.sign({
     plan: lowered.plan,
     revisionId: seeded.revision.id,
-    semanticOperations: [],
+    semanticOperations: lowered.semanticOperations,
     creative: lowered.trustedCreativePayload,
   });
   await prisma.$transaction([
@@ -432,6 +518,7 @@ async function seedCreativeBuild(): Promise<Seeded & {
     creativeArtifactHash: verified.creativeArtifactHash!,
     materializationHash: verified.nativeMaterializationHash!,
     expectedControlNames: verified.trustedNativeMaterialization!.controls.map((control) => control.instanceName),
+    expectedMaterialization: lowered.materialization,
   };
 }
 
@@ -661,6 +748,227 @@ describe("job runner", () => {
     expect(Object.values(inspection.index.controls).map((control) => control.name))
       .toEqual(expect.arrayContaining(seeded.expectedControlNames));
   });
+
+  it("builds, packages, validates, and imports the sanitized advanced-interactions fixture", async () => {
+    const fixture = await advancedCreativeFixture();
+    const seeded = await seedCreativeBuild(fixture, "action-open-avatar-overlay");
+    const queued = await jobs.enqueue({ ...enqueueInput(seeded), projectKey: fixture.plan.projectKey });
+    const operatorError = vi.fn();
+    const runner = new JobRunner({ prisma, storage, registry, serverPlanVerifier: seeded.authority, operatorLogger: { error: operatorError } });
+
+    const done = await runner.runOnce(`advanced-interactions-${++counter}`, new Date());
+    const failedReport = done?.status === "FAILED"
+      ? await prisma.validationReport.findFirst({ where: { buildJobId: queued.id } })
+      : null;
+    expect(done, `${JSON.stringify(done)} ${JSON.stringify(failedReport)} ${JSON.stringify(operatorError.mock.calls)}`)
+      .toMatchObject({ id: queued.id, status: "SUCCEEDED" });
+    const artifact = await prisma.artifact.findFirstOrThrow({ where: { buildJobId: queued.id } });
+    const unpacked = await importNativeClientPackage(
+      await collect(await storage.open(seeded.tenant.id, artifact.storageKey)),
+      await mkdtemp(path.join(tmpdir(), "kf-advanced-interactions-import-")),
+    );
+    const inspection = await inspectClientProject(unpacked);
+    const expected = seeded.expectedMaterialization;
+    const controls = Object.values(inspection.raw.pages).flatMap((page) => walkNativeControls(page));
+    const controlsByName = new Map(controls.flatMap((control) => {
+      const name = nativeControlName(control);
+      return name === undefined ? [] : [[name, control] as const];
+    }));
+    const expectedControl = (semanticId: string) => {
+      const correlation = expected.controls.find((entry) => entry.semanticControlId === semanticId);
+      expect(correlation, `missing materialization correlation for ${semanticId}`).toBeDefined();
+      return correlation!;
+    };
+    const nativeControl = (semanticId: string) => {
+      const correlation = expectedControl(semanticId);
+      const control = controlsByName.get(correlation.instanceName);
+      expect(control, `missing imported native control ${semanticId}/${correlation.instanceName}`).toBeDefined();
+      return control!;
+    };
+    const expectedAction = (sourceActionId: string) => {
+      const action = expected.interactions.actions.find((entry) => entry.sourceActionId === sourceActionId);
+      expect(action, `missing compiled action ${sourceActionId}`).toBeDefined();
+      return action!;
+    };
+    const expectedBinding = (ownerInstanceName: string, effectId: string) => {
+      const binding = expected.interactions.eventBindings.find((entry) => entry.ownerInstanceName === ownerInstanceName
+        && [...entry.nativeActionIds, ...entry.scriptModuleIds].includes(effectId));
+      expect(binding, `missing binding ${ownerInstanceName}/${effectId}`).toBeDefined();
+      return binding!;
+    };
+    const linkForAction = (ownerSemanticId: string, sourceActionId: string) => {
+      const action = expectedAction(sourceActionId);
+      const link = nativeLinks(nativeControl(ownerSemanticId)).find((entry) =>
+        (entry["kfCompilerAction"] as Record<string, unknown> | undefined)?.["actionId"] === action.id);
+      expect(link, `missing native action link ${ownerSemanticId}/${sourceActionId}`).toBeDefined();
+      return { action, link: link! };
+    };
+    const scriptSegment = (ownerSemanticId: string, sourceScriptId: string) => {
+      const module = expected.interactions.scripts.find((entry) => entry.sourceScriptId === sourceScriptId);
+      expect(module, `missing compiled script ${sourceScriptId}`).toBeDefined();
+      const binding = expectedBinding(module!.ownerInstanceName, module!.id);
+      const link = nativeLinks(nativeControl(ownerSemanticId)).find((entry) => {
+        const script = entry["script"];
+        return entry["name"] === binding.kfEvent && entry["linkId"] === binding.linkId
+          && typeof script === "string"
+          && decodedCompilerModules(script).some((segment) => segment.metadata["moduleId"] === module!.id);
+      });
+      expect(link, `missing native script link ${ownerSemanticId}/${sourceScriptId}`).toBeDefined();
+      const linkScript = link!["script"];
+      expect(typeof linkScript).toBe("string");
+      const segment = decodedCompilerModules(typeof linkScript === "string" ? linkScript : "")
+        .find((entry) => entry.metadata["moduleId"] === module!.id);
+      expect(segment).toBeDefined();
+      expect(segment!.metadata).toEqual({
+        schema: "kf-compiled-event/v1",
+        moduleId: module!.id,
+        sourceScriptId: module!.sourceScriptId,
+        placement: module!.placement,
+        bodySha256: module!.sourceHash,
+        bodyByteLength: Buffer.byteLength(module!.source, "utf8"),
+        ownerInstanceName: module!.ownerInstanceName,
+        kfEvent: binding.kfEvent,
+        linkId: binding.linkId ?? null,
+        phase: binding.phase,
+        instanceReferences: module!.instanceReferences,
+        pageReferences: module!.pageReferences,
+      });
+      expect(segment!.body).toBe(module!.source);
+      return { module: module!, binding, link: link!, body: segment!.body };
+    };
+
+    expect(controlsByName.has("details-link")).toBe(false);
+    expect(nativeControl("details-link")).toMatchObject({ uiModelType: 35 });
+    expect(nativeControl("avatar-image")).toMatchObject({ uiModelType: 41 });
+    expect(nativeControl("status-select")).toMatchObject({ uiModelType: 44 });
+    expect(nativeControl("contact-name")).toMatchObject({ uiModelType: 38 });
+    expect(nativeControl("portfolio-grid")).toMatchObject({ objectType: 3, uiExtendType: 1 });
+
+    const state = expected.states!.find((entry) => entry.semanticStateId === "details-opened")!;
+    const stateResult = linkForAction("details-link", "mark-details-opened");
+    const stateBinding = expectedBinding(stateResult.action.ownerInstanceName, stateResult.action.id);
+    expect(stateResult.link).toMatchObject({
+      action: "setVariable",
+      variableId: state.variableName,
+      value: true,
+      name: stateBinding.kfEvent,
+      linkId: stateBinding.linkId,
+      enable: true,
+      kfCompilerAction: {
+        schema: "kf-compiled-state/v1", actionId: stateResult.action.id, sourceActionId: "mark-details-opened",
+        ownerInstanceName: stateResult.action.ownerInstanceName, stateId: "details-opened", variableName: state.variableName,
+        value: true, kfEvent: stateBinding.kfEvent, linkId: stateBinding.linkId ?? null, phase: stateBinding.phase,
+      },
+    });
+    const navigation = linkForAction("details-link", "navigate-detail");
+    const navigationBinding = expectedBinding(navigation.action.ownerInstanceName, navigation.action.id);
+    expect(navigation.link).toMatchObject({
+      action: "navigatePage", pageId: expected.pages.find((entry) => entry.semanticPageId === "detail")!.pageGuid,
+      name: navigationBinding.kfEvent, linkId: navigationBinding.linkId, enable: true,
+      kfCompilerAction: {
+        schema: "kf-compiled-action/v1", actionId: navigation.action.id, sourceActionId: "navigate-detail",
+        ownerInstanceName: navigation.action.ownerInstanceName, kfEvent: navigationBinding.kfEvent,
+        linkId: navigationBinding.linkId ?? null, phase: navigationBinding.phase,
+      },
+    });
+
+    const filter = scriptSegment("status-select", "filter-script");
+    const selectName = expectedControl("status-select").instanceName;
+    const gridName = expectedControl("portfolio-grid").instanceName;
+    expect(filter.binding).toMatchObject({ ownerInstanceName: selectName, kfEvent: "Change", phase: "event" });
+    expect(filter.body).toBe(`const records = [{"id":"p1","status":"运行中","name":"示例项目甲"},{"id":"p2","status":"已停止","name":"示例项目乙"}];\n`
+      + `const criterion1 = ${selectName}.GetCheckedNodes();\n`
+      + `const filtered = records.slice(0, 100).filter((record) => (record["status"] === criterion1));\n`
+      + `${gridName}.SetData(filtered);\n`);
+    expect(filter.module.instanceReferences).toEqual(expect.arrayContaining([
+      { semanticId: "status-select", instanceName: selectName },
+      { semanticId: "portfolio-grid", instanceName: gridName },
+    ]));
+
+    const form = scriptSegment("submit-contact", "submit-script");
+    const inputName = expectedControl("contact-name").instanceName;
+    const submittedVariable = expected.states!.find((entry) => entry.semanticStateId === "form-submitted")!.variableName;
+    expect(form.binding).toMatchObject({ ownerInstanceName: expectedControl("submit-contact").instanceName, kfEvent: "onClick", phase: "event" });
+    expect(form.body).toBe(`const field1 = ${inputName}.Value;\n`
+      + "let valid = true;\n"
+      + "if (((field1 === null) || (String(field1).trim() === \"\"))) {\n"
+      + "  (valid = false);\n"
+      + '  ShowMessage({"message":"请输入联系人姓名","type":"error"});\n'
+      + "}\n"
+      + `$Variable.${submittedVariable} = Boolean(valid);\n`
+      + "if (valid) {\n"
+      + '  ShowMessage({"message":"联系信息已模拟提交","type":"success"});\n'
+      + "}\n");
+    expect(form.module.instanceReferences).toEqual(expect.arrayContaining([{ semanticId: "contact-name", instanceName: inputName }]));
+
+    const feedback = linkForAction("feedback-contact", "submit-feedback");
+    const feedbackBinding = expectedBinding(feedback.action.ownerInstanceName, feedback.action.id);
+    const feedbackSource = 'ShowMessage({"message":"联系信息已模拟提交","type":"success"});';
+    expect(feedback.link).toMatchObject({
+      name: feedbackBinding.kfEvent, linkId: feedbackBinding.linkId, enable: true, script: feedbackSource,
+      kfCompilerAction: {
+        schema: "kf-compiled-feedback/v1", actionId: feedback.action.id, sourceActionId: "submit-feedback",
+        ownerInstanceName: feedback.action.ownerInstanceName, message: "联系信息已模拟提交", level: "success",
+        scriptSha256: createHash("sha256").update(feedbackSource, "utf8").digest("hex"),
+        scriptByteLength: Buffer.byteLength(feedbackSource, "utf8"), kfEvent: feedbackBinding.kfEvent,
+        linkId: feedbackBinding.linkId ?? null, phase: feedbackBinding.phase,
+      },
+    });
+
+    for (const [owner, actionId, visible] of [
+      ["open-contact", "open-contact-overlay", true],
+      ["close-contact", "close-contact-overlay", false],
+    ] as const) {
+      const visibility = linkForAction(owner, actionId);
+      const binding = expectedBinding(visibility.action.ownerInstanceName, visibility.action.id);
+      const overlay = expectedControl("contact-overlay-root");
+      expect(visibility.link["kfCompilerAction"]).toEqual({
+        schema: "kf-compiled-action/v3", actionId: visibility.action.id, sourceActionId: actionId,
+        ownerInstanceName: visibility.action.ownerInstanceName, ownerSemanticControlId: owner,
+        targetSemanticControlId: "contact-overlay-root", targetInstanceName: overlay.instanceName,
+        operation: visible ? "open-overlay" : "close-overlay", visible,
+        kfEvent: binding.kfEvent, linkId: binding.linkId ?? null, phase: binding.phase,
+      });
+      expect(decodedCompilerModules(String(visibility.link["script"]))[0]?.body)
+        .toBe(`${overlay.instanceName}.setVisible(${String(visible)});\n`);
+    }
+
+    const nativeVariables = Object.values(inspection.raw.variables).flatMap((group) => {
+      const variables = (group as Record<string, unknown>)["Variables"];
+      return Array.isArray(variables) ? variables as Record<string, unknown>[] : [];
+    });
+    expect(Object.values(inspection.index.variables).filter((variable) => variable.name.startsWith("$kf_")))
+      .toHaveLength(fixture.plan.localState.length);
+    for (const expectedState of expected.states ?? []) {
+      const variable = nativeVariables.find((entry) => entry["name"] === expectedState.variableName);
+      expect(variable).toEqual(expect.objectContaining({
+        name: expectedState.variableName, dataType: expectedState.dataType, defaultValue: expectedState.defaultValue,
+        comment: expectedState.comment, isMap: false,
+        basicItem: expect.objectContaining({ defaultValue: expectedState.defaultValue }),
+      }));
+    }
+
+    const semanticOnlyByControl = new Map<string, readonly string[]>([
+      ["status-select", ["filterField", "filterMode"]],
+      ["portfolio-grid", ["filterCombine"]],
+      ["contact-name", ["required", "validationMessage"]],
+      ["submit-contact", ["successMessage"]],
+      ["feedback-contact", ["feedbackMessage", "feedbackLevel"]],
+    ]);
+    semanticOnlyByControl.forEach((keys, semanticId) => {
+      const importedKeys = recursivelyCollectedKeys(nativeControl(semanticId));
+      keys.forEach((key) => expect(importedKeys, `${semanticId} leaked ${key}`).not.toContain(key));
+    });
+    const modelOnlyKeys = ["steps", "programVersion", "inputNames", "outputNames", "intent", "source"];
+    for (const correlation of expected.controls) {
+      const importedKeys = recursivelyCollectedKeys(nativeControl(correlation.semanticControlId));
+      modelOnlyKeys.forEach((key) => expect(importedKeys, `${correlation.semanticControlId} retained model field ${key}`).not.toContain(key));
+    }
+    expect(nativeLinks(nativeControl("avatar-image"))).toEqual([
+      { name: "Load", linkId: 200001, enable: false, script: "" },
+      { name: "Error", linkId: 200002, enable: false, script: "" },
+    ]);
+  }, 30_000);
 
   it("rejects a signed creative materialization bound to another workspace at the materialization boundary", async () => {
     const seeded = await seedCreativeBuild();
