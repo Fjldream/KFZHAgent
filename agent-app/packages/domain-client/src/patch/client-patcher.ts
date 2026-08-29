@@ -747,6 +747,9 @@ export interface CreativePageInstrumentation {
   onPageFlush?(pageGuid: string, file: string): void;
 }
 
+const VERIFIED_CREATIVE_STATE_CREATE = Symbol("verified-creative-state-create");
+type VerifiedCreativeStateCreateAuthorization = typeof VERIFIED_CREATIVE_STATE_CREATE;
+
 function hasTrustedTableOperation(
   operations: readonly TrustedSemanticOperation[],
   entityId: string,
@@ -1496,6 +1499,7 @@ async function applyCreate(
   semanticOperationEntityId = op.entityId,
   creativeParentContentExtent?: { readonly width: number; readonly height: number },
   creativeTabPane?: TabPaneOwnership,
+  verifiedCreativeStateCreate?: VerifiedCreativeStateCreateAuthorization,
 ): Promise<void> {
   const build = { seed: workspaceId };
   switch (op.entityType) {
@@ -1734,10 +1738,20 @@ async function applyCreate(
       break;
     }
     case "variable": {
+      const compilerOwnedName = op.entityId.toLocaleLowerCase("en-US").startsWith("$kf_");
       const semanticKeys = ["semanticStateId", "stateType", "dataType", "defaultValue", "comment"] as const;
-      const hasSemanticMetadata = op.entityId.startsWith("$kf_")
-        || Object.hasOwn(op.properties, "semanticStateId") || Object.hasOwn(op.properties, "stateType");
-      if (hasSemanticMetadata) {
+      const hasSemanticMetadata = Object.hasOwn(op.properties, "semanticStateId")
+        || Object.hasOwn(op.properties, "stateType");
+      const verifiedCreativeCreate = verifiedCreativeStateCreate === VERIFIED_CREATIVE_STATE_CREATE;
+      if ((compilerOwnedName || hasSemanticMetadata) && !verifiedCreativeCreate) {
+        throw new PatchConflictError(
+          `compiler-owned state variable "${op.entityId}" cannot be created through a generic create`,
+        );
+      }
+      if (verifiedCreativeCreate && !compilerOwnedName) {
+        throw new PatchConflictError("verified creative state creation requires a compiler-owned state variable name");
+      }
+      if (verifiedCreativeCreate) {
         const actualKeys = Object.keys(op.properties).sort();
         const expectedKeys = [...semanticKeys].sort();
         if (actualKeys.length !== expectedKeys.length || actualKeys.some((key, index) => key !== expectedKeys[index])) {
@@ -1784,6 +1798,18 @@ async function applyCreate(
       const groupFile = await resolveVariableGroupFile(inspection.index, baseRoot, versionDir);
       const doc = await readJsonFile(candidate, versionDir, groupFile);
       const variables = Array.isArray(doc["Variables"]) ? (doc["Variables"] as unknown[]) : [];
+      if (verifiedCreativeCreate) {
+        const targetIdentity = op.entityId.toLocaleLowerCase("en-US");
+        const collision = variables.some((value) => {
+          if (!isObject(value)) return false;
+          const identities = [value["name"], value["id"], value["guid"]]
+            .filter((identity): identity is string => typeof identity === "string");
+          return identities.some((identity) => identity.toLocaleLowerCase("en-US") === targetIdentity);
+        });
+        if (collision) {
+          throw new PatchConflictError(`creative compiler-owned state variable collision: ${op.entityId}`);
+        }
+      }
       const nextId =
         variables.reduce<number>((max, v) => {
           const rec = v as Record<string, unknown>;
@@ -2087,7 +2113,8 @@ async function applyVerifiedCreativePatch(
         comment: state.comment,
       })) throw new PatchConflictError(`creative semantic state payload mismatch: ${state.semanticStateId}`);
       await applyCreate(candidate, versionDir, baseInspection, base, operation,
-        materialization.workspaceId, options.semanticOperations ?? []);
+        materialization.workspaceId, options.semanticOperations ?? [], undefined, operation.entityId,
+        undefined, undefined, VERIFIED_CREATIVE_STATE_CREATE);
     }
 
     // Stage 1: pages. New pages use the signed k-GUID and dimensions exactly;

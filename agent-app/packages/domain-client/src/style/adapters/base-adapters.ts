@@ -51,6 +51,7 @@ function partProperties(selectorMapping: KFStylePartSelector): readonly StyleDec
   const semanticPart = selectorMapping.semanticPart;
   if (semanticPart === "root") {
     return selectorMapping.evidence.selectorMarkers.includes("cursor:pointer")
+      && selectorMapping.evidence.selectorSourceSha256 !== undefined
       ? Object.freeze([...ROOT_CSS_PROPERTIES, "cursor" as const])
       : ROOT_CSS_PROPERTIES;
   }

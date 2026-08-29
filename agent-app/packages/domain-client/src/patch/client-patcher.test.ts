@@ -935,25 +935,23 @@ describe("client patcher (Task 7 brief Step 1)", () => {
     expect(typeof entry?.id).toBe("number");
   });
 
-  it("writes compiler-owned semantic variables and rejects inconsistent type metadata", async () => {
+  it.each([
+    ["lowercase", "$kf_selected_rows_6f6cea6e0dbc"],
+    ["uppercase", "$KF_SELECTED_ROWS_6F6CEA6E0DBC"],
+  ])("rejects %s compiler-owned variable creation through the generic path", async (_label, entityId) => {
     const base = await copyFixture("client-unknown-field");
-    const candidate = await applyClientPatch(base, plan([{
+    await expect(applyClientPatch(base, plan([{
+      op: "create", entityType: "variable", entityId,
+      properties: { semanticStateId: "selected-rows", stateType: "record-key-list", dataType: 3, defaultValue: "[\"row-1\"]", comment: "选中记录列表" },
+    }]))).rejects.toThrow(/compiler-owned state variable.*generic create/i);
+  });
+
+  it("rejects caller-forged matching semantic metadata through the generic path", async () => {
+    const base = await copyFixture("client-unknown-field");
+    await expect(applyClientPatch(base, plan([{
       op: "create", entityType: "variable", entityId: "$kf_selected_rows_6f6cea6e0dbc",
       properties: { semanticStateId: "selected-rows", stateType: "record-key-list", dataType: 3, defaultValue: "[\"row-1\"]", comment: "选中记录列表" },
-    }]));
-    const result = await inspectClientProject(await rootDirOf(candidate));
-    const variables = (result.raw.variables["group-guid-1"] as { Variables: Array<Record<string, unknown>> }).Variables;
-    expect(variables.find((entry) => entry.name === "$kf_selected_rows_6f6cea6e0dbc"))
-      .toMatchObject({ dataType: 3, defaultValue: "[\"row-1\"]", comment: "选中记录列表" });
-
-    await expect(applyClientPatch(base, plan([{
-      op: "create", entityType: "variable", entityId: "$kf_bad_deadbeef0000",
-      properties: { semanticStateId: "bad", stateType: "boolean", dataType: 3, defaultValue: true, comment: "错误" },
-    }]))).rejects.toThrow(/semantic variable.*dataType/i);
-    await expect(applyClientPatch(base, plan([{
-      op: "create", entityType: "variable", entityId: "$kf_forged_000000000000",
-      properties: { dataType: 3, defaultValue: "forged", comment: "伪造" },
-    }]))).rejects.toThrow(/semantic variable requires exact/i);
+    }]))).rejects.toThrow(/compiler-owned state variable.*generic create/i);
   });
 
   it("accepts a plan whose planHash matches", async () => {

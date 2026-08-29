@@ -6,6 +6,7 @@ import {
   KF36_RUNTIME_PROFILE,
   isTrustedKF36RuntimeProfile,
   isTrustedKF36StylePart,
+  verifySelectorSourceBytes,
 } from "./runtime-profile.js";
 
 const repositoryRoot = fileURLToPath(new URL("../../../../../", import.meta.url));
@@ -76,9 +77,20 @@ describe("KF 3.6 runtime style profile", () => {
       "KingFusion3.6_Center/kingdevopscenter/kingclient/exe/public/javascripts/ThirdParty/element-ui/lib/theme-chalk/button.css",
     );
     expect(evidence.selectorMarkers).toEqual(expect.arrayContaining([".el-button", "cursor:pointer"]));
-    const source = readFileSync(`${repositoryRoot}${evidence.selectorSourcePath}`, "utf8");
-    expect(source).toContain(".el-button");
-    expect(source).toContain("cursor:pointer");
+    expect(evidence.selectorSourceSha256).toBe("d84fba6badd5a88ff80a6af85cc35ddb59d3832ea47faeec8ca3fac277e85bbc");
+    const source = readFileSync(`${repositoryRoot}${evidence.selectorSourcePath}`);
+    expect(source.toString("utf8")).toContain(".el-button");
+    expect(source.toString("utf8")).toContain("cursor:pointer");
+    expect(verifySelectorSourceBytes(evidence, source)).toBe(true);
+  });
+
+  it("rejects Button cursor evidence when complete bytes drift but both markers remain", () => {
+    const evidence = KF36_RUNTIME_PROFILE.selectors.button!.parts.root!.evidence;
+    const source = readFileSync(`${repositoryRoot}${evidence.selectorSourcePath}`);
+    const drifted = Buffer.concat([source, Buffer.from("\n/* marker-preserving drift */\n")]);
+    expect(drifted.toString("utf8")).toContain(".el-button");
+    expect(drifted.toString("utf8")).toContain("cursor:pointer");
+    expect(verifySelectorSourceBytes(evidence, drifted)).toBe(false);
   });
 
   it("maps reviewed component states to evidence-owned selectors instead of generic model selectors", () => {

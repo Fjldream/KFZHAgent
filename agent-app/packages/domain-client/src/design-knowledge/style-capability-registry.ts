@@ -40,11 +40,14 @@ function profile(capabilityId: string, parts: readonly PartSpec[]): StyleCapabil
     version: "1.0.0",
     parts: parts.map((part) => {
       const runtimePart = runtimeParts[part.id];
+      const properties = part.properties.filter((property) => property !== "cursor"
+        || (runtimePart?.evidence.selectorMarkers.includes("cursor:pointer") === true
+          && runtimePart.evidence.selectorSourceSha256 !== undefined));
       return {
         id: part.id,
         availability: runtimePart === undefined ? "planned" : "supported",
         semanticRoles: [part.semanticRole],
-        properties: [...part.properties],
+        properties,
         states: runtimePart === undefined ? [] : Object.keys(runtimePart.stateSelectors),
         notes: runtimePart === undefined
           ? ["缺少经模板与运行时证据审核的语义部件 selector；必须 fail closed。"]

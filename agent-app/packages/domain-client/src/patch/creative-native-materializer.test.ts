@@ -511,6 +511,14 @@ async function baseWorkspace() {
   }, { seed: "base" });
 }
 
+async function baseWorkspaceWithVariable(name: string) {
+  return compileClientProject({
+    schema: "kf-client-project-ir/v1", id: "base", name: "Base", version: "1.0.0.1",
+    pages: [{ id: "untouched", name: "Untouched", width: 800, height: 600, controls: [] }],
+    variables: [{ id: "existing-variable", name, dataType: 1, defaultValue: false }], scripts: [],
+  }, { seed: "base" });
+}
+
 async function existingSignedFixture(withImageAsset = false) {
   const base = await compileClientProject({
     schema: "kf-client-project-ir/v1", id: "existing-base", name: "Existing", version: "1.0.0.1",
@@ -606,6 +614,20 @@ async function existingSignedFixture(withImageAsset = false) {
 }
 
 describe("creative native materializer", () => {
+  it.each([
+    ["exact", (name: string) => name],
+    ["case-folded", (name: string) => name.toLocaleUpperCase("en-US")],
+  ])("rejects an existing %s compiler-owned state variable collision before creative append", async (_label, collide) => {
+    const { result, resolved, planHash } = await signedFixture(0, false, false, false, true);
+    const state = result.materialization.states?.[0];
+    if (state === undefined) throw new Error("signed state fixture required");
+    const base = await baseWorkspaceWithVariable(collide(state.variableName));
+    await expect(applyClientPatch(base.rootDir, result.plan, {
+      planHash, creativeMaterialization: resolved.creativeMaterialization,
+    } as ApplyPatchOptions & { creativeMaterialization: unknown }))
+      .rejects.toThrow(/creative compiler-owned state variable collision/i);
+  });
+
   it("blocks a missing non-Image closure during the authoritative V2 recompile", () => {
     const input = creativeInput();
     input.semanticPlan.localState.push({

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 export type KFStyleState = "hover" | "active" | "focus" | "disabled" | "selected" | "error";
 
 type EvidenceScalar = string | number | boolean;
@@ -9,6 +11,8 @@ export interface KFSelectorEvidence {
   readonly runtimeMarkers: readonly string[];
   readonly selectorSourcePath: string;
   readonly selectorMarkers: readonly string[];
+  /** Exact complete-file digest when a selector property is promoted from external product source. */
+  readonly selectorSourceSha256?: string;
 }
 
 export interface KFStylePartSelector {
@@ -62,7 +66,11 @@ function evidence(
   runtimeMarkers: readonly string[],
   selectorSourcePath: string,
   selectorMarkers: readonly string[],
+  selectorSourceSha256?: string,
 ): KFSelectorEvidence {
+  if (selectorSourceSha256 !== undefined && !/^[a-f0-9]{64}$/.test(selectorSourceSha256)) {
+    throw new Error("KF_SELECTOR_EVIDENCE_SHA256_INVALID");
+  }
   return Object.freeze({
     templatePath: `${TEMPLATE}${templateName}.json`,
     templateFields: Object.freeze({ ...templateFields }),
@@ -70,7 +78,20 @@ function evidence(
     runtimeMarkers: Object.freeze([...runtimeMarkers]),
     selectorSourcePath,
     selectorMarkers: Object.freeze([...selectorMarkers]),
+    ...(selectorSourceSha256 === undefined ? {} : { selectorSourceSha256 }),
   });
+}
+
+/** Verifies complete product-source bytes; marker retention cannot satisfy a changed digest. */
+export function verifySelectorSourceBytes(
+  selectorEvidence: KFSelectorEvidence,
+  sourceBytes: Uint8Array,
+): boolean {
+  const expectedSha256 = selectorEvidence.selectorSourceSha256;
+  if (expectedSha256 === undefined) return false;
+  const source = new TextDecoder().decode(sourceBytes);
+  if (!selectorEvidence.selectorMarkers.every((marker) => source.includes(marker))) return false;
+  return createHash("sha256").update(sourceBytes).digest("hex") === expectedSha256;
 }
 
 function part(
@@ -119,6 +140,7 @@ const buttonEvidence = evidence(
   "button", { showUiExtendType: "ElementUI_Button", uiModelType: 35 },
   `${ELEMENT}kmui_elementui_button.js`, ["<el-button", "ElementUI_Button"],
   `${ELEMENT_THEME}button.css`, [".el-button", "cursor:pointer"],
+  "d84fba6badd5a88ff80a6af85cc35ddb59d3832ea47faeec8ca3fac277e85bbc",
 );
 const inputEvidence = evidence(
   "input", { showUiExtendType: "ElementUI_Input", uiModelType: 38 },
