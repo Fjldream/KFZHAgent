@@ -883,6 +883,16 @@ describe("DeepSeekModelPort", () => {
     expect(capturedImplementationPrompt).toContain("每个已确认旅程步骤");
     expect(implementationSystemPrompt).toContain("辅助 action 必须填写 []");
     expect(implementationSystemPrompt).toContain('"scripts"');
+    expect(implementationSystemPrompt).toContain('"template":"multi-filter"');
+    expect(implementationSystemPrompt).toContain('"name":"records","refKind":"mock-data"');
+    expect(implementationSystemPrompt).toContain('"name":"criterion-1-value","refKind":"control"');
+    expect(implementationSystemPrompt).toContain('"name":"view","refKind":"control"');
+    expect(implementationSystemPrompt).toContain('"name":"criterion-1-mode","value":"equals|not-equals|contains|starts-with|gte|lte"');
+    expect(implementationSystemPrompt).toContain('multi-filter 禁止 filtered 输出');
+    expect(implementationSystemPrompt).toContain('"template":"form-validate-submit"');
+    expect(implementationSystemPrompt).toContain('"name":"field-1-required","value":true');
+    expect(implementationSystemPrompt).toContain('"name":"success-message","value":"成功反馈"');
+    expect(implementationSystemPrompt).toContain('只有无法精确匹配上述审核模板的工作流才能使用 custom');
     expect(implementationSystemPrompt).toContain('"kind":"layout"');
     expect(implementationSystemPrompt).toContain('"kind":"registered-module"');
     expect(implementationSystemPrompt).toContain('"kind":"control"');

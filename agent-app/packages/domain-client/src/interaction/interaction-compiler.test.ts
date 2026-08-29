@@ -127,7 +127,44 @@ describe("compileInteractions", () => {
     expect(result.diagnostics.requests).toEqual([]);
     expect(result.implementation.compiledActions).toHaveLength(1);
     expect(result.implementation.compiledScripts).toEqual([]);
+    expect(result.sourceSolutionPlanHash).toBe(canonicalServerHash(input.plan));
+    expect(result.loweredSolutionPlanHash).toBe(result.sourceSolutionPlanHash);
+    expect(Object.isFrozen(result)).toBe(true);
     expect(traceInteraction(result, "go", "click")).toEqual(["navigate"]);
+  });
+
+  it("deterministically lowers reviewed declarative intent while preserving raw-plan provenance", () => {
+    const input = fixture("script");
+    const original = structuredClone(input);
+    input.plan.scripts = [{
+      id: "load-records", purpose: "筛选本地记录", kind: "custom", programVersion: "declarative-steps/v1",
+      inputs: [
+        { name: "records", description: "访客记录", refKind: "mock-data", refId: "visitor-records" },
+        { name: "criterion-1-value", description: "编号条件", refKind: "control", refId: "filter" },
+      ],
+      outputs: [{ name: "view", description: "记录表格", refKind: "control", refId: "records" }],
+      steps: [{ order: 1, intent: "按已声明编号条件筛选记录并更新表格", inputNames: ["records", "criterion-1-value"], outputNames: ["view"] }],
+    }];
+    const root = input.plan.pages[0]!.root;
+    if (root.kind !== "layout" || root.children[1]!.kind !== "control" || root.children[2]!.kind !== "control") throw new Error("control fixture required");
+    root.children[1]!.properties = [{ name: "filterField", value: "id" }, { name: "filterMode", value: "equals" }];
+    root.children[2]!.properties = [{ name: "filterCombine", value: "all" }];
+    input.implementation.sourceSolutionPlanHash = canonicalServerHash(input.plan);
+    input.implementation.sourceModuleRegistryHash = solutionModuleRegistryHash(input.plan, createDefaultModuleRegistry());
+    const rawHash = canonicalServerHash(input.plan);
+    const authoritativeRaw = structuredClone(input);
+
+    const first = compileInteractions(input);
+    const second = compileInteractions(input);
+
+    expect(input).toEqual(authoritativeRaw);
+    expect(first).toEqual(second);
+    expect(first.sourceSolutionPlanHash).toBe(rawHash);
+    expect(first.loweredSolutionPlanHash).not.toBe(first.sourceSolutionPlanHash);
+    expect(first.implementation.sourceSolutionPlanHash).toBe(first.sourceSolutionPlanHash);
+    expect(first.diagnostics.errors).toEqual([]);
+    expect(first.implementation.compiledScripts[0]!.source).toContain("Datagrid1.SetData(filtered)");
+    expect(original.plan.scripts[0]!.kind).toBe("custom");
   });
 
   it("allows an auxiliary action with no journey refs without weakening confirmed-step coverage", () => {

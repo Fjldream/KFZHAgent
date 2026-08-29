@@ -260,6 +260,47 @@ describe("conversation graph workspace query", () => {
     expect(JSON.stringify(outcome)).not.toMatch(/signature|creativeArtifact|materialization/i);
   });
 
+  it("uses the same deterministic state correlation for graph and authoritative interaction compilation", async () => {
+    const fixture = creativeFixture();
+    const statePlan = SolutionImplementationPlanSchema.parse({
+      ...fixture.plan,
+      localState: [{ id: "detail-ready", purpose: "详情准备状态", type: "boolean", initialValue: false }],
+      pages: fixture.plan.pages.map((page) => page.id === "home"
+        ? { ...page, initialStateIds: ["detail-ready"] }
+        : page),
+      actions: [{
+        ...fixture.plan.actions[0]!,
+        afterActionIds: ["mark-ready"],
+      }, {
+        id: "mark-ready", kind: "set-state", stateId: "detail-ready", value: true,
+        afterActionIds: [], journeyStepRefs: [],
+      }],
+    });
+    const compiler = createCreativeSolutionCompilerFromEnvironment(
+      creativePrisma().client,
+      {} as never,
+      { resolveManyForCompilation: vi.fn().mockResolvedValue([]) },
+      { KF_SERVER_PLAN_HMAC_KEY_BASE64: Buffer.alloc(32, 0x61).toString("base64") },
+    );
+
+    const outcome = await compiler.compile({
+      tenantId: "tenant-creative",
+      workspaceId: "workspace-creative",
+      conversationId: "conversation-state-correlation",
+      baseRevisionId: "revision-creative",
+      projectKey: statePlan.projectKey,
+      domainKind: "kingclient",
+      blueprint: fixture.blueprint,
+      candidateBundle: fixture.candidates,
+      semanticPlan: statePlan,
+    });
+
+    expect(
+      outcome.status,
+      outcome.status === "blocked" ? JSON.stringify(outcome.diagnostics) : undefined,
+    ).toBe("compiled");
+  });
+
   it.each([
     ["missing", null],
     ["wrong workspace", { tenantId: "tenant", workspaceId: "other-workspace", status: "OPEN" }],

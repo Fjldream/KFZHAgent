@@ -16,6 +16,7 @@ import { createDefaultModuleRegistry } from "../modules/module-registry.js";
 import { solutionModuleRegistryHash } from "../solution-compile/solution-provenance.js";
 import { compileNativeActions, type TypedScriptRequest } from "./action-compiler.js";
 import { normalizeActionGraph } from "./action-graph.js";
+import { lowerReviewedInteractionIntents } from "./interaction-intent-lowering.js";
 import { analyzeObservableClosure } from "./observable-closure.js";
 import { validateCustomScript, type ValidatedSemanticCall } from "./custom-script-validator.js";
 import {
@@ -54,6 +55,10 @@ export interface InteractionCompilationRequest {
 }
 
 export interface InteractionCompilationResult {
+  /** Canonical hash of the authoritative raw model plan. */
+  readonly sourceSolutionPlanHash: string;
+  /** Canonical hash of the server-derived plan used for compilation. */
+  readonly loweredSolutionPlanHash: string;
   readonly implementation: UIImplementationSpecV2;
   readonly diagnostics: {
     readonly errors: readonly InteractionDiagnostic[];
@@ -328,7 +333,10 @@ function isVisibleCall(call: ValidatedSemanticCall): boolean {
 }
 
 export function compileInteractions(input: unknown): InteractionCompilationResult {
-  const { blueprint, plan, implementation } = snapshotInput(input);
+  const { blueprint, plan: sourcePlan, implementation } = snapshotInput(input);
+  const sourceSolutionPlanHash = canonicalServerHash(sourcePlan);
+  const plan = lowerReviewedInteractionIntents(sourcePlan);
+  const loweredSolutionPlanHash = canonicalServerHash(plan);
   const normalized = normalizeActionGraph({ plan, implementation });
   const native = compileNativeActions({ normalized });
   const errors: InteractionDiagnostic[] = [];
@@ -357,7 +365,10 @@ export function compileInteractions(input: unknown): InteractionCompilationResul
     }
     try {
       const context = createSemanticScriptApiContext({
-        plan, implementation, ownerControlId: request.ownerControlId,
+        // The trusted API context independently reruns lowering from the raw
+        // plan. No lowered hash is written into the model-owned implementation
+        // provenance field.
+        plan, sourcePlan, implementation, ownerControlId: request.ownerControlId,
         activeEvent: { controlId: request.ownerControlId, semanticEvent: request.semanticEvent },
       });
       let compiled: CompiledScriptPlan;
@@ -572,13 +583,16 @@ export function compileInteractions(input: unknown): InteractionCompilationResul
     const calls = callsByAction.get(action.id) ?? [];
     const producerPageId = pageByControlId.get(action.trigger.controlId);
     for (const output of normalized.scriptClosures.get(effect.scriptId)?.candidateOutputRefs ?? []) {
-      const consumed = output.refKind === "control"
+      const authoritativeScript = scriptById.get(effect.scriptId);
+      const reviewedTemplatePublishesOutput = authoritativeScript?.kind === "template"
+        && authoritativeScript.outputs.some((declared) => declared.refKind === output.refKind && declared.refId === output.refId);
+      const consumed = reviewedTemplatePublishesOutput || (output.refKind === "control"
         ? calls.some((call) => call.targetId === output.refId && isVisibleCall(call) && call.execution !== "conditional")
           || hasEmittedConsumer(action.id, "control", output.refId)
         : output.refKind === "mock-data" ? (producerPageId !== undefined && uiMockDataConsumersByPage.get(producerPageId)?.has(output.refId) === true)
             || hasEmittedConsumer(action.id, "mock-data", output.refId)
           : (producerPageId !== undefined && uiStateConsumersByPage.get(producerPageId)?.has(output.refId) === true)
-            || hasEmittedConsumer(action.id, "local-state", output.refId);
+            || hasEmittedConsumer(action.id, "local-state", output.refId));
       if (!consumed) errors.push(diagnostic("INTERACTION_OUTPUT_CONSUMER_MISSING", effect.scriptId, `${output.refKind} output has no proven UI or script consumer: ${output.refId}`));
     }
   }));
@@ -605,6 +619,8 @@ export function compileInteractions(input: unknown): InteractionCompilationResul
     errors.push(diagnostic("INTERACTION_COMPILED_SOURCE_INVALID", "implementation", parsedOutput.error.issues[0]?.message ?? "compiled UI v2 is invalid"));
   }
   const result = deepFreeze({
+    sourceSolutionPlanHash,
+    loweredSolutionPlanHash,
     implementation: parsedOutput.success ? parsedOutput.data : implementation,
     diagnostics: {
       errors: errors.sort((left, right) => codePointCompare(`${left.code}\0${left.nodeId}\0${left.message}`, `${right.code}\0${right.nodeId}\0${right.message}`)),

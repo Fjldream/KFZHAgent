@@ -17,6 +17,7 @@ import {
   solutionModuleRegistryHash,
   type ExpectedControlProvenance,
 } from "../solution-compile/solution-provenance.js";
+import { lowerReviewedInteractionIntents } from "./interaction-intent-lowering.js";
 
 const API_NAMES = [
   "$control.getValue", "$control.setValue", "$control.setData", "$event.record",
@@ -175,28 +176,40 @@ function ownRecord(value: JsonData, nodeId: string): Record<string, JsonData> {
 export function createSemanticScriptApiContext(input: unknown): SemanticScriptApiContext {
   const cloned = ownRecord(clonePureData(input, "context"), "context");
   const keys = Object.keys(cloned).sort();
-  const allowedKeys = cloned.activeEvent === undefined
-    ? ["implementation", "ownerControlId", "plan"]
-    : ["activeEvent", "implementation", "ownerControlId", "plan"];
+  const allowedKeys = [
+    ...(cloned.activeEvent === undefined ? [] : ["activeEvent"]),
+    "implementation", "ownerControlId", "plan",
+    ...(cloned.sourcePlan === undefined ? [] : ["sourcePlan"]),
+  ];
   if (keys.length !== allowedKeys.length || keys.some((key, index) => key !== allowedKeys[index])) {
-    return invalidContext("context", "context must contain only plan, implementation, ownerControlId, and optional activeEvent");
+    return invalidContext("context", "context must contain only plan, implementation, ownerControlId, optional activeEvent, and optional sourcePlan");
   }
   if (typeof cloned.ownerControlId !== "string") return invalidContext("ownerControlId", "ownerControlId must be a semantic ID");
   const parsedPlan = SolutionImplementationPlanSchema.safeParse(cloned.plan);
   if (!parsedPlan.success) {
     return invalidContext("plan", parsedPlan.error.issues[0]?.message ?? "invalid solution implementation plan", { cause: parsedPlan.error });
   }
+  const parsedSourcePlan = cloned.sourcePlan === undefined
+    ? parsedPlan
+    : SolutionImplementationPlanSchema.safeParse(cloned.sourcePlan);
+  if (!parsedSourcePlan.success) {
+    return invalidContext("sourcePlan", parsedSourcePlan.error.issues[0]?.message ?? "invalid source solution implementation plan", { cause: parsedSourcePlan.error });
+  }
+  if (cloned.sourcePlan !== undefined
+    && canonicalServerHash(lowerReviewedInteractionIntents(parsedSourcePlan.data)) !== canonicalServerHash(parsedPlan.data)) {
+    return invalidContext("plan", "lowered plan does not match deterministic reviewed intent lowering");
+  }
   const parsed = UIImplementationSpecV2Schema.safeParse(cloned.implementation);
   if (!parsed.success || parsed.data.compatibility !== "native" || parsed.data.runtimeCorrelation === undefined) {
     return invalidContext("implementation", parsed.success ? "native runtime correlation is required" : parsed.error.issues[0]?.message ?? "invalid UI implementation", parsed.success ? undefined : { cause: parsed.error });
   }
-  if (parsed.data.sourceSolutionPlanHash !== canonicalServerHash(parsedPlan.data)) {
+  if (parsed.data.sourceSolutionPlanHash !== canonicalServerHash(parsedSourcePlan.data)) {
     return invalidContext("implementation", "solution-plan hash does not match the authoritative plan");
   }
   const trustedModuleRegistry = createDefaultModuleRegistry();
   let trustedModuleRegistryHash: string;
   try {
-    trustedModuleRegistryHash = solutionModuleRegistryHash(parsedPlan.data, trustedModuleRegistry);
+    trustedModuleRegistryHash = solutionModuleRegistryHash(parsedSourcePlan.data, trustedModuleRegistry);
   } catch (error) {
     return invalidContext("implementation", "module registry does not match the trusted default registry", error instanceof Error ? { cause: error } : undefined);
   }

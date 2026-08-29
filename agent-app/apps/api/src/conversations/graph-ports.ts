@@ -508,6 +508,7 @@ export function createCreativeSolutionCompilerFromEnvironment(
           workspaceId: input.workspaceId,
           baseRevisionId: input.baseRevisionId,
           implementation,
+          semanticStateIds: input.semanticPlan.localState.map((state) => state.id),
           editableEntities: evidence.editableEntities,
         });
         const interactions = compileInteractions({
@@ -687,12 +688,14 @@ function correlateCreativeImplementation(input: {
   workspaceId: string;
   baseRevisionId: string;
   implementation: UIImplementationSpecV2;
+  semanticStateIds: readonly string[];
   editableEntities: readonly EditableEntity[];
 }): { implementation: UIImplementationSpecV2; verifiedExisting?: VerifiedExistingRuntimeCorrelationHandle } {
   const derived = attachRuntimeCorrelation({
     workspaceId: input.workspaceId,
     baseRevisionId: input.baseRevisionId,
     implementation: input.implementation,
+    semanticStateIds: input.semanticStateIds,
   });
   const existingPageNames = new Set(input.editableEntities
     .filter((entity) => entity.kind === "page")
