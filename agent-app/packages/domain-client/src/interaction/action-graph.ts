@@ -67,6 +67,11 @@ export interface TrustedActionCompilationContext {
     readonly pageId: string;
   }[];
   readonly pages: readonly { readonly semanticPageId: string; readonly pageGuid: string }[];
+  readonly states: readonly {
+    readonly semanticStateId: string;
+    readonly variableName: string;
+    readonly stateType: SolutionImplementationPlan["localState"][number]["type"];
+  }[];
   readonly overlayHosts: readonly { readonly overlayId: string; readonly controlId: string; readonly pageId: string }[];
   readonly scripts: readonly ScriptPlan[];
   readonly scriptClosures: readonly { readonly scriptId: string; readonly closure: ScriptClosureCandidate }[];
@@ -597,6 +602,10 @@ export function normalizeActionGraph(input: NormalizeActionGraphInput): Normaliz
     graph: structuredClone(graph),
     controls: controlSnapshots,
     pages: implementation.runtimeCorrelation!.pages.map((entry) => ({ ...entry })),
+    states: plan.localState.flatMap((state) => {
+      const correlated = implementation.runtimeCorrelation!.states?.find((entry) => entry.semanticStateId === state.id);
+      return correlated === undefined ? [] : [{ semanticStateId: state.id, variableName: correlated.variableName, stateType: state.type }];
+    }),
     overlayHosts,
     scripts: plan.scripts.map((script) => structuredClone(script)),
     scriptClosures: Array.from(scriptClosures, ([scriptId, closure]) => ({ scriptId, closure: structuredClone(closure) })),

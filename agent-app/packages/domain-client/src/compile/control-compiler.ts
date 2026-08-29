@@ -74,7 +74,7 @@ import {
   type CompiledScriptModule,
 } from "@kf/contracts";
 import { createHash } from "node:crypto";
-import { types as utilTypes } from "node:util";
+import { isDeepStrictEqual, types as utilTypes } from "node:util";
 import {
   EASYUI_ALL_FIELDS,
   EASYUI_PROTO_FIELDS,
@@ -435,6 +435,8 @@ function serializedCompiledModule(module: CompiledScriptModule, binding?: Compil
 
 const COMPILED_ACTION_MARKER_SCHEMA = "kf-compiled-action/v1";
 const COMPILED_VISIBILITY_ACTION_MARKER_SCHEMA = "kf-compiled-action/v3";
+const COMPILED_STATE_ACTION_MARKER_SCHEMA = "kf-compiled-state/v1";
+const COMPILED_FEEDBACK_ACTION_MARKER_SCHEMA = "kf-compiled-feedback/v1";
 
 interface CompiledNavigateActionMarker {
   schema: typeof COMPILED_ACTION_MARKER_SCHEMA;
@@ -461,7 +463,34 @@ interface CompiledVisibilityActionMarker {
   phase: "event" | "after-event";
 }
 
-type CompiledActionMarker = CompiledNavigateActionMarker | CompiledVisibilityActionMarker;
+interface CompiledStateActionMarker {
+  schema: typeof COMPILED_STATE_ACTION_MARKER_SCHEMA;
+  actionId: string;
+  sourceActionId: string;
+  ownerInstanceName: string;
+  stateId: string;
+  variableName: string;
+  value: string | number | boolean | null;
+  kfEvent: string;
+  linkId: number | null;
+  phase: "event" | "after-event";
+}
+
+interface CompiledFeedbackActionMarker {
+  schema: typeof COMPILED_FEEDBACK_ACTION_MARKER_SCHEMA;
+  actionId: string;
+  sourceActionId: string;
+  ownerInstanceName: string;
+  message: string;
+  level: "success" | "info" | "warning" | "error";
+  scriptSha256: string;
+  scriptByteLength: number;
+  kfEvent: string;
+  linkId: number | null;
+  phase: "event" | "after-event";
+}
+
+type CompiledActionMarker = CompiledNavigateActionMarker | CompiledVisibilityActionMarker | CompiledStateActionMarker | CompiledFeedbackActionMarker;
 
 function parseCompiledActionMarker(input: unknown): CompiledActionMarker | undefined {
   if (input === undefined) return undefined;
@@ -471,9 +500,14 @@ function parseCompiledActionMarker(input: unknown): CompiledActionMarker | undef
   const schema = record?.["schema"];
   const expected = schema === COMPILED_VISIBILITY_ACTION_MARKER_SCHEMA
     ? ["actionId", "kfEvent", "linkId", "operation", "ownerInstanceName", "ownerSemanticControlId", "phase", "schema", "sourceActionId", "targetInstanceName", "targetSemanticControlId", "visible"]
-    : ["actionId", "kfEvent", "linkId", "ownerInstanceName", "phase", "schema", "sourceActionId"];
+    : schema === COMPILED_STATE_ACTION_MARKER_SCHEMA
+      ? ["actionId", "kfEvent", "linkId", "ownerInstanceName", "phase", "schema", "sourceActionId", "stateId", "value", "variableName"]
+      : schema === COMPILED_FEEDBACK_ACTION_MARKER_SCHEMA
+        ? ["actionId", "kfEvent", "level", "linkId", "message", "ownerInstanceName", "phase", "schema", "scriptByteLength", "scriptSha256", "sourceActionId"]
+        : ["actionId", "kfEvent", "linkId", "ownerInstanceName", "phase", "schema", "sourceActionId"];
   if (record === undefined || Object.keys(record).sort().join("\0") !== expected.join("\0")
-    || (schema !== COMPILED_ACTION_MARKER_SCHEMA && schema !== COMPILED_VISIBILITY_ACTION_MARKER_SCHEMA)
+    || ![COMPILED_ACTION_MARKER_SCHEMA, COMPILED_VISIBILITY_ACTION_MARKER_SCHEMA,
+      COMPILED_STATE_ACTION_MARKER_SCHEMA, COMPILED_FEEDBACK_ACTION_MARKER_SCHEMA].includes(String(schema))
     || typeof record["actionId"] !== "string" || typeof record["sourceActionId"] !== "string"
     || typeof record["ownerInstanceName"] !== "string" || typeof record["kfEvent"] !== "string"
     || (record["linkId"] !== null && !Number.isInteger(record["linkId"]))
@@ -486,6 +520,19 @@ function parseCompiledActionMarker(input: unknown): CompiledActionMarker | undef
       || typeof record["visible"] !== "boolean"
       || record["visible"] !== (record["operation"] === "open-overlay"))) {
     throw new ModelOutputInvalidError("compiler-owned visibility action marker is malformed");
+  }
+  if (schema === COMPILED_STATE_ACTION_MARKER_SCHEMA
+    && (typeof record["stateId"] !== "string" || typeof record["variableName"] !== "string"
+      || !/^\$kf_[a-z0-9_]+_[0-9a-f]{12}$/.test(record["variableName"])
+      || !Object.hasOwn(record, "value")
+      || !(record["value"] === null || ["string", "number", "boolean"].includes(typeof record["value"])))) {
+    throw new ModelOutputInvalidError("compiler-owned state action marker is malformed");
+  }
+  if (schema === COMPILED_FEEDBACK_ACTION_MARKER_SCHEMA
+    && (typeof record["message"] !== "string" || !["success", "info", "warning", "error"].includes(String(record["level"]))
+      || typeof record["scriptSha256"] !== "string" || !/^[0-9a-f]{64}$/.test(record["scriptSha256"])
+      || !Number.isInteger(record["scriptByteLength"]) || Number(record["scriptByteLength"]) < 1 || Number(record["scriptByteLength"]) > 32_000)) {
+    throw new ModelOutputInvalidError("compiler-owned feedback action marker is malformed");
   }
   return record as unknown as CompiledActionMarker;
 }
@@ -517,6 +564,21 @@ function serializedVisibilityActionScript(marker: CompiledVisibilityActionMarker
     scriptModuleIds: [],
     nativeActionIds: [marker.actionId],
   });
+}
+
+function serializedFeedbackActionScript(marker: CompiledFeedbackActionMarker): string {
+  return `ShowMessage(${JSON.stringify({ message: marker.message, type: marker.level })});`;
+}
+
+function isCanonicalShowMessageSource(source: string): boolean {
+  if (!source.startsWith("ShowMessage(") || !source.endsWith(");")) return false;
+  let payload: unknown;
+  try { payload = JSON.parse(source.slice("ShowMessage(".length, -2)); } catch { return false; }
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) return false;
+  const record = payload as Record<string, unknown>;
+  if (Object.keys(record).join("\0") !== "message\0type" || typeof record["message"] !== "string"
+    || !["success", "info", "warning", "error"].includes(String(record["type"]))) return false;
+  return source === `ShowMessage(${JSON.stringify({ message: record["message"], type: record["type"] })});`;
 }
 
 /**
@@ -643,6 +705,52 @@ function serializeCompiledNativeAction(
       kfCompilerAction: marker,
     };
   }
+  if (action.kind === "set-state") {
+    const marker: CompiledStateActionMarker = {
+      schema: COMPILED_STATE_ACTION_MARKER_SCHEMA,
+      actionId: action.id,
+      sourceActionId: action.sourceActionId,
+      ownerInstanceName: action.ownerInstanceName,
+      stateId: action.stateId,
+      variableName: action.targetVariableName,
+      value: action.value,
+      kfEvent: binding.kfEvent,
+      linkId: binding.linkId ?? null,
+      phase: binding.phase,
+    };
+    return {
+      action: "setVariable",
+      variableId: action.targetVariableName,
+      value: action.value,
+      ...(binding.linkId === undefined ? {} : { linkId: binding.linkId }),
+      enable: true,
+      name: binding.kfEvent,
+      kfCompilerAction: marker,
+    };
+  }
+  if (action.kind === "show-feedback") {
+    const source = `ShowMessage(${JSON.stringify({ message: action.message, type: action.level })});`;
+    const marker: CompiledFeedbackActionMarker = {
+      schema: COMPILED_FEEDBACK_ACTION_MARKER_SCHEMA,
+      actionId: action.id,
+      sourceActionId: action.sourceActionId,
+      ownerInstanceName: action.ownerInstanceName,
+      message: action.message,
+      level: action.level,
+      scriptSha256: createHash("sha256").update(source, "utf8").digest("hex"),
+      scriptByteLength: Buffer.byteLength(source, "utf8"),
+      kfEvent: binding.kfEvent,
+      linkId: binding.linkId ?? null,
+      phase: binding.phase,
+    };
+    return {
+      ...(binding.linkId === undefined ? {} : { linkId: binding.linkId }),
+      enable: true,
+      script: serializedFeedbackActionScript(marker),
+      name: binding.kfEvent,
+      kfCompilerAction: marker,
+    };
+  }
   if (action.kind !== "navigate-page") {
     throw new ModelOutputInvalidError(`native action kind lacks reviewed KF 3.6 serialization: ${action.kind}`);
   }
@@ -732,6 +840,7 @@ export function serializeReviewedNativeInteractions(
     throw new ModelOutputInvalidError("compiled native action references require an authoritative actions table");
   }
   const referencedActions = new Set<string>();
+  const bindingByActionId = new Map<string, CompiledEventBinding>();
   const referencedEventModules = new Set<string>();
   const phaseKeys = new Set<string>();
   for (const binding of bindings) {
@@ -749,6 +858,7 @@ export function serializeReviewedNativeInteractions(
       if (!actionById.has(id)) throw new ModelOutputInvalidError(`missing compiled native action: ${id}`);
       if (referencedActions.has(id)) throw new ModelOutputInvalidError(`compiled native action has multiple bindings: ${id}`);
       referencedActions.add(id);
+      bindingByActionId.set(id, binding);
     }
   }
   if (modules.some((module) => module.placement === "event" && !referencedEventModules.has(module.id))) {
@@ -757,6 +867,11 @@ export function serializeReviewedNativeInteractions(
   if (actions?.some((action) => !referencedActions.has(action.id)) === true) {
     throw new ModelOutputInvalidError("orphan compiled native action");
   }
+  const expectedOwnedActionLinks = new Map((actions ?? []).flatMap((action) => {
+    if (action.kind !== "set-state" && action.kind !== "show-feedback") return [];
+    const binding = bindingByActionId.get(action.id);
+    return binding === undefined ? [] : [[action.id, serializeCompiledNativeAction(action, binding)] as const];
+  }));
   const result = safeCloneScriptData(compiledControl, "compiledControl") as TemplateJson;
   const actualOwner = result["name"] ?? asCompilerRecord(result["baseProperty"])["name"];
   if (actualOwner !== expectedOwner) throw new ModelOutputInvalidError("compiled control owner does not match the authoritative script owner");
@@ -765,11 +880,26 @@ export function serializeReviewedNativeInteractions(
   const linkMng = rawLinkMng as TemplateJson;
   const rawLinks = linkMng["linkList"];
   if (!Array.isArray(rawLinks)) throw new ModelOutputInvalidError("compiled control linkMng.linkList must be an array");
+  const seenOwnedActionMarkers = new Set<string>();
   const links = rawLinks.flatMap((link, index) => {
     if (link === null || typeof link !== "object" || Array.isArray(link)) throw new ModelOutputInvalidError(`compiled control linkMng.linkList.${index} must be an object`);
     const record = link as Record<string, unknown>;
     const actionMarker = parseCompiledActionMarker(record["kfCompilerAction"]);
     if (actionMarker !== undefined) {
+      if (actionMarker.schema === COMPILED_STATE_ACTION_MARKER_SCHEMA || actionMarker.schema === COMPILED_FEEDBACK_ACTION_MARKER_SCHEMA) {
+        if (seenOwnedActionMarkers.has(actionMarker.actionId)) {
+          throw new ModelOutputInvalidError(`duplicate compiler-owned action marker: ${actionMarker.actionId}`);
+        }
+        const expected = expectedOwnedActionLinks.get(actionMarker.actionId);
+        if (expected === undefined) {
+          throw new ModelOutputInvalidError(`compiler-owned action is absent from the authoritative manifest: ${actionMarker.actionId}`);
+        }
+        if (!isDeepStrictEqual(record, expected)) {
+          throw new ModelOutputInvalidError(`compiler-owned action does not match the authoritative manifest: ${actionMarker.actionId}`);
+        }
+        seenOwnedActionMarkers.add(actionMarker.actionId);
+        return [];
+      }
       const enclosingLinkId = typeof record["linkId"] === "number" ? record["linkId"] : null;
       if (actionMarker.ownerInstanceName !== ownerInstanceName
         || actionMarker.kfEvent !== record["name"]
@@ -784,6 +914,19 @@ export function serializeReviewedNativeInteractions(
         throw new ModelOutputInvalidError("compiler-owned visibility action enclosing identity mismatch");
       }
       return [];
+    }
+    for (const expected of expectedOwnedActionLinks.values()) {
+      const sameEvent = record["name"] === expected["name"]
+        && (typeof record["linkId"] === "number" ? record["linkId"] : null)
+          === (typeof expected["linkId"] === "number" ? expected["linkId"] : null);
+      if (!sameEvent) continue;
+      const stateCollision = expected["action"] === "setVariable" && record["action"] === "setVariable"
+        && record["variableId"] === expected["variableId"];
+      const feedbackCollision = (expected["kfCompilerAction"] as Record<string, unknown> | undefined)?.["schema"] === COMPILED_FEEDBACK_ACTION_MARKER_SCHEMA
+        && record["action"] === undefined && typeof record["script"] === "string" && isCanonicalShowMessageSource(record["script"]);
+      if (stateCollision || feedbackCollision) {
+        throw new ModelOutputInvalidError("compiler-owned action marker is missing from a conflicting native effect");
+      }
     }
     if (typeof record["script"] === "string" && hasCompilerOwnedScriptTail(record["script"])) {
       const legacy = stripCompilerOwnedScriptTail(record["script"], ownerInstanceName, {

@@ -3,9 +3,28 @@ import {
   ActionGraphSchema,
   ActionPlanSchema,
   ActionValueSchema,
+  CompiledNativeActionSchema,
   SemanticEventBindingSchema,
   semanticImplementationTextIssue,
 } from "./action-graph.js";
+
+describe("compiled state action contract", () => {
+  it("requires the resolved KF variable name and a literal scalar value", () => {
+    expect(CompiledNativeActionSchema.safeParse({
+      id: "kf$action:set-enabled", sourceActionId: "set-enabled", ownerInstanceName: "Button1",
+      kind: "set-state", stateId: "enabled", targetVariableName: "$kf_enabled_0123456789ab", value: true,
+    }).success).toBe(true);
+    expect(CompiledNativeActionSchema.safeParse({
+      id: "kf$action:set-enabled", sourceActionId: "set-enabled", ownerInstanceName: "Button1",
+      kind: "set-state", stateId: "enabled", value: true,
+    }).success).toBe(false);
+    expect(CompiledNativeActionSchema.safeParse({
+      id: "kf$action:set-enabled", sourceActionId: "set-enabled", ownerInstanceName: "Button1",
+      kind: "set-state", stateId: "enabled", targetVariableName: "$kf_enabled_0123456789ab",
+      value: { kind: "record", fields: [] },
+    }).success).toBe(false);
+  });
+});
 
 const graphFixture = {
   schema: "kf-action-graph/v1",

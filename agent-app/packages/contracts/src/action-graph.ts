@@ -641,13 +641,21 @@ const compiledActionBase = {
   ownerInstanceName: CompilerInstanceNameSchema,
 };
 
+const CompiledStateValueSchema = z.union([z.boolean(), z.number().finite(), z.string().max(2_000), z.null()]);
+
 export const CompiledNativeActionSchema = z.discriminatedUnion("kind", [
   z.object({ ...compiledActionBase, kind: z.literal("navigate-page"), targetPageGuid: CompilerPageGuidSchema }).strict(),
   z.object({ ...compiledActionBase, kind: z.literal("open-overlay"), ownerSemanticControlId: StableSemanticIdSchema, targetSemanticControlId: StableSemanticIdSchema, targetInstanceName: CompilerInstanceNameSchema }).strict(),
   z.object({ ...compiledActionBase, kind: z.literal("close-overlay"), ownerSemanticControlId: StableSemanticIdSchema, targetSemanticControlId: StableSemanticIdSchema, targetInstanceName: CompilerInstanceNameSchema }).strict(),
   z.object({ ...compiledActionBase, kind: z.literal("set-visibility"), targetInstanceName: CompilerInstanceNameSchema, visible: z.boolean() }).strict(),
   z.object({ ...compiledActionBase, kind: z.literal("switch-tab"), targetInstanceName: CompilerInstanceNameSchema, tabId: StableSemanticIdSchema }).strict(),
-  z.object({ ...compiledActionBase, kind: z.literal("set-state"), stateId: StableSemanticIdSchema, value: ActionValueSchema }).strict(),
+  z.object({
+    ...compiledActionBase,
+    kind: z.literal("set-state"),
+    stateId: StableSemanticIdSchema,
+    targetVariableName: z.string().trim().min(1).max(100).regex(/^\$kf_[a-z0-9_]+_[0-9a-f]{12}$/),
+    value: CompiledStateValueSchema,
+  }).strict(),
   z.object({ ...compiledActionBase, kind: z.literal("set-control-value"), targetInstanceName: CompilerInstanceNameSchema, value: ActionValueSchema }).strict(),
   z.object({ ...compiledActionBase, kind: z.literal("show-feedback"), level: z.enum(["success", "info", "warning", "error"]), message: shortText }).strict(),
 ]);

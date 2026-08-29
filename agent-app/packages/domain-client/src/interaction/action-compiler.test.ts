@@ -46,6 +46,48 @@ afterEach(() => {
 });
 
 describe("compileNativeActions", () => {
+  it("resolves type-compatible set-state and feedback effects to reviewed native actions", async () => {
+    const { normalizeActionGraph } = await import("./action-graph.js");
+    const { compileNativeActions } = await import("./action-compiler.js");
+    const data = fixture();
+    const root = data.plan.pages[0]!.root;
+    if (root.kind !== "control") throw new Error("control trigger fixture required");
+    root.eventBindings = [{ semanticEvent: "click", actionIds: ["set-enabled", "saved"] }];
+    data.plan.localState.push({ id: "enabled", purpose: "启用", type: "boolean", initialValue: false });
+    data.plan.actions = [
+      { id: "set-enabled", kind: "set-state", stateId: "enabled", value: true, afterActionIds: ["saved"] },
+      { id: "saved", kind: "show-feedback", level: "success", message: "保存成功", afterActionIds: [] },
+    ];
+    data.implementation.runtimeCorrelation!.states = [
+      { semanticStateId: "enabled", variableName: "$kf_enabled_0123456789ab" },
+    ];
+
+    const result = compileNativeActions({ normalized: normalizeActionGraph(data) });
+    expect(result.scriptRequests).toEqual([]);
+    expect(result.actions).toEqual([
+      expect.objectContaining({ kind: "set-state", stateId: "enabled", targetVariableName: "$kf_enabled_0123456789ab", value: true }),
+      expect.objectContaining({ kind: "show-feedback", level: "success", message: "保存成功" }),
+    ]);
+  });
+
+  it("fails closed when set-state value is not compatible with its semantic state type", async () => {
+    const { normalizeActionGraph } = await import("./action-graph.js");
+    const { compileNativeActions } = await import("./action-compiler.js");
+    const data = fixture();
+    const root = data.plan.pages[0]!.root;
+    if (root.kind !== "control") throw new Error("control trigger fixture required");
+    root.eventBindings = [{ semanticEvent: "click", actionIds: ["set-enabled"] }];
+    data.plan.localState.push({ id: "enabled", purpose: "启用", type: "boolean", initialValue: false });
+    data.plan.actions = [{ id: "set-enabled", kind: "set-state", stateId: "enabled", value: "true", afterActionIds: [] }];
+    data.implementation.runtimeCorrelation!.states = [
+      { semanticStateId: "enabled", variableName: "$kf_enabled_0123456789ab" },
+    ];
+
+    const result = compileNativeActions({ normalized: normalizeActionGraph(data) });
+    expect(result.actions).toEqual([]);
+    expect(result.scriptRequests).toEqual([expect.objectContaining({ reason: "ACTION_VALUE_REQUIRES_SCRIPT" })]);
+  });
+
   it("closes attached runtime page identities through exact native navigation compilation", async () => {
     const { normalizeActionGraph } = await import("./action-graph.js");
     const { compileNativeActions } = await import("./action-compiler.js");
@@ -216,7 +258,7 @@ describe("compileNativeActions", () => {
     expect(result.scriptRequests[0]).toMatchObject({ reason: "TRIGGER_EVENT_UNSUPPORTED" });
   });
 
-  it("keeps planned local state assignment out of native output", async () => {
+  it("keeps local state assignment without runtime correlation out of native output", async () => {
     vi.doMock("../design-knowledge/script-capability-registry.js", () => ({
       requireScriptCapabilityProfile: () => ({
         schema: "kf-script-capability-profile/v1", capabilityId: "button", version: "1.0.0", availability: "supported",
@@ -232,7 +274,7 @@ describe("compileNativeActions", () => {
     data.plan.actions = [{ id: "navigate", kind: "set-state", stateId: "allowed", value: true, afterActionIds: [] }];
     const result = compileNativeActions({ normalized: normalizeActionGraph(data) });
     expect(result.actions).toEqual([]);
-    expect(result.scriptRequests[0]).toMatchObject({ reason: "ACTION_CAPABILITY_UNSUPPORTED" });
+    expect(result.scriptRequests[0]).toMatchObject({ reason: "ACTION_VALUE_REQUIRES_SCRIPT" });
   });
 
   it("requires exact supported target capability evidence for visibility", async () => {
@@ -300,9 +342,7 @@ describe("compileNativeActions", () => {
     const effects = [
       { kind: "set-visibility", targetId: "detail", visible: true },
       { kind: "switch-tab", targetId: "detail", tabId: "summary" },
-      { kind: "set-state", stateId: "allowed", value: true },
       { kind: "set-control-value", targetId: "detail", value: { kind: "literal", value: "更新" } },
-      { kind: "show-feedback", level: "success", message: "完成" },
     ] as const;
     for (const effect of effects) {
       const data = fixture();

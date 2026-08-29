@@ -115,7 +115,16 @@ function runtimeIndexes(context: TrustedActionCompilationContext) {
   }]));
   const pages = new Map(context.pages.map((entry) => [entry.semanticPageId, entry.pageGuid]));
   const overlayHosts = new Map(context.overlayHosts.map((entry) => [entry.overlayId, { controlId: entry.controlId, pageId: entry.pageId }]));
-  return { controls, pages, overlayHosts };
+  const states = new Map(context.states.map((entry) => [entry.semanticStateId, { variableName: entry.variableName, stateType: entry.stateType }]));
+  return { controls, pages, overlayHosts, states };
+}
+
+function stateValueMatches(type: TrustedActionCompilationContext["states"][number]["stateType"], value: unknown): boolean {
+  if (type === "boolean") return typeof value === "boolean";
+  if (type === "number") return typeof value === "number" && Number.isFinite(value);
+  if (type === "text") return typeof value === "string";
+  if (type === "record-key") return typeof value === "string" || value === null;
+  return false;
 }
 
 function parseNativeAction(value: unknown, nodeId: string): CompiledNativeAction {
@@ -168,7 +177,12 @@ function compileEffect(
       return targetInstanceName === undefined ? undefined : parseNativeAction({ ...base, kind: effect.kind, targetInstanceName, value: effect.value.value }, action.id);
     }
     case "show-feedback": return parseNativeAction({ ...base, kind: effect.kind, level: effect.level, message: effect.message }, action.id);
-    case "set-state": return parseNativeAction({ ...base, kind: effect.kind, stateId: effect.stateId, value: effect.value }, action.id);
+    case "set-state": {
+      const target = indexes.states.get(effect.stateId);
+      return target === undefined || !stateValueMatches(target.stateType, effect.value) ? undefined : parseNativeAction({
+        ...base, kind: effect.kind, stateId: effect.stateId, targetVariableName: target.variableName, value: effect.value,
+      }, action.id);
+    }
     case "run-script": return undefined;
   }
 }
@@ -311,6 +325,13 @@ export function compileNativeActions(input: CompileNativeActionsInput): NativeAc
       if (effect.kind === "set-control-value" && effect.value.kind !== "literal") {
         requests.push(request(action, "ACTION_VALUE_REQUIRES_SCRIPT", scriptsById));
         continue;
+      }
+      if (effect.kind === "set-state") {
+        const target = indexes.states.get(effect.stateId);
+        if (target === undefined || !stateValueMatches(target.stateType, effect.value)) {
+          requests.push(request(action, "ACTION_VALUE_REQUIRES_SCRIPT", scriptsById));
+          continue;
+        }
       }
       const compiled = compileEffect(action, effect, owner.instanceName, indexes);
       if (compiled === undefined) {

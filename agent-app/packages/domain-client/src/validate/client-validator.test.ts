@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { canonicalServerHash, type ScriptPlan, type SolutionImplementationPlan, type UIImplementationSpecV2 } from "@kf/contracts";
 import type { ClientWorkspace } from "../compile/client-compiler.js";
-import { compileControl, type CompileContext } from "../compile/control-compiler.js";
+import { compileControl, serializeReviewedNativeInteractions, type CompileContext } from "../compile/control-compiler.js";
 import { deriveGuid } from "../compile/guid-factory.js";
 import { validateCustomScript } from "../interaction/custom-script-validator.js";
 import { createSemanticScriptApiContext, createSemanticScriptValidationIdentity } from "../interaction/semantic-script-api.js";
@@ -223,6 +223,91 @@ function compileReviewedSyntax(options: {
 }
 
 describe("client validator (Task 7 brief Step 2)", () => {
+  it("accepts exact compiler-owned feedback and rejects marker or source tampering", async () => {
+    const feedback = {
+      id: "kf$action:saved", sourceActionId: "saved", ownerInstanceName: "Button1",
+      kind: "show-feedback" as const, level: "success" as const, message: "保存成功",
+    };
+    const binding = { id: "kf$binding:saved", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
+      phase: "event" as const, scriptModuleIds: [], nativeActionIds: [feedback.id] };
+    const serialized = serializeReviewedNativeInteractions(
+      compileControl({ seed: "validator-feedback" }, { id: "Button1", type: "button", x: 0, y: 0, width: 120, height: 40, text: "保存" }, {
+        variableGroupGuid: "variables", pageGroupGuid: "pages", resolvePageGuid: (id) => id, resolveVariableName: (id) => id,
+      }),
+      { ownerInstanceName: "Button1", capabilityId: "button", modules: [], actions: [feedback], bindings: [binding] },
+      { ownerInstanceName: "Button1", capabilityId: "button" },
+    );
+    const original = (serialized.linkMng as { linkList: Array<Record<string, unknown>> }).linkList[0]!;
+    for (const [label, mutate] of [
+      ["valid", () => {}],
+      ["message", (link: Record<string, unknown>) => { (link["kfCompilerAction"] as Record<string, unknown>)["message"] = "伪造"; }],
+      ["level", (link: Record<string, unknown>) => { (link["kfCompilerAction"] as Record<string, unknown>)["level"] = "error"; }],
+      ["marker", (link: Record<string, unknown>) => { (link["kfCompilerAction"] as Record<string, unknown>)["schema"] = "kf-compiled-feedback/v0"; }],
+      ["script", (link: Record<string, unknown>) => { link["script"] = `${String(link["script"])} `; }],
+    ] as const) {
+      const base = await copyFixture("client-unknown-field");
+      const root = await applyClientPatch(base, happyPlan());
+      const page = await readPage(root);
+      const link = structuredClone(original);
+      mutate(link);
+      page.objects[0]!.linkMng = { linkList: [link] };
+      await writePage(root, page);
+      const report = await validateClientProject(base, root, happyPlan(), { skipRoundTrip: true });
+      expect(report.checks.businessRules, label).toBe(label === "valid" ? "pass" : "fail");
+    }
+  });
+
+  it("rejects compiler-owned state variable identity tampering", async () => {
+    const variableName = "$kf_enabled_0123456789ab";
+    const state = { id: "kf$action:set-enabled", sourceActionId: "set-enabled", ownerInstanceName: "Button1",
+      kind: "set-state" as const, stateId: "enabled", targetVariableName: variableName, value: true };
+    const binding = { id: "kf$binding:set-enabled", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
+      phase: "event" as const, scriptModuleIds: [], nativeActionIds: [state.id] };
+    const serialized = serializeReviewedNativeInteractions(
+      compileControl({ seed: "validator-state" }, { id: "Button1", type: "button", x: 0, y: 0, width: 120, height: 40, text: "启用" }, {
+        variableGroupGuid: "variables", pageGroupGuid: "pages", resolvePageGuid: (id) => id, resolveVariableName: (id) => id,
+      }),
+      { ownerInstanceName: "Button1", capabilityId: "button", modules: [], actions: [state], bindings: [binding] },
+      { ownerInstanceName: "Button1", capabilityId: "button" },
+    );
+    const base = await copyFixture("client-unknown-field");
+    const variables = await readVariables(base);
+    variables.Variables.push({ name: variableName, dataType: 1, id: 99 });
+    await writeVariables(base, variables);
+    const root = await applyClientPatch(base, happyPlan());
+    const page = await readPage(root);
+    const link = structuredClone((serialized.linkMng as { linkList: Array<Record<string, unknown>> }).linkList[0]!);
+    link["variableId"] = "$kf_forged_0123456789ab";
+    page.objects[0]!.linkMng = { linkList: [link] };
+    await writePage(root, page);
+    const report = await validateClientProject(base, root, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.businessRules).toBe("fail");
+    expect(report.warnings.join("\n")).toMatch(/compiler-owned state action provenance mismatch/);
+  });
+
+  it("rejects a replayed compiler-owned marker identity during direct project validation", async () => {
+    const feedback = { id: "kf$action:replayed", sourceActionId: "replayed", ownerInstanceName: "Button1",
+      kind: "show-feedback" as const, level: "info" as const, message: "已更新" };
+    const binding = { id: "kf$binding:replayed", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
+      phase: "event" as const, scriptModuleIds: [], nativeActionIds: [feedback.id] };
+    const serialized = serializeReviewedNativeInteractions(
+      compileControl({ seed: "validator-replay" }, { id: "Button1", type: "button", x: 0, y: 0, width: 120, height: 40, text: "更新" }, {
+        variableGroupGuid: "variables", pageGroupGuid: "pages", resolvePageGuid: (id) => id, resolveVariableName: (id) => id,
+      }),
+      { ownerInstanceName: "Button1", capabilityId: "button", modules: [], actions: [feedback], bindings: [binding] },
+      { ownerInstanceName: "Button1", capabilityId: "button" },
+    );
+    const base = await copyFixture("client-unknown-field");
+    const candidate = await applyClientPatch(base, happyPlan());
+    const page = await readPage(candidate);
+    const link = (serialized.linkMng as { linkList: Array<Record<string, unknown>> }).linkList[0]!;
+    page.objects[0]!.linkMng = { linkList: [link, structuredClone(link)] };
+    await writePage(candidate, page);
+    const report = await validateClientProject(base, candidate, happyPlan(), { skipRoundTrip: true });
+    expect(report.checks.businessRules).toBe("fail");
+    expect(report.warnings.join("\n")).toMatch(/duplicate compiler-owned action marker identity/);
+  });
+
   it("validates explicitly compiler-owned event script metadata without rejecting unrelated legacy scripts", async () => {
     const base = await copyFixture("client-unknown-field");
     const legacyCandidate = await applyClientPatch(base, happyPlan());

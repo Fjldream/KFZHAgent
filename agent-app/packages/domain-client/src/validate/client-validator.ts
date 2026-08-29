@@ -198,6 +198,33 @@ interface CompilerVisibilityActionMarker {
   readonly phase: "event" | "after-event";
 }
 
+interface CompilerStateActionMarker {
+  readonly schema: "kf-compiled-state/v1";
+  readonly actionId: string;
+  readonly sourceActionId: string;
+  readonly ownerInstanceName: string;
+  readonly stateId: string;
+  readonly variableName: string;
+  readonly value: string | number | boolean | null;
+  readonly kfEvent: string;
+  readonly linkId: number | null;
+  readonly phase: "event" | "after-event";
+}
+
+interface CompilerFeedbackActionMarker {
+  readonly schema: "kf-compiled-feedback/v1";
+  readonly actionId: string;
+  readonly sourceActionId: string;
+  readonly ownerInstanceName: string;
+  readonly message: string;
+  readonly level: "success" | "info" | "warning" | "error";
+  readonly scriptSha256: string;
+  readonly scriptByteLength: number;
+  readonly kfEvent: string;
+  readonly linkId: number | null;
+  readonly phase: "event" | "after-event";
+}
+
 function compilerVisibilityActionMarker(value: unknown): { readonly marker?: CompilerVisibilityActionMarker; readonly issue?: string } {
   const record = asRecord(value);
   if (record["schema"] !== "kf-compiled-action/v3") return {};
@@ -219,6 +246,54 @@ function compilerVisibilityActionMarker(value: unknown): { readonly marker?: Com
     return { issue: "compiler-owned visibility action marker is malformed" };
   }
   return { marker: record as unknown as CompilerVisibilityActionMarker };
+}
+
+function compilerStateActionMarker(value: unknown): { readonly marker?: CompilerStateActionMarker; readonly issue?: string } {
+  const record = asRecord(value);
+  if (record["schema"] !== "kf-compiled-state/v1") return {};
+  const expected = ["actionId", "kfEvent", "linkId", "ownerInstanceName", "phase", "schema", "sourceActionId", "stateId", "value", "variableName"];
+  const scalar = record["value"] === null || ["string", "number", "boolean"].includes(typeof record["value"]);
+  if (Object.keys(record).sort().join("\0") !== expected.join("\0")
+    || typeof record["actionId"] !== "string" || !/^kf\$action:[A-Za-z0-9][A-Za-z0-9_-]{0,89}$/.test(record["actionId"])
+    || typeof record["sourceActionId"] !== "string" || !/^[A-Za-z][A-Za-z0-9_-]{0,99}$/.test(record["sourceActionId"])
+    || typeof record["ownerInstanceName"] !== "string" || !/^[A-Za-z_$][A-Za-z0-9_$]*[0-9]$/.test(record["ownerInstanceName"])
+    || typeof record["stateId"] !== "string" || !/^[A-Za-z][A-Za-z0-9_-]{0,99}$/.test(record["stateId"])
+    || typeof record["variableName"] !== "string" || !/^\$kf_[a-z0-9_]+_[0-9a-f]{12}$/.test(record["variableName"])
+    || !scalar || typeof record["kfEvent"] !== "string" || (record["linkId"] !== null && !Number.isInteger(record["linkId"]))
+    || (record["phase"] !== "event" && record["phase"] !== "after-event")) {
+    return { issue: "compiler-owned state action marker is malformed" };
+  }
+  return { marker: record as unknown as CompilerStateActionMarker };
+}
+
+function compilerFeedbackActionMarker(value: unknown): { readonly marker?: CompilerFeedbackActionMarker; readonly issue?: string } {
+  const record = asRecord(value);
+  if (record["schema"] !== "kf-compiled-feedback/v1") return {};
+  const expected = ["actionId", "kfEvent", "level", "linkId", "message", "ownerInstanceName", "phase", "schema", "scriptByteLength", "scriptSha256", "sourceActionId"];
+  if (Object.keys(record).sort().join("\0") !== expected.join("\0")
+    || typeof record["actionId"] !== "string" || !/^kf\$action:[A-Za-z0-9][A-Za-z0-9_-]{0,89}$/.test(record["actionId"])
+    || typeof record["sourceActionId"] !== "string" || !/^[A-Za-z][A-Za-z0-9_-]{0,99}$/.test(record["sourceActionId"])
+    || typeof record["ownerInstanceName"] !== "string" || !/^[A-Za-z_$][A-Za-z0-9_$]*[0-9]$/.test(record["ownerInstanceName"])
+    || typeof record["message"] !== "string" || record["message"].length < 1 || record["message"].length > 2_000
+    || !["success", "info", "warning", "error"].includes(String(record["level"]))
+    || typeof record["scriptSha256"] !== "string" || !/^[0-9a-f]{64}$/.test(record["scriptSha256"])
+    || !Number.isInteger(record["scriptByteLength"]) || Number(record["scriptByteLength"]) < 1 || Number(record["scriptByteLength"]) > 32_000
+    || typeof record["kfEvent"] !== "string" || (record["linkId"] !== null && !Number.isInteger(record["linkId"]))
+    || (record["phase"] !== "event" && record["phase"] !== "after-event")) {
+    return { issue: "compiler-owned feedback action marker is malformed" };
+  }
+  return { marker: record as unknown as CompilerFeedbackActionMarker };
+}
+
+function canonicalFeedbackSource(marker: CompilerFeedbackActionMarker): string {
+  return `ShowMessage(${JSON.stringify({ message: marker.message, type: marker.level })});`;
+}
+
+function compilerMarkerNamespaceIssue(value: unknown): string | undefined {
+  const schema = asRecord(value)["schema"];
+  if (typeof schema !== "string" || !schema.startsWith("kf-compiled-")) return undefined;
+  return ["kf-compiled-action/v1", "kf-compiled-action/v3", "kf-compiled-state/v1", "kf-compiled-feedback/v1"].includes(schema)
+    ? undefined : "compiler-owned action marker schema is unknown";
 }
 
 function canonicalCompilerMetadata(metadata: CompilerOwnedScriptMetadata): string {
@@ -1419,6 +1494,7 @@ async function checkBusinessRules(
     instanceTypesByPage.set(pageGuid, pageTypes);
   });
   const compilerModuleIds = new Set<string>();
+  const compilerActionMarkerIds = new Set<string>();
 
   for (const [pageGuid, tree] of Object.entries(inspection.raw.pages)) {
     const pageInstanceTypes = instanceTypesByPage.get(pageGuid) ?? new Map<string, RuntimeControlType>();
@@ -1476,9 +1552,45 @@ async function checkBusinessRules(
         const link = asRecord(rawLink);
         const action = link["action"];
         const script = link["script"];
+        const markerNamespaceIssue = compilerMarkerNamespaceIssue(link["kfCompilerAction"]);
+        if (markerNamespaceIssue !== undefined) issues.push(`control "${String(name)}" ${markerNamespaceIssue}`);
         const visibilityMarkerResult = compilerVisibilityActionMarker(link["kfCompilerAction"]);
         if (visibilityMarkerResult.issue !== undefined) issues.push(`control "${String(name)}" ${visibilityMarkerResult.issue}`);
         const visibilityMarker = visibilityMarkerResult.marker;
+        const stateMarkerResult = compilerStateActionMarker(link["kfCompilerAction"]);
+        if (stateMarkerResult.issue !== undefined) issues.push(`control "${String(name)}" ${stateMarkerResult.issue}`);
+        const stateMarker = stateMarkerResult.marker;
+        const feedbackMarkerResult = compilerFeedbackActionMarker(link["kfCompilerAction"]);
+        if (feedbackMarkerResult.issue !== undefined) issues.push(`control "${String(name)}" ${feedbackMarkerResult.issue}`);
+        const feedbackMarker = feedbackMarkerResult.marker;
+        const compilerActionMarkerId = stateMarker?.actionId ?? feedbackMarker?.actionId;
+        if (compilerActionMarkerId !== undefined) {
+          if (compilerActionMarkerIds.has(compilerActionMarkerId)) {
+            issues.push(`control "${String(name)}" duplicate compiler-owned action marker identity: ${compilerActionMarkerId}`);
+          }
+          compilerActionMarkerIds.add(compilerActionMarkerId);
+        }
+        if (stateMarker !== undefined) {
+          if (stateMarker.ownerInstanceName !== name || stateMarker.kfEvent !== link["name"]
+            || stateMarker.linkId !== (link["linkId"] ?? null) || link["enable"] !== true
+            || action !== "setVariable" || link["variableId"] !== stateMarker.variableName
+            || !Object.is(link["value"], stateMarker.value) || script !== undefined) {
+            issues.push(`control "${String(name)}" compiler-owned state action provenance mismatch`);
+          }
+          continue;
+        }
+        if (feedbackMarker !== undefined) {
+          const expectedSource = canonicalFeedbackSource(feedbackMarker);
+          let syntaxValid = true;
+          try { parse(expectedSource, { ecmaVersion: 2022, sourceType: "script" }); } catch { syntaxValid = false; }
+          if (!syntaxValid || feedbackMarker.ownerInstanceName !== name || feedbackMarker.kfEvent !== link["name"]
+            || feedbackMarker.linkId !== (link["linkId"] ?? null) || link["enable"] !== true || action !== undefined
+            || script !== expectedSource || Buffer.byteLength(expectedSource, "utf8") !== feedbackMarker.scriptByteLength
+            || createHash("sha256").update(expectedSource, "utf8").digest("hex") !== feedbackMarker.scriptSha256) {
+            issues.push(`control "${String(name)}" compiler-owned feedback action provenance mismatch`);
+          }
+          continue;
+        }
         const parsedCompilerSource = typeof script === "string" ? compilerOwnedSegments(script) : { segments: [] as readonly CompilerOwnedSegment[] };
         if (parsedCompilerSource.issue !== undefined || parsedCompilerSource.segments.length > 0) {
           if (typeof script === "string" && script.length > 32_000) issues.push(`control "${String(name)}" compiled event script exceeds 32000 characters`);

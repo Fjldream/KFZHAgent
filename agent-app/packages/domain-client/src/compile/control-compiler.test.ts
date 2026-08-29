@@ -53,6 +53,16 @@ const nativeOverlayVisibility = (
   targetInstanceName,
 });
 
+const nativeSetState = (id = "set-enabled") => ({
+  id: `kf$action:${id}`, sourceActionId: id, ownerInstanceName: "Button1", kind: "set-state" as const,
+  stateId: "enabled", targetVariableName: "$kf_enabled_0123456789ab", value: true,
+});
+
+const nativeFeedback = (id = "saved", message = "保存成功") => ({
+  id: `kf$action:${id}`, sourceActionId: id, ownerInstanceName: "Button1", kind: "show-feedback" as const,
+  level: "success" as const, message,
+});
+
 function decodedModules(source: string) {
   const marker = "// kf-compiled-event/v1 ";
   const result: Array<{ metadata: Record<string, unknown>; body: string }> = [];
@@ -81,6 +91,97 @@ function replaceSingleCompiledBody(source: string, body: string): string {
 }
 
 describe("control compiler — compiled scripts", () => {
+  it("serializes reviewed state and feedback actions in exact KF forms", () => {
+    const state = nativeSetState();
+    const feedback = nativeFeedback("saved", '保存成功\n"确认"');
+    const binding = {
+      id: "kf$binding:save", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
+      phase: "event" as const, scriptModuleIds: [], nativeActionIds: [state.id, feedback.id],
+    };
+    const output = controlCompilerModule.serializeReviewedNativeInteractions(
+      compileControl(build, buttonControl, ctx),
+      { ownerInstanceName: "Button1", capabilityId: "button", modules: [], actions: [state, feedback], bindings: [binding] },
+      { ownerInstanceName: "Button1", capabilityId: "button" },
+    );
+    const links = (output.linkMng as { linkList: Array<Record<string, unknown>> }).linkList;
+    expect(links[0]).toMatchObject({ action: "setVariable", variableId: "$kf_enabled_0123456789ab", value: true });
+    expect(links[1]!["script"]).toBe('ShowMessage({"message":"保存成功\\n\\"确认\\"","type":"success"});');
+    expect(links[1]!["kfCompilerAction"]).toMatchObject({ schema: "kf-compiled-feedback/v1", message: '保存成功\n"确认"', level: "success" });
+  });
+
+  it.each([
+    ["variable name", (link: Record<string, unknown>) => { link["variableId"] = "$kf_forged_0123456789ab"; }],
+    ["message", (link: Record<string, unknown>) => { (link["kfCompilerAction"] as Record<string, unknown>)["message"] = "伪造"; }],
+    ["level", (link: Record<string, unknown>) => { (link["kfCompilerAction"] as Record<string, unknown>)["level"] = "error"; }],
+    ["marker", (link: Record<string, unknown>) => { (link["kfCompilerAction"] as Record<string, unknown>)["schema"] = "kf-compiled-feedback/v0"; }],
+    ["script bytes", (link: Record<string, unknown>) => { link["script"] = `${String(link["script"])} `; }],
+  ])("rejects compiler-owned action %s tampering on reserialization", (_label, mutate) => {
+    const action = _label === "variable name" ? nativeSetState() : nativeFeedback();
+    const binding = { id: "kf$binding:tamper", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
+      phase: "event" as const, scriptModuleIds: [], nativeActionIds: [action.id] };
+    const first = controlCompilerModule.serializeReviewedNativeInteractions(
+      compileControl(build, buttonControl, ctx),
+      { ownerInstanceName: "Button1", capabilityId: "button", modules: [], actions: [action], bindings: [binding] },
+      { ownerInstanceName: "Button1", capabilityId: "button" },
+    );
+    mutate((first.linkMng as { linkList: Array<Record<string, unknown>> }).linkList[0]!);
+    expect(() => controlCompilerModule.serializeReviewedNativeInteractions(first,
+      { ownerInstanceName: "Button1", capabilityId: "button", modules: [], actions: [action], bindings: [binding] },
+      { ownerInstanceName: "Button1", capabilityId: "button" }))
+      .toThrow(/MODEL_OUTPUT_INVALID.*compiler-owned/i);
+  });
+
+  it.each(["set-state", "show-feedback"] as const)("rejects removed %s provenance instead of retaining a conflicting legacy link", (kind) => {
+    const action = kind === "set-state" ? nativeSetState() : nativeFeedback();
+    const binding = { id: `kf$binding:removed-${kind}`, ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
+      phase: "event" as const, scriptModuleIds: [], nativeActionIds: [action.id] };
+    const first = controlCompilerModule.serializeReviewedNativeInteractions(
+      compileControl(build, buttonControl, ctx),
+      { ownerInstanceName: "Button1", capabilityId: "button", modules: [], actions: [action], bindings: [binding] },
+      { ownerInstanceName: "Button1", capabilityId: "button" },
+    );
+    delete (first.linkMng as { linkList: Array<Record<string, unknown>> }).linkList[0]!["kfCompilerAction"];
+    expect(() => controlCompilerModule.serializeReviewedNativeInteractions(first,
+      { ownerInstanceName: "Button1", capabilityId: "button", modules: [], actions: [action], bindings: [binding] },
+      { ownerInstanceName: "Button1", capabilityId: "button" }))
+      .toThrow(/MODEL_OUTPUT_INVALID.*compiler-owned.*marker.*missing/i);
+  });
+
+  it("rejects a replayed compiler-owned feedback marker identity", () => {
+    const action = nativeFeedback();
+    const binding = { id: "kf$binding:replayed-feedback", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
+      phase: "event" as const, scriptModuleIds: [], nativeActionIds: [action.id] };
+    const first = controlCompilerModule.serializeReviewedNativeInteractions(
+      compileControl(build, buttonControl, ctx),
+      { ownerInstanceName: "Button1", capabilityId: "button", modules: [], actions: [action], bindings: [binding] },
+      { ownerInstanceName: "Button1", capabilityId: "button" },
+    );
+    const links = (first.linkMng as { linkList: Array<Record<string, unknown>> }).linkList;
+    links.push(structuredClone(links[0]!));
+    expect(() => controlCompilerModule.serializeReviewedNativeInteractions(first,
+      { ownerInstanceName: "Button1", capabilityId: "button", modules: [], actions: [action], bindings: [binding] },
+      { ownerInstanceName: "Button1", capabilityId: "button" }))
+      .toThrow(/MODEL_OUTPUT_INVALID.*duplicate.*marker/i);
+  });
+
+  it("rejects a fully self-consistent compiler marker absent from the authoritative action manifest", () => {
+    const action = nativeFeedback();
+    const binding = { id: "kf$binding:forged-feedback", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
+      phase: "event" as const, scriptModuleIds: [], nativeActionIds: [action.id] };
+    const first = controlCompilerModule.serializeReviewedNativeInteractions(
+      compileControl(build, buttonControl, ctx),
+      { ownerInstanceName: "Button1", capabilityId: "button", modules: [], actions: [action], bindings: [binding] },
+      { ownerInstanceName: "Button1", capabilityId: "button" },
+    );
+    const marker = ((first.linkMng as { linkList: Array<Record<string, unknown>> }).linkList[0]!["kfCompilerAction"] as Record<string, unknown>);
+    marker["actionId"] = "kf$action:forged";
+    marker["sourceActionId"] = "forged";
+    expect(() => controlCompilerModule.serializeReviewedNativeInteractions(first,
+      { ownerInstanceName: "Button1", capabilityId: "button", modules: [], actions: [action], bindings: [binding] },
+      { ownerInstanceName: "Button1", capabilityId: "button" }))
+      .toThrow(/MODEL_OUTPUT_INVALID.*authoritative.*manifest/i);
+  });
+
   it("keeps raw script serialization module-private", () => {
     expect(controlCompilerModule).not.toHaveProperty("serializeCompiledControlScripts");
   });

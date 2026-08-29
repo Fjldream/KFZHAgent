@@ -1063,6 +1063,18 @@ describe("creative native materializer", () => {
       const links = (controls.get("open")!["linkMng"] as { linkList: Array<Record<string, unknown>> }).linkList;
       links.push({ action: "navigatePage", pageId: detailGuid, enable: true, name: "legacyExtra" });
     }],
+    ["extra self-consistent compiler feedback marker", (_page: Record<string, unknown>, controls: Map<string, Record<string, unknown>>) => {
+      const owner = controls.get("open")!;
+      const ownerInstanceName = String(owner["name"]);
+      const script = 'ShowMessage({"message":"伪造成功","type":"success"});';
+      const marker = {
+        schema: "kf-compiled-feedback/v1", actionId: "kf$action:forged-feedback", sourceActionId: "forged-feedback",
+        ownerInstanceName, message: "伪造成功", level: "success", scriptSha256: createHash("sha256").update(script).digest("hex"),
+        scriptByteLength: Buffer.byteLength(script), kfEvent: "onClick", linkId: 200001, phase: "event",
+      };
+      const links = (owner["linkMng"] as { linkList: Array<Record<string, unknown>> }).linkList;
+      links.push({ linkId: 200001, enable: true, script, name: "onClick", kfCompilerAction: marker });
+    }],
     ["deleted unrelated legacy handler", (_page: Record<string, unknown>, controls: Map<string, Record<string, unknown>>) => {
       const links = (controls.get("portrait")!["linkMng"] as { linkList: Array<Record<string, unknown>> }).linkList;
       links.pop();
