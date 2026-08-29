@@ -1,6 +1,6 @@
 # KF Advanced Interactions Verification
 
-Verified on 2026-08-30 (Asia/Shanghai) against the committed advanced-interactions implementation at `f4cee09dd799575d7d4ca20582c39fdaef04c341`.
+Verified on 2026-08-30 (Asia/Shanghai) against the committed advanced-interactions implementation and final integrity fixes at `303013e47d91e213403299131d8fbabe9c269ba8`.
 
 ## Release verdict
 
@@ -10,15 +10,15 @@ The committed implementation passes the complete requested automated boundary: C
 /Users/fengjinlong/YK/KingFusion3.6/outputs/kf-advanced-interactions-task8/advanced-interactions.kf.zip
 ```
 
-- Size: `22,226` bytes
-- SHA-256: `a383a068877843cd8416fd5d0ea82ce282593e51e649ff4cf945be6efa9e20df`
+- Size: `22,143` bytes
+- SHA-256: `cfbe16850a9f8b32a124cca9a5a66f461404f8756092e828889f0c80627cac7d`
 - `unzip -t`: passed; every member reported `OK`, with no compressed-data errors.
 
 This is automated compile/package/import evidence, not a claim that the interactions have been exercised in a live KF 3.6 runtime. The live KF checklist remains open below.
 
 ## Commit scope
 
-Implementation range: `9d5fbdbbe1a450a1ca2f6123e51232946bcaad55..f4cee09dd799575d7d4ca20582c39fdaef04c341`.
+Implementation range: `9d5fbdbbe1a450a1ca2f6123e51232946bcaad55..303013e47d91e213403299131d8fbabe9c269ba8`.
 
 | Commit | Purpose |
 | --- | --- |
@@ -30,6 +30,7 @@ Implementation range: `9d5fbdbbe1a450a1ca2f6123e51232946bcaad55..f4cee09dd799575
 | `ce3220d68bbd2af23f2265542d5c753380117e21` | serialize reviewed filter and form templates |
 | `c97cded4e934f7125a3f96e7802f47a8b5fe2995` | lower recognized intent to reviewed templates |
 | `f4cee09dd799575d7d4ca20582c39fdaef04c341` | cover advanced interactions through graph, Worker, package, and import |
+| `303013e47d91e213403299131d8fbabe9c269ba8` | pin exact Button cursor source bytes and close compiler-owned state namespace creation |
 
 The design specification is commit `0a36a79` and precedes the range above.
 
@@ -41,32 +42,32 @@ Every Node command used the bundled runtime:
 export PATH=/Users/fengjinlong/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH
 ```
 
-Runtime versions were Node `v24.19.0` and pnpm `11.19.0`. Release evidence was collected from a detached checkout of `f4cee09` at `/tmp/kf-task8-clean-f4cee09`. Two material test inputs, `KingFusion3.6_Center` and `KingFusion3.6_Node`, are external product-evidence trees ignored by the root `.gitignore`; they are not contents of `f4cee09` or any other Git commit. Therefore this is verification of the clean committed implementation **together with those named external product inputs**, not proof that the commit alone is self-contained.
+Runtime versions were Node `v24.19.0` and pnpm `11.19.0`. Release evidence was collected from a detached checkout of `303013e` at `/tmp/kf-final-fix-303013e`. Two material test inputs, `KingFusion3.6_Center` and `KingFusion3.6_Node`, are external product-evidence trees ignored by the root `.gitignore`; they are not contents of `303013e` or any other Git commit. Therefore this is verification of the clean committed implementation **together with those named external product inputs**, not proof that the commit alone is self-contained.
 
 The exact checkout and evidence-link setup used was:
 
 ```bash
-git worktree add --detach /tmp/kf-task8-clean-f4cee09 \
-  f4cee09dd799575d7d4ca20582c39fdaef04c341
+git worktree add --detach /tmp/kf-final-fix-303013e \
+  303013e47d91e213403299131d8fbabe9c269ba8
 
 ln -s /Users/fengjinlong/YK/KingFusion3.6/KingFusion3.6_Center \
-  /tmp/kf-task8-clean-f4cee09/KingFusion3.6_Center
+  /tmp/kf-final-fix-303013e/KingFusion3.6_Center
 ln -s /Users/fengjinlong/YK/KingFusion3.6/KingFusion3.6_Node \
-  /tmp/kf-task8-clean-f4cee09/KingFusion3.6_Node
+  /tmp/kf-final-fix-303013e/KingFusion3.6_Node
 ```
 
 These were symbolic links, not copied Git inputs or an OS-enforced read-only mount. The evidence tests accessed the linked files only through read APIs. Reproduction should provide equivalent KF 3.6 product trees at the two source paths and must treat them as read-only external inputs. The exact cleanup used after verification was:
 
 ```bash
-unlink /tmp/kf-task8-clean-f4cee09/KingFusion3.6_Center
-unlink /tmp/kf-task8-clean-f4cee09/KingFusion3.6_Node
-git -C /tmp/kf-task8-clean-f4cee09 status --short
-git -C /tmp/kf-task8-clean-f4cee09 diff --check
+unlink /tmp/kf-final-fix-303013e/KingFusion3.6_Center
+unlink /tmp/kf-final-fix-303013e/KingFusion3.6_Node
+git -C /tmp/kf-final-fix-303013e status --short
+git -C /tmp/kf-final-fix-303013e diff --check
 ```
 
 After cleanup, detached-worktree `git status --short` produced no output and `git diff --check` passed.
 
-The first Domain Client attempt, before mounting those product trees, reported 13 failures and 1328 passes because exact referenced KF files were absent (`ENOENT`/`existsSync` failures). No behavioral assertion failed. After the required product evidence was mounted, the complete package passed as shown below. This environmental retry is recorded so the clean-commit evidence is reproducible rather than silently treating ignored product data as committed source.
+The external product trees were mounted before the final serial run. The Button cursor evidence test read the exact complete `button.css` bytes and matched SHA-256 `d84fba6badd5a88ff80a6af85cc35ddb59d3832ea47faeec8ca3fac277e85bbc`; a marker-preserving byte drift fixture was rejected.
 
 ## Commands and results
 
@@ -103,12 +104,12 @@ pnpm build
 | Package | Tests | Typecheck | Lint | Build |
 | --- | ---: | --- | --- | --- |
 | Contracts | 18 files; 484 passed | passed | passed | n/a |
-| Domain Client | 65 files; 1341 passed, 5 skipped | passed | passed | n/a |
+| Domain Client | 65 files; 1346 passed, 5 skipped | passed | passed | n/a |
 | API | 17 files; 329 passed | passed | passed | n/a |
 | Worker | 4 files; 41 passed | passed | passed | n/a |
 | Web | 11 files; 130 passed | passed | passed | passed; 104 modules transformed |
 
-Total: 115 test files, 2325 passed, 5 skipped, 0 failed. The API suite emitted non-fatal external tracing `429` messages because the tracing tenant has exhausted its monthly trace allowance; the affected application tests passed and the API process exited `0`. No DeepSeek/model request was made for fixture generation or package creation.
+Total: 115 test files, 2330 passed, 5 skipped, 0 failed. The API suite emitted non-fatal external tracing `429` messages because the tracing tenant has exhausted its monthly trace allowance; the affected application tests passed and the API process exited `0`. No DeepSeek/model request was made for fixture generation or package creation.
 
 ## Offline saved-fixture package proof
 
@@ -116,7 +117,7 @@ The sanitized fixture `apps/api/src/conversations/fixtures/v4-flash-portfolio-in
 
 ```bash
 cd agent-app/apps/worker
-TMPDIR=/Users/fengjinlong/YK/KingFusion3.6/outputs/kf-advanced-interactions-task8/staging/ \
+TMPDIR=/Users/fengjinlong/YK/KingFusion3.6/outputs/kf-advanced-interactions-task8/final-fix-staging/ \
 KINGCLIENT_NATIVE_ACCEPTED=true \
 pnpm exec vitest run src/job-runner.integration.test.ts \
   -t "builds, packages, validates, and imports the sanitized advanced-interactions fixture"
@@ -127,13 +128,13 @@ Result: 1 selected test passed, 29 skipped by the focus filter. The harness enqu
 For this run the single Worker-stored artifact was generated at:
 
 ```text
-/Users/fengjinlong/YK/KingFusion3.6/outputs/kf-advanced-interactions-task8/staging/kf-worker-artifacts-E46d02/0c1575be-204e-405b-ae59-7a0d9253d7c7/4a0f61f4-befa-59be-8f6c-21f1f4b81b1a
+/Users/fengjinlong/YK/KingFusion3.6/outputs/kf-advanced-interactions-task8/final-fix-staging/kf-worker-artifacts-YcOEHq/b7e5c0d4-752d-40d3-a1db-1456fa87bb5e/014dde32-ca5e-5494-82cf-c6cd2652c2ea
 ```
 
 The random directory/artifact identifiers are run-local. The reproducible discovery and copy procedure used by this one-test staging directory is to require exactly one regular file below `kf-worker-artifacts-*`, then copy those bytes to the stable path:
 
 ```bash
-staging_root=/Users/fengjinlong/YK/KingFusion3.6/outputs/kf-advanced-interactions-task8/staging
+staging_root=/Users/fengjinlong/YK/KingFusion3.6/outputs/kf-advanced-interactions-task8/final-fix-staging
 stable_zip=/Users/fengjinlong/YK/KingFusion3.6/outputs/kf-advanced-interactions-task8/advanced-interactions.kf.zip
 
 source_count=$(find "$staging_root" -type f \
@@ -152,6 +153,12 @@ unzip -t /Users/fengjinlong/YK/KingFusion3.6/outputs/kf-advanced-interactions-ta
 stat -f 'bytes=%z path=%N' /Users/fengjinlong/YK/KingFusion3.6/outputs/kf-advanced-interactions-task8/advanced-interactions.kf.zip
 shasum -a 256 /Users/fengjinlong/YK/KingFusion3.6/outputs/kf-advanced-interactions-task8/advanced-interactions.kf.zip
 ```
+
+## Final integrity fixes
+
+- Button `cursor:pointer` promotion now requires immutable selector evidence with the exact complete-file SHA-256 of the named ElementUI `button.css`. Both the style adapter and design-knowledge profile fail closed without that pinned digest, while the structured CSS value boundary remains limited to `pointer`.
+- Generic variable creation now rejects every case-folded `$kf_` prefix and rejects caller-supplied semantic-state metadata. A module-private authorization token reaches variable creation only after the creative envelope handle, complete ChangePlan hash, signed state projection, and exact materialization payload have all been verified.
+- Verified creative state append rejects exact and case-insensitive collisions against existing native variable identities. Focused regressions cover lowercase and uppercase generic attempts, forged matching metadata, exact and case-folded collisions, signed creative success, and ordinary generic variable create/delete controls.
 
 ## Supported interaction output
 
@@ -194,8 +201,8 @@ Use the stable ZIP above in an actual KF 3.6 environment:
 
 ## Hygiene and worktree state
 
-- Clean detached commit: `git diff --check` passed; `git status --short` was empty after removing temporary evidence mounts.
+- Clean detached commit: `git diff --check` passed; `git status --short` was empty after removing temporary evidence and environment mounts.
 - Shared worktree: `git diff --check` passed. It still contains pre-existing user-owned modified/untracked files from earlier work, plus the deliberately uncommitted `outputs/` package. Those files were not used as committed implementation evidence and were not staged by this task.
 - The plan's broad `sk-[A-Za-z0-9]+` scan found only known non-secret false positives such as `sk-1`, `sk-xxx`, and prose containing `Task-2`. A second plausible-key scan using `sk-[A-Za-z0-9]{20,}`, excluding `.env`, `node_modules`, ZIPs, and other generated/binary media, returned no matches.
-- `.env` was never read or printed. Generated ZIP/binary content was excluded from the secret scan.
+- The existing `.env` was mounted only for the clean API test process; its contents were never printed or manually inspected. No model call was made. Generated ZIP/binary content was excluded from the secret scan.
 - Only this Markdown report is intended for commit. The generated package remains a local, user-inspectable artifact.
