@@ -10,6 +10,7 @@ import {
   type ScriptPlan,
 } from "@kf/contracts";
 import { requireScriptCapabilityProfile } from "../design-knowledge/script-capability-registry.js";
+import { requireNativeActionCapability } from "../design-knowledge/native-action-capability-registry.js";
 import { createDefaultModuleRegistry } from "../modules/module-registry.js";
 import {
   validateSolutionControlSemanticProjection,
@@ -66,12 +67,17 @@ interface RuntimeControl {
   readonly mockDataId?: string;
 }
 
+interface RuntimeState {
+  readonly definition: SolutionImplementationPlan["localState"][number];
+  readonly variableName: string;
+}
+
 interface TrustedContext {
   readonly owner: RuntimeControl;
   readonly controls: ReadonlyMap<string, RuntimeControl>;
   readonly pages: ReadonlyMap<string, string>;
   readonly overlays: ReadonlySet<string>;
-  readonly localState: ReadonlyMap<string, SolutionImplementationPlan["localState"][number]>;
+  readonly localState: ReadonlyMap<string, RuntimeState>;
   readonly mockData: ReadonlyMap<string, MockDataSet>;
   readonly scripts: ReadonlyMap<string, ScriptPlan>;
   readonly activeEvent?: { readonly controlId: string; readonly semanticEvent: string };
@@ -320,12 +326,20 @@ export function createSemanticScriptApiContext(input: unknown): SemanticScriptAp
     activeEvent = deepFreeze({ controlId: record.controlId, semanticEvent: record.semanticEvent });
   }
   const context = Object.freeze({ schema: "kf-semantic-script-api-context/v1" as const });
+  const stateVariables = new Map((parsed.data.runtimeCorrelation.states ?? [])
+    .map((entry) => [entry.semanticStateId, entry.variableName] as const));
+  const localState = new Map<string, RuntimeState>();
+  for (const state of parsedPlan.data.localState.filter((candidate) => ownerStateIds.has(candidate.id))) {
+    const variableName = stateVariables.get(state.id);
+    if (variableName === undefined) return invalidContext(state.id, "runtime state correlation is missing");
+    localState.set(state.id, deepFreeze({ definition: state, variableName }));
+  }
   trustedContexts.set(context, {
     owner,
     controls,
     pages: new Map(parsed.data.runtimeCorrelation.pages.map((entry) => [entry.semanticPageId, entry.pageGuid])),
     overlays: new Set(parsedPlan.data.overlays.filter((overlay) => overlay.hostPageId === owner.pageId).map((overlay) => overlay.id)),
-    localState: new Map(parsedPlan.data.localState.filter((state) => ownerStateIds.has(state.id)).map((state) => [state.id, state])),
+    localState,
     mockData: new Map([...ownerMockDataIds].flatMap((id) => {
       const data = dataById.get(id);
       return data === undefined ? [] : [[id, data] as const];
@@ -632,7 +646,19 @@ export function resolveSemanticApiCall(input: unknown, context: SemanticScriptAp
     if (api === "$control.setValue") validateControlValue(api, target, args[1]);
     const property = profileOf(target)?.properties.find((candidate) => candidate.semanticProperty === "value");
     const direction = api === "$control.getValue" ? "readable" : "writable";
-    if (!supported(property)) return planned(api, "SCRIPT_PROPERTY_NOT_SUPPORTED");
+    if (!supported(property)) {
+      if (api === "$control.getValue") {
+        const method = profileOf(target)?.methods.find((candidate) => candidate.semanticMethod === "read-value");
+        if (supported(method)) {
+          return deepFreeze({
+            availability: "supported" as const, kind: "method" as const, api, ...resolutionBase(target),
+            kfMethod: method!.kfMethod, parameterNames: [...method!.parameters], returns: method!.returns,
+            evidence: method!.evidence.map((evidence) => ({ ...evidence })),
+          });
+        }
+      }
+      return planned(api, "SCRIPT_PROPERTY_NOT_SUPPORTED");
+    }
     if (!property![direction]) return planned(api, direction === "readable" ? "SCRIPT_PROPERTY_NOT_READABLE" : "SCRIPT_PROPERTY_NOT_WRITABLE");
     return deepFreeze({
       availability: "supported" as const,
@@ -704,20 +730,29 @@ export function resolveSemanticApiCall(input: unknown, context: SemanticScriptAp
     if (state === undefined) invalidCall(api, `unknown local state: ${stateId}`);
     if (api === "$state.set") {
       const value = args[1];
-      const valid = (state.type === "boolean" && typeof value === "boolean")
-        || (state.type === "number" && typeof value === "number")
-        || (state.type === "text" && typeof value === "string")
-        || (state.type === "record-key" && (typeof value === "string" || value === null))
-        || (state.type === "record-key-list" && Array.isArray(value) && value.every((item) => typeof item === "string"));
-      if (!valid) invalidCall(api, `value does not match local state type: ${state.type}`);
-      if ((state.type === "record-key" || state.type === "record-key-list") && state.mockDataId !== undefined && state.keyField !== undefined) {
-        const dataSet = trusted.mockData.get(state.mockDataId);
-        if (dataSet === undefined) invalidCall(api, `record-key data is not owned by the current page: ${state.mockDataId}`);
-        const keys = recordKeys(dataSet, state.keyField);
+      const definition = state.definition;
+      const valid = (definition.type === "boolean" && typeof value === "boolean")
+        || (definition.type === "number" && typeof value === "number")
+        || (definition.type === "text" && typeof value === "string")
+        || (definition.type === "record-key" && (typeof value === "string" || value === null))
+        || (definition.type === "record-key-list" && Array.isArray(value) && value.every((item) => typeof item === "string"));
+      if (!valid) invalidCall(api, `value does not match local state type: ${definition.type}`);
+      if ((definition.type === "record-key" || definition.type === "record-key-list") && definition.mockDataId !== undefined && definition.keyField !== undefined) {
+        const dataSet = trusted.mockData.get(definition.mockDataId);
+        if (dataSet === undefined) invalidCall(api, `record-key data is not owned by the current page: ${definition.mockDataId}`);
+        const keys = recordKeys(dataSet, definition.keyField);
         const requested = Array.isArray(value) ? value : [value];
         if (Array.isArray(value) && new Set(value).size !== value.length) invalidCall(api, "record-key-list values must be unique");
         if (requested.some((key) => typeof key !== "string" || !keys.has(key))) invalidCall(api, "unknown record key");
       }
+      const capability = requireNativeActionCapability("set-state");
+      if (capability.availability !== "supported" || capability.serialization !== "variable-command") {
+        return planned(api, "SCRIPT_PAGE_LOCAL_RUNTIME_UNAVAILABLE");
+      }
+      return deepFreeze({
+        availability: "supported" as const, kind: "variable-write" as const, api, stateId, variableName: state.variableName,
+        evidence: capability.evidence.map((item) => ({ ...item })),
+      });
     }
     return planned(api, "SCRIPT_PAGE_LOCAL_RUNTIME_UNAVAILABLE");
   }
@@ -726,14 +761,27 @@ export function resolveSemanticApiCall(input: unknown, context: SemanticScriptAp
     const dataId = stringId(api, args[0], "mock data ID");
     const dataSet = trusted.mockData.get(dataId);
     if (dataSet === undefined) invalidCall(api, `unknown mock data: ${dataId}`);
-    if (api === "$data.set") validateRuntimeRecordList(api, args[1], dataSet);
-    return planned(api, "SCRIPT_PAGE_LOCAL_RUNTIME_UNAVAILABLE");
+    if (api === "$data.set") {
+      validateRuntimeRecordList(api, args[1], dataSet);
+      return planned(api, "SCRIPT_PAGE_LOCAL_RUNTIME_UNAVAILABLE");
+    }
+    const records = dataSet.records.slice(0, 100).map((record) => Object.fromEntries(
+      record.values.map((entry) => [entry.field, entry.value]),
+    ));
+    return deepFreeze({ availability: "supported" as const, kind: "compiler-data-read" as const, api, dataId, records });
   }
   if (api === "$feedback.show") {
     exactArity(api, args, 2);
     if (typeof args[0] !== "string" || !["success", "info", "warning", "error"].includes(args[0])) invalidCall(api, "level must be success, info, warning, or error");
     if (typeof args[1] !== "string" || args[1].trim().length === 0 || args[1].length > 400) invalidCall(api, "message must contain 1..400 characters");
-    return planned(api, "SCRIPT_FEEDBACK_NOT_SERIALIZABLE");
+    const capability = requireNativeActionCapability("show-feedback");
+    if (capability.availability !== "supported" || capability.serialization !== "feedback-script") {
+      return planned(api, "SCRIPT_FEEDBACK_NOT_SERIALIZABLE");
+    }
+    return deepFreeze({
+      availability: "supported" as const, kind: "feedback" as const, api, level: args[0], message: args[1],
+      evidence: capability.evidence.map((item) => ({ ...item })),
+    });
   }
   if (api === "$timer.after" || api === "$timer.repeat") {
     exactArity(api, args, api === "$timer.after" ? 2 : 3);

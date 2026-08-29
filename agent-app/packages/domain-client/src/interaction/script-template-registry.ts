@@ -16,6 +16,8 @@ export type ScriptTemplateId =
 export interface ScriptTemplateDescriptor {
   readonly id: ScriptTemplateId;
   readonly semanticCalls: readonly string[];
+  readonly availability: "supported" | "planned";
+  readonly diagnostic?: string;
   readonly operations?: readonly ["append", "update", "remove"];
 }
 
@@ -43,8 +45,7 @@ const recordFields = z.array(z.object({ field: fieldName, controlId: StableSeman
 const MultiFilterParametersSchema = z.object({
   combine: z.enum(["all", "any"]),
   recordsId: StableSemanticIdSchema,
-  filteredId: StableSemanticIdSchema,
-  viewId: StableSemanticIdSchema.optional(),
+  viewId: StableSemanticIdSchema,
   criteria: z.array(z.object({
     field: fieldName,
     mode: matchMode,
@@ -117,15 +118,15 @@ const ResetParametersSchema = z.object({
 }).strict();
 
 const descriptors: readonly ScriptTemplateDescriptor[] = deepFreeze([
-  { id: "form-validate-submit", semanticCalls: ["$control.getValue", "$state.set", "$feedback.show"] },
-  { id: "master-detail-fill", semanticCalls: ["$event.record", "$control.setValue", "$feedback.show"] },
-  { id: "multi-filter", semanticCalls: ["$data.get", "$control.getValue", "$data.set", "$control.setData"] },
+  { id: "form-validate-submit", availability: "supported", semanticCalls: ["$control.getValue", "$state.set", "$feedback.show"] },
+  { id: "master-detail-fill", availability: "planned", diagnostic: "SCRIPT_TEMPLATE_INPUT_WRITE_UNVERIFIED", semanticCalls: ["$event.record", "$control.setValue", "$feedback.show"] },
+  { id: "multi-filter", availability: "supported", semanticCalls: ["$data.get", "$control.getValue", "$control.setData"] },
   {
-    id: "record-mutate",
+    id: "record-mutate", availability: "planned", diagnostic: "SCRIPT_TEMPLATE_PERSISTENT_DATA_MUTATION_UNVERIFIED",
     semanticCalls: ["$data.get", "$control.getValue", "$state.get", "$data.set", "$control.setData", "$feedback.show"],
     operations: ["append", "update", "remove"],
   },
-  { id: "reset-controls", semanticCalls: ["$control.setValue", "$state.set", "$data.get", "$data.set", "$feedback.show"] },
+  { id: "reset-controls", availability: "planned", diagnostic: "SCRIPT_TEMPLATE_RESET_WRITE_UNVERIFIED", semanticCalls: ["$control.setValue", "$state.set", "$data.get", "$data.set", "$feedback.show"] },
 ]);
 
 const descriptorById = new Map(descriptors.map((descriptor) => [descriptor.id, descriptor]));
@@ -238,8 +239,7 @@ class InvocationReader {
 function parseMultiFilter(plan: TemplatePlan, id: string): z.infer<typeof MultiFilterParametersSchema> {
   const reader = new InvocationReader(plan, id);
   const records = reader.input("records", ["mock-data"]);
-  const filtered = reader.output("filtered", ["mock-data"]);
-  const view = reader.optionalOutput("view", ["control"]);
+  const view = reader.output("view", ["control"]);
   const combine = reader.literal("combine");
   const criteria: Array<{ field: string; mode: z.infer<typeof matchMode>; valueControlId: string }> = [];
   for (let index = 1; index <= 8; index += 1) {
@@ -258,7 +258,7 @@ function parseMultiFilter(plan: TemplatePlan, id: string): z.infer<typeof MultiF
   if (reader.hasAny("criterion-9-")) invalid(id, "criteria.9");
   reader.finish();
   return parseTemplateParameters(MultiFilterParametersSchema, {
-    combine, recordsId: records.refId, filteredId: filtered.refId, ...(view === undefined ? {} : { viewId: view.refId }), criteria,
+    combine, recordsId: records.refId, viewId: view.refId, criteria,
   }, id);
 }
 
@@ -386,8 +386,7 @@ function renderMultiFilter(parameters: z.infer<typeof MultiFilterParametersSchem
   });
   const expressions = parameters.criteria.map((criterion, index) => criterionExpression(criterion, index + 1));
   lines.push(`const filtered = records.slice(0, 100).filter((record) => (${expressions.join(parameters.combine === "all" ? " && " : " || ")}));`);
-  lines.push(`$data.set(${literal(parameters.filteredId)}, filtered);`);
-  if (parameters.viewId !== undefined) lines.push(`$control.setData(${literal(parameters.viewId)}, filtered);`);
+  lines.push(`$control.setData(${literal(parameters.viewId)}, filtered);`);
   return lines.join("\n");
 }
 
@@ -426,7 +425,7 @@ function renderFormValidate(parameters: z.infer<typeof FormValidateParametersSch
       lines.push(`if (field${index + 1} === null || String(field${index + 1}).trim() === "") { valid = false; $feedback.show("error", ${literal(field.message!)}); }`);
     }
   });
-  lines.push(`$state.set(${literal(parameters.submittedStateId)}, valid);`);
+  lines.push(`$state.set(${literal(parameters.submittedStateId)}, Boolean(valid));`);
   lines.push(`if (valid) { $feedback.show("success", ${literal(parameters.successMessage)}); }`);
   return lines.join("\n");
 }

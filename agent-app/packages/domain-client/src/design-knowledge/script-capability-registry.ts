@@ -10,6 +10,7 @@ export type ScriptCapabilityEvidence = ScriptCapabilityProfile["events"][number]
 const TEMPLATE = (ref: string) => ({ kind: "template", ref });
 const PRODUCT_SOURCE = (ref: string, contentSha256: string) => ({ kind: "product-source", ref, contentSha256 });
 const CENTER_PROPERTY_PAGE = "KingFusion3.6_Center/sdb/c7f1771f-0c8f-4c75-9d71-3b8c4b6bd190/kingclient/9fdd3be0-2d91-11f1-b60a-4937cd79e5a1/pagerecord/recordpages/数据模型管理_属性定义20230511104433.json";
+const CENTER_SELECT_READ_PAGE = "KingFusion3.6_Center/sdb/c7f1771f-0c8f-4c75-9d71-3b8c4b6bd190/kingclient/e4dbfd40-2359-11f1-a6b7-99f0fd275345/pagerecord/recordpages/历史报警120240306091033.json";
 const NODE_DATAGRID_METHOD_PAGE = "KingFusion3.6_Node/sdb/kingclient/5dd3e6c0-d181-11f0-b646-250384722929/d6271f40-e165-11f0-bc3d-dbe5f779bd94/pagerecord/recordpages/数据网格_方法20250218173552.json";
 const NODE_DATAGRID_EVENT_PAGE = "KingFusion3.6_Node/sdb/kingclient/5dd3e6c0-d181-11f0-b646-250384722929/d6271f40-e165-11f0-bc3d-dbe5f779bd94/project/page/数据网格_事件.json";
 const NODE_LAYOUT_RUNTIME = "KingFusion3.6_Node/kingexedb/kingclient/exe/public/javascripts/Common/Graphic/Layout/kmui_layoutcomponentbase.js";
@@ -136,9 +137,15 @@ const REVIEWED_PROFILES: Readonly<Record<string, unknown>> = {
       { semanticEvent: "blur", kfEvent: "Blur", availability: "supported", arguments: [], evidence: [TEMPLATE("agent-app/packages/domain-client/src/templates/control-templates/select.json#connectArray")] },
       { semanticEvent: "focus", kfEvent: "Focus", availability: "supported", arguments: [], evidence: [TEMPLATE("agent-app/packages/domain-client/src/templates/control-templates/select.json#connectArray")] },
     ],
-    methods: [],
+    methods: [{
+      semanticMethod: "read-value", kfMethod: "GetCheckedNodes", availability: "supported", parameters: [], returns: "unknown",
+      evidence: [PRODUCT_SOURCE(
+        `${CENTER_SELECT_READ_PAGE}#linkMng.linkList.3.script`,
+        "6c4badcb9b32bf8e2273ef992258c04bb844e87a913705128c6cb92c35c7e4d8",
+      )],
+    }],
     initialization: { supportsConfigureData: false, lifecycleEvents: [] },
-    limitations: ["选择事件可识别，但尚未提供事件脚本编译器。"],
+    limitations: ["读取仅使用产品脚本证明的 GetCheckedNodes()；不将 Value 或任何写入拼写视为受支持。"],
   },
   tabs: {
     schema: "kf-script-capability-profile/v1",

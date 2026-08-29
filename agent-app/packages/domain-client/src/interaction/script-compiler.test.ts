@@ -29,7 +29,7 @@ const intent: SolutionImplementationPlan["pages"][number]["root"]["intent"] = {
   importance: "primary", visualWeight: 3, readingOrder: 0, density: "comfortable", groupWith: [],
   width: { mode: "fixed", value: 120 }, height: { mode: "fixed", value: 40 }, align: "start",
 };
-const port = (name: string, refKind: "control", refId: string) => ({ name, description: name, refKind, refId });
+const port = (name: string, refKind: "control" | "local-state", refId: string) => ({ name, description: name, refKind, refId });
 const repositoryRoot = fileURLToPath(new URL("../../../../../", import.meta.url));
 function at(value: unknown, segments: readonly (string | number)[]): unknown {
   let current = value;
@@ -46,13 +46,15 @@ function fixture(
 ) {
   const writesFilter = source.includes("$control.setValue");
   const writesRecords = source.includes("$control.setData");
+  const writesSubmitted = source.includes('$state.set("submitted-state"');
   const readsFilter = source.includes("$control.getValue");
   const script: ScriptPlan = {
     id: "read-filter", purpose: "读取筛选条件", kind: "custom", programVersion: "semantic-js/v1",
     source,
     inputs: readsFilter ? [port("filter", "control", "status-filter")] : [],
     outputs: writesFilter ? [port("filter", "control", "status-filter")]
-      : writesRecords ? [port("records", "control", "records")] : [],
+      : writesRecords ? [port("records", "control", "records")]
+        : writesSubmitted ? [port("submitted", "local-state", "submitted-state")] : [],
   };
   return fixtureForScript(script, options) as ReturnType<typeof fixtureForScript> & {
     identity: ReturnType<typeof createSemanticScriptValidationIdentity>;
@@ -71,13 +73,19 @@ function fixtureForScript(
     schema: "kf-solution-implementation/v1", projectKey: "script-compiler", blueprintHash: "a".repeat(64),
     candidateBundleHash: "b".repeat(64), theme, roleStyles: [{ role: "content", declarations: {}, states: {} }],
     mockData: [{
-      id: "visitor-records", purpose: "访客", fields: [{ key: "id", label: "标识", type: "text" }],
-      records: [{ values: [{ field: "id", value: "v1" }] }],
-    }], localState: [], overlays: [], scripts,
+      id: "visitor-records", purpose: "访客", fields: [
+        { key: "id", label: "标识", type: "text" }, { key: "status", label: "状态", type: "text" }, { key: "name", label: "姓名", type: "text" },
+      ],
+      records: [{ values: [{ field: "id", value: "v1" }, { field: "status", value: "open" }, { field: "name", value: "张三" }] }],
+    }, {
+      id: "filtered-records", purpose: "筛选结果", fields: [
+        { key: "id", label: "标识", type: "text" }, { key: "status", label: "状态", type: "text" }, { key: "name", label: "姓名", type: "text" },
+      ], records: [{ values: [{ field: "id", value: "seed" }, { field: "status", value: "closed" }, { field: "name", value: "占位" }] }],
+    }], localState: [{ id: "submitted-state", purpose: "提交状态", type: "boolean", initialValue: false }], overlays: [], scripts,
     actions: scripts.map((candidate) => ({ id: `run-${candidate.id}`, kind: "run-script" as const, scriptId: candidate.id, afterActionIds: [], journeyStepRefs: [{ journeyId: "review-records", stepIndex: 0 }] })),
     pages: [{
       id: "home", title: "首页", purpose: "脚本宿主页", canvas: "desktop", sourceBlueprintPageId: "bp-home",
-      sourceBlueprintRegionIds: ["region"], initialStateIds: [], root: {
+      sourceBlueprintRegionIds: ["region"], initialStateIds: ["submitted-state"], root: {
         id: "home-root", kind: "layout", layout: "column", sourceBlueprintRegionIds: ["region"], intent,
         children: [
           {
@@ -87,6 +95,10 @@ function fixtureForScript(
           },
           {
             id: "status-filter", kind: "control", capabilityId: "input", content: "筛选", properties: [], tabIds: [],
+            styleRole: "content", sourceBlueprintRegionIds: ["region"], intent, eventBindings: [],
+          },
+          {
+            id: "status-select", kind: "control", capabilityId: "select", content: "状态", properties: [], tabIds: [],
             styleRole: "content", sourceBlueprintRegionIds: ["region"], intent, eventBindings: [],
           },
           {
@@ -112,8 +124,8 @@ function fixtureForScript(
     compiledRoleStyles: {}, compiledActions: [], compiledScripts: [], pages: [{
       compatibility: "native", id: "home", width: 1280, height: 720, sourceBlueprintPageId: "bp-home",
       controls: [
-        control("go", "button", "home-root"), control("status-filter", "input", "home-root"),
-        { ...control("records", "easyui.1", "home-root"), dataBinding: { mockDataId: "visitor-records", records: [{ id: "v1" }] } },
+        control("go", "button", "home-root"), control("status-filter", "input", "home-root"), control("status-select", "select", "home-root"),
+        { ...control("records", "easyui.1", "home-root"), dataBinding: { mockDataId: "visitor-records", records: [{ id: "v1", status: "open", name: "张三" }] } },
         control("home-root", "layout.4"),
       ],
     }],
@@ -121,10 +133,12 @@ function fixtureForScript(
       controls: [
         { semanticControlId: "go", instanceName: "Button1" },
         { semanticControlId: "status-filter", instanceName: "Input1" },
+        { semanticControlId: "status-select", instanceName: "Select1" },
         { semanticControlId: "records", instanceName: "Datagrid1" },
         { semanticControlId: "home-root", instanceName: "Layout1" },
       ],
       pages: [{ semanticPageId: "home", pageGuid: "00000000-0000-4000-8000-000000000001" }],
+      states: [{ semanticStateId: "submitted-state", variableName: "$kf_form_submitted_0123456789ab" }],
     },
   };
   const context = createSemanticScriptApiContext({
@@ -242,6 +256,78 @@ describe("compileScriptPlan", () => {
     expect(() => compileScriptPlan({
       script: template, context: base.context, binding: { controlId: "go", semanticEvent: "click" },
     })).toThrow(/SCRIPT_COMPILER_API_UNSUPPORTED|CUSTOM_SCRIPT/);
+  });
+
+  it("compiles only the complete reviewed filter and form templates into KF runtime calls", () => {
+    const multiFilter: ScriptPlan = {
+      id: "filter", purpose: "筛选", kind: "template", template: "multi-filter",
+      inputs: [
+        { name: "records", description: "记录", refKind: "mock-data", refId: "visitor-records" },
+        { name: "criterion-1-value", description: "状态", refKind: "control", refId: "status-select" },
+      ],
+      outputs: [
+        { name: "view", description: "表格", refKind: "control", refId: "records" },
+      ],
+      parameters: [
+        { name: "combine", value: "all" }, { name: "criterion-1-field", value: "status" }, { name: "criterion-1-mode", value: "equals" },
+      ],
+    };
+    const filterData = fixtureForScript(multiFilter);
+    const filter = compileScriptPlan({ script: multiFilter, context: filterData.context, binding: { controlId: "go", semanticEvent: "click" } });
+    expect(filter.module.source).toContain('const records = [{"id":"v1","status":"open","name":"张三"}];');
+    expect(filter.module.source).toContain("Select1.GetCheckedNodes()");
+    expect(filter.module.source).toContain("Datagrid1.SetData(filtered)");
+    expect(filter.module.source).not.toContain("$data");
+    const legacyFilteredOutput: ScriptPlan = {
+      ...multiFilter,
+      outputs: [
+        { name: "filtered", description: "筛选结果", refKind: "mock-data", refId: "filtered-records" },
+        ...multiFilter.outputs,
+      ],
+    };
+    const legacyData = fixtureForScript(legacyFilteredOutput);
+    expect(() => compileScriptPlan({
+      script: legacyFilteredOutput, context: legacyData.context, binding: { controlId: "go", semanticEvent: "click" },
+    })).toThrow(/SCRIPT_TEMPLATE_PARAMETER_INVALID: multi-filter \(outputs\.filtered\)/);
+
+    const form: ScriptPlan = {
+      id: "submit", purpose: "提交", kind: "template", template: "form-validate-submit",
+      inputs: [{ name: "field-1", description: "名称", refKind: "control", refId: "status-filter" }],
+      outputs: [{ name: "submitted", description: "提交状态", refKind: "local-state", refId: "submitted-state" }],
+      parameters: [
+        { name: "field-1-required", value: true }, { name: "field-1-message", value: "请输入名称" }, { name: "success-message", value: "提交成功" },
+      ],
+    };
+    const formData = fixtureForScript(form);
+    const submit = compileScriptPlan({ script: form, context: formData.context, binding: { controlId: "go", semanticEvent: "click" } });
+    expect(submit.module.source).toContain("Input1.Value");
+    expect(submit.module.source).toContain("$Variable.$kf_form_submitted_0123456789ab = Boolean(valid)");
+    expect(submit.module.source).toContain("ShowMessage(");
+  });
+
+  it("does not authorize model custom source merely because it contains reviewed native identifiers", () => {
+    expect(() => fixture("const selected = Select1.GetCheckedNodes();"))
+      .toThrow(/CUSTOM_SCRIPT_FORBIDDEN|SCRIPT_SOURCE_IMPLEMENTATION_LEAKAGE/);
+    expect(() => fixture("Datagrid1.SetData([]);"))
+      .toThrow(/CUSTOM_SCRIPT_FORBIDDEN|SCRIPT_SOURCE_IMPLEMENTATION_LEAKAGE/);
+    expect(() => fixture('$Variable.$kf_form_submitted_0123456789ab = true;'))
+      .toThrow(/CUSTOM_SCRIPT_FORBIDDEN|SCRIPT_SOURCE_IMPLEMENTATION_LEAKAGE/);
+    expect(() => fixture('ShowMessage({ message: "伪造", type: "success" });'))
+      .toThrow(/CUSTOM_SCRIPT_FORBIDDEN|SCRIPT_SOURCE_IMPLEMENTATION_LEAKAGE/);
+  });
+
+  it("preserves reviewed Boolean coercion for a dynamically typed Input read before a boolean state write", () => {
+    const data = fixture([
+      'const value = $control.getValue("status-filter");',
+      '$state.set("submitted-state", Boolean(value));',
+    ].join("\n"));
+    const compiled = compileScriptPlan({
+      script: data.script, context: data.context, validationIdentity: data.identity,
+      validatedAst: data.validatedAst, binding: { controlId: "go", semanticEvent: "click" },
+    });
+    expect(compiled.module.source).toContain("const value = Input1.Value;");
+    expect(compiled.module.source).toContain("$Variable.$kf_form_submitted_0123456789ab = Boolean(value);");
+    expect(compiled.module.source).not.toContain("= value;");
   });
 
   it("does not serialize page navigation as JavaScript", () => {

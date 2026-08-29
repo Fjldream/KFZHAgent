@@ -17,7 +17,7 @@ import {
   validateCustomScript,
   type ValidatedScriptAst,
 } from "./custom-script-validator.js";
-import { renderScriptTemplate } from "./script-template-registry.js";
+import { renderScriptTemplate, requireScriptTemplate } from "./script-template-registry.js";
 import {
   assertSemanticScriptActiveEvent,
   requireSemanticScriptValidationIdentity,
@@ -30,6 +30,17 @@ import {
 } from "./semantic-script-api.js";
 
 type AstNode = Node & Record<string, unknown>;
+type FeedbackLevel = "success" | "info" | "warning" | "error";
+
+type ReviewedRuntimeCall =
+  | { readonly kind: "read-control"; readonly instanceName: string; readonly expression: "Value" | "GetCheckedNodes()" }
+  | { readonly kind: "set-datagrid"; readonly instanceName: string; readonly argument: string }
+  | { readonly kind: "set-variable"; readonly variableName: string; readonly argument: string }
+  | { readonly kind: "show-message"; readonly level: FeedbackLevel; readonly message: string };
+
+function isFeedbackLevel(value: unknown): value is FeedbackLevel {
+  return value === "success" || value === "info" || value === "warning" || value === "error";
+}
 
 export type ScriptCompilerErrorCode =
   | "SCRIPT_COMPILER_API_UNSUPPORTED"
@@ -391,13 +402,40 @@ class ReviewedAstEmitter {
     else if (api === "$control.setData") resolution = resolveSemanticApiCall({ api, args: [targetId, []] }, this.context);
     else if (api === "$event.record") resolution = resolveSemanticApiCall({ api, args: [] }, this.context);
     else if (api === "$page.navigate") resolution = resolveSemanticApiCall({ api, args: [targetId] }, this.context);
+    else if (api === "$data.get") resolution = resolveSemanticApiCall({ api, args: [targetId] }, this.context);
+    else if (api === "$state.set") resolution = resolveSemanticApiCall({ api, args: [targetId, false] }, this.context);
+    else if (api === "$feedback.show") {
+      const level = staticString(args[0]);
+      const message = staticString(args[1]);
+      resolution = resolveSemanticApiCall({ api, args: [level, message] }, this.context);
+    }
     else return fail("SCRIPT_COMPILER_API_UNSUPPORTED", api, "no reviewed KF emitter");
     if (resolution.availability !== "supported") return fail("SCRIPT_COMPILER_API_UNSUPPORTED", api, resolution.availability);
     if ("semanticControlId" in resolution && "instanceName" in resolution) {
       this.instanceReferences.set(resolution.semanticControlId, resolution.instanceName);
     }
-    if (resolution.kind === "property-read") return `${resolution.instanceName}.${resolution.kfProperty}`;
-    if (resolution.kind === "method") return `${resolution.instanceName}.${resolution.kfMethod}(${args.slice(1).map((item) => this.expression(item)).join(", ")})`;
+    let runtimeCall: ReviewedRuntimeCall | undefined;
+    if (resolution.kind === "property-read") {
+      if (resolution.kfProperty !== "Value") return fail("SCRIPT_COMPILER_API_UNSUPPORTED", api, "unreviewed property read");
+      runtimeCall = { kind: "read-control", instanceName: resolution.instanceName, expression: "Value" };
+    } else if (resolution.kind === "method" && api === "$control.getValue") {
+      if (resolution.kfMethod !== "GetCheckedNodes") return fail("SCRIPT_COMPILER_API_UNSUPPORTED", api, "unreviewed control read method");
+      runtimeCall = { kind: "read-control", instanceName: resolution.instanceName, expression: "GetCheckedNodes()" };
+    } else if (resolution.kind === "method" && api === "$control.setData") {
+      if (resolution.kfMethod !== "SetData") return fail("SCRIPT_COMPILER_API_UNSUPPORTED", api, "unreviewed datagrid method");
+      runtimeCall = { kind: "set-datagrid", instanceName: resolution.instanceName, argument: this.expression(args[1]!) };
+    } else if (resolution.kind === "variable-write") {
+      const valueNode = args[1]!;
+      runtimeCall = { kind: "set-variable", variableName: resolution.variableName, argument: this.expression(valueNode) };
+    } else if (resolution.kind === "feedback") {
+      if (!isFeedbackLevel(resolution.level)) return fail("SCRIPT_COMPILER_API_UNSUPPORTED", api, "unreviewed feedback level");
+      runtimeCall = { kind: "show-message", level: resolution.level, message: resolution.message };
+    }
+    if (runtimeCall?.kind === "read-control") return `${runtimeCall.instanceName}.${runtimeCall.expression}`;
+    if (runtimeCall?.kind === "set-datagrid") return `${runtimeCall.instanceName}.SetData(${runtimeCall.argument})`;
+    if (runtimeCall?.kind === "set-variable") return `$Variable.${runtimeCall.variableName} = ${runtimeCall.argument}`;
+    if (runtimeCall?.kind === "show-message") return `ShowMessage(${JSON.stringify({ message: runtimeCall.message, type: runtimeCall.level })})`;
+    if (resolution.kind === "compiler-data-read") return quote(resolution.records);
     if (resolution.kind === "event-argument") return `arguments[${resolution.argumentPosition}]`;
     if (resolution.kind === "restricted-action") {
       this.pageReferences.set(resolution.targetPageId, resolution.targetPageGuid);
@@ -449,6 +487,13 @@ export function compileScriptPlan(input: CompileScriptPlanInput): CompiledScript
   let validated: ValidatedScriptAst;
   let authoritativeCustom: ReturnType<typeof requireSemanticScriptValidationIdentity> | undefined;
   if (script.kind === "template") {
+    const descriptor = requireScriptTemplate(script.template);
+    if (descriptor.availability !== "supported") {
+      return fail("SCRIPT_COMPILER_API_UNSUPPORTED", script.template, descriptor.diagnostic ?? "template is planned");
+    }
+    if (script.template === "multi-filter" && !script.outputs.some((output) => output.name === "view" && output.refKind === "control")) {
+      return fail("SCRIPT_COMPILER_API_UNSUPPORTED", script.template, "SCRIPT_TEMPLATE_DATAGRID_OUTPUT_REQUIRED");
+    }
     source = renderScriptTemplate(script.template, script);
     validated = validateCustomScript({ source, inputs: script.inputs, outputs: script.outputs, context: snapshot.context });
   } else {

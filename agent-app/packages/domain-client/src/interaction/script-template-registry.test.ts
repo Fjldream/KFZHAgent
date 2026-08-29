@@ -17,7 +17,6 @@ const multiFilter = {
     { name: "criterion-2-value", description: "名称条件", refKind: "control", refId: "name-filter" },
   ],
   outputs: [
-    { name: "filtered", description: "筛选结果", refKind: "mock-data", refId: "filtered-records" },
     { name: "view", description: "结果表格", refKind: "control", refId: "records-table" },
   ],
   parameters: [
@@ -123,6 +122,13 @@ describe("reviewed script template registry", () => {
     expect(requireScriptTemplate("record-mutate").operations).toEqual(["append", "update", "remove"]);
     expect(Object.isFrozen(requireScriptTemplate("record-mutate").operations)).toBe(true);
     expect(requireScriptTemplate("multi-filter")).toBe(templates[2]);
+    expect(templates.map(({ id, availability, diagnostic }) => ({ id, availability, diagnostic }))).toEqual([
+      { id: "form-validate-submit", availability: "supported", diagnostic: undefined },
+      { id: "master-detail-fill", availability: "planned", diagnostic: "SCRIPT_TEMPLATE_INPUT_WRITE_UNVERIFIED" },
+      { id: "multi-filter", availability: "supported", diagnostic: undefined },
+      { id: "record-mutate", availability: "planned", diagnostic: "SCRIPT_TEMPLATE_PERSISTENT_DATA_MUTATION_UNVERIFIED" },
+      { id: "reset-controls", availability: "planned", diagnostic: "SCRIPT_TEMPLATE_RESET_WRITE_UNVERIFIED" },
+    ]);
     expect(() => requireScriptTemplate("missing-template")).toThrow("SCRIPT_TEMPLATE_UNKNOWN: missing-template");
   });
 
@@ -132,9 +138,18 @@ describe("reviewed script template registry", () => {
       "const criterion1 = $control.getValue(\"status-filter\");",
       "const criterion2 = $control.getValue(\"name-filter\");",
       "const filtered = records.slice(0, 100).filter((record) => (record[\"status\"] === criterion1 && String(record[\"name\"]).startsWith(String(criterion2))));",
-      "$data.set(\"filtered-records\", filtered);",
       "$control.setData(\"records-table\", filtered);",
     ].join("\n"));
+  });
+
+  it("rejects the legacy filtered output instead of silently treating a declared port as ephemeral", () => {
+    expect(() => renderScriptTemplate("multi-filter", {
+      ...multiFilter,
+      outputs: [
+        { name: "filtered", description: "筛选结果", refKind: "mock-data", refId: "filtered-records" },
+        ...multiFilter.outputs,
+      ],
+    })).toThrow(/SCRIPT_TEMPLATE_PARAMETER_INVALID: multi-filter \(outputs\.filtered\)/);
   });
 
   it("renders selected-record detail fill without an undeclared selection API", () => {
@@ -155,7 +170,7 @@ describe("reviewed script template registry", () => {
       "const field2 = $control.getValue(\"visitor-phone\");",
       "let valid = true;",
       "if (field1 === null || String(field1).trim() === \"\") { valid = false; $feedback.show(\"error\", \"请输入访客姓名\"); }",
-      "$state.set(\"submitted-state\", valid);",
+      "$state.set(\"submitted-state\", Boolean(valid));",
       "if (valid) { $feedback.show(\"success\", \"访客信息已模拟提交\"); }",
     ].join("\n"));
   });

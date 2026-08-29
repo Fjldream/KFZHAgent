@@ -74,6 +74,7 @@ import {
   type CompiledScriptModule,
 } from "@kf/contracts";
 import { createHash } from "node:crypto";
+import { parse } from "acorn";
 import { isDeepStrictEqual, types as utilTypes } from "node:util";
 import {
   EASYUI_ALL_FIELDS,
@@ -818,6 +819,14 @@ export function serializeReviewedNativeInteractions(
     if (parsed.data.ownerInstanceName !== ownerInstanceName) throw new ModelOutputInvalidError(`compiled script owner mismatch: ${parsed.data.id}`);
     const hash = createHash("sha256").update(parsed.data.source, "utf8").digest("hex");
     if (hash !== parsed.data.sourceHash) throw new ModelOutputInvalidError(`compiled script hash mismatch: ${parsed.data.id}`);
+    if (parsed.data.source.includes("kf-compiled-event/v1")) {
+      throw new ModelOutputInvalidError(`compiled script contains reserved marker: ${parsed.data.id}`);
+    }
+    try {
+      parse(parsed.data.source, { ecmaVersion: 2022 });
+    } catch (error) {
+      throw new ModelOutputInvalidError(`compiled script AST is invalid: ${parsed.data.id}`, { cause: error });
+    }
     return parsed.data;
   });
   const moduleById = new Map(modules.map((module) => [module.id, module]));

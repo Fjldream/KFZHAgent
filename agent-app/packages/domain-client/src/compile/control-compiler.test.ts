@@ -186,6 +186,19 @@ describe("control compiler — compiled scripts", () => {
     expect(controlCompilerModule).not.toHaveProperty("serializeCompiledControlScripts");
   });
 
+  it("rejects malformed generated AST even when a forged module supplies a matching hash", () => {
+    const malformed = scriptModule("malformed", "if (");
+    const binding = {
+      id: "kf$binding:malformed", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
+      phase: "event" as const, scriptModuleIds: [malformed.id], nativeActionIds: [],
+    };
+    expect(() => controlCompilerModule.serializeReviewedNativeInteractions(
+      compileControl(build, buttonControl, ctx),
+      { ownerInstanceName: "Button1", capabilityId: "button", modules: [malformed], bindings: [binding] },
+      { ownerInstanceName: "Button1", capabilityId: "button" },
+    )).toThrow(/MODEL_OUTPUT_INVALID.*AST is invalid/);
+  });
+
   it("preserves native actions and serializes an evidence-exact event chain in declared module order", () => {
     const first = scriptModule("first", "const first = 1;\n");
     const second = scriptModule("second", "const second = 2;\n");

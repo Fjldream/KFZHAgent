@@ -103,6 +103,13 @@ function implementation(): UIImplementationSpecV2 {
         { semanticPageId: "home", pageGuid: "00000000-0000-4000-8000-000000000001" },
         { semanticPageId: "detail-page", pageGuid: "00000000-0000-4000-8000-000000000002" },
       ],
+      states: [
+        { semanticStateId: "submitted", variableName: "$kf_submitted_0123456789ab" },
+        { semanticStateId: "detail-visible", variableName: "$kf_detail_visible_0123456789ac" },
+        { semanticStateId: "selected-name", variableName: "$kf_selected_name_0123456789ad" },
+        { semanticStateId: "selected-names", variableName: "$kf_selected_names_0123456789ae" },
+        { semanticStateId: "detail-state", variableName: "$kf_detail_state_0123456789af" },
+      ],
     },
   };
 }
@@ -258,13 +265,34 @@ describe("semantic script API", () => {
     });
   });
 
-  it("keeps input writes and select Value access planned without inventing a runtime spelling", () => {
+  it("keeps input writes planned and maps Select reads only to reviewed GetCheckedNodes", () => {
     expect(resolveSemanticApiCall(call("$control.setValue", "status-filter", "open"), context())).toEqual({
       availability: "planned", kind: "planned", api: "$control.setValue", reason: "SCRIPT_PROPERTY_NOT_WRITABLE",
     });
-    expect(resolveSemanticApiCall(call("$control.getValue", "status-select"), context())).toEqual({
-      availability: "planned", kind: "planned", api: "$control.getValue", reason: "SCRIPT_PROPERTY_NOT_SUPPORTED",
+    expect(resolveSemanticApiCall(call("$control.getValue", "status-select"), context())).toMatchObject({
+      availability: "supported", kind: "method", instanceName: "Select1", kfMethod: "GetCheckedNodes",
     });
+  });
+
+  it("resolves compiler-owned data snapshots, variable writes, and bounded feedback without promoting reads or mutation", () => {
+    expect(resolveSemanticApiCall(call("$data.get", "visitor-records"), context())).toEqual({
+      availability: "supported", kind: "compiler-data-read", api: "$data.get", dataId: "visitor-records",
+      records: [{ id: "visitor-1", name: "张三" }],
+    });
+    expect(resolveSemanticApiCall(call("$state.set", "submitted", true), context())).toMatchObject({
+      availability: "supported", kind: "variable-write", variableName: "$kf_submitted_0123456789ab",
+      evidence: expect.arrayContaining([expect.objectContaining({
+        kind: "product-source", contentSha256: "61ab4359b8a7a596282bfd48d7998765d6b9a5607fc58da68225600bd826d673",
+      })]),
+    });
+    expect(resolveSemanticApiCall(call("$feedback.show", "success", "完成"), context())).toMatchObject({
+      availability: "supported", kind: "feedback", api: "$feedback.show", level: "success", message: "完成",
+      evidence: expect.arrayContaining([expect.objectContaining({
+        kind: "product-source", contentSha256: "61ab4359b8a7a596282bfd48d7998765d6b9a5607fc58da68225600bd826d673",
+      })]),
+    });
+    expect(resolveSemanticApiCall(call("$state.get", "submitted"), context())).toMatchObject({ availability: "planned" });
+    expect(resolveSemanticApiCall(call("$data.set", "visitor-records", []), context())).toMatchObject({ availability: "planned" });
   });
 
   it("resolves only the product-evidenced datagrid SetData method", () => {
@@ -320,10 +348,7 @@ describe("semantic script API", () => {
     ["$overlay.open", ["detail-overlay"], "SCRIPT_OVERLAY_NOT_SERIALIZABLE"],
     ["$overlay.close", ["detail-overlay"], "SCRIPT_OVERLAY_NOT_SERIALIZABLE"],
     ["$state.get", ["submitted"], "SCRIPT_PAGE_LOCAL_RUNTIME_UNAVAILABLE"],
-    ["$state.set", ["submitted", true], "SCRIPT_PAGE_LOCAL_RUNTIME_UNAVAILABLE"],
-    ["$data.get", ["visitor-records"], "SCRIPT_PAGE_LOCAL_RUNTIME_UNAVAILABLE"],
     ["$data.set", ["visitor-records", []], "SCRIPT_PAGE_LOCAL_RUNTIME_UNAVAILABLE"],
-    ["$feedback.show", ["success", "完成"], "SCRIPT_FEEDBACK_NOT_SERIALIZABLE"],
     ["$timer.after", [100, "refresh-script"], "SCRIPT_TIMER_NOT_SERIALIZABLE"],
     ["$timer.repeat", [100, 2, "refresh-script"], "SCRIPT_TIMER_NOT_SERIALIZABLE"],
   ])("keeps %s as a closed planned result", (api, args, reason) => {
@@ -478,7 +503,9 @@ describe("semantic script API", () => {
     expect(() => resolveSemanticApiCall(call("$data.get", "detail-data"), context("go")))
       .toThrow(/SCRIPT_API_INPUT_INVALID.*unknown mock data/);
     expect(resolveSemanticApiCall(call("$state.get", "detail-state"), context("detail-input"))).toMatchObject({ availability: "planned" });
-    expect(resolveSemanticApiCall(call("$data.get", "detail-data"), context("detail-input"))).toMatchObject({ availability: "planned" });
+    expect(resolveSemanticApiCall(call("$data.get", "detail-data"), context("detail-input"))).toMatchObject({
+      availability: "supported", kind: "compiler-data-read", dataId: "detail-data",
+    });
     expect(() => resolveSemanticApiCall(call("$overlay.open", "detail-overlay"), context("detail-input")))
       .toThrow(/SCRIPT_API_INPUT_INVALID.*unknown overlay/);
   });

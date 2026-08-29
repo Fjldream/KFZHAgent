@@ -54,6 +54,31 @@ describe("script capability knowledge", () => {
     ))).toBe(true);
   });
 
+  it("binds the Select read to an exact active GetCheckedNodes product script", () => {
+    const method = requireScriptCapabilityProfile("select").methods.find((candidate) => candidate.semanticMethod === "read-value");
+    expect(method).toMatchObject({
+      kfMethod: "GetCheckedNodes",
+      availability: "supported",
+      parameters: [],
+      returns: "unknown",
+    });
+    expect(method?.evidence).toEqual([{
+      kind: "product-source",
+      ref: "KingFusion3.6_Center/sdb/c7f1771f-0c8f-4c75-9d71-3b8c4b6bd190/kingclient/e4dbfd40-2359-11f1-a6b7-99f0fd275345/pagerecord/recordpages/历史报警120240306091033.json#linkMng.linkList.3.script",
+      contentSha256: "6c4badcb9b32bf8e2273ef992258c04bb844e87a913705128c6cb92c35c7e4d8",
+    }]);
+    const source = readEvidenceContent(method!.evidence[0]!.ref);
+    expect(createHash("sha256").update(source).digest("hex")).toBe(method!.evidence[0]!.contentSha256);
+    expect(source).toContain("var tag_comment = Select1.GetCheckedNodes();");
+    const { file } = resolveEvidence(method!.evidence[0]!.ref);
+    const page = JSON.parse(readFileSync(file, "utf8")) as unknown;
+    const select = objectAt(page, ["objects", 0, "insiderObjects", 0, "insiderObjects", 0, "insiderObjects", 0,
+      "insiderObjects", 0, "insiderObjects", 0, "insiderObjects", 1]);
+    expect(select).toMatchObject({ name: "Select1", uiModelType: 44 });
+    expect((select["linkMng"] as { linkList: Array<{ name: string }> }).linkList.map((entry) => entry.name))
+      .toEqual(["Change", "visible-Change", "Remove-Tag", "Clear", "Blur", "Focus"]);
+  });
+
   it("preserves the reviewed image event identifiers from the native template", () => {
     expect(requireScriptCapabilityProfile("image").events).toMatchObject([
       { semanticEvent: "load", kfEvent: "Load", linkId: 200001 },

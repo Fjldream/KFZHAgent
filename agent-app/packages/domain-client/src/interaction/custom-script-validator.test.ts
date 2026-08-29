@@ -547,7 +547,7 @@ describe("reviewed templates pass the same AST gate", () => {
       id: "multi-filter", invocation: {
         id: "filter-records", kind: "template", template: "multi-filter", purpose: "筛选记录",
         inputs: [port("records", "mock-data", "visitor-records"), port("criterion-1-value", "control", "status-filter")],
-        outputs: [port("filtered", "mock-data", "filtered-records"), port("view", "control", "records-table")],
+        outputs: [port("view", "control", "records-table")],
         parameters: [{ name: "combine", value: "all" }, { name: "criterion-1-field", value: "status" }, { name: "criterion-1-mode", value: "contains" }],
       },
     },
