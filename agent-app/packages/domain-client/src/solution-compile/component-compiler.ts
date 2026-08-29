@@ -2,6 +2,7 @@ import {
   CapabilityCandidateBundleSchema,
   LEGACY_MODULE_PLAN_CANDIDATE_BUNDLE_HASH,
   ApprovedAssetFactsSchema,
+  ComponentStyleSpecV2Schema,
   UIImplementationSpecV2Schema,
   canonicalServerHash,
   modelAssetIdToWorkspaceAssetId,
@@ -13,6 +14,7 @@ import {
   type OverlayPlan,
   type RepeaterNode,
   type SemanticScalar,
+  type StyleDeclarationV2,
   type SolutionImplementationPlan,
   type SolutionNode,
   type SolutionPage,
@@ -21,7 +23,10 @@ import {
 import { parseTableData } from "../modules/definitions/native-data-adapters.js";
 import type { ModuleRegistry } from "../modules/module-registry.js";
 import { layoutCapabilityIdsFor } from "../planning/capability-retrieval.js";
-import { listControlCapabilities } from "../style/control-capability-registry.js";
+import {
+  effectiveInteractiveCapability,
+  listControlCapabilities,
+} from "../style/control-capability-registry.js";
 import {
   adaptReviewedComponentProperties,
   compileRegisteredModuleNode,
@@ -97,6 +102,10 @@ interface MutableSemanticDataRecord { [key: string]: SemanticData }
 
 const OVERLAY_Z_BASE = 100_000;
 const MAX_CONTROL_ID_LENGTH = 100;
+const INTERACTIVE_TEXT_STYLE_ROLE = "interactive-text";
+const TEXT_TYPOGRAPHY_KEYS = Object.freeze([
+  "textColor", "fontSize", "fontWeight", "lineHeight", "textAlign",
+] as const satisfies readonly (keyof StyleDeclarationV2)[]);
 
 function fail(code: string, path: CompilePath, detail: string, cause?: Error): never {
   throw new ComponentCompileError(code, path, detail, cause === undefined ? undefined : { cause });
@@ -411,10 +420,53 @@ function bindSemanticTabs(
   properties.activeId = activeId;
 }
 
+function sourceTextTypography(context: CompileContext, node: ControlNode): StyleDeclarationV2 {
+  const roleDeclarations = context.input.plan.roleStyles
+    .find((style) => style.role === node.styleRole)?.declarations ?? {};
+  const typography: StyleDeclarationV2 = {};
+  for (const key of TEXT_TYPOGRAPHY_KEYS) {
+    const value = roleDeclarations[key];
+    if (value !== undefined) Object.assign(typography, { [key]: value });
+  }
+  return typography;
+}
+
+function interactiveTextStyle(
+  context: CompileContext,
+  node: ControlNode,
+): NonNullable<UIImplementationControlV2["style"]> {
+  return ComponentStyleSpecV2Schema.parse({
+    role: INTERACTIVE_TEXT_STYLE_ROLE,
+    declarations: {
+      ...sourceTextTypography(context, node),
+      ...(node.styleOverride?.declarations ?? {}),
+      backgroundColor: "transparent",
+      borderTopWidth: 0,
+      borderRightWidth: 0,
+      borderBottomWidth: 0,
+      borderLeftWidth: 0,
+      padding: 0,
+      cursor: "pointer",
+    },
+    states: {
+      ...(node.styleOverride?.states ?? {}),
+      focus: {
+        ...(node.styleOverride?.states.focus ?? {}),
+        focusRing: { color: "{theme.primary}", width: 2, offset: 2 },
+      },
+    },
+  });
+}
+
 function emitControl(context: CompileContext, node: ControlNode, walk: WalkContext): void {
   const id = expandedId(node.id, walk.idPrefix);
   const compiled = compiledGeometry(context, id, [id, "geometry"]);
-  const capabilityId = controlCapability(context, node, [id, "capabilityId"]);
+  const sourceCapabilityId = controlCapability(context, node, [id, "capabilityId"]);
+  const capabilityId = effectiveInteractiveCapability(node);
+  if (capabilityId !== sourceCapabilityId) {
+    controlCapability(context, { ...node, capabilityId }, [id, "capabilityId"]);
+  }
+  const interactiveText = sourceCapabilityId === "text" && capabilityId === "button";
   const properties = semanticProperties(node, walk, [id]);
   bindSemanticTabs(node, capabilityId, properties, [id]);
   const assetIds = styleAssetIds(context, node, [id]);
@@ -444,13 +496,14 @@ function emitControl(context: CompileContext, node: ControlNode, walk: WalkConte
   pushControl(context, {
     id,
     ...(walk.parentId === undefined ? {} : { parentId: walk.parentId }),
-    role: node.styleRole,
+    role: interactiveText ? INTERACTIVE_TEXT_STYLE_ROLE : node.styleRole,
     capabilityId,
     ...adapted,
     depth: walk.depth,
     zIndex: compiled.zIndex + (context.overlay === undefined ? 0 : OVERLAY_Z_BASE),
     geometry: { ...compiled.geometry },
-    ...(node.styleOverride === undefined ? {} : { style: {
+    ...(interactiveText ? { style: interactiveTextStyle(context, node) }
+      : node.styleOverride === undefined ? {} : { style: {
       role: node.styleRole,
       declarations: node.styleOverride.declarations,
       states: node.styleOverride.states,

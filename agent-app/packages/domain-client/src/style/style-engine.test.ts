@@ -250,6 +250,25 @@ describe("compileResolvedStyle", () => {
     states: { hover: { backgroundColor: "#1d4ed8" } },
   });
 
+  it("compiles evidenced Button pointer cursor and rejects it on Text", () => {
+    const compile = (capabilityId: string) => compileResolvedStyle({
+      componentId: `cursor-${capabilityId}`,
+      capabilityId,
+      theme: themeFixture,
+      styleRole: "interactive-text",
+      roleStyle: styleV2({ role: "interactive-text", declarations: { cursor: "pointer" } }),
+      approvedAssets: [],
+      runtimeProfile: KF36_RUNTIME_PROFILE,
+    });
+
+    expect(compile("button").cssFragments).toContainEqual({
+      selectorToken: "root",
+      state: "normal",
+      declarations: { cursor: "pointer" },
+    });
+    expect(() => compile("text")).toThrow(/STYLE_PROPERTY_UNSUPPORTED/);
+  });
+
   it.each([
     "easyui.1",
     "tree",

@@ -191,6 +191,7 @@ height 精确联合：{"mode":"content"} | {"mode":"fill"} | {"mode":"viewport"}
 - {"kind":"control","capabilityId":"候选控件 id","content":语义值,"properties":[{"name":"semantic-property","value":语义值}],"tabIds":[],"mockDataId":"可选模拟数据 id","styleRole":"角色样式 id","styleOverride":{"declarations":{},"states":{}},"eventBindings":[事件绑定]}；styleOverride 可省略，若提供也只能是下述语义样式结构。
 - {"kind":"repeater","mockDataId":"模拟数据 id","itemAlias":"item-name","keyField":"字段 key","maxItems":20,"template":节点}
 事件绑定结构为 {"semanticEvent":"候选能力支持的语义事件","actionIds":["动作 id"]}。
+需要 click 的文字必须选择 button capability 并使用 interactive-text 样式角色；text 和 image 不得声明 click。
 
 theme 必须完整包含 background、surface、primary、accent、textPrimary、textSecondary、fontFamily、spacingUnit、radiusScale:{small,medium,large}。这些是语义主题令牌，不是原始 CSS。
 roleStyles 每项是 {"role":"stable-role","declarations":{"backgroundColor":"可选语义颜色令牌","textColor":"可选语义颜色令牌","borderColor":"可选语义颜色令牌","borderRadius":8,"fontSize":16,"fontWeight":600,"lineHeight":1.5,"padding":8,"margin":0,"gap":8,"boxShadow":"none|small|medium|large","opacity":1,"textAlign":"left|center|right"},"states":{"hover":{},"active":{},"focus":{},"disabled":{},"selected":{},"error":{}}}；只写结构化语义样式意图，禁止原始 CSS 规则和选择器。

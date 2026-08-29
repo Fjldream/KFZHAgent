@@ -59,6 +59,15 @@ describe("compileScopedCss", () => {
     })).toBe("#domId{font-weight:600;line-height:1.5;opacity:0.8}");
   });
 
+  it("serializes only the reviewed pointer cursor value", () => {
+    expect(serializeStyleDeclarations({ cursor: "pointer" }, [])).toEqual({
+      body: "cursor:pointer",
+      resolvedAssets: [],
+    });
+    expect(() => serializeStyleDeclarations({ cursor: "crosshair" } as never, []))
+      .toThrow(/STYLE_VALUE_FORBIDDEN|INVALID_STYLE_VALUE/);
+  });
+
   it("emits only supported state selectors", () => {
     expect(compileScopedCss(buttonSelectorRoles, {
       disabled: { textColor: "#64748b" },

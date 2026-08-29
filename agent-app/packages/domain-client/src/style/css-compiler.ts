@@ -112,7 +112,7 @@ const V2_PROPERTY_KEYS = new Set<keyof StyleDeclarationV2>([
   "borderRadius", "borderTopLeftRadius", "borderTopRightRadius", "borderBottomRightRadius", "borderBottomLeftRadius",
   "fontSize", "fontWeight", "lineHeight", "letterSpacing", "padding", "paddingHorizontal", "paddingVertical",
   "margin", "gap", "boxShadow", "opacity", "textAlign", "truncate", "objectFit", "overflow",
-  "iconSize", "iconColor", "iconGap", "focusRing", "transition", "advanced",
+  "iconSize", "iconColor", "iconGap", "cursor", "focusRing", "transition", "advanced",
 ]);
 const COLOR_PROPERTIES = Object.freeze({
   backgroundColor: "background-color",
@@ -299,6 +299,10 @@ export function serializeStyleDeclarations(
   if (declarations.textAlign !== undefined) output.set("text-align", declarations.textAlign);
   if (declarations.objectFit !== undefined) output.set("object-fit", declarations.objectFit);
   if (declarations.overflow !== undefined) output.set("overflow", declarations.overflow);
+  if (declarations.cursor !== undefined) {
+    if (declarations.cursor !== "pointer") return forbiddenV2Value("cursor");
+    output.set("cursor", declarations.cursor);
+  }
   if (declarations.truncate !== undefined) {
     output.set("text-overflow", declarations.truncate ? "ellipsis" : "clip");
     output.set("white-space", declarations.truncate ? "nowrap" : "normal");

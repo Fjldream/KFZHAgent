@@ -120,6 +120,19 @@ function basicTree(rootKind: LayoutNode["layout"] = "column"): CompiledLayoutTre
   return compiledTree(compiledNode("root", "layout", geometry(40, 40, 1_360, 120), [child], rootKind), 200);
 }
 
+function bundleWithControlCandidates(...capabilityIds: string[]): CapabilityCandidateBundle {
+  const bundle = structuredClone(realBundle);
+  const source = bundle.regions[0]!.controls.find((candidate) => candidate.id === "text")
+    ?? bundle.regions[0]!.controls[0]!;
+  const requested = capabilityIds.map((id) => ({ ...source, id }));
+  bundle.regions[0]!.controls = [
+    ...requested,
+    ...bundle.regions[0]!.controls.filter((candidate) => !capabilityIds.includes(candidate.id)),
+  ].slice(0, 5);
+  bundle.detailedCapabilityIds = [...new Set([...bundle.detailedCapabilityIds, ...capabilityIds])].sort();
+  return bundle;
+}
+
 function compileInput(
   inputPlan: SolutionImplementationPlan,
   layoutTree: CompiledLayoutTree,
@@ -232,6 +245,92 @@ describe("compileComponents", () => {
       id: "title", parentId: "root", capabilityId: "text", content: "访客申请", depth: 1,
       nativeProperties: { text: "访客申请", parentId: "root" },
     });
+  });
+
+  it("materializes clickable text as a link-style button without changing semantic ownership", () => {
+    const bundle = bundleWithControlCandidates("text", "button");
+    const linkText = control("title", "查看详情") as Extract<SolutionNode, { kind: "control" }>;
+    linkText.eventBindings = [{ semanticEvent: "click", actionIds: ["open"] }];
+    const originalBinding = structuredClone(linkText.eventBindings);
+    const controls = compileComponents(compileInput(
+      plan(layout("root", "column", [linkText]), bundle),
+      basicTree(),
+      bundle,
+    ));
+
+    expect(controls[1]).toMatchObject({
+      id: "title",
+      capabilityId: "button",
+      role: "interactive-text",
+      content: "查看详情",
+      geometry: geometry(40, 64, 400, 40),
+      sourceSolutionNodeId: "title",
+      sourceBlueprintPageId: "bp-page",
+      sourceBlueprintRegionIds: ["main"],
+      style: {
+        role: "interactive-text",
+        declarations: {
+          backgroundColor: "transparent",
+          borderTopWidth: 0,
+          borderRightWidth: 0,
+          borderBottomWidth: 0,
+          borderLeftWidth: 0,
+          padding: 0,
+          cursor: "pointer",
+        },
+        states: { focus: { focusRing: { color: "{theme.primary}", width: 2, offset: 2 } } },
+      },
+    });
+    expect(linkText.eventBindings).toEqual(originalBinding);
+  });
+
+  it("carries source Text role typography into the interactive-text Button", () => {
+    const bundle = bundleWithControlCandidates("text", "button");
+    const linkText = control("title", "查看详情") as Extract<SolutionNode, { kind: "control" }>;
+    linkText.eventBindings = [{ semanticEvent: "click", actionIds: ["open"] }];
+    linkText.styleOverride = { declarations: { fontWeight: 800 }, states: {} };
+    const inputPlan = plan(layout("root", "column", [linkText]), bundle);
+    inputPlan.roleStyles = [{
+      role: "body",
+      declarations: { textColor: "#123456", fontSize: 18, fontWeight: 600, lineHeight: 1.6, textAlign: "left" },
+      states: {},
+    }];
+
+    const controls = compileComponents(compileInput(inputPlan, basicTree(), bundle));
+
+    expect(controls[1]!.style).toMatchObject({
+      role: "interactive-text",
+      declarations: {
+        textColor: "#123456",
+        fontSize: 18,
+        fontWeight: 800,
+        lineHeight: 1.6,
+        textAlign: "left",
+        cursor: "pointer",
+      },
+    });
+  });
+
+  it("preserves unsupported image click for downstream evidence diagnostics", () => {
+    const bundle = bundleWithControlCandidates("image");
+    const image = control("title") as Extract<SolutionNode, { kind: "control" }>;
+    image.capabilityId = "image";
+    image.content = null;
+    image.eventBindings = [{ semanticEvent: "click", actionIds: ["open"] }];
+
+    const controls = compileComponents(compileInput(
+      plan(layout("root", "column", [image]), bundle),
+      basicTree(),
+      bundle,
+    ));
+
+    expect(controls[1]).toMatchObject({
+      id: "title",
+      capabilityId: "image",
+      sourceSolutionNodeId: "title",
+      sourceBlueprintRegionIds: ["main"],
+    });
+    expect(image.eventBindings).toEqual([{ semanticEvent: "click", actionIds: ["open"] }]);
   });
 
   it("uses candidate order before the code-point tie break for a compatible layout", () => {

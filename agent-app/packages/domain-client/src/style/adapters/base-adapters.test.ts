@@ -100,6 +100,12 @@ describe("base style adapters", () => {
     ]));
   });
 
+  it("allows the evidenced cursor property only on the Button root", () => {
+    expect(getStyleAdapter("button")!.parts[0]!.cssProperties).toContain("cursor");
+    expect(getStyleAdapter("text")!.parts[0]!.cssProperties).not.toContain("cursor");
+    expect(getStyleAdapter("easyui.2")!.parts[0]!.cssProperties).not.toContain("cursor");
+  });
+
   it("keeps unsupported semantic parts absent instead of falling back to root", () => {
     expect(getStyleAdapter("tabs")!.parts.some((part) => part.semanticPart === "label")).toBe(false);
     expect(getStyleAdapter("easyui.1")!.parts.some((part) => part.semanticPart === "empty")).toBe(false);

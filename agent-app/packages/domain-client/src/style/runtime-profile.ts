@@ -118,7 +118,7 @@ function rootOnly(
 const buttonEvidence = evidence(
   "button", { showUiExtendType: "ElementUI_Button", uiModelType: 35 },
   `${ELEMENT}kmui_elementui_button.js`, ["<el-button", "ElementUI_Button"],
-  `${ELEMENT_LIB}button.js`, ["el-button"],
+  `${ELEMENT_THEME}button.css`, [".el-button", "cursor:pointer"],
 );
 const inputEvidence = evidence(
   "input", { showUiExtendType: "ElementUI_Input", uiModelType: 38 },

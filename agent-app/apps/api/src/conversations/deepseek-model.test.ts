@@ -863,6 +863,7 @@ describe("DeepSeekModelPort", () => {
     expect(capturedImplementationPrompt).toContain("本地状态");
     expect(capturedImplementationPrompt).toContain("声明式意图和步骤");
     expect(capturedImplementationPrompt).toContain("不得输出可执行 JavaScript 或源代码");
+    expect(capturedImplementationPrompt).toContain("需要 click 的文字必须选择 button capability 并使用 interactive-text 样式角色；text 和 image 不得声明 click。");
     expect(capturedImplementationPrompt).not.toContain("styleDataNew");
     expect(capturedImplementationPrompt).not.toContain("linkId");
     expect(capturedImplementationPrompt).not.toContain("configureData");

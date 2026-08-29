@@ -35,7 +35,7 @@ export const DesignDataShapeSchema = z.enum([
 ]);
 export const StyleKnowledgePropertySchema = z.enum([
   "backgroundColor", "textColor", "borderColor", "borderRadius", "fontSize", "fontWeight",
-  "lineHeight", "padding", "margin", "gap", "boxShadow", "opacity", "textAlign",
+  "lineHeight", "padding", "margin", "gap", "boxShadow", "opacity", "textAlign", "cursor",
 ]);
 export const StyleKnowledgeStateSchema = z.enum(["hover", "active", "focus", "disabled", "selected", "error"]);
 
@@ -65,7 +65,7 @@ export const StyleCapabilityProfileSchema = z.object({
     id,
     availability,
     semanticRoles: z.array(id).min(1).max(12),
-    properties: z.array(StyleKnowledgePropertySchema).min(1).max(13),
+    properties: z.array(StyleKnowledgePropertySchema).min(1).max(14),
     states: z.array(StyleKnowledgeStateSchema).max(6),
     notes: textList,
   }).strict()).min(1).max(16),

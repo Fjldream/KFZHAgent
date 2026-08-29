@@ -70,6 +70,17 @@ describe("KF 3.6 runtime style profile", () => {
     }
   });
 
+  it("pins Button pointer cursor support to the shipped ElementUI stylesheet", () => {
+    const evidence = KF36_RUNTIME_PROFILE.selectors.button!.parts.root!.evidence;
+    expect(evidence.selectorSourcePath).toBe(
+      "KingFusion3.6_Center/kingdevopscenter/kingclient/exe/public/javascripts/ThirdParty/element-ui/lib/theme-chalk/button.css",
+    );
+    expect(evidence.selectorMarkers).toEqual(expect.arrayContaining([".el-button", "cursor:pointer"]));
+    const source = readFileSync(`${repositoryRoot}${evidence.selectorSourcePath}`, "utf8");
+    expect(source).toContain(".el-button");
+    expect(source).toContain("cursor:pointer");
+  });
+
   it("maps reviewed component states to evidence-owned selectors instead of generic model selectors", () => {
     expect(KF36_RUNTIME_PROFILE.selectors.tabs!.parts.tab!.stateSelectors).toEqual({
       hover: "#domId .el-tabs__item:hover",

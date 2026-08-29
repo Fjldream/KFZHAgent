@@ -289,6 +289,7 @@ export const StyleDeclarationV2Schema = z.object({
   boxShadow: z.enum(["none", "small", "medium", "large"]).optional(),
   opacity: z.number().min(0).max(1).optional(),
   textAlign: z.enum(["left", "center", "right"]).optional(),
+  cursor: z.literal("pointer").optional(),
   truncate: z.boolean().optional(),
   objectFit: z.enum(["contain", "cover", "fill", "none", "scale-down"]).optional(),
   overflow: z.enum(["visible", "hidden", "auto", "scroll"]).optional(),

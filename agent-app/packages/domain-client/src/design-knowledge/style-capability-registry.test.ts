@@ -53,6 +53,12 @@ describe("style capability knowledge", () => {
       ]);
   });
 
+  it("advertises cursor only where exact Button stylesheet evidence exists", () => {
+    expect(requireStyleCapabilityProfile("button").parts[0]!.properties).toContain("cursor");
+    expect(requireStyleCapabilityProfile("text").parts[0]!.properties).not.toContain("cursor");
+    expect(requireStyleCapabilityProfile("easyui.2").parts[0]!.properties).not.toContain("cursor");
+  });
+
   it("covers evidenced input, select, tabs, datagrid, tree/list, image, tag, navigation, overlays, and layouts", () => {
     const expectedSupportedParts = {
       input: ["root", "input", "placeholder"],

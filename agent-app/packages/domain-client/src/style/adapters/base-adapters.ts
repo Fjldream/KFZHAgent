@@ -47,8 +47,13 @@ const PRESERVE_ONLY_EVIDENCE_ADAPTERS = new Set([
   "easyui.1", "easyui.12", "easyui.19", "list", "navmenu", "tree",
 ]);
 
-function partProperties(semanticPart: string): readonly StyleDeclarationKey[] {
-  if (semanticPart === "root") return ROOT_CSS_PROPERTIES;
+function partProperties(selectorMapping: KFStylePartSelector): readonly StyleDeclarationKey[] {
+  const semanticPart = selectorMapping.semanticPart;
+  if (semanticPart === "root") {
+    return selectorMapping.evidence.selectorMarkers.includes("cursor:pointer")
+      ? Object.freeze([...ROOT_CSS_PROPERTIES, "cursor" as const])
+      : ROOT_CSS_PROPERTIES;
+  }
   if (semanticPart === "media") {
     return Object.freeze(["objectFit", "opacity", "borderRadius", "transition", "advanced"] as const);
   }
@@ -82,7 +87,7 @@ function createPartAdapter(
         ? ["backgroundColor" as const]
         : [],
     ),
-    cssProperties: partProperties(selectorMapping.semanticPart),
+    cssProperties: partProperties(selectorMapping),
     supportedStates: Object.freeze(Object.keys(selectorMapping.stateSelectors)),
   });
 }

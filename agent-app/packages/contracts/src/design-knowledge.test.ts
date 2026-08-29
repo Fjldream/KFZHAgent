@@ -64,12 +64,13 @@ describe("design knowledge contracts", () => {
         id: "root",
         availability: "supported",
         semanticRoles: ["action-surface"],
-        properties: ["backgroundColor", "textColor", "borderRadius"],
+        properties: ["backgroundColor", "textColor", "borderRadius", "cursor"],
         states: ["hover", "active", "focus", "disabled"],
         notes: ["主要按钮必须有可辨识的 focus 状态"],
       }],
     });
     expect(profile.parts[0]?.availability).toBe("supported");
+    expect(profile.parts[0]?.properties).toContain("cursor");
   });
 
   it("requires evidence for every supported script member", () => {

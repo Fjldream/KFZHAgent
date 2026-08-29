@@ -5,6 +5,7 @@ import {
   AnyUIImplementationSpecSchema,
   ComponentStyleSpecV2Schema,
   ControlCapabilitySchema,
+  StyleDeclarationV2Schema,
   UIImplementationControlV2Schema,
   UIImplementationSpecV2Schema,
   UIImplementationSpecSchema,
@@ -262,6 +263,13 @@ function mutableNativeV2Fixture(): MutableNativeV2Fixture {
 }
 
 describe("KF UI style contracts", () => {
+  it("allows only the reviewed pointer cursor in structured style declarations", () => {
+    expect(StyleDeclarationV2Schema.parse({ cursor: "pointer" })).toEqual({ cursor: "pointer" });
+    for (const cursor of ["auto", "default", "crosshair", "url(pointer.cur)"]) {
+      expect(StyleDeclarationV2Schema.safeParse({ cursor }).success, cursor).toBe(false);
+    }
+  });
+
   it("accepts structured style intent without raw CSS", () => {
     const parsed = ComponentStyleSpecV2Schema.parse({
       role: "primary-action",

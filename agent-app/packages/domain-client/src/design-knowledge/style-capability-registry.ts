@@ -64,7 +64,12 @@ const PROFILES: readonly StyleCapabilityProfile[] = Object.freeze([
     spec("root", "media-container", [...SURFACE, ...SPACE]),
     spec("media", "media-content", ["borderRadius", "opacity"]),
   ]),
-  ...["tag", "button", "easyui.2"].map((capabilityId) => profile(capabilityId, [
+  profile("button", [
+    spec("root", "interactive-root", [...ALL, "cursor"]),
+    spec("label", "label-content", TYPE),
+    spec("icon", "icon-content", [...TYPE, "opacity"]),
+  ]),
+  ...["tag", "easyui.2"].map((capabilityId) => profile(capabilityId, [
     spec("root", "interactive-root", ALL),
     spec("label", "label-content", TYPE),
     spec("icon", "icon-content", [...TYPE, "opacity"]),

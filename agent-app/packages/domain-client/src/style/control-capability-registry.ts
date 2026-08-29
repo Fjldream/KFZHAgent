@@ -8,6 +8,27 @@ import {
 const LAYOUT_TYPES = Object.freeze([0, 2, 3, 4, 5, 6]);
 const NON_STATIC_CONTROL_TYPES = new Set(["easyui", "layout", "prototype"]);
 
+interface InteractiveCapabilityNode {
+  readonly capabilityId: string;
+  readonly eventBindings: readonly {
+    readonly semanticEvent: string;
+    readonly actionIds: readonly string[];
+  }[];
+}
+
+/**
+ * Maps semantic trigger ownership to an evidence-backed native trigger owner.
+ * Unsupported controls, including Image, retain their original capability so
+ * the interaction compiler can emit an exact unresolved-trigger diagnostic.
+ */
+export function effectiveInteractiveCapability(node: InteractiveCapabilityNode): string {
+  if (node.capabilityId !== "text") return node.capabilityId;
+  return node.eventBindings.some((binding) =>
+    binding.semanticEvent === "click" && binding.actionIds.length > 0)
+    ? "button"
+    : node.capabilityId;
+}
+
 function dimension(
   status: CapabilityStatus,
   supported: string[] = [],

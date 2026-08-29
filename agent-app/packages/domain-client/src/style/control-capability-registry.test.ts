@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assertCapabilityCoverage,
+  effectiveInteractiveCapability,
   getControlCapability,
   listControlCapabilities,
 } from "./control-capability-registry.js";
@@ -23,6 +24,18 @@ describe("control capability registry", () => {
   it("records unsupported style capability instead of omitting the control", () => {
     expect(getControlCapability("webcontainer")?.style.status)
       .toBe("unsupported");
+  });
+
+  it("normalizes only non-empty Text click bindings to reviewed Button capability", () => {
+    const node = (capabilityId: string, semanticEvent: string, actionIds: string[]) => ({
+      capabilityId,
+      eventBindings: [{ semanticEvent, actionIds }],
+    });
+
+    expect(effectiveInteractiveCapability(node("text", "click", ["open"]))).toBe("button");
+    expect(effectiveInteractiveCapability(node("text", "click", []))).toBe("text");
+    expect(effectiveInteractiveCapability(node("text", "change", ["open"]))).toBe("text");
+    expect(effectiveInteractiveCapability(node("image", "click", ["open"]))).toBe("image");
   });
 
   it("does not allow callers to mutate canonical capability records", () => {
