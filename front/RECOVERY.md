@@ -30,3 +30,14 @@ Vite writes the production output to `front/build`; the original `front/dist` is
 ## Runtime limitation
 
 This repository restores the frontend code and its production build only.  Login/SSO, the Axios API wrapper, and the WebSocket monitoring client still require the real backend, proxy configuration, credentials, and reachable WebSocket endpoints.  They cannot be validated as end-to-end functionality with a static frontend build alone.
+
+## Verification (2026-09-04)
+
+Using Node.js 22.14.0 (`PATH=/Users/fengjinlong/.nvm/versions/node/v22.14.0/bin:$PATH`):
+
+- `cd front && npm test` — PASS, 4/4 tests passed, 0 failed.
+- `cd front && npm run build` — PASS, Vite 6.4.3 built `front/build`; the existing `front/dist` was not used as the output directory. The build emitted only the existing `::v-deep` deprecation and large-chunk warnings.
+- `cd front && npm run dev -- --host 127.0.0.1 --port 4177` — PASS. Vite reported `http://127.0.0.1:4177/` ready in 574 ms with no startup module-resolution errors. The process was stopped with SIGINT and confirmed stopped.
+- `curl --fail --silent --show-error http://127.0.0.1:4177/` — PASS, HTTP 200. The response contained `<div id="app"></div>` and `/src/main.js`.
+
+These checks validate the local static entry and development server only.  Login/SSO, API calls, WebSocket monitoring, and other functions requiring a real backend were not validated end to end.
