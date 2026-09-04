@@ -1,5 +1,5 @@
 // 配置自定义icons
-import 'virtual:svg-icons-register'; // 必须放在最前面！
+import './plugins/svg-icons-register.js'; // 必须放在最前面！
 import { createApp } from 'vue';
 
 // Pinia 相关
