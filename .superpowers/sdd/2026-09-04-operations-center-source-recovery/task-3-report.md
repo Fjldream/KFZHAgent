@@ -51,3 +51,24 @@
 
 - 任务简报要求 `VITE_ROUTE_MAIN=/main`，但已恢复的 `src/stores/systemConfigStore.js` 对该变量执行 `JSON.parse`。该默认值在实际触发该 store 时可能不是有效 JSON；依照“精确值照用”的要求未偏离简报，建议后续需求确认运行时语义。
 - 构建仅有恢复源码中既存 `::v-deep` 写法的 deprecation warning，以及 Vite 对大于 500 kB chunk 的提示；均不影响构建成功，未超出本任务范围修改。
+
+## Fix round 1/5
+
+Controller ruling 以 bundle 的精确编译值为准，覆盖原任务简报中不兼容 `JSON.parse` 的 `VITE_ROUTE_MAIN=/main` 默认值：
+
+```dotenv
+VITE_ROUTE_MAIN=["calculationProject","collectProject","clientProject","dataSourceProject","alarmProject"]
+```
+
+- 已更新提交中的 `front/.env.example` 与本地、忽略的 `front/.env`；后者未暂存。
+- `project-structure.test.mjs` 现验证该环境值可 JSON 解析并深度等于上述数组。
+- 该测试动态导入 `vite.config.js`，验证 `@` alias 解析为 `front/src` 且 `build.outDir === 'build'`。
+- 该测试还验证 `package.json` 的 direct `dependencies` keys 精确等于恢复源码的 14 个 bare imports，不再只检查包含关系。
+
+### RED / GREEN evidence
+
+- RED：新增断言在旧值 `/main` 上失败，错误为 `Unexpected token '/', "/main" is not valid JSON`。
+- GREEN：替换为 bundle 数组后，`node --test scripts/project-structure.test.mjs` 为 1/1 PASS。
+- 完整验证：`npm test` 为 4/4 PASS；`npm run build` 成功（Vite 6.4.3）。
+
+原报告的首条 concern 已由本修复消除；仍保留恢复源码的 `::v-deep` deprecation warning 与 Vite 大 chunk 提示，未超出本任务范围修改。
