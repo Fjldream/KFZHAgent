@@ -13,6 +13,11 @@ export async function recoverSources({ mapDirectory, outputDirectory }) {
       const source = map.sources[index];
       if (!source.startsWith('../../../src/')) continue;
       const relativePath = source.slice('../../../'.length);
+      const sourceRoot = path.resolve(outputDirectory, 'src');
+      const destination = path.resolve(outputDirectory, relativePath);
+      if (destination !== sourceRoot && !destination.startsWith(`${sourceRoot}${path.sep}`)) {
+        throw new Error(`Source path escapes src directory: ${relativePath}`);
+      }
       const content = map.sourcesContent?.[index];
       if (typeof content !== 'string') throw new Error(`Missing sourcesContent for ${relativePath}`);
       if (collected.has(relativePath)) {

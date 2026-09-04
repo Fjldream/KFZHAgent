@@ -46,3 +46,24 @@ test('同一路径出现不同内容时拒绝覆盖', async () => {
     /Conflicting sourcemap content for src\/main\.js/,
   );
 });
+
+test('拒绝穿越 src 目录的源码路径', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'kf-source-map-traversal-'));
+  const maps = path.join(root, 'maps');
+  const output = path.join(root, 'output');
+  await mkdir(maps);
+  const map = {
+    version: 3,
+    sources: ['../../../src/../escaped.js'],
+    sourcesContent: ['must not be written'],
+    names: [],
+    mappings: '',
+  };
+  await writeFile(path.join(maps, 'traversal.js.map'), JSON.stringify(map));
+
+  await assert.rejects(
+    recoverSources({ mapDirectory: maps, outputDirectory: output }),
+    /Source path escapes src directory: src\/\.\.\/escaped\.js/,
+  );
+  await assert.rejects(readFile(path.join(output, 'escaped.js'), 'utf8'), { code: 'ENOENT' });
+});
