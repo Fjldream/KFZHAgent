@@ -22,7 +22,7 @@ test('工程骨架覆盖运行依赖和环境变量', async () => {
     assert.match(env, new RegExp(`^${key}=`, 'm'));
   }
   const loadedEnv = loadEnv('development', projectRoot, 'VITE_');
-  assert.equal(loadedEnv.VITE_BACKEND_ORIGIN, 'https://127.0.0.1');
+  assert.equal(loadedEnv.VITE_BACKEND_ORIGIN, 'https://192.168.3.32');
   assert.equal(loadedEnv.VITE_PROXY_DOMAIN, '/opscenter');
   assert.equal(axios.getUri({ baseURL: loadedEnv.VITE_PROXY_DOMAIN, url: '/oemConfig' }), '/opscenter/oemConfig');
   const routeMain = loadedEnv.VITE_ROUTE_MAIN;
@@ -32,7 +32,7 @@ test('工程骨架覆盖运行依赖和环境变量', async () => {
   assert.equal(viteConfig.resolve.alias['@'], fileURLToPath(new URL('../src', import.meta.url)));
   assert.equal(viteConfig.build.outDir, 'build');
   assert.deepEqual(viteConfig.server.proxy['/opscenter'], {
-    target: 'https://127.0.0.1',
+    target: 'https://192.168.3.32',
     changeOrigin: true,
     secure: false,
   });
