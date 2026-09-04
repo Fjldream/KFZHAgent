@@ -1,4 +1,5 @@
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -43,11 +44,26 @@ export async function recoverSources({ mapDirectory, outputDirectory }) {
   };
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+const isDirectExecution = process.argv[1]
+  && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+
+if (isDirectExecution) {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  const result = await recoverSources({
-    mapDirectory: path.join(root, 'dist/static/js'),
-    outputDirectory: root,
-  });
-  console.log(JSON.stringify(result, null, 2));
+  const [flag, output] = process.argv.slice(2);
+
+  if (flag !== '--output' || !output || process.argv.length !== 4) {
+    console.error('Usage: node scripts/recover-sourcemaps.mjs --output <directory>');
+    process.exitCode = 1;
+  } else {
+    try {
+      const result = await recoverSources({
+        mapDirectory: path.join(root, 'dist/static/js'),
+        outputDirectory: path.resolve(process.cwd(), output),
+      });
+      console.log(JSON.stringify(result, null, 2));
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : error);
+      process.exitCode = 1;
+    }
+  }
 }
