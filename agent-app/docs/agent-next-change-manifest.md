@@ -70,3 +70,41 @@
 - 建议消息：`test(agent): guard isolated integration databases`
 - 范围：仅上述新增/修改文件；7 个涉库测试文件携带开工前既有改动（已在 `origin/main` 的 `09e03a7` 快照中），提交说明需注明。
 - 远程：按维护者要求**不推送**。
+
+---
+
+# T01：模型合同、配置能力与 usage 规范化
+
+执行日期：2026-10-20（同 T00）
+功能标注：Agent工作台迭代
+
+## 新增/修改文件
+
+| 文件 | 改动 |
+|---|---|
+| `agent-app/packages/contracts/src/model-usage.ts` | 新增跨包类型：`ModelTask`、`NormalizedUsage`、`ProviderUsage`、`ModelRoute`（纯类型，无 Nest/API 依赖） |
+| `agent-app/packages/contracts/src/index.ts` | 导出 `model-usage.js` |
+| `agent-app/apps/api/src/models/model-types.ts` | `ModelRouteSource`（服务端 env 视图）、`ModelRouteTable`（任务→路由） |
+| `agent-app/apps/api/src/models/normalize-usage.ts` | `normalizeUsage`：只接受非负安全整数；缺失保持 null；`hit+miss≠input` 标 `inconsistent`；reasoning 单独暴露不并入 output |
+| `agent-app/apps/api/src/models/model-config.ts` | `resolveModelRoutes`（env 白名单 → 6 类任务路由）、`validateModelRoute`（vision 未配置时抛 `MODEL_CAPABILITY_UNSUPPORTED`） |
+| `agent-app/apps/api/src/models/normalize-usage.test.ts` | 5 例：缺失/正常、负数浮点溢出、不一致、reasoning 不重复、部分字段 |
+| `agent-app/apps/api/src/models/model-config.test.ts` | 5 例：默认值保留 `deepseek-chat`、vision 未配置必须拒绝、vision 独立模型不回落、baseUrl/超时/上限归一、价格版本与 thinking 透传 |
+| `agent-app/.env.example` | 新增模型路由变量说明（无真实密钥）：`DEEPSEEK_MODEL/BASE_URL/TIMEOUT_MS/MAX_CONTEXT_TOKENS/VISION_MODEL/PRICING_VERSION/THINKING/API_KEY` |
+
+## Red → Green 证据
+
+| 阶段 | 命令 | 结果 |
+|---|---|---|
+| 红测（normalize） | `vitest run ... apps/api/src/models/normalize-usage.test.ts` | FAIL：`Cannot find module './normalize-usage.js'` |
+| 绿测（normalize） | 同上 | 1 passed → 扩到 **5 passed** |
+| 红测（config） | `vitest run ... model-config.test.ts` | FAIL：`Cannot find module './model-config.js'` |
+| 绿测（config） | 两文件同跑 | **10 passed (10)** |
+| 类型检查 | `tsc -p packages/contracts --noEmit`、`tsc -p apps/api --noEmit` | 2/2 exit 0 |
+
+## 设计取舍
+
+- **默认模型不变**：`deepseek-chat`、`https://api.deepseek.com`、60s 超时、64k 上下文，均沿用 `deepseek-model.ts` 现有常量。
+- **视觉必须显式配置**：`DEEPSEEK_VISION_MODEL` 为空时 `routes.vision.supportsVision=false`，`validateModelRoute(route,"vision")` 直接抛错；不把文本模型当视觉模型、也不降级为纯文字请求。
+- **不猜价格**：`pricingVersion` 未配置为 null，费用留待 T02 记为未知。
+- **白名单边界**：路由只从服务端 env 派生，`ModelRoute` 结构里没有 apiKey/浏览器可控字段。
+

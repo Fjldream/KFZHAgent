@@ -47,7 +47,7 @@ Superpowers安装路径因机器不同会变化。本机writing-plans读取路�
 | Task | 内容 | 初始状态 | 依赖 |
 |---|---|---|---|
 | T00 | 基线与数据库安全 | VERIFIED（2026-10-20） | 无 |
-| T01 | 模型能力/usage合同 | NOT_STARTED | T00 |
+| T01 | 模型能力/usage合同 | VERIFIED（2026-10-20） | T00 |
 | T02 | 调用账本与费用 | NOT_STARTED | T01 |
 | T03 | 网关/超时/取消 | NOT_STARTED | T02 |
 | T04 | prompt拆分与前缀 | NOT_STARTED | T03 |
@@ -171,6 +171,24 @@ rg -n 'createClassifyIntentNode|createSolutionGraph|generationWorkflow' packages
 偏差：pnpm 不在 PATH，改用 ./node_modules/.bin/{vitest,tsc,prisma}；e2e 守卫用例不在 workspace 项目根内，用临时配置单独验证
 风险：①空库先跑 api.integration 必挂（checkpoint 表顺序依赖）②job-runner 的 EEXIST 疑为本机沙箱 FS broker 包装错误，需非沙箱终端复核
 下一步：T01 模型合同与 usage 规范化（packages/contracts/src/model-usage.ts 起）
+```
+
+```text
+任务：T01
+状态：VERIFIED
+执行日期与功能标注：2026-10-20 / Agent工作台迭代
+基线：T00 之后（本地提交 469a3a3）
+实现：新增 packages/contracts/src/model-usage.ts（ModelTask/NormalizedUsage/ProviderUsage/ModelRoute）+ index 导出；
+      apps/api/src/models/{model-types,normalize-usage,model-config}.ts；两份测试；.env.example 补模型变量说明
+红测：normalize-usage.test.ts → Cannot find module './normalize-usage.js'；model-config.test.ts → Cannot find module './model-config.js'
+绿测：10 passed (10)（normalize 5 + config 5）
+回归：tsc -p packages/contracts / apps/api --noEmit 均 exit 0
+数据库：未涉及
+证据：agent-app/docs/agent-next-change-manifest.md §T01
+提交：本地提交，未推送
+偏差：计划只要求 normalize 红线；额外先写了 model-config 红线以保证先测后码
+风险：DeepSeek 真实 vision 模型名与能力仍未实测，T19 前需维护者给出白名单；价格表版本待 T02 提供
+下一步：T02 调用账本与费用（prisma ModelInvocation + pricing.ts）
 ```
 
 
