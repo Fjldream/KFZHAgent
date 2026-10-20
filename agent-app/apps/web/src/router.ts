@@ -34,9 +34,9 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
       { path: "/change-password", name: "change-password", component: ChangePasswordView, meta: { requiresAuth: true } },
       { path: "/workspaces", name: "workspaces", component: WorkspacesView, meta: { requiresAuth: true } },
       // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
-      { path: "/workspaces/:id/workbench", name: "workbench", component: WorkbenchView, props: true, meta: { requiresAuth: true } },
-      // 新的 run 驱动工作台；旧 WorkbenchView 保持可用，便于对比回退。
-      { path: "/workspaces/:id/run-workbench", name: "run-workbench", component: RunWorkbenchView, props: true, meta: { requiresAuth: true } },
+      // 新的 run 驱动工作台现在是默认工作台；旧版保留在 legacy-workbench 便于对比回退。
+      { path: "/workspaces/:id/workbench", name: "workbench", component: RunWorkbenchView, props: true, meta: { requiresAuth: true } },
+      { path: "/workspaces/:id/legacy-workbench", name: "legacy-workbench", component: WorkbenchView, props: true, meta: { requiresAuth: true } },
       // end
       { path: "/workspaces/:id", name: "workspace", component: WorkspaceView, props: true, meta: { requiresAuth: true } },
       { path: "/:pathMatch(.*)*", redirect: "/workspaces" },
