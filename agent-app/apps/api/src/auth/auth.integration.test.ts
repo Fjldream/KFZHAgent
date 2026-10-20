@@ -3,7 +3,16 @@
 import "reflect-metadata";
 process.env.DATABASE_URL =
   process.env.TEST_DATABASE_URL ??
-  "postgresql://postgres@127.0.0.1:5432/kf_agent_test";
+  "postgresql://postgres@127.0.0.1:5432/kf_agent_test_agent_next";
+
+// modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+import { assertSafeTestDatabase } from "../../../../tests/helpers/database-safety.js";
+assertSafeTestDatabase({
+  url: process.env.DATABASE_URL,
+  allowReset: process.env.KF_TEST_ALLOW_DESTRUCTIVE_RESET,
+  expectedPrefix: "kf_agent_test_",
+});
+// end
 process.env.KF_SERVER_PLAN_HMAC_KEY_BASE64 ??= Buffer.alloc(32, 0x54).toString("base64");
 
 import type { INestApplication } from "@nestjs/common";
@@ -138,7 +147,7 @@ describe("auth integration", () => {
     expect(res.body.user.role).toBe("tenant_admin");
     expect(res.body.mustChangePassword).toBe(true);
 
-    // A session with mustChangePassword still sees the flag on /api/me.
+    // mustChangePassword 会话仍能在 /api/me 上看到该标志。
     const setCookie = (res.headers["set-cookie"] as unknown as string[])[0];
     const cookie = setCookie.split(";")[0] as string;
     const me = await request(app.getHttpServer())
@@ -154,8 +163,7 @@ describe("auth integration", () => {
       .send({ name: "Blocked Before Password Change" })
       .expect(403);
 
-    // First password change clears the mandatory flag and issues a FULL
-    // session (fresh cookie) so no second login is needed.
+    // 第一次密码更改会清除强制标志并发出一个完整的会话（新的会话cookie），因此不需要第二次登录。
     const changed = await request(app.getHttpServer())
       .post("/api/auth/change-password")
       .set("Cookie", cookie)
@@ -169,14 +177,14 @@ describe("auth integration", () => {
       .expect(200);
     expect(meAfter.body.mustChangePassword).toBe(false);
 
-    // The full session can now operate the workspace.
+    // 完整的会话现在可以操作工作空间。
     await request(app.getHttpServer())
       .post("/api/workspaces")
       .set("Cookie", fullCookie)
       .send({ name: "Workspace After Password Change" })
       .expect(201);
 
-    // Re-login with the new password is a normal (non-forced) login.
+    // 使用新密码重新登录是正常的（非强制）登录。
     const relogin = await request(app.getHttpServer())
       .post("/api/auth/login")
       .send({
@@ -243,7 +251,7 @@ describe("auth integration", () => {
         })
         .expect(401);
     }
-    // Even the correct password is rejected while locked.
+    // 即使正确的密码也被拒绝。
     await request(app.getHttpServer())
       .post("/api/auth/login")
       .send({
@@ -270,7 +278,7 @@ describe("auth integration", () => {
     const workspaceId = created.body.id;
     expect(created.body.tenantId).toBe(await tenantIdOf(TENANT_A.tenant));
 
-    // Owner tenant can read its own workspace.
+    // 所有者租户可以读取其自己的工作空间。
     await request(app.getHttpServer())
       .get(`/api/workspaces/${workspaceId}`)
       .set("Cookie", cookieA)

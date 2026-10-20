@@ -1,14 +1,17 @@
-// Task 2 (browser visual preview): GET /api/artifacts/:id/preview.
-// - PreviewService unit tests (mocked storage) cover the error branch and the
-//   render path with a real compiled KF container.
-// - HTTP integration describe bootstraps the real AppModule, seeds a real
-//   artifact container into the test storage, then exercises the endpoint
-//   contract: 200 text/html with page name and control data-type, 401
-//   unauthenticated, cross-tenant 404.
+// 任务2（浏览器预览）：GET /api/artifacts/:id/preview. - PreviewService单元测试（mocked存储）覆盖错误分支和渲染路径，使用真实编译的KF容器描述。- HTTP集成描述了启动真实AppModule，将真实Artifact容器种子到测试存储中，然后测试端点合同：200文本/HTML，页面名称和控制数据类型，401未认证，跨租户404。
 import "reflect-metadata";
 process.env.DATABASE_URL =
   process.env.TEST_DATABASE_URL ??
-  "postgresql://postgres@127.0.0.1:5432/kf_agent_test";
+  "postgresql://postgres@127.0.0.1:5432/kf_agent_test_agent_next";
+
+// modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+import { assertSafeTestDatabase } from "../../../../tests/helpers/database-safety.js";
+assertSafeTestDatabase({
+  url: process.env.DATABASE_URL,
+  allowReset: process.env.KF_TEST_ALLOW_DESTRUCTIVE_RESET,
+  expectedPrefix: "kf_agent_test_",
+});
+// end
 process.env.KF_SERVER_PLAN_HMAC_KEY_BASE64 ??= Buffer.alloc(32, 0x54).toString("base64");
 import { NotFoundException } from "@nestjs/common";
 import type { INestApplication } from "@nestjs/common";

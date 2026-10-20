@@ -1,9 +1,18 @@
-// Postgres checkpoint integration test (brief Step 7):
-// start a thread → stop at the approval interrupt → destroy the graph instance
-// → rebuild the graph with a PostgresSaver checkpointer over the same database
-// → resume with Command → assert the same conversation continues.
+// Postgres 检查点集成测试（简要步骤 7）：
+// 启动一个线程 → 在审批中断处停止 → 销毁图实例
+// → 使用同一数据库上的 PostgresSaver checkpointer 重建图实例
+// → 通过 Command 恢复 → 断言继续的是同一个会话。
 process.env.DATABASE_URL =
-  process.env.TEST_DATABASE_URL ?? "postgresql://postgres@127.0.0.1:5432/kf_agent_test";
+  process.env.TEST_DATABASE_URL ?? "postgresql://postgres@127.0.0.1:5432/kf_agent_test_agent_next";
+
+// modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+import { assertSafeTestDatabase } from "../../../tests/helpers/database-safety.js";
+assertSafeTestDatabase({
+  url: process.env.DATABASE_URL,
+  allowReset: process.env.KF_TEST_ALLOW_DESTRUCTIVE_RESET,
+  expectedPrefix: "kf_agent_test_",
+});
+// end
 
 import { Command } from "@langchain/langgraph";
 import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";

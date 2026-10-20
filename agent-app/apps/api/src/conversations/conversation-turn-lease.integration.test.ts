@@ -1,6 +1,15 @@
 process.env.DATABASE_URL =
   process.env.TEST_DATABASE_URL ??
-  "postgresql://postgres@127.0.0.1:5432/kf_agent_test";
+  "postgresql://postgres@127.0.0.1:5432/kf_agent_test_agent_next";
+
+// modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+import { assertSafeTestDatabase } from "../../../../tests/helpers/database-safety.js";
+assertSafeTestDatabase({
+  url: process.env.DATABASE_URL,
+  allowReset: process.env.KF_TEST_ALLOW_DESTRUCTIVE_RESET,
+  expectedPrefix: "kf_agent_test_",
+});
+// end
 
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";

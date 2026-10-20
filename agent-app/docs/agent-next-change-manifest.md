@@ -1,0 +1,72 @@
+# Agent Next 变更清单（T00）
+
+功能标注：Agent工作台迭代
+执行日期：2026-10-20
+计划来源：`docs/superpowers/plans/2026-10-20-agent-app-next-master.md` §T00
+
+## 1. 新增文件
+
+| 文件 | 职责 |
+|---|---|
+| `agent-app/tests/helpers/database-safety.ts` | 纯函数守卫 `assertSafeTestDatabase`：要求显式 `allowReset === "1"` + 隔离库名前缀 + 名称长于前缀；拒绝时只抛固定错误码，不回显 URL/凭据 |
+| `agent-app/tests/helpers/database-safety.test.ts` | 守卫单元测试（6 例）：缺 URL、生产库名、裸 `kf_agent_test`、缺 flag、URL 编码库名、空密码、错误协议、无库名、错误信息不含连接串 |
+| `agent-app/tests/helpers/vitest.config.ts` | 仅 include `tests/helpers/*.test.ts` 的独立配置，避免误触发集成套件 |
+| `agent-app/docs/agent-next-baseline.md` | 执行基线：HEAD、分支、dirty 统计、工具链、隔离库、工作目录决策 |
+| `agent-app/docs/agent-next-change-manifest.md` | 本文件 |
+
+## 2. 修改文件
+
+| 文件 | 改动 |
+|---|---|
+| `agent-app/tests/e2e/helpers/destructive-reset.ts` | 协议/前缀/长度规则改为复用统一守卫，保留 `refuse()` 统一报错、双开关语义、loopback 校验与库名后缀正则 |
+| `agent-app/apps/api/src/api.integration.test.ts` | 兜底库名 → `kf_agent_test_agent_next`；接入守卫 |
+| `agent-app/apps/api/src/auth/auth.integration.test.ts` | 同上 |
+| `agent-app/apps/api/src/artifacts/preview.service.test.ts` | 同上 |
+| `agent-app/apps/api/src/creative-goldens.integration.test.ts` | 同上 |
+| `agent-app/apps/api/src/conversations/conversation-turn-lease.integration.test.ts` | 同上 |
+| `agent-app/apps/api/src/build-jobs/build-job.integration.test.ts` | 同上 |
+| `agent-app/apps/worker/src/job-runner.integration.test.ts` | 同上 |
+| `agent-app/packages/agent-orchestrator/src/solution-graph.integration.test.ts` | 同上 |
+| `agent-app/packages/build-jobs/src/build-job.service.integration.test.ts` | 同上 |
+
+未修改：`packages/agent-orchestrator/src/solution-graph.test.ts`（检索式命中 `TEXT_TRUNCATED` 字样，不接触数据库，按计划不改非破坏性测试）。
+
+## 3. Red → Green 证据
+
+| 阶段 | 命令 | 结果 |
+|---|---|---|
+| 红测（缺实现） | `./node_modules/.bin/vitest run --config tests/helpers/vitest.config.ts` | FAIL：`Cannot find module './database-safety.js'`，1 个文件加载失败 |
+| 绿测（实现后） | 同上 | **6 passed (6)** |
+| e2e 守卫回归 | `vitest run --config <临时配置>` 指向 `tests/e2e/helpers/*.test.ts` | **13 passed (13)**，原有用例断言（`E2E destructive reset refused: ...`、双开关）全部保留通过 |
+| 负向验证（真实集成测试） | 只给 `TEST_DATABASE_URL`、不给 `KF_TEST_ALLOW_DESTRUCTIVE_RESET` | 文件级失败：`Error: TEST_DATABASE_NOT_AUTHORIZED`，数据库未被连接 |
+| 类型检查 | `tsc -p apps/api | apps/worker | packages/build-jobs | packages/agent-orchestrator --noEmit` | 4/4 exit 0 |
+
+## 4. 现有集成套件基线（隔离库 `kf_agent_test_agent_next`）
+
+环境：`TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:5432/kf_agent_test_agent_next`、`KF_TEST_ALLOW_DESTRUCTIVE_RESET=1`、`prisma migrate deploy` 已执行。
+
+| 套件 | 结果 | 说明 |
+|---|---|---|
+| `auth.integration.test.ts` | 10 passed / 1 failed | 失败项 `sets HttpOnly Secure SameSite session cookies`：本机 `.env` 的 `COOKIE_SECURE=false` 导致，`COOKIE_SECURE=true` 时该例通过。**环境因素，非本轮改动** |
+| `api.integration.test.ts` | 58 passed / 1 failed | 首轮空库时 59 条全挂（`relation "checkpoint_writes" does not exist`）；待其它套件 `PostgresSaver.setup()` 建表后重跑仅剩 `recompiles the complete implementation...` 超时 5000ms |
+| `creative-goldens.integration.test.ts` | 0 passed / 1 failed | `BUILD_EXECUTION_FAILED`，失败快照落库为 FAILED；疑似与 job-runner 同一环境原因，未在 T00 范围内深挖 |
+| `job-runner.integration.test.ts` | 27 passed / 3 failed | ① `EEXIST ... mkdirExact`：mkDir 经本机沙箱 FS broker 抛出的错误 `code` 不是 `EEXIST`，`hasCode` 无法吞掉；② 一条 5000ms 超时；③ `expected 'FAILED' to be 'SUCCEEDED'`（疑似①的连带） |
+| `build-job.integration.test.ts` | 31 passed | 通过 |
+| `conversation-turn-lease.integration.test.ts` | 13 passed | 通过 |
+| `preview.service.test.ts` | 6 passed | 通过 |
+| `build-job.service.integration.test.ts` | 5 passed | 通过 |
+| `solution-graph.integration.test.ts` | 7 passed | 通过 |
+
+合计：157 通过 / 5 失败（均单列为既有问题，未删除或跳过任何用例）。
+
+### 已确认的既有隐患（非本任务引入，建议后续任务处理）
+
+1. **空库顺序依赖**：`api.integration.test.ts` 的 `resetDatabase` 会 TRUNCATE `checkpoint_*`，但该表由 LangGraph `PostgresSaver.setup()` 运行时创建；在全新库上先跑该套件必然全挂。CI 若从空库启动会踩到。
+2. **`tests/e2e/helpers/*.test.ts` 不在任何 workspace 项目根内**，`pnpm test` 实际不会执行它们（本轮用临时配置验证，未改全局测试编排）。
+3. **本机 `.env` 的 `COOKIE_SECURE=false`** 与 `auth.integration` 的 Secure 断言冲突。
+
+## 5. 提交
+
+- 建议消息：`test(agent): guard isolated integration databases`
+- 范围：仅上述新增/修改文件；7 个涉库测试文件携带开工前既有改动（已在 `origin/main` 的 `09e03a7` 快照中），提交说明需注明。
+- 远程：按维护者要求**不推送**。

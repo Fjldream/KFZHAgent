@@ -1,13 +1,17 @@
-// Concurrency integration tests for BuildJobService leasing.
+// BuildJobService 租约的并发集成测试。
 //
-// The core guarantee under test: at most one build job of a given workspace
-// may be RUNNING at any moment, even when two workers concurrently attempt to
-// claim two QUEUED jobs of the same workspace. A READ COMMITTED snapshot
-// cannot see another transaction's uncommitted RUNNING update, so the naive
-// `NOT EXISTS` guard races; `pg_advisory_xact_lock(workspaceId)` serializes
-// the claim decision per workspace.
+// 被测的核心保证：任意时刻，同一工作空间最多只能有一个构建作业处于 RUNNING，即使两个 worker 同时尝试申领该工作空间的两个 QUEUED 作业。READ COMMITTED 快照无法看到另一事务尚未提交的 RUNNING 更新，因此简单的 `NOT EXISTS` 守卫存在竞态；`pg_advisory_xact_lock(workspaceId)` 会按工作空间串行化申领决策。
 process.env.DATABASE_URL =
-  process.env.TEST_DATABASE_URL ?? "postgresql://postgres@127.0.0.1:5432/kf_agent_test";
+  process.env.TEST_DATABASE_URL ?? "postgresql://postgres@127.0.0.1:5432/kf_agent_test_agent_next";
+
+// modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+import { assertSafeTestDatabase } from "../../../tests/helpers/database-safety.js";
+assertSafeTestDatabase({
+  url: process.env.DATABASE_URL,
+  allowReset: process.env.KF_TEST_ALLOW_DESTRUCTIVE_RESET,
+  expectedPrefix: "kf_agent_test_",
+});
+// end
 
 import { PrismaClient, type BuildJob } from "@prisma/client";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";

@@ -1,10 +1,15 @@
-// Task 9 Step 6/7: worker execution chain and crash recovery.
-// The crash-recovery test simulates a worker terminating after the artifact
-// write but before the database commit, then retries with the same
-// idempotency key and asserts exactly one successful revision and one final
-// artifact.
+// 任务 9 步骤 6/7：worker 执行链和崩溃恢复。崩溃恢复测试模拟 worker 在写入制品后、提交数据库前终止，然后使用相同的幂等键重试，并断言最终只有一个成功修订和一个最终制品。
 process.env.DATABASE_URL =
-  process.env.TEST_DATABASE_URL ?? "postgresql://postgres@127.0.0.1:5432/kf_agent_test";
+  process.env.TEST_DATABASE_URL ?? "postgresql://postgres@127.0.0.1:5432/kf_agent_test_agent_next";
+
+// modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+import { assertSafeTestDatabase } from "../../../tests/helpers/database-safety.js";
+assertSafeTestDatabase({
+  url: process.env.DATABASE_URL,
+  allowReset: process.env.KF_TEST_ALLOW_DESTRUCTIVE_RESET,
+  expectedPrefix: "kf_agent_test_",
+});
+// end
 
 import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { createHash, createHmac } from "node:crypto";
@@ -242,6 +247,17 @@ const INITIAL_IR = {
   scripts: [],
 };
 
+const CREATIVE_INITIAL_IR = {
+  ...INITIAL_IR,
+  pages: [{
+    id: "page-home",
+    name: "Page1",
+    width: 1440,
+    height: 900,
+    controls: [],
+  }],
+};
+
 function creativeFixture() {
   const blueprint = CustomerSolutionBlueprintSchema.parse({
     schema: "kf-design-plan/v3",
@@ -439,7 +455,7 @@ async function seedCreativeBuild(
   expectedControlNames: string[];
   expectedMaterialization: TrustedNativeMaterialization;
 }> {
-  const seeded = await seedNewWorkspace();
+  const seeded = await seedNewWorkspace(CREATIVE_INITIAL_IR);
   const implementation = compileSolutionImplementation({
     plan: fixture.plan,
     candidateBundle: fixture.candidates,
@@ -768,6 +784,24 @@ describe("job runner", () => {
       await mkdtemp(path.join(tmpdir(), "kf-advanced-interactions-import-")),
     );
     const inspection = await inspectClientProject(unpacked);
+    expect(inspection.summary.pages.map((page) => page.name).sort()).toEqual(["detail", "home"]);
+    const versionDir = await resolveVersionDirName(unpacked);
+    const projectDir = path.join(unpacked, versionDir, "project");
+    const pageManager = JSON.parse(await readFile(path.join(projectDir, "pageManager.json"), "utf8")) as {
+      default: string;
+      appHomePage: string;
+      Pages: Array<{ id: string }>;
+    };
+    expect(pageManager).toMatchObject({ default: "home", appHomePage: "home" });
+    const expectedPageGuids = pageManager.Pages.map((page) => page.id).sort();
+    const pageGroup = JSON.parse(await readFile(path.join(projectDir, "pageGroupManager.json"), "utf8")) as {
+      Groups: { pages: string[] };
+    };
+    expect(pageGroup.Groups.pages.sort()).toEqual(expectedPageGuids);
+    const diffusion = JSON.parse(await readFile(path.join(projectDir, "diffusionManager.json"), "utf8")) as {
+      page: Record<string, unknown>;
+    };
+    expect(Object.keys(diffusion.page).sort()).toEqual(expectedPageGuids);
     const expected = seeded.expectedMaterialization;
     const controls = Object.values(inspection.raw.pages).flatMap((page) => walkNativeControls(page));
     const controlsByName = new Map(controls.flatMap((control) => {
@@ -836,6 +870,21 @@ describe("job runner", () => {
       expect(segment!.body).toBe(module!.source);
       return { module: module!, binding, link: link!, body: segment!.body };
     };
+    const actionSegment = (ownerSemanticId: string, sourceActionId: string) => {
+      const action = expectedAction(sourceActionId);
+      const binding = expectedBinding(action.ownerInstanceName, action.id);
+      const link = nativeLinks(nativeControl(ownerSemanticId)).find((entry) => {
+        const script = entry["script"];
+        return entry["name"] === binding.kfEvent && entry["linkId"] === binding.linkId
+          && typeof script === "string"
+          && decodedCompilerModules(script).some((segment) => segment.metadata["sourceScriptId"] === sourceActionId);
+      });
+      expect(link, `missing executable action segment ${ownerSemanticId}/${sourceActionId}`).toBeDefined();
+      const segment = decodedCompilerModules(String(link!["script"]))
+        .find((entry) => entry.metadata["sourceScriptId"] === sourceActionId);
+      expect(segment).toBeDefined();
+      return { action, binding, link: link!, body: segment!.body };
+    };
 
     expect(controlsByName.has("details-link")).toBe(false);
     expect(nativeControl("details-link")).toMatchObject({ uiModelType: 35 });
@@ -845,32 +894,13 @@ describe("job runner", () => {
     expect(nativeControl("portfolio-grid")).toMatchObject({ objectType: 3, uiExtendType: 1 });
 
     const state = expected.states!.find((entry) => entry.semanticStateId === "details-opened")!;
-    const stateResult = linkForAction("details-link", "mark-details-opened");
-    const stateBinding = expectedBinding(stateResult.action.ownerInstanceName, stateResult.action.id);
-    expect(stateResult.link).toMatchObject({
-      action: "setVariable",
-      variableId: state.variableName,
-      value: true,
-      name: stateBinding.kfEvent,
-      linkId: stateBinding.linkId,
-      enable: true,
-      kfCompilerAction: {
-        schema: "kf-compiled-state/v1", actionId: stateResult.action.id, sourceActionId: "mark-details-opened",
-        ownerInstanceName: stateResult.action.ownerInstanceName, stateId: "details-opened", variableName: state.variableName,
-        value: true, kfEvent: stateBinding.kfEvent, linkId: stateBinding.linkId ?? null, phase: stateBinding.phase,
-      },
-    });
-    const navigation = linkForAction("details-link", "navigate-detail");
-    const navigationBinding = expectedBinding(navigation.action.ownerInstanceName, navigation.action.id);
-    expect(navigation.link).toMatchObject({
-      action: "navigatePage", pageId: expected.pages.find((entry) => entry.semanticPageId === "detail")!.pageGuid,
-      name: navigationBinding.kfEvent, linkId: navigationBinding.linkId, enable: true,
-      kfCompilerAction: {
-        schema: "kf-compiled-action/v1", actionId: navigation.action.id, sourceActionId: "navigate-detail",
-        ownerInstanceName: navigation.action.ownerInstanceName, kfEvent: navigationBinding.kfEvent,
-        linkId: navigationBinding.linkId ?? null, phase: navigationBinding.phase,
-      },
-    });
+    const stateResult = actionSegment("details-link", "mark-details-opened");
+    expect(stateResult.body).toBe(`$Variable.${state.variableName} = true;\n`);
+    const navigation = actionSegment("details-link", "navigate-detail");
+    expect(navigation.body).toBe('ShowPage("detail",1);\n');
+    expect(navigation.link).toBe(stateResult.link);
+    expect(decodedCompilerModules(String(navigation.link["script"])).map((entry) => entry.metadata["sourceScriptId"]))
+      .toEqual(["mark-details-opened", "navigate-detail"]);
 
     const filter = scriptSegment("status-select", "filter-script");
     const selectName = expectedControl("status-select").instanceName;
@@ -919,18 +949,12 @@ describe("job runner", () => {
       ["open-contact", "open-contact-overlay", true],
       ["close-contact", "close-contact-overlay", false],
     ] as const) {
-      const visibility = linkForAction(owner, actionId);
-      const binding = expectedBinding(visibility.action.ownerInstanceName, visibility.action.id);
-      const overlay = expectedControl("contact-overlay-root");
-      expect(visibility.link["kfCompilerAction"]).toEqual({
-        schema: "kf-compiled-action/v3", actionId: visibility.action.id, sourceActionId: actionId,
-        ownerInstanceName: visibility.action.ownerInstanceName, ownerSemanticControlId: owner,
-        targetSemanticControlId: "contact-overlay-root", targetInstanceName: overlay.instanceName,
-        operation: visible ? "open-overlay" : "close-overlay", visible,
-        kfEvent: binding.kfEvent, linkId: binding.linkId ?? null, phase: binding.phase,
-      });
-      expect(decodedCompilerModules(String(visibility.link["script"]))[0]?.body)
-        .toBe(`${overlay.instanceName}.setVisible(${String(visible)});\n`);
+      const visibility = actionSegment(owner, actionId);
+      const targets = visibility.action.kind === "open-overlay" || visibility.action.kind === "close-overlay"
+        ? visibility.action.targetControls
+        : [];
+      const ordered = visible ? targets : [...targets].reverse();
+      expect(visibility.body).toBe(ordered.map((target) => `${target.instanceName}.setVisible(${String(visible)});`).join("\n") + "\n");
     }
 
     const nativeVariables = Object.values(inspection.raw.variables).flatMap((group) => {

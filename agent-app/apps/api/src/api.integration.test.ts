@@ -4,7 +4,16 @@
 import "reflect-metadata";
 process.env.DATABASE_URL =
   process.env.TEST_DATABASE_URL ??
-  "postgresql://postgres@127.0.0.1:5432/kf_agent_test";
+  "postgresql://postgres@127.0.0.1:5432/kf_agent_test_agent_next";
+
+// modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+import { assertSafeTestDatabase } from "../../../tests/helpers/database-safety.js";
+assertSafeTestDatabase({
+  url: process.env.DATABASE_URL,
+  allowReset: process.env.KF_TEST_ALLOW_DESTRUCTIVE_RESET,
+  expectedPrefix: "kf_agent_test_",
+});
+// end
 process.env.KF_SERVER_PLAN_HMAC_KEY_BASE64 ??= Buffer.alloc(32, 0x54).toString("base64");
 
 import type { INestApplication } from "@nestjs/common";
@@ -153,8 +162,8 @@ const TABLES = [
   "Tenant",
 ];
 
-// PostgresSaver creates these tables through setup(); every integration suite
-// truncates them so checkpoints cannot leak across tests.
+// PostgresSaver 通过 setup() 创建这些表；每个集成套件
+// 都会截断它们，因此检查点无法跨越测试泄漏。
 const CHECKPOINT_TABLES = [
   "checkpoint_writes",
   "checkpoint_blobs",
@@ -162,7 +171,7 @@ const CHECKPOINT_TABLES = [
   "checkpoint_migrations",
 ];
 
-/** Deterministic fake model: the API's ModelPort injection point (Task 11). */
+/** 确定的伪模型：API 的 ModelPort 注入点（任务 11）。 */
 class FakeModelPort {
   moduleDelegate = new DeterministicFakeModelPort();
   intents = [];

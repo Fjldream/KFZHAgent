@@ -1,3 +1,8 @@
+// modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+import { assertSafeTestDatabase } from "../../helpers/database-safety.js";
+
+// end
+
 export interface E2eDestructiveResetEnvironment {
   databaseUrl: string | undefined;
   allowDestructiveReset: string | undefined;
@@ -24,9 +29,19 @@ export function assertE2eDestructiveResetAllowed(input: E2eDestructiveResetEnvir
   } catch {
     refuse("database URL is invalid");
   }
-  if (parsed.protocol !== "postgres:" && parsed.protocol !== "postgresql:") {
-    refuse("database protocol is not PostgreSQL");
+  // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+  // 协议、隔离库前缀与库名长度规则改为复用统一守卫，避免两处实现漂移；
+  // 失败仍统一走 refuse，保留既有「双开关 + 独立库名」语义与脱敏报错。
+  try {
+    assertSafeTestDatabase({
+      url: input.databaseUrl,
+      allowReset: input.allowDestructiveReset,
+      expectedPrefix: E2E_DATABASE_PREFIX,
+    });
+  } catch {
+    refuse("database is not an authorized isolated E2E target");
   }
+  // end
   const hostname = parsed.hostname.startsWith("[") && parsed.hostname.endsWith("]")
     ? parsed.hostname.slice(1, -1)
     : parsed.hostname;
