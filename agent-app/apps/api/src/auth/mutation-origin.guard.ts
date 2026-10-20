@@ -37,12 +37,12 @@ const configuredOrigins = (): string[] =>
 /** cookie 鉴权的写请求必须带允许的 Origin；缺失或不匹配一律 403。 */
 @Injectable()
 export class MutationOriginGuard implements CanActivate {
-  constructor(private readonly allowedOrigins: string[] = configuredOrigins()) {}
-
+  // 不用构造器注入：Nest 会把 `string[]` 当成 DI token 去解析，
+  // @UseGuards 直接实例化时会报 UnknownDependencies。改为 canActivate 时读环境。
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<{ headers?: Record<string, string | undefined> }>();
     const origin = request.headers?.origin;
-    return isAllowedMutationOrigin(origin, this.allowedOrigins);
+    return isAllowedMutationOrigin(origin, configuredOrigins());
   }
 }
 // end

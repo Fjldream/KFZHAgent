@@ -13,7 +13,12 @@ export const RUN_STORE = Symbol("RUN_STORE");
   imports: [PrismaModule],
   controllers: [RunController],
   providers: [
-    PrismaRunQueries,
+    {
+      // PrismaClient 是 type-only 参数，直接声明 provider 会让 Nest 注入 undefined。
+      provide: PrismaRunQueries,
+      inject: [PrismaService],
+      useFactory: (prisma: PrismaService) => new PrismaRunQueries(prisma),
+    },
     {
       provide: RUN_STORE,
       inject: [PrismaService],
