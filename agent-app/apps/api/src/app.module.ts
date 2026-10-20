@@ -5,6 +5,7 @@ import { AuditModule } from "./audit/audit.module.js";
 import { AuthModule } from "./auth/auth.module.js";
 import { BuildJobsModule } from "./build-jobs/build-jobs.module.js";
 import { ConversationsModule } from "./conversations/conversations.module.js";
+import { RunsModule } from "./runs/run.module.js";
 import { PrismaModule } from "./prisma/prisma.module.js";
 import { RevisionsModule } from "./revisions/revisions.module.js";
 import { TenantsModule } from "./tenants/tenants.module.js";
@@ -24,6 +25,7 @@ import { WorkspacesModule } from "./workspaces/workspaces.module.js";
     AssetsModule,
     BuildJobsModule,
     ConversationsModule,
+    RunsModule,
   ],
 })
 export class AppModule {}

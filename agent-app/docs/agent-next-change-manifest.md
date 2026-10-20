@@ -682,3 +682,24 @@
 | SIGTERM | 优雅退出，**exit=0** |
 
 冒烟过程中抓到两个只在真实启动时才暴露的问题：①`DeliverySnapshotService` 缺 `PrismaService`；②`ConversationService` 缺 `AuditService`。都已按依赖清单修好——**这正是只跑单测发现不了的**。
+
+
+## T10 端点：POST/GET/events + RunsModule
+
+| 文件 | 说明 |
+|---|---|
+| `runs/run.service.ts` | HTTP 门面：`RunActionSchema` 校验、mode/clientRequestId 必填校验、错误映射（非法游标/上限 → 400，跨租户 → 404） |
+| `runs/run.controller.ts` | `POST api/conversations/:id/runs`（202）、`GET api/runs/:id`、`GET api/runs/:id/events`（SSE）；先取一页再开流，非法游标不会写出半个流；15s 心跳、1s 轮询、30s 窗口后主动结束让客户端重连 |
+| `runs/run.module.ts` | `RUN_STORE` 工厂（lease 可配）+ RunService/PrismaRunQueries，导出给 worker 复用 |
+| `app.module.ts` | 注册 `RunsModule` |
+| `runs/run.controller.test.ts` | 4 例：按 principal 建 run、非法游标不写 SSE、终态收尾、未知 run 404 |
+
+## 验证
+
+| 项 | 结果 |
+|---|---|
+| 控制器单测 | 4 passed |
+| `api.integration.test.ts`（真实启动 AppModule） | **57 passed / 2 failed（与拆分前基线完全一致）** |
+| `tsc -p apps/api` | 无错误 |
+
+**踩坑（两次）**：控制器里用 `import type { RunService }` / `type PrismaRunQueries` 会让运行时引用被擦除，Nest 报 `can't resolve dependencies of the RunController (?, ?)`。**被注入的类必须值导入**，纯类型才用 `import type`。
