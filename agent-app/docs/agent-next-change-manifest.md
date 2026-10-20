@@ -645,3 +645,19 @@
 证据：`run-step-memo` 5 + `solution-graph` 39 = **44 passed**；orchestrator / api tsc 均无错误。
 
 **踩坑**：`exactOptionalPropertyTypes: true` 下，可选回调字段必须写成 `((...) => X) | undefined`，否则调用方传 `undefined` 会报 TS2379。
+
+
+## 追加：图调用与中断判定（T09 handler 依赖的最后一块）
+
+| 文件 | 说明 |
+|---|---|
+| `apps/api/src/runs/run-graph-runner.ts` | `runGraphOnce({graph, input, conversationId, signal})`：用 `{configurable:{thread_id}}` 跑 stream，再 `getState` 判定 `tasks[].interrupts` → 返回 `{kind:"interrupted"}` 或 `{kind:"completed", stage}`；信号中止抛 `RunAborted` |
+| `apps/api/src/runs/run-graph-runner.test.ts` | 4 例：完成带 stage、审批中断不报成功、流中 abort、无 stage 返回 null（不猜） |
+
+证据：4 passed；`tsc -p apps/api` 无错误。
+
+**一个需要维护者拍板的设计点**：当前 `planRunSteps` 把一次消息拆成 `classify/blueprint/await_approval` 三步，但 solution-graph 本身在一个 run 内就会跑完这些节点。若 registry 真的按三个 step 分别调图，等于**图被驱动三次**。两条路：
+- **A（推荐）**：图驱动的 run 只保留一个 step（`graph`），节点级可恢复性交给已经接好的 `withStepMemo`；
+- **B**：把图拆成子图逐步驱动，工作量大且要改图的路由。
+
+在拍板前 registry 保持空表（worker 仍 idle），不会误跑。
