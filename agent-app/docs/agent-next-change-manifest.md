@@ -464,3 +464,21 @@
 证据：4 passed；`tsc -p apps/api` 无错误。
 
 下一步（按 A 路线）：把计划接到执行器 —— worker 入口读取 `AgentRun.action` → `planRunSteps` → 为每步绑定处理器（先接 classify/blueprint，其余抛 `STEP_NOT_IMPLEMENTED` 并显式失败，不静默跳过）。
+
+
+## 追加：执行计划接入执行器（A 路线 ①）
+
+| 文件 | 说明 |
+|---|---|
+| `apps/api/src/runs/run-execution.service.ts` | `RunExecutionService.executeLease`：读 run 的 action/baseRevision → `planRunSteps` → 按 stepKey 绑定处理器 → 交给 `GraphRunExecutor`；**缺处理器抛 `STEP_NOT_IMPLEMENTED` 让 run 明确失败**，绝不静默跳过 |
+| `apps/api/src/runs/run-execution.integration.test.ts` | 3 例：完整计划跑完 SUCCEEDED、缺处理器时 FAILED 且此前步骤保留、处理器收到 action/baseRevision/tenant |
+
+证据：3 passed；`tsc -p apps/api` 无错误。
+
+## A 路线 ② 的精确改动点（下一步，需完整回归）
+
+1. `packages/agent-orchestrator/src/state.ts`：`GraphState` 增加 `runId: string`、`planVersion: string`、`stepOutputs: Record<string, string>`（只存引用，不存整段输出）。
+2. `solution-graph.ts`：建图时把 `runId` 与每节点 `inputHash` 注入 state；节点进入前先查 `RunStepStore.findCompleted`，命中则直接复用并跳过模型调用；节点产出后调 `complete`。
+3. `nodes/enqueue-build.ts`：`build` 幂等键改用 `runId + planVersion`，确保 enqueue 前后崩溃都找回同一个 BuildJob。
+4. 回填校验：恢复时比对 checkpoint 里的 `runId/baseRevisionId/schemaVersion` 与当前 run 一致，不一致则整段重跑而不是复用。
+5. 回归门槛：`deepseek-model.test.ts`（124 条）+ `run-*.integration`（约 30 条）+ `creative-goldens`（当前既有失败需先确认基线）。
