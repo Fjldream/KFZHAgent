@@ -17,4 +17,22 @@
   --blur-glass: blur(20px) saturate(180%);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  /* modified by jinlong.feng at 2026-10-20 Agent工作台迭代：对齐 UI 设计稿 agent-app-ui-macos-20261020 */
+  --color-warning: #ff9f0a;
+  --radius-card: 16px;
+  --radius-button: 10px;
+  --radius-sheet: 20px;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.06);
+  --shadow-float: 0 8px 40px rgba(0, 0, 0, 0.16);
+  --blur-glass: blur(20px) saturate(180%);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --sidebar-bg: rgba(246, 246, 248, 0.78);
+  --sidebar-bg-solid: #f2f2f4;
+  --titlebar-bg: rgba(250, 250, 252, 0.85);
+  --fill-quaternary: rgba(120, 120, 128, 0.08);
+  --fill-tertiary: rgba(120, 120, 128, 0.16);
+  --sidebar-w: 240px;
+  --inspector-w: 320px;
+  --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  /* end */
 }
