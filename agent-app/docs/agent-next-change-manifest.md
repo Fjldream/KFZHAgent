@@ -522,3 +522,14 @@
 证据：memo 适配器 2 passed + 执行服务 3 passed；orchestrator/api tsc 均无错误。
 
 ②剩余：其余节点接线、`enqueue-build` 幂等键、checkpoint 与 run 一致性显式校验（当前靠 inputHash 内含 planVersion/baseRevision 隐式保证）。
+
+
+## 追加：design-plan 节点接线（A 路线 ② 第 1 项续）
+
+`design-plan.ts` 也包上 `withStepMemo`：同一 run 下 `designRevision + currentRevisionId + 最新用户消息` 未变时，直接复用已完成的蓝图，跳过最贵的模型调用之一。
+
+改动为 12 行新增 / 1 行删除（该文件此前属于工作区旧版，已先 `git show HEAD:<path>` 取回正文再改，避免重复上轮回退事故）。
+
+证据：`solution-graph.test.ts` 39 + `run-step-memo.test.ts` 5 = **44 passed**；orchestrator tsc 无错误。
+
+②剩余：`compile-creative-solution` 接线、`enqueue-build` 幂等键、checkpoint 与 run 一致性显式校验。

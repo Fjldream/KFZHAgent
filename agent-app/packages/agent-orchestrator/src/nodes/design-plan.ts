@@ -4,6 +4,9 @@ import {
 } from "@kf/contracts";
 import type { AgentGraphStateValue, AgentGraphUpdate } from "../state.js";
 import type { SolutionGraphDeps } from "../ports.js";
+// modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+import { withStepMemo } from "../run-step-memo.js";
+// end
 import { assessBlueprintRevision } from "../blueprint-quality.js";
 import { encodeBlueprintMessage } from "../blueprint-message.js";
 import { hashDesignPlan } from "../design-plan-version.js";
@@ -27,7 +30,7 @@ import { hashDesignPlan } from "../design-plan-version.js";
  * and the version lives next to it in state.
  */
 export function createDesignPlanNode(deps: SolutionGraphDeps) {
-  return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
+  const node = async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
     const revisingConfirmedCreativeBlueprint =
       state.generationWorkflow === "creative-v2"
       && state.designPlan?.schema === "kf-design-plan/v3"
@@ -178,6 +181,14 @@ export function createDesignPlanNode(deps: SolutionGraphDeps) {
       lastErrorCode: undefined,
     };
   };
+  // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+  // 蓝图是最贵的模型调用之一：同一 run 下输入未变时直接复用已完成输出。
+  return withStepMemo("design-plan", node, deps, (state) => ({
+    designRevision: state.designRevision,
+    currentRevisionId: state.currentRevisionId,
+    requirement: latestUserMessage(state),
+  }));
+  // end
 }
 
 /** The latest user turn, used as the requirement text for the model. */
