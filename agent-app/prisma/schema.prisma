@@ -85,6 +85,9 @@ model Conversation {
   workspaceId String
   title       String
   summary     String?
+  // T05：结构化长期记忆（schemaVersion + 基线绑定）；summary 旧字段保留兼容。
+  memory                 Json?
+  memoryThroughMessageId String?
   turnFence   ConversationTurnFence?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

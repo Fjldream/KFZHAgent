@@ -234,6 +234,40 @@
 2. **`classify-intent.ts` 未改**：结构化动作（确认/取消/重试）的确定性路由在 T09 落地，本轮保留现有快路。
 3. **`promptVersion` / `prefixHash` 已产出但尚未落库**：T06 预算与账本接线时写入 `ModelInvocation`。
 
+---
+
+# T05：上下文装配、摘要有效性与窗口预算（进行中）
+
+执行日期：2026-10-20
+功能标注：Agent工作台迭代
+
+## 已完成部分
+
+| 文件 | 改动 |
+|---|---|
+| `agent-app/apps/api/src/models/context-builder.ts` | `buildContext`：当前指令与有效记忆必留 → 最近历史尽量留 → 从最旧消息开始丢；UTF-8 字节上界估算（每消息 +64 token 协议开销）；当前指令本身超预算抛 `CONTEXT_BUDGET_EXCEEDED` |
+| `agent-app/apps/api/src/models/context-builder.test.ts` | 7 例：丢弃最旧消息保留近况、必留内容超预算拒绝、中文按字节计、空会话、记忆基线校验、未知 schemaVersion 忽略、记忆不含堆栈 |
+| `agent-app/prisma/schema.prisma` | `Conversation` 新增 `memory Json?`、`memoryThroughMessageId String?`（`summary` 旧字段保留） |
+| `agent-app/prisma/migrations/202610200002_conversation_summary_version/migration.sql` | 纯新增两列；checksum `af23f624d78c8c98e52304b1e9dd8d0f3a5b594ef75183a90792a0a8428244ca`，应用后 diff 回到 empty |
+| `agent-app/apps/api/src/conversations/deepseek-model.ts` | 修复「summary 已加载但 creative 未使用」：蓝图上下文条件注入 `conversationMemory`（≤1200 字符）；implementation 提示词仍然不带 |
+
+## 证据
+
+| 项 | 结果 |
+|---|---|
+| context-builder 测试 | **7 passed** |
+| 老模型套件 | **124 passed**（含「implementation 不得包含 conversationSummary」的原守卫） |
+| 类型检查 | `tsc -p apps/api` exit 0 |
+| 迁移 | `migrate deploy` 成功；`migrate diff` → empty |
+
+## 未完成（依赖 T06，故本任务标记 IN_PROGRESS）
+
+1. **摘要生成节流与计费**：只在历史跨阈值时用 `summary` 任务生成，走网关计费；当前没有任何自动生成路径。
+2. **记忆持久化**：`memory` / `memoryThroughMessageId` 字段已建表，但尚无读写服务（需要与 run 事务协作）。
+3. **graph-ports / load-context 接线**：仍沿用旧 `summary` 字符串合并逻辑，未切到结构化 `ConversationMemory`。
+
+这三项都要用到 T06 的预算与网关接线，故与 T06 合并处理，避免半成品状态入库。
+
 
 
 

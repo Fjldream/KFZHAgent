@@ -238,6 +238,8 @@ const MAX_CREATIVE_PROMPT_BYTES = 128_000;
 const MAX_CREATIVE_RECENT_MESSAGES = 12;
 const MAX_CREATIVE_MESSAGE_CHARS = 2_000;
 const MAX_CREATIVE_REQUIREMENT_CHARS = 6_000;
+/** 会话记忆进入蓝图上下文时的长度上界，防止摘要无限增长挤占需求本身。 */
+const MAX_CREATIVE_SUMMARY_CHARS = 1_200;
 const MAX_SOLUTION_ASSETS = 100;
 const MAX_SOLUTION_REJECTION_REASONS = 20;
 const MAX_SOLUTION_REJECTION_REASON_CHARS = 300;
@@ -1476,6 +1478,13 @@ function buildCreativeBlueprintPrompt(
   const context = {
     requirement: (input.requirementText ?? "").slice(0, MAX_CREATIVE_REQUIREMENT_CHARS),
     recentConversation: boundedCreativeConversation(input),
+    // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+    // 修复「summary 已加载但 creative 未使用」：把会话记忆带进蓝图上下文，
+    // 限长且只在存在时注入；implementation 提示词仍不带，避免无关上下文干扰结构化输出。
+    ...((input.conversationSummary ?? "").trim().length > 0
+      ? { conversationMemory: (input.conversationSummary ?? "").trim().slice(0, MAX_CREATIVE_SUMMARY_CHARS) }
+      : {}),
+    // end
     ...(options.revising && previousBlueprint !== undefined ? { previousBlueprint } : {}),
     ...(rejectionReasons.length > 0 ? { rejectionReasons } : {}),
   };

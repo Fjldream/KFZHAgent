@@ -51,7 +51,7 @@ Superpowers安装路径因机器不同会变化。本机writing-plans读取路�
 | T02 | 调用账本与费用 | VERIFIED（2026-10-20） | T01 |
 | T03 | 网关/超时/取消 | VERIFIED（2026-10-20） | T02 |
 | T04 | prompt拆分与前缀 | VERIFIED（2026-10-20，等价口径） | T03 |
-| T05 | 上下文与摘要 | NOT_STARTED | T04 |
+| T05 | 上下文与摘要 | IN_PROGRESS（2026-10-20，剩余依赖 T06） | T04 |
 | T06 | 预算与修复 | NOT_STARTED | T05 |
 | T07 | Run/Event迁移 | NOT_STARTED | T01/T02 |
 | T08 | 幂等队列与fence | NOT_STARTED | T06/T07 |
@@ -242,6 +242,21 @@ rg -n 'createClassifyIntentNode|createSolutionGraph|generationWorkflow' packages
       ③promptVersion/prefixHash 已产出但未落库（T06 接）
 风险：文案精简一旦启动会改变模型输出质量，需单独评审与样本对比
 下一步：T05 上下文装配、摘要有效性与窗口预算
+```
+
+```text
+任务：T05
+状态：IN_PROGRESS（装配与记忆接入完成；摘要节流/持久化/graph-ports 接线依赖 T06）
+实现：新增 apps/api/src/models/context-builder.ts + 测试；
+      Conversation 增 memory/memoryThroughMessageId + 迁移 202610200002（checksum af23f624…）；
+      deepseek-model 蓝图上下文条件注入 conversationMemory（≤1200 字符）
+绿测：context-builder 7 passed；老模型套件 124 passed；tsc -p apps/api exit 0
+数据库：kf_agent_test_agent_next 已应用；migrate diff 回到 empty
+证据：agent-app/docs/agent-next-change-manifest.md §T05
+提交：本地提交，未推送
+偏差：摘要生成与记忆持久化未做，留给 T06（需要预算/网关的 summary 调用通道）
+风险：memory 字段目前无人写入，读取路径仍是旧 summary 字符串
+下一步：T06 统一预算、重试协调器与统计接口（含 summary 计费与 T05 剩余项）
 ```
 
 
