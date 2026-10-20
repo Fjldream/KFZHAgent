@@ -533,3 +533,14 @@
 证据：`solution-graph.test.ts` 39 + `run-step-memo.test.ts` 5 = **44 passed**；orchestrator tsc 无错误。
 
 ②剩余：`compile-creative-solution` 接线、`enqueue-build` 幂等键、checkpoint 与 run 一致性显式校验。
+
+
+## 追加：compile-creative-solution 接线（A 路线 ② 第 1 项完成）
+
+`compile-creative-solution.ts` 包上 `withStepMemo`：key = `solutionImplementationPlanHash + designPlanHash + currentRevisionId`，方案或基线未变时复用已签名产物，不重复编译。
+
+改动 12 行新增 / 1 行删除（同样先 `git show HEAD:` 取回正文）。
+
+证据：44 passed（图单元 39 + memo 5）；orchestrator tsc 无错误。
+
+节点接线进度：`design-plan` ✅、`solution-implementation-plan` ✅、`compile-creative-solution` ✅。②剩余：`enqueue-build` 幂等键、checkpoint 一致性只读校验。
