@@ -1,5 +1,5 @@
 // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
-import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, NotFoundException, Get, HttpCode, HttpStatus, Param, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
 import type { Response } from "express";
 import { MutationOriginGuard } from "../auth/mutation-origin.guard.js";
 import { TenantGuard, type AuthenticatedRequest } from "../auth/tenant.guard.js";
@@ -53,6 +53,14 @@ export class RunController {
   @Get("runs/:runId")
   async snapshot(@Req() req: AuthenticatedRequest, @Param("runId") runId: string) {
     return this.runs.snapshot(principalOf(req), runId);
+  }
+
+  // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+  @Get("runs/:runId/usage")
+  async usage(@Req() req: AuthenticatedRequest, @Param("runId") runId: string) {
+    const found = await this.runs.usage(principalOf(req), runId);
+    if (found === null) throw new NotFoundException("RUN_NOT_FOUND");
+    return found;
   }
 
   @Get("runs/:runId/events")

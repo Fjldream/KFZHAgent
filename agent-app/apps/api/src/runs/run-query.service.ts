@@ -71,6 +71,41 @@ export class PrismaRunQueries implements RunQueries {
       payload: (row.payload ?? {}) as Record<string, unknown>,
     }));
   }
+
+  // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+  /** run 的预算用量：RunBudget + 调用账本聚合，供右栏「用量」pane。 */
+  async usageFor(tenantId: string, runId: string): Promise<{
+    callsUsed: number; callsLimit: number;
+    inputTokens: number; inputLimit: number;
+    outputTokens: number; outputLimit: number;
+    costEstimate: string;
+    usageUnknownCount: number;
+  } | null> {
+    const run = await this.prisma.agentRun.findFirst({ where: { id: runId, tenantId }, select: { id: true } });
+    if (run === null) return null;
+    const budget = await this.prisma.runBudget.findUnique({ where: { runId } });
+    const invocations = await this.prisma.modelInvocation.aggregate({
+      where: { runId },
+      _count: { _all: true },
+      _sum: { inputTokens: true, outputTokens: true, costMicros: true },
+    });
+    const sums = invocations._sum as Record<string, number | bigint | null>;
+    const inputTokens = Number(sums.inputTokens ?? 0);
+    const outputTokens = Number(sums.outputTokens ?? 0);
+    const costMicros = Number(sums.costMicros ?? 0);
+    const callsUsed = invocations._count._all;
+    // 每次调用至少占 1 次预算；UNKNOWN 结果按保守上限记在预算行，不在这里重复计。
+    const unknownCount = budget?.unknownUsageCount ?? 0;
+    return {
+      callsUsed: Math.max(callsUsed, budget?.usedInvocations ?? 0),
+      callsLimit: budget?.maxInvocations ?? 0,
+      inputTokens, inputLimit: budget?.maxInputTokens ?? 0,
+      outputTokens, outputLimit: budget?.maxOutputTokens ?? 0,
+      costEstimate: `¥${(costMicros / 1_000_000).toFixed(2)}`,
+      usageUnknownCount: unknownCount,
+    };
+  }
+  // end
 }
 
 /** SSE 帧格式；id 用 seq，便于浏览器 EventSource 断线后带 Last-Event-ID 重连。 */

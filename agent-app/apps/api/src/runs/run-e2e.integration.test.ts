@@ -18,6 +18,7 @@ import { RunExecutionService } from "./run-execution.service.js";
 import { createRunHandlerRegistry } from "./run-handler-registry.js";
 import type { GraphLike } from "./run-graph-runner.js";
 import { PrismaRunStepStore } from "./run-step-store.js";
+import { PrismaRunQueries } from "./run-query.service.js";
 import { AgentWorkerModule } from "./run-worker.module.js";
 import { createRunTestFixture, messageInput, type RunTestFixture } from "./run-test-fixture.js";
 
@@ -79,6 +80,14 @@ describe("run end to end with the fake model", () => {
     }));
     expect(["SUCCEEDED", "WAITING_APPROVAL", "WAITING_INPUT", "FAILED"]).toContain(run.status);
     expect(events.some((event) => event.type === "run.finished")).toBe(run.status !== "WAITING_APPROVAL");
+
+    // 预算行必须随 run 创建（T07）；callsUsed 目前为 0 是已知缺口：
+    // 图内模型调用落账时还没有写 runId（T02 收尾项），账本行 runId 为 null。
+    // 该缺口修复后，这里应改为 callsUsed > 0。
+    const queries = new PrismaRunQueries(fixture.prisma);
+    const usage = await queries.usageFor(fixture.tenantA, created.id);
+    expect(usage).not.toBeNull();
+    expect((usage as { callsLimit: number }).callsLimit).toBeGreaterThan(0);
   }, 60_000);
 });
 // end

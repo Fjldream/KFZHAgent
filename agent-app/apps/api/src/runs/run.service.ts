@@ -65,6 +65,12 @@ export class RunService {
     }
   }
 
+  // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+  /** 预算用量；跨租户/不存在返回 null 由控制器映射 404。 */
+  async usage(principal: RunPrincipal, runId: string) {
+    return this.queries.usageFor(principal.tenantId, runId);
+  }
+
   async events(principal: RunPrincipal, runId: string, after: number, limit: number) {
     try {
       return await this.queries.eventsAfter(principal.tenantId, runId, after, limit);
