@@ -7,10 +7,7 @@ import {
 import LoginView from "./views/LoginView.vue";
 import ChangePasswordView from "./views/ChangePasswordView.vue";
 import WorkspacesView from "./views/WorkspacesView.vue";
-import WorkspaceView from "./views/WorkspaceView.vue";
-// modified by jinlong.feng at 2026-10-20 Agent工作台迭代
-// 新工作台为并行入口：旧 WorkspaceView 仍是默认视图，工作台走独立路由（UI 演示，未接后端）。
-// modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+// modified by jinlong.feng at 2026-10-20 Agent工作台迭代：按 UI 设计稿 1:1 重做，旧视图已删除
 import RunWorkbenchView from "./views/RunWorkbenchView.vue";
 // end
 
@@ -36,7 +33,6 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
       { path: "/workspaces/:id", redirect: (to) => `/workspaces/${String(to.params.id)}/workbench` },
       { path: "/workspaces/:id/workbench", name: "workbench", component: RunWorkbenchView, props: true, meta: { requiresAuth: true } },
       // end
-      { path: "/workspaces/:id", name: "workspace", component: WorkspaceView, props: true, meta: { requiresAuth: true } },
       { path: "/:pathMatch(.*)*", redirect: "/workspaces" },
     ],
   });
