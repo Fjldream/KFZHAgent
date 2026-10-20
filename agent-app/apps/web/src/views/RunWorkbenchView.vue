@@ -6,6 +6,7 @@ import ConversationSidebar, { type SidebarConversation } from "../components/run
 import MessageBubble from "../components/runs/MessageBubble.vue";
 import RunTimeline from "../components/runs/RunTimeline.vue";
 import RunStatusCapsule from "../components/runs/RunStatusCapsule.vue";
+import RunPill from "../components/runs/RunPill.vue";
 import ContextPanel from "../components/runs/ContextPanel.vue";
 import ComposerBar, { type ComposerMode } from "../components/runs/ComposerBar.vue";
 import { startRun } from "../runs-api.js";
@@ -60,6 +61,13 @@ const send = async (text: string): Promise<void> => {
 
 onBeforeUnmount(() => steps.value?.stop());
 
+/** T11 之前先本地断开事件流；服务端取消接口接入后改为发 CANCEL 请求。 */
+const stopRequested = ref(false);
+function stopRun(): void {
+  stopRequested.value = true;
+  steps.value?.stop();
+}
+
 const panes = [
   { id: "plan", label: "方案" },
   { id: "project", label: "工程" },
@@ -84,6 +92,12 @@ const activePane = ref("plan");
     </template>
 
     <template #main>
+      <div class="main-head">
+        <span class="conv-name">演示会话</span>
+        <span class="mode-chip">{{ mode === "build" ? "🛠 生成修改" : mode === "plan" ? "🧭 规划" : "💬 讨论" }}</span>
+        <RunPill :status="busy ? status : null" @stop="stopRun" />
+      </div>
+      <p v-if="stopRequested" class="stop-note">已断开本地订阅 · 服务端取消接口（T11）接入前，运行会在后台继续直到完成</p>
       <div class="stream">
         <p v-if="steps === null" class="hint">发送一条需求即可开始一次运行。</p>
         <RunTimeline v-if="steps !== null && steps.steps().length > 0" :steps="steps.steps()" />
@@ -104,6 +118,29 @@ const activePane = ref("plan");
 </template>
 
 <style scoped>
+.main-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px 0;
+}
+
+.conv-name { font-size: 14px; font-weight: 600; letter-spacing: -0.02em; }
+
+.mode-chip {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 7px;
+  background: var(--fill-quaternary);
+  color: var(--color-text-secondary);
+}
+
+.stop-note {
+  margin: 6px 20px 0;
+  font-size: 11px;
+  color: var(--color-warning);
+}
+
 .stream {
   flex: 1;
   min-height: 0;
