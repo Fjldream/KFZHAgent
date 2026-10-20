@@ -594,3 +594,17 @@
 证据：执行器集成 **7 passed**；`tsc -p apps/api` 无错误。
 
 语义要点：暂停**不是失败**。如果把它当 FAILED，恢复时会重跑整段并在用户确认后重复扣费；如果当成 SUCCEEDED，前端会以为任务已完成。等待态只允许被「新 action」推走，不会被 worker 重新领取。
+
+
+## 追加：run → 图输入的纯函数（T09 handler 接线前置）
+
+| 文件 | 说明 |
+|---|---|
+| `apps/api/src/runs/run-graph-input.ts` | `buildRunGraphInput(run, latestUserMessage, stage)`：把持久 run 映射成旧 SSE 入口同形状的图输入（tenant/user/workspace/conversation/stage/recentMessages + runId/planVersion/currentRevisionId） |
+| `apps/api/src/runs/run-graph-input.test.ts` | 4 例：字段映射、只带本轮消息、无基线时省略 currentRevisionId、确定性动作空消息列表 |
+
+证据：4 passed；`tsc -p apps/api` 无错误。
+
+**设计判断**：`recentMessages` 只放本轮用户消息。历史交给 `load-context` 节点分页加载——在入口塞全量历史会让长会话每次重算全部上下文，checkpoint 体积也会失控。
+
+**下一步（handler 接图的唯一剩余前置）**：worker 侧需要拿到编译好的图实例（含 checkpointer 与 `modelPort` 等依赖），这要求把图中 providers 从 `conversations.module.ts` 拆出可复用的 `ConversationRuntimeModule`，worker 只导入该模块。之后 registry 即可：读 run → `buildRunGraphInput` → `graph.stream(input, {runId})` → interrupt 时抛 `RunPaused`。
