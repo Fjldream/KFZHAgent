@@ -180,7 +180,7 @@ model DomainProjectRevision {
   packageUrl         String?
   createdAt          DateTime @default(now())
 
-  @@unique([tenantId, solutionRevisionId, projectKey])
+  @@unique([tenantId, solutionRevisionId, projectKey], map: "DomainProjectRevision_tenantId_solutionRevisionId_projectKey_ke")
   @@index([tenantId, solutionRevisionId])
 }
 
@@ -201,8 +201,8 @@ model BuildJob {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  @@index([status, leaseExpiresAt, createdAt, tenantId, workspaceId])
-  @@index([tenantId, status, leaseExpiresAt, createdAt, workspaceId])
+  @@index([status, leaseExpiresAt, createdAt, tenantId, workspaceId], map: "BuildJob_status_leaseExpiresAt_createdAt_tenantId_workspaceId_i")
+  @@index([tenantId, status, leaseExpiresAt, createdAt, workspaceId], map: "BuildJob_tenantId_status_leaseExpiresAt_createdAt_workspaceId_i")
   @@index([tenantId, workspaceId])
 }
 
@@ -210,7 +210,8 @@ model BuildJob {
 model BuildSchedulerCursor {
   id           Int      @id
   lastTenantId String   @default("")
-  updatedAt    DateTime @updatedAt
+  // 库里该列有 DEFAULT CURRENT_TIMESTAMP；补回默认值以对齐已部署迁移，避免每次 diff 都提议 DROP DEFAULT。
+  updatedAt    DateTime @default(now()) @updatedAt
 }
 
 model Artifact {
