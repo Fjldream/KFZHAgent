@@ -1,7 +1,11 @@
 // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
 import "reflect-metadata";
+import { NestFactory } from "@nestjs/core";
 import { PrismaClient } from "@prisma/client";
+import { AgentWorkerModule } from "./runs/run-worker.module.js";
+import { ConversationService } from "./conversations/conversation.service.js";
 import { createRunHandlerRegistry } from "./runs/run-handler-registry.js";
+import type { GraphLike } from "./runs/run-graph-runner.js";
 import { RunExecutionService } from "./runs/run-execution.service.js";
 import { PrismaRunStepStore } from "./runs/run-step-store.js";
 import { PrismaRunStore } from "./runs/run-store.js";
@@ -20,8 +24,15 @@ async function main(): Promise<void> {
   const leaseMs = Number(process.env.AGENT_RUN_LEASE_MS ?? 30_000);
   const store = new PrismaRunStore(prisma, leaseMs);
   const steps = new PrismaRunStepStore(prisma);
-  const handlers = createRunHandlerRegistry();
+  // 只装配图运行所需模块：不起 HTTP controller，也不启动 build-job 轮询器。
+  const app = await NestFactory.createApplicationContext(AgentWorkerModule, { logger: ["error", "warn"] });
+  const conversations = app.get(ConversationService);
+  const handlers = createRunHandlerRegistry({
+    prisma,
+    loadGraph: async () => (await conversations.getGraph()) as unknown as GraphLike,
+  });
   const ready = Object.keys(handlers).length > 0;
+
 
   const controller = new AbortController();
   process.on("SIGTERM", () => controller.abort());
@@ -39,7 +50,8 @@ async function main(): Promise<void> {
     console.log(JSON.stringify({
       event: "agent_worker_heartbeat",
       at: new Date().toISOString(),
-      lastHandledAt: worker.heartbeatAt()?.toISOString() ?? null,
+      // 这是循环仍在跑的证据，不代表处理过任务，故不叫 lastHandledAt
+      lastLoopAt: worker.heartbeatAt()?.toISOString() ?? null,
       ready,
     }));
   }, HEARTBEAT_INTERVAL_MS);
@@ -55,6 +67,7 @@ async function main(): Promise<void> {
     await worker.start(controller.signal);
   } finally {
     clearInterval(heartbeat);
+    await app.close();
     await prisma.$disconnect();
   }
 }

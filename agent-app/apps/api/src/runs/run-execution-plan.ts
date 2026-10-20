@@ -5,7 +5,7 @@ import { routeRunAction, type ActionRoute } from "./action-router.js";
 import { canonicalJson } from "../models/canonical-json.js";
 
 /** 计划版本：节点逻辑一改，所有 inputHash 自动失效，避免复用旧语义输出。 */
-export const RUN_PLAN_VERSION = "run-plan@1";
+export const RUN_PLAN_VERSION = "run-plan@2";
 
 export type PlannedStep = {
   stepKey: string;
@@ -13,51 +13,31 @@ export type PlannedStep = {
   inputHash: string;
 };
 
-const STEPS_BY_ROUTE: Readonly<Record<ActionRoute, ReadonlyArray<{ stepKey: string; label: string }>>> = {
-  classify: [
-    { stepKey: "classify", label: "理解需求" },
-    { stepKey: "blueprint", label: "生成方案蓝图" },
-    { stepKey: "await_approval", label: "等待确认" },
-  ],
-  confirm_blueprint: [
-    { stepKey: "confirm_blueprint", label: "确认蓝图" },
-    { stepKey: "plan", label: "生成实施方案" },
-    { stepKey: "await_approval", label: "等待确认" },
-  ],
-  resume_approval: [
-    { stepKey: "resume_approval", label: "继续执行" },
-    { stepKey: "build", label: "生成工程" },
-  ],
-  revise_regions: [
-    { stepKey: "revise_regions", label: "按区域修改" },
-    { stepKey: "build", label: "重新生成工程" },
-  ],
-  accept_visual_reference: [
-    { stepKey: "analyze_reference", label: "解析视觉参考" },
-    { stepKey: "blueprint", label: "生成方案蓝图" },
-  ],
+/**
+ * 图驱动的 run 只登记 **一个** step。
+ *
+ * 原因：solution-graph 本身在一个 run 内就会跑完 classify -> blueprint ->
+ * await_approval 等节点。若在这里拆成多个 step 再去分别调图，同一张图会被
+ * 驱动多次（第二次从上一次 checkpoint 继续），模型调用量翻倍且行为不可预测。
+ *
+ * 节点级可恢复性由 `withStepMemo` 在图内部保证，不依赖这里的 step 粒度。
+ */
+const STEP_BY_ROUTE: Readonly<Record<ActionRoute, string>> = {
+  classify: "理解需求并推进流程",
+  confirm_blueprint: "确认蓝图并推进流程",
+  resume_approval: "继续执行已批准的方案",
+  revise_regions: "按区域修改并推进流程",
+  accept_visual_reference: "按视觉参考推进流程",
 };
 
-/**
- * 由一个动作推导出有序步骤计划。
- *
- * inputHash = SHA-256(计划版本 + 动作 + 基线 revision + 步骤自身)，
- * 因此同一动作在换基线后不会命中旧步骤输出，节点逻辑升级也会整体失效。
- */
 export function planRunSteps(action: RunAction, baseRevisionId: string | null): PlannedStep[] {
   const route = routeRunAction(action);
-  return STEPS_BY_ROUTE[route].map((step) => ({
-    stepKey: step.stepKey,
-    label: step.label,
+  return [{
+    stepKey: "graph",
+    label: STEP_BY_ROUTE[route],
     inputHash: createHash("sha256")
-      .update(canonicalJson({
-        planVersion: RUN_PLAN_VERSION,
-        route,
-        action,
-        baseRevisionId,
-        stepKey: step.stepKey,
-      }), "utf8")
+      .update(canonicalJson({ planVersion: RUN_PLAN_VERSION, route, action, baseRevisionId }), "utf8")
       .digest("hex"),
-  }));
+  }];
 }
 // end

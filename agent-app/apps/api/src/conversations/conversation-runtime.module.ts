@@ -3,6 +3,7 @@ import { Module } from "@nestjs/common";
 import { ArtifactsModule } from "../artifacts/artifacts.module.js";
 import { AssetsModule } from "../assets/assets.module.js";
 import { DeliveryModule } from "../delivery/delivery.module.js";
+import { PrismaModule } from "../prisma/prisma.module.js";
 import { AssetService } from "../assets/asset.service.js";
 import { ARTIFACT_STORAGE } from "../artifacts/artifact-storage.js";
 import { PrismaService } from "../prisma/prisma.service.js";
@@ -30,7 +31,9 @@ import {
  * 避免循环依赖与「worker 里意外起 HTTP」。
  */
 @Module({
-  imports: [ArtifactsModule, AssetsModule, DeliveryModule],
+    // PrismaModule 是 @Global，但只在注册它的根模块内全局；worker 用独立上下文启动，
+  // 必须显式 import，否则 DeliverySnapshotService 解析不到 PrismaService。
+  imports: [PrismaModule, ArtifactsModule, AssetsModule, DeliveryModule],
   providers: [
     {
       provide: CONVERSATION_TURN_LEASE,

@@ -38,9 +38,7 @@ const startRun = async (clientRequestId: string) => {
 };
 
 const handlers = (overrides: Partial<StepHandlerRegistry> = {}): StepHandlerRegistry => ({
-  classify: async () => ({ output: { intent: "NEW_REQUIREMENT" }, safeSummary: "识别为新建需求" }),
-  blueprint: async () => ({ output: { pages: 3 }, safeSummary: "生成 3 个页面" }),
-  await_approval: async () => ({ output: { waiting: true }, safeSummary: "等待确认" }),
+  graph: async () => ({ output: { stage: "done" }, safeSummary: "流程完成" }),
   ...overrides,
 });
 
@@ -58,14 +56,14 @@ describe("run execution service", () => {
       where: { runId: lease.runId, status: "COMPLETED" },
       orderBy: { stepKey: "asc" },
     });
-    expect(completed.map((row) => row.stepKey).sort()).toEqual(["await_approval", "blueprint", "classify"]);
+    expect(completed.map((row) => row.stepKey)).toEqual(["graph"]);
   });
 
   it("fails explicitly when a step handler is missing", async () => {
     const lease = await startRun("exec-service-missing");
     const service = new RunExecutionService({
       prisma: fixture.prisma, store: fixture.store, steps,
-      handlers: handlers({ await_approval: undefined as never }),
+      handlers: handlers({ graph: undefined as never }),
     });
 
     const snapshot = await service.executeLease(lease, new AbortController().signal);
@@ -74,7 +72,7 @@ describe("run execution service", () => {
     const done = await fixture.prisma.agentRunStep.count({
       where: { runId: lease.runId, status: "COMPLETED" },
     });
-    expect(done).toBe(2);
+    expect(done).toBe(0);
   });
 
   it("passes the run action and base revision to every handler", async () => {
@@ -82,16 +80,16 @@ describe("run execution service", () => {
     const seen = vi.fn(async (_context: StepContext) => ({ output: { ok: true } }));
     const service = new RunExecutionService({
       prisma: fixture.prisma, store: fixture.store, steps,
-      handlers: { classify: seen, blueprint: seen, await_approval: seen },
+      handlers: { graph: seen },
     });
 
     await service.executeLease(lease, new AbortController().signal);
-    expect(seen).toHaveBeenCalledTimes(3);
+    expect(seen).toHaveBeenCalledTimes(1);
     expect(seen.mock.calls[0]?.[0]).toMatchObject({
       runId: lease.runId,
       tenantId: fixture.tenantA,
       action: { type: "message", text: "生成一个生产大屏" },
-      stepKey: "classify",
+      stepKey: "graph",
     });
   });
 });

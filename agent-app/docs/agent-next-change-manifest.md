@@ -661,3 +661,24 @@
 - **B**：把图拆成子图逐步驱动，工作量大且要改图的路由。
 
 在拍板前 registry 保持空表（worker 仍 idle），不会误跑。
+
+
+## T09 收口：单图步 + 真实 handler + worker 装配（按 A 方案）
+
+| 文件 | 改动 |
+|---|---|
+| `run-execution-plan.ts` | `RUN_PLAN_VERSION` 升到 `run-plan@2`；**每个 run 只登记一个 `graph` step**（节点级恢复由 `withStepMemo` 负责） |
+| `run-handler-registry.ts` | 真实 handler：读 run + 首条用户消息 → `buildRunGraphInput` → `runGraphOnce` → 中断抛 `RunPaused("WAITING_APPROVAL")` |
+| `run-worker.module.ts` | worker 专用装配：镜像 AppModule 的业务模块，**不导入 BuildJobsModule**（不启轮询器）、不绑 controller |
+| `run-agent-worker.ts` | 改用 `NestFactory.createApplicationContext(AgentWorkerModule)`；`loadGraph` 复用 `ConversationService#getGraph()` |
+| `conversation-runtime.module.ts` | 补 `PrismaModule`：`@Global` 只在注册它的根模块内生效，独立上下文必须显式 import |
+
+## 实测（不是只跑单测）
+
+| 项 | 结果 |
+|---|---|
+| runs 全目录 | **13 文件 / 60 测试全绿** |
+| worker 真实启动（空库） | 心跳 `{"event":"agent_worker_heartbeat","ready":true,"lastLoopAt":...}` |
+| SIGTERM | 优雅退出，**exit=0** |
+
+冒烟过程中抓到两个只在真实启动时才暴露的问题：①`DeliverySnapshotService` 缺 `PrismaService`；②`ConversationService` 缺 `AuditService`。都已按依赖清单修好——**这正是只跑单测发现不了的**。
