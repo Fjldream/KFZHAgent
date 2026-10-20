@@ -320,6 +320,17 @@ rg -n 'createClassifyIntentNode|createSolutionGraph|generationWorkflow' packages
 下一步：T10 事件重放、快照与新 API
 ```
 
+```text
+任务：T10
+状态：IN_PROGRESS（查询层与 Origin 守卫完成；controller/SSE 未做）
+实现：新增 runs/run-query.service.ts（snapshot/eventsAfter/serializeRunEvent）
+      + auth/mutation-origin.guard.ts；两份测试
+绿测：run-events 集成 5、origin 守卫 3；tsc -p apps/api 无错误
+证据：agent-app/docs/agent-next-change-manifest.md §T10
+偏差：未建 controller/module，未做 SSE 长连接与 heartbeat
+下一步：T09 图接线（solution-graph 带 runId/stepHash）+ worker 进程入口，再做 T10 端点
+```
+
 
 ## 计划文档自检记录（2026-10-20）
 

@@ -421,3 +421,34 @@
 证据：run-store 12 passed + run-worker 4 passed = **16 passed**；`tsc -p apps/api` 无错误。
 
 仍未做：独立进程入口 `run-agent-worker.ts`（**故意不加**：图尚未接线，进程会把每个 run 立刻失败）、Nest RuntimeModule 拆分、图带 runId/stepHash、`start:agent-worker` 脚本。
+
+
+---
+
+# T10：事件重放与快照（部分完成）
+
+执行日期：2026-10-20
+功能标注：Agent工作台迭代
+
+## 已完成部分
+
+| 文件 | 改动 |
+|---|---|
+| `apps/api/src/runs/run-query.service.ts` | `PrismaRunQueries`：`snapshot` / `eventsAfter` 均以 (tenantId, runId) 为条件，跨租户按不存在处理；游标必须非负整数且不超过当前 lastSeq；分页上限 1000；`serializeRunEvent` 输出 `id: <seq>` 的 SSE 帧，便于 EventSource 用 Last-Event-ID 重连 |
+| `apps/api/src/runs/run-events.integration.test.ts` | 5 例：SSE 帧格式、游标分页与顺序、非法游标/上限拒绝、跨租户隐藏、快照字段 |
+| `apps/api/src/auth/mutation-origin.guard.ts` | `isAllowedMutationOrigin` 精确 origin 匹配（URL 规范化、拒绝子域/端口/后缀混淆）+ `MutationOriginGuard` |
+| `apps/api/src/auth/mutation-origin.guard.test.ts` | 3 例：精确匹配、缺失/畸形/相似域名拒绝、大小写与默认端口归一 |
+
+## 证据
+
+| 项 | 结果 |
+|---|---|
+| 事件重放集成（隔离库） | 5 passed |
+| origin 守卫 | 3 passed |
+| 类型检查 | `tsc -p apps/api` 无错误 |
+
+## 未完成（需要 Nest/HTTP 装配）
+
+1. `run.controller.ts` 与 `run.module.ts`：POST/GET/events 三个端点、SSE 长连接、heartbeat 与背压策略均未实现。
+2. `app.module.ts` 注册、`tests/e2e/helpers/api.ts` 附带测试 Origin。
+3. 断线重连、100 短连接不耗尽连接池等真实 HTTP 验证。
