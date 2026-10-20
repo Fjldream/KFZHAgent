@@ -452,3 +452,15 @@
 1. `run.controller.ts` 与 `run.module.ts`：POST/GET/events 三个端点、SSE 长连接、heartbeat 与背压策略均未实现。
 2. `app.module.ts` 注册、`tests/e2e/helpers/api.ts` 附带测试 Origin。
 3. 断线重连、100 短连接不耗尽连接池等真实 HTTP 验证。
+
+
+## 追加：确定性执行计划（T09 图接线的前置）
+
+| 文件 | 说明 |
+|---|---|
+| `apps/api/src/runs/run-execution-plan.ts` | `planRunSteps(action, baseRevisionId)`：动作 → 有序步骤；`inputHash = SHA-256(计划版本 + 路由 + 动作 + 基线 + 步骤)`，换基线或升级节点逻辑都会整体失效，杜绝复用旧语义输出 |
+| `apps/api/src/runs/run-execution-plan.test.ts` | 4 例：同输入同哈希、换基线全失效、按钮动作不含 classify、计划版本生效 |
+
+证据：4 passed；`tsc -p apps/api` 无错误。
+
+下一步（按 A 路线）：把计划接到执行器 —— worker 入口读取 `AgentRun.action` → `planRunSteps` → 为每步绑定处理器（先接 classify/blueprint，其余抛 `STEP_NOT_IMPLEMENTED` 并显式失败，不静默跳过）。
