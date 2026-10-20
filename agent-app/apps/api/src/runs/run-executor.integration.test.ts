@@ -11,7 +11,7 @@ assertSafeTestDatabase({
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createRunTestFixture, messageInput, type RunTestFixture } from "./run-test-fixture.js";
-import { GraphRunExecutor, type ExecutableStep } from "./run-executor.js";
+import { GraphRunExecutor, RunPaused, type ExecutableStep } from "./run-executor.js";
 import { PrismaRunStepStore } from "./run-step-store.js";
 import { PrismaRunStore } from "./run-store.js";
 
@@ -132,6 +132,37 @@ describe("run executor", () => {
     ], new AbortController().signal);
 
     expect(snapshot.status).toBe("SUCCEEDED");
+  });
+});
+
+describe("run executor pauses", () => {
+  it("stops at an approval interrupt without recording a step failure", async () => {
+    const lease = await startRun("exec-pause-approval");
+    const executor = new GraphRunExecutor({ store: fixture.store, steps });
+
+    const snapshot = await executor.execute(lease, fixture.tenantA, [
+      step({ stepKey: "blueprint", label: "生成方案蓝图", inputHash: "hash-bp",
+        run: async () => { throw new RunPaused("WAITING_APPROVAL"); } }),
+    ], new AbortController().signal);
+
+    expect(snapshot.status).toBe("WAITING_APPROVAL");
+    const row = await fixture.prisma.agentRun.findUniqueOrThrow({ where: { id: lease.runId } });
+    expect(row).toMatchObject({ status: "WAITING_APPROVAL", leaseOwner: null, leaseExpiresAt: null });
+
+    const failed = await fixture.prisma.agentRunEvent.count({
+      where: { runId: lease.runId, type: "step.failed" },
+    });
+    expect(failed).toBe(0);
+  });
+
+  it("keeps a paused run out of the claim queue", async () => {
+    const lease = await startRun("exec-pause-input");
+    const executor = new GraphRunExecutor({ store: fixture.store, steps });
+    await executor.execute(lease, fixture.tenantA, [
+      step({ run: async () => { throw new RunPaused("WAITING_INPUT"); } }),
+    ], new AbortController().signal);
+
+    expect(await fixture.store.claim("worker-after-pause", new Date())).toBeNull();
   });
 });
 // end

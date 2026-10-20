@@ -580,3 +580,17 @@
 证据：`run-worker.test.ts` **5 passed**（含新用例「未就绪时完全不 claim」）；`tsc -p apps/api` 无错误。
 
 **为什么不做成「启动即领任务」**：注册表还是空的，若直接领任务，每个真实 run 都会被标成 `STEP_NOT_IMPLEMENTED` 失败。宁可进程空转并明确告警，也不能把用户任务吃掉。
+
+
+## 追加：执行器认识「审批中断」（暂停语义）
+
+| 文件 | 改动 |
+|---|---|
+| `apps/api/src/runs/run-store.ts` | 新增 `pause(lease, tenantId, WAITING_APPROVAL|WAITING_INPUT)`：CAS 到等待态并清空租约，`finishedAt` 不写；`append` 的事件写入排除等待态 |
+| `apps/api/src/runs/run-executor.ts` | 新增 `RunPaused`；步骤抛出时**不写 step.failed**，外层直接 `pause()` 收尾 |
+| `apps/api/src/runs/run-executor.integration.test.ts` | 2 例：中断后 run 停在 WAITING_APPROVAL 且租约清空、无 step.failed；暂停的 run 不再被 claim |
+| `apps/api/src/runs/run-handler-registry.ts` | 注释说明处理器用 `RunPaused` 表达图 interrupt |
+
+证据：执行器集成 **7 passed**；`tsc -p apps/api` 无错误。
+
+语义要点：暂停**不是失败**。如果把它当 FAILED，恢复时会重跑整段并在用户确认后重复扣费；如果当成 SUCCEEDED，前端会以为任务已完成。等待态只允许被「新 action」推走，不会被 worker 重新领取。

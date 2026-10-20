@@ -8,6 +8,9 @@ import type { StepHandlerRegistry } from "./run-execution.service.js";
  * 也就不会把 run 标记成 `STEP_NOT_IMPLEMENTED` 失败。
  * 接入时把每个 stepKey 映射到「调用 solution-graph 对应节点」的处理器即可，
  * 处理器可从上下文拿到绑定当前租约的 `memo`，直接传给 `SolutionGraphDeps.runStepMemo`。
+ *
+ * 图的 interrupt（等待用户确认）由处理器抛 `RunPaused("WAITING_APPROVAL")` 表达：
+ * 执行器会释放租约、把 run 停在等待态，且不会写 step.failed。
  */
 export function createRunHandlerRegistry(): StepHandlerRegistry {
   return {};

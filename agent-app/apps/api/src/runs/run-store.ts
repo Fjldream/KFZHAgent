@@ -30,6 +30,8 @@ export interface RunStore {
     event: Omit<RunEvent, "seq" | "createdAt" | "schemaVersion" | "runId">,
   ): Promise<RunEvent>;
   finish(lease: ClaimedRunLease, tenantId: string, status: RunStatus, failureCode?: string): Promise<RunSnapshot>;
+  /** 停在中途等用户确认：释放租约但 run 不结束，后续由新 action 继续。 */
+  pause(lease: ClaimedRunLease, tenantId: string, status: "WAITING_APPROVAL" | "WAITING_INPUT"): Promise<RunSnapshot>;
 }
 
 export const IDEMPOTENCY_CONFLICT = "IDEMPOTENCY_CONFLICT";
@@ -298,7 +300,7 @@ export class PrismaRunStore implements RunStore {
           AND "leaseOwner" = ${lease.ownerId}
           AND "fence" = ${lease.fence}
           AND "leaseExpiresAt" > ${now}
-          AND "status" NOT IN ('SUCCEEDED','FAILED','CANCELLED')
+          AND "status" NOT IN ('SUCCEEDED','FAILED','CANCELLED','WAITING_INPUT','WAITING_APPROVAL')
         RETURNING "lastSeq"
       `;
       const row = rows[0];
@@ -345,6 +347,34 @@ export class PrismaRunStore implements RunStore {
         AND "leaseOwner" = ${lease.ownerId}
         AND "fence" = ${lease.fence}
         AND "status" NOT IN ('SUCCEEDED','FAILED','CANCELLED')
+      RETURNING "id", "tenantId", "workspaceId", "conversationId", "status", "lastSeq",
+                "baseRevisionId", "buildJobId", "resultRevisionId", "failureCode", "supersededByRunId"
+    `;
+    const row = rows[0];
+    if (row === undefined) throw new Error(FENCE_REJECTED);
+    await this.prisma.conversation.update({
+      where: { id: row.conversationId },
+      data: { lastActivityAt: now },
+    });
+    return toSnapshot(row);
+  }
+
+  async pause(
+    lease: ClaimedRunLease,
+    tenantId: string,
+    status: "WAITING_APPROVAL" | "WAITING_INPUT",
+  ): Promise<RunSnapshot> {
+    const now = new Date();
+    const rows = await this.prisma.$queryRaw<RunRow[]>`
+      UPDATE "AgentRun"
+      SET "status" = ${status},
+          "leaseOwner" = NULL,
+          "leaseExpiresAt" = NULL
+      WHERE "id" = ${lease.runId}
+        AND "tenantId" = ${tenantId}
+        AND "leaseOwner" = ${lease.ownerId}
+        AND "fence" = ${lease.fence}
+        AND "status" = 'RUNNING'
       RETURNING "id", "tenantId", "workspaceId", "conversationId", "status", "lastSeq",
                 "baseRevisionId", "buildJobId", "resultRevisionId", "failureCode", "supersededByRunId"
     `;
