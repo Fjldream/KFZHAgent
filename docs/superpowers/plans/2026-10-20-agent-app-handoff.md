@@ -54,7 +54,7 @@ Superpowers安装路径因机器不同会变化。本机writing-plans读取路�
 | T05 | 上下文与摘要 | IN_PROGRESS（2026-10-20，剩余依赖 T06） | T04 |
 | T06 | 预算与修复 | IN_PROGRESS（2026-10-20，核心完成） | T05 |
 | T07 | Run/Event迁移 | VERIFIED（2026-10-20，RunBudget 外键留 T08） | T01/T02 |
-| T08 | 幂等队列与fence | NOT_STARTED | T06/T07 |
+| T08 | 幂等队列与fence | IN_PROGRESS（2026-10-20，核心完成） | T06/T07 |
 | T09 | 独立执行器 | NOT_STARTED | T08 |
 | T10 | SSE/API恢复 | NOT_STARTED | T09 |
 | T11 | 取消/重试/构建协调 | NOT_STARTED | T10 |
@@ -290,6 +290,20 @@ rg -n 'createClassifyIntentNode|createSolutionGraph|generationWorkflow' packages
 偏差：①RunBudget.runId 未加 FK（会让 T06 独立预算测试失效）②Message.runId 未加 FK
 风险：AgentRun 表已可写，但尚无创建/领取/事件写入服务（T08 起）
 下一步：T08 幂等创建、队列领取、租约与 fencing
+```
+
+```text
+任务：T08
+状态：IN_PROGRESS（创建/领取/续期/追加/收尾完成；过期租约恢复与 advisory 协调待 T09/T11）
+实现：新增 apps/api/src/runs/{run-store.ts,run-test-fixture.ts,run-store.integration.test.ts}
+绿测：run-store 集成 10 passed（并发幂等、每会话单活跃、旧 fence 拒绝、过期租约拒绝、终态不复活）
+回归：tsc -p apps/api 无错误
+数据库：未新增迁移（复用 T07 表）
+证据：agent-app/docs/agent-next-change-manifest.md §T08
+提交：本地提交，未推送
+偏差：①过期租约恢复未做 ②未与 conversation-turn-lease advisory lock 协调 ③run.service/run.module 留 T10 ④RunBudget.runId 外键仍未加
+风险：租约过期的 RUNNING run 目前会卡住，必须由 T09/T11 的恢复逻辑兜住，不能上线裸跑
+下一步：T09 独立执行器、确定性操作与可恢复节点
 ```
 
 

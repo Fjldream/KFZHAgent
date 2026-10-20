@@ -341,6 +341,36 @@
 2. **`Message.runId` 未加外键**：design §6 只要求可空字段；等 T09 写入消息时再决定是否收紧。
 3. **`lastActivityAt` 回填**拆成独立数据迁移（0005），避免把数据修补混进结构迁移。
 
+---
+
+# T08：幂等创建、队列领取、租约与 fencing（进行中）
+
+执行日期：2026-10-20
+功能标注：Agent工作台迭代
+
+## 已完成部分
+
+| 文件 | 改动 |
+|---|---|
+| `apps/api/src/runs/run-store.ts` | `PrismaRunStore.create/claim/renew/append/finish`：create 在单事务内写用户消息、run、预算、`run.queued` 事件与会话活动时间；唯一冲突按 requestHash 判定幂等或 `IDEMPOTENCY_CONFLICT`；claim 用 `FOR UPDATE SKIP LOCKED` + 同会话唯一活跃约束；append 原子 `lastSeq+1` 并要求 owner/fence/未过期；finish 只接受终态且 fence 校验 |
+| `apps/api/src/runs/run-test-fixture.ts` | 仅测试使用的 fixture：两个租户/工作区/会话 + `newConversation()` / `resetRuns()` / `messageInput()` |
+| `apps/api/src/runs/run-store.integration.test.ts` | 10 例：并发同请求合并、同 ID 不同内容冲突、跨租户会话拒绝、每会话一个活跃、事件 seq 单调与旧 fence 拒绝、租约过期后 renew/append 拒绝、finish 后拒绝追加与二次 finish、伪造租户租约拒绝、终态不可复活、创建副作用 |
+
+## 证据
+
+| 项 | 结果 |
+|---|---|
+| run-store 集成（隔离库） | **10 passed** |
+| 类型检查 | `tsc -p apps/api` 无错误 |
+
+## 未完成（依赖 T09/T11）
+
+1. **过期租约恢复分支**：对 `leaseExpiresAt < now` 的 RUNNING/CANCEL_REQUESTED，尚未实现「取得同会话原 advisory 锁 → 校验旧 turn fence 已释放 → 旧 fence CAS 重新领取」。当前这类 run 会一直停在 RUNNING，需要 T09 执行器与 T11 reconciler 一起收口。
+2. **与旧 SSE 的 advisory lock 协调**：`conversation-turn-lease.ts` 未改，新队列与旧入口尚未共用同一锁域。
+3. **`run.service.ts` / `run.module.ts`**：HTTP 门面与 Nest 注册留到 T10（与 controller 一起加，避免空壳）。
+4. **`RunBudget.runId` 外键**：仍需保留到「预算不再由测试独立创建」之后再加。
+
+
 
 
 
