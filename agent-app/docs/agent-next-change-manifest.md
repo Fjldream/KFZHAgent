@@ -407,4 +407,17 @@
 1. `run-worker.ts` / `run-agent-worker.ts` / `conversation-runtime.module.ts`：独立 worker 进程与 Nest 模块拆分未做，执行器目前是纯类、由测试直接驱动。
 2. 图接线：`solution-graph.ts` / `state.ts` / `enqueue-build.ts` 未带 runId 与 step inputHash，尚无「图 checkpoint ↔ step 存储」一致性校验。
 3. `package.json` 的 `start:agent-worker`、E2E 第四进程启动/清理未加。
-4. 租约过期恢复分支（T08 遗留）仍未实现。
+4. ~~租约过期恢复分支~~ —— 本轮已补：`PrismaRunStore.recoverExpired` + `RunWorker`（见下）。
+
+## 本轮追加（同日）
+
+| 文件 | 改动 |
+|---|---|
+| `apps/api/src/runs/run-store.ts` | `recoverExpired`：只在旧租约确实过期、且该会话无 PENDING 执行屏障时，以旧 fence CAS 接手并 `fence+1`；不把状态改回 QUEUED |
+| `apps/api/src/runs/run-worker.ts` | `RunWorker`：先领新任务、再尝试接手过期租约；单次执行失败不拖垮循环；维护进程级心跳；按 signal 停止 |
+| `apps/api/src/runs/run-worker.test.ts` | 4 例：领取后执行、回落到恢复、空闲、失败后继续并在 abort 时停止 |
+| `run-store.integration.test.ts` | 追加 2 例：过期接手后旧 worker 的 append/renew 被拒；存在 PENDING turn fence 时拒绝接手 |
+
+证据：run-store 12 passed + run-worker 4 passed = **16 passed**；`tsc -p apps/api` 无错误。
+
+仍未做：独立进程入口 `run-agent-worker.ts`（**故意不加**：图尚未接线，进程会把每个 run 立刻失败）、Nest RuntimeModule 拆分、图带 runId/stepHash、`start:agent-worker` 脚本。

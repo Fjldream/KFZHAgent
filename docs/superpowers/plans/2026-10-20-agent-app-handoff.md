@@ -315,6 +315,7 @@ rg -n 'createClassifyIntentNode|createSolutionGraph|generationWorkflow' packages
 证据：agent-app/docs/agent-next-change-manifest.md §T09
 提交：本地提交，未推送
 偏差：①无独立 worker 进程与 start:agent-worker ②图未接 runId/stepHash ③E2E 第四进程未加 ④过期租约恢复仍缺
+进度更新：已补 recoverExpired + RunWorker（16 passed）；仍缺进程入口与图接线
 风险：执行器只能被测试直接驱动，生产链路尚未使用；与 LangGraph 的一致性校验缺失
 下一步：T10 事件重放、快照与新 API
 ```

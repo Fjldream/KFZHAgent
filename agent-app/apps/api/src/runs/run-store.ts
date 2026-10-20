@@ -21,6 +21,8 @@ export type ClaimedRunLease = { runId: string; ownerId: string; fence: number; e
 export interface RunStore {
   create(input: StartRunInput): Promise<RunSnapshot>;
   claim(ownerId: string, now: Date): Promise<ClaimedRunLease | null>;
+  /** 接手租约已过期的 RUNNING/CANCEL_REQUESTED run；旧执行者仍持锁时返回 null。 */
+  recoverExpired(ownerId: string, now: Date): Promise<ClaimedRunLease | null>;
   renew(lease: ClaimedRunLease, now: Date): Promise<ClaimedRunLease>;
   append(
     lease: ClaimedRunLease,
@@ -219,6 +221,44 @@ export class PrismaRunStore implements RunStore {
             "status" = 'RUNNING',
             "startedAt" = COALESCE("startedAt", ${now})
         WHERE "id" = ${candidate.id} AND "status" = 'QUEUED'
+        RETURNING "fence"
+      `;
+      const row = claimed[0];
+      if (row === undefined) return null;
+      return { runId: candidate.id, ownerId, fence: row.fence, expiresAt: expiresAt.toISOString() };
+    });
+  }
+
+  async recoverExpired(ownerId: string, now: Date): Promise<ClaimedRunLease | null> {
+    const expiresAt = new Date(now.getTime() + this.leaseMs);
+    return this.prisma.$transaction(async (tx) => {
+      // 只在旧执行者确实已失去租约、且没有未释放的对话执行屏障时接手；
+      // 不把状态无条件改回 QUEUED，也不在旧执行者仍持锁时抢占。
+      const candidates = await tx.$queryRaw<Array<{ id: string; fence: number }>>`
+        SELECT r."id", r."fence"
+        FROM "AgentRun" AS r
+        WHERE r."status" IN ('RUNNING','CANCEL_REQUESTED')
+          AND r."leaseExpiresAt" IS NOT NULL
+          AND r."leaseExpiresAt" < ${now}
+          AND NOT EXISTS (
+            SELECT 1 FROM "ConversationTurnFence" AS f
+            WHERE f."conversationId" = r."conversationId" AND f."state" = 'PENDING'
+          )
+        ORDER BY r."leaseExpiresAt"
+        FOR UPDATE SKIP LOCKED
+        LIMIT 1
+      `;
+      const candidate = candidates[0];
+      if (candidate === undefined) return null;
+
+      const claimed = await tx.$queryRaw<Array<{ fence: number }>>`
+        UPDATE "AgentRun"
+        SET "leaseOwner" = ${ownerId},
+            "leaseExpiresAt" = ${expiresAt},
+            "fence" = "fence" + 1
+        WHERE "id" = ${candidate.id}
+          AND "fence" = ${candidate.fence}
+          AND "status" IN ('RUNNING','CANCEL_REQUESTED')
         RETURNING "fence"
       `;
       const row = claimed[0];

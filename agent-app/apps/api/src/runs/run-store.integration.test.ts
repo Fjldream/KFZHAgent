@@ -172,4 +172,46 @@ describe("run creation side effects", () => {
     expect(conversation.lastActivityAt.getTime()).toBeGreaterThan(before.getTime());
   });
 });
+
+describe("expired lease recovery", () => {
+  it("takes over an expired run with a higher fence and rejects the old worker", async () => {
+    await fixture.resetRuns();
+    const short = await createRunTestFixture(50);
+    try {
+      const conversationId = await short.newConversation();
+      const created = await short.store.create(messageInput(short, "recover-1", "跨租约", { conversationId }));
+      const oldLease = await short.store.claim("worker-old", new Date());
+      if (oldLease === null || oldLease.runId !== created.id) throw new Error("lease mismatch");
+
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      const recovered = await short.store.recoverExpired("worker-new", new Date());
+      expect(recovered).toMatchObject({ runId: created.id, ownerId: "worker-new" });
+      expect(recovered?.fence).toBe(oldLease.fence + 1);
+
+      await expect(short.store.append(oldLease, short.tenantA, { type: "run.cancelled", payload: {} }))
+        .rejects.toThrow(FENCE_REJECTED);
+      await expect(short.store.renew(oldLease, new Date())).rejects.toThrow(FENCE_REJECTED);
+    } finally {
+      await short.cleanup();
+    }
+  });
+
+  it("refuses to recover while a pending conversation turn fence exists", async () => {
+    await fixture.resetRuns();
+    const short = await createRunTestFixture(50);
+    try {
+      const conversationId = await short.newConversation();
+      const created = await short.store.create(messageInput(short, "recover-2", "有屏障", { conversationId }));
+      const oldLease = await short.store.claim("worker-old", new Date());
+      if (oldLease === null) throw new Error("lease missing");
+      await short.prisma.conversationTurnFence.create({
+        data: { conversationId, ownerId: "legacy-sse", leaseId: `lease-${created.id}` },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(await short.store.recoverExpired("worker-new", new Date())).toBeNull();
+    } finally {
+      await short.cleanup();
+    }
+  });
+});
 // end
