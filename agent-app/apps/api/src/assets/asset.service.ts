@@ -55,9 +55,7 @@ class AssetTooLargeError extends Error {
 }
 
 /**
- * Tenant/workspace-scoped image registry. Upload bytes remain private in
- * ArtifactStorage: model- and web-facing records deliberately omit
- * `storageKey`, so an uploaded filename cannot become a filesystem path.
+ * 租户级工作区图像注册表。上传的字节在ArtifactStorage中保留私有性：模型和面向Web的记录故意不包含`storageKey`，因此上传的文件名不能成为文件系统路径。
  */
 @Injectable()
 export class AssetService {
@@ -76,8 +74,7 @@ export class AssetService {
     maxBytes?: number;
   }): Promise<WorkspaceAssetCatalogItem> {
     await this.requireWorkspace(input.tenantId, input.workspaceId);
-    // Explicitly ignore the client-declared header: byte sniffing below is
-    // authoritative for all accepted image types.
+    // 明确忽略客户端声明的头：以下所有接受的图像类型都基于以下声明进行验证。
     void input.declaredMediaType;
     const inspection = new BoundedImageInspectionStream(sanitizeMaxBytes(input.maxBytes));
     const name = sanitizeAssetName(input.name);
@@ -130,10 +127,8 @@ export class AssetService {
   }
 
   /**
-   * Returns catalog-safe metadata in caller request order. The database read
-   * is exactly one tenant/workspace-scoped query; unknown IDs are reported
-   * precisely rather than silently treated as absent assets.
-   */
+ * 按照调用方请求顺序返回可安全用于目录的元数据。数据库读取严格限制为一次租户/工作空间范围查询；未知 ID 会被准确报告，而不是静默视为不存在的资产。
+ */
   async resolveMany(input: {
     tenantId: string;
     workspaceId: string;
@@ -161,7 +156,7 @@ export class AssetService {
     return orderedIds.map((id) => byId.get(id)!);
   }
 
-  /** Server-only immutable facts used to authorize a signed module compilation. */
+  /** 仅服务器的不可变事实用于授权一个签名的模块编译。 */
   async resolveManyForCompilation(input: {
     tenantId: string;
     workspaceId: string;

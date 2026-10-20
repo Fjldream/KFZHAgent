@@ -19,15 +19,14 @@ const own = (record: Readonly<Record<string, unknown>>, key: string): boolean =>
 const finiteInteger = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && Number.isInteger(value);
 const malformed = (reason: string): NativeRuntimeClassification => ({ kind: "malformed", reason });
 
-/** Single fail-closed discriminator shared by inspection and native validation. */
+/** 检查与原生校验共享的单一故障关闭式判别器。 */
 export function classifyNativeRuntimeControl(record: Readonly<Record<string, unknown>>): NativeRuntimeClassification {
   const hasUiModel = own(record, "uiModelType");
   const hasUiExtend = own(record, "uiExtendType");
   const hasLayoutType = own(record, "layoutType");
-  // Static KF controls commonly retain objectType=3 and uiExtendType=null.
-  // A non-null/undefined uiExtendType is the mutually exclusive EasyUI claim
-  // when uiModelType is also present; without uiModelType, objectType=3 still
-  // establishes an EasyUI envelope whose proto must validate below.
+  // 静态 KF 控制通常保留 objectType=3 和 uiExtendType=null。
+  // 当 uiModelType 也存在时， uiExtendType 不为 null/undefined 的互斥 EasyUI 声称
+  // 当 uiModelType 不存在时， objectType=3 仍然建立一个 EasyUI 的包，其原型必须验证以下。
   const easyuiEnvelope = hasUiModel
     ? hasUiExtend && record["uiExtendType"] !== null
     : record["objectType"] === 3 || hasUiExtend;

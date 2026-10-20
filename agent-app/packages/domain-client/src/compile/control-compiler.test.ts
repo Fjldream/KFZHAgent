@@ -37,6 +37,7 @@ const nativeNavigate = (id: string, ownerInstanceName = "Button1") => ({
   id: `kf$action:${id}`, sourceActionId: id, ownerInstanceName,
   kind: "navigate-page" as const,
   targetPageGuid: "k00000000-0000-4000-8000-000000000001",
+  targetPageName: "detail",
 });
 
 const nativeOverlayVisibility = (
@@ -51,6 +52,7 @@ const nativeOverlayVisibility = (
   kind,
   targetSemanticControlId: "contact-overlay-root",
   targetInstanceName,
+  targetControls: [{ semanticControlId: "contact-overlay-root", instanceName: targetInstanceName }],
 });
 
 const nativeSetState = (id = "set-enabled") => ({
@@ -91,6 +93,33 @@ function replaceSingleCompiledBody(source: string, body: string): string {
 }
 
 describe("control compiler — compiled scripts", () => {
+  it("serializes all actions for one KF event into one ordered executable script slot", () => {
+    const state = nativeSetState();
+    const feedback = nativeFeedback();
+    const navigate = nativeNavigate("open-detail");
+    const binding = {
+      id: "kf$binding:save", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
+      phase: "event" as const, scriptModuleIds: [], nativeActionIds: [state.id, feedback.id, navigate.id],
+    };
+
+    const output = controlCompilerModule.serializeReviewedNativeInteractions(
+      compileControl(build, buttonControl, ctx),
+      { ownerInstanceName: "Button1", capabilityId: "button", modules: [], actions: [state, feedback, navigate], bindings: [binding] },
+      { ownerInstanceName: "Button1", capabilityId: "button" },
+    );
+    const links = (output.linkMng as { linkList: Array<Record<string, unknown>> }).linkList;
+
+    expect(links).toHaveLength(1);
+    expect(links[0]).toMatchObject({ linkId: 200001, enable: true, name: "onClick" });
+    expect(String(links[0]!["script"])).toContain("$Variable.$kf_enabled_0123456789ab = true;");
+    expect(String(links[0]!["script"])).toContain('ShowMessage({"message":"保存成功","type":"success"});');
+    expect(String(links[0]!["script"])).toContain('ShowPage("detail",1);');
+    expect(String(links[0]!["script"]).indexOf("$Variable.$kf_enabled_0123456789ab = true;"))
+      .toBeLessThan(String(links[0]!["script"]).indexOf("ShowMessage("));
+    expect(String(links[0]!["script"]).indexOf("ShowMessage("))
+      .toBeLessThan(String(links[0]!["script"]).indexOf("ShowPage("));
+  });
+
   it("serializes reviewed state and feedback actions in exact KF forms", () => {
     const state = nativeSetState();
     const feedback = nativeFeedback("saved", '保存成功\n"确认"');
@@ -104,9 +133,11 @@ describe("control compiler — compiled scripts", () => {
       { ownerInstanceName: "Button1", capabilityId: "button" },
     );
     const links = (output.linkMng as { linkList: Array<Record<string, unknown>> }).linkList;
-    expect(links[0]).toMatchObject({ action: "setVariable", variableId: "$kf_enabled_0123456789ab", value: true });
-    expect(links[1]!["script"]).toBe('ShowMessage({"message":"保存成功\\n\\"确认\\"","type":"success"});');
-    expect(links[1]!["kfCompilerAction"]).toMatchObject({ schema: "kf-compiled-feedback/v1", message: '保存成功\n"确认"', level: "success" });
+    expect(links).toHaveLength(1);
+    expect(decodedModules(String(links[0]!["script"])).map((entry) => entry.body)).toEqual([
+      "$Variable.$kf_enabled_0123456789ab = true;\n",
+      'ShowMessage({"message":"保存成功\\n\\"确认\\"","type":"success"});\n',
+    ]);
   });
 
   it.each([
@@ -214,9 +245,10 @@ describe("control compiler — compiled scripts", () => {
     });
 
     const links = (out["linkMng"] as { linkList: Array<Record<string, unknown>> }).linkList;
-    expect(links[0]).toEqual({ action: "navigatePage", pageId: "kdetail" });
-    expect(links[1]).toMatchObject({ linkId: 200001, enable: true, name: "onClick" });
-    const serialized = decodedModules(String(links[1]!["script"]));
+    expect(links).toHaveLength(1);
+    expect(links[0]).toMatchObject({ linkId: 200001, enable: true, name: "onClick" });
+    expect(String(links[0]!["script"])).toMatch(/^ShowPage\("detail",1\);/);
+    const serialized = decodedModules(String(links[0]!["script"]));
     expect(serialized.map((entry) => entry.body)).toEqual([first.source, second.source]);
     expect(serialized[0]!.metadata).toEqual({
       schema: "kf-compiled-event/v1", moduleId: first.id, sourceScriptId: first.sourceScriptId,
@@ -281,10 +313,11 @@ describe("control compiler — compiled scripts", () => {
       { ownerInstanceName: "Button1", capabilityId: "button" },
     );
     const links = (out.linkMng as { linkList: Array<Record<string, unknown>> }).linkList;
-    expect(links.map((link) => link.kfCompilerAction === undefined
-      ? `script:${String(link.name)}`
-      : `action:${String((link.kfCompilerAction as Record<string, unknown>)["sourceActionId"])}`))
-      .toEqual(["script:First", "action:second-a", "action:second-b", "action:third", "script:Third"]);
+    expect(links.map((link) => link.name)).toEqual(["First", "Second", "Third"]);
+    expect(decodedModules(String(links[1]!["script"])).map((entry) => entry.metadata["sourceScriptId"]))
+      .toEqual(["second-a", "second-b"]);
+    expect(decodedModules(String(links[2]!["script"])).map((entry) => entry.metadata["sourceScriptId"]))
+      .toEqual(["third", "combined-order"]);
   });
 
   it.each([
@@ -365,8 +398,8 @@ describe("control compiler — compiled scripts", () => {
   });
 
   it.each([
-    ["script then action", true, ["script:event-script", "action:after-action"]],
-    ["action then script", false, ["action:event-action", "script:after-script"]],
+    ["script then action", true, ["event-script", "after-action"]],
+    ["action then script", false, ["event-action", "after-script"]],
   ] as const)("preserves exact same-slot mixed-phase order: %s", (_label, scriptFirst, expected) => {
     const eventScript = scriptModule(scriptFirst ? "event-script" : "after-script", "const phase = 1;\n");
     const eventAction = nativeNavigate(scriptFirst ? "after-action" : "event-action");
@@ -386,13 +419,10 @@ describe("control compiler — compiled scripts", () => {
       { ownerInstanceName: "Button1", capabilityId: "button", modules: [eventScript], actions: [eventAction], bindings },
       { ownerInstanceName: "Button1", capabilityId: "button" },
     );
-    const effects = (out.linkMng as { linkList: Array<Record<string, unknown>> }).linkList
-      .filter((link) => link["name"] === "onClick")
-      .map((link) => {
-        const marker = link["kfCompilerAction"] as Record<string, unknown> | undefined;
-        if (marker !== undefined) return `action:${String(marker["sourceActionId"])}`;
-        return `script:${String(decodedModules(String(link["script"]))[0]?.metadata["moduleId"]).replace("kf$script:", "")}`;
-      });
+    const link = (out.linkMng as { linkList: Array<Record<string, unknown>> }).linkList
+      .find((candidate) => candidate["name"] === "onClick")!;
+    const effects = decodedModules(String(link["script"]))
+      .map((entry) => String(entry.metadata["sourceScriptId"]));
     expect(effects).toEqual(expected);
   });
 
@@ -427,8 +457,8 @@ describe("control compiler — compiled scripts", () => {
   it.each([
     ["event", (link: Record<string, unknown>) => { link["name"] = "Forged"; }],
     ["link", (link: Record<string, unknown>) => { link["linkId"] = 200099; }],
-    ["action", (link: Record<string, unknown>) => { link["action"] = "setVariable"; }],
-  ])("rejects an existing compiler action marker whose enclosing %s identity drifted", (_label, mutate) => {
+    ["script", (link: Record<string, unknown>) => { link["script"] = String(link["script"]).replace("ShowPage", "ShowPageX"); }],
+  ])("rejects a compiled navigation event whose %s provenance drifted", (_label, mutate) => {
     const action = nativeNavigate("old");
     const binding = { id: "kf$binding:old", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001,
       phase: "event" as const, scriptModuleIds: [], nativeActionIds: [action.id] };
@@ -442,7 +472,7 @@ describe("control compiler — compiled scripts", () => {
     expect(() => controlCompilerModule.serializeReviewedNativeInteractions(first,
       { ownerInstanceName: "Button1", capabilityId: "button", modules: [], actions: [action], bindings: [binding] },
       { ownerInstanceName: "Button1", capabilityId: "button" }))
-      .toThrow(/MODEL_OUTPUT_INVALID.*action.*identity/i);
+      .toThrow(/MODEL_OUTPUT_INVALID.*(?:event identity|hash)/i);
   });
 
   it("uses configureData only for a capability that explicitly supports it", () => {

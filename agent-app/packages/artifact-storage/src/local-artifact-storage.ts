@@ -7,7 +7,7 @@ import type { ArtifactKind, ArtifactStorage, StoredArtifact } from "./artifact-s
 const TENANT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const ARTIFACT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Structured error raised by LocalArtifactStorage. */
+/** 由 LocalArtifactStorage 引起的结构化错误。 */
 export class ArtifactStorageError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(`ARTIFACT_STORAGE_ERROR: ${message}`, options);

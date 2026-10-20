@@ -97,25 +97,32 @@ describe("script capability knowledge", () => {
   });
 
   it("binds overlay visibility to the exact reviewed KF layout setVisible runtime evidence", () => {
-    const expectedEvidence = {
+    const layoutEvidence = {
       kind: "product-source",
       ref: "KingFusion3.6_Node/kingexedb/kingclient/exe/public/javascripts/Common/Graphic/Layout/kmui_layoutcomponentbase.js",
       contentSha256: "04831c1bd9feb0d19eaac07e0aee5af7df07bd4fba8072b6630dd1c4689b0aff",
     };
+    const uiModelEvidence = {
+      kind: "product-source",
+      ref: "KingFusion3.6_Node/kingexedb/kingclient/exe/public/javascripts/Common/Graphic/UI/kmui_modelbase.js",
+      contentSha256: "8cc6135ae1a0e87c565d2e86ccf67ba3bd96d33f976970b37d9e740c062d255f",
+    };
+    const expectedEvidence = [layoutEvidence, uiModelEvidence];
     for (const capabilityId of ["layout.2", "layout.4", "layout.5"]) {
       const profile = requireScriptCapabilityProfile(capabilityId);
       expect(profile.availability).toBe("supported");
       expect(profile.actions).toEqual([
-        expect.objectContaining({ semanticAction: "open-dialog", implementation: "restricted-action", availability: "supported", evidence: [expectedEvidence] }),
-        expect.objectContaining({ semanticAction: "close-dialog", implementation: "restricted-action", availability: "supported", evidence: [expectedEvidence] }),
+        expect.objectContaining({ semanticAction: "open-dialog", implementation: "restricted-action", availability: "supported", evidence: expectedEvidence }),
+        expect.objectContaining({ semanticAction: "close-dialog", implementation: "restricted-action", availability: "supported", evidence: expectedEvidence }),
       ]);
       expect(profile.methods).toEqual([
-        expect.objectContaining({ semanticMethod: "set-visible", kfMethod: "setVisible", parameters: ["visible"], returns: "void", availability: "supported", evidence: [expectedEvidence] }),
+        expect.objectContaining({ semanticMethod: "set-visible", kfMethod: "setVisible", parameters: ["visible"], returns: "void", availability: "supported", evidence: expectedEvidence }),
       ]);
       expect(profile.properties).toEqual([]);
-      const runtimeSource = readEvidenceContent(expectedEvidence.ref);
+      const runtimeSource = readEvidenceContent(layoutEvidence.ref);
       expect(runtimeSource).toContain("KMLayoutCompBase.prototype.setVisible=function(e){e?this.thisElement.style.display=\"\":this.thisElement.style.display=\"none\",this.visible=e}");
       expect(runtimeSource).not.toContain('defineScriptProperty(this,"Visible"');
+      expect(readEvidenceContent(uiModelEvidence.ref)).toContain("KMUIModelBase.prototype.setVisible=function(e){this.visible=e");
     }
   });
 
@@ -278,7 +285,7 @@ describe("script capability knowledge", () => {
   it("ties each supported button action to its own compiler regression evidence", () => {
     const compilerTestPath = "agent-app/packages/domain-client/src/compile/client-compiler.test.ts";
     const expectedTestRefs = {
-      "navigate-page": `${compilerTestPath}#navigatePage`,
+      "navigate-page": `${compilerTestPath}#ShowPage`,
       "set-variable": `${compilerTestPath}#setVariable`,
     } as const;
     const button = requireScriptCapabilityProfile("button");

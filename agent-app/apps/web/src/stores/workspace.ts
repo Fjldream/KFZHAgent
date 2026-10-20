@@ -61,7 +61,7 @@ export interface WorkspaceState {
   revisions: Revision[];
   currentRevisionId: string | null;
   moduleDeliveryResult: ModuleDeliveryResult | null;
-  /** Authoritative creative-v2 delivery; creative artifacts are download-only. */
+  /** 权威的 creative-v2 交付；创意制品只能下载。 */
   projectDelivery: CreativeProjectDelivery | null;
 }
 
@@ -88,7 +88,7 @@ const state: WorkspaceState = reactive({
   projectDelivery: null,
 });
 
-/** Monotonic fence: a newer load/build poll makes all older async responses stale. */
+/** 单调栅栏：新的加载/构建轮询使所有较旧的异步响应都变得过时。 */
 let buildPollGeneration = 0;
 let workspaceLoadGeneration = 0;
 let interactionGeneration = 0;
@@ -210,8 +210,7 @@ async function pollBuildJob(
       await new Promise((resolve) => setTimeout(resolve, 1_000));
     }
   } catch (error) {
-    // A stale request belongs to a workspace/job the user has already left.
-    // Its failure must not surface on the currently visible workspace.
+    // 一个过期的请求属于用户已经离开的工作空间/作业。其失败不应在当前可见的工作空间中显示。
     if (!isCurrent()) return initialStatus;
     throw error;
   }
@@ -232,8 +231,8 @@ async function load(workspaceId: string): Promise<void> {
     state.pendingApproval = null;
     state.lastDone = null;
   }
-  // Build state is server-owned and must be reconstructed on every entry.
-  // Clearing first prevents an old workspace's preview/report from flashing.
+  // 构建状态由服务器所有，必须在每次进入时重建。
+  // 清除第一项可防止旧工作区预览/报告闪烁。
   state.buildJobId = null;
   state.buildJobStatus = null;
   state.artifacts = [];
@@ -277,7 +276,7 @@ async function load(workspaceId: string): Promise<void> {
         if (boundBuild.status === "SUCCEEDED" || boundBuild.status === "FAILED" || boundBuild.status === "CANCELLED") {
           await pollBuildJob(boundBuild.id, boundBuild.status, workspaceId, conversationId);
         } else {
-          // Do not block page loading while a durable worker job is still active.
+          // 持久化 worker 作业仍处于活动状态时，不要阻塞页面加载。
           void pollBuildJob(boundBuild.id, boundBuild.status, workspaceId, conversationId).catch((error: unknown) => {
             if (isCurrentLoad()) state.error = errorMessage(error);
           });

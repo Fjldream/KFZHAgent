@@ -22,7 +22,7 @@ const ModuleAssetMetadataSchema = z.object({
   moduleId: id,
   assetId: id,
   status: z.enum(["resolved", "unavailable", "pending"]),
-  /** Opaque canonical identity; never a path, storage key, secret, or native payload. */
+  /** 不透明的规范标识；绝不是路径、存储键、密钥或原生载荷。 */
   assetIdentity: text,
   approvedAsset: ApprovedAssetFactsSchema.optional(),
 }).strict();

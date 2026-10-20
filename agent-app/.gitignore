@@ -22,3 +22,4 @@ tests/e2e/.e2e-pids.json
 
 # Task: demo runtime artifacts (never committed)
 .kf-demo-artifacts/
+.kf-trial-artifacts/

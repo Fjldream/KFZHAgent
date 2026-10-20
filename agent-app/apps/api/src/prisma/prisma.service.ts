@@ -6,8 +6,7 @@ import {
 import { PrismaClient } from "@prisma/client";
 
 /**
- * Wraps the Prisma client for the API app. DATABASE_URL is read from the
- * environment when the client is constructed (never from request bodies).
+ * 包装 Prisma 客户端的 API 应用程序。当客户端被构造时，DATABASE_URL 从环境读取（从请求体中读取从不）。
  */
 @Injectable()
 export class PrismaService

@@ -153,8 +153,8 @@ const TABLES = [
   "Tenant",
 ];
 
-// PostgresSaver creates these tables through setup(); every integration suite
-// truncates them so checkpoints cannot leak across tests.
+// PostgresSaver 通过 setup() 创建这些表；每个集成套件
+// 都会截断它们，因此检查点无法跨越测试泄漏。
 const CHECKPOINT_TABLES = [
   "checkpoint_writes",
   "checkpoint_blobs",
@@ -162,7 +162,7 @@ const CHECKPOINT_TABLES = [
   "checkpoint_migrations",
 ];
 
-/** Deterministic fake model: the API's ModelPort injection point (Task 11). */
+/** 确定的伪模型：API 的 ModelPort 注入点（任务 11）。 */
 class FakeModelPort {
   moduleDelegate = new DeterministicFakeModelPort();
   intents = [];

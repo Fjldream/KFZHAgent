@@ -68,7 +68,7 @@ const controls = [
     dateSource: "KS",
     titleName: "实时报警",
   },
-  // PieChart
+  // 饼图
   {
     id: "PieChart1",
     type: "prototype",
@@ -81,7 +81,7 @@ const controls = [
       series: [{ name: "占比", data: [{ name: "类别A", value: 350 }, { name: "类别B", value: 210 }, { name: "类别C", value: 140 }] }],
     }],
   },
-  // XYChart
+  // XY 图
   {
     id: "XYChart1",
     type: "prototype",

@@ -547,6 +547,15 @@ function resolvedRootDeclarations(
   ).declarations;
 }
 
+function compilerLayoutGap(node: Extract<SolutionNode, { kind: "layout" }>): number {
+  const tokens = node.intent.density === "compact"
+    ? { section: 16, control: 8 }
+    : node.intent.density === "spacious"
+      ? { section: 32, control: 16 }
+      : { section: 24, control: 12 };
+  return node.children.some((child) => child.kind === "layout") ? tokens.section : tokens.control;
+}
+
 function measureTreeUnsafe(
   node: SolutionNode,
   plan: SolutionImplementationPlan,
@@ -584,7 +593,7 @@ function measureTreeUnsafe(
   let measured: IntrinsicSize;
   if (node.kind === "layout") {
     const children = node.children.map((child) => measureTree(child, plan, moduleRegistry, available, output));
-    measured = measureIntrinsic({ ...base, kind: "layout", node, childMeasures: children, gap: plan.theme.spacingUnit });
+    measured = measureIntrinsic({ ...base, kind: "layout", node, childMeasures: children, gap: compilerLayoutGap(node) });
   } else if (node.kind === "registered-module") {
     const definition = moduleRegistry.require(node.moduleKind, node.templateVersion);
     measured = measureIntrinsic({ ...base, kind: "registered-module", node, layoutContract: definition.layout });

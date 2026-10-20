@@ -1,4 +1,4 @@
--- CreateTable
+-- 创建表
 CREATE TABLE "WorkspaceAsset" (
     "id" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
@@ -17,15 +17,15 @@ CREATE TABLE "WorkspaceAsset" (
     CONSTRAINT "WorkspaceAsset_pkey" PRIMARY KEY ("id")
 );
 
--- CreateIndex
+-- 创建索引
 CREATE UNIQUE INDEX "WorkspaceAsset_tenantId_workspaceId_sha256_key"
 ON "WorkspaceAsset"("tenantId", "workspaceId", "sha256");
 
--- CreateIndex
+-- 创建索引
 CREATE INDEX "WorkspaceAsset_tenantId_workspaceId_idx"
 ON "WorkspaceAsset"("tenantId", "workspaceId");
 
--- AddForeignKey
+-- 添加外键
 ALTER TABLE "WorkspaceAsset"
 ADD CONSTRAINT "WorkspaceAsset_workspaceId_fkey"
 FOREIGN KEY ("workspaceId") REFERENCES "SolutionWorkspace"("id")

@@ -16,8 +16,7 @@ const modelTextSchema = z
   .refine((value) => !/<script\b|javascript\s*:|data\s*:\s*text\s*\/\s*html/i.test(value));
 
 /**
- * Registered logical asset metadata. Physical paths, storage credentials, and
- * executable content are intentionally resolved outside the planning boundary.
+ * 已注册的逻辑资产元数据。物理路径、存储凭据和可执行内容特意在规划边界之外解析。
  */
 export const AssetRecordSchema = z
   .object({
@@ -29,7 +28,7 @@ export const AssetRecordSchema = z
   })
   .strict();
 
-/** A non-sensitive result of resolving a registered asset for a module. */
+/** 注册资产的非敏感结果。 */
 export const ApprovedAssetFactsSchema = z.object({
   workspaceAssetId: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/),
   targetPath: z.string().regex(/^project\/res\/images\/[0-9a-f]{64}\.(?:png|jpg|webp)$/),

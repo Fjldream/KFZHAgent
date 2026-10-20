@@ -2,10 +2,7 @@ import { Injectable } from "@nestjs/common";
 import * as argon2 from "argon2";
 
 /**
- * Password hashing with Argon2id. Library defaults are used (m=65536, t=3,
- * p=4) so that hashes stay portable across Linux x86 and Windows targets via
- * the prebuilt binaries shipped with the `argon2` package. Only the hash is
- * ever persisted.
+ * 使用 Argon2id 进行密码哈希。默认值（m=65536, t=3, p=4）适用于将哈希保留在 Linux x86 和 Windows 目标上，通过 `argon2` 包中的预构建二进制文件。哈希仅保存。
  */
 @Injectable()
 export class PasswordService {
@@ -17,7 +14,7 @@ export class PasswordService {
     try {
       return await argon2.verify(hash, password);
     } catch {
-      // Malformed or unrecognized hash format => treat as invalid.
+      // 无效或未识别的哈希格式 => 视为无效。
       return false;
     }
   }

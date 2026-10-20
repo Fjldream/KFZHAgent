@@ -20,6 +20,7 @@ import {
   deriveGuid,
   attachRuntimeCorrelation,
   compileInteractions,
+  RECOVERABLE_INTERACTION_DIAGNOSTIC_CODES,
   createCreativeUIImplementationV2Compiler,
   importNativeClientPackage,
   inspectClientProject,
@@ -59,22 +60,20 @@ import type { AssetService } from "../assets/asset.service.js";
 import { REVIEWED_KF36_MODULE_RUNTIME_EVIDENCE } from "./module-runtime-evidence.js";
 
 /**
- * Real Prisma-backed ports for the solution graph (brief "Consumes" line).
- * The graph stays free of direct database access; every read/write flows
- * through these ports so it remains deterministic and resumable.
+ * 解决方案图使用的真实 Prisma 后端端口（简要“Consumes”行）。图本身不直接访问数据库；所有读写都经过这些端口，从而保持确定性和可恢复性。
  */
 
-/** How many recent messages are handed to the model (mirrors the graph bound). */
+/** 模型中接收的最近消息数量（与图绑定） */
 const RECENT_MESSAGE_LIMIT = 20;
 const CREATIVE_COMPILATION_LOGGER = new Logger("CreativeSolutionCompiler");
 
-/** Nest token for the production-local deterministic retrieval boundary. */
+/** 生产-本地确定性检索边界标识符 */
 export const CAPABILITY_RETRIEVAL_PORT = Symbol("CAPABILITY_RETRIEVAL_PORT");
 
-/** Nest token for the only server-owned creative compilation/persistence boundary. */
+/** 仅服务器拥有原创编译/持久化边界标识符 */
 export const CREATIVE_SOLUTION_COMPILER_PORT = Symbol("CREATIVE_SOLUTION_COMPILER_PORT");
 
-/** Pure in-process retrieval: immutable design knowledge in, bounded candidates out. */
+/** 纯进程内检索：输入不可变的设计知识，输出有界的候选项。 */
 export const LOCAL_CAPABILITY_RETRIEVAL_PORT: CapabilityRetrievalPort = Object.freeze({
   retrieve({ blueprint }: { blueprint: CustomerSolutionBlueprint }) {
     return Promise.resolve(retrieveCapabilities({
@@ -184,8 +183,7 @@ export function createGraphPorts(
       if (projectRevision !== null && projectRevision.packageUrl !== null) {
         return inspectBuiltClientEntities(tenantId, projectRevision.packageUrl, storage);
       }
-      // compile-mode revisions store the ClientProjectIR in state; its control
-      // GUIDs are deterministic per workspace: deriveGuid({ seed: workspaceId }, id).
+      // 编译模式修订存储 ClientProjectIR 在状态中；其控制GUIDs 是每工作区的确定性： deriveGuid({ seed: workspaceId }, id)。
       const record = revision.state as Record<string, unknown>;
       if (!Array.isArray(record["pages"])) {
         return [];
@@ -198,9 +196,7 @@ export function createGraphPorts(
             kind: "page",
             name: pageName,
             type: "page",
-            // Page compiler uses the page name and adds the native `k`
-            // prefix. Missing that prefix makes every later create operation
-            // target a page GUID that does not exist in the package.
+            // 页面编译器使用页面名称，并添加前缀 `k`。缺少这个前缀会导致每次创建操作都指向不存在于包中的页面 GUID。
             guid: `k${deriveGuid({ seed: workspaceId }, pageName)}`,
           });
         }
@@ -516,38 +512,12 @@ export function createCreativeSolutionCompilerFromEnvironment(
           plan: input.semanticPlan,
           implementation: correlated.implementation,
         });
-        const explicitlyUnresolvedImageClickActions = new Set<string>();
-        const collectImageClicks = (node: SolutionImplementationPlan["pages"][number]["root"]): void => {
-          if (node.kind === "layout") {
-            node.children.forEach(collectImageClicks);
-            return;
-          }
-          if (node.kind === "registered-module") {
-            node.slots.forEach((slot) => slot.children.forEach(collectImageClicks));
-            return;
-          }
-          if (node.kind === "repeater") {
-            collectImageClicks(node.template);
-            return;
-          }
-          if (node.capabilityId !== "image") return;
-          node.eventBindings
-            .filter((binding) => binding.semanticEvent === "click")
-            .forEach((binding) => binding.actionIds.forEach((actionId) => explicitlyUnresolvedImageClickActions.add(actionId)));
-        };
-        input.semanticPlan.pages.forEach((page) => collectImageClicks(page.root));
-        input.semanticPlan.overlays.forEach((overlay) => collectImageClicks(overlay.root));
-        const recoverableRequests = interactions.diagnostics.requests
-          .filter((request) => request.reason === "TRIGGER_EVENT_UNSUPPORTED"
-            && explicitlyUnresolvedImageClickActions.has(request.actionId));
-        const recoverableActionIds = new Set(recoverableRequests.map((request) => request.actionId));
         const recoverableErrors = interactions.diagnostics.errors
-          .filter((diagnostic) => diagnostic.code === "INTERACTION_CLOSURE_MISSING"
-            && recoverableActionIds.has(diagnostic.nodeId));
+          .filter((diagnostic) => RECOVERABLE_INTERACTION_DIAGNOSTIC_CODES.has(diagnostic.code));
         const warnings = [
           ...interactions.diagnostics.warnings,
           ...recoverableErrors,
-          ...recoverableRequests.map((request) => ({
+          ...interactions.diagnostics.requests.map((request) => ({
             code: "INTERACTION_COMPILATION_REQUEST",
             nodeId: request.actionId,
             message: request.reason,
@@ -560,21 +530,13 @@ export function createCreativeSolutionCompilerFromEnvironment(
         }));
         const blocking: CreativeCompilationDiagnostic[] = [
           ...interactions.diagnostics.errors
-            .filter((diagnostic) => !recoverableErrors.includes(diagnostic))
+            .filter((diagnostic) => !RECOVERABLE_INTERACTION_DIAGNOSTIC_CODES.has(diagnostic.code))
             .map((diagnostic) => ({
             code: diagnostic.code,
             nodeId: diagnostic.nodeId,
             message: "交互工程能力校验未通过",
             phase: "interaction",
           })),
-          ...interactions.diagnostics.requests
-            .filter((request) => !recoverableRequests.includes(request))
-            .map((request) => ({
-              code: "INTERACTION_COMPILATION_REQUEST",
-              nodeId: request.actionId,
-              message: "交互需要补充明确的可执行能力",
-              phase: "interaction" as const,
-            })),
         ];
         if (blocking.length > 0) return { status: "blocked" as const, diagnostics: blocking, warnings };
 

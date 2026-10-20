@@ -7,9 +7,7 @@ import { ArtifactService } from "../artifacts/artifact.service.js";
 import { BuildJobService } from "./build-job.service.js";
 
 /**
- * Durable build-job query endpoints. Jobs are tenant-scoped; cross-tenant ids
- * surface as 404. Terminal outcomes (SUCCEEDED/FAILED) are recorded once as
- * BUILD_RESULT audit events on first observation.
+ * 持久构建作业查询端点。作业是租户特定的；跨租户 ID 表现为 404。终端结果（SUCCEEDED/FAILED）记录为 BUILD_RESULT 审计事件，首次观察。
  */
 @Controller("api/build-jobs")
 @UseGuards(TenantGuard)
@@ -21,7 +19,7 @@ export class BuildJobController {
     private readonly artifacts: ArtifactService,
   ) {}
 
-  /** Rehydrates build/preview state after the browser reopens a workspace. */
+  /** 重新填充构建/预览状态，当浏览器重新打开工作区时。 */
   @Get()
   async getLatestBuildJob(
     @Query("workspaceId") workspaceId: string | undefined,
@@ -83,7 +81,7 @@ export class BuildJobController {
     return publicValidationReport(report);
   }
 
-  /** A terminal status is irreversible, so recording once per job is enough. */
+  /** 终端状态是不可逆的，因此记录一次即可。 */
   private async recordBuildResultOnce(job: BuildJob): Promise<void> {
     if (job.status !== "SUCCEEDED" && job.status !== "FAILED") return;
     const existing = await this.prisma.auditLog.findFirst({

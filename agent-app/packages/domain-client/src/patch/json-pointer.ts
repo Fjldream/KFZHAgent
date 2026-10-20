@@ -1,15 +1,13 @@
 /**
- * Minimal RFC 6901-style JSON Pointer support (no external dependency).
+ * 最小的 RFC 6901 样式的 JSON 点支持（没有外部依赖）。
  *
- * The patch engine addresses fields inside a raw KF JSON tree with pointers
- * like `/backgroundColor` (relative to an entity) or `#/objects/0/backgroundColor`
- * (relative to a file root). This module implements:
- * - token parsing with `~0` -> `~` and `~1` -> `/` unescaping,
- * - get/set traversal that never mutates the base tree,
- * - pointer joins for change-scope tracking.
+ * 此补丁引擎将字段嵌套在原始 KF JSON 树中的字段处理为像 `/backgroundColor`（相对于实体）或 `#/objects/0/backgroundColor`（相对于文件根）这样的指针。此模块实现：
+ * - 使用 `~0` -> `~` 和 `~1` -> `/` 解析令牌，
+ * - 从不修改原始树的遍历，
+ * - 指针连接以跟踪变更范围。
  */
 
-/** Error used for every rejected patch (invalid path or path not allowlisted). */
+/** 用于每个拒绝的补丁的错误。 */
 export class PatchConflictError extends Error {
   constructor(detail: string, options?: ErrorOptions) {
     super(`PATCH_CONFLICT: ${detail}`, options);

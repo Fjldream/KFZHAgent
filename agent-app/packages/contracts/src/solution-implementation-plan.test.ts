@@ -1,4 +1,4 @@
-// @ts-nocheck -- mutation fixtures intentionally probe malformed runtime values.
+// @ts-nocheck -- 有意图的修改fixture探查不完整的运行值。
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, expect, it } from "vitest";
 import {
@@ -999,6 +999,28 @@ describe("SolutionImplementationPlanSchema", () => {
     semanticPlan.scripts[1].steps[0].intent = "Show empty state if no record is selected";
     semanticPlan.scripts[1].steps[1].intent = "Show guidance for new operators while records are loading";
     expect(SolutionImplementationPlanSchema.safeParse(semanticPlan).success).toBe(true);
+  });
+
+  it("accepts frontend technology names as customer content without admitting executable forms", () => {
+    for (const content of [
+      "JavaScript",
+      "使用 D3.js 和 ECharts 展示实时数据",
+      "使用虚拟滚动和 WebSocket 提升实时体验",
+      "Node.js 与 Next.js 项目经验",
+      "avatar.jpg",
+      "邮箱：zhangwei@example.com",
+      "GitHub：github.com/zhangwei",
+    ]) {
+      const plan = cloneFixture();
+      findNode(plan, "equipment-name").content = content;
+      expect(SolutionImplementationPlanSchema.safeParse(plan).success, content).toBe(true);
+    }
+
+    for (const content of ["new WebSocket('ws://host')", "javascript:alert(1)", "detail.text.value"]) {
+      const plan = cloneFixture();
+      findNode(plan, "equipment-name").content = content;
+      expect(SolutionImplementationPlanSchema.safeParse(plan).success, content).toBe(false);
+    }
   });
 
   it.each([

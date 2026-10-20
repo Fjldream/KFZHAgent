@@ -1,4 +1,4 @@
-// @ts-nocheck -- adapter behavior is exercised through the public DomainPack boundary.
+// @ts-nocheck -- 通过公共DomainPack边界测试行为。
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";

@@ -1,5 +1,4 @@
--- A stuck graph cancellation must fence only its conversation without
--- retaining one scarce PostgreSQL lease-pool client per stuck turn.
+-- 必须仅在取消循环中隔离其对话，而不保留一个稀缺 PostgreSQL 租赁池客户端在循环中。
 CREATE TABLE "ConversationTurnFence" (
     "conversationId" TEXT NOT NULL,
     "ownerId" TEXT NOT NULL,

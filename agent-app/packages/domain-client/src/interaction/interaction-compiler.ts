@@ -54,10 +54,30 @@ export interface InteractionCompilationRequest {
   readonly reason: string;
 }
 
+/**
+ * 描述故意省略的交互边而不是不安全或编译错误的程序。API 可以将这些作为兼容性警告显示，而其他交互错误仍然保持阻塞。
+ */
+export const RECOVERABLE_INTERACTION_DIAGNOSTIC_CODES: ReadonlySet<InteractionDiagnosticCode> = new Set([
+  "INTERACTION_CLOSURE_MISSING",
+]);
+
+export function interactionDiagnosticsBlockCompilation(
+  diagnostics: Readonly<{
+    errors: readonly InteractionDiagnostic[];
+    requests: readonly InteractionCompilationRequest[];
+  }>,
+  recoverableRequestActionIds: ReadonlySet<string> = new Set(),
+): boolean {
+  return diagnostics.errors.some((diagnostic) =>
+    diagnostic.code !== "INTERACTION_CLOSURE_MISSING"
+      || !recoverableRequestActionIds.has(diagnostic.nodeId))
+    || diagnostics.requests.some((request) => !recoverableRequestActionIds.has(request.actionId));
+}
+
 export interface InteractionCompilationResult {
-  /** Canonical hash of the authoritative raw model plan. */
+  /** 权威原始模型计划的哈希值。 */
   readonly sourceSolutionPlanHash: string;
-  /** Canonical hash of the server-derived plan used for compilation. */
+  /** 用于编译的服务器衍生计划的哈希值。 */
   readonly loweredSolutionPlanHash: string;
   readonly implementation: UIImplementationSpecV2;
   readonly diagnostics: {

@@ -25,7 +25,7 @@ export interface DomainWorkspace {
   id: string;
   rootDir: string;
   mode: "base" | "candidate";
-  /** Exact disposable root owned by the DomainPack when rootDir is nested. */
+  /** rootDir 嵌套时，由 DomainPack 持有的确切一次性根目录。 */
   cleanupRoot?: string;
 }
 
@@ -48,11 +48,11 @@ export interface DomainPatchInput {
   baseWorkspace: DomainWorkspace;
   changePlan: unknown;
   expectedPlanHash: string;
-  /** Server-validated native adapter authorizations; never model-authored. */
+  /** 经服务器校验的原生适配器授权；绝不由模型编写。 */
   semanticOperations?: readonly TrustedSemanticOperation[];
-  /** Worker-resolved private bytes. Neither storage keys nor internal UUIDs cross this boundary. */
+  /** 由工作程序解决的私有字节。存储键和内部 UUID 从未跨越此边界。 */
   assets?: readonly DomainAssetInput[];
-  /** Server-issued opaque value; domain packs must reject forged/raw creative payloads. */
+  /** 服务器签发的不透明值；领域包必须拒绝伪造或原始的创意载荷。 */
   creativeMaterialization?: unknown;
   workRoot?: string;
 }
@@ -61,10 +61,10 @@ export interface DomainValidateInput {
   baseWorkspace: DomainWorkspace;
   candidateWorkspace: DomainWorkspace;
   changePlan: unknown;
-  /** Server-validated native adapter authorizations reused by exact replay validation. */
+  /** 服务器验证的原生适配器授权，用于精确重播验证。 */
   semanticOperations?: readonly TrustedSemanticOperation[];
   assets?: readonly DomainAssetInput[];
-  /** Same verified opaque handle consumed by patch; never persisted as plan JSON. */
+  /** patch 使用同一个已校验的不透明句柄；绝不将其作为计划 JSON 持久化。 */
   creativeMaterialization?: unknown;
 }
 
@@ -95,14 +95,14 @@ const MEDIA_TYPE_PATTERN =
   /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/i;
 const FILE_EXTENSION_PATTERN = /^\.[a-z0-9]{1,10}$/i;
 
-/** Header-safe MIME with a compatibility fallback for rows created before metadata persistence. */
+/** 兼容性降级的 MIME 头安全，适用于在元数据持久化之前创建的行。 */
 export function normalizeArtifactMediaType(value: string | null | undefined): string {
   return typeof value === "string" && MEDIA_TYPE_PATTERN.test(value)
     ? value.toLowerCase()
     : DEFAULT_ARTIFACT_MEDIA_TYPE;
 }
 
-/** A single, short suffix only; path separators and header characters fall back to legacy `.gz`. */
+/** 仅包含一个短后缀；路径分隔符和头部字符退回到旧的 `.gz`。 */
 export function normalizeArtifactFileExtension(value: string | null | undefined): string {
   return typeof value === "string" && FILE_EXTENSION_PATTERN.test(value)
     ? value.toLowerCase()

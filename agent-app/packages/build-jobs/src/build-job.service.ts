@@ -13,36 +13,16 @@ import {
 const MAX_LEASE_CANDIDATE_WORKSPACES = 16;
 
 /**
- * Durable build-job lease and commit logic, shared by the API (enqueue) and
- * the worker (lease/execute/commit).
+ * 持久化构建作业的租约与提交逻辑，由 API（入队）和 worker（租赁/执行/提交）共享。
  *
- * Idempotency: `enqueue` returns the existing row for a repeated
- * idempotencyKey; the UNIQUE index on idempotencyKey is the concurrency
- * backstop.
+ * 幂等性：`enqueue` 对重复的 idempotencyKey 返回现有记录；idempotencyKey 上的 UNIQUE 索引是并发兜底。
  *
- * Leasing: `leaseNext` advances a persistent cross-tenant round-robin cursor,
- * inspects at most one candidate workspace per bounded tenant batch, and
- * serializes each workspace claim with non-blocking `pg_try_advisory_xact_lock`
- * (transaction-scoped, auto-released), then locks one candidate row with
- * `SELECT ... FOR UPDATE SKIP LOCKED`, taking a claim (`leaseOwner` +
- * `leaseExpiresAt`) and bumping `attemptCount`. Only QUEUED/RUNNING/VALIDATING
- * rows with an expired or absent lease are claimable, and only when no other
- * row of the same workspace currently holds a live lease (one active job per
- * workspace). The advisory lock closes the READ COMMITTED race where a
- * `NOT EXISTS` scan could not see another transaction's uncommitted RUNNING
- * update.
+ * 租赁：`leaseNext` 推进持久化的跨租户轮询游标，在每个有界租户批次中最多检查一个候选工作空间，并使用非阻塞的 `pg_try_advisory_xact_lock`（事务范围、自动释放）串行化每次工作空间申领；随后通过 `SELECT ... FOR UPDATE SKIP LOCKED` 锁定一条候选记录，取得申领信息（`leaseOwner` 和 `leaseExpiresAt`）并递增 `attemptCount`。只有租约已过期或不存在的 QUEUED/RUNNING/VALIDATING 记录可以被申领，并且同一工作空间当前不能有其他记录持有有效租约（每个工作空间只能有一个活动作业）。咨询锁消除了 READ COMMITTED 下的竞态：`NOT EXISTS` 扫描可能看不到另一个事务尚未提交的 RUNNING 更新。
  *
- * Crash recovery: a worker that dies mid-build leaves the row RUNNING with an
- * expired lease; after expiry `leaseNext` re-claims it and `completeBuild`
- * commits the result exactly once. Re-committing an already terminal row is a
- * no-op (defense in depth).
+ * 崩溃恢复：worker 在构建中途退出后，会留下租约已过期的 RUNNING 记录；租约到期后，`leaseNext` 会重新申领该记录，`completeBuild` 则只提交一次结果。对已处于终态的记录再次提交不会执行任何操作（纵深防御）。
  */
 /**
- * Test-only extension points for BuildJobService. `beforeClaim` runs inside
- * the lease transaction after the claim SELECT has locked the candidate row
- * but before the RUNNING UPDATE, letting a test widen the READ COMMITTED race
- * window (the exact condition that allowed two jobs of one workspace to be
- * claimed concurrently before the advisory-lock fix).
+ * BuildJobService 的测试专用扩展点。`beforeClaim` 在租约事务内部运行：申领 SELECT 已锁定候选记录，但 RUNNING UPDATE 尚未执行；测试可以借此扩大 READ COMMITTED 的竞态窗口（修复咨询锁之前，该条件会导致同一工作空间的两个作业被并发申领）。
  */
 export interface BuildJobServiceDebugHooks {
   beforeClaim?: () => Promise<void>;
@@ -59,7 +39,7 @@ export class BuildJobService {
     this.#debugHooks = debugHooks;
   }
 
-  /** Enqueues a build job; idempotent on idempotencyKey. */
+  /** 将构建作业入队；以 idempotencyKey 保证幂等。 */
   async enqueue(input: EnqueueBuildInput): Promise<BuildJob> {
     const projectKey = normalizeProjectKey(input.projectKey, input.domainKind);
     const existing = await this.prisma.buildJob.findUnique({
@@ -105,8 +85,7 @@ export class BuildJobService {
         data: { ...input, projectKey, status: "QUEUED" },
       });
     } catch (error) {
-      // Concurrent enqueue of the same key: the UNIQUE index is the final
-      // authority, return the winning row.
+      // 相同键的并发入队：UNIQUE 索引是最终依据，返回竞争胜出的记录。
       if (isUniqueViolation(error)) {
         const winner = await this.prisma.buildJob.findUnique({
           where: { idempotencyKey: input.idempotencyKey },
@@ -121,24 +100,15 @@ export class BuildJobService {
   }
 
   /**
-   * Claims the next runnable build job. Returns null when nothing is
-   * claimable. `now` is injected for deterministic lease tests.
-   *
-   * The "one active job per workspace" guard cannot be implemented with a
-   * `NOT EXISTS` scan alone: under READ COMMITTED each statement sees its own
-   * snapshot, so a concurrent transaction's uncommitted RUNNING update is
-   * invisible and two workers could claim two QUEUED jobs of the same
-   * workspace. We therefore serialize the claim decision per candidate
-   * workspace with a bounded `pg_try_advisory_xact_lock(workspaceId)` loop
-   * (transaction-scoped, auto-released) before re-checking committed state.
-   */
+ * 申领下一个可运行的构建作业。没有可申领作业时返回 null。注入 `now` 以支持确定性的租约测试。
+ *
+ * “每个工作空间只能有一个活动作业”的守卫不能只通过 `NOT EXISTS` 扫描实现：在 READ COMMITTED 隔离级别下，每条语句看到自己的快照，因此另一个并发事务尚未提交的 RUNNING 更新不可见，两个 worker 可能分别申领同一工作空间的两个 QUEUED 作业。为此，我们在重新检查已提交状态前，通过有界的 `pg_try_advisory_xact_lock(workspaceId)` 循环（事务范围、自动释放）按候选工作空间串行化申领决策。
+ */
   async leaseNext(owner: string, now: Date, leaseMs?: number): Promise<BuildJob | null> {
     const ttl = leaseMs ?? this.leaseMs;
     const expiry = new Date(now.getTime() + ttl);
     return this.prisma.$transaction(async (tx) => {
-      // Serialize only the small scheduling decision. The persisted cursor
-      // makes every call begin after the last tenant that actually won a
-      // claim, so one old backlog cannot occupy every candidate batch.
+      // 只串行化小型调度决策。持久化游标使每次调用都从上一个实际成功申领作业的租户之后开始，因此某个旧积压队列无法占满所有候选批次。
       await tx.$executeRaw`
         INSERT INTO "BuildSchedulerCursor" ("id", "lastTenantId", "updatedAt")
         VALUES (1, '', ${now})

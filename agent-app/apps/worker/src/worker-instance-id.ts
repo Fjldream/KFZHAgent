@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { hostname as systemHostname } from "node:os";
 
-/** A startup-scoped lease owner that stays unique across hosts and containers. */
+/** 一个初创租户的租户所有者，它在主机和容器之间保持独特。 */
 export function createWorkerInstanceId(
   hostname = systemHostname(),
   pid = process.pid,

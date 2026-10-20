@@ -1,8 +1,5 @@
 /**
- * Per-entity native field allowlists are defined in @kf/contracts so the
- * patcher, creative lowerer, and signed-artifact validator share one policy.
- * This module keeps the historical domain-client exports plus raw-KF path
- * resolution, which remains patcher-specific.
+ * 每种实体的原生字段允许列表定义在 @kf/contracts 中，使 patcher、creative lowerer 和签名制品 validator 共享同一策略。该模块保留历史 domain-client 导出以及原始 KF 路径解析；后者仍是 patcher 专用逻辑。
  */
 
 export {
@@ -17,7 +14,7 @@ export {
   type AllowlistLookup,
 } from "@kf/contracts";
 
-/** Geometry alias: `x` -> `leftTopPt.x`, `y` -> `leftTopPt.y`. */
+/** 几何别名：`x` -> `leftTopPt.x`，`y` -> `leftTopPt.y`。 */
 export const CONTROL_GEOMETRY_ALIASES: Readonly<Record<string, string>> = {
   "/x": "/leftTopPt/x",
   "/y": "/leftTopPt/y",
@@ -26,8 +23,7 @@ export const CONTROL_GEOMETRY_ALIASES: Readonly<Record<string, string>> = {
 };
 
 /**
- * KF layout IR paths map to nested raw fields. EasyUI fields are already
- * top-level and therefore need no equivalent table.
+ * KF布局的IR路径映射到嵌套的原始字段。EasyUI字段已经是顶级字段，因此不需要等效的表格。
  */
 export const CONTROL_LAYOUT_PATH_ALIASES: Readonly<Record<string, string>> = {
   "/x": "/baseProperty/leftTopPt/x",
@@ -39,7 +35,7 @@ export const CONTROL_LAYOUT_PATH_ALIASES: Readonly<Record<string, string>> = {
   "/panels": "/dPanelsOption",
 };
 
-/** CustomCharts stores geometry below pageProperty rather than at the root. */
+/** CustomCharts存储在pageProperty之下，而不是在根处。 */
 export const PROTOTYPE_GEOMETRY_ALIASES_BY_NAME: Readonly<
   Record<string, Readonly<Record<string, string>>>
 > = {
@@ -52,12 +48,12 @@ export const PROTOTYPE_GEOMETRY_ALIASES_BY_NAME: Readonly<
   },
 };
 
-/** Resolves a relative change path to the effective raw-KF path. */
+/** 将相对变化路径转换为有效原始-KF路径。 */
 export function resolveControlPath(relativePath: string): string {
   return CONTROL_GEOMETRY_ALIASES[relativePath] ?? relativePath;
 }
 
-/** Resolves type-specific layout/prototype aliases before patch application. */
+/** 在应用布局/原型布局前，解决类型特定的布局/原型别名。 */
 export function resolveControlPathFor(
   controlType: string | undefined,
   relativePath: string,

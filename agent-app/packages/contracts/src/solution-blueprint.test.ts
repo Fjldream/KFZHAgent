@@ -104,6 +104,21 @@ describe("CustomerSolutionBlueprintSchema", () => {
     }).success).toBe(true);
   });
 
+  it.each([
+    "Node.js 与 TypeScript 项目经验",
+    "代码主页：https://github.com/example/profile",
+    "头像：https://images.example.com/avatar.png",
+  ])("accepts benign customer-facing dotted text: %s", (content) => {
+    expect(CustomerSolutionBlueprintSchema.safeParse(withPrimaryRegion({ content: [content] })).success).toBe(true);
+  });
+
+  it.each(["content.hero", "data.status-grid", "navigation.top"])(
+    "rejects a KF implementation namespace token: %s",
+    (objective) => {
+      expect(CustomerSolutionBlueprintSchema.safeParse({ ...valid, objective }).success).toBe(false);
+    },
+  );
+
   it.each(["Version(3.6)", "KPI(关键指标)"])("accepts an unspaced benign product label: %s", (content) => {
     expect(CustomerSolutionBlueprintSchema.safeParse(withPrimaryRegion({ content: [content] })).success).toBe(true);
   });

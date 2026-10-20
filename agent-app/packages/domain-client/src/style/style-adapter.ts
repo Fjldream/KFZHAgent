@@ -20,19 +20,19 @@ export interface CompiledControlStyle {
   styleDataNew: string;
   unsupported: UnsupportedStyle[];
   warnings: StyleWarning[];
-  /** Deterministic compiler-owned correlation metadata; never used as a DOM selector. */
+  /** 编译器所有者确定性关联元数据；它从不作为DOM选择器使用。 */
   scopeToken?: string;
-  /** Contract-safe semantic fragments consumed by native UI v2. */
+  /** 由原生 UI v2 消费的合同安全语义片段。 */
   cssFragments?: readonly CompiledStyleFragment[];
-  /** Evidence-owned persisted selectors plus compiler-owned correlation metadata. */
+  /** 证据所有者持久化的选择器，以及编译者所有者关联的元数据。 */
   scopedFragments?: readonly CompiledScopedStyleFragment[];
-  /** Compiler-issued complete persisted payload; Task 6 must verify this before lossless persistence. */
+  /** 由编译器签发的完整持久化载荷；任务 6 必须先校验它，再进行无损持久化。 */
   persistedStyleHandoff?: PersistedStyleHandoff;
 }
 
 /**
- * Complete project-time style payload for one native v2 component.
- * It deliberately contains the persisted `#domId` placeholder and no runtime DOM identity.
+ * 为一个原生 v2 组件完成项目时间样式数据包。
+ * 它故意包含持久化 `#domId` placeholder 但没有运行时 DOM 身份。
  */
 export interface PersistedStyleHandoff {
   readonly componentCorrelationId: string;

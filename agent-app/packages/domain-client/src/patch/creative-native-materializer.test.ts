@@ -19,6 +19,7 @@ import {
 import { describe, expect, it } from "vitest";
 import { compileClientProject } from "../compile/client-compiler.js";
 import { inspectClientProject } from "../inspect/client-inspector.js";
+import type { ClientProjectIR } from "../ir/client-project-ir.schema.js";
 import { createCreativeUIImplementationV2Compiler } from "../implementation/ui-implementation-v2-compiler.js";
 import {
   attachRuntimeCorrelation,
@@ -511,6 +512,14 @@ async function baseWorkspace() {
   }, { seed: "base" });
 }
 
+async function bootstrapWorkspace(controls: ClientProjectIR["pages"][number]["controls"] = []) {
+  return compileClientProject({
+    schema: "kf-client-project-ir/v1", id: "solution", name: "Solution", version: "1.0.0.1",
+    pages: [{ id: "page-home", name: "Page1", width: 1440, height: 900, controls }],
+    variables: [], scripts: [],
+  }, { seed: "bootstrap" });
+}
+
 async function baseWorkspaceWithVariable(name: string) {
   return compileClientProject({
     schema: "kf-client-project-ir/v1", id: "base", name: "Base", version: "1.0.0.1",
@@ -614,6 +623,56 @@ async function existingSignedFixture(withImageAsset = false) {
 }
 
 describe("creative native materializer", () => {
+  it("replaces the empty generative Page1 bootstrap and promotes the semantic home page", async () => {
+    const { result, resolved, planHash } = await signedFixture();
+    const base = await bootstrapWorkspace();
+    const candidate = await applyClientPatch(base.rootDir, result.plan, {
+      planHash, creativeMaterialization: resolved.creativeMaterialization,
+      replaceGenerativeBootstrap: true,
+    } as ApplyPatchOptions & { creativeMaterialization: unknown });
+
+    const inspection = await inspectClientProject(candidate.rootDir);
+    expect(inspection.summary.pages.map((page) => page.name).sort()).toEqual(["detail", "home"]);
+
+    const projectDir = path.join(candidate.rootDir, "1.0.0.1", "project");
+    const manager = JSON.parse(await readFile(path.join(projectDir, "pageManager.json"), "utf8")) as {
+      default: string;
+      appHomePage: string;
+      Pages: Array<{ id: string; name: string }>;
+    };
+    expect(manager).toMatchObject({ default: "home", appHomePage: "home" });
+    expect(manager.Pages.map((page) => page.name).sort()).toEqual(["detail", "home"]);
+
+    const expectedPageGuids = manager.Pages.map((page) => page.id).sort();
+    const pageGroup = JSON.parse(await readFile(path.join(projectDir, "pageGroupManager.json"), "utf8")) as {
+      Groups: { pages: string[] };
+    };
+    expect(pageGroup.Groups.pages.sort()).toEqual(expectedPageGuids);
+    const diffusion = JSON.parse(await readFile(path.join(projectDir, "diffusionManager.json"), "utf8")) as {
+      page: Record<string, unknown>;
+    };
+    expect(Object.keys(diffusion.page).sort()).toEqual(expectedPageGuids);
+  });
+
+  it("preserves a genuine non-empty Page1 and its existing home-page selection", async () => {
+    const { result, resolved, planHash } = await signedFixture();
+    const base = await bootstrapWorkspace([
+      { id: "CustomerTitle", type: "text", x: 20, y: 20, width: 240, height: 40, text: "客户页面" },
+    ]);
+    const candidate = await applyClientPatch(base.rootDir, result.plan, {
+      planHash, creativeMaterialization: resolved.creativeMaterialization,
+      replaceGenerativeBootstrap: true,
+    } as ApplyPatchOptions & { creativeMaterialization: unknown });
+
+    const inspection = await inspectClientProject(candidate.rootDir);
+    expect(inspection.summary.pages.map((page) => page.name).sort()).toEqual(["Page1", "detail", "home"]);
+    const manager = JSON.parse(await readFile(
+      path.join(candidate.rootDir, "1.0.0.1", "project", "pageManager.json"),
+      "utf8",
+    )) as { default: string; appHomePage: string };
+    expect(manager).toMatchObject({ default: "Page1", appHomePage: "Page1" });
+  });
+
   it.each([
     ["exact", (name: string) => name],
     ["case-folded", (name: string) => name.toLocaleUpperCase("en-US")],
@@ -680,15 +739,18 @@ describe("creative native materializer", () => {
       const nativeByName = (name: string) => controls.find((control) => control["name"] === name)!;
       const visibilityLink = (owner: string, operation: "open-overlay" | "close-overlay") =>
         ((nativeByName(owner)["linkMng"] as { linkList: Array<Record<string, unknown>> }).linkList)
-          .find((link) => (link["kfCompilerAction"] as Record<string, unknown> | undefined)?.["operation"] === operation)!;
+          .find((link) => decodedModules(String(link["script"])).some((module) =>
+            module.metadata["sourceScriptId"] === (operation === "open-overlay" ? "open-review-overlay" : "close-review-overlay")))!;
       expect((nativeOverlay["baseProperty"] as Record<string, unknown>)["visible"]).toBe(false);
+      expect(nativeByName(close.instanceName)["runVisible"]).toBe(false);
       for (const [owner, operation, visible] of [[open.instanceName, "open-overlay", true], [close.instanceName, "close-overlay", false]] as const) {
         const link = visibilityLink(owner, operation);
-        expect(link["kfCompilerAction"]).toMatchObject({
-          schema: "kf-compiled-action/v3", operation, targetSemanticControlId: overlay.semanticControlId,
-          targetInstanceName: overlay.instanceName, visible,
-        });
-        expect(decodedModules(String(link["script"]))[0]?.body).toBe(`${overlay.instanceName}.setVisible(${String(visible)});\n`);
+        const expectedTargets = operation === "open-overlay"
+          ? [overlay.instanceName, close.instanceName]
+          : [close.instanceName, overlay.instanceName];
+        expect(decodedModules(String(link["script"]))[0]?.body).toBe(
+          expectedTargets.map((target) => `${target}.setVisible(${String(visible)});`).join("\n") + "\n",
+        );
       }
       return { nativeOverlay, openLink: visibilityLink(open.instanceName, "open-overlay") };
     };
@@ -725,7 +787,7 @@ describe("creative native materializer", () => {
     (tamperedOverlay["baseProperty"] as Record<string, unknown>)["visible"] = true;
     const tamperedOpen = pageControls.find((control) => control["name"] === open.instanceName)!;
     const tamperedOpenLink = ((tamperedOpen["linkMng"] as { linkList: Array<Record<string, unknown>> }).linkList)
-      .find((link) => (link["kfCompilerAction"] as Record<string, unknown> | undefined)?.["operation"] === "open-overlay")!;
+      .find((link) => String(link["script"]).includes("setVisible(true)"))!;
     tamperedOpenLink["script"] = String(tamperedOpenLink["script"]).replace("setVisible(true)", "setVisible(false)");
     await writeFile(pagePath, JSON.stringify(pageJson, null, 2));
     const tamperedReport = await pack.validate({
@@ -803,13 +865,12 @@ describe("creative native materializer", () => {
       height: open.geometry.height,
     });
     const nativeNavigate = (((byName.get(open.instanceName)?.["linkMng"] as { linkList: Array<Record<string, unknown>> }).linkList)
-      .find((entry) => entry["action"] === "navigatePage"));
-    expect(nativeNavigate).toMatchObject({
-      action: "navigatePage",
-      pageId: result.materialization.pages.find((page) => page.semanticPageId === "detail")!.pageGuid,
-    });
+      .find((entry) => String(entry["script"]).includes('ShowPage("detail",1);')));
+    expect(nativeNavigate).toMatchObject({ linkId: 200001, enable: true, name: "onClick" });
     const nativeGrid = byName.get(grid.instanceName)!;
     expect(nativeGrid["data"]).toEqual([{ id: "1" }]);
+    expect(String(nativeGrid["configureData"])).toContain("$('#' + id).datagrid(");
+    expect(String(nativeGrid["configureData"])).toContain('"data":[{"id":"1"}]');
     const rowClick = ((nativeGrid["linkMng"] as { linkList: Array<Record<string, unknown>> }).linkList)
       .find((entry) => entry["name"] === "onClickRow");
     expect(rowClick).toMatchObject({ linkId: 200024, enable: true });
@@ -829,8 +890,8 @@ describe("creative native materializer", () => {
     const importedControls = Object.values(roundTripped.raw.pages).flatMap((page) => walkControls(page));
     const importedOpen = importedControls.find((control) => control["name"] === open.instanceName)!;
     expect(((importedOpen["linkMng"] as { linkList: Array<Record<string, unknown>> }).linkList)
-      .find((entry) => entry["action"] === "navigatePage"))
-      .toMatchObject({ pageId: result.materialization.pages.find((page) => page.semanticPageId === "detail")!.pageGuid });
+      .find((entry) => String(entry["script"]).includes('ShowPage("detail",1);')))
+      .toMatchObject({ linkId: 200001, enable: true, name: "onClick" });
     expect(importedControls.some((control) => control["name"] === grid.instanceName
       && String(((control["linkMng"] as { linkList: Array<Record<string, unknown>> }).linkList)
         .find((entry) => entry["linkId"] === 200024)?.["script"]).includes(`${grid.instanceName}.SetData([])`))).toBe(true);

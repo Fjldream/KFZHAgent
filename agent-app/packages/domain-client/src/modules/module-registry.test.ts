@@ -268,7 +268,7 @@ describe("versioned module registry", () => {
       (catalog as unknown as Array<{ kind: string }>)[0]!.kind = "forged";
       (catalog[0]!.variants as string[]).push("forged");
     } catch {
-      // Frozen snapshots reject mutation in strict-mode ESM.
+      // 冻结快照拒绝在严格模式的 ESM 中进行修改。
     }
 
     expect(registry.listForPlanning()[0]!.kind).toBe("hero");

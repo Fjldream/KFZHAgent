@@ -56,7 +56,7 @@ const implementation = {
     sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["hero"],
     eventBindings: [{ id: "kf$binding:navigate", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001, phase: "event", scriptModuleIds: [], nativeActionIds: ["kf$action:navigate"] }],
   }] }],
-  compiledActions: [{ id: "kf$action:navigate", sourceActionId: "navigate", ownerInstanceName: "Button1", kind: "navigate-page", targetPageGuid: "k00000000-0000-4000-8000-000000000001" }],
+  compiledActions: [{ id: "kf$action:navigate", sourceActionId: "navigate", ownerInstanceName: "Button1", kind: "navigate-page", targetPageName: "home", targetPageGuid: "k00000000-0000-4000-8000-000000000001" }],
   compiledScripts: [], runtimeCorrelation: { controls: [{ semanticControlId: "open", instanceName: "Button1" }], pages: [{ semanticPageId: "home", pageGuid: "k00000000-0000-4000-8000-000000000001" }] },
 };
 

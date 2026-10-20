@@ -34,7 +34,7 @@ const implementationFieldNames = new Set([
 const canonicalUuid = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
 const quotedObjectKey = /\\?["']([A-Za-z][A-Za-z0-9_. -]*)\\?["']\s*:/g;
 const implementationAssignment = /\b([A-Za-z][A-Za-z0-9_. -]*)\s*(?:=|:)/g;
-const dottedImplementationToken = /\b[A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z][A-Za-z0-9_-]*)+\b/;
+const dottedImplementationToken = /\b(?:content|data|feedback|form|interaction|metric|navigation)\.[A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z][A-Za-z0-9_-]*)*\b/i;
 const cssDeclaration = /(?:^|[;{]\s*)(?:color|display|position|width|height|margin(?:-[a-z]+)?|padding(?:-[a-z]+)?|background(?:-[a-z]+)?|border(?:-[a-z]+)?|font(?:-[a-z]+)?|opacity|z-index|flex(?:-[a-z]+)?|grid(?:-[a-z]+)?|transform|transition|animation)\s*:\s*[^;{}\n]+(?:;|}|$)/i;
 const cssCustomProperty = /(?:^|[;{]\s*)--[A-Za-z0-9_-]+\s*:\s*[^;{}\n]+(?:;|}|$)/;
 const cssPseudoElement = /(?:^|\s)(?:[.#][A-Za-z_-][A-Za-z0-9_-]*|button|input|select|textarea|a|form|table|tr|td|div|span|section|main|header|footer|nav|label)::[A-Za-z-]+(?:\([^)]*\))?/i;
@@ -121,7 +121,7 @@ function implementationTextIssue(value: string): string | undefined {
   return undefined;
 }
 
-/** Recursively excludes platform implementation data from every v3 value. */
+/** 递归地排除平台实现数据，从每个v3值中。 */
 function validateImplementationFree(value: unknown, ctx: z.RefinementCtx, path: Array<string | number> = []): void {
   if (typeof value === "string") {
     const message = implementationTextIssue(value);
@@ -142,7 +142,7 @@ function validateImplementationFree(value: unknown, ctx: z.RefinementCtx, path: 
   }
 }
 
-/** Customer-facing language only; implementation-free checks run recursively at the root. */
+/** 仅限客户面语言；仅限检查的实现检查在根处递归运行。 */
 const blueprintText = z
   .string()
   .trim()
@@ -151,7 +151,7 @@ const blueprintText = z
 
 const blueprintTextList = z.array(blueprintText).max(12);
 
-/** Stable semantic identity, never a platform-generated identifier. */
+/** 稳定的语义身份，永远不是平台生成的标识符。 */
 const blueprintId = z
   .string()
   .trim()

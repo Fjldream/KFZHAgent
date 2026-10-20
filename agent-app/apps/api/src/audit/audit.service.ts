@@ -3,9 +3,7 @@ import { Prisma, type AuditLog } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service.js";
 
 /**
- * Canonical audit event names (brief Step 7). Every meaningful security or
- * business action is recorded with tenantId + actor + resource so the full
- * history of a tenant can be reconstructed and reviewed by a platform admin.
+ * 每个有意义的安全或业务操作都记录为审计事件，tenantId + 活动执行者 + 资源，这样可以重建和审查租户的完整历史记录，供平台管理员查看。
  */
 export const AUDIT_ACTIONS = {
   LOGIN_SUCCESS: "LOGIN_SUCCESS",
@@ -37,12 +35,9 @@ export interface AuditInput {
 }
 
 /**
- * Thin audit-log writer. tenantId always comes from the authenticated
- * principal or the resource itself, never from a request body.
+ * 轻量的审计日志写入器。tenantId 始终来自经过身份验证的主体或资源本身，绝不来自请求正文。
  *
- * `record` may be given a transaction client so audit rows land in the same
- * transaction as the guarded operation (used by the serialized conversation
- * resume path).
+ * 可以向 `record` 传入事务客户端，使审计记录与受保护的操作写入同一事务（用于串行化的会话恢复路径）。
  */
 @Injectable()
 export class AuditService {

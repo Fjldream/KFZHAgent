@@ -22,9 +22,9 @@ export interface SerializedStyleDeclarations {
 }
 
 export interface CompiledScopedStyleFragment {
-  /** Deterministic metadata used to correlate compiler output; it is not a DOM selector. */
+  /** 用于关联编译器输出的确定性元数据；它不是DOM选择器。 */
   readonly componentScopeToken: string;
-  /** Exact plan component identity required when binding the eventual KF runtime DOM id. */
+  /** 当将最终的KF运行时DOM ID绑定到选择的最终属性时，必须使用精确的计划组件身份。 */
   readonly componentCorrelationId: string;
   readonly selectorToken: "root" | `part:${string}`;
   readonly state: StyleState;

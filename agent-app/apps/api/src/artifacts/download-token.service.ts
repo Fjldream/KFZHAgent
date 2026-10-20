@@ -9,13 +9,10 @@ import { PrismaService } from "../prisma/prisma.service.js";
 import { ARTIFACT_STORAGE } from "./artifact-storage.js";
 import { DeliverySnapshotService } from "../delivery/delivery-snapshot.service.js";
 
-const DOWNLOAD_TOKEN_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const DOWNLOAD_TOKEN_TTL_MS = 10 * 60 * 1000; // 10分钟
 
 /**
- * Short-lived single-use artifact download tokens (brief Step 6). The token
- * is a random 256-bit secret; only its SHA-256 hash is stored. Each token is
- * bound to userId + tenantId + artifactId + expiration, and the file route
- * revalidates every binding (plus the active session) before streaming.
+ * 短期、一次性的制品下载令牌（简要步骤 6）。令牌是随机的 256 位密钥；只存储其 SHA-256 哈希。每个令牌都绑定 userId、tenantId、artifactId 和过期时间；文件路由在开始流式传输前会重新验证所有绑定关系（以及活动会话）。
  */
 @Injectable()
 export class DownloadTokenService {
@@ -61,10 +58,8 @@ export class DownloadTokenService {
   }
 
   /**
-   * Revalidates every token binding and the artifact's tenant scope, then
-   * atomically marks the token used (single-use) and opens the artifact
-   * stream. Any mismatch or a reused/expired token is a 401.
-   */
+ * 重新验证令牌的每一项绑定以及制品的租户作用域，然后以原子方式把令牌标记为已使用（一次性），并打开制品流。任何绑定不匹配或令牌已使用/过期都会返回 401。
+ */
   async consume(input: {
     token: string;
     tenantId: string;
@@ -89,7 +84,7 @@ export class DownloadTokenService {
     const artifact = await this.resolveArtifact(input.tenantId, row.artifactId);
     await this.deliverySnapshots.assertArtifactDeliverable(input.tenantId, row.artifactId);
 
-    // Atomic single-use claim: only one consumer can flip usedAt.
+    // 原子式一次性申领：只能有一个使用方设置 usedAt。
     const claimed = await this.prisma.downloadToken.updateMany({
       where: { id: row.id, usedAt: null },
       data: { usedAt: new Date() },
@@ -109,7 +104,7 @@ export class DownloadTokenService {
     };
   }
 
-  /** The artifact must exist under the tenant via Artifact or DomainProjectRevision. */
+  /** Artifact必须在租户中存在，通过Artifact或DomainProjectRevision。 */
   private async resolveArtifact(tenantId: string, artifactId: string): Promise<{
     storageKey: string;
     sizeBytes: number | null;
@@ -132,9 +127,7 @@ export class DownloadTokenService {
     const storedExtension = normalizeArtifactFileExtension(
       artifact?.fileExtension ?? domainProject?.fileExtension,
     );
-    // Source packages have always been ZIP containers. Older rows inherited
-    // the pre-metadata `.gz` default, so correct only that tagged combination;
-    // client-package ZIPs retain their historical extension contract.
+    // 源包始终是ZIP容器。旧行继承了预-metadata的`.gz`默认值，因此仅修正该组合；客户端包保留了其历史扩展合同。
     const fileExtension =
       kind === "source-package" && mediaType === "application/zip" && storedExtension === ".gz"
         ? ".zip"

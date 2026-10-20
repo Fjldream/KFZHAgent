@@ -4,15 +4,11 @@ import type { AgentGraphStateValue, AgentGraphUpdate } from "../state.js";
 import type { SolutionGraphDeps } from "../ports.js";
 
 /**
- * Enqueues the durable build job for an approved plan (brief Step 5).
+ * 为已批准的计划将持久化构建作业入队（简要步骤 5）。
  *
- * Guard: a build must carry one exact routing-owned authorization. Legacy
- * plans require the approval interrupt's approve resume; module plans may
- * arrive directly from confirmed-blueprint or preview-feedback routing.
+ * 守卫：构建必须携带一个由路由持有的确切授权。旧版计划需要来自审批中断的 approve 恢复；模块计划可以直接从 confirmed-blueprint 或 preview-feedback 路由到达。
  *
- * The enqueue is idempotent on its idempotencyKey (the underlying
- * BuildJobService deduplicates on the same key). Approving marks the change
- * request APPROVED before the job is visible to workers.
+ * 入队操作以 idempotencyKey 保证幂等（底层 BuildJobService 使用同一键去重）。在作业对 worker 可见之前，批准操作会把变更请求标记为 APPROVED。
  */
 export function createEnqueueBuildNode(deps: SolutionGraphDeps) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
@@ -71,9 +67,7 @@ export function createEnqueueBuildNode(deps: SolutionGraphDeps) {
       const domainKind = (creativeAuthorized
         ? state.creativeDomainKind!
         : deps.defaultDomainKind ?? "kingclient").trim();
-      // One canonical value drives legacy detection, durable identity, the
-      // idempotency key, and the enqueue payload. This keeps spaced replays
-      // bound to the exact same job as their already-normalized form.
+      // 一个规范值同时驱动旧版检测、持久化标识、幂等键和入队载荷。这使间隔发生的重放仍绑定到与其已规范化形式完全相同的作业。
       const projectKey = projectKeySchema.parse(creativeAuthorized
         ? state.creativeProjectKey!
         : deps.defaultProjectKey ?? domainKind);

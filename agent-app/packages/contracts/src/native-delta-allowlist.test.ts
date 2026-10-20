@@ -38,7 +38,7 @@ describe("native delta allowlist runtime immutability", () => {
       try {
         exportedFields.push(MUTATION_PROBE);
       } catch {
-        // A frozen legacy view is an accepted mutation boundary.
+        // 冻结的遗产视图是一个接受的变异边界。
       }
 
       expect(allowedFieldsFor({
@@ -59,7 +59,7 @@ describe("native delta allowlist runtime immutability", () => {
       try {
         exportedFields.push(MUTATION_PROBE);
       } catch {
-        // A frozen legacy view is an accepted mutation boundary.
+        // 冻结的遗产视图是一个接受的变异边界。
       }
 
       expect(allowedFieldsFor({

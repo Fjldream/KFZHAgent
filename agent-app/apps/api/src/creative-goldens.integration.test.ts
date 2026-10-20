@@ -1,5 +1,4 @@
-// @ts-nocheck -- Golden fixtures are JSON boundary values; runtime schemas and
-// integration assertions intentionally provide the authoritative checks.
+// @ts-nocheck -- 金标准.fixture是JSON边界值；运行时的schema和集成验证故意提供权威的检查。
 import "reflect-metadata";
 process.env.DATABASE_URL =
   process.env.TEST_DATABASE_URL ??
@@ -102,7 +101,7 @@ function pngChunk(type, data) {
   return chunk;
 }
 
-/** Small deterministic scene rasters: sky, architecture, horizon and textured foreground; never baked UI. */
+/** 小的确定性场景栅格：天空、建筑、地平线和纹理化的前景；从不烘焙的用户界面。 */
 function portalFixturePng(seed) {
   const width = 96;
   const height = 64;

@@ -121,7 +121,7 @@ const semanticPropertyNameSchema = z
     "implementation property names are not allowed",
   );
 
-/** Blueprint provenance also accepts legacy bounded human labels losslessly. */
+/** 蓝图来源信息也能无损接受旧版的有界可读标签。 */
 const provenanceIdSchema = z
   .string()
   .trim()
@@ -130,7 +130,7 @@ const provenanceIdSchema = z
   .refine((value) => !canonicalUuidToken.test(value), "GUID-shaped provenance identifiers are not allowed")
   .refine((value) => !/<\/?script\b|\b(?:javascript|vbscript)\s*:/i.test(value), "executable provenance identifiers are not allowed");
 
-/** Capability identity is syntactic here; signed-candidate membership belongs to Task 4. */
+/** 能力身份在这里是语法的；签署候选成员属于任务4。 */
 const capabilityIdSchema = z
   .string()
   .trim()
@@ -159,7 +159,7 @@ const shortTextSchema = z.string().trim().min(1).max(400);
 const hashSchema = z.string().regex(/^[0-9a-f]{64}$/);
 export const LEGACY_MODULE_PLAN_CANDIDATE_BUNDLE_HASH = "3e147b2b8351b526f10dd9dfc47c4c93bbfc29814d791400e3e5b02c38220840";
 
-/** Exact source-contract shapes admitted only by the legacy compatibility branch. */
+/** 仅由遗留兼容性分支接受的源-合同形状。 */
 const legacyStableIdSchema = z
   .string()
   .trim()

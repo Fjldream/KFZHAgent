@@ -5,14 +5,16 @@ import { createKnowledgeRegistry } from "./registry.js";
 export interface NativeActionCapability {
   readonly semanticAction: "navigate-page" | "open-overlay" | "close-overlay" | "set-state" | "show-feedback";
   readonly availability: "supported" | "planned";
-  readonly serialization: "navigate-command" | "overlay-visibility" | "variable-command" | "feedback-script";
+  readonly serialization: "navigation-script" | "overlay-visibility" | "variable-command" | "feedback-script";
   readonly evidence: readonly ScriptCapabilityEvidence[];
 }
 
 const NAVIGATION_EVIDENCE = Object.freeze([
-  { kind: "compiler", ref: "agent-app/packages/domain-client/src/ir/client-project-ir.schema.ts#RestrictedAction" },
-  { kind: "compiler", ref: "agent-app/packages/domain-client/src/compile/control-compiler.ts#compileAction" },
-  { kind: "compiler", ref: "agent-app/packages/domain-client/src/compile/client-compiler.test.ts#navigatePage" },
+  {
+    kind: "product-source",
+    ref: "KingFusion3.6_Node/sdb/kingclient/4d40fe10-ea9f-11f0-873c-fbefc9d34a70/f06c3b90-ea9f-11f0-871c-1f9d1cf633fa/pagerecord/recordpages/APP_油井加药执行20260108135939.json#ShowPage",
+    contentSha256: "9190597094b2f424f80ec34139471581f62a43dd31d02014e09efcfb896c48ee",
+  },
 ] satisfies readonly ScriptCapabilityEvidence[]);
 const OVERLAY_VISIBILITY_EVIDENCE = Object.freeze([
   {
@@ -40,7 +42,7 @@ const CAPABILITIES = [
   {
     semanticAction: "navigate-page",
     availability: "supported",
-    serialization: "navigate-command",
+    serialization: "navigation-script",
     evidence: NAVIGATION_EVIDENCE,
   },
   {

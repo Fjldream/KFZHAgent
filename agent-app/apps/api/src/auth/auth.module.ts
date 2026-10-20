@@ -6,9 +6,7 @@ import { RolesGuard } from "./roles.guard.js";
 import { SessionService } from "./session.service.js";
 import { TenantGuard } from "./tenant.guard.js";
 
-// Global so that UsersService/TenantsService/controllers can inject the
-// password service and guards without importing this module (avoids a module
-// cycle with UsersModule, which AuthController depends on).
+// 全局作用域，使 `UsersService` 和 `TenantsService` 控制器可以注入密码服务和守卫，而不必导入此模块（避免与 `UsersModule` 之间的模块循环，后者 `AuthController` 取决于）。
 @Global()
 @Module({
   imports: [UsersModule],

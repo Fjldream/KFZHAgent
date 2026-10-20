@@ -100,7 +100,11 @@ describe("compileNativeActions", () => {
     const targetPageGuid = data.implementation.runtimeCorrelation!.pages
       .find((entry) => entry.semanticPageId === "detail-page")!.pageGuid;
     const result = compileNativeActions({ normalized: normalizeActionGraph(data) });
-    expect(result.actions[0]).toMatchObject({ kind: "navigate-page", targetPageGuid });
+    expect(result.actions[0]).toMatchObject({
+      kind: "navigate-page",
+      targetPageGuid,
+      targetPageName: "detail-page",
+    });
   });
 
   it("allows a reviewed Datagrid event to trigger reviewed navigation", async () => {
@@ -173,10 +177,18 @@ describe("compileNativeActions", () => {
       expect.objectContaining({
         kind: "close-overlay", ownerSemanticControlId: "close-overlay-button", ownerInstanceName: "Button2",
         targetSemanticControlId: "contact-overlay-root", targetInstanceName: "Layout2",
+        targetControls: [
+          { semanticControlId: "contact-overlay-root", instanceName: "Layout2" },
+          { semanticControlId: "close-overlay-button", instanceName: "Button2" },
+        ],
       }),
       expect.objectContaining({
         kind: "open-overlay", ownerSemanticControlId: "go", ownerInstanceName: "Button1",
         targetSemanticControlId: "contact-overlay-root", targetInstanceName: "Layout2",
+        targetControls: [
+          { semanticControlId: "contact-overlay-root", instanceName: "Layout2" },
+          { semanticControlId: "close-overlay-button", instanceName: "Button2" },
+        ],
       }),
     ]);
   });
@@ -207,6 +219,7 @@ describe("compileNativeActions", () => {
     expect(result.actions).toEqual([{
       id: "kf$action:navigate", sourceActionId: "navigate", ownerInstanceName: "Button1", kind: "navigate-page",
       targetPageGuid: "00000000-0000-4000-8000-000000000002",
+      targetPageName: "detail-page",
     }]);
     expect(result.bindings).toEqual([{
       id: "kf$binding:navigate", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001, phase: "event",
@@ -233,6 +246,7 @@ describe("compileNativeActions", () => {
     expect(result.actions).toEqual([{
       id: "kf$action:navigate", sourceActionId: "navigate", ownerInstanceName: "Button1", kind: "navigate-page",
       targetPageGuid: "00000000-0000-4000-8000-000000000002",
+      targetPageName: "detail-page",
     }]);
     expect(result.bindings).toEqual([{
       id: "kf$binding:navigate", ownerInstanceName: "Button1", kfEvent: "Click", phase: "event",
@@ -354,14 +368,19 @@ describe("compileNativeActions", () => {
     }
   });
 
-  it("preserves the existing restricted navigatePage and setVariable serialization", () => {
+  it("serializes legacy restricted navigation with the KF ShowPage runtime API", () => {
     const context = {
       variableGroupGuid: "variables",
       pageGroupGuid: "pages",
       resolvePageGuid: (id: string) => `guid-${id}`,
       resolveVariableName: (id: string) => id,
     };
-    expect(compileAction({ kind: "navigate", pageId: "detail" }, context)).toEqual({ action: "navigatePage", pageId: "guid-detail" });
+    expect(compileAction({ kind: "navigate", pageId: "detail" }, context)).toEqual({
+      linkId: 200001,
+      enable: true,
+      name: "onClick",
+      script: 'ShowPage("detail",1);',
+    });
     expect(compileAction({ kind: "setVariable", variableId: "selected", value: 7 }, context)).toEqual({ action: "setVariable", variableId: "selected", value: 7 });
   });
 

@@ -1,18 +1,7 @@
 import { z } from "zod";
 
 /**
- * The intents the model can classify a user turn into (brief Step 4).
- * Deterministic routing switches exclusively on these values; the graph never
- * guesses a route. Unsupported-domain requests keep a supported intent
- * (NEW_REQUIREMENT / MODIFY_REQUIREMENT) but are diverted to pendingRequirements
- * by the classify node when no requested domain is supported. CLARIFY means the
- * model needs more information before it can pick a route. CONFIRM_DESIGN and
- * REVISE_DESIGN drive the design-plan loop (design-review): the user confirms
- * the presented design plan (→ plan-change) or asks for a revision (→ design-plan
- * again with revising=true). CONFIRM_BUILD lands the preview-review loop
- * (Task 9): after the build enqueues and a preview is available, confirming the
- * result routes to the terminal `done` stage; REVISE_DESIGN / MODIFY_REQUIREMENT
- * in the preview-review stage loop back to design-plan / plan-change.
+ * 模型可以将用户轮次分类为以下意图（简要步骤 4）。确定性路由只依据这些值进行切换；图绝不会猜测路由。不受支持的域请求仍保留受支持的意图（NEW_REQUIREMENT / MODIFY_REQUIREMENT），但当请求的域都不受支持时，classify 节点会将其转入 pendingRequirements。CLARIFY 表示模型需要更多信息才能选择路由。CONFIRM_DESIGN 和 REVISE_DESIGN 驱动 design-plan 循环（design-review）：用户可以确认展示的设计计划（→ plan-change），也可以要求修订（→ design-plan，并设置 revising=true）。CONFIRM_BUILD 对应 preview-review 循环（任务 9）：构建入队且预览可用后，确认结果会路由到终态 `done`；preview-review 阶段中的 REVISE_DESIGN / MODIFY_REQUIREMENT 会分别回到 design-plan / plan-change。
  */
 export const IntentSchema = z.enum([
   "QUESTION",
@@ -32,12 +21,7 @@ export type Intent = z.infer<typeof IntentSchema>;
 export const intentValues = IntentSchema.options;
 
 /**
- * Runtime gate for `ModelPort.classifyIntent` output (I1). Mirrors the plan
- * gate in plan-change: a real LLM (Phase 3) can emit garbage and the graph
- * must reject it before any state side effect, never routing on an invented
- * intent value. Cross-validation via superRefine guards against fake
- * clarifications: intent=CLARIFY must carry a clarifyingQuestion, and a
- * clarifyingQuestion is only allowed when intent=CLARIFY.
+ * 针对 `ModelPort.classifyIntent` 输出的运行时校验关卡（I1）。它与 plan-change 中的方案校验关卡相对应：真实 LLM（阶段 3）可能输出无效内容，图必须在产生任何状态副作用之前将其拒绝，绝不能依据虚构的意图值进行路由。通过 superRefine 进行交叉校验，以防止虚假澄清：intent=CLARIFY 时必须携带 clarifyingQuestion，并且只有 intent=CLARIFY 时才允许出现 clarifyingQuestion。
  */
 export const ClassifyIntentResultSchema = z
   .object({

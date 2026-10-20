@@ -5,19 +5,17 @@ import { deriveGuid, type BuildSeed } from "./guid-factory.js";
 import { compileControl, ModelOutputInvalidError, type CompileContext } from "./control-compiler.js";
 
 /**
- * Per-page compilation (brief Step 5).
+ * 逐页面编译（简要步骤 5）。
  *
- * Starts from the REVIEWED `page-skeleton.json` (deep-cloned), applies only
- * schema-approved overrides (guid, page name, page size, objects, prototype),
- * and produces both the page JSON and its pageManager entry.
+ * 从已审查的 `page-skeleton.json` 开始（深拷贝），只应用 schema 批准的覆盖项（guid、页面名称、页面尺寸、objects、prototype），并同时生成页面 JSON 和对应的 pageManager 条目。
  */
 
-/** Fallback page size when the IR omits width/height (page-skeleton default). */
+/** 当IR不提供宽度/高度时，页面大小的备用页面大小。 */
 export const SKELETON_DEFAULT_WIDTH = 1280;
 export const SKELETON_DEFAULT_HEIGHT = 720;
 
 export interface CompiledPage {
-  /** KF file name for the page under `project/page/` (e.g. `Page1.json`). */
+  /** 项目中`project/page/`下的页面文件名（例如，`Page1.json`）。 */
   fileName: string;
   pageGuid: string;
   width: number;

@@ -370,7 +370,7 @@ describe("portal module definitions", () => {
     const pageObjects = (page["objects"] as unknown[]).map(record);
     const primaryAction = pageObjects.find((entry) => controlName(entry) === "portal-hero/primary-action");
     if (primaryAction === undefined) throw new Error("missing hero action");
-    expect(primaryAction["linkMng"]).toEqual({ linkList: [{ action: "navigatePage", pageId: "page-guid-1" }] });
+    expect(primaryAction["linkMng"]).toEqual({ linkList: [{ linkId: 200001, enable: true, name: "onClick", script: 'ShowPage("Page1",1);' }] });
     expect(primaryAction["script"]).toBeUndefined();
     expect(Object.keys(record(primaryAction["linkMng"]))).toEqual(["linkList"]);
     expect(pageObjects.find((entry) => controlName(entry) === "portal-portfolio/card-1-title")).toBeDefined();
@@ -412,8 +412,8 @@ describe("portal module definitions", () => {
     const contact = controls.find((entry) => controlName(entry) === "portal-navigation/nav-2");
     if (projects === undefined || contact === undefined) throw new Error("missing flattened navigation controls");
     expect(controlName(projects)).not.toBe(controlName(contact));
-    expect(projects["linkMng"]).toEqual({ linkList: [{ action: "navigatePage", pageId: "page-guid-projects" }] });
-    expect(contact["linkMng"]).toEqual({ linkList: [{ action: "navigatePage", pageId: "page-guid-contact" }] });
+    expect(projects["linkMng"]).toEqual({ linkList: [{ linkId: 200001, enable: true, name: "onClick", script: 'ShowPage("Projects",1);' }] });
+    expect(contact["linkMng"]).toEqual({ linkList: [{ linkId: 200001, enable: true, name: "onClick", script: 'ShowPage("Contact",1);' }] });
     for (const button of [projects, contact]) {
       expect(button["script"]).toBeUndefined();
       expect(Object.keys(record(button["linkMng"]))).toEqual(["linkList"]);
@@ -473,7 +473,7 @@ describe("portal module definitions", () => {
     const matched = controls.find((entry) => controlName(entry) === "portal-navigation/nav-1");
     if (matched === undefined) throw new Error("missing flattened navigation control nav-1");
     expect(matched["linkMng"])
-      .toEqual({ linkList: [{ action: "navigatePage", pageId: "page-guid-projects" }] });
+      .toEqual({ linkList: [{ linkId: 200001, enable: true, name: "onClick", script: 'ShowPage("Projects",1);' }] });
     const unmatched = controls.find((entry) => controlName(entry) === "portal-navigation/nav-2");
     if (unmatched === undefined) throw new Error("missing flattened navigation control nav-2");
     expect(unmatched["linkMng"]).toEqual({ linkList: [] });

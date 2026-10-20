@@ -29,7 +29,7 @@ export interface EvaluateModuleDeliveryInput {
   readonly gaps: readonly ModuleDeliveryGap[];
   readonly registry: ModuleRegistry;
   readonly assetsById: Readonly<Record<string, ResolvedAsset>>;
-  /** Trusted conversion-boundary provenance; plan declarations cannot authorize coverage. */
+  /** 可信的转换边界来源证明；计划声明不能授权覆盖范围。 */
   readonly metadata: ModuleCompilationMetadata;
 }
 

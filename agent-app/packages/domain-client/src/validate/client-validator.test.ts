@@ -380,7 +380,7 @@ describe("client validator (Task 7 brief Step 2)", () => {
       }],
     });
     expect((compiledButton.linkMng as { linkList: Array<Record<string, unknown>> }).linkList)
-      .toContainEqual({ action: "navigatePage", pageId: pageGuid });
+      .toContainEqual({ linkId: 200001, enable: true, name: "onClick", script: 'ShowPage("home",1);' });
     expect(compiledDatagrid).toMatchObject({ name: datagridName, objectType: 3, uiExtendType: 1 });
     expect((compiledDatagrid.linkMng as { linkList: Array<Record<string, unknown>> }).linkList)
       .toEqual(expect.arrayContaining([expect.objectContaining({ name: "onClickRow", linkId: 200024, enable: true })]));

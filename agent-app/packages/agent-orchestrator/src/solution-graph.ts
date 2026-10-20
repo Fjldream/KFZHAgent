@@ -24,9 +24,7 @@ import { hasCurrentDesignPlanVersion } from "./design-plan-version.js";
 import { decodeBlueprintConfirmation } from "./blueprint-message.js";
 
 /**
- * Thrown when the caller tries to run a conversation that is paused at the
- * approval interrupt with an input that is not a resume command. The pending
- * approval stays intact and resumable (see I2).
+ * 当调用者尝试运行一个处于批准中断状态的会话，且输入的不是恢复命令时，会抛出异常。正在等待的批准保持完整且可恢复（见I2）。
  */
 export class ApprovalResumeRequiredError extends Error {
   override name = "ApprovalResumeRequiredError";

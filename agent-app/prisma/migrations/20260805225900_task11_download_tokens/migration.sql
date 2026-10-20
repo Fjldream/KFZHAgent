@@ -1,13 +1,11 @@
--- Task 11: HTTP/SSE API, upload, confirmation, and download.
--- - Conversation.summary: rolling conversation summary written by the agent
---   graph's load-context node (persisted across requests).
--- - DownloadToken: short-lived single-use artifact download tokens. Only the
---   SHA-256 hash of each token is stored; plaintext tokens are returned once.
+-- 任务 11：HTTP/SSE API、上传、确认和下载。
+-- - Conversation.summary：由 Agent 图的 load-context 节点写入的滚动会话摘要（跨请求持久化）。
+-- - DownloadToken：短期、一次性的制品下载令牌。每个令牌只存储 SHA-256 哈希；明文令牌只返回一次。
 
--- AlterTable
+-- 修改表
 ALTER TABLE "Conversation" ADD COLUMN "summary" TEXT;
 
--- CreateTable
+-- 创建表
 CREATE TABLE "DownloadToken" (
     "id" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
@@ -21,8 +19,8 @@ CREATE TABLE "DownloadToken" (
     CONSTRAINT "DownloadToken_pkey" PRIMARY KEY ("id")
 );
 
--- CreateIndex
+-- 创建索引
 CREATE UNIQUE INDEX "DownloadToken_tokenHash_key" ON "DownloadToken"("tokenHash");
 
--- CreateIndex
+-- 创建索引
 CREATE INDEX "DownloadToken_tenantId_expiresAt_idx" ON "DownloadToken"("tenantId", "expiresAt");

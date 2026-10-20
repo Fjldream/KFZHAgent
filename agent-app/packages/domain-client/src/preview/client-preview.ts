@@ -11,14 +11,13 @@ import { assertStyleCompilationAccepted, compileControlStyle } from "../style/st
 import { resolveComponentStyle } from "../style/theme-resolver.js";
 
 /**
- * Sanitized, self-contained HTML preview (brief Step 7).
+ * 经过净化、完全自包含的 HTML 预览（简要步骤 7）。
  *
- * Security invariants:
- * - EVERY text value is HTML-escaped (no raw `& < > " '` reaches the markup).
- * - NO `<script>` tag is ever emitted; the preview is inert by construction.
- * - NO remote assets: no img/src/href, no external stylesheets or fonts.
- * - A Content-Security-Policy meta tag (suitable for iframe srcdoc) hardens the
- *   document: `default-src 'none'; img-src data:; style-src 'unsafe-inline'`.
+ * 安全不变量：
+ * - 每个文本值都会进行 HTML 转义（原始 `& < > " '` 绝不会进入标记）。
+ * - 绝不生成 `<script>` 标签；预览在结构上保持惰性。
+ * - 不使用远程资产：没有 img/src/href，也没有外部样式表或字体。
+ * - 使用适合 iframe srcdoc 的 Content-Security-Policy meta 标签强化文档：`default-src 'none'; img-src data:; style-src 'unsafe-inline'`。
  */
 
 const DEFAULT_PAGE_WIDTH = 1280;

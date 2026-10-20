@@ -1,7 +1,4 @@
--- Source packages are ZIP containers. Early metadata rows inherited the
--- legacy gzip extension default even though their media type was already ZIP.
--- Correct only that explicit combination so built client-package history is
--- untouched.
+-- 源包是ZIP容器。早期的元数据行继承了遗留的gzip扩展默认值，尽管它们的媒体类型已经是ZIP。只正确了那个明确的组合，这样客户端包的历史记录是不受影响的。
 
 UPDATE "DomainProjectRevision"
 SET "fileExtension" = '.zip'

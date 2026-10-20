@@ -1,5 +1,4 @@
--- Creative-v2 delivery binding. Nullable columns preserve every existing
--- legacy/module artifact without silently classifying or migrating it.
+-- Creative-v2 交付绑定。可空列会保留所有现有旧版/模块制品，不会对其进行静默分类或迁移。
 ALTER TABLE "Artifact"
 ADD COLUMN "solutionRevisionId" TEXT,
 ADD COLUMN "creativeArtifactHash" TEXT,

@@ -7,11 +7,12 @@ export interface BlueprintRegionQuery {
   readonly dataShape: string;
   readonly density: "compact" | "comfortable" | "spacious";
   readonly purpose: string;
+  readonly content: readonly string[];
   readonly interactions: readonly string[];
   readonly visualIntent: string;
 }
 
-/** Extracts the bounded customer semantics used by local capability retrieval. */
+/** 从本地能力检索中提取的受限制的客户语义。 */
 export function buildBlueprintRegionQueries(
   blueprint: CustomerSolutionBlueprint,
 ): readonly BlueprintRegionQuery[] {
@@ -23,6 +24,7 @@ export function buildBlueprintRegionQueries(
       dataShape: region.dataShape,
       density: region.density,
       purpose: region.purpose,
+      content: Object.freeze([...region.content]),
       interactions: Object.freeze([...region.interactions]),
       visualIntent: region.visualIntent,
     })),

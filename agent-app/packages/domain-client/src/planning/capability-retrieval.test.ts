@@ -144,6 +144,7 @@ describe("blueprint region query extraction", () => {
       dataShape: "media-list",
       density: "comfortable",
       purpose: "图片主导的作品展示和案例集合",
+      content: ["项目图片", "项目标题", "案例摘要", "查看详情"],
       interactions: [],
       visualIntent: "强调媒体叙事、作品层次和舒适留白",
     }]);
@@ -267,12 +268,16 @@ describe("deterministic capability retrieval", () => {
     expect(bundle.regions[0]!.controls.map((candidate) => candidate.id)).not.toContain("image");
   });
 
-  it("blocks instead of padding a region when required interactions lack three supported controls", () => {
+  it("keeps interaction-capable controls together with justified content companions", () => {
     for (const interaction of ["change", "open-dialog", "click"]) {
       const blueprint = structuredClone(portfolioBlueprint);
       blueprint.pages[0]!.regions[0]!.interactions = [interaction];
-      expect(() => retrieveCapabilities({ blueprint, knowledge: getDesignKnowledgeSnapshot() }), interaction)
-        .toThrow("CAPABILITY_RETRIEVAL_BLOCKED");
+      const bundle = retrieveCapabilities({ blueprint, knowledge: getDesignKnowledgeSnapshot() });
+      expect(bundle.regions[0]!.controls.map((candidate) => candidate.id), interaction).toEqual(
+        expect.arrayContaining(["image", "text"]),
+      );
+      expect(bundle.regions[0]!.controls.length, interaction).toBeLessThanOrEqual(5);
+      expect(CapabilityCandidateBundleSchema.safeParse(bundle).success, interaction).toBe(true);
     }
   });
 
@@ -282,20 +287,40 @@ describe("deterministic capability retrieval", () => {
     "切换标签页",
     "打开和关闭对话框",
     "选择并更改审核状态",
-  ])("normalizes a natural Chinese interaction and fails closed when three supported controls do not exist: %s", (interaction) => {
+  ])("normalizes a natural Chinese interaction while retaining content controls: %s", (interaction) => {
     const blueprint = structuredClone(portfolioBlueprint);
     blueprint.pages[0]!.regions[0]!.interactions = [interaction];
 
-    expect(() => retrieveCapabilities({ blueprint, knowledge: getDesignKnowledgeSnapshot() }))
-      .toThrow("CAPABILITY_RETRIEVAL_BLOCKED");
+    const bundle = retrieveCapabilities({ blueprint, knowledge: getDesignKnowledgeSnapshot() });
+    expect(bundle.regions[0]!.controls.map((candidate) => candidate.id)).toEqual(
+      expect.arrayContaining(["image", "text"]),
+    );
+    expect(bundle.regions[0]!.controls.length).toBeLessThanOrEqual(5);
+    expect(CapabilityCandidateBundleSchema.safeParse(bundle).success).toBe(true);
   });
 
-  it("does not return technically inert candidates for 点击记录查看详情", () => {
+  it("returns the reviewed click control plus the region's content controls for 点击记录查看详情", () => {
     const blueprint = structuredClone(portfolioBlueprint);
     blueprint.pages[0]!.regions[0]!.interactions = ["点击记录查看详情"];
 
-    expect(() => retrieveCapabilities({ blueprint, knowledge: getDesignKnowledgeSnapshot() }))
-      .toThrow("CAPABILITY_RETRIEVAL_BLOCKED");
+    const bundle = retrieveCapabilities({ blueprint, knowledge: getDesignKnowledgeSnapshot() });
+    expect(bundle.regions[0]!.controls.map((candidate) => candidate.id)).toEqual(
+      expect.arrayContaining(["button", "image", "text"]),
+    );
+  });
+
+  it("uses complementary controls to cover a compound tab and filter interaction", () => {
+    const blueprint = structuredClone(portfolioBlueprint);
+    blueprint.pages[0]!.regions[0]!.interactions = [
+      "点击标签筛选项目列表",
+      "选择排序方式重新排序",
+    ];
+
+    const bundle = retrieveCapabilities({ blueprint, knowledge: getDesignKnowledgeSnapshot() });
+    expect(bundle.regions[0]!.controls.map((candidate) => candidate.id)).toEqual(
+      expect.arrayContaining(["checkbox", "image", "tabs", "text"]),
+    );
+    expect(bundle.regions[0]!.controls).toHaveLength(5);
   });
 
   it("keeps every one of 96 regions bounded under the global detail budget", () => {
@@ -364,7 +389,7 @@ describe("solution plan candidate validation", () => {
     plan.pages[0]!.sourceBlueprintPageId = "wrong-page";
 
     expect(() => assertSolutionPlanUsesCandidates(plan, bundle)).toThrow(
-      "control portfolio-control: capability image is not a candidate for page-regions [wrong-page/selected-work]",
+      `control portfolio-control: capability ${bundle.regions[0]!.controls[0]!.id} is not a candidate for page-regions [wrong-page/selected-work]`,
     );
   });
 

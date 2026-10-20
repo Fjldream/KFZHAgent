@@ -108,15 +108,13 @@ const CUSTOMER_ERROR_CODES = new Set([
 ]);
 
 /**
- * Conversation workflow service. Exposes the LangGraph solution workflow
- * behind the HTTP layer:
- *   - POST messages runs a turn with conversationId as thread_id and streams
- *     graph state updates over SSE,
- *   - POST resume resumes a paused approval with Command({ resume }),
- *   - while an approval is pending, plain messages are rejected with
- *     ApprovalResumeRequiredError (the graph guard already enforces this; the
- *     service checks before persisting the user message so no orphan message
- *     is written).
+ * 会话工作流服务。通过HTTP层暴露LangGraph解决方案的工作流
+ *
+ * - POST消息运行一个会话，将conversationId作为线程ID，并通过SSE流式传输图状态更新
+ *
+ * - POST恢复恢复一个暂停的批准，使用Command({ resume })
+ *
+ * - 当批准正在等待时，普通消息被拒绝，以ApprovalResumeRequiredError，因为图锁已经强制执行了这一点；服务在持久化用户消息之前检查这一点，因此不会写入孤儿消息。
  */
 @Injectable()
 export class ConversationService {
@@ -196,12 +194,8 @@ export class ConversationService {
   }
 
   /**
-   * Starts a message turn. Persists the user message only after confirming no
-   * approval interrupt is pending, then returns a generator of SSE events
-   * (graph state updates + a final `done` event). Throws
-   * ApprovalResumeRequiredError before any stream starts when the thread is
-   * paused.
-   */
+ * 开始一个消息轮次。仅在确认没有批准中断在等待时，才保存用户消息，然后返回一个 SSE 事件生成器（图状态更新 + 一个`done` 事件）。在流开始之前，抛出ApprovalResumeRequiredError 之前，任何流开始时。当线程被暂停时。
+ */
   async startTurn(
     principal: SessionPrincipalLike,
     conversationId: string,
@@ -216,9 +210,8 @@ export class ConversationService {
     const config = threadConfig(conversationId);
     const lease = await this.turnLeases.acquire(conversationId);
     try {
-      // The lock-internal re-check and complete stream guarantee a later turn
-      // observes the winner's committed checkpoint. Contenders fail fast at
-      // the dedicated lease boundary instead of consuming checkpoint clients.
+      // 锁内部重检查和完全流保证在之后的轮次
+      // 遵守获胜者的承诺检查点。竞标者在专用租约边界处失败，而不是消耗检查点客户端。
       const snapshot = (await graph.getState(config)) as unknown as StateSnapshotLike;
       if (hasPendingInterrupt(snapshot)) {
         throw new ApprovalResumeRequiredError(conversationId);
@@ -266,19 +259,12 @@ export class ConversationService {
   }
 
   /**
-   * Resumes a pending approval. Accepts approve/revise/cancel plus the exact
-   * planHash the user was shown.
-   *
-   * Safety (I1): a resume is only meaningful while an approval interrupt is
-   * actually pending. Every graph entry uses the same durable turn lease as a
-   * normal message, so the pending/hash check, graph drain, final checkpoint,
-   * and audit transaction have one cross-instance writer boundary.
-   *
-   * A planHash mismatch is surfaced as a 409 conflict with
-   * PLAN_HASH_MISMATCH (graph returns to idle with no side effects). Graph
-   * execution failures are surfaced as structured 409 GRAPH_ERROR responses
-   * (mirrors the SSE `error` event on the messages endpoint).
-   */
+ * 恢复待处理的审批。接受 approve/revise/cancel 操作以及向用户展示的确切 planHash。
+ *
+ * 安全性（I1）：只有确实存在待处理的审批中断时，恢复才有意义。每个图入口都使用与普通消息相同的持久轮次租约，因此待处理状态/哈希检查、图执行排空、最终检查点和审计事务共用一个跨实例写入边界。
+ *
+ * planHash 不匹配时返回带 PLAN_HASH_MISMATCH 的 409 冲突（图返回 idle 且不产生副作用）。图执行失败时返回结构化的 409 GRAPH_ERROR 响应（与消息端点的 SSE `error` 事件一致）。
+ */
   async resume(
     principal: SessionPrincipalLike,
     conversationId: string,
@@ -301,8 +287,7 @@ export class ConversationService {
     try {
       const result = await this.prisma.$transaction(
         async (tx) => {
-        // Lease-internal re-check: every graph entry observes the prior
-        // writer's committed checkpoint before it can enter the graph.
+        // 租赁内部检查：每个图条目在进入图之前必须观察到其前一个写入者的已提交快照。
         const snapshot = (await graph.getState(config)) as unknown as StateSnapshotLike;
         if (!hasPendingInterrupt(snapshot)) {
           throw new ConflictException(
@@ -322,7 +307,7 @@ export class ConversationService {
           )) as AsyncGenerator<unknown>;
           for await (const chunk of stream) {
             void chunk;
-            // Drain the run; the final checkpoint holds the outcome.
+            // 清空运行；最终检查点保存结果。
           }
           final = (await graph.getState(config)) as unknown as StateSnapshotLike;
         } catch {
@@ -356,8 +341,7 @@ export class ConversationService {
         if (interrupt !== undefined) result.interrupt = interrupt;
         if (values.buildJobId !== undefined) result.buildJobId = values.buildJobId;
 
-        // Audit rows share the lock transaction: they commit together with
-        // the lock release, so a loser can never write them.
+        // 审计行共享事务锁定：它们与锁定释放一起提交，因此，失败者永远无法写入它们。
         const detail = { planHash, workspaceId: conversation.workspaceId };
         const changePlanId =
           typeof values.changePlanId === "string" ? values.changePlanId : undefined;
@@ -417,8 +401,7 @@ export class ConversationService {
         }
         return result;
         },
-        // The graph resume is fast (no LLM call), but keep a generous bound so
-        // a stalled checkpoint write cannot pin the durable turn lease forever.
+        // 图层恢复是快速的 (没有 LLM 调用)，但保持一个宽裕的边界，以防止一个停滞的检查点写入永远无法永久锁定持久性转租。
         { timeout: 30_000 },
       );
       await lease.dispose();
@@ -524,7 +507,7 @@ function isTechnicalAssistantPayload(content: string): boolean {
   for (const candidate of jsonCandidates(content)) {
     try {
       if (isTechnicalJson(JSON.parse(candidate))) return true;
-    } catch { /* prose or incomplete JSON remains normal customer content */ }
+    } catch { /* prose 或不完整的 JSON 保持正常客户内容 */ }
   }
   return false;
 }

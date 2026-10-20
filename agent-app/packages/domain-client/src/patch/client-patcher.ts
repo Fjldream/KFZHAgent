@@ -130,24 +130,19 @@ import {
 } from "./change-scope.js";
 
 /**
- * Lossless client patcher (brief Step 4).
+ * 无损客户端 patcher（简要步骤 4）。
  *
- * `applyClientPatch(base, plan)` copies the base workspace tree and applies a
- * confirmed ChangePlan field-by-field on the copy:
- * - update patches JSON-pointer paths that are allowlisted per entity type;
- *   unknown/future fields are never touched,
- * - create compiles a complete entity from the reviewed templates and derives
- *   its KF GUID deterministically from the plan's workspace id,
- * - delete removes an entity but only when destructiveConfirmed=true and the
- *   operation digest matches the operation content.
+ * `applyClientPatch(base, plan)` 会复制基础工作空间树，并在副本上逐字段应用已确认的 ChangePlan：
+ * - update 修补按实体类型列入允许列表的 JSON Pointer 路径；绝不触碰未知或未来字段；
+ * - create 根据已审查的模板编译完整实体，并依据计划的 workspace ID 确定性派生其 KF GUID；
+ * - delete 只在 destructiveConfirmed=true 且操作摘要与操作内容匹配时删除实体。
  *
- * The returned candidate is a full, unpackable ClientWorkspace; nothing is
- * written back into `base`.
+ * 返回的候选项是完整、可解包的 ClientWorkspace；不会向 `base` 写回任何内容。
  */
 
 // ---------------------------------------------------------------------------
-// Normalization (contract shape from @kf/contracts; tolerates the brief's
-// `action` alias for `op` and an optional `entityType` hint on update/delete)
+// 规范化（从 @kf/contracts 中抽取合同形状；容忍简短的
+// `action` 作为 `op` 的别名，以及一个可选的 `entityType` 提示，用于更新/删除）
 // ---------------------------------------------------------------------------
 
 export interface NormalizedOperation {
@@ -737,6 +732,8 @@ export interface ApplyPatchOptions {
   assets?: readonly DomainAssetInput[];
   /** Opaque handle emitted only after the complete creative envelope passes HMAC verification. */
   creativeMaterialization?: VerifiedCreativeMaterialization;
+  /** True only when the base was compiled from a new generative revision, never for an imported package. */
+  replaceGenerativeBootstrap?: boolean;
   /** Counting-only observer for bounded creative page batching tests. */
   creativeInstrumentation?: CreativePageInstrumentation;
 }
@@ -2071,6 +2068,51 @@ function pageSizeInto(page: Record<string, unknown>, width: number, height: numb
   pageProperty["windowSize"] = { width, height };
 }
 
+function emptyGenerativeBootstrapPage(inspection: InspectResult): {
+  readonly guid: string;
+  readonly file: string;
+} | undefined {
+  if (inspection.summary.pageCount !== 1) return undefined;
+  const page = inspection.summary.pages[0];
+  if (page === undefined || page.name !== "Page1" || page.width !== 1440 || page.height !== 900
+    || page.controlCount !== 0) return undefined;
+  const manager = asRecord(inspection.raw.pageManager);
+  if (manager["default"] !== "Page1" || manager["appHomePage"] !== "Page1") return undefined;
+  const indexed = inspection.index.pages[page.guid];
+  return indexed === undefined ? undefined : { guid: page.guid, file: indexed.file };
+}
+
+async function replaceGenerativeBootstrapPage(input: {
+  readonly candidate: string;
+  readonly versionDir: string;
+  readonly bootstrap: { readonly guid: string; readonly file: string };
+  readonly manager: Record<string, unknown>;
+  readonly managerPages: Array<Record<string, unknown>>;
+  readonly generatedPages: readonly { readonly pageGuid: string; readonly semanticPageId: string }[];
+  readonly homeSemanticPageId?: string;
+}): Promise<void> {
+  const home = input.generatedPages.find((page) => page.semanticPageId === input.homeSemanticPageId)
+    ?? input.generatedPages.find((page) => page.semanticPageId.toLocaleLowerCase("en-US") === "home")
+    ?? input.generatedPages[0];
+  if (home === undefined) return;
+  const bootstrapIndex = input.managerPages.findIndex((page) => page["id"] === input.bootstrap.guid);
+  if (bootstrapIndex < 0) throw new PatchConflictError("generative bootstrap page manager entry is missing");
+  input.managerPages.splice(bootstrapIndex, 1);
+  input.manager["default"] = home.semanticPageId;
+  input.manager["appHomePage"] = home.semanticPageId;
+  await rm(filePath(input.candidate, input.versionDir, input.bootstrap.file));
+
+  const pageGuids = input.managerPages.flatMap((page) => typeof page["id"] === "string" ? [page["id"]] : []);
+  const pageGroup = await readJsonFile(input.candidate, input.versionDir, "project/pageGroupManager.json");
+  const groups = asRecord(pageGroup["Groups"]);
+  groups["pages"] = pageGuids;
+  await writeJsonFile(input.candidate, input.versionDir, "project/pageGroupManager.json", pageGroup);
+
+  const diffusion = await readJsonFile(input.candidate, input.versionDir, "project/diffusionManager.json");
+  diffusion["page"] = Object.fromEntries(pageGuids.map((guid) => [guid, []]));
+  await writeJsonFile(input.candidate, input.versionDir, "project/diffusionManager.json", diffusion);
+}
+
 async function applyVerifiedCreativePatch(
   base: string,
   input: unknown,
@@ -2089,6 +2131,9 @@ async function applyVerifiedCreativePatch(
   const normalizedPlan = normalizeChangePlan(verified.plan);
   const versionDir = await resolveVersionDirName(base);
   const baseInspection = await inspectClientProject(base);
+  const bootstrap = options.replaceGenerativeBootstrap === true
+    ? emptyGenerativeBootstrapPage(baseInspection)
+    : undefined;
   const candidate = await mkdtemp(path.join(options.workRoot ?? tmpdir(), "kf-client-candidate-"));
   try {
     await cp(base, candidate, { recursive: true });
@@ -2185,6 +2230,17 @@ async function applyVerifiedCreativePatch(
         securitySection: "", user: "admin", resourceGroup: "", resourceGroupMsg: "",
       });
     }
+    if (bootstrap !== undefined) {
+      const generatedPages = materialization.pages.filter((page) => page.source === "workspace-derived");
+      await replaceGenerativeBootstrapPage({
+        candidate, versionDir, bootstrap, manager, managerPages, generatedPages,
+        ...(artifact.semanticPlan.pages[0]?.id === undefined ? {} : {
+          homeSemanticPageId: artifact.semanticPlan.pages[0].id,
+        }),
+      });
+      delete pageIndexEntries[bootstrap.guid];
+      existingPageNames.delete("Page1");
+    }
     await writeJsonFile(candidate, versionDir, "project/pageManager.json", manager);
 
     // Signed pages and the one DFS runtime indexes above replace a whole-project
@@ -2265,6 +2321,38 @@ async function applyVerifiedCreativePatch(
       }
     }
 
+    // KF 3.6 does not cascade a layout host's runtime visibility to every
+    // independently materialized child control. Hide the complete overlay
+    // subtree at rest so no button/input leaks before the first open action.
+    const belongsToOverlay = (candidate: (typeof materialization.controls)[number], hostId: string): boolean => {
+      let current: (typeof materialization.controls)[number] | undefined = candidate;
+      const visited = new Set<string>();
+      while (current !== undefined && !visited.has(current.semanticControlId)) {
+        if (current.semanticControlId === hostId) return true;
+        visited.add(current.semanticControlId);
+        current = current.parentSemanticControlId === undefined
+          ? undefined
+          : controlBySemantic.get(current.parentSemanticControlId);
+      }
+      return false;
+    };
+    for (const host of materialization.controls.filter((control) => control.overlayHost?.initiallyVisible === false)) {
+      const page = pageBatches.get(host.pageGuid);
+      if (page === undefined) throw new PatchConflictError(`creative overlay page missing: ${host.semanticControlId}`);
+      for (const target of materialization.controls.filter((control) =>
+        control.pageGuid === host.pageGuid && belongsToOverlay(control, host.semanticControlId))) {
+        const native = page.byName.get(target.instanceName)?.root;
+        if (native === undefined) throw new PatchConflictError(`creative overlay subtree runtime control missing: ${target.semanticControlId}`);
+        if (target.capabilityId.startsWith("layout.")) {
+          asRecord(native["baseProperty"])["visible"] = false;
+        } else {
+          native["visible"] = false;
+          native["runVisible"] = false;
+        }
+        page.modified = true;
+      }
+    }
+
     // Stage 4: exact allowlisted existing deltas, then authoritative style/data.
     for (const control of materialization.controls.filter((value) => value.source === "uploaded-existing")) {
       const baseEntry = control.nativeGuid === undefined ? undefined : baseInspection.index.controls[control.nativeGuid];
@@ -2319,7 +2407,20 @@ async function applyVerifiedCreativePatch(
       }
       for (const [field, value] of Object.entries(style.compiledStyle.nativeFields)) ref.root[field] = structuredClone(value);
       if (compiled.styleDataNew !== "") ref.root["styleDataNew"] = mergeManagedStyleData(ref.root["styleDataNew"], compiled.styleDataNew);
-      if (style.dataBinding?.records !== undefined) ref.root["data"] = structuredClone(style.dataBinding.records);
+      if (style.dataBinding?.records !== undefined) {
+        const records = structuredClone(style.dataBinding.records);
+        ref.root["data"] = records;
+        if (control.capabilityId === "easyui.1") {
+          const existingColumns = Array.isArray(ref.root["columns"]) && Array.isArray(ref.root["columns"][0])
+            ? structuredClone(ref.root["columns"])
+            : [Object.keys(records[0] ?? {}).map((field) => ({ field, title: field, width: 160, align: "left" }))];
+          ref.root["columns"] = existingColumns;
+          // KF 3.6's KMUIExtDatagrid runtime deliberately installs a demo
+          // column set in jsonToObject; real product pages replace it through
+          // configureData. Emit the same product-proven initialization form.
+          ref.root["configureData"] = `$('#' + id).datagrid(${JSON.stringify({ columns: existingColumns, data: records })});\n`;
+        }
+      }
       page.modified = true;
     }
 

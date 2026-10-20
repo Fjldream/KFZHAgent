@@ -8,7 +8,7 @@ import {
 } from "../conversations/server-plan-authority.js";
 import { DeliverySnapshotService } from "./delivery-snapshot.service.js";
 
-/** Shared persisted delivery authority used by conversations and artifact routes. */
+/** 由会话路由与制品路由共用的持久化交付权限主体。 */
 @Module({
   providers: [
     DeliverySnapshotService,

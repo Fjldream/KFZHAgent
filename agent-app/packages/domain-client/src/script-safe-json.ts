@@ -1,4 +1,4 @@
-/** JSON text safe to embed directly in ECMAScript source. */
+/** 直接嵌入到ECMAScript源代码中的JSON文本安全 */
 export function stringifyScriptSafeJson(value: unknown): string | undefined {
   const serialized = JSON.stringify(value);
   return serialized

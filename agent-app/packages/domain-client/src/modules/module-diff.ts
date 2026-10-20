@@ -8,11 +8,11 @@ export interface UnexpectedModuleChange {
 }
 
 export interface ModulePlanDiff {
-  /** Modules whose declaration changed, was added, or was removed. */
+  /** 声明更改、添加或移除的模块。 */
   readonly changedModules: readonly string[];
-  /** Modules with identical declarations in both revisions. */
+  /** 在两个修订中具有相同声明的模块。 */
   readonly unchangedModules: readonly string[];
-  /** Untouched module geometry may change only inside this deterministic layout interval. */
+  /** 仅当模块几何体在这一确定的布局区间内改变时，模块几何体可能改变。 */
   readonly layoutAffectedModules: readonly string[];
   readonly unexpectedChanges: readonly UnexpectedModuleChange[];
 }
@@ -28,9 +28,8 @@ export interface DiffModulePlansInput {
 }
 
 /**
- * Raised before a partial revision can be handed to the UI/KF compiler. The
- * diff is intentionally data-only so callers can persist an actionable repair
- * reason without exposing native implementation details to a model.
+ * 在可以交给UI/KF编译器之前，必须进行一次部分修订。
+ * 差异数组故意是数据驱动的，这样调用者可以持久化一个可操作的修复理由，而不暴露到模型的原始实现细节。
  */
 export class UnexpectedModuleChangeError extends Error {
   readonly diff: ModulePlanDiff;

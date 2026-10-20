@@ -8,8 +8,7 @@ import type { AgentGraphStateValue, AgentGraphUpdate } from "../state.js";
 const MAX_REJECTION_DETAIL = 500;
 
 /**
- * Converts a confirmed customer blueprint into bounded UI intent and then
- * delegates all KF operations to the deterministic domain compiler.
+ * 将确认的客户蓝图转换为受控的用户意图界面，并将所有KF操作委托给确定的领域编译器。
  */
 export function createImplementationPlanNode(deps: SolutionGraphDeps) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {

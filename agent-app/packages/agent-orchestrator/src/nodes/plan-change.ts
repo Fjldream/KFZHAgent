@@ -6,29 +6,18 @@ import { GraphPlanSchema } from "../schemas/change-plan.js";
 import { ProjectDesignSchema } from "../schemas/project-design.js";
 
 /**
- * Produces a change plan for the current requirement (brief Step 4/5):
- *   - a brand-new workspace (no current revision) gets an initial project
- *     design instead of a plan, and never reaches the approval/build path,
- *   - MODIFY_REQUIREMENT or a planning-stage retry calls reviseChangePlan,
- *     otherwise createChangePlan is used,
- *   - the plan is persisted with deterministic ids (idempotent re-runs),
- *   - the planHash is computed over the canonical normalized plan,
- *   - the node ends in the `approval` stage where the approval interrupt waits.
+ * 为当前需求生成变更计划（简要步骤 4/5）：
+ *   - 全新的工作空间（没有当前修订）会获得初始项目设计，而不是计划，并且绝不会进入审批/构建路径；
+ *   - MODIFY_REQUIREMENT 或规划阶段重试会调用 reviseChangePlan，否则使用 createChangePlan；
+ *   - 使用确定性 ID 持久化计划（重复执行具有幂等性）；
+ *   - planHash 根据规范化后的标准计划计算；
+ *   - 节点结束于 `approval` 阶段，审批中断在此等待。
  *
- * Persistent side effects are idempotent: deterministic changeRequestId /
- * changePlanId make repeated execution converge instead of duplicating rows.
+ * 持久化副作用具有幂等性：确定性的 changeRequestId / changePlanId 使重复执行收敛，而不会产生重复记录。
  */
 export function createPlanChangeNode(deps: SolutionGraphDeps) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
-    // Design-flow guard (spec §5.4): a design-plan confirmation must have a
-    // confirmed plan to plan against. CONFIRM_DESIGN can only be routed into
-    // plan-change from the design loop (the design-plan node set designPlanHash
-    // and stage=design-review), so the guard is scoped to that entry: confirming
-    // a plan that was never generated is a graph-integrity violation and the
-    // node refuses instead of fabricating a control plan. The legacy entry
-    // paths (NEW_REQUIREMENT / MODIFY_REQUIREMENT / approval revise resume) do
-    // not pass through the design loop yet and keep working unchanged — the
-    // spec's NEW_REQUIREMENT → design-plan re-routing is a later task.
+    // 设计流程防护（规范 §5.4）：确认设计方案时，必须存在可供后续规划依据的已确认方案。CONFIRM_DESIGN 只能从设计循环路由到 plan-change（design-plan 节点已设置 designPlanHash 和 stage=design-review），因此此防护仅适用于该入口：确认一个从未生成的方案属于图完整性违规，节点会拒绝处理，而不是虚构控制方案。旧入口路径（NEW_REQUIREMENT / MODIFY_REQUIREMENT / 审批节点的 revise 恢复操作）尚不经过设计循环，因此保持原有行为；规范中的 NEW_REQUIREMENT → design-plan 重路由将在后续任务中实现。
     if (state.intent === "CONFIRM_DESIGN" && state.designPlanHash === undefined) {
       return { stage: "idle", lastErrorCode: "DESIGN_NOT_CONFIRMED" };
     }
@@ -55,11 +44,7 @@ export function createPlanChangeNode(deps: SolutionGraphDeps) {
       designPlan: state.designPlan,
     };
 
-    // New workspace: initial design only, no plan/build. The raw design output
-    // is zod-gated against the v1 SolutionIR schema before it is referenced in
-    // any summary side effect (I1) — garbage model output returns to idle with
-    // INVALID_MODEL_OUTPUT instead of fabricating an "initial design created"
-    // summary.
+    // 新工作空间：只创建设计初稿，不进行规划或构建。原始设计输出在被任何摘要副作用引用前，会依据 v1 SolutionIR schema 通过 zod 校验（I1）；无效的模型输出会携带 INVALID_MODEL_OUTPUT 返回 idle，而不是虚构“已创建设计初稿”的摘要。
     if (state.currentRevisionId === undefined) {
       const rawDesign: unknown = await deps.modelPort.createProjectDesign(modelContext);
       const parsedDesign = ProjectDesignSchema.safeParse(rawDesign);

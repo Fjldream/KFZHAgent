@@ -33,8 +33,7 @@ async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 2000): Pro
     try {
       if (await predicate()) return;
     } catch (err) {
-      // put() creates the tenant directory asynchronously; a readdir before
-      // that mkdir resolves yields ENOENT and must be retried, not failed.
+      // put() 创建租户目录异步；在那个 mkdir 之前 readdir 解析会返回 ENOENT 并必须重试，而不是失败。
       if (!(err instanceof Error) || (err as { code?: string }).code !== "ENOENT") {
         throw err;
       }
@@ -90,11 +89,11 @@ describe("LocalArtifactStorage", () => {
       maxBytes: 1024,
     });
 
-    // tenant-b cannot see tenant-a's artifact.
+    // 租户 b 无法看到租户 a 的 artifact。
     await expect(storage.open("tenant-b", artifactId)).rejects.toThrow();
     await expect(storage.delete("tenant-b", artifactId)).rejects.toThrow();
 
-    // tenant-a can read back its own artifact.
+    // 租户 a 可以读回自己的 artifact。
     const stream = await storage.open("tenant-a", artifactId);
     await expect(readAll(stream)).resolves.toBe("hello-a");
   });
@@ -160,8 +159,7 @@ describe("LocalArtifactStorage", () => {
       maxBytes: 4096,
     });
 
-    // While the write is still in flight, a temp file must exist and the
-    // final artifact must not exist yet.
+    // 写入仍在进行时，临时文件必须存在，最终制品必须尚未存在。
     await waitFor(async () => {
       const entries = await readdir(path.join(root, "tenant-a"));
       return entries.some((e) => e.startsWith(".put-") && e.endsWith(".tmp"));
@@ -169,7 +167,7 @@ describe("LocalArtifactStorage", () => {
 
     const duringEntries = await readdir(path.join(root, "tenant-a"));
     expect(duringEntries.some((e) => e.startsWith(".put-"))).toBe(true);
-    expect(duringEntries.every((e) => e.startsWith(".put-"))).toBe(true); // only temp files, no final artifact yet
+    expect(duringEntries.every((e) => e.startsWith(".put-"))).toBe(true); // 只有临时文件，没有最终 artifact 了。
 
     stream.push("part-1-");
     await new Promise((r) => setTimeout(r, 20));
@@ -214,8 +212,7 @@ describe("LocalArtifactStorage", () => {
       maxBytes: 1024,
     });
 
-    // The on-disk layout must stay at <root>/<tenantId>/<artifactId> and the
-    // public return type must not expose any path.
+    // 磁盘布局必须保持为 <root>/<tenantId>/<artifactId>，并且公共返回类型必须不暴露任何路径。
     const resolved = path.resolve(root, "tenant-a", artifactId);
     expect(resolved.startsWith(path.resolve(root) + path.sep)).toBe(true);
 

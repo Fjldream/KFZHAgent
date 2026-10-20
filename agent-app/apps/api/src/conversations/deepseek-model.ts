@@ -7,6 +7,7 @@ import type {
   ModulePlan,
   ModulePlanOperation,
   SolutionImplementationPlan,
+  SolutionNode,
   UIImplementationSpec,
   ValidationReport,
 } from "@kf/contracts";
@@ -61,26 +62,21 @@ function bindSingleKfPageNavigation(
 }
 
 /**
- * DeepSeek-backed ModelPort (OpenAI-compatible chat completions).
+ * 由 DeepSeek 支持的 ModelPort（兼容 OpenAI 的聊天补全接口）。
  *
- * Every planning method sends the bounded ModelPortContext (never raw uploads,
- * secrets, or full page JSON) plus the editable-entity list with exact KF
- * GUIDs, and demands strict JSON output. Output is zod-gated here before it
- * reaches the graph, and change plans referencing hallucinated GUIDs are
- * rejected — the graph can never build a plan that references entities that
- * do not exist.
+ * 每个规划方法都会发送有界的 ModelPortContext（绝不发送原始上传内容、机密信息或完整页面 JSON），以及带有准确 KF GUID 的可编辑实体列表，并要求输出严格的 JSON。输出在进入图之前会在此处经过 zod 校验；引用虚构 GUID 的变更计划会被拒绝，因此图绝不会构建引用不存在实体的计划。
  *
- * Env wiring (conversations.module.ts): `MODEL_PORT_MODE=deepseek` +
- * `DEEPSEEK_API_KEY` (and optional DEEPSEEK_BASE_URL / DEEPSEEK_MODEL).
+ * 环境配置（conversations.module.ts）：`MODEL_PORT_MODE=deepseek` +
+ * `DEEPSEEK_API_KEY`（以及可选的 DEEPSEEK_BASE_URL / DEEPSEEK_MODEL）。
  */
 
 export interface DeepSeekModelOptions {
   apiKey: string;
-  /** OpenAI-compatible base URL (default https://api.deepseek.com). */
+  /** OpenAI-兼容的基础URL (默认 https://api.deepseek.com) */
   baseUrl?: string;
-  /** Model name (default deepseek-chat). */
+  /** 模型名称 (默认 deepseek-chat) */
   model?: string;
-  /** Test seam. */
+  /** 测试缝合 */
   fetch?: typeof fetch;
   timeoutMs?: number;
 }
@@ -89,7 +85,7 @@ const DEFAULT_BASE_URL = "https://api.deepseek.com";
 const DEFAULT_MODEL = "deepseek-chat";
 const DEFAULT_TIMEOUT_MS = 60_000;
 
-/** Raised when the LLM output cannot be turned into a valid plan/design. */
+/** 当语言模型输出无法转换为有效的计划/设计时被触发。 */
 export class DeepSeekModelOutputError extends Error {
   override name = "DeepSeekModelOutputError";
   constructor(detail: string) {
@@ -100,6 +96,18 @@ export class DeepSeekModelOutputError extends Error {
 type JsonRepairCode = "JSON_PARSE" | "JSON_TRUNCATED" | "NO_JSON_OBJECT";
 class JsonExtractionError extends DeepSeekModelOutputError {
   constructor(readonly code: JsonRepairCode, detail: string) { super(detail); }
+}
+
+class SolutionPlanSchemaError extends DeepSeekModelOutputError {
+  constructor(readonly reasons: readonly string[]) {
+    super(`solution implementation plan failed zod gate: ${reasons.slice(0, 3).join("; ")}`);
+  }
+}
+
+class SolutionPlanJourneyError extends DeepSeekModelOutputError {
+  constructor(readonly reasons: readonly string[]) {
+    super(`solution implementation plan failed journey gate: ${reasons.slice(0, 3).join("; ")}`);
+  }
 }
 
 const SYSTEM_PROMPT = `你以礼貌、专业的客服顾问口吻与客户沟通，回复简洁自然，像真人顾问在对话，避免机械罗列。
@@ -165,6 +173,8 @@ const SOLUTION_BLUEPRINT_SYSTEM_PROMPT = `你是客户解决方案蓝图顾问�
 
 蓝图必须完整表达客户任务、多页面地图、每页信息架构与阅读顺序、真实行业内容和模拟示例、重要状态、跨页面交互旅程、视觉方向，以及对信息架构和交互方式的创造性重新设计。
 蓝图只描述客户能理解和确认的产品体验。禁止任何平台生成标识符、控件或模块种类、能力编号、通用唯一标识符、坐标、实现配置和工程内部字段。
+sampleData 的所有字段值必须是字符串；多个值必须合并为一个客户可读字符串，禁止输出数组、数字、布尔值、null 或嵌套对象。
+所有描述性数组最多 12 项，包括 audiences、scenarios、semanticRoles、content、sampleData、interactions、states、colors、acceptanceScenarios 和 openQuestions；应合并相近内容，不得为了凑数量重复。
 
 精确 JSON 结构（所有顶层键都必填且只能出现这些键）：
 {"schema":"kf-design-plan/v3","displayName":"客户可读名称","objective":"客户任务目标","audiences":["受众"],"scenarios":["场景"],"pages":[{"id":"semantic-page-id","title":"页面标题","purpose":"页面用途","readingOrder":["semantic-region-id"],"regions":[{"id":"semantic-region-id","purpose":"区域用途","semanticRoles":["客户可读语义角色"],"dataShape":"业务数据形态","density":"compact|comfortable|spacious","importance":"primary|secondary|supporting","content":["具体内容"],"sampleData":[{"业务字段":"真实感模拟值"}],"interactions":["客户可感知交互"],"states":["重要状态"],"visualIntent":"区域视觉意图"}]}],"journeys":[{"id":"semantic-journey-id","actor":"参与者","goal":"旅程目标","steps":[{"pageId":"已声明页面 id","regionId":"该页面已声明区域 id","action":"用户动作","result":"可见结果"}],"completion":"完成结果"}],"visualDirection":{"tone":"整体基调","colors":["颜色方向"],"typography":"文字层级","spacingAndSurfaces":"留白与表面"},"acceptanceScenarios":["客户可观察验收场景"],"openQuestions":[]}
@@ -180,7 +190,7 @@ const SOLUTION_IMPLEMENTATION_SYSTEM_PROMPT = `你是完整交互式前端解决
 {"schema":"kf-solution-implementation/v1","projectKey":"stable-project-key","blueprintHash":"64位小写十六进制","candidateBundleHash":"64位小写十六进制","theme":{},"roleStyles":[],"mockData":[],"localState":[],"pages":[],"overlays":[],"actions":[],"scripts":[]}
 blueprintHash 必须等于确认蓝图的服务端规范哈希，candidateBundleHash 必须等于候选包的服务端规范哈希；不得自行改写或猜测。
 
-语义值精确联合：字符串 | 有限数字 | 布尔值 | null | {"kind":"list","items":[语义值]} | {"kind":"record","fields":[{"name":"semantic-name","value":语义值}]} | {"kind":"repeater-field","itemAlias":"semantic-name","field":"semantic-name"}。
+语义值精确联合：字符串 | 有限数字 | 布尔值 | null | {"kind":"list","items":[语义值]} | {"kind":"record","fields":[{"name":"semantic-name","value":语义值}]} | {"kind":"repeater-field","itemAlias":"semantic-name","field":"semantic-name"}。{"kind":"literal","value":...} 只允许用于 set-control-value 的值表达式，禁止用于节点 content、properties、set-state 或 close-overlay.result。
 repeater-field 只能出现在匹配 itemAlias 的 repeater.template 内，field 必须是该 repeater 引用的 mockData 已声明字段；字段引用只能使用上述 repeater-field 对象，禁止使用美元符号、花括号或字符串插值。
 每个节点共同包含 {"id":"stable-id","sourceBlueprintRegionIds":["已确认区域 id"],"intent":{"importance":"primary|secondary|supporting","visualWeight":1,"readingOrder":0,"density":"compact|comfortable|spacious","groupWith":[],"width":{"mode":"content|fixed|fill|ratio|minmax"},"height":{"mode":"content|fixed|fill|viewport|ratio|minmax"},"align":"start|center|end|stretch"}}。
 width 精确联合：{"mode":"content"} | {"mode":"fill"} | {"mode":"fixed","value":320} | {"mode":"ratio","value":1.5} | {"mode":"minmax","min":240,"max":640}。
@@ -188,15 +198,21 @@ height 精确联合：{"mode":"content"} | {"mode":"fill"} | {"mode":"viewport"}
 节点是以下 kind 判别联合之一：
 - {"kind":"layout","layout":"row|column|grid|asymmetric-grid|split|stack|dock|sidebar-content|master-detail|scroll-region|overlay-anchor","recipeId":"可选候选组合 id","children":[节点]}
 - {"kind":"registered-module","moduleKind":"服务器明确授权的模块 kind","templateVersion":"授权版本","variant":"授权变体","title":"标题","content":语义值,"assetId":"可选资产 id","eventBindings":[事件绑定],"slots":[{"slotId":"授权槽位","children":[节点]}]}；输入未提供授权模块时不得使用此分支。
-- {"kind":"control","capabilityId":"候选控件 id","content":语义值,"properties":[{"name":"semantic-property","value":语义值}],"tabIds":[],"mockDataId":"可选模拟数据 id","styleRole":"角色样式 id","styleOverride":{"declarations":{},"states":{}},"eventBindings":[事件绑定]}；styleOverride 可省略，若提供也只能是下述语义样式结构。
+- {"kind":"control","capabilityId":"候选控件 id","content":语义值,"properties":[{"name":"semantic-property","value":语义值}],"tabIds":[],"mockDataId":"可选模拟数据 id","styleRole":"角色样式 id","styleOverride":{"declarations":{},"states":{}},"eventBindings":[事件绑定]}；styleOverride 可省略，若提供也只能是下述语义样式结构。properties.name 必须是业务语义名；禁止 text、value、color、background、width、height 等实现属性名，无法确定合法名时使用 properties:[]。
+- control.mockDataId 仅用于 easyui.1；Repeater 数据由 repeater.mockDataId 与 repeater-field 绑定。
+- input/select/image 的 content 必须为 null。input 文案写 placeholder；select 当前值写 value、选项写 options（含 label/value）；image 仅可引用服务端已审核 asset。
 - {"kind":"repeater","mockDataId":"模拟数据 id","itemAlias":"item-name","keyField":"字段 key","maxItems":20,"template":节点}
+repeater.maxItems 必须大于等于其 mockDataId 对应数据集的 records 数量；演示数据应优先控制在 12 条以内。
+含三个以上纵向区块的页面根节点使用 scroll-region，禁止裁切内容。
 事件绑定结构为 {"semanticEvent":"候选能力支持的语义事件","actionIds":["动作 id"]}。
 需要 click 的文字必须选择 button capability 并使用 interactive-text 样式角色；text 和 image 不得声明 click。
 
-theme 必须完整包含 background、surface、primary、accent、textPrimary、textSecondary、fontFamily、spacingUnit、radiusScale:{small,medium,large}。这些是语义主题令牌，不是原始 CSS。
-roleStyles 每项是 {"role":"stable-role","declarations":{"backgroundColor":"可选语义颜色令牌","textColor":"可选语义颜色令牌","borderColor":"可选语义颜色令牌","borderRadius":8,"fontSize":16,"fontWeight":600,"lineHeight":1.5,"padding":8,"margin":0,"gap":8,"boxShadow":"none|small|medium|large","opacity":1,"textAlign":"left|center|right"},"states":{"hover":{},"active":{},"focus":{},"disabled":{},"selected":{},"error":{}}}；只写结构化语义样式意图，禁止原始 CSS 规则和选择器。
+theme 必须完整包含 background、surface、primary、accent、textPrimary、textSecondary、fontFamily、spacingUnit、radiusScale:{small,medium,large}。六个颜色值只允许 #RGB/#RGBA/#RRGGBB/#RRGGBBAA、CSS 英文颜色名、合法 rgb/hsl，或精确 {theme.primary} 形式；例如 {"background":"#0F172A","surface":"#111827","primary":"#2563EB","accent":"#38BDF8","textPrimary":"#F8FAFC","textSecondary":"#CBD5E1"}。禁止自然语言颜色名、渐变、var() 和不带花括号的 theme.primary。
+roleStyles 每项是 {"role":"stable-role","declarations":{"backgroundColor":"可选语义颜色令牌","textColor":"可选语义颜色令牌","borderColor":"可选语义颜色令牌","borderRadius":8,"fontSize":16,"fontWeight":600,"lineHeight":1.5,"padding":8,"boxShadow":"none|small|medium|large","opacity":1,"textAlign":"left|center|right"},"states":{"hover":{},"active":{},"focus":{},"disabled":{},"selected":{},"error":{}}}；只写结构化语义样式意图，禁止原始 CSS 规则和选择器。控件样式禁止 margin 和 gap；区块间距必须由 layout、density 和 theme.spacingUnit 表达。
 mockData 每项是 {"id":"stable-id","purpose":"行业用途","fields":[{"key":"semantic-key","label":"客户可读标签","type":"text|number|boolean|date"}],"records":[{"values":[{"field":"已声明字段 key","value":语义标量}]}]}。
 localState 每项是 {"id":"stable-id","purpose":"状态用途","type":"boolean|number|text|record-key|record-key-list","initialValue":语义标量或稳定 id 数组,"mockDataId":"记录状态时必填","keyField":"记录状态时必填"}。
+record-key/record-key-list 的 keyField 必须是对应 mockData 已声明字段，且每条 record 都必须提供唯一、非空字符串键值；initialValue 和 set-state.value 只能使用这些真实键值或允许的 null，禁止凭空使用 "1" 等索引。
+Repeater.keyField 使用独立内部键（如 recordKey），值限 ASCII 字母、数字、空格、下划线、连字符且以字母/数字开头；展示字段不得充当键。
 pages 每项是 {"id":"stable-id","title":"标题","purpose":"用途","canvas":"responsive|desktop|large-display","sourceBlueprintPageId":"确认页面 id","sourceBlueprintRegionIds":["确认区域 id"],"initialStateIds":["状态 id"],"root":节点}。
 overlays 每项是 {"id":"stable-id","title":"标题","purpose":"用途","presentation":"dialog|window|drawer|confirmation","hostPageId":"页面 id","sourceBlueprintPageId":"确认页面 id","sourceBlueprintRegionIds":["确认区域 id"],"visibleStateId":"布尔状态 id","dismissible":true,"root":节点}。
 每个 action 必须包含最多十二项的 "journeyStepRefs"。直接实现已确认旅程步骤的 action 填写 [{"journeyId":"已确认旅程 id","stepIndex":0}]；仅服务于动作链的辅助 action 必须填写 []，不得伪造步骤归属。每个已确认旅程步骤必须至少被一个 action 精确映射；不得引用不存在的旅程或步骤，也不得添加 KF 实现数据。
@@ -207,7 +223,10 @@ scripts 是声明式计划联合：{"kind":"template","id":"stable-id","purpose"
 - {"template":"form-validate-submit"}：inputs 为 1 至 8 个连续 field-N control；outputs 只能有 submitted local-state 且引用布尔状态；parameters 为每项 field-N-required 布尔值，required=true 时还必须有对应非空 field-N-message，最后必须有 {"name":"success-message","value":"成功反馈"}。例如首项必填参数 {"name":"field-1-required","value":true}。
 只有无法精确匹配上述审核模板的工作流才能使用 custom；不得用 custom 模糊描述一个缺少字段、模式、端口、校验消息或提交反馈的审核模板。
 parameters 每项精确联合：{"name":"limit","value":20} | {"name":"source","refKind":"mock-data|local-state|control","refId":"已声明 id"}；value 可以是字符串、有限数字、布尔值或 null；每项必须且只能提供 value 或完整的 refKind+refId。
-所有 stable id 在计划中全局唯一；来源 id、样式、模拟数据、状态、节点、页面、浮层、动作和脚本引用必须命中已声明对象；每个确认页面/区域必须且只能由对应页面或浮层覆盖。`;
+每个 action 必须从事件绑定可达；同一个 action id 只能由一个控件/模块的一个 eventBinding 触发，多个触发入口执行相同行为时必须创建不同 action id，禁止共享导致多触发归属。
+每条交互链只把首个 action id 放入一个 eventBinding.actionIds；后续反馈、导航或状态动作通过首个 action 的 afterActionIds 串联，禁止创建未被任何事件或前序 action 引用的孤立动作。script 端口 refKind=control 时 refId 必须命中 kind=control 的真实节点，不能引用 layout、repeater、页面或表单区域名称。
+保持 JSON 紧凑：每个蓝图区域使用一个主布局和完成内容/交互所需的最少节点；列表数据必须使用一个 repeater.template 复用，禁止为每条模拟记录复制节点、动作或脚本。
+所有 stable id 在计划中全局唯一，包括样式、模拟数据、状态、页面、浮层、每层节点、动作和脚本；建议按 role-/data-/state-/page-/overlay-/node-/action-/script- 前缀分域，且 page id 不要直接复用 sourceBlueprintPageId。来源 id、样式、模拟数据、状态、节点、页面、浮层、动作和脚本引用必须命中已声明对象；每个确认页面/区域必须且只能由对应页面或浮层覆盖。所有可选字段无值时必须直接省略，禁止输出 null（语义值本身明确需要空值时除外）。业务展示文案不得写代码表达式、成员访问或运行时调用；技术名词若触发运行时词限制，应改写为等价客户可读描述。`;
 
 const MAX_CREATIVE_PROMPT_BYTES = 128_000;
 const MAX_CREATIVE_RECENT_MESSAGES = 12;
@@ -321,7 +340,7 @@ function stableEqual(left: unknown, right: unknown): boolean {
   return canonicalJson(left) === canonicalJson(right);
 }
 
-/** Return a detached, canonical JSON value so audit operations never retain page-object references. */
+/** 返回一个分离的、标准的JSON值，以确保审计操作永远不会保留页面对象的引用。 */
 function detachedCanonical<T>(value: T): T {
   assertDescriptorSafeJson(value, "revision delta payload");
   return JSON.parse(canonicalJson(value)) as T;
@@ -1018,6 +1037,392 @@ function assertNoForbiddenSolutionKeys(value: unknown, path: readonly string[] =
 
 const INTERPOLATION_OPENER = "$" + "{";
 
+function normalizeBlueprintSampleValue(value: unknown): unknown {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "boolean") return value ? "是" : "否";
+  if (
+    Array.isArray(value)
+    && value.length > 0
+    && value.every((entry) =>
+      typeof entry === "string"
+      || typeof entry === "boolean"
+      || (typeof entry === "number" && Number.isFinite(entry)))
+  ) {
+    return value.map((entry) =>
+      typeof entry === "boolean" ? (entry ? "是" : "否") : String(entry)).join("、");
+  }
+  return value;
+}
+
+function boundBlueprintDescriptionList(value: unknown): unknown {
+  return Array.isArray(value) ? (value as unknown[]).slice(0, 12) : value;
+}
+
+function normalizeBlueprintVisualDirection(value: unknown): unknown {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
+  const direction = value as Record<string, unknown>;
+  return {
+    ...direction,
+    colors: boundBlueprintDescriptionList(direction["colors"]),
+  };
+}
+
+function normalizeBlueprintSampleData(raw: unknown): unknown {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const blueprint = raw as Record<string, unknown>;
+  if (!Array.isArray(blueprint["pages"])) return raw;
+  const pages = blueprint["pages"] as unknown[];
+  return {
+    ...blueprint,
+    audiences: boundBlueprintDescriptionList(blueprint["audiences"]),
+    scenarios: boundBlueprintDescriptionList(blueprint["scenarios"]),
+    visualDirection: normalizeBlueprintVisualDirection(blueprint["visualDirection"]),
+    acceptanceScenarios: boundBlueprintDescriptionList(blueprint["acceptanceScenarios"]),
+    openQuestions: boundBlueprintDescriptionList(blueprint["openQuestions"]),
+    pages: pages.map((page) => {
+      if (page === null || typeof page !== "object" || Array.isArray(page)) return page;
+      const pageRecord = page as Record<string, unknown>;
+      if (!Array.isArray(pageRecord["regions"])) return page;
+      const regions = pageRecord["regions"] as unknown[];
+      return {
+        ...pageRecord,
+        regions: regions.map((region) => {
+          if (region === null || typeof region !== "object" || Array.isArray(region)) return region;
+          const regionRecord = region as Record<string, unknown>;
+          if (!Array.isArray(regionRecord["sampleData"])) return region;
+          const samples = regionRecord["sampleData"] as unknown[];
+          return {
+            ...regionRecord,
+            semanticRoles: boundBlueprintDescriptionList(regionRecord["semanticRoles"]),
+            content: boundBlueprintDescriptionList(regionRecord["content"]),
+            interactions: boundBlueprintDescriptionList(regionRecord["interactions"]),
+            states: boundBlueprintDescriptionList(regionRecord["states"]),
+            sampleData: samples.slice(0, 12).map((sample) => {
+              if (sample === null || typeof sample !== "object" || Array.isArray(sample)) return sample;
+              return Object.fromEntries(
+                Object.entries(sample as Record<string, unknown>)
+                  .map(([key, value]) => [key, normalizeBlueprintSampleValue(value)]),
+              );
+            }),
+          };
+        }),
+      };
+    }),
+  };
+}
+
+const semanticThemeColorAliases = new Map([
+  "background", "surface", "primary", "accent", "textPrimary", "textSecondary",
+].map((name) => [name.toLowerCase(), `{theme.${name}}`]));
+const semanticColorFields = new Set([
+  "background", "surface", "primary", "accent", "textPrimary", "textSecondary",
+  "backgroundColor", "textColor", "borderColor",
+]);
+
+function normalizeSolutionStyleAliases(value: unknown, fieldName?: string, parentKind?: string): unknown {
+  if (
+    value !== null
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && Object.keys(value).length === 2
+    && (value as Record<string, unknown>).kind === "literal"
+    && Object.hasOwn(value, "value")
+    && parentKind !== "set-control-value"
+    && fieldName !== "left"
+    && fieldName !== "right"
+  ) {
+    return normalizeSolutionStyleAliases((value as Record<string, unknown>).value, fieldName, parentKind);
+  }
+  if (typeof value === "string" && fieldName !== undefined && semanticColorFields.has(fieldName)) {
+    return semanticThemeColorAliases.get(value.trim().toLowerCase()) ?? value;
+  }
+  if (typeof value === "string" && fieldName === "fontFamily") {
+    const primaryFamily = value.split(",", 1)[0]!.trim().replace(/^['"]|['"]$/g, "");
+    if (primaryFamily.toLowerCase() === "system-ui") return "System UI";
+    if (primaryFamily.toLowerCase() === "sans-serif") return "Sans Serif";
+    return primaryFamily;
+  }
+  if (Array.isArray(value)) return value.map((entry) => normalizeSolutionStyleAliases(entry, undefined, parentKind));
+  if (value === null || typeof value !== "object") return value;
+  const ownKind = typeof (value as Record<string, unknown>).kind === "string"
+    ? String((value as Record<string, unknown>).kind)
+    : undefined;
+  const normalized = Object.fromEntries(Object.entries(value).map(([key, child]) => [
+    key,
+    normalizeSolutionStyleAliases(child, key, ownKind),
+  ]));
+  if (normalized.type === "text" && normalized.initialValue === null) normalized.initialValue = "";
+  return normalized;
+}
+
+function cloneDirectlyBoundLeafNavigations(value: unknown): unknown {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
+  const plan = value as Record<string, unknown>;
+  if (!Array.isArray(plan.actions)) return value;
+  const actions = plan.actions.filter((entry): entry is Record<string, unknown> =>
+    entry !== null && typeof entry === "object" && !Array.isArray(entry));
+  const actionById = new Map(actions.flatMap((action) =>
+    typeof action.id === "string" ? [[action.id, action] as const] : []));
+  const directlyBound = new Set<string>();
+  const visitBindings = (entry: unknown): void => {
+    if (Array.isArray(entry)) {
+      entry.forEach(visitBindings);
+      return;
+    }
+    if (entry === null || typeof entry !== "object") return;
+    const record = entry as Record<string, unknown>;
+    if (Array.isArray(record.eventBindings)) {
+      for (const binding of record.eventBindings) {
+        if (binding === null || typeof binding !== "object" || Array.isArray(binding)) continue;
+        const actionIds = (binding as Record<string, unknown>).actionIds;
+        if (Array.isArray(actionIds)) actionIds.forEach((id) => {
+          if (typeof id === "string") directlyBound.add(id);
+        });
+      }
+    }
+    Object.values(record).forEach(visitBindings);
+  };
+  visitBindings(plan.pages);
+  visitBindings(plan.overlays);
+  const usedIds = new Set(actionById.keys());
+  const clones: Record<string, unknown>[] = [];
+  for (const ownerAction of actions) {
+    if (!Array.isArray(ownerAction.afterActionIds)) continue;
+    ownerAction.afterActionIds = ownerAction.afterActionIds.map((rawDependencyId) => {
+      const dependencyValue: unknown = rawDependencyId;
+      if (typeof dependencyValue !== "string" || !directlyBound.has(dependencyValue)) return dependencyValue;
+      const dependencyId = dependencyValue;
+      const dependency = actionById.get(dependencyId);
+      if (dependency?.kind !== "navigate-page"
+        || !Array.isArray(dependency.afterActionIds)
+        || dependency.afterActionIds.length !== 0) return dependencyId;
+      let sequence = 2;
+      let suffix = `-owner-${sequence}`;
+      let cloneId = `${dependencyId.slice(0, 100 - suffix.length)}${suffix}`;
+      while (usedIds.has(cloneId)) {
+        sequence += 1;
+        suffix = `-owner-${sequence}`;
+        cloneId = `${dependencyId.slice(0, 100 - suffix.length)}${suffix}`;
+      }
+      usedIds.add(cloneId);
+      clones.push({ ...dependency, id: cloneId });
+      return cloneId;
+    });
+  }
+  if (clones.length > 0) plan.actions = [...actions, ...clones];
+  return value;
+}
+
+function bindUniquelyMatchedDestinationJourneySteps(
+  blueprint: CustomerSolutionBlueprint,
+  plan: SolutionImplementationPlan,
+): SolutionImplementationPlan {
+  const covered = new Set(plan.actions.flatMap((action) =>
+    (action.journeyStepRefs ?? []).map((ref) => `${ref.journeyId}:${ref.stepIndex}`)));
+  const implementationPageIdsByBlueprintPage = new Map<string, Set<string>>();
+  for (const page of plan.pages) {
+    const ids = implementationPageIdsByBlueprintPage.get(page.sourceBlueprintPageId) ?? new Set<string>();
+    ids.add(page.id);
+    implementationPageIdsByBlueprintPage.set(page.sourceBlueprintPageId, ids);
+  }
+  for (const journey of blueprint.journeys) {
+    journey.steps.forEach((step, stepIndex) => {
+      const refKey = `${journey.id}:${stepIndex}`;
+      if (covered.has(refKey) || stepIndex === 0) return;
+      const destinationPageIds = implementationPageIdsByBlueprintPage.get(step.pageId);
+      if (destinationPageIds === undefined) return;
+      const candidates = plan.actions.filter((action) =>
+        action.kind === "navigate-page"
+        && destinationPageIds.has(action.targetPageId)
+        && (action.journeyStepRefs ?? []).some((ref) =>
+          ref.journeyId === journey.id && ref.stepIndex === stepIndex - 1)
+        && (action.journeyStepRefs?.length ?? 0) < 12);
+      if (candidates.length !== 1) return;
+      candidates[0]!.journeyStepRefs = [
+        ...(candidates[0]!.journeyStepRefs ?? []),
+        { journeyId: journey.id, stepIndex },
+      ];
+      covered.add(refKey);
+    });
+  }
+  return plan;
+}
+
+function alignBoundedRepeaterLimits(plan: SolutionImplementationPlan): SolutionImplementationPlan {
+  const recordCounts = new Map(plan.mockData.map((dataSet) => [dataSet.id, dataSet.records.length]));
+  const visit = (node: SolutionNode): void => {
+    if (node.kind === "repeater") {
+      const recordCount = recordCounts.get(node.mockDataId);
+      if (recordCount !== undefined && recordCount > node.maxItems && recordCount <= 12) {
+        node.maxItems = recordCount;
+      }
+      visit(node.template);
+      return;
+    }
+    if (node.kind === "layout") node.children.forEach(visit);
+    if (node.kind === "registered-module") node.slots.forEach((slot) => slot.children.forEach(visit));
+  };
+  plan.pages.forEach((page) => visit(page.root));
+  plan.overlays.forEach((overlay) => visit(overlay.root));
+  return plan;
+}
+
+function safeRepeaterKey(value: unknown): string | undefined {
+  if (value === null || typeof value === "boolean") return undefined;
+  if (typeof value !== "string" && typeof value !== "number") return undefined;
+  if (typeof value === "number" && (!Number.isFinite(value) || value < 0)) return undefined;
+  const raw = (typeof value === "number" ? value.toString() : value).normalize("NFKC").trim();
+  if (raw.length === 0 || raw.length > 48 || !/^[A-Za-z0-9][A-Za-z0-9 _-]*$/.test(raw)) return undefined;
+  const normalized = raw.toLowerCase().replace(/[ _]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  return /^[a-z0-9][a-z0-9-]*$/.test(normalized) ? normalized : undefined;
+}
+
+function alignBoundedRepeaterKeys(plan: SolutionImplementationPlan): SolutionImplementationPlan {
+  const dataSets = new Map(plan.mockData.map((dataSet) => [dataSet.id, dataSet]));
+  const generatedFields = new Map<string, string>();
+  const ensureSafeKeyField = (mockDataId: string, currentKeyField: string): string => {
+    const dataSet = dataSets.get(mockDataId);
+    if (dataSet === undefined) return currentKeyField;
+    const normalizedKeys = dataSet.records.map((record) => {
+      const value = record.values.find((entry) => entry.field === currentKeyField)?.value;
+      return safeRepeaterKey(value);
+    });
+    if (normalizedKeys.every((key): key is string => key !== undefined)
+      && new Set(normalizedKeys).size === normalizedKeys.length) return currentKeyField;
+    const existingGenerated = generatedFields.get(mockDataId);
+    if (existingGenerated !== undefined) return existingGenerated;
+    if (dataSet.records.length > 12 || dataSet.fields.length >= 32) return currentKeyField;
+    const fieldKeys = new Set(dataSet.fields.map((field) => field.key));
+    let suffix = 1;
+    let key = "stableRecordKey";
+    while (fieldKeys.has(key)) {
+      suffix += 1;
+      key = `stableRecordKey${suffix}`;
+    }
+    dataSet.fields.push({ key, label: "稳定记录标识", type: "text" });
+    dataSet.records.forEach((record, index) => {
+      record.values.push({ field: key, value: `record-${index + 1}` });
+    });
+    generatedFields.set(mockDataId, key);
+    return key;
+  };
+  const visit = (node: SolutionNode): void => {
+    if (node.kind === "repeater") {
+      node.keyField = ensureSafeKeyField(node.mockDataId, node.keyField);
+      visit(node.template);
+      return;
+    }
+    if (node.kind === "layout") node.children.forEach(visit);
+    if (node.kind === "registered-module") node.slots.forEach((slot) => slot.children.forEach(visit));
+  };
+  plan.pages.forEach((page) => visit(page.root));
+  plan.overlays.forEach((overlay) => visit(overlay.root));
+  return plan;
+}
+
+function alignMultiSectionPageScrolling(plan: SolutionImplementationPlan): SolutionImplementationPlan {
+  plan.pages.forEach((page) => {
+    if (page.root.kind === "layout" && page.root.layout === "column" && page.root.children.length >= 3) {
+      page.root.layout = "scroll-region";
+    }
+  });
+  return plan;
+}
+
+function removeUnsupportedControlMockDataBindings(plan: SolutionImplementationPlan): SolutionImplementationPlan {
+  const visit = (node: SolutionNode): void => {
+    if (node.kind === "control") {
+      if (node.capabilityId !== "easyui.1") delete node.mockDataId;
+      return;
+    }
+    if (node.kind === "repeater") {
+      visit(node.template);
+      return;
+    }
+    if (node.kind === "layout") node.children.forEach(visit);
+    if (node.kind === "registered-module") node.slots.forEach((slot) => slot.children.forEach(visit));
+  };
+  plan.pages.forEach((page) => visit(page.root));
+  plan.overlays.forEach((overlay) => visit(overlay.root));
+  return plan;
+}
+
+function normalizePropertyDrivenControlContent(plan: SolutionImplementationPlan): SolutionImplementationPlan {
+  const visit = (node: SolutionNode): void => {
+    if (node.kind === "control") {
+      if ((node.capabilityId === "input" || node.capabilityId === "select") && typeof node.content === "string") {
+        const propertyName = node.capabilityId === "input" ? "placeholder" : "value";
+        if (node.properties.length < 32 && !node.properties.some((property) => property.name === propertyName)) {
+          node.properties.push({ name: propertyName, value: node.content });
+        }
+        node.content = null;
+      } else if (node.capabilityId === "image") {
+        node.content = null;
+      }
+      if (node.capabilityId === "select") {
+        const options = node.properties.find((property) => property.name === "options");
+        if (options?.value !== null && typeof options?.value === "object" && options.value.kind === "list"
+          && options.value.items.every((item) => typeof item === "string" || typeof item === "number")) {
+          options.value = {
+            kind: "list",
+            items: options.value.items.map((item) => ({
+              kind: "record",
+              fields: [
+                { name: "label", value: String(item) },
+                { name: "value", value: item },
+              ],
+            })),
+          };
+        }
+      }
+      return;
+    }
+    if (node.kind === "repeater") {
+      visit(node.template);
+      return;
+    }
+    if (node.kind === "layout") node.children.forEach(visit);
+    if (node.kind === "registered-module") node.slots.forEach((slot) => slot.children.forEach(visit));
+  };
+  plan.pages.forEach((page) => visit(page.root));
+  plan.overlays.forEach((overlay) => visit(overlay.root));
+  return plan;
+}
+
+function removeLayoutOwnedControlStyleProperties(plan: SolutionImplementationPlan): SolutionImplementationPlan {
+  const clean = (declarations: Record<string, unknown>): void => {
+    delete declarations.margin;
+    delete declarations.gap;
+  };
+  plan.roleStyles.forEach((style) => {
+    clean(style.declarations);
+    Object.values(style.states).forEach((declarations) => {
+      if (declarations !== undefined) clean(declarations);
+    });
+  });
+  const visit = (node: SolutionNode): void => {
+    if (node.kind === "control") {
+      if (node.styleOverride !== undefined) {
+        clean(node.styleOverride.declarations);
+        Object.values(node.styleOverride.states).forEach((declarations) => {
+          if (declarations !== undefined) clean(declarations);
+        });
+      }
+      return;
+    }
+    if (node.kind === "repeater") {
+      visit(node.template);
+      return;
+    }
+    if (node.kind === "layout") node.children.forEach(visit);
+    if (node.kind === "registered-module") node.slots.forEach((slot) => slot.children.forEach(visit));
+  };
+  plan.pages.forEach((page) => visit(page.root));
+  plan.overlays.forEach((overlay) => visit(overlay.root));
+  return plan;
+}
+
 function assertNoInterpolationSyntax(value: unknown, path: readonly string[] = []): void {
   if (typeof value === "string") {
     if (value.includes(INTERPOLATION_OPENER)) {
@@ -1268,15 +1673,20 @@ function buildSolutionImplementationPrompt(input: ModelPortContext, revising: bo
     ...(previousPlan === undefined ? {} : { previousPlan }),
     ...(rejectionReasons.length === 0 ? {} : { rejectionReasons }),
   };
+  const requiredJourneyStepRefs = blueprint.journeys.flatMap((journey) =>
+    journey.steps.map((_step, stepIndex) => `${journey.id}:${stepIndex}`));
   assertNoInterpolationSyntax(payload);
   const prompt = [
     ...(extractionRepair
       ? ["上一轮仅因 JSON 不完整或无法解析而失败；请重新输出同一份完整对象，只修复 JSON 结构。"]
       : []),
     revising
-      ? "根据拒绝原因局部修复语义子树，保持所有无关页面、节点、状态和动作不变，并返回完整计划。"
+      ? previousPlan === undefined
+        ? "上一版未通过结构校验。根据拒绝原因重新生成完整语义计划，不要复用错误字段形态。"
+        : "根据拒绝原因局部修复语义子树，保持所有无关页面、节点、状态和动作不变，并返回完整计划。"
       : "将已确认蓝图转换为完整交互式前端语义计划。",
     "每个蓝图区必须被页面或浮层覆盖；提供真实行业模拟数据、本地状态、动作，以及脚本的声明式意图和步骤。组合经验可以自由组合或忽略组合经验。",
+    `必须逐项覆盖的已确认旅程步骤：${JSON.stringify(requiredJourneyStepRefs)}。每项必须出现在实际实现该步骤的 action.journeyStepRefs 中，不能挂到无关动作。`,
     "不得输出可执行 JavaScript 或源代码；不得输出选择器、样式规则、几何、平台原生 JSON、平台生成标识符或编译器字段。",
     "语义规划输入(JSON)：",
     JSON.stringify(payload),
@@ -1302,7 +1712,9 @@ function validateSolutionJourneyCoverage(
   for (const action of plan.actions) {
     for (const reference of action.journeyStepRefs ?? []) {
       if (journeys.get(reference.journeyId)?.steps[reference.stepIndex] === undefined) {
-        throw new DeepSeekModelOutputError(`solution plan references unknown journey step ${reference.journeyId}:${reference.stepIndex}`);
+        throw new SolutionPlanJourneyError([
+          `移除未知旅程步骤引用 ${reference.journeyId}:${reference.stepIndex}，只引用已确认旅程步骤`,
+        ]);
       }
       covered.add(`${reference.journeyId}:${reference.stepIndex}`);
     }
@@ -1310,7 +1722,9 @@ function validateSolutionJourneyCoverage(
   for (const journey of blueprint.journeys) {
     journey.steps.forEach((_step, stepIndex) => {
       if (!covered.has(`${journey.id}:${stepIndex}`)) {
-        throw new DeepSeekModelOutputError(`solution plan does not map confirmed journey step ${journey.id}:${stepIndex}`);
+        throw new SolutionPlanJourneyError([
+          `必须将已确认旅程步骤 ${journey.id}:${stepIndex} 映射到实际实现该交互的 action.journeyStepRefs`,
+        ]);
       }
     });
   }
@@ -1332,8 +1746,13 @@ export class DeepSeekModelPort implements ModelPort {
   private async chatJson(
     system: string,
     user: string,
-    options: { maxTokens?: number } = {},
+    options: {
+      maxTokens?: number;
+      thinking?: "enabled" | "disabled";
+      reasoningEffort?: "low" | "high" | "max";
+    } = {},
   ): Promise<unknown> {
+    const thinking = options.thinking ?? "disabled";
     const requestBody = {
       model: this.model,
       messages: [
@@ -1341,7 +1760,11 @@ export class DeepSeekModelPort implements ModelPort {
         { role: "user", content: user },
       ],
       response_format: { type: "json_object" },
-      temperature: 0.2,
+      thinking: { type: thinking },
+      ...(thinking === "enabled" && options.reasoningEffort !== undefined
+        ? { reasoning_effort: options.reasoningEffort }
+        : {}),
+      ...(thinking === "disabled" ? { temperature: 0.2 } : {}),
       max_tokens: options.maxTokens ?? 4000,
     };
     const serializedRequest = JSON.stringify(requestBody);
@@ -1380,11 +1803,11 @@ export class DeepSeekModelPort implements ModelPort {
     };
     const choice = data.choices?.[0];
     const content = choice?.message?.content;
-    if (typeof content !== "string" || content.length === 0) {
-      throw new DeepSeekModelOutputError("empty model reply");
-    }
     if (choice?.finish_reason === "length") {
       throw new JsonExtractionError("JSON_TRUNCATED", "model reply was truncated at the output token limit");
+    }
+    if (typeof content !== "string" || content.length === 0) {
+      throw new DeepSeekModelOutputError("empty model reply");
     }
     return extractJson(content);
   }
@@ -1514,13 +1937,16 @@ export class DeepSeekModelPort implements ModelPort {
     input: ModelPortContext,
     options: { revising: boolean; rejectionReasons?: readonly string[]; extractionRepair?: boolean },
   ): Promise<CustomerSolutionBlueprint> {
+    const isRepair = options.extractionRepair === true || (options.rejectionReasons?.length ?? 0) > 0;
     const raw = await this.chatJson(
       SOLUTION_BLUEPRINT_SYSTEM_PROMPT,
       buildCreativeBlueprintPrompt(input, options),
-      { maxTokens: 8000 },
+      isRepair
+        ? { maxTokens: 8000, thinking: "disabled" }
+        : { maxTokens: 8000, thinking: "enabled", reasoningEffort: "low" },
     );
     assertNoForbiddenSolutionKeys(raw);
-    const parsed = CustomerSolutionBlueprintSchema.safeParse(raw);
+    const parsed = CustomerSolutionBlueprintSchema.safeParse(normalizeBlueprintSampleData(raw));
     if (!parsed.success) {
       throw new DeepSeekModelOutputError(
         `solution blueprint failed zod gate: ${parsed.error.issues
@@ -1917,21 +2343,43 @@ export class DeepSeekModelPort implements ModelPort {
     const raw = await this.chatJson(
       SOLUTION_IMPLEMENTATION_SYSTEM_PROMPT,
       userPrompt,
-      { maxTokens: 12_000 },
+      { maxTokens: 32_000 },
     );
     assertNoForbiddenSolutionKeys(raw);
-    const parsed = SolutionImplementationPlanSchema.safeParse(raw);
-    if (!parsed.success) {
-      throw new DeepSeekModelOutputError(
-        `solution implementation plan failed zod gate: ${parsed.error.issues
-          .slice(0, 3)
-          .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
-          .join("; ")}`,
-      );
-    }
     const blueprint = CustomerSolutionBlueprintSchema.parse(input.confirmedSolutionBlueprint);
-    validateSolutionJourneyCoverage(blueprint, input.capabilityCandidates, parsed.data);
-    return parsed.data;
+    const capabilityCandidates = CapabilityCandidateBundleSchema.parse(input.capabilityCandidates);
+    const normalizedRaw = cloneDirectlyBoundLeafNavigations(normalizeSolutionStyleAliases(raw));
+    const authorityBoundRaw = normalizedRaw !== null
+      && typeof normalizedRaw === "object"
+      && !Array.isArray(normalizedRaw)
+      ? {
+          ...normalizedRaw,
+          blueprintHash: canonicalServerHash(blueprint),
+          candidateBundleHash: canonicalServerHash(capabilityCandidates),
+        }
+      : normalizedRaw;
+    const parsed = SolutionImplementationPlanSchema.safeParse(authorityBoundRaw);
+    if (!parsed.success) {
+      const rootUnion = parsed.error.issues.find((issue) => issue.code === "invalid_union" && issue.path.length === 0);
+      const nativeIssues = rootUnion?.code === "invalid_union" && rootUnion.errors[0]?.length
+        ? rootUnion.errors[0]
+        : parsed.error.issues;
+      const reasons: string[] = [];
+      const seenMessages = new Set<string>();
+      for (const issue of nativeIssues) {
+        if (seenMessages.has(issue.message)) continue;
+        seenMessages.add(issue.message);
+        reasons.push(`${issue.path.join(".") || "plan"}: ${issue.message}`
+          .slice(0, MAX_SOLUTION_REJECTION_REASON_CHARS));
+        if (reasons.length === MAX_SOLUTION_REJECTION_REASONS) break;
+      }
+      throw new SolutionPlanSchemaError(reasons);
+    }
+    const journeyBoundPlan = removeLayoutOwnedControlStyleProperties(normalizePropertyDrivenControlContent(removeUnsupportedControlMockDataBindings(alignMultiSectionPageScrolling(alignBoundedRepeaterKeys(alignBoundedRepeaterLimits(
+      bindUniquelyMatchedDestinationJourneySteps(blueprint, parsed.data),
+    ))))));
+    validateSolutionJourneyCoverage(blueprint, capabilityCandidates, journeyBoundPlan);
+    return journeyBoundPlan;
   }
 
   private async generateSolutionImplementationPlan(
@@ -1941,8 +2389,33 @@ export class DeepSeekModelPort implements ModelPort {
     try {
       return await this.requestSolutionImplementationPlan(input, revising);
     } catch (error) {
-      if (!(error instanceof JsonExtractionError)) throw error;
-      return this.requestSolutionImplementationPlan(input, revising, true);
+      if (error instanceof JsonExtractionError) {
+        return this.requestSolutionImplementationPlan(input, revising, true);
+      }
+      if (!revising && error instanceof SolutionPlanSchemaError) {
+        try {
+          return await this.requestSolutionImplementationPlan({
+            ...input,
+            solutionPlanRejectionReasons: [...error.reasons],
+          }, true);
+        } catch (repairError) {
+          if (repairError instanceof SolutionPlanJourneyError
+            || repairError instanceof SolutionPlanSchemaError && repairError.reasons.length <= 2) {
+            return this.requestSolutionImplementationPlan({
+              ...input,
+              solutionPlanRejectionReasons: [...repairError.reasons],
+            }, true);
+          }
+          throw repairError;
+        }
+      }
+      if (!revising && error instanceof SolutionPlanJourneyError) {
+        return this.requestSolutionImplementationPlan({
+          ...input,
+          solutionPlanRejectionReasons: [...error.reasons],
+        }, true);
+      }
+      throw error;
     }
   }
 
@@ -2059,7 +2532,7 @@ export class DeepSeekModelPort implements ModelPort {
   }
 }
 
-/** Shared no-network validation entry point for deterministic fixtures. */
+/** 共享无网络验证入口点，用于确定性测试用例。 */
 export function validateModulePlanForContext(input: ModelPortContext, raw: unknown, revising: boolean): ModulePlan {
   return new DeepSeekModelPort({
     apiKey: "internal-module-plan-validator",

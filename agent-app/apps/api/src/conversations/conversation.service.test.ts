@@ -181,7 +181,7 @@ describe("ConversationService graph dependency wiring", () => {
       }),
       [Symbol.asyncIterator]() { return this; },
     };
-    async function* emptySource() { /* later retry */ }
+    async function* emptySource() { /* 稍后重试 */ }
     mocks.compileSolutionGraph.mockReturnValue({
       getState: vi.fn().mockResolvedValue({ values: { stage: "design-review" }, tasks: [] }),
       stream: vi.fn().mockResolvedValueOnce(source).mockResolvedValueOnce(emptySource()),

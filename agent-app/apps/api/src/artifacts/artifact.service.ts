@@ -9,9 +9,7 @@ import { PrismaService } from "../prisma/prisma.service.js";
 import { ARTIFACT_STORAGE } from "./artifact-storage.js";
 
 /**
- * Artifact service: records artifact rows against build jobs and proxies
- * tenant-scoped storage access (open/delete). Storage keys are opaque ids
- * produced by ArtifactStorage.put; absolute paths never cross this boundary.
+ * 制品服务：记录与构建作业关联的制品记录，并代理租户范围的存储访问（打开/删除）。存储键是 ArtifactStorage.put 生成的不透明 ID；绝对路径绝不会越过该边界。
  */
 @Injectable()
 export class ArtifactService {

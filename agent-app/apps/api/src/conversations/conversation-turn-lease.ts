@@ -28,9 +28,7 @@ export class ConversationTurnBusyError extends Error {
 }
 
 /**
- * Owns a small pool used only for session-scoped turn leases. It must never be
- * shared with PostgresSaver: a turn holds its lease while the graph needs
- * checkpoint connections.
+ * 拥有一个仅用于会话级租约的池。它必须从不与PostgresSaver: 转换持有其租约的连接。
  */
 export class PostgresConversationTurnLeaseManager
 implements ConversationTurnLeasePort, OnModuleDestroy {
@@ -151,7 +149,7 @@ implements ConversationTurnLeasePort, OnModuleDestroy {
             [conversationId, this.ownerId, leaseId],
           );
         } catch {
-          // ADMITTED is already fail-closed; releasing the session remains safe.
+          // ADMITTED 已处于故障关闭状态；释放会话仍然安全。
         }
         await managedClient.release(conversationId);
         state = "quarantined";
@@ -211,9 +209,7 @@ implements ConversationTurnLeasePort, OnModuleDestroy {
        WHERE "conversationId" = $1`,
       [conversationId],
     );
-    // Only PENDING means the lease was never handed to graph execution. It is
-    // recoverable after the exact owner session is proven gone. ADMITTED and
-    // QUARANTINED remain fail-closed because graph work may have started.
+    // 只有 PENDING 才表示租约从未交给图执行。确认确切的持有者会话已消失后，可以恢复该租约。ADMITTED 和 QUARANTINED 会保持故障关闭，因为图任务可能已经开始。
     const row = fence.rows[0];
     if (row === undefined) return;
     if (row.state === "PENDING") {
@@ -254,14 +250,13 @@ implements ConversationTurnLeasePort, OnModuleDestroy {
       await client.query(query, [conversationId, this.ownerId, leaseId]);
       return;
     } catch {
-      // A lost INSERT response can still mean the row committed. Destroy the
-      // uncertain session, then reconcile the exact never-returned token.
-      try { client.release(true); } catch { /* already removed */ }
+      // 丢失的插入响应仍然可能意味着该行已提交。销毁不确定的会话，然后重新协商从未返回的精确令牌。
+      try { client.release(true); } catch { /* 已经移除 */ }
     }
     try {
       await this.pool.query(query, [conversationId, this.ownerId, leaseId]);
     } catch {
-      // A PENDING row is explicitly recoverable once this owner is no longer live.
+      // 一个PENDING行是明确可恢复的，一旦这个拥有者不再活跃。
     }
   }
 
@@ -283,7 +278,7 @@ implements ConversationTurnLeasePort, OnModuleDestroy {
           this.ownerConnection = undefined;
           try {
             client.release(true);
-          } catch { /* the pool may already have removed the failed client */ }
+          } catch { /* 池可能已经移除了失败的客户端 */ }
           this.logger.error("Conversation turn fence owner session was lost");
         });
         this.ownerClient = client;
@@ -310,10 +305,7 @@ implements ConversationTurnLeasePort, OnModuleDestroy {
     ]);
     for (const client of this.provisioning) client.destroy();
     this.provisioning.clear();
-    // This manager cannot prove that every graph iterator stopped merely
-    // because Nest shutdown began. Convert active session locks to durable
-    // fences and retain existing quarantines; only confirmed graph cleanup
-    // may call dispose() and delete its exact lease token.
+    // 这个管理器无法证明，每张图的迭代器仅仅因为Nest启动而停止。将活跃会话锁转换为持久锁，并保留现有的隔离区；只有确认的图清理操作才能调用dispose()并删除其确切的租约令牌。
     await Promise.allSettled([...this.active].map((lease) => lease.quarantine()));
 
     const ownerClient = this.ownerClient;
@@ -385,10 +377,9 @@ function manageTurnClient(
       released = true;
       try {
         client.release(true);
-      } catch { /* the pool may already have removed the failed client */ }
+      } catch { /* 池可能已经移除了失败的客户端 */ }
     }
-    // Keep this listener attached to a destroyed client: pg may emit a fatal
-    // backend error followed by a connection-terminated error.
+    // 保持此监听器与销毁客户端相关联：pg 可能会发出致命的后端错误，然后是连接终止错误。
     warnOnce();
   };
   client.on("error", onError);
@@ -402,7 +393,7 @@ function manageTurnClient(
       released = true;
       try {
         client.release(true);
-      } catch { /* the pool may already have removed the failed client */ }
+      } catch { /* 池可能已经移除了失败的客户端 */ }
     },
     async release(conversationId: string) {
       if (released) return;
@@ -420,7 +411,7 @@ function manageTurnClient(
           released = true;
           try {
             client.release(true);
-          } catch { /* the pool may already have removed the failed client */ }
+          } catch { /* 池可能已经移除了失败的客户端 */ }
         }
         warnOnce();
       }

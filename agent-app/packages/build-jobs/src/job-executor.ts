@@ -39,17 +39,14 @@ import {
 } from "./revision-state.js";
 
 /**
- * Thrown by the crash-injection hook to simulate a worker terminating after
- * the artifact write but before the database commit. The executor re-throws it
- * without recording a FAILED outcome, leaving the job RUNNING so a later lease
- * can recover it.
+ * 由崩溃注入钩子抛出，用于模拟 worker 在制品写入后、数据库提交前终止。执行器会直接重新抛出该错误而不记录 FAILED 结果，使作业保持 RUNNING，以便后续租约恢复。
  */
 export class BuildWorkerCrash extends Error {
   override name = "BuildWorkerCrash";
 }
 
 export interface BuildExecutorHooks {
-  /** Invoked after the artifact is durably stored and before the DB commit. */
+  /** 在制品完成持久化之后、数据库提交之前调用。 */
   beforeCommit?: (artifact: StoredArtifact) => Promise<void>;
 }
 
@@ -61,9 +58,9 @@ export interface BuildExecutorDeps {
   workRoot?: string;
   maxArtifactBytes?: number;
   leaseMs?: number;
-  /** Server-only HMAC verifier; required when a persisted internal envelope is encountered. */
+  /** 仅服务器端的HMAC验证器；当遇到持久化的内部封包时，必须使用。 */
   serverPlanVerifier?: Pick<ServerPlanAuthority, "verify">;
-  /** Private operator-only sink. Raw errors must never enter ValidationReport. */
+  /** 仅供运维人员使用的私有接收端。原始错误绝不能进入 ValidationReport。 */
   operatorLogger?: BuildOperatorLogger;
 }
 
@@ -78,8 +75,7 @@ export interface ResolvedStoredPlan {
 }
 
 /**
- * Worker trust boundary for persisted ChangePlan JSON. Legacy model-safe plans
- * remain supported, but internal semantic adapters require a server envelope.
+ * 持久化 ChangePlan JSON 的 worker 信任边界。仍支持旧版模型安全计划，但内部语义适配器需要服务器信封。
  */
 export function resolveStoredPlan(
   input: unknown,

@@ -34,7 +34,7 @@ export const ServerPlanEnvelopeSchema = z.object({
   creativeArtifactHash: Sha256Schema.optional(),
   trustedNativeMaterialization: TrustedNativeMaterializationSchema.optional(),
   nativeMaterializationHash: Sha256Schema.optional(),
-  /** HMAC-SHA-256 issued by the server; never returned by the public API. */
+  /** 由服务器生成的HMAC-SHA-256；从公共API中永远不会返回。 */
   signature: Sha256Schema,
 }).strict().superRefine((envelope, ctx) => {
   const present = [envelope.creativeArtifact, envelope.creativeArtifactHash,
@@ -55,9 +55,7 @@ export interface ServerPlanEnvelopeExpectations {
 }
 
 /**
- * Persisted-plan pre-parse budgets. These are intentionally above the
- * reviewed limits of 500 semantic operations and a 500x32 table payload,
- * while bounding work before Zod, canonical sorting, or hashing.
+ * 持久化计划预解析预算。这些预算故意高于500个语义操作和一个500x32表数据负载的审查限制，但在Zod、canonical排序或哈希之前进行工作。
  */
 export const SERVER_PLAN_RAW_LIMITS = Object.freeze({
   maxDepth: 128,
@@ -67,7 +65,7 @@ export const SERVER_PLAN_RAW_LIMITS = Object.freeze({
   maxTotalStringBytes: 16 * 1024 * 1024,
 });
 
-/** Stable public digest. This is integrity metadata, never authorization. */
+/** 稳定的公共摘要。这是完整性元数据，从不授权。 */
 export function canonicalServerHash(value: unknown): string {
   return createHash("sha256").update(stableJson(value)).digest("hex");
 }
@@ -128,9 +126,7 @@ export function canonicalChangePlanHash(input: unknown): string {
 }
 
 /**
- * Canonical bytes covered by the server HMAC. The signature itself is
- * deliberately excluded; every other persisted field, including schema
- * version and the complete semantic authorization list, is covered.
+ * 服务器HMAC覆盖的字节。签名本身被故意排除；除了持久化的字段，包括存储的schema版本和完整的语义授权列表，还包括其他所有字段。
  */
 export function canonicalServerPlanSigningBytes(input: ServerPlanEnvelope): Uint8Array {
   const envelope = parseServerPlanEnvelopeData(input);
@@ -150,8 +146,7 @@ export function canonicalServerPlanSigningBytes(input: ServerPlanEnvelope): Uint
 }
 
 /**
- * Strict structural and semantic consistency validation only. This function
- * does not establish authorization; server code must verify the HMAC first.
+ * 仅进行严格的结构和语义一致性验证。此函数不建立授权；服务器代码必须首先验证HMAC。
  */
 export function validateServerPlanEnvelopeData(
   input: unknown,

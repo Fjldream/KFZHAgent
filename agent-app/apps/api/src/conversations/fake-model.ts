@@ -151,8 +151,7 @@ export class DeterministicFakeModelPort implements ModelPort {
       const rebuilt = this.deterministicModulePlan(input);
       const desired: ModulePlan = {
         ...rebuilt,
-        // v1 has no page-level operation. Keep existing page identity and
-        // presentation stable while rebuilding only the accepted module set.
+        // v1 不有页面级操作。保持现有页面身份和呈现稳定，仅重建接受的模块集。
         pages: previous.pages.map((page, index) => ({
           ...page,
           modules: rebuilt.pages[index]?.modules ?? [],
@@ -263,11 +262,8 @@ export class DeterministicFakeModelPort implements ModelPort {
   }
 
   /**
-   * Offline-only fixtures for portal, dashboard, and admin acceptance paths.
-   * They derive the exact kind/version/variant from the server planning catalog
-   * and the source IDs from the verified artifact; no network/model fallback is
-   * possible in fake mode.
-   */
+ * 仅供离线使用的 portal、dashboard 和 admin 验收路径夹具。它们从服务器规划目录派生确切的 kind/version/variant，并从已校验制品派生源 ID；fake 模式下不可能回退到网络或模型。
+ */
   private deterministicModulePlan(input: ModelPortContext): ModulePlan {
     const { accepted, catalog, blueprint, assets } = prepareModulePlanningInputs(input);
     const blueprintById = new Map(blueprint.modules.map((module) => [module.id, module]));

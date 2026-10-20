@@ -206,7 +206,7 @@ const SYNTHETIC_PAGES = {
     objects: [
       // Label：uiModelType=6 + objectType=3 + prototypeName="Label"（不在特殊节点集合）
       { uiModelType: 6, objectType: 3, prototypeName: "Label", name: "Label2", guid: "klbl2", leftTopPt: { x: 10, y: 10 }, width: 100, height: 20 },
-      // easyui LinkButton（objectType=3）
+      // easyui 链接按钮（objectType=3）
       { name: "LinkButton6", guid: "klb6", objectType: 3, uiExtendType: 1, leftTopPt: { x: 10, y: 40 }, width: 60, height: 24 },
       // ProjectFlowChart 布局（layoutType=6, 无 objectType）
       {

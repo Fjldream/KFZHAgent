@@ -18,13 +18,12 @@ import type { ModelPort } from "./model-port.js";
 import type { GraphMessage } from "./state.js";
 
 /**
- * Ports consumed by the solution graph (brief "Consumes" line):
- *   - workspace query port: conversations, messages, revision summaries.
- *   - change-plan repository: change requests and change plans.
- *   - build-job port: enqueue and inspect durable build jobs.
+ * 解决方案图中消耗的端口（"Consumes"行）:
+ *   - 工作空间查询端口：对话、消息和修订摘要。
+ *   - 变更计划仓库：变更请求和变更计划。
+ *   - 构建作业端口：排队和检查持久构建作业。
  *
- * Ports keep the graph free of direct Prisma access so unit tests run against
- * in-memory fakes and only the checkpoint integration test touches Postgres.
+ * 这些端口确保解决方案图不受Prisma直接访问的影响，因此单元测试仅在内存中使用假象运行，并且只有检查点集成测试才接触Postgres。
  */
 
 export type { BuildJobStatus, EnqueueBuildInput } from "@kf/build-jobs";
@@ -36,19 +35,18 @@ export interface ListRecentMessagesInput {
 }
 
 /**
- * A model-editable entity of the current revision. Fed to the ModelPort so a
- * real LLM can reference exact KF GUIDs instead of hallucinating them.
- * (compile-mode GUIDs are deterministic: deriveGuid({ seed: workspaceId }, id).)
+ * 当前修订中可由模型编辑的实体。将其传给 ModelPort，使真实 LLM 能引用准确的 KF GUID，而不是凭空捏造。
+ * （编译模式下的 GUID 是确定性的：deriveGuid({ seed: workspaceId }, id)。）
  */
 export interface EditableEntity {
   kind: "control" | "page" | "variable";
-  /** Semantic id: control id / page name / variable name. */
+  /** 语义 ID：控件 ID / 页面名称 / 变量名称。 */
   name: string;
-  /** Control type (text/button/inputnumber) or "page"/"variable". */
+  /** 控件类型（text/button/inputnumber）或 “page”/“variable”。 */
   type: string;
-  /** KF GUID the change plan must reference. */
+  /** 变更计划必须引用的KF GUID。 */
   guid: string;
-  /** Current control geometry, when the entity is a control. */
+  /** 当实体是控制时，当前控制几何。 */
   x?: number;
   y?: number;
   width?: number;
@@ -63,15 +61,15 @@ export interface AppendMessageInput {
 }
 
 export interface WorkspaceQueryPort {
-  /** Last `limit` messages of the conversation, oldest first. */
+  /** `limit`：对话最后一条消息，按时间顺序排列。 */
   listRecentMessages(input: ListRecentMessagesInput): Promise<GraphMessage[]>;
-  /** Persists one message; the graph appends assistant replies. */
+  /** 保存一条消息；图将助手回复附加到消息中。 */
   appendMessage(input: AppendMessageInput): Promise<void>;
   getConversationSummary(input: {
     tenantId: string;
     conversationId: string;
   }): Promise<string | undefined>;
-  /** Overwrite-style summary write; the graph recomputes the full string so it is idempotent. */
+  /** 覆盖式摘要写入；图会重新计算完整字符串，因此该操作是幂等的。 */
   setConversationSummary(input: {
     tenantId: string;
     conversationId: string;
@@ -81,7 +79,7 @@ export interface WorkspaceQueryPort {
     tenantId: string;
     workspaceId: string;
   }): Promise<string | undefined>;
-  /** Server-owned workspace origin used only for safe workflow routing. */
+  /** 仅用于安全工作流路由的服务器拥有的工作区来源。 */
   getWorkspaceRouting?(input: {
     tenantId: string;
     workspaceId: string;
@@ -89,12 +87,12 @@ export interface WorkspaceQueryPort {
     mode: "new" | "upload";
     generationWorkflow: "legacy" | "module-v1" | "creative-v2";
   } | undefined>;
-  /** Bounded, model-safe summary of a revision (never the full JSON). */
+  /** 修订的简要总结（从不包含完整的 JSON） */
   getRevisionSummary(input: {
     tenantId: string;
     revisionId: string;
   }): Promise<string | undefined>;
-  /** Model-editable entities of a revision (controls/pages/variables with KF GUIDs). */
+  /** 修订版本（控制/页面/变量的KF GUID）的可编辑实体 */
   getRevisionEntities(input: {
     tenantId: string;
     revisionId: string;
@@ -124,7 +122,7 @@ export interface SavePlanInput {
   workspaceId: string;
   changeRequestId: string;
   planHash: string;
-  /** Model-safe plans or server-owned persisted envelopes; internal envelopes never reach the model. */
+  /** 模型安全的计划或服务器持有的持久化信封；内部信封永远不会到达模型 */
   plan: ChangePlan | InternalChangePlan | ServerPlanEnvelope;
 }
 
@@ -137,7 +135,7 @@ export interface ChangePlanRepository {
   saveChangeRequest(input: SaveChangeRequestInput): Promise<void>;
   savePlan(input: SavePlanInput): Promise<void>;
   loadPlanHash(input: { tenantId: string; changePlanId: string }): Promise<string | undefined>;
-  /** Re-verifies the persisted signed creative envelope before its small queue handoff. */
+  /** 在将其小队手递之前，对持久化签名的创意信封进行重新验证 */
   verifyPersistedCreativePlan(input: {
     tenantId: string;
     workspaceId: string;
@@ -178,9 +176,7 @@ export interface PlanArtifactRefs {
 }
 
 /**
- * Optional artifact pipeline that renders a diff artifact and a visual preview
- * for the plan. Not wired in this task (Task 11); when absent the approval
- * interrupt carries no artifact ids.
+ * 可选制品管线，用于为计划渲染差异制品和可视化预览。本任务（任务 11）尚未接入；缺失时，审批中断不携带制品 ID。
  */
 export interface PlanArtifactsPort {
   create(input: PlanArtifactsInput): Promise<PlanArtifactRefs>;
@@ -189,14 +185,14 @@ export interface PlanArtifactsPort {
 export interface UiImplementationCompilerInput {
   workspaceId: string;
   spec: UIImplementationSpec;
-  /** Last confirmed implementation, allowing the compiler to emit local deltas. */
+  /** 最后的实现，允许编译器在本地生成差异 */
   previousSpec?: UIImplementationSpec;
-  /** Verified current module compilation; required for every module-owned component. */
+  /** 验证当前模块编译；每模块拥有的组件都必须满足此条件。 */
   moduleCompilationArtifact?: VerifiedModuleCompilationArtifact;
   editableEntities: EditableEntity[];
 }
 
-/** Domain-owned deterministic implementation boundary; the model never emits ChangePlan here. */
+/** 由领域持有的确定性实现边界；模型绝不会在这里生成 ChangePlan。 */
 export interface UiImplementationCompilerPort {
   compile(input: UiImplementationCompilerInput): Promise<{
     plan: InternalChangePlan;
@@ -205,9 +201,9 @@ export interface UiImplementationCompilerPort {
   }>;
 }
 
-/** Deterministic module compiler boundary. Registry/assets remain server-owned behind the port. */
+/** 确定性模块编译边界。注册表/资产始终在端口后方保持服务器拥有。 */
 export interface ModulePlanCompilerPort {
-  /** Stable-only, bounded summaries. Beta/unsupported definitions never cross this boundary. */
+  /** 仅包含稳定版本的有界摘要。测试版或不受支持的定义绝不会跨越此边界。 */
   listPlanningCatalog(): Promise<readonly ModulePlanningSummary[]>;
   compile(input: {
     tenantId: string;
@@ -220,12 +216,12 @@ export interface ModulePlanCompilerPort {
   }): Promise<ModuleCompilationOutcome>;
 }
 
-/** Tenant/workspace-scoped model-safe asset metadata. Never returns storage keys or paths. */
+/** 租户/工作区范围的模型安全资产元数据。从不返回存储键或路径。 */
 export interface AssetCatalogPort {
   list(input: { tenantId: string; workspaceId: string }): Promise<readonly import("@kf/contracts").AssetRecord[]>;
 }
 
-/** API-owned confirmation boundary; model fields are inputs, never signing authority. */
+/** API拥有确认边界；模型字段是输入，而不是签署权限。 */
 export interface AcceptedBlueprintConfirmationPort {
   confirm(input: {
     blueprint: CustomerEffectBlueprint;
@@ -234,7 +230,7 @@ export interface AcceptedBlueprintConfirmationPort {
   }): Promise<AcceptedBlueprintArtifact>;
 }
 
-/** Deterministic local retrieval boundary. Implementations make no model call. */
+/** 确定性本地检索边界。实现不调用模型。 */
 export interface CapabilityRetrievalPort {
   retrieve(input: {
     blueprint: CustomerSolutionBlueprint;
@@ -246,7 +242,7 @@ export interface CreativeCompilationDiagnostic {
   phase?: string;
   nodeId: string;
   message: string;
-  /** Safe incident identity; raw dependency details remain in server logs only. */
+  /** 安全事件标识；原始依赖细节仅在服务器日志中保留。 */
   correlationId?: string;
   alternatives?: readonly string[];
 }
@@ -266,7 +262,7 @@ export interface CreativeSolutionCompilerInput {
 export type CreativeSolutionCompilerOutcome =
   | {
       status: "compiled";
-      /** Narrow receipt for a complete, verified, atomically persisted creative envelope. */
+      /** 完整、验证、原子持久的创意包裹窄接收。 */
       changeRequestId: string;
       changePlanId: string;
       planHash: string;
@@ -283,12 +279,12 @@ export type CreativeSolutionCompilerOutcome =
       warnings: readonly CreativeCompilationDiagnostic[];
     };
 
-/** One server-owned creative boundary: evidence, compilation, verification, and atomic persistence. */
+/** 一个由服务器所有者控制的创意边界：证据、编译、验证和原子持久。 */
 export interface CreativeSolutionCompilerPort {
   compile(input: CreativeSolutionCompilerInput): Promise<CreativeSolutionCompilerOutcome>;
 }
 
-/** Server-only authority port. Implementations hold the HMAC key outside graph state. */
+/** 仅服务器端的权威端口。实现将HMAC密钥保留在图外状态。 */
 export interface ServerPlanSignerPort {
   sign(input: {
     plan: InternalChangePlan;
@@ -298,9 +294,7 @@ export interface ServerPlanSignerPort {
 }
 
 /**
- * All dependencies the solution graph needs. The graph owns no persistence of
- * its own: every side effect flows through these ports so the graph itself
- * stays deterministic and resumable.
+ * 解决方案图所需的全部依赖项。图本身不拥有任何持久性：所有副作用都通过这些端口传递，因此图本身保持确定性和可恢复性。
  */
 export interface SolutionGraphDeps {
   modelPort: ModelPort;
@@ -308,24 +302,24 @@ export interface SolutionGraphDeps {
   changePlanRepository: ChangePlanRepository;
   buildJobPort: BuildJobPort;
   planArtifacts?: PlanArtifactsPort;
-  /** Present for domains whose confirmed blueprints can compile through an implementation spec. */
+  /** 用于蓝图确认后可通过实现规范完成编译的领域。 */
   uiImplementationCompiler?: UiImplementationCompilerPort;
-  /** Required before any internal semantic envelope may be persisted. */
+  /** 在任何内部语义包体可以被持久化之前，必须存在。 */
   serverPlanSigner?: ServerPlanSignerPort;
-  /** Same server key as ServerPlanSigner, domain-separated by the artifact authority. */
+  /** 与 ServerPlanSigner 使用相同的服务器密钥，并由制品权限主体进行域分离。 */
   moduleArtifactAuthority?: ModuleArtifactAuthority;
-  /** Reserved module-generation execution port; Task 10 can wire it without changing checkpoint state. */
+  /** 生成模块的执行端口；任务10可以不改变检查点状态而连接它。 */
   modulePlanCompiler?: ModulePlanCompilerPort;
   assetCatalog?: AssetCatalogPort;
   acceptedBlueprintConfirmation?: AcceptedBlueprintConfirmationPort;
-  /** Required only by the creative-v2 route. */
+  /** 仅由创意v2路由所需。 */
   capabilityRetrieval?: CapabilityRetrievalPort;
-  /** Required only by the creative-v2 route; never stored in graph state. */
+  /** 仅由创意v2路由所需；从图状态中存储。 */
   creativeSolutionCompiler?: CreativeSolutionCompilerPort;
-  /** Domain support predicate (DomainRegistry-backed in production). */
+  /** 域支持谓词（DomainRegistry在生产中后端支持） */
   isDomainSupported: (domain: string) => boolean;
-  /** Domain used when enqueueing a build (defaults to the KF client domain). */
+  /** 构建时使用的域（默认为客户端域） */
   defaultDomainKind?: string;
-  /** Stable project identity used with the default domain (defaults to domain kind). */
+  /** 默认域（默认为域类型） */
   defaultProjectKey?: string;
 }

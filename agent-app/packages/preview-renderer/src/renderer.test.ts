@@ -20,8 +20,7 @@ const page: PageIR = {
   ],
 };
 
-// Note: `dependencies`/`globalScripts` from the task brief are not fields of
-// ClientProjectIR, so the literal is asserted (runtime shape is unaffected).
+// 注意：`dependencies`/`globalScripts` 从任务简要中不被视为ClientProjectIR 的字段，因此其实际值（运行时形状不受影响）被断言（运行时形状不受影响）。
 const ir = {
   schema: "kf-client-project-ir/v1", id: "w1", name: "监控大屏",
   pages: [page, { ...page, id: "p2", name: "第二页", controls: [] }],
@@ -101,19 +100,19 @@ describe("preview renderer", () => {
   });
   it("renders per-type payloads", () => {
     const html = renderPagePreview(page);
-    expect(html).toContain("开始运行"); // button text
-    expect(html).toContain("开"); // switch activeText
+    expect(html).toContain("开始运行"); // 按钮文本
+    expect(html).toContain("开"); // 开关 activeText
     expect(html).toContain("关");
-    expect(html).toContain("A"); // select options
+    expect(html).toContain("A"); // 选择器选项
     expect(html).toContain("B");
-    expect(html).toContain("启用"); // checkbox label
-    expect(html).toContain("高"); // radio options
-    expect(html).toContain("<b>富文本</b>"); // richtext html passthrough
-    expect(html).toContain('value="0.0" disabled'); // inputnumber
-    expect(html).toContain('src="http://x/y.png"'); // image src
-    expect(html).toContain('class="kf-tab is-active"'); // tabs active highlight
-    expect(html).toContain("<th>列1</th>"); // table header
-    expect(html).toContain('class="kf-spacer"'); // spacer
+    expect(html).toContain("启用"); // 复选框标签
+    expect(html).toContain("高"); // 单选框选项
+    expect(html).toContain("<b>富文本</b>"); // 富文本 HTML 透传
+    expect(html).toContain('value="0.0" disabled'); // 数字输入框
+    expect(html).toContain('src="http://x/y.png"'); // 图片 src
+    expect(html).toContain('class="kf-tab is-active"'); // 标签页活动项高亮
+    expect(html).toContain("<th>列1</th>"); // 表头
+    expect(html).toContain('class="kf-spacer"'); // 间隔
   });
   it("renders the new control types", () => {
     const page = {
@@ -144,15 +143,15 @@ describe("preview renderer", () => {
     expect(html).toContain("× 标签");
     expect(html).toContain('class="kf-step is-active"');
     expect(html).toContain("步骤2");
-    expect(html).toContain("kf-tree-check"); // tree checkbox icon
-    expect(html).toContain("请选择"); // cascader placeholder
-    expect(html).toContain("2025-01-01"); // datetimepicker value
-    expect(html).toContain("操作"); // dropdown text
-    expect(html).toContain("多文件"); // upload multiple
-    expect(html).toContain("kf-scale-fill"); // scale
-    expect(html).toContain("事件1"); // timeline item
-    expect(html).toContain("example.com"); // webcontainer iframe
-    expect(html).toContain("● 高"); // radiolegacy selected
+    expect(html).toContain("kf-tree-check"); // 树形复选框图标
+    expect(html).toContain("请选择"); // 级联选择器占位文本
+    expect(html).toContain("2025-01-01"); // 日期时间选择器值
+    expect(html).toContain("操作"); // 下拉菜单文本
+    expect(html).toContain("多文件"); // 多文件上传
+    expect(html).toContain("kf-scale-fill"); // 刻度
+    expect(html).toContain("事件1"); // 时间线项
+    expect(html).toContain("example.com"); // Web 容器 iframe
+    expect(html).toContain("● 高"); // 旧版单选框已选状态
   });
   it("renders multi-page tabs with CSS :target and no scripts", () => {
     const html = renderClientProjectPreview(ir);

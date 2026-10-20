@@ -35,16 +35,16 @@ export interface ImplementationCompileContext {
   existingControlGuidByComponentId: Readonly<Record<string, string>>;
   existingControlCapabilityIdByComponentId: Readonly<Record<string, string>>;
   existingControlGeometryByComponentId?: Readonly<Record<string, UIComponentSpec["geometry"]>>;
-  /** Last confirmed model spec, used only to emit true semantic deltas. */
+  /** 最后确认的模型规范，仅用于生成真正的语义差异。 */
   previousImplementation?: UIImplementationSpec;
-  /** Runtime-branded server verification of the persisted current compilation artifact. */
+  /** 对已持久化的当前编译制品进行带运行时品牌的服务器校验。 */
   moduleCompilationArtifact?: VerifiedModuleCompilationArtifact;
 }
 
 export interface UiImplementationCompileResult {
   plan: InternalChangePlan;
   capabilityReport: CapabilityReport;
-  /** Server port persists these separately from model-facing plan/spec JSON. */
+  /** 服务器端口与模型面向的计划/规范JSON分开保存。 */
   semanticOperations: readonly { kind: "kf.table-data/v1"; entityId: string; capabilityId: "easyui.1"; sourceModuleId: string; payloadHash: string }[];
 }
 
@@ -110,15 +110,15 @@ const PROPERTY_KEYS: Readonly<Record<string, readonly string[]>> = Object.freeze
 });
 
 const CONTENT_CAPABILITIES = new Set(["button", "text", "richtext"]);
-/** Data adapters deliberately materialize reviewed native structures without CSS. */
+/** 数据适配器故意不材料化审查后的原始结构，而是在CSS之前。 */
 const CONFIGURATION_ONLY_NATIVE_CAPABILITIES = new Set([
   "easyui.1",
 ]);
 const EMPTY_STYLE: ComponentStyleSpec = Object.freeze({ declarations: {}, states: {} });
 /**
- * Compiles a validated UI implementation spec into a deterministic, structured
- * ChangePlan. Styles remain structured intent: this layer compiles styles only
- * to verify capability coverage, never to copy generated CSS into the plan.
+ * 编译一个验证过的用户界面实现规范为一个确定的、结构化的
+ * ChangePlan。样式保持结构化的意图：此层仅编译样式以验证覆盖能力，
+ * 从未将生成的CSS复制到计划中。
  */
 export function compileUiImplementation(
   input: UIImplementationSpec,

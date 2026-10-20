@@ -383,7 +383,7 @@ describe("client compiler", () => {
     });
   });
 
-  it("resolves navigate.pageId semantic ids to page KF GUIDs", async () => {
+  it("validates navigate.pageId and emits the KF ShowPage runtime call", async () => {
     const irWithNavigate = {
       ...ir,
       pages: [
@@ -402,9 +402,11 @@ describe("client compiler", () => {
       await readFile(path.join(result.path, "1.0.0.1", "project", "page", "Page1.json"), "utf8"),
     );
     const button = page.objects.find((o) => o.name === "Button1");
-    expect(button.linkMng.linkList[0]).toMatchObject({
-      action: "navigatePage",
-      pageId: page.guid,
+    expect(button.linkMng.linkList[0]).toEqual({
+      linkId: 200001,
+      enable: true,
+      name: "onClick",
+      script: 'ShowPage("Page1",1);',
     });
   });
 

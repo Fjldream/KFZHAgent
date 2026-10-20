@@ -2,32 +2,28 @@ import { z } from "zod";
 import { ComponentStyleSpecSchema } from "@kf/contracts";
 
 /**
- * ClientProjectIR: a schema-constrained, lossless view of a KingFusion client
- * project. IR field names are semantic (stable across KF versions); the raw KF
- * field layout lives in the control templates under `src/templates/`.
+ * ClientProjectIR: 一个受约束的、无损的客户端KingFusion项目视图。IR字段名是语义的（在KF版本之间保持稳定），KF字段布局的原始版本在控制模板中存储在`src/templates/`中。
  *
- * Conventions:
- * - `ControlIR.id` is a STABLE SEMANTIC id (e.g. the KF control `name`), never
- *   a KF GUID. The KF GUID mapping is owned by the inspector's EntityIndex.
- * - `ControlIR` is a Zod discriminated union on `type`; a variant may never
- *   expose a raw KF object or an arbitrary property bag.
+ * 约定：
+ * - `ControlIR.id` 是一个稳定且语义的ID（例如，KF控制的`name`），永远不是KF GUID。KF GUID映射由检查员的EntityIndex所有。
+ * - `ControlIR` 是一个Zod歧异类型，类型是`type`的变体；一个变体永远不可能暴露原始KF对象或任意属性包。
  */
 
-/** Layout coordinates shared by every control variant (brief Step 4). */
+/** 所有控件变体共用的布局坐标（简述第 4 步）。 */
 export const BaseControlIR = z.object({
   id: z.string().min(1),
   x: z.number().nonnegative(),
   y: z.number().nonnegative(),
   width: z.number().positive(),
   height: z.number().positive(),
-  /** Structured style intent only; arbitrary CSS is intentionally not representable. */
+  /** 仅包含结构化风格意图；任意CSS故意不被表示。 */
   style: ComponentStyleSpecSchema.optional(),
 });
 export type BaseControlIR = z.infer<typeof BaseControlIR>;
 
 export const ImageFitSchema = z.enum(["fill", "contain", "cover", "none", "scale-down"]);
 
-/** URL values emitted into KF fields: HTTP(S) or a local relative resource only. */
+/** 在 KF 字段中，发出的 URL 值仅限于 HTTP(S) 或本地相对资源。 */
 export const SafeResourceUrlSchema = z.string().min(1).max(2_048).refine((value) => {
   const hasControlCharacter = [...value].some((char) => {
     const code = char.charCodeAt(0);
@@ -137,7 +133,7 @@ export const ImageControlIR = BaseControlIR.extend({
 const TabDefinitionIR = z.object({
   id: z.string().trim().min(1),
   label: z.string().trim().min(1),
-  /** Creative-only semantic ownership; direct/legacy IR may omit both fields. */
+  /** 仅限创意的语义所有权；直接/遗产IR可能省略这两个字段。 */
   regionId: z.string().trim().min(1).max(100).optional(),
   paneNodeId: z.string().trim().min(1).max(100).optional(),
 }).strict().superRefine((tab, ctx) => {
@@ -173,12 +169,7 @@ export const TabsControlIR = BaseControlIR.extend({
 export const TableControlIR = BaseControlIR.extend({
   type: z.literal("table"),
 }).strict();
-// KF tables (uiModelType 31) do NOT serialize columns/dataSource as object
-// fields: verified against 1094 real SDB table objects, the column model lives
-// inside the `configureData` script (`this.table({ columns: [...] })`) and the
-// runtime `$VMData.columns` Vue state is never persisted. A structured column
-// mapping is therefore deferred to Task 6 (parse `configureData` or introduce
-// a configuration DSL); until then the table variant exposes base geometry only.
+// KF表（uiModelType 31）不序列化列/dataSource为对象字段：验证了1094个实际SDB表对象，列模型居住在`configureData`脚本（`this.table({ columns: [...] })`）和运行时`$VMData.columns` Vue状态中从未被持久化。因此，因此，表变型仅暴露基几何。因此，直到任务6（解析`configureData`或引入配置DSL）编译器从`configureData`发出`$VMData.columns`。在此之前，表变型暴露基几何。
 
 export const RichTextControlIR = BaseControlIR.extend({
   type: z.literal("richtext"),
@@ -189,10 +180,7 @@ export const SpacerControlIR = BaseControlIR.extend({
   type: z.literal("spacer"),
   axis: z.enum(["horizontal", "vertical"]),
 }).strict();
-// `axis` is a DERIVED field: KF spacers carry no such attribute (verified:
-// 11k+ real SDB spacer objects have no `name` and no axis field). The axis is
-// implied by the KF uiModelType (13 = HORIZONTALSPACER, 14 = VERTICALSPACER);
-// the Task 6 compiler emits the uiModelType from `axis`.
+// `axis` 是派生字段：KF 间隔控件没有该属性（已验证：1.1 万多个真实 SDB 间隔控件对象都没有 `name` 或 axis 字段）。轴向由 KF uiModelType 隐含指定（13 = HORIZONTALSPACER，14 = VERTICALSPACER）；任务 6 的编译器根据 `axis` 生成 uiModelType。
 
 // ── 新增控件（参考工程 test_最新_2 实际使用；字段 = LLM 可生成的语义属性，
 //    复杂数据如 gantt data/tag tags 走 configureData 脚本，IR 不建模）──
@@ -375,7 +363,7 @@ export const EasyuiControlIR = BaseControlIR.extend({
   proto: z.number().int(),
   /** 冗余保留原始 proto 值（与 proto 相同，便于回写 KF 时对账）。 */
   uiExtendType: z.number().int().optional(),
-  /** Read-only semantic projection of reviewed native Datagrid data/columns. */
+  /** 只读语义投影审查后的原始Datagrid数据/列。 */
   tableData: ReviewedTableDataSchema.optional(),
   // ── easyui 核心可选字段（EASYUI_PROTO_FIELDS 并集，排除 IR 保留名 type/proto/uiExtendType/几何；值类型宽松 unknown）──
   _validateOnCreate: z.unknown().optional(),
@@ -631,41 +619,41 @@ export const ControlIR = z.discriminatedUnion("type", [
 ]);
 export type ControlIR = z.infer<typeof ControlIR>;
 
-/** KF `uiModelType` -> IR control type (from `kmui_glabolvar.js` + SDB pages). */
+/** KF`uiModelType` -> IR控制类型（从KF`kmui_glabolvar.js` + SDB页面）。 */
 export const CONTROL_TYPE_BY_UIMODEL_TYPE: Readonly<Record<number, string>> = {
   0: "radiolegacy", // RADIO（旧）
   1: "checkboxlegacy", // CHECKBOX（旧）
-  3: "combobox", // COMBOBOX
-  6: "text", // TEXTBOX
-  7: "richtext", // RICHTEXT
-  8: "scale", // SCALE
-  9: "list", // LIST
-  11: "treeview", // TREEVIEW
-  12: "webcontainer", // WEBCONTAINER
-  13: "spacer", // HORIZONTALSPACER
-  14: "spacer", // VERTICALSPACER
-  30: "gantt", // GANTT
-  31: "table", // TABLE
-  32: "tree", // TREE
-  33: "dropdown", // DROPDOWN
-  34: "navmenu", // NAVMENU
-  35: "button", // BUTTON (element-style, page JSON verified)
-  36: "radio", // ELEMENTRADIO
-  37: "checkbox", // ELEMENTCHECHECKBOX
-  38: "input", // INPUT
-  39: "cascader", // CASCADER
-  40: "datetimepicker", // DATETIMEPICKER
-  41: "image", // IMAGE
-  43: "factorycalendar", // FACTORYCALENDAR
-  44: "select", // SELECT
-  45: "upload", // UPLOAD
-  46: "transfer", // TRANSFER
-  47: "tabs", // TABS
-  48: "switch", // SWITCH
-  49: "inputnumber", // INPUTNUMBER
-  50: "tag", // TAG
-  51: "timeline", // TIMELINE
-  52: "steps", // STEPS
+  3: "combobox", // 组合框
+  6: "text", // 文本框
+  7: "richtext", // 富文本框
+  8: "scale", // 滑块
+  9: "list", // 列表
+  11: "treeview", // 树视图
+  12: "webcontainer", // WEB容器
+  13: "spacer", // 水平分隔符
+  14: "spacer", // 垂直分隔符
+  30: "gantt", // 甘特图
+  31: "table", // 表格
+  32: "tree", // 树
+  33: "dropdown", // 下拉菜单
+  34: "navmenu", // 导航菜单
+  35: "button", // 按钮 (元素样式，页面 JSON 已验证)
+  36: "radio", // 元素单选
+  37: "checkbox", // 元素复选框
+  38: "input", // 输入
+  39: "cascader", // 级联选择器
+  40: "datetimepicker", // 日期选择器
+  41: "image", // 图片
+  43: "factorycalendar", // 工厂日期选择器
+  44: "select", // 选择
+  45: "upload", // 上传
+  46: "transfer", // 转移
+  47: "tabs", // 标签页
+  48: "switch", // 开关
+  49: "inputnumber", // 数字输入框
+  50: "tag", // 标签
+  51: "timeline", // 时间线
+  52: "steps", // 步骤条
 };
 
 export const VariableIR = z.object({

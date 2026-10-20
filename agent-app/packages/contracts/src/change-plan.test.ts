@@ -6,13 +6,9 @@ import {
 import { canonicalChangePlanHash } from "./server-plan-envelope.js";
 
 /**
- * Change-plan contract tests.
+ * 变更计划契约测试。
  *
- * These guard the fields Task 10/11 depend on when they run plans through
- * zod `changePlanSchema.parse()`: zod strips unknown keys by default, so a
- * field used by the patcher/validator must be a declared schema field or it
- * silently disappears. `digest` (delete) and `entityType` (update hint) are
- * exactly such fields.
+ * 这些测试保护任务 10/11 在通过 zod `changePlanSchema.parse()` 处理计划时依赖的字段：zod 默认会删除未知键，因此 patcher/validator 使用的字段必须声明为 schema 字段，否则会被静默删除。`digest`（删除）和 `entityType`（更新提示）正是这类字段。
  */
 
 describe("change plan schema", () => {

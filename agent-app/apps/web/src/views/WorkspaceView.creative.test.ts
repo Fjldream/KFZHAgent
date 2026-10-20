@@ -1,4 +1,4 @@
-// @ts-nocheck -- focused integration fixture exercises the real Vue view with a server delivery snapshot.
+// @ts-nocheck -- 集中集成测试用例模拟真实 Vue 视图与服务器交付快照的交互。
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import { describe, expect, it, vi } from "vitest";

@@ -36,7 +36,7 @@ import { compileResolvedStyle } from "../style/style-engine.js";
 import { resolveStyle } from "../style/theme-resolver.js";
 import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
 import { validateGeneratedComponentProperties } from "./component-properties.js";
-import { compileInteractions } from "../interaction/interaction-compiler.js";
+import { compileInteractions, interactionDiagnosticsBlockCompilation } from "../interaction/interaction-compiler.js";
 import {
   attachRuntimeCorrelation,
   readVerifiedExistingRuntimeCorrelation,
@@ -103,7 +103,7 @@ interface ServerScopedCreativePayloadIssuer {
 
 export interface CreativeUIImplementationV2CompileResult {
   readonly plan: InternalChangePlan;
-  /** Compiler-owned authorization for exact Datagrid payloads present in the emitted plan. */
+  /** 编译器对精确的Datagrid数据包在生成的计划中的所有权授权。 */
   readonly semanticOperations: readonly TrustedSemanticOperationInput[];
   readonly capabilityReport: CapabilityReport;
   readonly verifiedAssets: readonly VerifiedCreativeAsset[];
@@ -400,10 +400,7 @@ function compileCreativeUIImplementationV2(
   const recoverableRequestActionIds = new Set(authoritativeInteractions.diagnostics.requests
     .filter((request) => request.reason === "TRIGGER_EVENT_UNSUPPORTED" && imageClickActions.has(request.actionId))
     .map((request) => request.actionId));
-  const hasBlockingInteraction = authoritativeInteractions.diagnostics.errors.some((diagnostic) =>
-    diagnostic.code !== "INTERACTION_CLOSURE_MISSING" || !recoverableRequestActionIds.has(diagnostic.nodeId))
-    || authoritativeInteractions.diagnostics.requests.some((request) => !recoverableRequestActionIds.has(request.actionId));
-  if (hasBlockingInteraction) {
+  if (interactionDiagnosticsBlockCompilation(authoritativeInteractions.diagnostics, recoverableRequestActionIds)) {
     fail("CREATIVE_INTERACTION_COMPILATION_BLOCKED", canonicalServerHash(authoritativeInteractions.diagnostics));
   }
   if (canonicalServerHash(authoritativeInteractions.implementation) !== canonicalServerHash(implementation)) {

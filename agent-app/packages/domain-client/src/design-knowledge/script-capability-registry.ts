@@ -14,19 +14,29 @@ const CENTER_SELECT_READ_PAGE = "KingFusion3.6_Center/sdb/c7f1771f-0c8f-4c75-9d7
 const NODE_DATAGRID_METHOD_PAGE = "KingFusion3.6_Node/sdb/kingclient/5dd3e6c0-d181-11f0-b646-250384722929/d6271f40-e165-11f0-bc3d-dbe5f779bd94/pagerecord/recordpages/数据网格_方法20250218173552.json";
 const NODE_DATAGRID_EVENT_PAGE = "KingFusion3.6_Node/sdb/kingclient/5dd3e6c0-d181-11f0-b646-250384722929/d6271f40-e165-11f0-bc3d-dbe5f779bd94/project/page/数据网格_事件.json";
 const NODE_LAYOUT_RUNTIME = "KingFusion3.6_Node/kingexedb/kingclient/exe/public/javascripts/Common/Graphic/Layout/kmui_layoutcomponentbase.js";
+const NODE_UI_MODEL_RUNTIME = "KingFusion3.6_Node/kingexedb/kingclient/exe/public/javascripts/Common/Graphic/UI/kmui_modelbase.js";
+const NODE_NAVIGATION_PAGE = "KingFusion3.6_Node/sdb/kingclient/4d40fe10-ea9f-11f0-873c-fbefc9d34a70/f06c3b90-ea9f-11f0-871c-1f9d1cf633fa/pagerecord/recordpages/APP_油井加药执行20260108135939.json";
 const OVERLAY_VISIBILITY_EVIDENCE = [PRODUCT_SOURCE(
   NODE_LAYOUT_RUNTIME,
   "04831c1bd9feb0d19eaac07e0aee5af7df07bd4fba8072b6630dd1c4689b0aff",
+), PRODUCT_SOURCE(
+  NODE_UI_MODEL_RUNTIME,
+  "8cc6135ae1a0e87c565d2e86ccf67ba3bd96d33f976970b37d9e740c062d255f",
 )];
+const NAVIGATION_RUNTIME_EVIDENCE = PRODUCT_SOURCE(
+  `${NODE_NAVIGATION_PAGE}#ShowPage`,
+  "9190597094b2f424f80ec34139471581f62a43dd31d02014e09efcfb896c48ee",
+);
 const ACTION_IR_EVIDENCE = [
   { kind: "compiler", ref: "agent-app/packages/domain-client/src/ir/client-project-ir.schema.ts#RestrictedAction" },
   { kind: "compiler", ref: "agent-app/packages/domain-client/src/compile/control-compiler.ts#compileAction" },
 ] as const;
 
-function actionEvidence(testFragment: "navigatePage" | "setVariable") {
+function actionEvidence(testFragment: "ShowPage" | "setVariable") {
   return [
     ...ACTION_IR_EVIDENCE,
     { kind: "compiler", ref: `agent-app/packages/domain-client/src/compile/client-compiler.test.ts#${testFragment}` },
+    ...(testFragment === "ShowPage" ? [NAVIGATION_RUNTIME_EVIDENCE] : []),
   ];
 }
 
@@ -54,7 +64,7 @@ const REVIEWED_PROFILES: Readonly<Record<string, unknown>> = {
     version: "1.0.0",
     availability: "supported",
     actions: [
-      { semanticAction: "navigate-page", implementation: "restricted-action", availability: "supported", evidence: actionEvidence("navigatePage") },
+      { semanticAction: "navigate-page", implementation: "restricted-action", availability: "supported", evidence: actionEvidence("ShowPage") },
       { semanticAction: "set-variable", implementation: "restricted-action", availability: "supported", evidence: actionEvidence("setVariable") },
       { semanticAction: "open-dialog", implementation: "restricted-action", availability: "supported", evidence: OVERLAY_VISIBILITY_EVIDENCE },
       { semanticAction: "close-dialog", implementation: "restricted-action", availability: "supported", evidence: OVERLAY_VISIBILITY_EVIDENCE },

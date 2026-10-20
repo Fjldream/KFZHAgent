@@ -1,8 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import { WEB_BASE } from "./tests/e2e/helpers/config.js";
 
-// Explicit test-runner opt-in. Direct seed execution still requires callers
-// to set this sentinel themselves.
+// 显式测试运行器启用。直接种子执行仍然需要调用者自己设置这个哨兵。
 process.env.KF_E2E_ALLOW_DESTRUCTIVE_RESET = "1";
 
 /**

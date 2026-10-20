@@ -493,9 +493,7 @@ function serializeReviewedTabsRuntimeState(ownerInstanceName: string, input: Rev
 }
 
 /**
- * Exact compiler-owned KF 3.6 Tabs initialization. The checked-in runtime
- * creates Vue from defaultData before evaluating configureData, and `tabs(e)`
- * is its only reviewed path for assigning tabData/activeName into `$vm`.
+ * 由编译器精确控制的 KF 3.6 Tabs 初始化。已签入的运行时会先基于 defaultData 创建 Vue，再求值 configureData；`tabs(e)` 是经审查后唯一用于把 tabData/activeName 赋给 `$vm` 的路径。
  */
 export function serializeReviewedTabsInitialization(
   ownerInstanceName: string,
@@ -511,7 +509,7 @@ export function serializeReviewedTabsInitialization(
   });
 }
 
-/** Parses only the exact compiler form; it is not a general JS/configureData parser. */
+/** 只解析精确的编译形式；它不是通用的JS/configureData解析器。 */
 export function parseReviewedTabsInitialization(source: unknown): Readonly<{
   ownerInstanceName: string;
   uiModelType: 47;

@@ -2,27 +2,27 @@ import type { BuildJob, JobStatus } from "@prisma/client";
 
 export type BuildJobStatus = JobStatus;
 
-/** Input for a durable build job enqueue (idempotent on idempotencyKey). */
+/** 持久化构建作业入队的输入（以 idempotencyKey 保证幂等）。 */
 export interface EnqueueBuildInput {
   tenantId: string;
   workspaceId: string;
   baseRevisionId: string;
   changePlanId: string;
   planHash: string;
-  /** Stable project identity. Omitted legacy calls default to domainKind. */
+  /** 稳定的项目标识。省略该值的旧版调用默认使用 domainKind。 */
   projectKey?: string;
   domainKind: string;
   idempotencyKey: string;
 }
 
-/** Validation report persisted with a completed build job. */
+/** 验证报告，已完成构建作业。 */
 export interface JobValidationReport {
   outcome: string;
   summary: string;
   details: unknown;
 }
 
-/** The new revision payload for a successful build commit. */
+/** 成功构建提交的新修订版本。 */
 export interface SuccessfulBuildResult {
   kind: string;
   state: unknown;
@@ -46,7 +46,7 @@ export interface SuccessfulBuildResult {
   };
 }
 
-/** Completion input; owner + attempt must match a live lease or the commit is rejected. */
+/** 完成输入；所有者尝试必须匹配一个活的租约，否则提交将被拒绝。 */
 export interface CompleteBuildInput {
   jobId: string;
   tenantId: string;
@@ -57,7 +57,7 @@ export interface CompleteBuildInput {
   result?: SuccessfulBuildResult;
 }
 
-/** A build job that has been claimed by a worker lease. */
+/** 已被工蜂租约占有的构建作业。 */
 export type LeasedBuildJob = BuildJob;
 
 export type { BuildJob };

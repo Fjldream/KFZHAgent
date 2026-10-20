@@ -18,9 +18,7 @@ import { TenantGuard, type AuthenticatedRequest } from "../auth/tenant.guard.js"
 import { WorkspaceService } from "./workspace.service.js";
 
 /**
- * Workspace endpoints behind the tenant guard. tenantId always comes from the
- * authenticated session; cross-tenant lookups surface as 404 to avoid leaking
- * that a resource exists.
+ * 位于租户守卫后的工作空间端点。tenantId 始终来自已认证会话；跨租户查询表现为 404，避免泄漏资源存在性。
  */
 @Controller("api/workspaces")
 @UseGuards(TenantGuard)
@@ -63,12 +61,8 @@ export class WorkspacesController {
   }
 
   /**
-   * Streaming source-package upload (brief Step 4). The request body is
-   * streamed straight into artifact storage with a strict byte cap and ZIP
-   * content sniffing; the Source Revision is created only after import +
-   * inspection succeed. Failure error codes: PACKAGE_UNSUPPORTED /
-   * PACKAGE_UNPACK_FAILED / PROJECT_PARSE_FAILED; 413 for oversized bodies.
-   */
+ * 流式 source-package 上传（简要步骤 4）。请求正文会在严格字节上限和 ZIP 内容嗅探的约束下直接流入制品存储；只有导入和检查成功后才创建源修订。失败错误码：PACKAGE_UNSUPPORTED / PACKAGE_UNPACK_FAILED / PROJECT_PARSE_FAILED；正文过大时返回 413。
+ */
   @Post(":id/uploads")
   @HttpCode(HttpStatus.CREATED)
   async uploadSource(
@@ -118,10 +112,9 @@ export class WorkspacesController {
   }
 
   /**
-   * Destructive workspace deletion. Requires an explicit `{ confirm: true }`
-   * body; the confirmation itself is recorded as DESTRUCTIVE_CONFIRM so the
-   * audit trail distinguishes the confirmation from the deletion.
-   */
+ * 破坏性工作区删除。需要一个明确的 `{ confirm: true }`
+ * body; 确认本身被记录为 DESTRUCTIVE_CONFIRM，以便审计轨迹能够区分确认和删除。
+ */
   @Delete(":id")
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteWorkspace(

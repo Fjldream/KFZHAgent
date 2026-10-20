@@ -51,21 +51,16 @@ import {
 } from "./report.js";
 
 /**
- * Six-layer client validator (brief Step 6).
+ * 六层客户端 validator（简要步骤 6）。
  *
- * `validateClientProject(base, candidate, plan)` is the ONLY authority that
- * can pass or fail a modified workspace. Each layer is independent and each
- * returns pass/warn/fail; `status` is "pass" only when every required check
- * passes. Warnings (e.g. a planned change with no observable effect) are
- * collected in the report and never override a failure.
+ * `validateClientProject(base, candidate, plan)` 是判定修改后工作空间通过或失败的唯一权限主体。各层相互独立，分别返回 pass/warn/fail；只有所有必需检查均通过时，`status` 才为 “pass”。警告（例如计划内变更没有可观察效果）会收集到报告中，绝不会覆盖失败结果。
  *
- *  1. packageStructure — the candidate is a valid, unpackable workspace,
- *  2. jsonSchema      — every JSON file parses and page/control shapes hold,
- *  3. references      — GUID uniqueness + pageManager / action references,
- *  4. businessRules   — known uiModelTypes, in-bounds geometry, well-formed
- *                       script actions, confirmed destructive deletes,
- *  5. changeScope     — nothing outside the confirmed plan changed,
- *  6. roundTrip       — pack candidate and unpack it again: byte-identical.
+ *  1. packageStructure — 候选项是有效、可解包的工作空间；
+ *  2. jsonSchema      — 每个 JSON 文件都可解析，页面/控件结构有效；
+ *  3. references      — GUID 唯一性以及 pageManager / action 引用有效；
+ *  4. businessRules   — uiModelType 已知、几何范围有效、脚本 action 结构正确、破坏性删除已确认；
+ *  5. changeScope     — 已确认计划之外没有任何内容发生变化；
+ *  6. roundTrip       — 打包候选项后再次解包，结果逐字节一致。
  */
 
 async function exists(p: string): Promise<boolean> {
@@ -393,6 +388,14 @@ function compilerSourceIssue(
   if (/\b(?:window|document|globalThis|fetch|XMLHttpRequest|WebSocket|eval|Function)\b/.test(source)) return "compiled script contains a forbidden global";
   const declaredInstances = new Set(metadata.instanceReferences.map((reference) => reference.instanceName));
   const program = parse(source, { ecmaVersion: 2022, sourceType: "script" }) as unknown as Record<string, unknown>;
+  const isCanonicalShowPageCall = (call: Record<string, unknown>): boolean => {
+    const args = Array.isArray(call["arguments"]) ? call["arguments"] as Array<Record<string, unknown>> : [];
+    const pageName = args[0]?.["type"] === "Literal" && typeof args[0]["value"] === "string"
+      ? args[0]["value"] : undefined;
+    return call["type"] === "CallExpression" && args.length === 2 && pageName !== undefined
+      && args[1]?.["type"] === "Literal" && args[1]["value"] === 1
+      && metadata.pageReferences.some((reference) => reference.semanticId === pageName);
+  };
   const allowedNodeTypes = new Set([
     "Program", "VariableDeclaration", "VariableDeclarator", "ExpressionStatement", "ReturnStatement", "IfStatement",
     "FunctionDeclaration", "ArrowFunctionExpression", "BlockStatement", "EmptyStatement",
@@ -668,9 +671,7 @@ function compilerSourceIssue(
     if (["BinaryExpression", "UnaryExpression"].includes(String(value["type"]))) return { kind: "scalar" };
     return unknownFact;
   };
-  // Binding names are globally unique in this restricted grammar, so a small
-  // fixed point is enough to propagate aliases, callback element facts, and
-  // call results without introducing flow-insensitive shadowing escapes.
+  // 在这一受限语法中，绑定名称全局唯一，因此一个小型不动点就足以传播别名、回调元素事实和调用结果，而不会引入流不敏感的遮蔽逃逸。
   for (let iteration = 0; iteration <= declaredNames.size + 1; iteration += 1) {
     let changed = false;
     walk(program as never, {
@@ -860,6 +861,7 @@ function compilerSourceIssue(
               && Array.isArray(parentRecord["params"]) && parentRecord["params"].includes(node));
           const allowedGlobal = ["String", "Number", "Boolean", "Math", "Date"].includes(name)
             || (name === "ShowMessage" && parentRecord?.["callee"] === node && isCanonicalShowMessageCall(parentRecord))
+            || (name === "ShowPage" && parentRecord?.["callee"] === node && isCanonicalShowPageCall(parentRecord))
             || name === "$Variable"
             || (name === "arguments" && metadata.placement === "event" && isDatagrid(instanceTypes.get(metadata.ownerInstanceName)) && metadata.kfEvent === "onClickRow")
             || declaredInstances.has(name) && instanceTypes.has(name);
@@ -886,7 +888,8 @@ function compilerSourceIssue(
           const name = typeof callee["name"] === "string" ? callee["name"] : undefined;
           if (name === undefined || (!resolvesCallable(scopeByNode.get(node), name)
             && !["String", "Number", "Boolean"].includes(name)
-            && !(name === "ShowMessage" && isCanonicalShowMessageCall(record)))) astIssue ??= "dynamic or unknown direct call";
+            && !(name === "ShowMessage" && isCanonicalShowMessageCall(record))
+            && !(name === "ShowPage" && isCanonicalShowPageCall(record)))) astIssue ??= "dynamic or unknown direct call";
           if (name !== undefined && resolvesCallable(scopeByNode.get(node), name)) {
             const edges = functionCalls.get(currentFunction) ?? new Set<string>(); edges.add(name); functionCalls.set(currentFunction, edges);
             const start = typeof record["start"] === "number" ? record["start"] : Number.MAX_SAFE_INTEGER;
@@ -902,13 +905,15 @@ function compilerSourceIssue(
           const receiver = factOf(object);
           const standardGlobal = objectName !== undefined && !resolvesLocal(object === undefined ? undefined : scopeByNode.get(object), objectName);
           const runtimeType = objectName === undefined ? undefined : instanceTypes.get(objectName);
-          const exactOverlayVisibilityCall = visibilityAction !== undefined
-            && objectName === visibilityAction.targetInstanceName
-            && runtimeType?.kind === "layout"
+          const exactOverlayVisibilityCall = objectName !== undefined
+            && declaredInstances.has(objectName)
+            && (runtimeType?.kind === "layout" || runtimeType?.kind === "static")
             && member === "setVisible"
             && args.length === 1
             && args[0]?.["type"] === "Literal"
-            && args[0]["value"] === visibilityAction.visible;
+            && typeof args[0]["value"] === "boolean"
+            && (visibilityAction === undefined || objectName !== visibilityAction.targetInstanceName
+              || args[0]["value"] === visibilityAction.visible);
           const runtimeCall = objectName !== undefined && declaredInstances.has(objectName)
             && (member === "SetData" && (isUiModel(runtimeType, 31) || isDatagrid(runtimeType)) && args.length === 1
               || member === "GetCheckedNodes" && isUiModel(runtimeType, 44) && args.length === 0
@@ -1066,6 +1071,8 @@ function compilerSourceIssue(
         || (isUiModel(runtimeType, 31) && member === "SetData" && called)
         || (isDatagrid(runtimeType) && member === "SetData" && called)
         || (isUiModel(runtimeType, 44) && member === "GetCheckedNodes" && called && !written)
+        || ((runtimeType?.kind === "layout" || runtimeType?.kind === "static")
+          && member === "setVisible" && called && !written)
         || (visibilityAction !== undefined && runtimeType?.kind === "layout"
           && name === visibilityAction.targetInstanceName && member === "setVisible" && called && !written);
       if (!supported) unsupportedRuntimeMember ??= `${name}.${member ?? "?"}`;
@@ -1290,8 +1297,10 @@ function compilerSourceIssue(
     return "compiled configureData placement is not in the evidence-backed allowlist";
   }
   const declaredPages = new Set(metadata.pageReferences.map((reference) => reference.pageGuid));
-  for (const { pageGuid } of metadata.pageReferences) {
-    if (!source.includes(JSON.stringify(pageGuid))) return `compiled script does not use declared page reference "${pageGuid}"`;
+  for (const { semanticId, pageGuid } of metadata.pageReferences) {
+    if (!source.includes(JSON.stringify(pageGuid)) && !source.includes(JSON.stringify(semanticId))) {
+      return `compiled script does not use declared page reference "${pageGuid}"`;
+    }
   }
   for (const pageGuid of source.match(/(?<![A-Za-z0-9])k?[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![A-Za-z0-9])/gi) ?? []) {
     if (!declaredPages.has(pageGuid)) return `compiled script uses undeclared page reference "${pageGuid}"`;
@@ -2072,6 +2081,7 @@ async function checkCreativeChangeScope(
   semanticOperations: readonly TrustedSemanticOperation[],
   assets: readonly DomainAssetInput[],
   materializationIssues: readonly string[],
+  replaceGenerativeBootstrap: boolean,
 ): Promise<{ outcome: CheckOutcome; warnings: string[] }> {
   let expectedRoot: string | undefined;
   try {
@@ -2080,6 +2090,7 @@ async function checkCreativeChangeScope(
       creativeMaterialization: handle,
       semanticOperations,
       assets,
+      replaceGenerativeBootstrap,
     });
     expectedRoot = expected.rootDir;
     const [expectedFiles, candidateFiles] = await Promise.all([
@@ -2213,6 +2224,8 @@ export interface ValidateOptions {
   /** Worker-verified semantic authorizations required by exact replay validation. */
   semanticOperations?: readonly TrustedSemanticOperation[];
   creativeMaterialization?: VerifiedCreativeMaterialization;
+  /** Mirrors patch authority for a compiler-created new-workspace bootstrap only. */
+  replaceGenerativeBootstrap?: boolean;
   /** Counting-only observer for bounded creative page indexing tests. */
   creativeInstrumentation?: CreativePageInstrumentation;
 }
@@ -2310,6 +2323,7 @@ export async function validateClientProject(
       options?.semanticOperations ?? [],
       options?.creativeAssets ?? [],
       creativeIssues,
+      options?.replaceGenerativeBootstrap === true,
     );
   outcomes.changeScope = scope.outcome;
   extraWarnings.push(...scope.warnings);

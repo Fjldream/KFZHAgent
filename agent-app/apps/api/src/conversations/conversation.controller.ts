@@ -26,9 +26,7 @@ import { ConversationTurnBusyError } from "./conversation-turn-lease.js";
 const CLIENT_DISCONNECTED = Symbol("CLIENT_DISCONNECTED");
 
 /**
- * Conversation endpoints behind the tenant guard. thread_id is the
- * conversation id (brief contract). POST messages streams graph updates over
- * SSE; POST resume accepts approve/revise/cancel plus the exact planHash.
+ * 租户防护后的会话端点。thread_id 是会话的会话标识符（简短合同）。POST 消息流过 SSE 进行图更新；POST 暂停接受批准的批准确认以及/revise/cancel 和planHash。
  */
 @Controller("api/conversations")
 @UseGuards(TenantGuard)
@@ -93,14 +91,10 @@ export class ConversationController {
   }
 
   /**
-   * SSE message turn. Returns text/event-stream; graph state updates are
-   * pushed as `state` events and the final snapshot as a `done` event. When
-   * an approval is pending this rejects with 409 APPROVAL_RESUME_REQUIRED
-   * (the stream has not started yet).
-   *
-   * If the client disconnects mid-stream, the graph run is cancelled (the
-   * generator is `return()`ed) so no work continues after the socket closes.
-   */
+ * SSE 消息转码。返回 text/event-stream; 图表状态更新以 `state` 事件推送，并且最终的快照以 `done` 事件推送。当有审批在等待时，这将拒绝返回 409 APPROVAL_RESUME_REQUIRED（流尚未开始）。
+ *
+ * 如果客户端在流中断开连接，图表运行将被取消（生成器被 `return()` 了），因此在连接关闭后不会继续进行工作。
+ */
   @Post(":id/messages")
   @HttpCode(HttpStatus.OK)
   async sendMessage(

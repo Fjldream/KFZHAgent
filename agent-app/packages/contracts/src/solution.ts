@@ -2,9 +2,7 @@ import { z } from "zod";
 import { solutionId } from "./ids.js";
 
 /**
- * Zod schema for a SolutionId. Input is a plain string; output is the branded
- * SolutionId type from ids.ts (single source of truth, reuses the solutionId
- * factory's non-empty validation). Empty/blank strings are rejected.
+ * 一个 SolutionId 的 zod 模式，输入是一个纯字符串；输出是 SolutionId 类型从 ids.ts（单个源的真相，重用 solutionId 工厂的非空验证）。空/空白字符串被拒绝。
  */
 export const solutionIdSchema = z
   .string()
@@ -13,7 +11,7 @@ export const solutionIdSchema = z
 
 const PROJECT_KEY_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N}._-]*$/u;
 
-/** Canonical stable project identity used across contracts, jobs, and revisions. */
+/** 跨合同、工作和修订使用的标准稳定项目身份。 */
 export const projectKeySchema = z
   .string()
   .trim()
@@ -45,7 +43,7 @@ export const projectBlueprintSchema = z
   });
 export type ProjectBlueprint = z.infer<typeof projectBlueprintSchema>;
 
-/** Backward-compatible name retained for v1 SolutionIR consumers. */
+/** 为 v1 SolutionIR 使用方保留的向后兼容名称。 */
 export const solutionProjectSchema = projectBlueprintSchema;
 export type SolutionProject = ProjectBlueprint;
 

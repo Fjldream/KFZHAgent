@@ -7,10 +7,7 @@ import type { DomainProjectRevision, SolutionRevision } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service.js";
 
 /**
- * Thrown whenever a caller tries to update or delete a solution revision
- * through the service. Revisions are append-only records of validated state;
- * history changes are expressed as new revisions (rollback creates one that
- * references the historical revision).
+ * 当调用方试图通过服务更新或删除解决方案修订时抛出。修订是已校验状态的仅追加记录；历史变更通过创建新修订来表达（回滚会创建一个引用历史修订的新修订）。
  */
 export class RevisionImmutableError extends Error {
   override name = "RevisionImmutableError";

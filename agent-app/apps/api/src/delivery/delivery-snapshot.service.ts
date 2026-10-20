@@ -129,10 +129,10 @@ export class DeliverySnapshotService {
     return snapshot(tenantId, conversation.workspaceId, conversationId, job, artifact, revision, result);
   }
 
-  /** Same persisted snapshot gate for preview and token issuance/consumption. */
+  /** 预览与令牌的签发/使用采用同一个持久化快照校验关卡。 */
   async assertArtifactDeliverable(tenantId: string, artifactId: string): Promise<void> {
     const artifact = await this.prisma.artifact.findFirst({ where: { OR: [{ id: artifactId }, { storageKey: artifactId }], tenantId } });
-    if (artifact === null) return; // DomainProjectRevision/source upload compatibility is handled by its owning route.
+    if (artifact === null) return; // DomainProjectRevision / 源包上传的兼容性由其所属路由处理。
     const job = await this.prisma.buildJob.findFirst({ where: { id: artifact.buildJobId, tenantId } });
     if (job === null) throw new ConflictException("artifact has no trusted build binding");
     const workspace = await this.prisma.solutionWorkspace.findFirst({
@@ -147,12 +147,12 @@ export class DeliverySnapshotService {
     }
     const conversations = await this.prisma.conversation.findMany({ where: { tenantId, workspaceId: job.workspaceId }, select: { id: true } });
     const conversationId = conversations.find(({ id }) => buildJobBelongsToConversation(job, id))?.id ?? null;
-    if (conversationId === null) return; // Trusted server-created legacy/non-graph job; enqueue is not publicly exposed.
+    if (conversationId === null) return; // 由可信服务器创建的旧版/非图作业；入队能力不对外公开。
     const conversation = await this.prisma.conversation.findFirst({ where: { id: conversationId, tenantId, workspaceId: job.workspaceId } });
     if (conversation === null) throw new ConflictException("graph artifact has no trusted conversation binding");
     const values = await this.checkpointValues(conversationId);
     if (values === undefined) throw new ConflictException("module delivery status is unavailable");
-    if (!hasModuleState(values)) return; // Explicit persisted legacy graph checkpoint.
+    if (!hasModuleState(values)) return; // 显式持久化的旧版图检查点。
     const delivery = await this.getForConversation(tenantId, conversationId, job.id);
     if (delivery === null || delivery.result === null || delivery.result.status === "blocked" || delivery.artifactId !== artifact.id || delivery.buildJobId !== job.id) {
       throw new ConflictException("module delivery is blocked or unavailable");

@@ -35,11 +35,7 @@ const MODULE_PUBLIC_FAILURES = {
 type ModulePublicFailureCode = keyof typeof MODULE_PUBLIC_FAILURES;
 
 /**
- * Converts a confirmed v2 blueprint into a stable ModulePlan, compiles it
- * through the signed artifact coordinator, and persists the resulting
- * server-owned ChangePlan. There is deliberately no customer-facing technical
- * approval: success is authorized by graph routing and goes straight to the
- * preview build queue.
+ * 把已确认的 v2 蓝图转换为稳定的 ModulePlan，通过签名制品协调器进行编译，并持久化由服务器持有的 ChangePlan。特意不设置面向客户的技术审批：成功状态由图路由授权，并直接进入预览构建队列。
  */
 export function createModulePlanNode(deps: SolutionGraphDeps) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {

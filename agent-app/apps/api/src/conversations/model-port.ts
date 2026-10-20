@@ -1,20 +1,14 @@
 import type { ModelPort } from "@kf/agent-orchestrator";
 
 /**
- * Injection token for the ModelPort consumed by the solution graph.
+ * 解耦解决方案图中消耗的注入令牌。
  *
- * The production LLM implementation is intentionally out of scope for
- * Task 11/12 (Phase 3): the API exposes this injection point and defaults to a
- * deterministic stub so every workflow stage stays exercisable end to end.
- * Tests override this token with a programmable FakeModelPort; a deployment
- * wires a real ModelPort here without touching the graph or controllers.
+ * 生产 LLM 实现是故意超出任务 11/12（阶段 3）的范围（任务 3）：API 通过暴露此注入点并默认为确定性 stub，确保每个工作流阶段都能从头到尾运行测试。测试覆盖此令牌，将一个可编程的 FakeModelPort 用于替代；部署在这里不触及图或控制器，而是直接连接到实际的 ModelPort。
  */
 export const MODEL_PORT = Symbol("MODEL_PORT");
 
 /**
- * Raised when a default-stub capability is called that would need a real LLM
- * (planning). A deployment must provide a real ModelPort before those routes
- * are used; failing loudly beats silently fabricating a plan.
+ * 当调用一个需要真实语言模型（LLM）的默认-ModelPort 时，部署必须在使用这些路由之前提供一个真实 ModelPort；失败比沉默地伪造计划好。
  */
 export class ModelPortNotConfiguredError extends Error {
   override name = "ModelPortNotConfiguredError";

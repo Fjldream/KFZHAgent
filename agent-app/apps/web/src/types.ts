@@ -24,7 +24,7 @@ export interface Workspace {
   name: string;
   description?: string | null;
   mode: string;
-  /** Server-owned workflow discriminator; never inferred from artifact kind. */
+  /** 服务器持有的工作流判别器；绝不根据制品类型推断。 */
   generationWorkflow?: "legacy" | "module-v1" | "creative-v2";
   currentRevisionId?: string | null;
   /** 后端 SolutionWorkspace 返回含这些字段（前端仅展示用）。 */
@@ -87,7 +87,7 @@ export interface SseDonePayload {
   changeRequestId?: string | null;
   modulePlanHash?: string | null;
   interrupt?: ApprovalInterrupt | null;
-  /** Customer-safe projection of module compilation. Technical plans never cross this boundary. */
+  /** 模块编译的客户安全投影。技术计划永远不跨越这个边界。 */
   moduleDeliveryResult?: ModuleDeliveryResult | null;
 }
 
@@ -376,7 +376,7 @@ export function parseDesignPlan(content: string): DesignPlanView | null {
 
 const BLUEPRINT_MESSAGE_PREFIX = "KF_BLUEPRINT_MESSAGE/1\n";
 
-/** Decode the internal transport envelope into a customer-only view model. */
+/** 将内部传输信封解码为仅面向客户的视图模型。 */
 export function parseCustomerEffectBlueprint(
   content: string,
 ): CustomerBlueprintView | null {

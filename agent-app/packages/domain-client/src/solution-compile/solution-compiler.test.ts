@@ -530,6 +530,22 @@ function errorFrom(run: () => void): SolutionCompileError {
 }
 
 describe("compileSolutionImplementation", () => {
+  it("keeps intrinsic and layout gaps consistent for an expanded repeater inside a scroll page", () => {
+    const sourcePages = [{ pageId: "bp-skills", regions: ["skills"] }] as const;
+    const fixture = planWithBundle("scroll-repeater-gaps", [{
+      id: "skills-page", title: "技能", purpose: "浏览技能", canvas: "desktop",
+      sourceBlueprintPageId: "bp-skills", sourceBlueprintRegionIds: ["skills"], initialStateIds: [],
+      root: layout("skills-root", "skills", "scroll-region", [
+        layout("skills-section", "skills", "column", [
+          textNode("skills-heading", "skills", "核心技能"),
+          repeaterNode("skills-list", "skills", "skills-data", "skill", textNode("skill-name", "skills", "技能"), 5),
+        ]),
+      ]),
+    }], sourcePages, { mockData: [recordsDataSet("skills-data", 5)] });
+
+    expect(() => compileFixture(fixture)).not.toThrow();
+  });
+
   it("accepts exact compiler provenance for repeater expansions and registered-module components", () => {
     const admin = adminFixture();
     const adminImplementation = withRuntimeCorrelation(compileFixture(admin));

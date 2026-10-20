@@ -47,10 +47,9 @@ export {
 export { compilePage, SKELETON_DEFAULT_WIDTH, SKELETON_DEFAULT_HEIGHT } from "./page-compiler.js";
 
 /**
- * Deterministic client compiler (brief Step 5).
+ * 确定性客户端编译器（简要步骤 5）。
  *
- * `compileClientProject(ir, seed)` produces a full, unpackable KF native
- * client workspace on disk:
+ * `compileClientProject(ir, seed)` 会在磁盘上生成完整、可解包的 KF 原生客户端工作空间：
  *
  *   <workspace>/<version>/
  *     project.json
@@ -59,30 +58,25 @@ export { compilePage, SKELETON_DEFAULT_WIDTH, SKELETON_DEFAULT_HEIGHT } from "./
  *       page/<PageName>.json
  *       Tag/globalVariableMng.json
  *       Tag/variables/<groupGuid>.json
- *       km_global_script.js            (only when global scripts exist)
+ *       km_global_script.js            （仅在存在全局脚本时）
  *
- * Determinism: every value in the workspace is a pure function of (IR, seed) —
- * GUIDs via `deriveGuid`, JSON via stable key ordering, no timestamps, no
- * random ids. Compiling the same IR + seed twice yields byte-identical
- * directories (hashDirectory-equal).
+ * 确定性：工作空间中的每个值都是 (IR, seed) 的纯函数——GUID 通过 `deriveGuid` 生成，JSON 使用稳定键顺序，不包含时间戳或随机 ID。用相同 IR 和 seed 编译两次会得到逐字节一致的目录（hashDirectory 相等）。
  */
 
 export interface ClientWorkspace {
-  /** Deterministic workspace id (derived from the project semantic id). */
+  /** 确定的工作空间标识（从项目语义标识导出） */
   id: string;
   /**
-   * Absolute path of the workspace root. It directly contains the version
-   * directory, so `packageNativeClientProject(rootDir)` produces a package
-   * that `importNativeClientPackage` can unpack, and the inspector can read it.
-   */
+ * 工作区根的绝对路径。它直接包含版本目录，因此 `packageNativeClientProject(rootDir)` 会产生可以解包的包，而 `importNativeClientPackage` 可以读取它。
+ */
   rootDir: string;
   mode: "candidate";
-  /** Alias of `rootDir` (used by the compiler tests from the task brief). */
+  /** `rootDir` 的别名（由任务简报中的编译器测试使用） */
   path: string;
 }
 
 export interface CompileClientProjectOptions {
-  /** Parent directory for the compiler's fresh worker-local workspace. */
+  /** 编译器的全新工作区父目录 */
   workRoot?: string;
 }
 
@@ -110,7 +104,7 @@ export async function compileClientProject(
   const pageGroupGuid = "k" + deriveGuid(build, "page-group");
 
   // ---------------------------------------------------------------------
-  // Semantic-id uniqueness + reference indexes (brief Step 4)
+  // 语义标识唯一性 + 引用索引（简要步骤 4）
   // ---------------------------------------------------------------------
   const pageNameToGuid = new Map<string, string>();
   const pageNames = new Set<string>();
@@ -178,13 +172,13 @@ export async function compileClientProject(
   };
 
   // ---------------------------------------------------------------------
-  // Compile in-memory structures
+  // 编译内存结构
   // ---------------------------------------------------------------------
   const compiledPages = ir.pages.map((page) => compilePage(build, page, ctx));
   const variables = compileVariables(build, ir.variables, variableGroupGuid);
 
   // ---------------------------------------------------------------------
-  // Write the workspace
+  // 编写工作区
   // ---------------------------------------------------------------------
   const rootDir = await mkdtemp(path.join(options?.workRoot ?? tmpdir(), "kf-client-build-"));
   const versionDir = path.join(rootDir, ir.version);

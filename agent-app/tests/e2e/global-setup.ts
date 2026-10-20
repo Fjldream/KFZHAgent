@@ -5,8 +5,7 @@ import { fileURLToPath } from "node:url";
 import { API_BASE, API_PORT, E2E_DB_URL, WEB_BASE, WEB_PORT } from "./helpers/config.js";
 import { assertE2eDestructiveResetAllowed } from "./helpers/destructive-reset.js";
 
-// Guard before any API/Prisma module is imported, spawned, connected, seeded,
-// or allowed to issue TRUNCATE. The seed repeats this guard independently.
+// 在任何 API/Prisma 模块被导入、启动、连接、种子或允许执行 TRUNCATE 之前，必须先进行守卫。种子独立执行此守卫。
 assertE2eDestructiveResetAllowed({
   databaseUrl: E2E_DB_URL,
   allowDestructiveReset: process.env.KF_E2E_ALLOW_DESTRUCTIVE_RESET,
@@ -29,8 +28,7 @@ const BASE_ENV: Record<string, string> = {
   ARTIFACT_STORAGE_ROOT: ARTIFACT_ROOT,
   CORS_ORIGINS: WEB_BASE,
   MODEL_PORT_MODE: "fake",
-  // Deterministic test-only signing authority shared by the isolated API and
-  // worker. Never inherit a developer/production secret into E2E evidence.
+  // 由隔离 API 和 worker 共享的确定性测试专用签名权限主体。绝不把开发/生产密钥带入 E2E 证据。
   KF_SERVER_PLAN_HMAC_KEY_BASE64: Buffer.alloc(32, 0x45).toString("base64"),
   KF_E2E_ALLOW_DESTRUCTIVE_RESET: "1",
   // 本地 http 环境：Node 侧 APIRequestContext 不会把 Secure cookie 发到
