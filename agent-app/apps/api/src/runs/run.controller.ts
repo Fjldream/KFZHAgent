@@ -1,6 +1,7 @@
 // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
 import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
 import type { Response } from "express";
+import { MutationOriginGuard } from "../auth/mutation-origin.guard.js";
 import { TenantGuard, type AuthenticatedRequest } from "../auth/tenant.guard.js";
 import { isTerminal } from "./run-state.js";
 import { PrismaRunQueries, serializeRunEvent } from "./run-query.service.js";
@@ -38,6 +39,8 @@ export class RunController {
   ) {}
 
   @Post("conversations/:conversationId/runs")
+  // 写请求：cookie 鉴权必须叠加 Origin 校验，不能只靠 CORS。
+  @UseGuards(MutationOriginGuard)
   @HttpCode(HttpStatus.ACCEPTED)
   async start(
     @Req() req: AuthenticatedRequest,

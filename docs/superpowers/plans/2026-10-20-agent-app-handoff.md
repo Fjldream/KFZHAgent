@@ -374,3 +374,57 @@ T24 静态验证 → T25 原生验证（需授权环境）→ T26 评测与成�
 | 视觉模型名与能力 | T18/T19/T20 | 未提供，路由禁用 |
 | 可用 API key（真实调用） | T05/T06 尾巴、T26 质量对比 | 未提供，只能 fake 验证 |
 | 授权环境（原生验证） | T25 | 未提供 |
+
+---
+
+## 前端对接契约（2026-10-20，供前端那条线直接使用）
+
+### 已实现端点
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/conversations/:conversationId/runs` | 创建 run，返回 202 + RunSnapshot |
+| GET | `/api/runs/:runId` | 快照（含 `lastSeq`、`status`、`failureCode`） |
+| GET | `/api/runs/:runId/events?after=N&limit=100` | SSE 事件流，`id:` 即 seq |
+
+### 请求体（POST）
+
+```json
+{
+  "clientRequestId": "uuid-每次点击唯一",
+  "clientMessageId": "uuid-消息唯一",
+  "mode": "build",
+  "action": { "type": "message", "text": "生成一个生产大屏" },
+  "attachmentIds": [],
+  "expectedBaseRevisionId": "可选"
+}
+```
+
+- `action` 是严格判别联合，未知 type / 多余字段 / 超过 20000 字 → 400
+- 同 `clientRequestId` 重复提交：内容相同返回**同一个 run**；内容不同返回 `IDEMPOTENCY_CONFLICT`
+- POST 需要 cookie 会话 + **`Origin` 头命中服务端白名单**（`AGENT_ALLOWED_ORIGINS`），否则 403
+
+### 事件流语义
+
+- 每条帧：`id: <seq>` / `event: <type>` / `data: <JSON>`，浏览器 EventSource 可用
+- 断线重连带 `?after=最后收到的 seq` 即可补齐；服务端每 30 秒主动结束，让客户端重连
+- 游标非法（负数/非整数/超过 lastSeq）→ 400；跨租户或不存在 → 404
+- 事件类型 16 种，`decision.summary` 的 payload 只有 `summary`（≤600 字）/`controlIds`/`regionIds`，**不含模型原始思维链**
+
+### 前端可依赖 / 不可依赖
+
+**可依赖**：创建幂等、快照含 lastSeq、事件按 seq 严格递增且可重放、`WAITING_APPROVAL` 表示等用户确认。
+
+**暂不可依赖（未实现）**：
+- run 入口开关（T12）：目前没有 flag，前端不要假设能灰度关闭
+- 取消/重试端点（T11）：`CANCEL_REQUESTED` 状态存在但无 API
+- 会话列表/分叉/历史交付 API（T13/T17）
+- 附件上传与视觉相关 action（T18+）：`revise_regions`/`accept_visual_reference` 会返回 `FEATURE_NOT_ENABLED`
+
+### 前端待建（T13–T17）
+
+1. **T13 会话管理 API 对接**：列表、重命名、归档
+2. **T14 多会话导航**：侧栏 + 未读/活跃态
+3. **T15 时间线与重连**：消息 + 事件合并渲染，断线自动 `?after=` 续传
+4. **T16 模式与附件输入**：discuss/plan/build 三档 + 附件
+5. **T17 历史交付与分叉**：按 revision 展示产物，从任意点分叉
