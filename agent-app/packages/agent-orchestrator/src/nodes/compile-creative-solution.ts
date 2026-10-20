@@ -101,7 +101,7 @@ export function createCompileCreativeSolutionNode(deps: SolutionGraphDeps) {
   };
   // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
   // 编译是确定性且昂贵的一步：同一 run 下方案哈希未变就复用已签名产物。
-  return withStepMemo("compile-creative-solution", node, deps, (state) => ({
+  return withStepMemo("compile-creative-solution", node, { resolveMemo: deps.resolveRunStepMemo }, (state) => ({
     solutionImplementationPlanHash: state.solutionImplementationPlanHash,
     designPlanHash: state.designPlanHash,
     currentRevisionId: state.currentRevisionId,

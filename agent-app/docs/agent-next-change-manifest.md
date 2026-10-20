@@ -627,3 +627,21 @@
 判定方法：把 `conversations.module.ts` 临时还原成父提交版本，单独跑失败用例 → 同样失败，证明与拆分无关。失败的是 `task 12 api surface` 两条（历史 JSON 过滤、续改重编译），属于改造前基线问题，需单独排期。
 
 **踩坑**：拆分后首次启动报 `Nest can't resolve … Symbol(PG_POOL)`——因为原模块通过 `imports: [ArtifactsModule, ...]` 间接获得这些 token，拆分后必须在 RuntimeModule 里 `exports` 这些**模块**而不只是自定义 token。
+
+
+## 追加：memo 必须是「按 runId 解析」而不是编译期依赖
+
+**发现的问题**：`SolutionGraphDeps` 是进程级单例（`ConversationService#getGraph` 懒加载后复用），而 `RunStepMemo` 绑定具体租约（fence + owner）。把 memo 直接塞进 deps，等于图第一次编译时就把某个租约固化进去——第二个 run 会拿到错的 fence，写入被拒或写错位置。
+
+**修正**：
+
+| 文件 | 改动 |
+|---|---|
+| `packages/agent-orchestrator/src/run-step-memo.ts` | `MemoOptions.runStepMemo` → `resolveMemo(runId)`；调用时按 `state.runId` 解析，解析不到则直通原节点 |
+| `packages/agent-orchestrator/src/ports.ts` | `runStepMemo?: RunStepMemo` → `resolveRunStepMemo?: (runId) => RunStepMemo | undefined` |
+| 三个接线节点 | 传 `{ resolveMemo: deps.resolveRunStepMemo }` |
+| `apps/api/src/conversations/conversation.service.ts` | `getGraph()` 由 private 改为公开：worker 复用同一张图，避免第二份图定义 |
+
+证据：`run-step-memo` 5 + `solution-graph` 39 = **44 passed**；orchestrator / api tsc 均无错误。
+
+**踩坑**：`exactOptionalPropertyTypes: true` 下，可选回调字段必须写成 `((...) => X) | undefined`，否则调用方传 `undefined` 会报 TS2379。

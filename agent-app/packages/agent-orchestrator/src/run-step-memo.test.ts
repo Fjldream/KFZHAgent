@@ -23,7 +23,7 @@ describe("withStepMemo", () => {
   it("behaves exactly like the raw node when no run scope is present", async () => {
     const { memo } = fakeMemo();
     const node = vi.fn(async () => ({ stage: "done" as const }));
-    const wrapped = withStepMemo("plan", node, { runStepMemo: memo }, () => ({}));
+    const wrapped = withStepMemo("plan", node, { resolveMemo: () => memo }, () => ({}));
 
     await wrapped(state());
     expect(node).toHaveBeenCalledTimes(1);
@@ -34,7 +34,7 @@ describe("withStepMemo", () => {
   it("skips the node when the same step and inputs were already completed", async () => {
     const { memo } = fakeMemo();
     const node = vi.fn(async () => ({ stage: "done" as const }));
-    const wrapped = withStepMemo("plan", node, { runStepMemo: memo }, (value) => ({ hash: value.currentRevisionId }));
+    const wrapped = withStepMemo("plan", node, { resolveMemo: () => memo }, (value) => ({ hash: value.currentRevisionId }));
 
     await wrapped(state({ runId: "run-1", currentRevisionId: "rev-1" }));
     const second = await wrapped(state({ runId: "run-1", currentRevisionId: "rev-1" }));
@@ -46,7 +46,7 @@ describe("withStepMemo", () => {
   it("re-runs when the inputs change", async () => {
     const { memo } = fakeMemo();
     const node = vi.fn(async () => ({ stage: "done" as const }));
-    const wrapped = withStepMemo("plan", node, { runStepMemo: memo }, (value) => ({ hash: value.currentRevisionId }));
+    const wrapped = withStepMemo("plan", node, { resolveMemo: () => memo }, (value) => ({ hash: value.currentRevisionId }));
 
     await wrapped(state({ runId: "run-1", currentRevisionId: "rev-1" }));
     await wrapped(state({ runId: "run-1", currentRevisionId: "rev-2" }));
@@ -56,7 +56,7 @@ describe("withStepMemo", () => {
   it("never caches a failed update", async () => {
     const { memo, saved } = fakeMemo();
     const node = vi.fn(async () => ({ lastErrorCode: "SOLUTION_PLANNING_FAILED" }));
-    const wrapped = withStepMemo("plan", node, { runStepMemo: memo }, () => ({}));
+    const wrapped = withStepMemo("plan", node, { resolveMemo: () => memo }, () => ({}));
 
     await wrapped(state({ runId: "run-1" }));
     expect(saved.size).toBe(0);

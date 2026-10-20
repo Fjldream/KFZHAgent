@@ -429,7 +429,11 @@ export class ConversationService {
     }
   }
 
-  private async getGraph(): Promise<CompiledGraph> {
+  /**
+   * 编译后的解决方案图（懒加载、进程内复用）。
+   * 公开给 worker 复用同一套 deps 与 checkpointer，避免第二份图定义产生两套事实。
+   */
+  async getGraph(): Promise<CompiledGraph> {
     if (this.#graph === undefined) {
       const ports = createGraphPorts(
         this.prisma,

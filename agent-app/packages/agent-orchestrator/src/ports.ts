@@ -306,8 +306,8 @@ export interface ServerPlanSignerPort {
 export interface SolutionGraphDeps {
   modelPort: ModelPort;
   // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
-  /** 由执行器注入的节点级幂等；未接线时节点行为不变。 */
-  runStepMemo?: RunStepMemo;
+  /** 运行期按 runId 解析节点级幂等；未接线时节点行为不变。 */
+  resolveRunStepMemo?: (runId: string) => RunStepMemo | undefined;
   // end
   workspaceQuery: WorkspaceQueryPort;
   changePlanRepository: ChangePlanRepository;

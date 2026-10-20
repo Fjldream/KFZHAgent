@@ -183,7 +183,7 @@ export function createDesignPlanNode(deps: SolutionGraphDeps) {
   };
   // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
   // 蓝图是最贵的模型调用之一：同一 run 下输入未变时直接复用已完成输出。
-  return withStepMemo("design-plan", node, deps, (state) => ({
+  return withStepMemo("design-plan", node, { resolveMemo: deps.resolveRunStepMemo }, (state) => ({
     designRevision: state.designRevision,
     currentRevisionId: state.currentRevisionId,
     requirement: latestUserMessage(state),

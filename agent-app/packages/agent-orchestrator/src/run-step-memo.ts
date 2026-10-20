@@ -33,7 +33,11 @@ export function stepInputHash(stepKey: string, planVersion: string, inputs: unkn
 }
 
 export type MemoOptions = {
-  runStepMemo?: RunStepMemo;
+  /**
+   * 按 runId 解析该 run 的幂等端口。图是进程级单例，而 memo 绑定具体租约，
+   * 因此只能运行期解析，不能作为编译期依赖注入。
+   */
+  resolveMemo?: ((runId: string) => RunStepMemo | undefined) | undefined;
   planVersion?: string;
 };
 
@@ -51,8 +55,8 @@ export function withStepMemo(
   selectInputs: (state: AgentGraphStateValue) => unknown,
 ): (state: AgentGraphStateValue) => Promise<AgentGraphUpdate> {
   return async (state) => {
-    const memo = options.runStepMemo;
     const runId = state.runId;
+    const memo = options.resolveMemo?.(runId ?? "");
     if (memo === undefined || runId === undefined || runId.length === 0) return node(state);
 
     const inputHash = stepInputHash(stepKey, options.planVersion ?? "graph@1", selectInputs(state));

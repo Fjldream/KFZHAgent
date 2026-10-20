@@ -142,7 +142,7 @@ export function createSolutionImplementationPlanNode(deps: SolutionGraphDeps) {
   };
   // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
   // 只在有 run 且注入了 memo 时启用：命中已完成输出则跳过模型调用，旧调用行为不变。
-  return withStepMemo("solution-implementation-plan", node, deps, (state) => ({
+  return withStepMemo("solution-implementation-plan", node, { resolveMemo: deps.resolveRunStepMemo }, (state) => ({
     designPlanHash: state.designPlanHash,
     capabilityCandidatesHash: state.capabilityCandidatesHash,
     designRevision: state.designRevision,
