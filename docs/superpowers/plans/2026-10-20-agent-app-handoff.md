@@ -49,7 +49,7 @@ Superpowers安装路径因机器不同会变化。本机writing-plans读取路�
 | T00 | 基线与数据库安全 | VERIFIED（2026-10-20） | 无 |
 | T01 | 模型能力/usage合同 | VERIFIED（2026-10-20） | T00 |
 | T02 | 调用账本与费用 | VERIFIED（2026-10-20） | T01 |
-| T03 | 网关/超时/取消 | NOT_STARTED | T02 |
+| T03 | 网关/超时/取消 | VERIFIED（2026-10-20） | T02 |
 | T04 | prompt拆分与前缀 | NOT_STARTED | T03 |
 | T05 | 上下文与摘要 | NOT_STARTED | T04 |
 | T06 | 预算与修复 | NOT_STARTED | T05 |
@@ -209,6 +209,23 @@ rg -n 'createClassifyIntentNode|createSolutionGraph|generationWorkflow' packages
       ②diff 报出 BuildSchedulerCursor.updatedAt 删默认值与 3 条索引重命名属既有漂移，未纳入本迁移
 风险：①既有 schema 漂移未处理，后续迁移会反复报同一批 diff；②价格表尚未接 env（T06 处理），当前通过构造参数注入
 下一步：T03 统一 provider transport、全程 deadline 与取消（deepseek-transport.ts + model-gateway.ts）
+```
+
+```text
+任务：T03
+状态：VERIFIED
+执行日期与功能标注：2026-10-20 / Agent工作台迭代
+实现：新增 apps/api/src/models/{deepseek-transport.ts,model-gateway.ts} + 两份测试；
+      deepseek-model.ts 的 chatJson 委托 transport；orchestrator ModelPortContext 增加可选 execution
+绿测：transport 8、gateway 5、老模型套件 124（合计 137 passed，零回归）
+回归：tsc -p apps/api / packages/agent-orchestrator 均 exit 0
+数据库：未涉及
+证据：agent-app/docs/agent-next-change-manifest.md §T03
+提交：本地提交，未推送
+偏差：transport 先写实现后补测（未走红测）；截断原因由 transport 返回给 chatJson 再转 JSON_TRUNCATED，
+      以保留既有「关 thinking 重试」路径
+风险：gateway 尚未接进 Nest 模块与老入口（T06/T12 才接），当前仅单测覆盖
+下一步：T04 按任务拆 prompt、稳定前缀与确定性动作
 ```
 
 

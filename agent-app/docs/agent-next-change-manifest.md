@@ -155,4 +155,38 @@
 
 这些都不是 T02 的改动，放进本迁移会悄悄改变既有行为（尤其第 1 条会去掉默认值），故只取了 ModelInvocation 的 DDL。**另需注意**：`prisma migrate dev` 在该库不可用——LangGraph 的 `checkpoint_*` 表由 `PostgresSaver.setup()` 运行时创建，会被判为漂移并要求重置库；生成迁移必须用 `prisma migrate diff --from-migrations … --shadow-database-url …`。
 
+---
+
+# T03：统一 provider transport、全程 deadline 与取消
+
+执行日期：2026-10-20
+功能标注：Agent工作台迭代
+
+## 新增/修改文件
+
+| 文件 | 改动 |
+|---|---|
+| `agent-app/apps/api/src/models/deepseek-transport.ts` | `requestDeepSeekJson`：URL 拼接、`AbortSignal.any` 合并外部取消与 deadline、deadline 覆盖 fetch→body→JSON parse（仅 finally 清 timer）、HTTP 状态分类、图片能力校验、usage 归一 |
+| `agent-app/apps/api/src/models/model-gateway.ts` | `ModelGatewayService`：记账先于外发；成功记 SUCCEEDED，超时记 UNKNOWN，取消记 CANCELLED，其余 FAILED；收尾失败不掩盖原始错误 |
+| `agent-app/apps/api/src/models/deepseek-transport.test.ts` | 8 例：headers 不到达超时、body 挂起超时、外部取消 vs 超时区分、成功返回值、thinking/temperature 按能力发送、状态码映射与密钥不泄露、无视觉能力拒绝图片、空回复协议错误 |
+| `agent-app/apps/api/src/models/model-gateway.test.ts` | 5 例：成功记账、账本拒绝时不外发、超时记 UNKNOWN、取消记 CANCELLED、收尾失败不掩盖原始错误 |
+| `agent-app/apps/api/src/conversations/deepseek-model.ts` | `chatJson` 的 HTTP 部分委托 transport；保留原 body 形状（thinking/temperature/reasoning_effort）、128000 字节守卫、`JSON_TRUNCATED` 重试语义与既有返回类型 |
+| `agent-app/packages/agent-orchestrator/src/model-port.ts` | `ModelPortContext` 增加可选 `execution?: { runId, signal }`（旧调用不传仍合法） |
+
+## 证据
+
+| 项 | 结果 |
+|---|---|
+| transport 单元 | **8 passed** |
+| gateway 单元 | **5 passed** |
+| 老模型回归 `deepseek-model.test.ts` | **124 passed**（改造后零回归） |
+| 类型检查 | `tsc -p apps/api`、`tsc -p packages/agent-orchestrator` 均 exit 0 |
+
+## 偏差与实现说明
+
+1. **transport 未走红测**：实现与测试同批完成（先写实现），与计划「先红后绿」不符；后续任务恢复先写红测。
+2. **`finishReason` 由 transport 返回而不是直接抛错**：截断必须由 `chatJson` 转成 `JSON_TRUNCATED` 才能触发既有的「关 thinking 重试」路径；空正文 + `finish_reason=length` 仍判截断，空正文 + stop 才是协议错误。
+3. **兼容既有测试替身**：老测试的 fake fetch 返回普通对象（无 `headers`/`text`），transport 对 `response.headers?.get` 与 `response.text` 做能力判断，避免把替身差异误判成 provider 故障。
+
+
 
