@@ -63,3 +63,6 @@ export {
   type DecodedBlueprintMessage,
   type BlueprintConfirmation,
 } from "./blueprint-message.js";
+// modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+export { withStepMemo, stepInputHash, type RunStepMemo } from "./run-step-memo.js";
+// end

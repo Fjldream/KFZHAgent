@@ -1,9 +1,11 @@
 // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
 import type { RunAction, RunSnapshot } from "@kf/contracts";
+import type { RunStepMemo } from "@kf/agent-orchestrator";
 import type { PrismaClient } from "@prisma/client";
 import { GraphRunExecutor, type ExecutableStep } from "./run-executor.js";
 import { planRunSteps } from "./run-execution-plan.js";
 import type { RunStepStore } from "./run-step-store.js";
+import { createLeaseBoundStepMemo } from "./run-step-memo.adapter.js";
 import type { ClaimedRunLease, RunStore } from "./run-store.js";
 
 export const STEP_NOT_IMPLEMENTED = "STEP_NOT_IMPLEMENTED";
@@ -15,6 +17,8 @@ export type StepContext = {
   baseRevisionId: string;
   stepKey: string;
   signal: AbortSignal;
+  /** 绑定当前租约的节点级幂等；递给图节点即可获得「重启复用已完成输出」。 */
+  memo: RunStepMemo;
 };
 
 export type StepHandler = (context: StepContext) => Promise<{ output: unknown; safeSummary?: string }>;
@@ -51,6 +55,7 @@ export class RunExecutionService {
 
     const action = run.action as RunAction;
     const plan = planRunSteps(action, run.baseRevisionId);
+    const memo = createLeaseBoundStepMemo({ steps: this.deps.steps, lease, tenantId: run.tenantId });
 
     const steps: ExecutableStep[] = plan.map((planned) => ({
       stepKey: planned.stepKey,
@@ -68,6 +73,7 @@ export class RunExecutionService {
           baseRevisionId: run.baseRevisionId ?? "",
           stepKey: planned.stepKey,
           signal: stepSignal,
+          memo,
         });
       },
     }));

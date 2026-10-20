@@ -509,3 +509,16 @@
 2. `nodes/enqueue-build.ts` 幂等键未改为 `runId + planVersion`。
 3. 恢复时未校验 checkpoint 的 `runId/baseRevisionId/schemaVersion` 与当前 run 一致。
 4. 还没有把 `RunStepMemo` 绑定到租约的适配器（`PrismaRunStepStore` → memo），也没有 worker 进程入口。
+
+
+## 追加：租约绑定的节点幂等适配器（A 路线 ② 第 4 项）
+
+| 文件 | 说明 |
+|---|---|
+| `apps/api/src/runs/run-step-memo.adapter.ts` | `createLeaseBoundStepMemo({steps, lease, tenantId})` → `RunStepMemo`：`find` 按 run 读已完成输出，`save` 走 `RunStepStore.complete`，**因此旧 fence 写入被拒** |
+| `apps/api/src/runs/run-step-memo.adapter.integration.test.ts` | 2 例：写入后可读回且不同哈希不命中；另一 worker 接手后旧租约 save 抛 `FENCE_REJECTED` |
+| `apps/api/src/runs/run-execution.service.ts` | `StepContext` 增加 `memo`，处理器可直接递给图节点 `SolutionGraphDeps.runStepMemo` |
+
+证据：memo 适配器 2 passed + 执行服务 3 passed；orchestrator/api tsc 均无错误。
+
+②剩余：其余节点接线、`enqueue-build` 幂等键、checkpoint 与 run 一致性显式校验（当前靠 inputHash 内含 planVersion/baseRevision 隐式保证）。
