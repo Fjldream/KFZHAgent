@@ -305,6 +305,43 @@
 
 以上四项都涉及运行时行为或跨模块契约，留到 T07–T12（持久 run 与执行器）一并收口，避免两次改动同一批文件。
 
+---
+
+# T07：Run/Event/Step 合同与 additive migration
+
+执行日期：2026-10-20
+功能标注：Agent工作台迭代
+
+## 新增/修改文件
+
+| 文件 | 改动 |
+|---|---|
+| `packages/contracts/src/agent-run.ts` | `RunStatus/RunMode/RunAction/RunEvent` 与 Zod schema：action 是严格判别联合，事件 payload 按 type 白名单校验，`decision.summary` ≤600 字，`seq` 必须正整数 |
+| `packages/contracts/src/index.ts` | 导出 `agent-run.js` |
+| `packages/contracts/src/agent-run.test.ts` | 5 例：五种 action、未知 type/多余字段/超长文本拒绝、非法 seq、payload 白名单、状态枚举封闭 |
+| `apps/api/src/runs/run-state.ts` | 显式邻接表状态机 + `isTerminal` / `isWaiting` / `terminalFromFailure` |
+| `apps/api/src/runs/run-state.test.ts` | 4 例：终态不可复活、等待态不能回 RUNNING、只允许文档化的前向边、等待态语义 |
+| `prisma/schema.prisma` | 新增 `AgentRun` / `AgentRunEvent` / `AgentRunStep`；`Conversation` 增归档/分叉/`lastActivityAt`；`Message` 增 `runId/clientMessageId/parts`；`ModelInvocation.runId` 外键（SetNull）；补 `(tenantId,id)` 复合唯一键 |
+| `prisma/migrations/202610200004_agent_runs` | 结构迁移；checksum `e0289628569bca76b20029877dbb4f388b4c9c1d163b43d0559b68b799a78719` |
+| `prisma/migrations/202610200005_backfill_conversation_activity` | 纯数据回填：老会话 `lastActivityAt` = 最后消息时间 / 创建时间；checksum `c74490e5484e223f0d01f9294550ae9598a5a206bf3322b538e797e09e073e95` |
+| `apps/api/src/runs/run-schema.integration.test.ts` | 4 例：跨租户 conversation/workspace 关联被数据库拒绝、`(tenantId,conversationId,clientRequestId)` 唯一、事件 seq 唯一与级联删除、旧消息仍可读 |
+
+## 证据
+
+| 项 | 结果 |
+|---|---|
+| contracts | **5 passed** |
+| run-state | **4 passed** |
+| schema 集成（隔离库） | **4 passed** |
+| 类型检查 | `tsc -p apps/api`、`tsc -p packages/contracts` 无输出（无错误） |
+
+## 偏差
+
+1. **`RunBudget.runId` 暂未加 AgentRun 外键**：T06 的预算集成测试直接创建独立 RunBudget，加外键会立刻让它失效。等 T08 在创建 run 的同时建预算，再补外键与测试。
+2. **`Message.runId` 未加外键**：design §6 只要求可空字段；等 T09 写入消息时再决定是否收紧。
+3. **`lastActivityAt` 回填**拆成独立数据迁移（0005），避免把数据修补混进结构迁移。
+
+
 
 
 

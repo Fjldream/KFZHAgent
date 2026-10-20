@@ -20,4 +20,5 @@ export * from "./native-delta-allowlist.js";
 export * from "./creative-build-artifact.js";
 // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
 export * from "./model-usage.js";
+export * from "./agent-run.js";
 // end

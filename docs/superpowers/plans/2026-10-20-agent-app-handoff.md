@@ -53,7 +53,7 @@ Superpowers安装路径因机器不同会变化。本机writing-plans读取路�
 | T04 | prompt拆分与前缀 | VERIFIED（2026-10-20，等价口径） | T03 |
 | T05 | 上下文与摘要 | IN_PROGRESS（2026-10-20，剩余依赖 T06） | T04 |
 | T06 | 预算与修复 | IN_PROGRESS（2026-10-20，核心完成） | T05 |
-| T07 | Run/Event迁移 | NOT_STARTED | T01/T02 |
+| T07 | Run/Event迁移 | VERIFIED（2026-10-20，RunBudget 外键留 T08） | T01/T02 |
 | T08 | 幂等队列与fence | NOT_STARTED | T06/T07 |
 | T09 | 独立执行器 | NOT_STARTED | T08 |
 | T10 | SSE/API恢复 | NOT_STARTED | T09 |
@@ -274,6 +274,22 @@ rg -n 'createClassifyIntentNode|createSolutionGraph|generationWorkflow' packages
       ③T05 遗留（摘要节流/记忆持久化/graph-ports）未做 ④价格表仍靠构造注入
 风险：预算已可强制，但旧入口 runId 为 null 时不走预算，需 T12 桥接后统一
 下一步：T07 Run/Event 数据迁移与持久化
+```
+
+```text
+任务：T07
+状态：VERIFIED（RunBudget 外键按计划留到 T08）
+实现：contracts/agent-run.ts（状态/模式/动作/事件 + Zod 白名单）+ 测试；
+      apps/api/src/runs/run-state.ts（显式邻接表）+ 测试；
+      AgentRun/AgentRunEvent/AgentRunStep 表，Conversation/Message 扩展，ModelInvocation.runId FK；
+      迁移 0004（结构，e0289628…）+ 0005（lastActivityAt 回填，c74490e5…）
+绿测：contracts 5、run-state 4、schema 集成 4；tsc 无错误
+数据库：kf_agent_test_agent_next 已应用 0004/0005
+证据：agent-app/docs/agent-next-change-manifest.md §T07
+提交：本地提交，未推送
+偏差：①RunBudget.runId 未加 FK（会让 T06 独立预算测试失效）②Message.runId 未加 FK
+风险：AgentRun 表已可写，但尚无创建/领取/事件写入服务（T08 起）
+下一步：T08 幂等创建、队列领取、租约与 fencing
 ```
 
 
