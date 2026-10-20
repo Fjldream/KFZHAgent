@@ -1,7 +1,8 @@
 // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
 import { mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
-import RunTimeline, { type TimelineStep } from "./RunTimeline.vue";
+import RunTimeline from "./RunTimeline.vue";
+import type { TimelineStep } from "./types.js";
 
 const steps: TimelineStep[] = [
   { stepKey: "upload", label: "上传校验", status: "done", durationMs: 300, detail: "PNG · 1440×900" },

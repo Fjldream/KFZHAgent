@@ -61,6 +61,14 @@ function openWorkspace(ws: Workspace): void {
   void router.push(`/workspaces/${ws.id}`);
 }
 
+// modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+// 新工作台（UI 演示）入口：保留旧详情页为默认路径，二者并行。
+function openWorkbench(ws: Workspace): void {
+  menuOpenId.value = null;
+  void router.push(`/workspaces/${ws.id}/workbench`);
+}
+// end
+
 function onDelete(ws: Workspace): void {
   menuOpenId.value = null;
   emit("delete", ws);
@@ -143,6 +151,9 @@ function statusOf(ws: Workspace): { status: "active" | "done" | "error" | "info"
                 @click.stop
               >
                 <button type="button" class="menu-item" data-testid="menu-open" @click="openWorkspace(ws)">进入</button>
+                <!-- modified by jinlong.feng at 2026-10-20 Agent工作台迭代 -->
+                <button type="button" class="menu-item" data-testid="menu-workbench" @click="openWorkbench(ws)">工作台（演示）</button>
+                <!-- end -->
                 <button type="button" class="menu-item disabled" data-testid="menu-rename" disabled>重命名（即将推出）</button>
                 <button type="button" class="menu-item disabled" data-testid="menu-copy" disabled>复制（即将推出）</button>
                 <button type="button" class="menu-item danger" data-testid="menu-delete" @click="onDelete(ws)">删除</button>

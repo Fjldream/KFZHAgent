@@ -2,16 +2,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
-export type ConversationState = "running" | "queued" | "done" | "discuss" | "archived";
-
-export type SidebarConversation = {
-  id: string;
-  title: string;
-  state: ConversationState;
-  unread?: number;
-  /** 状态行的补充说明，例如「生成组件方案中 · 12 秒」「归档 · 10-14」。 */
-  meta?: string;
-};
+import type { SidebarConversation } from "./types.js";
 
 const props = withDefaults(defineProps<{
   workspaceName: string;

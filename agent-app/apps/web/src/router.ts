@@ -10,7 +10,6 @@ import WorkspacesView from "./views/WorkspacesView.vue";
 import WorkspaceView from "./views/WorkspaceView.vue";
 // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
 // 新工作台为并行入口：旧 WorkspaceView 仍是默认视图，工作台走独立路由（UI 演示，未接后端）。
-import WorkbenchView from "./views/WorkbenchView.vue";
 // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
 import RunWorkbenchView from "./views/RunWorkbenchView.vue";
 // end
@@ -34,9 +33,8 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
       { path: "/change-password", name: "change-password", component: ChangePasswordView, meta: { requiresAuth: true } },
       { path: "/workspaces", name: "workspaces", component: WorkspacesView, meta: { requiresAuth: true } },
       // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
-      // 新的 run 驱动工作台现在是默认工作台；旧版保留在 legacy-workbench 便于对比回退。
+      { path: "/workspaces/:id", redirect: (to) => `/workspaces/${String(to.params.id)}/workbench` },
       { path: "/workspaces/:id/workbench", name: "workbench", component: RunWorkbenchView, props: true, meta: { requiresAuth: true } },
-      { path: "/workspaces/:id/legacy-workbench", name: "legacy-workbench", component: WorkbenchView, props: true, meta: { requiresAuth: true } },
       // end
       { path: "/workspaces/:id", name: "workspace", component: WorkspaceView, props: true, meta: { requiresAuth: true } },
       { path: "/:pathMatch(.*)*", redirect: "/workspaces" },

@@ -2,16 +2,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
-export type TimelineStepStatus = "done" | "running" | "failed" | "pending";
-
-export type TimelineStep = {
-  stepKey: string;
-  label: string;
-  status: TimelineStepStatus;
-  durationMs?: number;
-  detail?: string;
-  tags?: Array<{ text: string; tone: "cache" | "attempt" | "repair" }>;
-};
+import type { TimelineStep } from "./types.js";
 
 const props = withDefaults(defineProps<{
   steps: TimelineStep[];

@@ -7,7 +7,7 @@ import {
   type RunEventLike,
   type RunStatusLike,
 } from "../runs-api.js";
-import type { TimelineStep } from "../components/runs/RunTimeline.vue";
+import type { TimelineStep } from "../components/runs/types.js";
 
 type Deps = {
   stream?: typeof streamRunEvents;

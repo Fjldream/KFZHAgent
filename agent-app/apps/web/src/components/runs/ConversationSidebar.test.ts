@@ -1,7 +1,8 @@
 // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
 import { mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
-import ConversationSidebar, { type SidebarConversation } from "./ConversationSidebar.vue";
+import ConversationSidebar from "./ConversationSidebar.vue";
+import type { SidebarConversation } from "./types.js";
 
 const conversations: SidebarConversation[] = [
   { id: "c1", title: "能耗对比页面改版", state: "running", unread: 2, meta: "生成组件方案中 · 12 秒" },
