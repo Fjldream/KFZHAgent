@@ -5,6 +5,8 @@ export type RunWorkerDeps = {
   store: Pick<RunStore, "claim" | "recoverExpired">;
   execute: (lease: ClaimedRunLease) => Promise<unknown>;
   ownerId: string;
+  /** 返回 false 时只保活、不领任务（例如处理器尚未接线）。 */
+  canClaim?: () => boolean;
   idleDelayMs?: number;
   now?: () => Date;
   sleep?: (ms: number) => Promise<void>;
@@ -35,6 +37,7 @@ export class RunWorker {
 
   /** 返回 true 表示这一轮确实处理了一个 run。 */
   async runOnce(): Promise<boolean> {
+    if (this.deps.canClaim !== undefined && !this.deps.canClaim()) return false;
     const now = this.now();
     const lease = await this.deps.store.claim(this.deps.ownerId, now)
       ?? await this.deps.store.recoverExpired(this.deps.ownerId, now);

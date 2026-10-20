@@ -566,3 +566,17 @@
 2. **破坏既有判定**：`buildJobBelongsToConversation` 直接按同一公式比对，改公式会让历史 BuildJob 全部「不属于」原会话。
 
 因此本轮**保留原 key**，并把「run/plan 维度」交给上层：run 与 buildJob 的绑定关系由 `AgentRun.buildJobId` 记录，恢复时先查 run 上的 buildJobId，再按原 key 兜底。这条取舍需要维护者确认后再考虑是否加 run 维度。
+
+
+## 追加：worker 进程入口与「未接线不领任务」闸门
+
+| 文件 | 说明 |
+|---|---|
+| `apps/api/src/runs/run-worker.ts` | 新增可选 `canClaim`：返回 false 时只保活、不 claim、不 recover，避免误启动就吞掉真实 run |
+| `apps/api/src/runs/run-handler-registry.ts` | 步骤处理器注册表，当前为空表（图调用尚未接线），并注明接入方式与 `memo` 用法 |
+| `apps/api/src/run-agent-worker.ts` | 独立进程入口：Prisma + store + steps + execution service + worker；15s 心跳日志；SIGTERM/SIGINT 优雅停止；未接线时打印 `agent_worker_not_ready` 警告并保持 idle |
+| `agent-app/package.json` | 新增 `start:agent-worker`，与 `start:api` 同一 vite-node 方式 |
+
+证据：`run-worker.test.ts` **5 passed**（含新用例「未就绪时完全不 claim」）；`tsc -p apps/api` 无错误。
+
+**为什么不做成「启动即领任务」**：注册表还是空的，若直接领任务，每个真实 run 都会被标成 `STEP_NOT_IMPLEMENTED` 失败。宁可进程空转并明确告警，也不能把用户任务吃掉。

@@ -40,6 +40,20 @@ describe("run worker", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  it("stays idle without claiming when the worker is not ready", async () => {
+    const claim = vi.fn(async () => lease());
+    const recoverExpired = vi.fn(async () => lease("stale", 3));
+    const execute = vi.fn(async () => undefined);
+    const worker = new RunWorker({
+      store: { claim, recoverExpired }, execute, ownerId: "worker-1", canClaim: () => false,
+    });
+
+    expect(await worker.runOnce()).toBe(false);
+    expect(claim).not.toHaveBeenCalled();
+    expect(recoverExpired).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("keeps looping after a failed execution and stops on abort", async () => {
     const controller = new AbortController();
     let calls = 0;

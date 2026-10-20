@@ -10,7 +10,8 @@
     "e2e:report": "playwright show-report",
     "start:api": "node --env-file=.env ./node_modules/vite-node/dist/cli.mjs -r apps/api -c tests/e2e/vite.e2e.config.ts apps/api/src/main.ts",
     "start:worker": "node --env-file=.env ./node_modules/vite-node/dist/cli.mjs -r apps/worker -c tests/e2e/vite.e2e.config.ts apps/worker/src/run.ts",
-    "start:web": "pnpm --filter web exec vite --host localhost --port 5173 --strictPort"
+    "start:web": "pnpm --filter web exec vite --host localhost --port 5173 --strictPort",
+    "start:agent-worker": "node --env-file=.env ./node_modules/vite-node/dist/cli.mjs -r apps/api -c tests/e2e/vite.e2e.config.ts apps/api/src/run-agent-worker.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
