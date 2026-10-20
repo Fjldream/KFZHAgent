@@ -268,6 +268,43 @@
 
 这三项都要用到 T06 的预算与网关接线，故与 T06 合并处理，避免半成品状态入库。
 
+---
+
+# T06：统一预算、重试协调器与统计接口（进行中）
+
+执行日期：2026-10-20
+功能标注：Agent工作台迭代
+
+## 已完成部分
+
+| 文件 | 改动 |
+|---|---|
+| `agent-app/apps/api/src/models/retry-policy.ts` | `decideRetry`：传输重试 1 次、语义修复 1 次；aborted / 额度耗尽 / 终态错误一律 stop |
+| `agent-app/apps/api/src/models/usage-summary.ts` | `aggregateUsage`：命中率按 token 加权；无分母返 null；不可信用量只进 unknownCount |
+| `agent-app/apps/api/src/models/run-budget.service.ts` | `reserve` 在事务内 `FOR UPDATE` 锁 RunBudget 再插入预占；`settle` 以「仍是 RESERVED」幂等；known 结算、unknown 保留保守额度、not_sent 释放；跨租户 `RESERVATION_NOT_FOUND` |
+| `agent-app/apps/api/src/models/model-gateway.ts` | 网关增加可选 `BudgetPort`：预占先于账本与外发；能力校验失败按 not_sent 释放，其余失败按 unknown 保守保留 |
+| `agent-app/prisma/schema.prisma` | 新增 `RunBudget`、`BudgetReservation` |
+| `agent-app/prisma/migrations/202610200003_run_budgets/migration.sql` | 仅新增两张表；checksum `287c9e63f61762367e3f82be06a00d097bd4769c68e6bf9e3021b5b754f8a94a`，应用后 diff 回到 empty |
+| 测试 | `retry-policy.test.ts`(3)、`usage-summary.test.ts`(2)、`run-budget.integration.test.ts`(8)、`model-gateway.test.ts` 增 2 例 |
+
+## 证据
+
+| 项 | 结果 |
+|---|---|
+| retry / usage-summary / gateway | 12 passed |
+| 预算集成（隔离库） | **8 passed**，其中 20 并发预占在 `maxInvocations=8` 下恰好 8 成功、12 个 `BUDGET_EXCEEDED` |
+| 类型检查 | `tsc -p apps/api` exit 0 |
+| 迁移 | `migrate deploy` 成功；`migrate diff` → empty |
+
+## 未完成（依赖后续任务）
+
+1. **移除 adapter 内嵌套修复**：`deepseek-model.ts` 仍有内层 JSON/schema 修复递归，需要与编排层协调后统一到 `decideRetry`，否则实际请求数仍可能超出预算解释范围。
+2. **编排层接线**：`solution-implementation-plan.ts` 尚未调用 `decideRetry`。
+3. **T05 遗留**：摘要按阈值生成并计费、memory 持久化、graph-ports 切结构化记忆。
+4. **价格表接 env**：`PriceRates` 仍由构造参数注入，没有部署配置读取。
+
+以上四项都涉及运行时行为或跨模块契约，留到 T07–T12（持久 run 与执行器）一并收口，避免两次改动同一批文件。
+
 
 
 

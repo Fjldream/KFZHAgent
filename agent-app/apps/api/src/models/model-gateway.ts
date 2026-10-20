@@ -1,5 +1,6 @@
 // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
 import type { InvocationRecorder } from "./model-invocation.service.js";
+import type { BudgetPort } from "./run-budget.service.js";
 import {
   MODEL_CANCELLED,
   MODEL_TIMEOUT,
@@ -27,11 +28,40 @@ export class ModelGatewayService implements ModelGateway {
     private readonly recorder: InvocationRecorder,
     private readonly fetchImpl: typeof fetch,
     private readonly apiKey: string,
+    private readonly budget: BudgetPort | null = null,
   ) {}
 
   async completeJson(request: JsonModelRequest): Promise<JsonModelResult> {
     const startedAt = Date.now();
-    const invocationId = await this.recorder.start(request.scope);
+    // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+    // 预算预占先于账本与外发：额度不足时既不写调用记录，也不产生物理请求。
+    const runId = request.scope.runId;
+    const budgetKey = runId === null ? null : { tenantId: request.scope.tenantId, runId };
+    if (this.budget !== null && budgetKey !== null) {
+      await this.budget.reserve({
+        tenantId: budgetKey.tenantId,
+        runId: budgetKey.runId,
+        invocationId: request.scope.inputHash,
+        estimatedInputUpperBound: estimateInputUpperBound(request),
+        maxOutputTokens: request.maxOutputTokens,
+      });
+    }
+    // end
+
+    let invocationId: string;
+    try {
+      invocationId = await this.recorder.start(request.scope);
+    } catch (error) {
+      if (this.budget !== null && budgetKey !== null) {
+        await this.budget.settle({
+          ...budgetKey,
+          invocationId: request.scope.inputHash,
+          usage: normalizeUsage(undefined),
+          result: "not_sent",
+        }).catch(() => undefined);
+      }
+      throw error;
+    }
 
     try {
       const result = await requestDeepSeekJson(request, this.fetchImpl, this.apiKey);
@@ -43,6 +73,14 @@ export class ModelGatewayService implements ModelGateway {
         providerRequestId: result.providerRequestId,
         failureCode: null,
       });
+      if (this.budget !== null && budgetKey !== null) {
+        await this.budget.settle({
+          ...budgetKey,
+          invocationId: request.scope.inputHash,
+          usage: result.usage,
+          result: "known",
+        });
+      }
       return result;
     } catch (error) {
       const code = error instanceof ModelTransportError ? error.code : "MODEL_UNKNOWN_ERROR";
@@ -55,8 +93,21 @@ export class ModelGatewayService implements ModelGateway {
         providerRequestId: null,
         failureCode: code,
       }).catch(() => undefined);
+      if (this.budget !== null && budgetKey !== null) {
+        await this.budget.settle({
+          ...budgetKey,
+          invocationId: request.scope.inputHash,
+          usage: normalizeUsage(undefined),
+          // 能力校验失败说明请求没发出去；其余情况 provider 可能已计费，按 unknown 保守保留。
+          result: code === "MODEL_CAPABILITY_UNSUPPORTED" ? "not_sent" : "unknown",
+        }).catch(() => undefined);
+      }
       throw error;
     }
   }
 }
+
+/** 无 tokenizer 时的输入上界：按 JSON 字节数估算，宁可高估。 */
+export const estimateInputUpperBound = (request: JsonModelRequest): number =>
+  Buffer.byteLength(JSON.stringify(request.messages), "utf8");
 // end

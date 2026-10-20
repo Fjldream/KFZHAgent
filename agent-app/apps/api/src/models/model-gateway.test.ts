@@ -42,6 +42,11 @@ const request = (signal?: AbortSignal): JsonModelRequest => ({
   ...(signal === undefined ? {} : { signal }),
 });
 
+const withRun = (modelRequest: JsonModelRequest): JsonModelRequest => ({
+  ...modelRequest,
+  scope: { ...modelRequest.scope, runId: "run-1" },
+});
+
 const recordingRecorder = () => {
   const starts: InvocationStart[] = [];
   const finishes: Array<{ id: string; tenantId: string; result: InvocationFinish }> = [];
@@ -139,6 +144,38 @@ describe("model gateway accounting", () => {
     const gateway = new ModelGatewayService(recorder, failingFetch, "sk-test");
 
     await expect(gateway.completeJson(request())).rejects.toBeInstanceOf(ModelTransportError);
+  });
+
+  it("does not start the ledger or call the provider when the budget refuses", async () => {
+    const { recorder } = recordingRecorder();
+    const fetchImpl = vi.fn();
+    const budget = {
+      reserve: vi.fn(async () => {
+        throw new Error("BUDGET_EXCEEDED");
+      }),
+      settle: vi.fn(async () => undefined),
+    };
+    const gateway = new ModelGatewayService(
+      recorder, fetchImpl as unknown as typeof fetch, "sk-test", budget,
+    );
+
+    await expect(gateway.completeJson(withRun(request())))
+      .rejects.toThrow("BUDGET_EXCEEDED");
+    expect(recorder.start).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("settles the budget as known on success", async () => {
+    const { recorder } = recordingRecorder();
+    const reserve = vi.fn(async () => undefined);
+    const settle = vi.fn(async () => undefined);
+    const budget = { reserve, settle };
+
+    const gateway = new ModelGatewayService(recorder, okFetch, "sk-test", budget);
+    await gateway.completeJson(withRun(request()));
+
+    expect(reserve).toHaveBeenCalledTimes(1);
+    expect(settle).toHaveBeenCalledWith(expect.objectContaining({ runId: "run-1", result: "known" }));
   });
 });
 // end

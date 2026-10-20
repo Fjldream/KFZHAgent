@@ -321,3 +321,34 @@ model ModelInvocation {
   @@index([tenantId, conversationId, startedAt])
   @@index([tenantId, status, startedAt])
 }
+
+/// T06 单次 run 的模型调用预算。runId 暂为字符串主键，T07 引入 AgentRun 后改为外键。
+model RunBudget {
+  runId                  String   @id
+  maxInvocations         Int
+  reservedInvocations    Int      @default(0)
+  usedInvocations        Int      @default(0)
+  maxInputTokens         Int
+  maxOutputTokens        Int
+  reservedTokenUpperBound Int     @default(0)
+  usedKnownTokens        Int      @default(0)
+  unknownUsageCount      Int      @default(0)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+}
+
+/// 每次调用的额度预占；UNKNOWN 结果保留保守额度，not_sent 释放。
+model BudgetReservation {
+  id             String    @id @default(uuid())
+  tenantId       String
+  runId          String
+  invocationId   String
+  reservedInput  Int
+  reservedOutput Int
+  state          String    @default("RESERVED") // RESERVED | SETTLED | RELEASED
+  createdAt      DateTime  @default(now())
+  settledAt      DateTime?
+
+  @@unique([tenantId, invocationId])
+  @@index([tenantId, runId])
+}

@@ -52,7 +52,7 @@ Superpowers安装路径因机器不同会变化。本机writing-plans读取路�
 | T03 | 网关/超时/取消 | VERIFIED（2026-10-20） | T02 |
 | T04 | prompt拆分与前缀 | VERIFIED（2026-10-20，等价口径） | T03 |
 | T05 | 上下文与摘要 | IN_PROGRESS（2026-10-20，剩余依赖 T06） | T04 |
-| T06 | 预算与修复 | NOT_STARTED | T05 |
+| T06 | 预算与修复 | IN_PROGRESS（2026-10-20，核心完成） | T05 |
 | T07 | Run/Event迁移 | NOT_STARTED | T01/T02 |
 | T08 | 幂等队列与fence | NOT_STARTED | T06/T07 |
 | T09 | 独立执行器 | NOT_STARTED | T08 |
@@ -257,6 +257,23 @@ rg -n 'createClassifyIntentNode|createSolutionGraph|generationWorkflow' packages
 偏差：摘要生成与记忆持久化未做，留给 T06（需要预算/网关的 summary 调用通道）
 风险：memory 字段目前无人写入，读取路径仍是旧 summary 字符串
 下一步：T06 统一预算、重试协调器与统计接口（含 summary 计费与 T05 剩余项）
+```
+
+```text
+任务：T06
+状态：IN_PROGRESS（预算/重试/统计核心完成；adapter 嵌套修复与编排层接线待 T07-T12）
+实现：新增 retry-policy.ts、usage-summary.ts、run-budget.service.ts 及三份测试；
+      model-gateway 增加可选 BudgetPort（预占先于账本与外发）；
+      RunBudget + BudgetReservation 表与迁移 202610200003（checksum 287c9e63…）
+绿测：retry 3 + usage-summary 2 + gateway 7 = 12；预算集成 8（20 并发恰好 8 成功）
+回归：tsc -p apps/api exit 0；migrate diff → empty
+数据库：kf_agent_test_agent_next 已应用两表
+证据：agent-app/docs/agent-next-change-manifest.md §T06
+提交：本地提交，未推送
+偏差：①adapter 内嵌套修复未移除 ②solution-implementation-plan 未接 decideRetry
+      ③T05 遗留（摘要节流/记忆持久化/graph-ports）未做 ④价格表仍靠构造注入
+风险：预算已可强制，但旧入口 runId 为 null 时不走预算，需 T12 桥接后统一
+下一步：T07 Run/Event 数据迁移与持久化
 ```
 
 
