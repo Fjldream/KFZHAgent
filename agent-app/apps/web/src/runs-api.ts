@@ -40,6 +40,25 @@ export async function fetchRunSnapshot(runId: string, init?: { signal?: AbortSig
   return (await response.json()) as RunSnapshotLike;
 }
 
+export type StartRunInput = {
+  clientRequestId: string;
+  clientMessageId: string;
+  mode: "discuss" | "plan" | "build";
+  action: { type: "message"; text: string };
+};
+
+/** 创建 run；同一 clientRequestId 重复提交会拿回同一个 run（服务端幂等）。 */
+export async function startRun(conversationId: string, input: StartRunInput): Promise<RunSnapshotLike> {
+  const response = await fetch(`${API_BASE}/api/conversations/${encodeURIComponent(conversationId)}/runs`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) throw await asApiError(response, "RUN_START_FAILED");
+  return (await response.json()) as RunSnapshotLike;
+}
+
 /**
  * 读取 run 事件流。服务端每 30 秒主动结束一次连接，因此本函数正常返回（而不是抛错）
  * 也意味着「该重连了」——调用方用最后一条 seq 作为 after 续传即可。
