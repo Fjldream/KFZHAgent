@@ -55,7 +55,7 @@ Superpowers安装路径因机器不同会变化。本机writing-plans读取路�
 | T06 | 预算与修复 | IN_PROGRESS（2026-10-20，核心完成） | T05 |
 | T07 | Run/Event迁移 | VERIFIED（2026-10-20，RunBudget 外键留 T08） | T01/T02 |
 | T08 | 幂等队列与fence | IN_PROGRESS（2026-10-20，核心完成） | T06/T07 |
-| T09 | 独立执行器 | NOT_STARTED | T08 |
+| T09 | 独立执行器 | IN_PROGRESS（2026-10-20，执行器核心完成） | T08 |
 | T10 | SSE/API恢复 | NOT_STARTED | T09 |
 | T11 | 取消/重试/构建协调 | NOT_STARTED | T10 |
 | T12 | 兼容与灰度 | NOT_STARTED | T11 |
@@ -304,6 +304,19 @@ rg -n 'createClassifyIntentNode|createSolutionGraph|generationWorkflow' packages
 偏差：①过期租约恢复未做 ②未与 conversation-turn-lease advisory lock 协调 ③run.service/run.module 留 T10 ④RunBudget.runId 外键仍未加
 风险：租约过期的 RUNNING run 目前会卡住，必须由 T09/T11 的恢复逻辑兜住，不能上线裸跑
 下一步：T09 独立执行器、确定性操作与可恢复节点
+```
+
+```text
+任务：T09
+状态：IN_PROGRESS（动作路由/步骤幂等/执行器完成；worker 进程与 Nest 装配未做）
+实现：新增 apps/api/src/runs/{action-router.ts,run-step-store.ts,run-executor.ts} 及两份测试
+绿测：action-router 2、run-executor 集成 5；tsc -p apps/api 无错误
+数据库：未新增迁移
+证据：agent-app/docs/agent-next-change-manifest.md §T09
+提交：本地提交，未推送
+偏差：①无独立 worker 进程与 start:agent-worker ②图未接 runId/stepHash ③E2E 第四进程未加 ④过期租约恢复仍缺
+风险：执行器只能被测试直接驱动，生产链路尚未使用；与 LangGraph 的一致性校验缺失
+下一步：T10 事件重放、快照与新 API
 ```
 
 

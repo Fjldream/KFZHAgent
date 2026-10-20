@@ -375,3 +375,36 @@
 
 
 
+
+
+---
+
+# T09：独立执行器、确定性操作与可恢复节点（进行中）
+
+执行日期：2026-10-20
+功能标注：Agent工作台迭代
+
+## 已完成部分
+
+| 文件 | 改动 |
+|---|---|
+| `apps/api/src/runs/action-router.ts` | `routeRunAction` 穷举 switch：message→classify，其余四种结构化动作直达；视觉动作在 flag 未启用时抛 `FEATURE_NOT_ENABLED`，不降级为文本 |
+| `apps/api/src/runs/action-router.test.ts` | 2 例：按钮动作不调用分类、视觉动作受 flag 约束 |
+| `apps/api/src/runs/run-step-store.ts` | `PrismaRunStepStore`：只有「runId + stepKey + inputHash」且状态 COMPLETED 的输出可复用；写入前校验 owner/fence/未过期；坏 JSON 视为未命中 |
+| `apps/api/src/runs/run-executor.ts` | `GraphRunExecutor.execute`：step.started → 复用或执行 → step 落库 → step.completed；失败写 step.failed 并收尾 FAILED；取消收尾 CANCELLED；租约按间隔续期，续期失败立即停止后续写入 |
+| `apps/api/src/runs/run-executor.integration.test.ts` | 5 例：按序执行并收尾、已完成步骤复用（runner 未被调用）、失败带失败码、已取消信号直接 CANCELLED、长步骤跨租约窗口仍成功 |
+
+## 证据
+
+| 项 | 结果 |
+|---|---|
+| action-router | 2 passed |
+| run-executor 集成（隔离库） | 5 passed |
+| 类型检查 | `tsc -p apps/api` 无错误 |
+
+## 未完成（需要 worker 进程与 Nest 装配）
+
+1. `run-worker.ts` / `run-agent-worker.ts` / `conversation-runtime.module.ts`：独立 worker 进程与 Nest 模块拆分未做，执行器目前是纯类、由测试直接驱动。
+2. 图接线：`solution-graph.ts` / `state.ts` / `enqueue-build.ts` 未带 runId 与 step inputHash，尚无「图 checkpoint ↔ step 存储」一致性校验。
+3. `package.json` 的 `start:agent-worker`、E2E 第四进程启动/清理未加。
+4. 租约过期恢复分支（T08 遗留）仍未实现。
