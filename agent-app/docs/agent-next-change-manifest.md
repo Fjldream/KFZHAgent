@@ -608,3 +608,22 @@
 **设计判断**：`recentMessages` 只放本轮用户消息。历史交给 `load-context` 节点分页加载——在入口塞全量历史会让长会话每次重算全部上下文，checkpoint 体积也会失控。
 
 **下一步（handler 接图的唯一剩余前置）**：worker 侧需要拿到编译好的图实例（含 checkpointer 与 `modelPort` 等依赖），这要求把图中 providers 从 `conversations.module.ts` 拆出可复用的 `ConversationRuntimeModule`，worker 只导入该模块。之后 registry 即可：读 run → `buildRunGraphInput` → `graph.stream(input, {runId})` → interrupt 时抛 `RunPaused`。
+
+
+## 追加：ConversationRuntimeModule 拆分（T09 前置）
+
+| 文件 | 改动 |
+|---|---|
+| `apps/api/src/conversations/conversation-runtime.module.ts` | 新增：图运行所需 providers（MODEL_PORT / CAPABILITY_RETRIEVAL_PORT / CREATIVE_SOLUTION_COMPILER_PORT / CONVERSATION_TURN_LEASE）与 Artifacts/Assets/Delivery 模块，并 **re-export 这三个模块**（ConversationService 仍依赖其中的 PG_POOL / ARTIFACT_STORAGE） |
+| `apps/api/src/conversations/conversations.module.ts` | 77 行 → 18 行：只保留 controller 与 ConversationService，import RuntimeModule |
+
+## 验证与既有失败判定
+
+| 项 | 结果 |
+|---|---|
+| `tsc -p apps/api` | 无错误 |
+| `api.integration.test.ts` | **57 passed / 2 failed（均为既有失败）** |
+
+判定方法：把 `conversations.module.ts` 临时还原成父提交版本，单独跑失败用例 → 同样失败，证明与拆分无关。失败的是 `task 12 api surface` 两条（历史 JSON 过滤、续改重编译），属于改造前基线问题，需单独排期。
+
+**踩坑**：拆分后首次启动报 `Nest can't resolve … Symbol(PG_POOL)`——因为原模块通过 `imports: [ArtifactsModule, ...]` 间接获得这些 token，拆分后必须在 RuntimeModule 里 `exports` 这些**模块**而不只是自定义 token。
