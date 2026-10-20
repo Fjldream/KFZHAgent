@@ -54,9 +54,9 @@ Superpowers安装路径因机器不同会变化。本机writing-plans读取路�
 | T05 | 上下文与摘要 | IN_PROGRESS（2026-10-20，剩余依赖 T06） | T04 |
 | T06 | 预算与修复 | IN_PROGRESS（2026-10-20，核心完成） | T05 |
 | T07 | Run/Event迁移 | VERIFIED（2026-10-20，RunBudget 外键留 T08） | T01/T02 |
-| T08 | 幂等队列与fence | IN_PROGRESS（2026-10-20，核心完成） | T06/T07 |
-| T09 | 独立执行器 | IN_PROGRESS（2026-10-20，执行器核心完成） | T08 |
-| T10 | SSE/API恢复 | NOT_STARTED | T09 |
+| T08 | 幂等队列与fence | VERIFIED（2026-10-20，含过期租约恢复） | T06/T07 |
+| T09 | 独立执行器 | IN_PROGRESS（2026-10-20，执行器/幂等/暂停/worker进程完成；handler 未接图） | T08 |
+| T10 | SSE/API恢复 | IN_PROGRESS（2026-10-20，查询层+Origin守卫完成；controller/SSE 未做） | T09 |
 | T11 | 取消/重试/构建协调 | NOT_STARTED | T10 |
 | T12 | 兼容与灰度 | NOT_STARTED | T11 |
 | T13 | 会话管理API | NOT_STARTED | T12 |
@@ -339,3 +339,38 @@ rg -n 'createClassifyIntentNode|createSolutionGraph|generationWorkflow' packages
 - 占位检查：未发现未定占位词；测试fixture、接口、错误码和关键算法已写入各阶段。
 - 一致性修正：统一视觉确认action；修正AppModule注册路径；明确旧请求预算与持久run外键的过渡；增加失效lease恢复、等待审批屏障和不可变snapshot顺序。
 - 验证边界：以上只是计划文档检查，不是业务测试通过；本轮没有运行数据库迁移、应用测试、真实模型评测或KF原生验证。
+
+---
+
+## 截至 2026-10-20 收尾：剩余任务与建议顺序
+
+**已完成（6 个）**：T00、T01、T02、T03、T04、T07
+**核心完成、待收尾（4 个）**：T05、T06、T09、T10
+**未开始（18 个）**：T11–T27（实为 17 个）+ T10 的 controller 部分
+
+### 第一批：把 P2 真正跑通（约 3 个任务量）
+
+1. **T09 收尾**：`run-handler-registry` 接图。前置动作是把 `conversation.service.ts` 里构造图输入（recentMessages / designPlan / capabilityCandidates / currentRevisionId）的逻辑抽成可复用、带测试的函数，再由 registry 注入该输入与 `memo`，并在图 interrupt 时抛 `RunPaused`。
+2. **T10 收尾**：`run.controller.ts` + `run.module.ts` + `app.module.ts` 注册；POST/GET/events 三端点；SSE 心跳 15s、每页 1k 事件、背压超限断开；断线与 100 短连接不耗尽连接池的真实 HTTP 测试。
+3. **T12 灰度开关**：runs 入口开关 + 旧 SSE 与新队列双写/回退路径，否则前面两者不敢上线。
+
+### 第二批：前端工作台（T13–T17）
+
+接口稳定后才动，否则返工。T13（会话管理 API）→ T14（多会话导航）→ T15（时间线/重连）→ T16（模式与附件）→ T17（历史交付/分叉）。
+
+### 第三批：图生工程（T18–T23）
+
+T18 安全上传 → T19 像素分析与缓存 → T20 控件证据匹配 → T21 语义编译 → T22 确认流程 → T23 局部修改。**T18/T19 需要真实视觉模型白名单与单价**，目前只有 `supportsVision=false` 的占位。
+
+### 第四批：验证与发布（T24–T27）
+
+T24 静态验证 → T25 原生验证（需授权环境）→ T26 评测与成本对比（需真实用量数据）→ T27 发布/交接。
+
+### 明确的外部依赖（没有这些，对应任务只能做到"框架+单测"）
+
+| 依赖 | 影响任务 | 现状 |
+|---|---|---|
+| DeepSeek 真实单价与缓存计价 | T02 费用、T26 成本对比 | 未提供，费用记 null |
+| 视觉模型名与能力 | T18/T19/T20 | 未提供，路由禁用 |
+| 可用 API key（真实调用） | T05/T06 尾巴、T26 质量对比 | 未提供，只能 fake 验证 |
+| 授权环境（原生验证） | T25 | 未提供 |
