@@ -544,3 +544,25 @@
 证据：44 passed（图单元 39 + memo 5）；orchestrator tsc 无错误。
 
 节点接线进度：`design-plan` ✅、`solution-implementation-plan` ✅、`compile-creative-solution` ✅。②剩余：`enqueue-build` 幂等键、checkpoint 一致性只读校验。
+
+
+## 追加：checkpoint 一致性只读校验 + enqueue 幂等键的**刻意不改**
+
+### 新增校验（只读）
+
+| 文件 | 说明 |
+|---|---|
+| `apps/api/src/runs/checkpoint-consistency.ts` | `checkCheckpointConsistency`：checkpoint 无 runId → `"legacy"` 原样继续；runId/planVersion/baseRevision 任一不一致 → 抛 `CHECKPOINT_RUN_MISMATCH` 让调用方整段重跑。**不往 checkpoint 写任何字段** |
+| `apps/api/src/runs/checkpoint-consistency.test.ts` | 4 例：legacy 放行、同 run 通过、跨 run/跨版本/跨基线拒绝、缺失字段忽略 |
+
+证据：4 passed；`tsc -p apps/api` 无错误。尚未接入 checkpointer 读取路径（接入点见下）。
+
+### 为什么没有把 `enqueue-build` 的幂等键改成 `runId + planVersion`
+
+现有 key 是 `conversationId[:projectKey]:changePlanId:planHash`，其语义是「同一会话 + 同一份计划 = 同一个 BuildJob」。计划里 T09 要求「enqueue 前后崩溃必须找回同一个 job」——**这个保证已经由现有 key 满足**，因为 planHash 对同一份计划是确定性的。
+
+改成 `runId + planVersion` 会带来两个反效果：
+1. **重复构建**：重试（`retryOfRunId` 指向新 run）会对同一份计划生成新 key，产生第二个 BuildJob，而本意是复用已完成的那个。
+2. **破坏既有判定**：`buildJobBelongsToConversation` 直接按同一公式比对，改公式会让历史 BuildJob 全部「不属于」原会话。
+
+因此本轮**保留原 key**，并把「run/plan 维度」交给上层：run 与 buildJob 的绑定关系由 `AgentRun.buildJobId` 记录，恢复时先查 run 上的 buildJobId，再按原 key 兜底。这条取舍需要维护者确认后再考虑是否加 run 维度。
