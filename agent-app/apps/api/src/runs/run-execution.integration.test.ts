@@ -32,7 +32,7 @@ const startRun = async (clientRequestId: string) => {
   const created = await fixture.store.create(
     messageInput(fixture, clientRequestId, "生成一个生产大屏", { conversationId }),
   );
-  const lease = await fixture.store.claim("worker-plan", new Date());
+  const lease = await fixture.store.claim("worker-plan", fixture.tenantA, new Date());
   if (lease === null || lease.runId !== created.id) throw new Error("lease mismatch");
   return lease;
 };

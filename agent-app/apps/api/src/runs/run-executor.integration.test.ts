@@ -41,7 +41,7 @@ const startRun = async (clientRequestId: string) => {
   const created = await fixture.store.create(
     messageInput(fixture, clientRequestId, "生成页面", { conversationId }),
   );
-  const lease = await fixture.store.claim("worker-t09", new Date());
+  const lease = await fixture.store.claim("worker-t09", fixture.tenantA, new Date());
   if (lease === null || lease.runId !== created.id) throw new Error("lease mismatch");
   return lease;
 };
@@ -61,7 +61,7 @@ describe("run executor", () => {
       where: { runId: lease.runId }, orderBy: { seq: "asc" },
     });
     expect(events.map((event) => event.type)).toEqual([
-      "run.queued", "step.started", "step.completed", "step.started", "step.completed",
+      "run.queued", "step.started", "step.completed", "step.started", "step.completed", "run.finished",
     ]);
     const completed = await fixture.prisma.agentRunStep.findMany({
       where: { runId: lease.runId, status: "COMPLETED" },
@@ -118,7 +118,7 @@ describe("run executor", () => {
     await fixture.resetRuns();
     const conversationId = await fixture.newConversation();
     const created = await shortStore.create(messageInput(fixture, "exec-renew", "长任务", { conversationId }));
-    const lease = await shortStore.claim("worker-renew", new Date());
+    const lease = await shortStore.claim("worker-renew", fixture.tenantA, new Date());
     if (lease === null || lease.runId !== created.id) throw new Error("lease mismatch");
 
     const executor = new GraphRunExecutor({
@@ -162,7 +162,7 @@ describe("run executor pauses", () => {
       step({ run: async () => { throw new RunPaused("WAITING_INPUT"); } }),
     ], new AbortController().signal);
 
-    expect(await fixture.store.claim("worker-after-pause", new Date())).toBeNull();
+    expect(await fixture.store.claim("worker-after-pause", fixture.tenantA, new Date())).toBeNull();
   });
 });
 // end

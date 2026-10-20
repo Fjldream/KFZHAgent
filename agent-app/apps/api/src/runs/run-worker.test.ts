@@ -12,7 +12,7 @@ describe("run worker", () => {
     const claim = vi.fn(async () => lease());
     const recoverExpired = vi.fn(async () => null);
     const execute = vi.fn(async () => undefined);
-    const worker = new RunWorker({ store: { claim, recoverExpired }, execute, ownerId: "worker-1" });
+    const worker = new RunWorker({ store: { claim, recoverExpired }, execute, ownerId: "worker-1", tenantId: "t1" });
 
     expect(await worker.runOnce()).toBe(true);
     expect(execute).toHaveBeenCalledTimes(1);
@@ -24,7 +24,7 @@ describe("run worker", () => {
     const claim = vi.fn(async () => null);
     const recoverExpired = vi.fn(async () => lease("stale-run", 7));
     const execute = vi.fn(async () => undefined);
-    const worker = new RunWorker({ store: { claim, recoverExpired }, execute, ownerId: "worker-2" });
+    const worker = new RunWorker({ store: { claim, recoverExpired }, execute, ownerId: "worker-2", tenantId: "t2" });
 
     expect(await worker.runOnce()).toBe(true);
     expect(execute).toHaveBeenCalledWith(expect.objectContaining({ runId: "stale-run", fence: 7 }));
@@ -34,7 +34,7 @@ describe("run worker", () => {
     const claim = vi.fn(async () => null);
     const recoverExpired = vi.fn(async () => null);
     const execute = vi.fn(async () => undefined);
-    const worker = new RunWorker({ store: { claim, recoverExpired }, execute, ownerId: "worker-1" });
+    const worker = new RunWorker({ store: { claim, recoverExpired }, execute, ownerId: "worker-1", tenantId: "t1" });
 
     expect(await worker.runOnce()).toBe(false);
     expect(execute).not.toHaveBeenCalled();
@@ -45,7 +45,7 @@ describe("run worker", () => {
     const recoverExpired = vi.fn(async () => lease("stale", 3));
     const execute = vi.fn(async () => undefined);
     const worker = new RunWorker({
-      store: { claim, recoverExpired }, execute, ownerId: "worker-1", canClaim: () => false,
+      store: { claim, recoverExpired }, execute, ownerId: "worker-1", tenantId: "t1", canClaim: () => false,
     });
 
     expect(await worker.runOnce()).toBe(false);
@@ -68,7 +68,7 @@ describe("run worker", () => {
     const worker = new RunWorker({
       store: { claim, recoverExpired: vi.fn(async () => null) },
       execute,
-      ownerId: "worker-1",
+      ownerId: "worker-1", tenantId: "t1",
       sleep: async () => undefined,
     });
 

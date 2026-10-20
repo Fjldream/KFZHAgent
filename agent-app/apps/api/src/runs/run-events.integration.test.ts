@@ -38,7 +38,7 @@ const startRunWithEvents = async (clientRequestId: string) => {
   const created = await fixture.store.create(
     messageInput(fixture, clientRequestId, "生成页面", { conversationId }),
   );
-  const lease = await fixture.store.claim("worker-t10", new Date());
+  const lease = await fixture.store.claim("worker-t10", fixture.tenantA, new Date());
   if (lease === null || lease.runId !== created.id) throw new Error("lease mismatch");
   await fixture.store.append(lease, fixture.tenantA, {
     type: "step.started", payload: { stepKey: "plan", label: "规划中", attempt: 1 },

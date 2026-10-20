@@ -58,7 +58,7 @@ describe("run claim and fencing", () => {
     await fixture.resetRuns();
     const conversationId = await fixture.newConversation();
     const created = await fixture.store.create(messageInput(fixture, "claim-1", "生成页面", { conversationId }));
-    const lease = await fixture.store.claim("worker-1", new Date());
+    const lease = await fixture.store.claim("worker-1", fixture.tenantA, new Date());
     expect(lease?.runId).toBe(created.id);
     expect(lease?.fence).toBe(1);
 
@@ -68,14 +68,14 @@ describe("run claim and fencing", () => {
 
     // 同一会话已有活跃 run，后续排队任务不得被领取。
     await fixture.store.create(messageInput(fixture, "claim-2", "第二个任务", { conversationId }));
-    expect(await fixture.store.claim("worker-2", new Date())).toBeNull();
+    expect(await fixture.store.claim("worker-2", fixture.tenantA, new Date())).toBeNull();
   });
 
   it("appends events with monotonic seq and rejects stale fences", async () => {
     await fixture.resetRuns();
     const conversationId = await fixture.newConversation();
     const created = await fixture.store.create(messageInput(fixture, "append-1", "生成页面", { conversationId }));
-    const lease = await fixture.store.claim("worker-1", new Date());
+    const lease = await fixture.store.claim("worker-1", fixture.tenantA, new Date());
     expect(lease?.runId).toBe(created.id);
     if (lease === null) throw new Error("lease missing");
 
@@ -97,7 +97,7 @@ describe("run claim and fencing", () => {
     const short = await createRunTestFixture(40);
     try {
       const created = await short.store.create(messageInput(short, "expire-1", "短租约"));
-      const lease = await short.store.claim("worker-short", new Date());
+      const lease = await short.store.claim("worker-short", short.tenantA, new Date());
       expect(lease?.runId).toBe(created.id);
       if (lease === null) throw new Error("lease missing");
 
@@ -114,7 +114,7 @@ describe("run claim and fencing", () => {
     await fixture.resetRuns();
     const conversationId = await fixture.newConversation();
     const created = await fixture.store.create(messageInput(fixture, "finish-1", "生成页面", { conversationId }));
-    const lease = await fixture.store.claim("worker-1", new Date());
+    const lease = await fixture.store.claim("worker-1", fixture.tenantA, new Date());
     if (lease === null || lease.runId !== created.id) throw new Error("lease mismatch");
 
     const snapshot = await fixture.store.finish(lease, fixture.tenantA, "FAILED", "MODEL_TIMEOUT");
@@ -130,7 +130,7 @@ describe("run claim and fencing", () => {
     await fixture.resetRuns();
     const conversationId = await fixture.newConversation();
     const created = await fixture.store.create(messageInput(fixture, "tenant-guard", "生成页面", { conversationId }));
-    const lease = await fixture.store.claim("worker-1", new Date());
+    const lease = await fixture.store.claim("worker-1", fixture.tenantA, new Date());
     if (lease === null || lease.runId !== created.id) throw new Error("lease mismatch");
 
     await expect(fixture.store.append(lease, fixture.tenantB, {
@@ -142,11 +142,11 @@ describe("run claim and fencing", () => {
     await fixture.resetRuns();
     const conversationId = await fixture.newConversation();
     await fixture.store.create(messageInput(fixture, "terminal-1", "生成页面", { conversationId }));
-    const lease = await fixture.store.claim("worker-1", new Date());
+    const lease = await fixture.store.claim("worker-1", fixture.tenantA, new Date());
     if (lease === null) throw new Error("lease missing");
     await fixture.store.finish(lease, fixture.tenantA, "SUCCEEDED");
 
-    const again = await fixture.store.claim("worker-2", new Date());
+    const again = await fixture.store.claim("worker-2", fixture.tenantA, new Date());
     expect(again).toBeNull();
     const row = await fixture.prisma.agentRun.findUniqueOrThrow({ where: { id: lease.runId } });
     expect(row.status).toBe("SUCCEEDED");
@@ -180,11 +180,11 @@ describe("expired lease recovery", () => {
     try {
       const conversationId = await short.newConversation();
       const created = await short.store.create(messageInput(short, "recover-1", "跨租约", { conversationId }));
-      const oldLease = await short.store.claim("worker-old", new Date());
+      const oldLease = await short.store.claim("worker-old", short.tenantA, new Date());
       if (oldLease === null || oldLease.runId !== created.id) throw new Error("lease mismatch");
 
       await new Promise((resolve) => setTimeout(resolve, 80));
-      const recovered = await short.store.recoverExpired("worker-new", new Date());
+      const recovered = await short.store.recoverExpired("worker-new", short.tenantA, new Date());
       expect(recovered).toMatchObject({ runId: created.id, ownerId: "worker-new" });
       expect(recovered?.fence).toBe(oldLease.fence + 1);
 
@@ -202,13 +202,13 @@ describe("expired lease recovery", () => {
     try {
       const conversationId = await short.newConversation();
       const created = await short.store.create(messageInput(short, "recover-2", "有屏障", { conversationId }));
-      const oldLease = await short.store.claim("worker-old", new Date());
+      const oldLease = await short.store.claim("worker-old", short.tenantA, new Date());
       if (oldLease === null) throw new Error("lease missing");
       await short.prisma.conversationTurnFence.create({
         data: { conversationId, ownerId: "legacy-sse", leaseId: `lease-${created.id}` },
       });
       await new Promise((resolve) => setTimeout(resolve, 80));
-      expect(await short.store.recoverExpired("worker-new", new Date())).toBeNull();
+      expect(await short.store.recoverExpired("worker-new", short.tenantA, new Date())).toBeNull();
     } finally {
       await short.cleanup();
     }

@@ -20,9 +20,9 @@ export type ClaimedRunLease = { runId: string; ownerId: string; fence: number; e
 
 export interface RunStore {
   create(input: StartRunInput): Promise<RunSnapshot>;
-  claim(ownerId: string, now: Date): Promise<ClaimedRunLease | null>;
+  claim(ownerId: string, tenantId: string, now: Date): Promise<ClaimedRunLease | null>;
   /** 接手租约已过期的 RUNNING/CANCEL_REQUESTED run；旧执行者仍持锁时返回 null。 */
-  recoverExpired(ownerId: string, now: Date): Promise<ClaimedRunLease | null>;
+  recoverExpired(ownerId: string, tenantId: string, now: Date): Promise<ClaimedRunLease | null>;
   renew(lease: ClaimedRunLease, now: Date): Promise<ClaimedRunLease>;
   append(
     lease: ClaimedRunLease,
@@ -194,7 +194,7 @@ export class PrismaRunStore implements RunStore {
     }
   }
 
-  async claim(ownerId: string, now: Date): Promise<ClaimedRunLease | null> {
+  async claim(ownerId: string, tenantId: string, now: Date): Promise<ClaimedRunLease | null> {
     const expiresAt = new Date(now.getTime() + this.leaseMs);
 
     return this.prisma.$transaction(async (tx) => {
@@ -202,6 +202,7 @@ export class PrismaRunStore implements RunStore {
         SELECT r."id"
         FROM "AgentRun" AS r
         WHERE r."status" = 'QUEUED'
+          AND r."tenantId" = ${tenantId}
           AND NOT EXISTS (
             SELECT 1 FROM "AgentRun" AS a
             WHERE a."conversationId" = r."conversationId"
@@ -231,7 +232,7 @@ export class PrismaRunStore implements RunStore {
     });
   }
 
-  async recoverExpired(ownerId: string, now: Date): Promise<ClaimedRunLease | null> {
+  async recoverExpired(ownerId: string, tenantId: string, now: Date): Promise<ClaimedRunLease | null> {
     const expiresAt = new Date(now.getTime() + this.leaseMs);
     return this.prisma.$transaction(async (tx) => {
       // 只在旧执行者确实已失去租约、且没有未释放的对话执行屏障时接手；
@@ -240,6 +241,7 @@ export class PrismaRunStore implements RunStore {
         SELECT r."id", r."fence"
         FROM "AgentRun" AS r
         WHERE r."status" IN ('RUNNING','CANCEL_REQUESTED')
+          AND r."tenantId" = ${tenantId}
           AND r."leaseExpiresAt" IS NOT NULL
           AND r."leaseExpiresAt" < ${now}
           AND NOT EXISTS (
@@ -352,6 +354,13 @@ export class PrismaRunStore implements RunStore {
     `;
     const row = rows[0];
     if (row === undefined) throw new Error(FENCE_REJECTED);
+    // 终态必须落一条 run.finished：前端靠它区分「跑完了」和「连接窗口到期」。
+    await this.prisma.$executeRaw`
+      INSERT INTO "AgentRunEvent" ("id", "runId", "tenantId", "seq", "type", "payload", "createdAt")
+      VALUES (gen_random_uuid()::text, ${row.id}, ${tenantId}, ${row.lastSeq + 1}, 'run.finished',
+              ${JSON.stringify({ status, ...(failureCode === undefined ? {} : { failureCode }) })}::jsonb, now())
+    `;
+    await this.prisma.agentRun.update({ where: { id: row.id }, data: { lastSeq: row.lastSeq + 1 } });
     await this.prisma.conversation.update({
       where: { id: row.conversationId },
       data: { lastActivityAt: now },
@@ -380,6 +389,12 @@ export class PrismaRunStore implements RunStore {
     `;
     const row = rows[0];
     if (row === undefined) throw new Error(FENCE_REJECTED);
+    await this.prisma.$executeRaw`
+      INSERT INTO "AgentRunEvent" ("id", "runId", "tenantId", "seq", "type", "payload", "createdAt")
+      VALUES (gen_random_uuid()::text, ${row.id}, ${tenantId}, ${row.lastSeq + 1}, 'run.paused',
+              ${JSON.stringify({ status })}::jsonb, now())
+    `;
+    await this.prisma.agentRun.update({ where: { id: row.id }, data: { lastSeq: row.lastSeq + 1 } });
     await this.prisma.conversation.update({
       where: { id: row.conversationId },
       data: { lastActivityAt: now },

@@ -33,7 +33,7 @@ const claimFreshRun = async (clientRequestId: string) => {
   const created = await fixture.store.create(
     messageInput(fixture, clientRequestId, "生成页面", { conversationId }),
   );
-  const lease = await fixture.store.claim("worker-memo", new Date());
+  const lease = await fixture.store.claim("worker-memo", fixture.tenantA, new Date());
   if (lease === null || lease.runId !== created.id) throw new Error("lease mismatch");
   return lease;
 };
@@ -55,11 +55,11 @@ describe("lease bound step memo", () => {
     try {
       const conversationId = await short.newConversation();
       const created = await short.store.create(messageInput(short, "memo-2", "跨租约", { conversationId }));
-      const oldLease = await short.store.claim("worker-old", new Date());
+      const oldLease = await short.store.claim("worker-old", short.tenantA, new Date());
       if (oldLease === null || oldLease.runId !== created.id) throw new Error("lease mismatch");
 
       await new Promise((resolve) => setTimeout(resolve, 80));
-      const recovered = await short.store.recoverExpired("worker-new", new Date());
+      const recovered = await short.store.recoverExpired("worker-new", short.tenantA, new Date());
       expect(recovered?.fence).toBe(oldLease.fence + 1);
 
       const staleMemo = createLeaseBoundStepMemo({

@@ -42,6 +42,9 @@ async function main(): Promise<void> {
   const worker = new RunWorker({
     store,
     ownerId: `agent-worker-${process.pid}`,
+    // 单租户部署：worker 只处理一个租户，由 AGENT_TENANT_ID 指定；
+    // 多租户部署需要每个租户一个 worker 实例（或加租户发现）。
+    tenantId: process.env.AGENT_TENANT_ID ?? "",
     canClaim: () => ready,
     execute: (lease) => service.executeLease(lease, controller.signal),
   });
