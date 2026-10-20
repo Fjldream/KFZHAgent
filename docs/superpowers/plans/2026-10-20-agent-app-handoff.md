@@ -50,7 +50,7 @@ Superpowers安装路径因机器不同会变化。本机writing-plans读取路�
 | T01 | 模型能力/usage合同 | VERIFIED（2026-10-20） | T00 |
 | T02 | 调用账本与费用 | VERIFIED（2026-10-20） | T01 |
 | T03 | 网关/超时/取消 | VERIFIED（2026-10-20） | T02 |
-| T04 | prompt拆分与前缀 | NOT_STARTED | T03 |
+| T04 | prompt拆分与前缀 | VERIFIED（2026-10-20，等价口径） | T03 |
 | T05 | 上下文与摘要 | NOT_STARTED | T04 |
 | T06 | 预算与修复 | NOT_STARTED | T05 |
 | T07 | Run/Event迁移 | NOT_STARTED | T01/T02 |
@@ -226,6 +226,22 @@ rg -n 'createClassifyIntentNode|createSolutionGraph|generationWorkflow' packages
       以保留既有「关 thinking 重试」路径
 风险：gateway 尚未接进 Nest 模块与老入口（T06/T12 才接），当前仅单测覆盖
 下一步：T04 按任务拆 prompt、稳定前缀与确定性动作
+```
+
+```text
+任务：T04
+状态：VERIFIED（等价口径，冯工 2026-10-20 确认「按等价做」）
+实现：新增 apps/api/src/models/{canonical-json.ts,task-prompts.ts} + task-prompts.test.ts；
+      deepseek-model.chatJson 消息构造改走 buildTaskPrompt（system 原文仍由调用方传入）
+绿测：prompt 7 passed；老模型套件 124 passed（body 断言不变 = 字节等价）；transport 8 passed
+回归：tsc -p apps/api exit 0
+数据库：未涉及（同批完成 schema 与 migrations 对齐收口，diff 现为空迁移）
+证据：agent-app/docs/agent-next-change-manifest.md §T04
+提交：本地提交，未推送
+偏差：①六类提示词文案未拆分，仍共用 SYSTEM_PROMPT 原文；②classify-intent 未改（确定性路由留 T09）；
+      ③promptVersion/prefixHash 已产出但未落库（T06 接）
+风险：文案精简一旦启动会改变模型输出质量，需单独评审与样本对比
+下一步：T05 上下文装配、摘要有效性与窗口预算
 ```
 
 

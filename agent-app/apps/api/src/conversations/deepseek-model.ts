@@ -1,5 +1,7 @@
 // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
 import { ModelTransportError, requestDeepSeekJson, type JsonModelResult } from "../models/deepseek-transport.js";
+import { buildTaskPrompt } from "../models/task-prompts.js";
+import type { ModelTask } from "@kf/contracts";
 
 // end
 import type {
@@ -1754,16 +1756,23 @@ export class DeepSeekModelPort implements ModelPort {
       maxTokens?: number;
       thinking?: "enabled" | "disabled";
       reasoningEffort?: "low" | "high" | "max";
+      task?: ModelTask;
     } = {},
   ): Promise<unknown> {
     const thinking = options.thinking ?? "disabled";
     const maxTokens = options.maxTokens ?? 4000;
+    // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+    // 等价迁移：消息仍由现有 system/user 原文构成，只是构造统一走 buildTaskPrompt，
+    // 便于后续任务复用稳定前缀哈希与版本号；此处不改变任何提示词文案。
+    const builtPrompt = buildTaskPrompt({
+      task: options.task ?? "implementation",
+      schemaVersion: "1",
+      systemPrompt: system,
+      instruction: user,
+    });
     const requestBody = {
       model: this.model,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
+      messages: builtPrompt.messages,
       response_format: { type: "json_object" },
       thinking: { type: thinking },
       ...(thinking === "enabled" && options.reasoningEffort !== undefined
@@ -1772,6 +1781,7 @@ export class DeepSeekModelPort implements ModelPort {
       ...(thinking === "disabled" ? { temperature: 0.2 } : {}),
       max_tokens: maxTokens,
     };
+    // end
     const serializedRequest = JSON.stringify(requestBody);
     const serializedRequestBytes = new TextEncoder().encode(serializedRequest).byteLength;
     if (serializedRequestBytes > MAX_CREATIVE_PROMPT_BYTES) {
@@ -1797,10 +1807,7 @@ export class DeepSeekModelPort implements ModelPort {
             timeoutMs: this.timeoutMs,
             pricingVersion: null,
           },
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: user },
-          ],
+          messages: builtPrompt.messages,
           maxOutputTokens: maxTokens,
           thinking: thinking === "enabled",
           ...(thinking === "disabled" ? { temperature: 0.2 } : {}),

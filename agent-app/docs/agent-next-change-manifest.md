@@ -188,5 +188,52 @@
 2. **`finishReason` 由 transport 返回而不是直接抛错**：截断必须由 `chatJson` 转成 `JSON_TRUNCATED` 才能触发既有的「关 thinking 重试」路径；空正文 + `finish_reason=length` 仍判截断，空正文 + stop 才是协议错误。
 3. **兼容既有测试替身**：老测试的 fake fetch 返回普通对象（无 `headers`/`text`），transport 对 `response.headers?.get` 与 `response.text` 做能力判断，避免把替身差异误判成 provider 故障。
 
+---
+
+# 附加项：schema 与 migrations 对齐收口（2026-10-20，冯工批准）
+
+`schema.prisma` 与已部署迁移之间存在 4 处既有漂移，此前每次生成迁移都会被重复报出。按「改 schema 对齐已部署库、不动数据库」的方式收口：
+
+| 漂移 | 处理 |
+|---|---|
+| `BuildSchedulerCursor.updatedAt` 被提议 `DROP DEFAULT` | schema 补回 `@default(now())`（库里的默认值保留，行为不变） |
+| `BuildJob` 两个长索引名 | 用 `@@index(..., map: "..._i")` 绑定到 PostgreSQL 实际存储的 63 字符名 |
+| `DomainProjectRevision` 唯一索引名 | 用 `@@unique(..., map: "..._ke")` 绑定 |
+
+验证：`prisma migrate diff --from-migrations … --to-schema-datamodel …` 输出 `-- This is an empty migration.`，`prisma validate` 通过，未新增迁移、未执行任何 DDL。
+
+---
+
+# T04：按任务拆 prompt、稳定前缀与确定性动作
+
+执行日期：2026-10-20
+功能标注：Agent工作台迭代
+实施口径（冯工 2026-10-20 确认）：**按等价做** —— 只做结构拆分与版本化，**提示词文案一字不改**。
+
+## 新增/修改文件
+
+| 文件 | 改动 |
+|---|---|
+| `agent-app/apps/api/src/models/canonical-json.ts` | 稳定序列化：对象 key 递归排序、数组保序、undefined 省略 |
+| `agent-app/apps/api/src/models/task-prompts.ts` | `buildTaskPrompt`：稳定 system 前缀 → 历史 → 本次指令；产出 `promptVersion` 与 `prefixHash`（SHA-256） |
+| `agent-app/apps/api/src/models/task-prompts.test.ts` | 7 例：前缀不受动态输入影响、schema/能力包变化换哈希、历史顺序、intent 不夹带控件注册表、等价模式 system 原文不变 |
+| `agent-app/apps/api/src/conversations/deepseek-model.ts` | `chatJson` 的消息构造改走 `buildTaskPrompt`（system 原文仍由调用方传入），新增可选 `task` 参数 |
+
+## 证据
+
+| 项 | 结果 |
+|---|---|
+| 新增 prompt 测试 | **7 passed** |
+| 老模型套件（字节等价验证） | **124 passed**，请求 body 断言全部不变 |
+| transport | 8 passed |
+| 类型检查 | `tsc -p apps/api` exit 0 |
+
+## 偏差（按维护者口径）
+
+1. **未拆分提示词文案**：六类任务仍共用同一段 `SYSTEM_PROMPT` 原文；本轮只建立任务版本号、稳定前缀与哈希。文案精简属于影响模型输出的变更，需单独评审后再做。
+2. **`classify-intent.ts` 未改**：结构化动作（确认/取消/重试）的确定性路由在 T09 落地，本轮保留现有快路。
+3. **`promptVersion` / `prefixHash` 已产出但尚未落库**：T06 预算与账本接线时写入 `ModelInvocation`。
+
+
 
 
