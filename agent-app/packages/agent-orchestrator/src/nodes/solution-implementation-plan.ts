@@ -11,6 +11,9 @@ import type { ModelPortContext } from "../model-port.js";
 import type { SolutionGraphDeps } from "../ports.js";
 import type { AgentGraphStateValue, AgentGraphUpdate } from "../state.js";
 import { hasCurrentDesignPlanVersion } from "../design-plan-version.js";
+// modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+import { withStepMemo } from "../run-step-memo.js";
+// end
 
 const MAX_REJECTION_REASONS = 20;
 const MAX_REJECTION_REASON_LENGTH = 300;
@@ -60,7 +63,7 @@ function dependencyFailure(): AgentGraphUpdate {
 
 /** Produces one semantic plan and permits at most one localized repair. */
 export function createSolutionImplementationPlanNode(deps: SolutionGraphDeps) {
-  return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
+  const node = async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
     if (state.generationWorkflow !== "creative-v2") {
       return { ...failure(0), lastErrorCode: "SOLUTION_PLANNING_FAILED" };
     }
@@ -137,6 +140,15 @@ export function createSolutionImplementationPlanNode(deps: SolutionGraphDeps) {
       ? success(repaired.plan, 1)
       : failure(1);
   };
+  // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+  // 只在有 run 且注入了 memo 时启用：命中已完成输出则跳过模型调用，旧调用行为不变。
+  return withStepMemo("solution-implementation-plan", node, deps, (state) => ({
+    designPlanHash: state.designPlanHash,
+    capabilityCandidatesHash: state.capabilityCandidatesHash,
+    designRevision: state.designRevision,
+    currentRevisionId: state.currentRevisionId,
+  }));
+  // end
 }
 
 function success(plan: SolutionImplementationPlan, attempt: 0 | 1): AgentGraphUpdate {

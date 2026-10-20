@@ -15,6 +15,7 @@ import type {
   SolutionImplementationPlan,
 } from "@kf/contracts";
 import type { ModelPort } from "./model-port.js";
+import type { RunStepMemo } from "./run-step-memo.js";
 import type { GraphMessage } from "./state.js";
 
 /**
@@ -304,6 +305,10 @@ export interface ServerPlanSignerPort {
  */
 export interface SolutionGraphDeps {
   modelPort: ModelPort;
+  // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+  /** 由执行器注入的节点级幂等；未接线时节点行为不变。 */
+  runStepMemo?: RunStepMemo;
+  // end
   workspaceQuery: WorkspaceQueryPort;
   changePlanRepository: ChangePlanRepository;
   buildJobPort: BuildJobPort;

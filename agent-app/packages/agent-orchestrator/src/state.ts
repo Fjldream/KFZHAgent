@@ -96,6 +96,12 @@ export type ApprovalResume = z.infer<typeof ApprovalResumeSchema>;
  */
 export const AgentGraphState = new StateSchema({
   tenantId: z.string().min(1),
+  // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+  /** 持久 run 的 id；旧 SSE 调用不传，图行为与改造前一致。 */
+  runId: z.string().optional(),
+  /** 节点级幂等配方版本；升级节点逻辑时改这个值可整体失效缓存。 */
+  planVersion: z.string().optional(),
+  // end
   userId: z.string().min(1),
   workspaceId: z.string().min(1),
   conversationId: z.string().min(1),

@@ -482,3 +482,30 @@
 3. `nodes/enqueue-build.ts`：`build` 幂等键改用 `runId + planVersion`，确保 enqueue 前后崩溃都找回同一个 BuildJob。
 4. 回填校验：恢复时比对 checkpoint 里的 `runId/baseRevisionId/schemaVersion` 与当前 run 一致，不一致则整段重跑而不是复用。
 5. 回归门槛：`deepseek-model.test.ts`（124 条）+ `run-*.integration`（约 30 条）+ `creative-goldens`（当前既有失败需先确认基线）。
+
+
+## 追加：图接线骨架（A 路线 ②，部分完成）
+
+| 文件 | 说明 |
+|---|---|
+| `packages/agent-orchestrator/src/run-step-memo.ts` | `RunStepMemo` 端口 + `withStepMemo` 包装器 + `stepInputHash`（稳定序列化）；**无 runId/无 memo 时直接执行原节点**，旧调用零影响；失败结果（含 `lastErrorCode`）不写缓存 |
+| `packages/agent-orchestrator/src/state.ts` | `AgentGraphState` 增加可选 `runId` / `planVersion` |
+| `packages/agent-orchestrator/src/ports.ts` | `SolutionGraphDeps` 增加可选 `runStepMemo` |
+| `packages/agent-orchestrator/src/nodes/solution-implementation-plan.ts` | 唯一一个已接线的节点：命中已完成输出则跳过模型调用 |
+| `packages/agent-orchestrator/src/run-step-memo.test.ts` | 5 例：无 runId 时行为等同原节点、命中即跳过、输入变化重跑、失败不缓存、哈希稳定且随版本变化 |
+
+## 回归证据（②的全部门槛）
+
+| 套件 | 结果 |
+|---|---|
+| `solution-graph.test.ts`（单元） | **39 passed**（零回归） |
+| `solution-graph.integration.test.ts`（DB） | **7 passed** |
+| `run-step-memo.test.ts` | **5 passed** |
+| `tsc -p packages/agent-orchestrator` / `tsc -p apps/api` | 均无错误 |
+
+## ② 仍未完成（下一步）
+
+1. 只接了一个节点（`solution-implementation-plan`）；`design-plan`、`blueprint`、`compile-creative-solution` 尚未包 memo。
+2. `nodes/enqueue-build.ts` 幂等键未改为 `runId + planVersion`。
+3. 恢复时未校验 checkpoint 的 `runId/baseRevisionId/schemaVersion` 与当前 run 一致。
+4. 还没有把 `RunStepMemo` 绑定到租约的适配器（`PrismaRunStepStore` → memo），也没有 worker 进程入口。
