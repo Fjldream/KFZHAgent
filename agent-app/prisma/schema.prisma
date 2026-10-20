@@ -1,7 +1,6 @@
-// Prisma schema for KF Solution Agent.
-// Task 8: PostgreSQL Schema, Local Authentication, and Tenant Isolation.
-// Every tenant business model carries a tenantId; unique indexes for
-// tenant-scoped names and job idempotency keys.
+// KF Solution Agent 的 Prisma schema。
+// 任务 8：PostgreSQL schema、本地身份验证与租户隔离。
+// 每个租户业务模型都携带 tenantId；租户范围名称和作业幂等键具有唯一索引。
 
 generator client {
   provider = "prisma-client-js"
@@ -70,9 +69,9 @@ model SolutionWorkspace {
   tenant            Tenant   @relation(fields: [tenantId], references: [id])
   name              String
   description       String?
-  mode              String   @default("new") // "new" (generative) | "upload" (imported source)
-  generationWorkflow String  @default("legacy") // "legacy" | "module-v1" | "creative-v2"; server-owned, never model/user-authored
-  currentRevisionId String? // advanced only after validation passes
+  mode              String   @default("new") // "new" (生成的) | "upload" (导入的源)
+  generationWorkflow String  @default("legacy") // “legacy” | “module-v1” | “creative-v2”; 由服务器所有，从不由模型/用户创建
+  currentRevisionId String? // 只有在验证通过后才可使用
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
   assets            WorkspaceAsset[]
@@ -93,10 +92,7 @@ model Conversation {
   @@index([tenantId, workspaceId])
 }
 
-/// Durable fail-closed marker used only when graph cancellation cannot be
-/// confirmed before the bounded SSE cleanup deadline. The owning API process
-/// proves liveness with one independent session advisory lock; no fence row
-/// owns a PostgreSQL pool client.
+/// 持久化的故障关闭标记，仅在有界 SSE 清理期限前无法确认图取消时使用。所属 API 进程通过一个独立的会话咨询锁证明存活；任何隔离标记记录都不会占用 PostgreSQL 连接池客户端。
 model ConversationTurnFence {
   conversationId String       @id
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -108,9 +104,7 @@ model ConversationTurnFence {
   @@index([ownerId])
 }
 
-/// Short-lived single-use artifact download tokens (Task 11). Only the
-/// SHA-256 hash of each token is stored; the plaintext token is returned once
-/// to the caller. `usedAt` guards single-use; `expiresAt` guards lifetime.
+/// 短期、一次性的制品下载令牌（任务 11）。每个令牌只存储 SHA-256 哈希；明文令牌只向调用方返回一次。`usedAt` 保证只能使用一次；`expiresAt` 限制有效期。
 model DownloadToken {
   id         String    @id @default(uuid())
   tenantId   String
@@ -166,7 +160,7 @@ model SolutionRevision {
   changePlanId     String?
   revisionNumber   Int      @default(1)
   kind             String   @default("built") // "initial" | "source" | "built" | "rollback"
-  parentRevisionId String? // immutable chain link; rollback points at the historical revision
+  parentRevisionId String? // 不可变的链节；回滚点指向历史修订
   state            Json?
   createdAt        DateTime @default(now())
 
@@ -212,7 +206,7 @@ model BuildJob {
   @@index([tenantId, workspaceId])
 }
 
-/// Persistent round-robin cursor for bounded cross-tenant build scheduling.
+/// 用于有界跨租户构建调度的持续轮转游标。
 model BuildSchedulerCursor {
   id           Int      @id
   lastTenantId String   @default("")
@@ -238,8 +232,7 @@ model Artifact {
   @@index([tenantId, solutionRevisionId])
 }
 
-/// Tenant- and workspace-scoped logical assets. `storageKey` remains server
-/// private; it is never part of model context or the web catalog response.
+/// 租户和工作空间范围内的逻辑资产。`storageKey` 始终为服务器私有信息；它绝不会进入模型上下文或 Web 目录响应。
 model WorkspaceAsset {
   id          String   @id @default(uuid())
   tenantId    String
@@ -284,4 +277,43 @@ model AuditLog {
   createdAt    DateTime @default(now())
 
   @@index([tenantId, createdAt])
+}
+
+/// T02 模型调用账本：每次 provider 物理请求一行，用于解释一次交付花了多少 token 与费用。
+/// 不存 API key、图片 base64 或完整提示词；runId 暂为可空字符串，T07 引入 AgentRun 后再补外键。
+model ModelInvocation {
+  id                 String    @id @default(uuid())
+  tenantId           String
+  workspaceId        String
+  conversationId     String?
+  runId              String?
+  task               String
+  provider           String
+  requestedModel     String
+  actualModel        String?
+  promptVersion      String
+  schemaVersion      String
+  prefixHash         String
+  inputHash          String
+  status             String    @default("RUNNING") // RUNNING | SUCCEEDED | FAILED | CANCELLED | UNKNOWN
+  attempt            Int
+  parentInvocationId String?
+  inputTokens        Int?
+  outputTokens       Int?
+  cacheHitTokens     Int?
+  cacheMissTokens    Int?
+  reasoningTokens    Int?
+  usageSource        String? // provider | unknown
+  costMicros         BigInt?
+  currency           String?
+  pricingVersion     String?
+  latencyMs          Int?
+  providerRequestId  String?
+  failureCode        String?
+  startedAt          DateTime  @default(now())
+  finishedAt         DateTime?
+
+  @@index([tenantId, workspaceId, startedAt])
+  @@index([tenantId, conversationId, startedAt])
+  @@index([tenantId, status, startedAt])
 }

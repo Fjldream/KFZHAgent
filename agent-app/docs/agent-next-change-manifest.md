@@ -108,3 +108,51 @@
 - **不猜价格**：`pricingVersion` 未配置为 null，费用留待 T02 记为未知。
 - **白名单边界**：路由只从服务端 env 派生，`ModelRoute` 结构里没有 apiKey/浏览器可控字段。
 
+---
+
+# T02：调用账本与费用
+
+执行日期：2026-10-20
+功能标注：Agent工作台迭代
+
+## 新增/修改文件
+
+| 文件 | 改动 |
+|---|---|
+| `agent-app/prisma/schema.prisma` | 新增 `ModelInvocation`（30 字段 + 3 个复合索引）；`runId` 暂为可空字符串，T07 再补外键 |
+| `agent-app/prisma/migrations/202610200001_model_invocations/migration.sql` | 仅 CreateTable + 3 个 CreateIndex，不触碰既有表 |
+| `agent-app/apps/api/src/models/pricing.ts` | `estimateCostMicros`：BigInt micros 计价、向上取整；价格缺失/负费率/usage 不完整/自相矛盾一律返 null |
+| `agent-app/apps/api/src/models/model-invocation.service.ts` | `ModelInvocationService`：start 落 RUNNING；finish 用 `(tenantId,id,RUNNING)` CAS 收尾；同终态幂等、异终态 `INVOCATION_STATE_CONFLICT`、跨租户 `INVOCATION_NOT_FOUND` |
+| `agent-app/apps/api/src/models/pricing.test.ts` | 4 例：加权计价、缺价/负价、不完整/矛盾 usage、向上取整与 bigint 精确性 |
+| `agent-app/apps/api/src/models/model-invocation.integration.test.ts` | 6 例：RUNNING 落库且无 prompt/key 列、成功计价、重复 finish 幂等、跨租户拒绝、缺价/矛盾/UNKNOWN 保持 null、异终态冲突 |
+
+## Red → Green 证据
+
+| 阶段 | 命令 | 结果 |
+|---|---|---|
+| 红测（pricing） | `vitest run ... src/models/pricing.test.ts` | FAIL：`Cannot find module './pricing.js'` |
+| 绿测（pricing） | 同上 | **4 passed** |
+| 绿测（账本，需隔离库 + flag） | `TEST_DATABASE_URL=…kf_agent_test_agent_next KF_TEST_ALLOW_DESTRUCTIVE_RESET=1 vitest run ... model-invocation.integration.test.ts` | **6 passed**（两文件合计 10 passed） |
+| 类型检查 | `tsc -p apps/api --noEmit` | exit 0 |
+| 旧链路回归 | `conversation-turn-lease` + `preview.service` | **19 passed** |
+
+## 迁移
+
+| 项 | 值 |
+|---|---|
+| 名称 | `202610200001_model_invocations` |
+| 文件 sha256 = Prisma 记录 checksum | `6fb3e0d53c42ea9e651c992f6d8a1fee2598a9bf049bb20200c3a13b5fa3b0bd`（在 `_prisma_migrations` 中已核对一致） |
+| 前向 | `prisma migrate deploy --schema prisma/schema.prisma`（已在 `kf_agent_test_agent_next` 执行成功） |
+| 回退 | `DROP TABLE "ModelInvocation";` 然后删除该迁移目录；不触碰其他表、不回滚数据 |
+
+### 迁移期间的既有漂移（未纳入本迁移，需维护者确认）
+
+`prisma migrate diff` 在 ModelInvocation 之外还报出 4 处 **schema.prisma 与 migrations 的既有不一致**：
+
+1. `ALTER TABLE "BuildSchedulerCursor" ALTER COLUMN "updatedAt" DROP DEFAULT;`
+2. `RenameIndex` BuildJob ×2
+3. `RenameIndex` DomainProjectRevision ×1
+
+这些都不是 T02 的改动，放进本迁移会悄悄改变既有行为（尤其第 1 条会去掉默认值），故只取了 ModelInvocation 的 DDL。**另需注意**：`prisma migrate dev` 在该库不可用——LangGraph 的 `checkpoint_*` 表由 `PostgresSaver.setup()` 运行时创建，会被判为漂移并要求重置库；生成迁移必须用 `prisma migrate diff --from-migrations … --shadow-database-url …`。
+
+

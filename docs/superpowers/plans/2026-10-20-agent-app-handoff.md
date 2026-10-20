@@ -48,7 +48,7 @@ Superpowers安装路径因机器不同会变化。本机writing-plans读取路�
 |---|---|---|---|
 | T00 | 基线与数据库安全 | VERIFIED（2026-10-20） | 无 |
 | T01 | 模型能力/usage合同 | VERIFIED（2026-10-20） | T00 |
-| T02 | 调用账本与费用 | NOT_STARTED | T01 |
+| T02 | 调用账本与费用 | VERIFIED（2026-10-20） | T01 |
 | T03 | 网关/超时/取消 | NOT_STARTED | T02 |
 | T04 | prompt拆分与前缀 | NOT_STARTED | T03 |
 | T05 | 上下文与摘要 | NOT_STARTED | T04 |
@@ -189,6 +189,26 @@ rg -n 'createClassifyIntentNode|createSolutionGraph|generationWorkflow' packages
 偏差：计划只要求 normalize 红线；额外先写了 model-config 红线以保证先测后码
 风险：DeepSeek 真实 vision 模型名与能力仍未实测，T19 前需维护者给出白名单；价格表版本待 T02 提供
 下一步：T02 调用账本与费用（prisma ModelInvocation + pricing.ts）
+```
+
+```text
+任务：T02
+状态：VERIFIED
+执行日期与功能标注：2026-10-20 / Agent工作台迭代
+基线：T01 之后（本地提交 4370d27）
+实现：prisma ModelInvocation + migrations/202610200001_model_invocations；
+      apps/api/src/models/{pricing.ts,model-invocation.service.ts} + 两份测试
+红测：pricing.test.ts → Cannot find module './pricing.js'
+绿测：pricing 4 passed；账本集成 6 passed（隔离库 + KF_TEST_ALLOW_DESTRUCTIVE_RESET=1），合计 10
+回归：tsc -p apps/api exit 0；conversation-turn-lease + preview.service 19 passed
+数据库：kf_agent_test_agent_next 新增 ModelInvocation；migrate deploy 成功；
+      checksum 6fb3e0d53c42ea9e651c992f6d8a1fee2598a9bf049bb20200c3a13b5fa3b0bd（与 _prisma_migrations 一致）
+证据：agent-app/docs/agent-next-change-manifest.md §T02
+提交：本地提交，未推送
+偏差：①migrate dev 因 checkpoint_* 运行期表被判漂移，改用 migrate diff + 影子库生成 SQL；
+      ②diff 报出 BuildSchedulerCursor.updatedAt 删默认值与 3 条索引重命名属既有漂移，未纳入本迁移
+风险：①既有 schema 漂移未处理，后续迁移会反复报同一批 diff；②价格表尚未接 env（T06 处理），当前通过构造参数注入
+下一步：T03 统一 provider transport、全程 deadline 与取消（deepseek-transport.ts + model-gateway.ts）
 ```
 
 
