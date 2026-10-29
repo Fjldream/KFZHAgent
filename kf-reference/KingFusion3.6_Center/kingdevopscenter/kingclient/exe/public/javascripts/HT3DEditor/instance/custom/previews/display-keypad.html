@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Preview Display</title>
+        <meta charset="UTF-8">
+        <link rel="shortcut icon" href="custom/images/favicon.ico?v=2" />
+        <style>
+            html, body {
+                padding: 0px;
+                margin: 0px;
+            }
+        </style>
+
+        <script src='custom/configs/htconfig.js'></script>
+        <script src='custom/libs/echarts.js'></script>
+        <script src='libs/core/ht.js'></script>
+        <script src='libs/plugin/ht-edgetype.js'></script>
+        <script src="libs/plugin/ht-obj.js"></script>
+        <script src='libs/core/ht-ui.js'></script>
+        <script src='libs/plugin/ht-vector.js'></script>
+
+        <script>
+            function moveHorizontal(datas, distX, finishFunc) {
+                ht.Default.startAnim({
+                    duration: 500,
+                    easing: function(t) {
+                        return t * t;
+                    },
+                    finishFunc: finishFunc,
+                    action: function(v) {
+                        datas.forEach(function(data) {
+                            data.setX(data.getX() + (distX - data.getX()) * v);
+                        })
+                    }
+                });
+            };
+
+            function init() {
+                dataModel = new ht.DataModel();
+                graphView = new ht.graph.GraphView(dataModel);
+                graphView.addToDOM();
+
+                ht.Default.xhrLoad('previews/display.json', function(text) {
+                    var json = ht.Default.parse(text);
+                    if(json.title) document.title = json.title;
+                    dataModel.deserialize(json);
+                    graphView.fitContent(true);
+                });
+            }
+
+        </script>
+    </head>
+    <body onload='setTimeout(init, 300)'>
+    </body>
+</html>

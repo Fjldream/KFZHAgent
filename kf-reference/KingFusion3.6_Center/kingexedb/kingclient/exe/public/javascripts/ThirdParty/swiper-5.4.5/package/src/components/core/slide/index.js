@@ -1,0 +1,1 @@
+import o from"./slideTo";import e from"./slideToLoop";import i from"./slideNext";import r from"./slidePrev";import m from"./slideReset";import t from"./slideToClosest";import l from"./slideToClickedSlide";export default{slideTo:o,slideToLoop:e,slideNext:i,slidePrev:r,slideReset:m,slideToClosest:t,slideToClickedSlide:l};

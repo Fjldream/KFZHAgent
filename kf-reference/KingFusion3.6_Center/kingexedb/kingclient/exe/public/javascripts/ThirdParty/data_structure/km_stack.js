@@ -1,0 +1,1 @@
+function KMStack(){this.stack=[]}KMStack.prototype.push=function(t){this.stack.push(t)},KMStack.prototype.pop=function(){return this.stack.pop()},KMStack.prototype.peek=function(){return this.stack[this.stack.length-1]},KMStack.prototype.length=function(){return this.stack.length},KMStack.prototype.print=function(){console.log(this.stack.join(" "))};

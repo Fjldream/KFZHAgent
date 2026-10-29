@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Preview Display</title>
+        <meta charset="UTF-8">
+        <link rel="shortcut icon" href="custom/images/favicon.ico?v=2" />
+        <style>
+            html, body {
+                padding: 0px;
+                margin: 0px;
+            }
+        </style>
+
+        <script src='custom/configs/htconfig.js'></script>
+        <script src='libs/core/ht.js'></script>
+        <script>
+            function init() {
+               dataModel = new ht.DataModel();
+               graphView = new ht.graph.GraphView(dataModel);
+               graphView.addToDOM();
+
+               ht.Default.xhrLoad('previews/display.json', function(text) {
+                   var json = ht.Default.parse(text);
+                   if (json.title) document.title = json.title;
+                   dataModel.deserialize(json);
+                   graphView.fitContent(true);
+
+                   startAnimate('oilBarrel', function(icon, v) {
+                       icon.a('clipVal', v);
+                   });
+                   startAnimate('electric', function(icon, v) {
+                       icon.a('clipVal', v);
+                       icon.a('valPercent', Math.ceil(v * 100) + '%');
+                   });
+                   startAnimate('progress', function(icon, v) {
+                       icon.a('clipVal', v);
+                   });
+                   startAnimate('controlRod', function(icon, v) {
+                       icon.a('value', [
+                           v * 93,
+                           0,
+                           7,
+                           24
+                       ]);
+                   });
+                   startAnimate('switch', function(icon, v) {
+                       if (v < 1 && v > 0.5) {
+                           icon.a('onOff', -45);
+                       } else {
+                           icon.a('onOff', 0);
+                       }
+                   }, 800);
+                   startAnimate('switch2', function(icon, v) {
+                       if (v < 1 && v > 0.5) {
+                           icon.a('onOff', 'rgb(255,255,255)');
+                       } else {
+                           icon.a('onOff', 'rgb(0,0,0)');
+                       }
+                   }, 500);
+                   startAnimate('windingSymbol', function(icon, v) {
+                       if (v < 1 && v > 0.5) {
+                           icon.a('onOff', 'rgb(255,0,0)');
+                       } else {
+                           icon.a('onOff', 'rgb(0,0,0)');
+                       }
+                   });
+                   startAnimate('fan', function(icon, v) {
+                       icon.a('angleVal', (Math.PI * 2) * v);
+                   });
+                   startAnimate('btnGroup', function(icon, v) {
+                       if (v < 1 && v > 0.5) {
+                           icon.a('isShow', false);
+                           icon.a('shapeRect1', [72.07216,5,9.85568,10.95585]);
+                           icon.a('shapeRect2', [72,25.79147,9.85568,10.95585]);
+                       } else {
+                           icon.a('isShow', true);
+                           icon.a('shapeRect1', [70.07216,3,9.85568,10.95585]);
+                           icon.a('shapeRect2', [70,23.79147,9.85568,10.95585]);
+                       }
+                   }, 500);
+                   startAnimate('dashboard', function(icon, v) {
+                       var curAngle = v * 360;
+                       var maxValue = icon.a('maxValue');
+                       if (curAngle > 45 && curAngle < 135) {
+                           icon.a('angle', 135);
+                           if (maxValue) {
+                               icon.a('value', '0A');
+                           }
+                       } else if (curAngle > 0 && curAngle < 45) {
+                           icon.a('angle', curAngle);
+                           if (maxValue) {
+                               icon.a('value', Math.ceil(maxValue * (curAngle + 225) / 270) + 'A');
+                           }
+                       } else {
+                           icon.a('angle', curAngle);
+                           if (maxValue) {
+                               icon.a('value', Math.ceil(maxValue * (curAngle - 135) / 270) + 'A');
+                           }
+                       }
+                   }, 5000);
+                   startAnimate('button1', function(icon, v) {
+                       if (v < 1 && v > 0.5) {
+                           icon.a('back', 'rgb(212,0,0)');
+                           icon.a('back0', [
+                               89.04652,
+                               149.56834,
+                               47.87025,
+                               50.54526
+                           ]);
+                           icon.a('back1', [
+                               101.92659,
+                               130.53807,
+                               38.2962,
+                               40.4362
+                           ]);
+                           icon.a('back2', [
+                               112.98165,
+                               124.84097,
+                               38.2962,
+                               40.4362
+                           ]);
+                           icon.a('back3', [
+                               116.28766,
+                               110.75618,
+                               47.87025,
+                               50.54526
+                           ]);
+                       } else {
+                           icon.a('back', 'rgb(1,128,1)');
+                           icon.a('back0', [
+                               89.04652,
+                               159.56834,
+                               47.87025,
+                               50.54526
+                           ]);
+                           icon.a('back1', [
+                               101.92659,
+                               170.53807,
+                               38.2962,
+                               40.4362
+                           ]);
+                           icon.a('back2', [
+                               112.98165,
+                               184.84097,
+                               38.2962,
+                               40.4362
+                           ]);
+                           icon.a('back3', [
+                               116.28766,
+                               190.75618,
+                               47.87025,
+                               50.54526
+                           ]);
+                       }
+                   });
+                   startAnimate('button2', function(icon, v) {
+                       if (v < 1 && v > 0.5) {
+                           icon.a('offBack', 'rgb(212,0,0)'); //红色
+                           icon.a('onBack', 'rgb(236,233,216)'); //默认色
+                           icon.a('rotate', '0.53');
+                           icon.a('midBack', 'rgb(212,0,0)');
+                           icon.a('midPos', [53, 19.5, 10, 10]);
+                           icon.a('rightBack', 'rgb(212,0,0)');
+                           icon.a('rightPos', [87, 30, 10, 10]);
+                       } else {
+                           icon.a('offBack', 'rgb(236,233,216)'); //默认色
+                           icon.a('onBack', 'rgb(0,255,1)'); //绿色
+                           icon.a('rotate', '-0.53');
+                           icon.a('midBack', 'rgb(0,255,1)');
+                           icon.a('midPos', [55, 17.5, 10, 10]);
+                           icon.a('rightBack', 'rgb(0,255,1)');
+                           icon.a('rightPos', [87, 0, 10, 10]);
+                       }
+                   });
+                   startAnimate('triangleRoll',function(icon,v){
+                       var curOffset = icon.a('offset') ? icon.a('offset') : 0;
+                       icon.a('offset', ++curOffset);
+                   });
+
+                   var testPoints = [
+                       0,
+                       5,
+                       3,
+                       10,
+                       4,
+                       13,
+                       5,
+                       16,
+                       9,
+                       1,
+                       16,
+                       31,
+                       17,
+                       50,
+                       19,
+                       60,
+                       22,
+                       80,
+                       23,
+                       83
+                   ];
+                   var curPoints = [];
+                   var x = 0;
+                   var coordinate = dataModel.getDataByTag('coordinate');
+                   setInterval(function() {
+                       if (x === testPoints.length) {
+                           coordinate.a('points', []);
+                           x = 0;
+                           curPoints = [];
+                       }
+                       curPoints.push(testPoints[x]);
+                       curPoints.push(testPoints[++x]);
+                       coordinate.a('points', curPoints);
+                       coordinate.iv();
+                       x++;
+                   }, 500);
+               });
+           }
+
+           function startAnimate(tagName, action, duration) {
+               var icon = dataModel.getDataByTag(tagName);
+               var iconAni = function() {
+                   ht.Default.startAnim({
+                       duration: duration ? duration : 1000,
+                       easing: function (t) {
+                            return t;
+                       },
+                       finishFunc: function() {
+                           iconAni();
+                       },
+                       action: function(v) {
+                           (typeof action === 'function') && action.call(this, icon, v);
+                       }
+                   });
+               };
+               iconAni();
+           }
+        </script>
+    </head>
+    <body onload='setTimeout(init, 300)'>
+    </body>
+</html>

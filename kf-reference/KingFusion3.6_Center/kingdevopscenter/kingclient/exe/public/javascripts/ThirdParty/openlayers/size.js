@@ -1,0 +1,1 @@
+export function buffer(r,n,f){return f===void 0&&(f=[0,0]),f[0]=r[0]+2*n,f[1]=r[1]+2*n,f}export function hasArea(r){return r[0]>0&&r[1]>0}export function scale(r,n,f){return f===void 0&&(f=[0,0]),f[0]=r[0]*n+.5|0,f[1]=r[1]*n+.5|0,f}export function toSize(r,n){return Array.isArray(r)?r:(n===void 0?n=[r,r]:(n[0]=r,n[1]=r),n)}

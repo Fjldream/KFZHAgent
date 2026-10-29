@@ -1,0 +1,1 @@
+import{isAny as e}from"../modeling/util/ModelingUtil";export default function i(p){p.on(["create.init","shape.move.init"],function(t){var n=t.context,o=t.shape;e(o,["bpmn:Participant","bpmn:SubProcess","bpmn:TextAnnotation"])&&(n.gridSnappingContext||(n.gridSnappingContext={}),n.gridSnappingContext.snapLocation="top-left")})}i.$inject=["eventBus"];

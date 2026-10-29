@@ -1,0 +1,1 @@
+class t{constructor(s,l){this.quill=s,this.options=l,this.modules={}}init(){Object.keys(this.options.modules).forEach(s=>{this.modules[s]==null&&this.addModule(s)})}addModule(s){let l=this.quill.constructor.import(`modules/${s}`);return this.modules[s]=new l(this.quill,this.options.modules[s]||{}),this.modules[s]}}t.DEFAULTS={modules:{}},t.themes={default:t};export default t;

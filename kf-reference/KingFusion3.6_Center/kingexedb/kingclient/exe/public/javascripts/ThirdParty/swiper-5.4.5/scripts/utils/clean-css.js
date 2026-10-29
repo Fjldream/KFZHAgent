@@ -1,0 +1,1 @@
+const CleanCSS=require("clean-css");module.exports=(s,e={})=>(e=Object.assign({compatibility:"*,-properties.zeroUnits"},e),new Promise((n,r)=>{if(s instanceof Promise){s.then(i=>{const c=new CleanCSS(e).minify(i);n(c.styles)}).catch(i=>{throw r(i),i});return}const t=new CleanCSS(e).minify(s);n(t.styles)}));

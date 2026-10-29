@@ -1,0 +1,1 @@
+export function padNumber(r,o,e){const t=e!==void 0?r.toFixed(e):""+r;let n=t.indexOf(".");return n=n===-1?t.length:n,n>o?t:new Array(1+o-n).join("0")+t}export function compareVersions(r,o){const e=(""+r).split("."),t=(""+o).split(".");for(let n=0;n<Math.max(e.length,t.length);n++){const s=parseInt(e[n]||"0",10),i=parseInt(t[n]||"0",10);if(s>i)return 1;if(i>s)return-1}return 0}

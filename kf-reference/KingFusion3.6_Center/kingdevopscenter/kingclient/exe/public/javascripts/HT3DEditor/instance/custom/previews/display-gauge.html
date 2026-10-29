@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Preview Display</title>
+    <meta charset="UTF-8">
+    <link rel="shortcut icon" href="custom/images/favicon.ico?v=2" />
+    <style>
+        html, body {
+            padding: 0px;
+            margin: 0px;
+        }
+    </style>
+
+    <script src='custom/configs/htconfig.js'></script>
+    <script src='libs/core/ht.js'></script>
+    <script src='libs/plugin/ht-edgetype.js'></script>
+    <script src='libs/core/ht-ui.js'></script>
+    <script src='libs/plugin/ht-vector.js'></script>
+
+</head>
+<body>
+
+<script>
+    (function(){
+        function init() {
+            dataModel = new ht.DataModel();
+            graphView = new ht.graph.GraphView(dataModel);
+            graphView.addToDOM();
+
+            ht.Default.xhrLoad('previews/display.json', function(text) {
+                var json = ht.Default.parse(text);
+                if(json.title) document.title = json.title;
+                dataModel.deserialize(json);
+                graphView.fitContent(true);
+                onLoad();
+            });
+        }
+        function onLoad() {
+            var speedGauge = dataModel.getDataByTag('speedGauge');
+            var speedText = dataModel.getDataByTag('speedText');
+            setInterval(function(){
+                var from = speedGauge.a('ht.value'),
+                    to = Math.floor(Math.random() * 220),
+                    range = to - from;
+                ht.Default.startAnim({
+                    frames: 30, // 动画帧数
+                    action: function(v, t){
+                        var val = Math.floor(from + range * v);
+                        speedGauge.a('ht.value', val);
+                        speedText.s('text', val);
+                    }
+                });
+            }, 2000);
+        }
+        init();
+    })()
+</script>
+</body>
+</html>

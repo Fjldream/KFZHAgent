@@ -1,0 +1,1 @@
+import{jsx as e}from"react/jsx-runtime";var o="container_abf42d",r="inner_fed887";const c=({size:s=45,color:a="black",speed:i=2})=>e("div",{className:o,style:{"--uib-size":s+"px","--uib-color":a,"--uib-speed":i+"s"},children:e("div",{className:r})});export{c as default};

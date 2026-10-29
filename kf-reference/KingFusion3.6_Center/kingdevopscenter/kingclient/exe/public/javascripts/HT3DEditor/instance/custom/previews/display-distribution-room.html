@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>配电室</title>
+    <meta charset="UTF-8">
+    <link rel="shortcut icon" href="custom/images/favicon.ico?v=2" />
+    <style>
+        html,
+        body {
+            padding: 0px;
+            margin: 0px;
+        }
+    </style>
+
+    <script src='libs/core/ht.js'></script>
+
+    <script>
+        function init() {
+
+            dataModel = new ht.DataModel();
+            graphView = new ht.graph.GraphView(dataModel);
+            graphView.addToDOM();
+
+            ht.Default.xhrLoad('previews/display.json', function (text) {
+                var json = ht.Default.parse(text);
+                if (json.title) document.title = json.title;
+                dataModel.deserialize(json);
+                graphView.fitContent(true);
+
+                loadData();
+            });
+        }
+
+        function loadData() {
+            var keys = ['ia', 'ib', 'ic', 'uab', 'ubc', 'uca', 'p', 'q', 'ep'];
+            // 模拟数据加载
+            setInterval(function() {
+
+                var a = Math.floor(Math.random() * 2) + 1;
+                var b = Math.floor(Math.random() * 30) + 1;
+
+                var tag = 'a'.concat(String(a)).concat('_b').concat(String(b));
+
+                keys.forEach( function(key) {
+                    var value = prefixInteger(Math.floor(Math.random() * 1000), 4);
+                    // 修改值 tag： a1_b2， key：ia/ib...， value: 变化的值
+                    setValue(tag, key, value);
+                });
+
+                var s = Math.floor(Math.random() * 2);
+                var di = tag.concat('_di1')
+                // di 标记， s: 0 开闸（绿）；1 关闸（红）
+                setSwitch(di, s);
+
+            }, 300);
+        }
+
+        /**
+         * 修改开关状态
+         */
+        function setSwitch(tag, value) {
+
+            var node = dataModel.getDataByTag(tag);
+            if (!node) return;
+
+            node.a('b.color', value === 0 ? 'rgb(0,199,7)' : 'rgb(212,0,0)');
+        }
+
+        /**
+        * 修改值
+        */
+        function setValue(tag, key, value) {
+
+            var node = dataModel.getDataByTag(tag);
+            if (!node) return;
+
+            node.a(key, value);
+        }
+
+        // 数值格式化
+        function prefixInteger(num, n) {
+            return (Array(n).join(0) + num).slice(-n);
+        }
+
+    </script>
+</head>
+
+<body onload='setTimeout(init, 300)'>
+</body>
+
+</html>

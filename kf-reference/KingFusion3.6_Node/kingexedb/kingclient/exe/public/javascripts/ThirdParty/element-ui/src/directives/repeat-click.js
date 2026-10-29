@@ -1,0 +1,1 @@
+import{once as i,on as m}from"element-ui/src/utils/dom";import{isMac as u}from"element-ui/src/utils/util";export default{bind(r,l,a){let e=null,t;const n=u()?100:200,o=()=>a.context[l.expression].apply(),s=()=>{Date.now()-t<n&&o(),clearInterval(e),e=null};m(r,"mousedown",c=>{c.button===0&&(t=Date.now(),i(document,"mouseup",s),clearInterval(e),e=setInterval(o,n))})}};

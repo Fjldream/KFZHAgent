@@ -1,0 +1,1 @@
+const o={info:1,warn:2,error:3,none:4};let n=o.info;export function setLevel(r){n=o[r]}export function log(...r){n>o.info||console.log(...r)}export function warn(...r){n>o.warn||console.warn(...r)}export function error(...r){n>o.error||console.error(...r)}

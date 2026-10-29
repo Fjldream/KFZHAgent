@@ -1,0 +1,1 @@
+import l from"vue";var t=[];!l.prototype.$isServer&&document.addEventListener("click",function(e){t.forEach(function(i){var r=e.target;!i||!i.$el||r===i.$el||i.$el.contains(r)||i.handleOutsideClick&&i.handleOutsideClick(e)})});export default{open(e){e&&t.push(e)},close(e){var i=t.indexOf(e);i!==-1&&t.splice(e,1)}};

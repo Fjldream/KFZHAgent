@@ -1,0 +1,1 @@
+class s{constructor(){this.disposed=!1}dispose(){this.disposed||(this.disposed=!0,this.disposeInternal())}disposeInternal(){}}export default s;

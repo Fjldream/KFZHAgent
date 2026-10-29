@@ -1,0 +1,9 @@
+import c from"quill-delta";import r from"parchment";import u from"../blots/block";import p from"../blots/inline";import h from"../blots/text";class a extends p{}a.blotName="code",a.tagName="CODE";class s extends u{static create(t){let e=super.create(t);return e.setAttribute("spellcheck",!1),e}static formats(){return!0}delta(){let t=this.domNode.textContent;return t.endsWith(`
+`)&&(t=t.slice(0,-1)),t.split(`
+`).reduce((e,i)=>e.insert(i).insert(`
+`,this.formats()),new c)}format(t,e){if(t===this.statics.blotName&&e)return;let[i]=this.descendant(h,this.length()-1);i!=null&&i.deleteAt(i.length()-1,1),super.format(t,e)}formatAt(t,e,i,o){if(e===0||r.query(i,r.Scope.BLOCK)==null||i===this.statics.blotName&&o===this.statics.formats(this.domNode))return;let n=this.newlineIndex(t);if(n<0||n>=t+e)return;let l=this.newlineIndex(t,!0)+1,m=n-l+1,d=this.isolate(l,m),f=d.next;d.format(i,o),f instanceof s&&f.formatAt(0,t-l+e-m,i,o)}insertAt(t,e,i){if(i!=null)return;let[o,n]=this.descendant(h,t);o.insertAt(n,e)}length(){let t=this.domNode.textContent.length;return this.domNode.textContent.endsWith(`
+`)?t:t+1}newlineIndex(t,e=!1){if(e)return this.domNode.textContent.slice(0,t).lastIndexOf(`
+`);{let i=this.domNode.textContent.slice(t).indexOf(`
+`);return i>-1?t+i:-1}}optimize(t){this.domNode.textContent.endsWith(`
+`)||this.appendChild(r.create("text",`
+`)),super.optimize(t);let e=this.next;e!=null&&e.prev===this&&e.statics.blotName===this.statics.blotName&&this.statics.formats(this.domNode)===e.statics.formats(e.domNode)&&(e.optimize(t),e.moveChildren(this),e.remove())}replace(t){super.replace(t),[].slice.call(this.domNode.querySelectorAll("*")).forEach(function(e){let i=r.find(e);i==null?e.parentNode.removeChild(e):i instanceof r.Embed?i.remove():i.unwrap()})}}s.blotName="code-block",s.tagName="PRE",s.TAB="  ";export{a as Code,s as default};

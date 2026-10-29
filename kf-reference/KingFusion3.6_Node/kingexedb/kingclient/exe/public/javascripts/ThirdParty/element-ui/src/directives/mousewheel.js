@@ -1,0 +1,1 @@
+import t from"normalize-wheel";const r=typeof navigator<"u"&&navigator.userAgent.toLowerCase().indexOf("firefox")>-1,s=function(e,o){e&&e.addEventListener&&e.addEventListener(r?"DOMMouseScroll":"mousewheel",function(i){const n=t(i);o&&o.apply(this,[i,n])})};export default{bind(e,o){s(e,o.value)}};

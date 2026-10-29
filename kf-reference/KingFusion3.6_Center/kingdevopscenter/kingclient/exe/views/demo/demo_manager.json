@@ -1,0 +1,61 @@
+{
+  "KP": [
+    {
+      "name": "GIS地图.json",
+      "description": "GIS地图"
+    },
+    {
+      "name": "实时报警.json",
+      "description": "实时报警"
+    },
+    {
+      "name": "导航页.json",
+      "description": "导航页"
+    },
+    {
+      "name": "权限管理.json",
+      "description": "权限管理"
+    },
+    {
+      "name": "查KC数据渲染报表.json",
+      "description": "查KC数据渲染报表"
+    },
+    {
+      "name": "查KH渲染报表.json",
+      "description": "查KH渲染报表"
+    },
+    {
+      "name": "查sql渲染报表.json",
+      "description": "查sql渲染报表"
+    },
+    {
+      "name": "用户修改.json",
+      "description": "用户修改"
+    },
+    {
+      "name": "用户新增.json",
+      "description": "用户新增"
+    },
+    {
+      "name": "用户管理.json",
+      "description": "用户管理"
+    },
+    {
+      "name": "自定义登录页面.json",
+      "description": "自定义登录页面"
+    },
+    {
+      "name": "运输总图2D.json",
+      "description": "运输总图2D"
+    },
+    {
+      "name": "重置密码.json",
+      "description": "重置密码"
+    },
+    {
+      "name": "驾驶舱.json",
+      "description": "驾驶舱"
+    }
+  ]
+}
+

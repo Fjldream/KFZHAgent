@@ -1,0 +1,1 @@
+import{createEmpty as p,createOrUpdateFromFlatCoordinates as s}from"../../extent.js";export function linearRingss(a,n,o,l){const i=[];let t=p();for(let e=0,c=o.length;e<c;++e){const r=o[e];t=s(a,n,r[0],l),i.push((t[0]+t[2])/2,(t[1]+t[3])/2),n=r[r.length-1]}return i}

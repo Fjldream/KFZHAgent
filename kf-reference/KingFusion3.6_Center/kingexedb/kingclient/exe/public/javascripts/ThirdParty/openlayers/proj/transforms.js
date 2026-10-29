@@ -1,0 +1,1 @@
+import{isEmpty as f}from"../obj.js";let t={};export function clear(){t={}}export function add(o,n,e){const r=o.getCode(),i=n.getCode();r in t||(t[r]={}),t[r][i]=e}export function remove(o,n){const e=o.getCode(),r=n.getCode(),i=t[e][r];return delete t[e][r],f(t[e])&&delete t[e],i}export function get(o,n){let e;return o in t&&n in t[o]&&(e=t[o][n]),e}

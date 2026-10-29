@@ -1,0 +1,1 @@
+export function fromResolutionLike(r){return Array.isArray(r)?Math.min(...r):r}

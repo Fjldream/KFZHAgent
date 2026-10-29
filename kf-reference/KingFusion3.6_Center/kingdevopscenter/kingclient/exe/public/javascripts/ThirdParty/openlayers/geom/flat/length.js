@@ -1,0 +1,1 @@
+export function lineStringLength(n,c,u,g){let h=n[c],x=n[c+1],p=0;for(let r=c+g;r<u;r+=g){const t=n[r],y=n[r+1];p+=Math.sqrt((t-h)*(t-h)+(y-x)*(y-x)),h=t,x=y}return p}export function linearRingLength(n,c,u,g){let h=lineStringLength(n,c,u,g);const x=n[u-g]-n[c],p=n[u-g+1]-n[c+1];return h+=Math.sqrt(x*x+p*p),h}

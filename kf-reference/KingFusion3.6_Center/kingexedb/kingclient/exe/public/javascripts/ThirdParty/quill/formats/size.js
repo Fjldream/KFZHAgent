@@ -1,0 +1,1 @@
+import e from"parchment";let t=new e.Attributor.Class("size","ql-size",{scope:e.Scope.INLINE,whitelist:["small","large","huge"]}),i=new e.Attributor.Style("size","font-size",{scope:e.Scope.INLINE,whitelist:["10px","18px","32px"]});export{t as SizeClass,i as SizeStyle};

@@ -61,6 +61,22 @@ flowchart LR
 
 生成包中的页面、控件和布局名称有原生约束，语义 ID 不应直接充当文件名。当前 Agent 通过独立原生名称派生处理，具体见 `agent-app/packages/domain-client/src/compile/native-page-name.ts`。修改命名时也要保持页面 GUID、页面管理、默认页和导航引用一致。
 
+<!-- modified by jinlong.feng at 2026-10-29 KF客户端完整入库与启动审计 -->
+### ThirdParty 与控件最终样式
+
+三个客户端的 `exe/public/javascripts/ThirdParty/` 已补入快照。它是产品随包提供的浏览器运行依赖，不能直接等同于可重新安装的 `node_modules`：实际库版本、已有改动、主题 CSS、字体和图标都会影响最终效果。
+
+- `jquery-easyui-1.6.4/`：控件 JS、主题和图标。追踪原生 EasyUI 控件的 DOM class、尺寸与显示行为时一并对照。
+- `element-ui/`：控件包、`lib/theme-chalk/` 样式及字体。业务控件 setter 写入的属性还会受到这些默认样式影响。
+- `core/`、`ht/`：按实际入口引用检查相关基础库、HT 行为与扩展，保留各部署树版本。
+- `echarts.min.js`、`univerLibs/`：图表、电子表格等浏览器依赖。库存在只说明产品依赖资源已保留，不能证明 Agent 的对应控件生成能力已经完成。
+- 其余目录保留运行用的 CSS、字体、图标、worker 及地图/PDF 相关静态资源；source map、示例/测试和明确副本除外。
+
+先从 `views/index.html`、开发态入口脚本和具体控件代码确定真正加载的路径，再读该路径下的库及主题。开发态 Univer 位于 `0.10.6` 路径，运行态位于 `0.12.0` 路径；Node 的 `ht/ht.js` 与 Center 对应文件也不同。本结论来自本地快照，不代表远程服务器当前部署版本。
+
+补录范围、原始哈希与依赖策略记录在 `kf-reference/manifest.json` 的 `policy.runtimeDependencies` 和 `kind: runtime-dependency` 记录中。
+<!-- end -->
+
 ## 3. 运行态加载、转换和渲染
 
 从 `KingFusion3.6_Node/kingexedb/kingclient/exe/` 阅读，并按需要对照 Center 版本：

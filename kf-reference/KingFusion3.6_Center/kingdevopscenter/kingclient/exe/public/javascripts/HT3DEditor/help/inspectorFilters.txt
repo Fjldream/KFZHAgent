@@ -1,0 +1,83 @@
+==============================
+# HT 编辑器属性页过滤器说明
+==============================
+
+1、详细模式
+    通过设置 hteditor_config.detailFilter 进行配置，以便过滤掉具体项目中不常用的属性
+
+hteditor_config.detailFilter = {
+    // 图元标题组
+    isDataTitleVisible: function(editor, data, title) {
+        return true;
+    },
+    // 图元属性
+    isDataPropertyVisible: function(editor, data, accessType, name) {
+        return true;
+    },
+    // 组件标题组
+    isCompTitleVisible: function(editor, type, title) {
+        return true;
+    },
+    // 组件属性
+    isCompPropertyVisible: function(editor, type, name) {
+        return true;
+    },
+    // 图纸标题组
+    isDisplayTitleVisible: function(editor, title) {
+        return true;
+    },
+    // 图纸属性
+    isDisplayPropertyVisible: function(editor, name) {
+        return true;
+    },
+    // 图标标题组
+    isSymbolTitleVisible: function(editor, title) {
+        return true;
+    },
+    // 图标属性
+    isSymbolPropertyVisible: function(editor, name) {
+        return true;
+    }
+};
+
+2、简化模式：
+    通过设置 hteditor_config.compactFilter 进行配置，如果设置了该属性页上方工具条最右侧会出现一个“简化属性”的切换按钮，该属性的设置相当于在 hteditor_config.detailFilter 的基础上再次追加过滤，因此在 hteditor_config.detailFilter 已经过滤的属性，可不必再重复配置。
+
+
+hteditor_config.compactFilter = {
+    // 图元标题组
+    isDataTitleVisible: function(editor, data, title) {
+        return true;
+    },
+    // 图元属性
+    isDataPropertyVisible: function(editor, data, accessType, name) {
+        return true;
+    },
+    // 组件标题组
+    isCompTitleVisible: function(editor, type, title) {
+        return true;
+    },
+    // 组件属性
+    isCompPropertyVisible: function(editor, type, name) {
+        return true;
+    },
+    // 图纸标题组
+    isDisplayTitleVisible: function(editor, title) {
+        return true;
+    },
+    // 图纸属性
+    isDisplayPropertyVisible: function(editor, name) {
+        return true;
+    },
+    // 图标标题组
+    isSymbolTitleVisible: function(editor, title) {
+        return true;
+    },
+    // 图标属性
+    isSymbolPropertyVisible: function(editor, name) {
+        return true;
+    }
+};
+
+
+

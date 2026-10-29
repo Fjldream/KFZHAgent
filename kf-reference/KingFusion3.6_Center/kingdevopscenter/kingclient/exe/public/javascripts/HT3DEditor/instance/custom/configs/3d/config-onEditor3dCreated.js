@@ -1,0 +1,1 @@
+(function(){window.hteditor_config.onEditor3dCreated=function(n,t){e(n),n.scenes.tree.setFocusDataById("scenes/\u76EE\u5F551")};function e(n){n.mainMenu.getItems()[1].items.push({label:"\u9AD8\u7089\u6A21\u578B",action:function(){n.getModelDialog("gaolu").open()}})}})();

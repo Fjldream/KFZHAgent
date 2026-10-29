@@ -1,0 +1,1 @@
+class o{constructor(e){this.propagationStopped,this.defaultPrevented,this.type=e,this.target=null}preventDefault(){this.defaultPrevented=!0}stopPropagation(){this.propagationStopped=!0}}export function stopPropagation(t){t.stopPropagation()}export function preventDefault(t){t.preventDefault()}export default o;

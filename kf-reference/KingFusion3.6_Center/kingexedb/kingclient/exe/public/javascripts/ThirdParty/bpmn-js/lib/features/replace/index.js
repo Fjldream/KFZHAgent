@@ -1,0 +1,1 @@
+import e from"../copy-paste";import o from"diagram-js/lib/features/replace";import p from"diagram-js/lib/features/selection";import m from"./BpmnReplace";export default{__depends__:[e,o,p],bpmnReplace:["type",m]};

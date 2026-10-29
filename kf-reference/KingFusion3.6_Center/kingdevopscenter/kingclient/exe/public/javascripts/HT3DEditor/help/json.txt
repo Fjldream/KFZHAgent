@@ -1,0 +1,248 @@
+==============================
+# HT 编辑器多种 JSON 格式文件说明
+==============================
+
+HT 框架共有四种类型 JSON 格式，分别为处理数据模型、矢量图标、组件定义和三维模型问题。
+
+# ===========================
+1、数据模型 JSON
+
+数据模型用于将 DataModel 数据容器中的图元信息转换成 JSON 结构，一般用于 2D 图纸和 3D 场景的存储，也可用于存储树表格等绑定 DataModel 数据容器组件的信息，HT 编辑器 2D 图纸 JSON 文件保存于 storage/displays 目录下，3D 场景 JSON 文件保存于 storage/scenes 目录下。
+
+数据模型 JSON 主要存储了 DataModel 中的图元 Data 信息，以及 DataModel 的属性，HT 体系将属性分为三种类型：
+- get/set 类型，简称 p，如 image 属性对应 getImage() 和 setImage(image) 函数
+- style 类型，简称 s，如 getStyle('label.color') 和 setStyle('label.color', 'red')
+- attr 类型，简称 a，如 getAttr('customProperty') 和 setAttr('customProperty', 123)
+参见《数据模型手册》https://hightopo.com/guide/guide/core/datamodel/ht-datamodel-guide.html
+
+数据模型 JSON 一般作为黑盒使用，不需要用户掌握格式，一些关键字说明如下：
+- "v": HT 版本号，ht.Default.getVersion()
+- "d": 数据格式的图元 Data 信息
+- "c": 图元 Data 对应的类，如 ht.Node, ht.Group ...
+- "i": 图元 Data 的 id 值，该值仅用于 Data 类型属性引用，反序列化后会由系统生成新 id
+- "__i": 引用 Data 对象属性，例如 host, parent, source, target 等
+
+数据模型的序列化和反序列化，本质由 ht.JSONSerializer 类实现，参见《序列化手册》https://hightopo.com/guide/guide/core/serialization/ht-serialization-guide.html，但实际使用大部分从 DataModel 和 View（GraphView/Graph3dView）的 serialize 和 deserialize 函数接口更方便。
+
+DataModel 接口：
+- serialize(space): 返回序列化后 JSON 对象的字符串内容
+    - space: 为空格缩进值，默认为2
+- deserialize(json, rootParent, options) 反序列化图元和属性信息到 DataModel 容器
+    - json: 反序列化内容，可为 JSON 对象，JSON 格式字符串，甚至为 'displays/topology.json' 的 URL 路径
+    - rootParent: 反序列化图元 Data 对象的 parent 为空时，将 rootParent 设置为其父亲节点
+    - options: 可选参考
+        - {
+            setId: false, // 默认为 false，是否用 i 值设置为图元 id，不建议使用
+            view: view // 当前视图，一般为 graphView 或 graph3dView
+            finishFunc: function(json, dataModel, view, datas) { // 完成回调函数
+                // json: 反序列化的 JSON 对象
+                // dataModel: 当前数据容器
+                // view: 当前视图，一般为 GraphView 或 Graph3dView 对象
+                // data: 反序列化后的新图元数组
+            }
+        }
+
+GraphView/Graph3dView 接口：
+- serialize(space): 返回序列化后 JSON 对象的字符串内容
+    - space: 为空格缩进值，默认为2
+- deserialize(json, options) 反序列化图元和属性信息到 DataModel 容器
+    - json: 反序列化内容，可为 JSON 对象，JSON 格式字符串，甚至为 'displays/topology.json' 的 URL 路径
+    - options: 可选参考，可直接为 setId, rootParent, finishFunc 值，也可为组合对象：
+        - {
+            setId: false, // 默认为 false，是否用 i 值设置为图元 id，不建议使用
+            rootParent: 反序列化图元 Data 对象的 parent 为空时，将 rootParent 设置为其父亲节点
+            finishFunc: function(json, dataModel, view, datas) { // 完成回调函数
+                // json: 反序列化的 JSON 对象
+                // dataModel: 当前数据容器
+                // view: 当前视图，一般为 GraphView 或 Graph3dView 对象
+                // data: 反序列化后的新图元数组
+            }
+        }
+
+HT 编辑器 display.html 图纸预览代码示例：
+    function init() {
+        graphView = new ht.graph.GraphView();
+        graphView.addToDOM();
+        graphView.deserialize('previews/display.json', function(json, dm, gv, datas) {
+            if(json.title) document.title = json.title;
+            graphView.fitContent(true);
+        });
+    }
+
+反序列化回调函数 json.a.onPreDeserialize 和 json.a.onPostDeserialize：
+- onPreDeserialize: function(json, dataModel, view) {} 反序列化之前回调
+- onPostDeserialize: function(json, dataModel, view, datas) {} 反序列化之后回调
+一般建议采用 GraphView/Graph3dView 接口，采用这样的方式省去传入 options 的 view 属性步骤，确保回调函数的 view 有值
+
+# ===========================
+2、矢量图标 JSON
+
+HT 采用自定义的 JSON 格式描述矢量图片，矢量格式详见《矢量手册》https://hightopo.com/guide/guide/core/vector/ht-vector-guide.html 说明，HT 编辑器将图标 JSON 文件保存于 storage/symbols 目录下。
+
+大部分使用矢量图标只需要指定指定 URL 文件路径即可:
+node.setImage('symbols/可视化/basic/node.json');
+
+也可以先注册，后使用：
+ht.Default.setImage('CustomNode', {
+  "width": 100,
+  "height": 50,
+  "comps": [
+    {
+      "type": "oval",
+      "background": "#D8D8D8",
+      "rect": [0, 0, 50, 50]
+    },
+    {
+      "type": "roundRect",
+      "background": "#D8D8D8",
+      "rect": [50, 0, 50, 50]
+    }
+  ]
+});
+node.setImage('CustomNode');
+
+也可以直接设置 JSON 对象
+node.setImage({
+  "width": 100,
+  "height": 50,
+  "comps": [
+    {
+      "type": "oval",
+      "background": "#D8D8D8",
+      "rect": [0, 0, 50, 50]
+    },
+    {
+      "type": "roundRect",
+      "background": "#D8D8D8",
+      "rect": [50, 0, 50, 50]
+    }
+  ]
+});
+
+# ===========================
+3、组件定义 JSON
+
+HT 默认预置提供了多种类型 comp 供矢量图标使用，但用户依然可以自定义更多类型，参见《矢量手册》的自定义组件章节 https://hightopo.com/guide/guide/core/vector/ht-vector-guide.html#ref_custom
+
+注册新组件 comp 类型 'clock-face'
+ht.Default.setCompType('clock-face', function(g, rect, comp, data, view) {
+    // 绘制组件 ...
+});
+
+使用 'clock-face' 组件
+ht.Default.setImage('clock', {
+    width: 100,
+    height: 100,
+    comps: [
+        {
+            type: 'clock-face',
+            rect: [0, 0, 100, 100]
+        },
+        ...
+    ]
+});
+
+为方便在 HT 编辑器使用，可将组件定义信息以 JSON 文件方式保存：
+{
+  "width": 100,
+  "height": 100,
+  // 在 rect 区域内绘制该组件内容，comp.getValue('hourColor') 会考虑数据绑定值、设置值以及默认值的优先关系
+  "func": "__ht__function(g, rect, comp, data, view) {... g.fillStyle = comp.getValue('hourColor'); ...}",
+  "properties": { // 自定义属性集合，方便编辑器的属性页显示和编辑
+    "hourColor": { // 自定义属性变量名
+      "valueType": "Color", // 属性类型
+      "defaultValue": "#6EFE9F", // 属性默认值
+      "name": "HourColor", // 属性页上项目名称
+      "description": "定义时钟组件时针颜色属性" // 描述说明
+    }
+  }
+}
+
+使用自定义组件无需注册，使用时 type 直接设置为 URL 文件路径即可
+ht.Default.setImage('clock', {
+    width: 100,
+    height: 100,
+    comps: [
+        {
+            type: 'symbols/clock-face.json',
+            rect: [0, 0, 100, 100],
+            hourColor: 'red'
+        },
+        ...
+    ]
+});
+
+# ===========================
+4、三维模型 JSON
+
+参见《OBJ 手册》 https://hightopo.com/guide/guide/plugin/obj/ht-obj-guide.html
+
+传统的手工加载 OBJ 模型方式：
+ht.Default.loadObj('obj/scooter.obj', 'obj/scooter.mtl', {
+    cube: true,
+    center: true,
+    shape3d: 'scooter',
+    finishFunc: function(modelMap, array, rawS3){
+        if(modelMap){
+            var node = new ht.Node();
+            node.s('shape3d': 'scooter');
+            dataModel.add(node);
+        }
+    }
+});
+
+建议的加载方式，是将这些加载信息描述到三维模型 JSON 文件，使用时直接通过 node.s('shape3d', 'models/scooter.json') 设置 URL 路径即可，HT 编辑器将三维模型描述文件保存在 storge/models 目录下
+{
+  "modelType": "obj",
+  "obj": "assets/objs/scooter/scooter.obj",
+  "mtl": "assets/objs/scooter/scooter.mtl",
+  "cube": true,
+  "center": true,
+  ...
+}
+
+modelType 预置了 obj 类型的支持，用户可以任意自定义 JSON 格式，并根据 JSON 参数动态生成三维模型。
+
+注册新 blastFurnace 高炉三维模型类型：
+ht.Default.setModelTypeHandler('blastFurnace', function(json, callback) {
+    ...
+    for (var i = json.params.length - 1; i >= 0; i--) {
+        ...
+    }
+    ...
+    var shape3dModel = [ht.Default.createRingModel(path, segments)];
+    ...
+    callback(shape3dModel);
+});
+
+描述具体高炉三维模型的 JSON 文件 models/blastFurnace/type3.json
+{
+  "modelType": "blastFurnace",
+  "params": [
+    {
+      "id": "head",
+      "label": "炉顶封罩",
+      "outsideRadius": "3300;8200",
+      "insideRadius": "3000;7200",
+      "height": "3000"
+    },
+    ...
+  ]
+}
+
+对图元设置成该三维高炉模型：
+node.s('shape3d', 'models/blastFurnace/type3.json');
+
+# ===========================
+5、JSON 文件数据下载
+
+大部分情况不需要用户手工发起，HT 内部会自动发起 HTTP 请求加载 JSON 文件数据，如果用户需要手工加载也可采用 ht.Default.xhrLoad(urls, callback, options) 的工具函数加载：
+- urls: 可为单个 URL 路径，也可为一堆的 URL 路径数组
+- callback: 回调函数 function(text) {}，下载成功 text 参数为文本数据，失败为 null
+- options: 可选参数
+    - {
+        sync: true/false，是否同步，默认为 false 异步加载数据
+        post: true/false，是否为 POST 方式，默认为 false 采用 GET 方式
+        mimeType: 默认为 'text/plain'
+        responseType: 返回数据类型，默认不设置
+    }

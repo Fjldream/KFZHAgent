@@ -1,0 +1,27 @@
+{
+    "isSso":false,
+    "ssoConfig":{
+        "thirdTokenConfig":{
+            "thirdTokenSso":false,
+            "firstUrl":"http://127.0.0.1/login",
+            "secondUrl":"http://127.0.0.1/login",
+            "method":"POST",
+            "body":"body",
+            "bodyFormat":"string",
+            "headers":{"content-type": "application/x-www-form-urlencoded"},
+            "headersTokenKey":"access_token",
+            "bodyTokenKey":"",
+            "returnValue":{        
+                "code":"code",
+                "data":"data",
+                "message":"msg"
+            },
+            "returnName":"login_name"
+        }
+    },
+    "loginPageConfig":{
+        "isNotLoginPage":false,
+        "distinguishField":"access_token",
+        "loginThirdUrl":"http://10.188.1.133/#/index/info"
+    }
+}

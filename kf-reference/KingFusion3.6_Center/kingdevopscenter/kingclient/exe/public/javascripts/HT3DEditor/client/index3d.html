@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>HT for Web 3D</title>
+    <meta charset="UTF-8">
+    <meta name='viewport' content='user-scalable=no'>
+    <link rel="shortcut icon" href="custom/images/favicon_3d.ico" />
+    <style>
+        html,
+        body {
+            padding: 0px;
+            margin: 0px;
+        }
+        .dialog-container{
+            left: 25% !important;
+            top: 25% !important;
+        }
+    </style>
+
+    <!-- ht config -->
+    <script src='custom/configs/htconfig.js'></script>
+    <script src='custom/configs/config-transform.js'></script>
+    <script src='custom/configs/config-service.js'></script>
+
+    <!-- configuration for editor -->
+    <script src='custom/configs/3d/config.js'></script>
+
+    <!-- ht core -->
+    <script src='libs/core/ht.js'></script>
+
+    <!-- ht plugins -->
+        <script src="libs/plugin/xlsx.full.min.js"></script>
+    <script src='custom/configs/buckle.js'></script>
+    <script src="libs/plugin/ht-cssanimation.js"></script>
+    <script src='libs/plugin/ht-contextmenu.js'></script>
+    <script src='libs/plugin/ht-dialog.js'></script>
+    <script src='libs/plugin/ht-edgetype.js'></script>
+    <script src='libs/plugin/ht-form.js'></script>
+    <script src='libs/plugin/ht-overview.js'></script>
+    <script src="libs/plugin/ht-autolayout.js"></script>
+    <script src="libs/plugin/ht-obj.js"></script>
+    <script src="libs/plugin/ht-modeling.js"></script>
+    <script src="libs/plugin/ht-historymanager.js"></script>
+    <script src="libs/plugin/ht-vector.js"></script>
+	<script  src="libs/plugin/Pipe.js"></script>
+    <!-- socket.io -->
+
+    <!-- KF3.6中使用 -->
+    <!-- <script src="/kingclient3d/socket.io/socket.io.js"></script> -->
+    <!-- KP2.0中使用 -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        function init() {
+            var urls = hteditor_config.subConfigs || [];
+            urls.push('libs/client.js');
+            ht.Default.loadJS(urls, function () {
+                ht.Default.loadJS(['libs/client3d.js'], function () {
+                    hteditor_config.indent = 90;
+                    urls = [
+                        'locales/' + hteditor_config.locale + '.js',
+                        'custom/locales/' + hteditor_config.locale + '.js'
+                    ];
+                    if (hteditor_config.libs) {
+                        urls = urls.concat(hteditor_config.libs);
+                    }
+                    ht.Default.loadJS(urls, function () {
+                        hteditor.init();
+                        window.editor3d = hteditor3d.createEditor3d();
+                        // 重写preview方法 add by lei.zhang
+                        window.editor3d.preview = function () {
+                            var previewURL = this.dm.a("previewURL") || "scene.html";
+                            this.url && -1 === previewURL.indexOf("?") && (previewURL +=
+                                "?tag=" + encodeURI(this.url));
+                            // 获取工程信息 add by lei.zhang
+                            var searchArr = window.location.search ? window.location.search
+                                .split('=') : [''];
+                            var projectInfo = searchArr[searchArr.length - 1];
+                            if (-1 !== previewURL.indexOf("?")) {
+                                previewURL += '&projectInfo=' + projectInfo;
+                            } else {
+                                previewURL += '?projectInfo=' + projectInfo;
+                            }
+                            var data = {
+                                url: previewURL
+                            };
+                            this.fireEvent("sceneViewPreviewing", data);
+                            window.open(data.url, data.url);
+                            data = {
+                                path: "previews/scene.json",
+                                content: this.serialize()
+                            };
+                            this.request("upload", data, function (previewURL) {})
+                        }
+                        // 实现iframe和父页面的通讯
+                        window.addEventListener('message', function (e) {
+                            if (e.source !== window.parent) return;
+                            if (e.data === 'save') {
+                                // 父页面触发保存,如果没有数据则不进行保存
+                                if (window.editor3d.dm.size()) {
+                                    window.editor3d.save();
+                                    window.editor3d.isSaveInKP = true;
+                                    // window.parent.postMessage('closed', editor3d.parentHref);
+                                } else {
+                                    window.parent.postMessage('closed', editor3d
+                                        .parentHref);
+                                }
+                            } else if (typeof e.data === 'string' && e.data.indexOf(
+                                    '.json') !== -1) {
+                                // 父页面打开新场景
+                                window.editor3d.newScene(e.data);
+                                window.editor3d.isSaveInKP = false;
+                            } else if (typeof e.data === 'string' && e.data.indexOf(
+                                    'http') !== -1) {
+                                // 记录父级页面的href,用来和父级页面进行通讯
+                                window.editor3d.parentHref = e.data;
+                            } else {
+                                // 选中打开的目录(会将选中目录的id传过来)
+                                var dataModel = window.editor3d.scenes.tree
+                                    .getDataModel();
+                                if (dataModel) {
+                                    var data = dataModel.getDataById(e.data);
+                                    if (data) {
+                                        dataModel.sm().setSelection(data);
+                                    }
+                                }
+                            }
+                        }, false);
+                    });
+                });
+            });
+        }
+    </script>
+</head>
+
+<body onload='init()'>
+</body>
+
+</html>

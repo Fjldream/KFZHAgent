@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>Form</title>
+    <style>
+        html, body {
+            padding: 0;
+            margin: 0;
+        }
+    </style>
+    <script src='libs/core/ht.js'></script>
+    <script src="libs/plugin/ht-vector.js"></script>
+    <script>
+        function init() {
+            dataModel = new ht.DataModel();
+            graphView = new ht.graph.GraphView(dataModel);
+
+            graphView.setPannable(false);
+            graphView.handleScroll = function() {};
+            graphView.handlePinch = function() {};
+            graphView.setRectSelectable(false);
+            graphView.setMovableFunc(function(data) { return false; })
+            graphView.addToDOM();
+            window.addEventListener('resize', function(e) { graphView.fitContent(); }, false);
+
+            ht.Default.xhrLoad('previews/display.json', function(text) {
+                var json = ht.Default.parse(text);
+                dataModel.deserialize(json);
+                graphView.fitContent(true);
+                // Alarm灯变化/2s
+                var flag = true;
+                setInterval(function () {
+                    changeAlarmColor(dataModel, 'Alarm1', flag);
+                    changeAlarmColor(dataModel, 'Alarm2', flag);
+                    changeAlarmColor(dataModel, 'Alarm3', flag);
+                    changeAlarmColor(dataModel, 'Alarm4', flag);
+                    flag = !flag;
+                }, 2000);
+                // TANK进度条变化/3s
+                setInterval(function () {
+                    var tag = dataModel.getDataByTag('tank');
+                    var num = Math.random() * 1;
+                    ht.Default.startAnim({
+                        duration: 500,
+                        action: function(v, t){
+                            tag.a('progress', num * v);
+                        }
+                    });
+                }, 3000);
+                // PUMP文字颜色变化/2.5s
+                setInterval(function () {
+                    changePumpState(dataModel, 'pump1');
+                    changePumpState(dataModel, 'pump2');
+                    changePumpState(dataModel, 'pump3');
+                }, 2500);
+            });
+        }
+
+        function changeAlarmColor(dataModel, tag, flag) {
+            var tag = dataModel.getDataByTag(tag);
+            if(flag) {
+                tag.a('backgroundColor', 'rgb(138,40,18)');
+                tag.a('progressiveColor', 'rgb(232,97,56)');
+            } else {
+                tag.a('backgroundColor', 'rgb(34,168,38)');
+                tag.a('progressiveColor', 'rgb(82,222,133)');
+            }
+        }
+
+        function changePumpState(dataModel, tag) {
+            var tag = dataModel.getDataByTag(tag);
+            var num = Math.floor(Math.random() * 3 + 1);
+            tag.a('status', num);
+        }
+    </script>
+</head>
+<body onload="init();">
+</body>
+</html>

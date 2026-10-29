@@ -1,0 +1,1 @@
+import a from"../../../utils/support";export default function(e){const o=this,{params:p,$wrapperEl:r,activeIndex:n}=o;p.loop&&o.loopDestroy();let f=n+1;if(typeof e=="object"&&"length"in e){for(let t=0;t<e.length;t+=1)e[t]&&r.prepend(e[t]);f=n+e.length}else r.prepend(e);p.loop&&o.loopCreate(),p.observer&&a.observer||o.update(),o.slideTo(f,0,!1)}

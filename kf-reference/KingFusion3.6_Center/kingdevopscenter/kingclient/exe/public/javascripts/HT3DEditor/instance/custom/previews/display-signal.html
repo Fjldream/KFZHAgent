@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>HT Material Comp Battery</title>
+    <meta charset="UTF-8">
+    <link rel="shortcut icon" href="custom/images/favicon.ico?v=2" />
+    <style>
+        html,
+        body {
+            padding: 0px;
+            margin: 0px;
+        }
+    </style>
+
+    <script src='custom/configs/htconfig.js'></script>
+    <script src='libs/core/ht.js'></script>
+
+    <script>
+        // 数据
+        var signalData = [ { signalLevel: 5, signalText: 'Excellent' }, { signalLevel: 4, signalText: 'Good' }, { signalLevel: 3, signalText: 'Fair' }, { signalLevel: 2, signalText: 'Poor' }, { signalLevel: 1, signalText: 'Bad' }, { signalLevel: 0, signalText: 'No Signal' }];
+        var signalDataWithColor = signalData.map(function (item) {
+            var signalLevel = item.signalLevel;
+            var signalColor;
+            if (signalLevel >= 3 && signalLevel <= 5) {
+                signalColor = '#8BC44C';
+            } else if (signalLevel === 2) {
+                signalColor = '#F7BD32';
+            } else if (signalLevel === 1) {
+                signalColor = '#ED5662';
+            } else {
+                signalColor = null;
+            }
+            return Object.assign({ signalColor: signalColor }, item);
+        });
+        // 开始动画
+        function startAnim(signalData, data) {
+            var index = 0;
+            setInterval(function () {
+                if (index === 6) index = 0;
+                var item = signalData[index];
+                data.a({
+                    signalLevel: item.signalLevel,
+                    signalText: item.signalText,
+                    signalColor: item.signalColor
+                });
+                index++;
+            }, 1000);
+        }
+        // 加载数据
+        function loadData(dataModel, graphView) {
+            ht.Default.xhrLoad('displays/industry/signal.json', function (text) {
+                var json = ht.Default.parse(text);
+                if (json.title) document.title = json.title;
+                dataModel.deserialize(json);
+                graphView.fitContent(true);
+                var signalWithText = dataModel.getDataByTag('signalWithText');
+                var signalNoText = dataModel.getDataByTag('signalNoText');
+                startAnim(signalDataWithColor, signalWithText)
+                startAnim(signalDataWithColor, signalNoText)
+            });
+        }
+        // 初始化
+        function init() {
+            dataModel = new ht.DataModel();
+            graphView = new ht.graph.GraphView(dataModel);
+            graphView.addToDOM();
+            loadData(dataModel, graphView);
+        }
+    </script>
+</head>
+
+<body onload="init()">
+</body>
+
+</html>

@@ -1,0 +1,1 @@
+import e from"../picker";import t from"../panel/time-select";export default{mixins:[e],name:"ElTimeSelect",componentName:"ElTimeSelect",props:{type:{type:String,default:"time-select"}},beforeCreate(){this.panel=t}};

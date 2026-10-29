@@ -1,0 +1,1 @@
+"use strict";exports.__esModule=!0;var _locale=require("element-ui/lib/locale");exports.default={methods:{t:function(){for(var e=arguments.length,r=Array(e),t=0;t<e;t++)r[t]=arguments[t];return _locale.t.apply(this,r)}}};

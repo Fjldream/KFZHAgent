@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Preview Display</title>
+        <meta charset="UTF-8">
+        <link rel="shortcut icon" href="custom/images/favicon.ico?v=2" />
+        <style>
+            html, body {
+                padding: 0px;
+                margin: 0px;
+            }
+        </style>
+
+        <script src='custom/configs/htconfig.js'></script>
+        <script src='custom/libs/echarts.js'></script>
+        <script src='libs/core/ht.js'></script>
+        <script src='libs/plugin/ht-edgetype.js'></script>
+        <script src="libs/plugin/ht-obj.js"></script>
+        <script src='libs/core/ht-ui.js'></script>
+        <script src='libs/plugin/ht-form.js'></script>
+        <script src='libs/plugin/ht-vector.js'></script>
+        <script src='libs/plugin/ht-animation.js'></script>
+
+        <script>
+            var g3d;
+            var infos = [];
+            function init() {
+                graphView = new ht.graph.GraphView();
+                graphView.addToDOM();
+                graphView.setMovableFunc(function() {return false});
+                graphView.deserialize('previews/display.json', function(json, dm, gv, datas) {
+                    if(json.title) document.title = json.title;
+                    graphView.fitContent(false);
+                    graphView.mp(function(e) {
+                        if (e.property === 'g3d') {
+                            g3d = e.newValue;
+                        }
+                        else if (e.property === 'sceneLoad') {
+                            handleSceneLoad(g3d, gv);
+                        }
+                    });
+
+                });
+            }
+            var triggerBy2d = false,
+                triggerBy3d = false;
+            function handleSceneLoad (g3d, g2d) {
+
+                var dm2d = g2d.dm(),
+                    dm3d = g3d.dm();
+
+                // 收集信息，
+                dm2d.each(function(data){
+                    var name = data.a('ht.name');
+                    if (name) {
+                        var tag, property, index;
+                        if (name.indexOf('@') > 0) {
+                            var arr = name.split('@');
+                            tag = arr[0];
+                            property = arr[1];
+                        }
+                        else {
+                            if (name.indexOf('#') > 0) {
+                                var arr = name.split('#');
+                                property = arr[0];
+                                index = arr[1];
+
+                                var getter = ht.Default.getter(property);
+                                var val = g3d[getter]();
+                                data.a('ht.value', val[index] || '0');
+                            }
+                            else {
+                                property = name;
+                            }
+                        }
+                        infos.push({
+                            tag: tag,
+                            property: property,
+                            name: name,
+                            index: index,
+                            data: data
+                        });
+                    }
+                });
+
+                dm2d.md(function(e) {
+                    if (!triggerBy3d && e.property === 'a:ht.value') {
+                        triggerBy2d = true;
+                        var name = e.data.a('ht.name');
+                        var tag, property;
+                        if (name) {
+                            if (name.indexOf('@') > 0) {
+                                var arr = name.split('@');
+                                tag = arr[0];
+                                property = arr[1];
+                                if (tag) {
+                                    var targetNode = dm3d.getDataByTag(tag);
+                                    setValue(targetNode, property, e.newValue);
+                                }
+                            }
+                            else {
+                                if (name.indexOf('#') > 0) {
+                                    var arr = name.split('#'),
+                                        index = arr[1];
+                                    property = arr[0];
+                                    var getter = ht.Default.getter(property);
+                                    var setter = ht.Default.setter(property);
+                                    var old = g3d[getter]();
+                                    old[index] = parseFloat(e.newValue);
+                                    g3d[setter](old);
+                                }
+                                else {
+                                    // 目前仅对 center 和 eye 处理
+                                }
+                            }
+                        }
+                        triggerBy2d = false;
+                    }
+                });
+
+                g3d.mp(function(e) {
+                    if (triggerBy2d) {return};
+                    infos.forEach(function(info) {
+                        if (info.tag) return;
+                        triggerBy3d = true;
+                        if (e.property === info.property) {
+                            if (ht.Default.isArray(e.newValue)) {
+                                info.data.a('ht.value', e.newValue[info.index]);
+                            }
+                            else {
+                                info.data.a('ht.value', e.newValue);
+                            }
+                        }
+                        triggerBy3d = false;
+                    });
+                });
+            }
+
+            function setValue(data, property, value) {
+                var arr = property.split(':');
+                if (arr.length === 1 || arr[0] === 'p') {
+                    if (arr.length === 2) {
+                        property = arr[1];
+                    }
+                    var setter = ht.Default.setter(property);
+                    data[setter](value);
+                }
+                else if (arr[0] === 's') {
+                    data.s(arr[1], value);
+                }
+                else {
+                    data.a(arr[1], value);
+                }
+            }
+        </script>
+    </head>
+    <body onload='setTimeout(init, 300)'>
+    </body>
+</html>

@@ -1,0 +1,1 @@
+import{decode as s}from"../Image.js";import{getHeight as l,getWidth as u}from"../extent.js";export function createLoader(t){const c=t.load||s,e=t.imageExtent,n=new Image;return t.crossOrigin!==null&&(n.crossOrigin=t.crossOrigin),()=>c(n,t.url).then(r=>{const i=u(e)/r.width,o=l(e)/r.height;return{image:r,extent:e,resolution:i!==o?[i,o]:o,pixelRatio:1}})}

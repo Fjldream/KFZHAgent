@@ -1,0 +1,1 @@
+import r from"./Event.js";export const SnapEventType={SNAP:"snap"};export class SnapEvent extends r{constructor(t,e){super(t),this.vertex=e.vertex,this.vertexPixel=e.vertexPixel,this.feature=e.feature,this.segment=e.segment}}

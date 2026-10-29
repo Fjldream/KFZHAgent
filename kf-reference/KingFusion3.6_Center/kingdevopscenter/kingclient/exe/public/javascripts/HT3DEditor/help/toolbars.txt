@@ -1,0 +1,51 @@
+==============================
+HT 编辑器工具条项说明
+==============================
+
+# ===========================
+# mainToolbar:
+    menu
+    edit
+
+    Shape
+    Oval
+    RoundRect
+    Rect
+    Polygon
+    Triangle
+    Star
+    Arc
+    Text
+    Node
+    Group
+    SubGraph
+    Edge
+
+    shape
+    oval
+    roundRect
+    rect
+    polygon
+    triangle
+    star
+    arc
+    text
+    border
+    piechart
+    onedimensionalcolumnchart
+    columnchart
+    linechart
+
+# ===========================
+# rightToolbar:
+    undo
+    redo
+    rulers
+    grid
+    save
+    preview
+    reload
+    zoom
+    zoomToFit
+    toggleLeft
+    toggleRight

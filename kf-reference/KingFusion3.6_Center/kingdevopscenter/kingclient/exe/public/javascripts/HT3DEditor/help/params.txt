@@ -1,0 +1,19 @@
+==============================
+HT 编辑器参数说明
+==============================
+
+//////////////////////////////
+// 配置 window.hteditor_config
+HT 编辑器的预置参数信息在 hteditor.config 变量上，可通过在加载 client.js 之前配置 window.hteditor_config 变量键值对信息，覆盖默认的预置参数值，参见 instance/custom/configs/2d/config.js 示例
+
+//////////////////////////////
+// 打印编辑器参数值信息
+var names = ['valueTypes', 'connectActions', 'gradientIcons', 'gradients'];
+for (var name in hteditor.config) {
+  if (names.indexOf(name) < 0) {
+    console.log(name + ':, ' + JSON.stringify(hteditor.config[name], null, 2));
+  }
+}
+names.forEach(function(name) {
+	console.log(hteditor.config[name]);
+});

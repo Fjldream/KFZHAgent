@@ -1,0 +1,175 @@
+==============================
+# HT 编辑器属性值类型说明
+==============================
+
+=================
+# All Value Types
+
+// Object.keys(hteditor.config.valueTypes)
+
+    - 'Int': '整形'
+    - 'Number': '数字'
+    - 'PositiveNumber': '正数'
+    - 'String': '字符串'
+    - 'Multiline': '多行文本'
+    - 'Image': '图片'
+    - 'URL': '路径'
+    - 'Font': '字体'
+    - 'Boolean': '布尔'
+    - 'Color': '颜色'
+    - 'Function': '函数'
+    - 'Object': '对象'
+    - 'ObjectArray': '对象数组'
+    - 'StringArray': '字符串数组'
+    - 'NumberArray': '数字数组'
+    - 'ColorArray': '颜色数组'
+    - 'Opacity': '透明度'
+    - 'Percentage': '百分比'
+    - 'Gradient': '渐进'
+    - 'FillRule': '填充规则'
+    - 'ClipDirection': '裁切方向'
+    - 'CapStyle': '线帽样式'
+    - 'JoinStyle': '交汇样式'
+    - 'Align': '水平对齐'
+    - 'VAlign': '垂直对齐'
+    - 'Stretch': '拉伸'
+    - 'Direction': '方向'
+    - 'Angle': '角度'
+    - 'Orientation': '朝向'
+    - 'ColumnChart': '柱状图'
+
+参见 instance/custom/configs/config-valueTypes.js，通过扩展 int|number|color|enum|boolean|string|multiline|image|url|font|function|custom 基础类型，用户可扩展更多自定义值类型，以下对这几种类型进行说明：
+
+    - 整数类型: {
+        type: 'int', // 显示为文本输入框，设置值自动转成整数类型
+        min: 0, // 允许最小值
+        max: 1,  // 允许最大值,
+        step: 0.1, // 拖动属性名改动步进值
+        defaultValue: 0 // 值为空时显示的默认值
+    }
+    - 浮点数类型: {
+        type: 'number', // 显示为文本输入框，设置值自动转成浮点数类型
+        min: 0, // 允许最小值
+        max: 1,  // 允许最大值
+        defaultValue: 0 // 值为空时显示的默认值
+    }
+    - 颜色类型: {
+        type: 'color' // 显示为颜色输入框，可弹出颜色选择器，设置值为合法的颜色字符串格式
+    }
+    - 枚举类型: {
+        type: 'enum', // 显示为组合框，可下拉列表选择值
+        values: [], // 必填，下拉列表项对应的值，真正设置到模型上的值
+        labels: [], // 下拉列表项对应的显示文本
+        i18nLabels: [], // 编辑器自动将 i18nLabels 内容转成 labels 值
+        icons: [], // 下拉列表项对应的显示图标
+    }
+    - 布尔类型: {
+        type: 'boolean' // 显示为 checkBox 复选框，设置值为 true|false 的布尔类型
+    }
+    - 文本类型: {
+        type: 'string' // 显示为 input 文本输入框，设置值为字符串类型
+    }
+    - 多行文本类型: {
+        type: 'multiline', // 显示为文本输入框，点击按钮可弹出文本编辑对话框
+    }
+    - 图片类型: {
+        type: 'image' // 显示为图片路径输入框，以及图片预览按钮，点击按钮可定位，双击可打开
+    }
+    - 路径类型: {
+        type: 'url' // 显示为路径输入框，可拖拽文件资源进行路径值设置
+    }
+    - 字体类型：{
+        type: 'font' // 显示为字体输入框，点击按钮可弹出字体选择对话框
+    }
+    - 函数类型: {
+        type: 'function' // 显示为按钮，点击可弹出函数编辑对话框，设置值为字符串类型
+    }
+    - 自定义类型： {
+        type: 'custom' // 自定义界面类型属性
+        buildUI: function(inspector, items, displayName, getter, setter, extraInfo) {
+            // 可自定义属性界面元素，可返回空，也可返回行高和元素宽布局信息
+            return { rowHeight: 40, widths: [hteditor.config.indent, 0.1, 0.1] }
+        }
+    }
+
+自定义属性 hteditor_config.customProperties 的属性的 extraInfo，自定义组件属性的 extraInfo，以及矢量数据绑定属性的 extraInfo，这三处皆可定义 buildUI 函数实现，优先级高于 valueType 的定义的属性 UI 样式
+
+# extraInfo 说明
+
+## extraInfo.arguments 适用于 Function 类型，可以指定函数打开弹窗默认的函数参数如
+    {
+        arguments: [ 'data', 'view' ]
+    }
+    支持注释格式，以下格式会自动增加参数说明注释
+    {
+        arguments: [ 
+            ['ht.Data', 'data', '节点对象],
+            ['ht.graph.GraphView', 'view', '拓扑视图'],
+        ]
+    }
+
+## extraInfo.enum 适用用于字符串数值类型，将输入变成下拉选择，如
+    {
+        enum: {
+            values: [], // 必填，下拉列表项对应的值，真正设置到模型上的值
+            labels: [], // 下拉列表项对应的显示文本
+            i18nLabels: [], // 编辑器自动将 i18nLabels 内容转成 labels 值
+            icons: [], // 下拉列表项对应的显示图标
+        }
+    }
+
+## extraInfo.buildUI 用于完全重构该属性的控件，如果附加了这个属性，整个控件都需要自己用 FormPane api 去构建, 如下展示改造属性为一个输入框+按钮的形式
+    {
+        buildUI: function(inspector, items, displayName, getter, setter, extraInfo) {
+            inspector.addLabelInput(items, displayName, getter, setter)
+            items.push({
+                button: {
+                    label: '...',
+                    onClicked: function() {
+                        var dialog = editor.testDialog;
+                        if (!editor.testDialog) {
+                            dialog = editor.testDialog = new ht.widget.Dialog();
+                            var listView = new ht.widget.ListView();
+                            dialog.setConfig({
+                                title: '测试标题',
+                                content: listView,
+                                width: 500,
+                                height: 370,
+                                closable: false,
+                                buttons: [
+                                    {
+                                        label: '确定',
+                                        action: function() {
+                                            setter(editor.ld, 'value')
+                                            dialog.hide();
+                                        }
+                                    },
+                                    {
+                                        label: '取消',
+                                        action: function() {
+                                            dialog.hide();
+                                        }
+                                    }
+                                ]
+                            });
+                        }
+                        dialog.show();
+                    }
+                }
+            });
+        }
+    }
+
+## extraInfo.visible 适用于所有属性，控制属性是否可见，例
+    {
+        visible: false
+    }
+
+## extraInfo.onPropertyChanged 适用于所有属性，当属性变更时调用，可以做些额外处理, 如当 image 属性变更时，重新过滤所有属性的显示隐藏
+    {
+        onPropertyChanged: function(event, inspector) {
+            if (event.property === 'image') {
+                inspector.filterPropertiesLater();
+            }
+        }
+    }

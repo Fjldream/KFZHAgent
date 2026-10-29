@@ -1,0 +1,1 @@
+import t from"parchment";let e={scope:t.Scope.INLINE,whitelist:["serif","monospace"]},l=new t.Attributor.Class("font","ql-font",e);class r extends t.Attributor.Style{value(o){return super.value(o).replace(/["']/g,"")}}let n=new r("font","font-family",e);export{n as FontStyle,l as FontClass};

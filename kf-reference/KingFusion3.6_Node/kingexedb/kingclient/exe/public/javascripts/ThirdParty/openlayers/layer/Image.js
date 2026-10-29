@@ -1,0 +1,1 @@
+import r from"./BaseImage.js";import a from"../renderer/canvas/ImageLayer.js";class t extends r{constructor(e){super(e)}createRenderer(){return new a(this)}getData(e){return super.getData(e)}}export default t;

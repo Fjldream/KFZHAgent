@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Preview Display</title>
+        <meta charset="UTF-8">
+        <link rel="shortcut icon" href="custom/images/favicon.ico?v=2" />
+        <style>
+            html, body {
+                padding: 0px;
+                margin: 0px;
+            }
+        </style>
+
+        <script src='custom/configs/htconfig.js'></script>
+        <script src='custom/libs/echarts.js'></script>
+        <script src='libs/core/ht.js'></script>
+        <script src='libs/plugin/ht-flow.js'></script>
+
+        <script>
+            ht.Default.setImage('cargo', 'symbols/demo/化工流程/货物.json');
+
+            function init() {
+                dataModel = new ht.DataModel();
+                graphView = new ht.graph.GraphView(dataModel);
+                graphView.enableFlow(true);
+                graphView.setFlowInterval(43);
+                graphView.addToDOM();
+
+                ht.Default.xhrLoad('previews/display.json', function(text) {
+                    var json = ht.Default.parse(text);
+                    if(json.title) document.title = json.title;
+                    dataModel.deserialize(json);
+                    graphView.fitContent();
+                    initCargoFlow();
+                    initFlow();
+                });
+
+                window.addEventListener('resize', function() {
+                    graphView.fitContent();
+                });
+
+            }
+
+            function initCargoFlow() {
+                for (var i = 1; i <= 4; i++) {
+
+                    var lane1 = dataModel.getDataByTag('lane' + i);
+                    lane1.s("flow", true);
+                    lane1.s("flow.count", 1);
+                    lane1.s("flow.step", 2);
+                    lane1.s("flow.element.image", "cargo");
+                    lane1.s("flow.element.max", 40);
+                    lane1.s("flow.element.count", 1);
+                    lane1.s("flow.element.autorotate", 1);
+                    lane1.s("flow.element.shadow.visible", false);
+                    lane1.s("shape.background", null);
+                }
+            }
+            function initFlow() {
+                var flow1 = dataModel.getDataByTag('flow1'),
+                    flow2 = dataModel.getDataByTag('flow2'),
+                    offset = 2;
+
+                flow1.s('shape.dash.offset', flow1.s('shape.dash.offset') - offset);
+                flow2.s('shape.dash.offset', flow2.s('shape.dash.offset') - offset);
+                setTimeout(function() {
+                    this.initFlow();
+                }, 10);
+            }
+
+        </script>
+    </head>
+    <body onload='setTimeout(init, 300)'>
+    </body>
+</html>

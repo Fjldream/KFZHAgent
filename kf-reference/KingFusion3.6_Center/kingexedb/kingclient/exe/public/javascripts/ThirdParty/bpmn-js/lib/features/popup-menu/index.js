@@ -1,0 +1,1 @@
+import e from"diagram-js/lib/features/popup-menu";import r from"../replace";import o from"./ReplaceMenuProvider";export default{__depends__:[e,r],__init__:["replaceMenuProvider"],replaceMenuProvider:["type",o]};

@@ -1,0 +1,199 @@
+==============================
+HT 编辑器集成说明
+==============================
+
+//////////////////////////
+// 打开编辑器 URL 参数说明
+- 正常打开：http://localhost:5566/
+- 创建图纸：http://localhost:5566/?hteditor=newdisplay
+- 创建图标：http://localhost:5566/?hteditor=newsymbol
+- 创建组件：http://localhost:5566/?hteditor=newcomponent
+- 打开图纸：http://localhost:5566/?hteditor=displays/basic/ht.json
+- 打开图标：http://localhost:5566/?hteditor=symbols/可视化/basic/ht_01.json
+- 打开组件：http://localhost:5566/?hteditor=components/progressBar/progressBar.json
+
+//////////////////////////
+// client/index.html 说明
+1：定义 window.htconfig 变量，配置 HT SDK 库的默认参数设置，编辑器中一般通过 convertURL 进行设置，对请求 URL 追加时间戳，避免浏览器缓存导致编辑过程图片不更新问题。参见 https://hightopo.com/guide/guide/core/theme/ht-theme-guide.html
+<script src='custom/configs/htconfig.js'></script>
+
+2：定义 window.hteditor_config 变量，配置 HT 编辑器的默认参数设置，参见 params.txt
+<script src='custom/configs/config.js'></script>
+
+3：引入 HT SDK 核心库
+<script src='libs/ht.js'></script>
+
+4：引入 HT SDK 插件库
+<script src="libs/ht-cssanimation.js"></script>
+<script src='libs/ht-contextmenu.js'></script>
+<script src='libs/ht-dialog.js'></script>
+<script src='libs/ht-edgetype.js'></script>
+<script src='libs/ht-form.js'></script>
+<script src='libs/ht-overview.js'></script>
+<script src="libs/ht-autolayout.js"></script>
+<script src="libs/ht-obj.js"></script>
+<script src="libs/ht-historymanager.js"></script>
+
+5：引入 WebSocket 前后台通讯库
+<script src="/socket.io/socket.io.js"></script>
+
+6：引入更多编辑器子配置文件，避免太多配置内容都在一个 custom/configs/config.js 文件上不方便管理。对于更大型的代码规模，一般需要在外面构建代码工程，最终打包成一个 custom/configs/config.js 文件，对于这种情况也无需配置 hteditor_config.subConfigs
+var urls = hteditor_config.subConfigs || [];
+
+7：引入编辑器客户端核心库 client.js ❤️
+urls.push('libs/client.js');
+
+8：引入编辑器预置和自定义国际化内容
+urls = [
+    'locales/' + hteditor.config.locale + '.js',
+    'custom/locales/' + hteditor.config.locale + '.js'
+];
+
+9：编辑器做初始化工作
+urls.push(hteditor.init);
+
+10: 引入第三方库，例如 ECharts、Highcharts 等
+urls = urls.concat(hteditor.config.libs);
+
+11：引入 Monaco Editor 所需 JS 库
+urls.push('vs/loader.js');
+urls.push('vs/editor/editor.main.nls.js');
+urls.push('vs/editor/editor.main.js');
+
+12：加载所有 JS 库，之后构建 editor 实例
+ht.Default.loadJS(urls, function(){
+    window.editor = hteditor.createEditor();
+});
+
+//////////////////////////
+// 编辑器界面架构说明
+---------------------------------------------------------------------------------------------------------------
+| mainMenu| mainToolbar                                                                    rightToolbar       |
+|-------------------------------------------------------------------------------------------------------------|
+| leftTopTabView                    | mainTabView                     | rightTopBorderPane                    |
+|   - explorer                      |  - displayView                  |  - inspectorTool                      |
+|                                   |  - symbolView                   |  - inspectorPane                      |
+|   - displaysTab   displays.tree   |  - currentView                  |                                       |
+|    - displays   <      ---        |                                 |                      \                |
+|                   displays.list   |  DisplayView                    |                       \               |
+|                                   |   - graphView                   |                        \              |
+|   - symbolsTab    symbols.tree    |   - displayTree                 |                         \             |
+|    - symbols    <      ---        |                                 |                                       |
+|                   symbols.list    |  SymbolView                     | --------------------  rightSplitView  |
+|                                   |   - graphView                   | rightBottomTabView                    |
+|   - componentsTab components.tree |   - symbolList                  |  - listPaneTab          /             |
+|    - components <      ---        |                                 |   - listPane           /              |
+|                   components.list |                                 |    - list             /               |
+|                                   |                                 |  -layerTab           /                |
+|   - assetsTab     assets.tree     |                                 |   - layerPane                         |
+|    - assets     <      ---        |                                 |  - overviewTab                        |
+|                   assets.list     |                                 |   - overview                          |
+|                                   |                                 |  - dataViewTab                        |
+|                   \                            /                    |   - dataview                          |
+|                    \                          /                                           |                 |
+|                     \ ---  leftSplitView --- /                                            |                 |
+|                                                                                          /                  |
+|                                         \                                               /                   |
+|                                          \                                             /                    |
+|                                           \     -------   mainSplitView   -------     /                     |
+|                                                                                                             |
+---------------------------------------------------------------------------------------------------------------
+
+//////////////////////////
+// 常用变量说明
+editor
+editor.explorer     = editor.leftTopTabView.getCurrentTab().getView()
+editor.tab          = editor.mainTabView.getTabModel().getSelectionModel().getLastData()
+editor.url          = editor.tab.getTag()
+editor.displayTree  = editor.displayView.displayTree
+editor.symbolList   = editor.symbolView.symbolList
+editor.currentView  = editor.displayView || editor.symbolView
+editor.list         = editor.displayTree || editor.symbolList
+editor.gv           = editor.currentView.graphView
+editor.dm           = editor.gv.getDataModel()
+editor.sm           = editor.gv.getSelectionModel()
+editor.ld           = editor.gv.getSelectionModel().getLastData()
+editor.dir          = editor.explorer.tree.getSelectionModel().getLastData()
+editor.file         = editor.explorer.list.getSelectionModel().getLastData()
+
+
+//////////////////////////
+// http://localhost:5566/index-openbyjson.html
+示例展示了完全不用 HT 编辑器默认的文件管理系统的工作方式，用户可改造成数据库等第三方存储方案。
+
+editor.mainSplitView.setLeftView(editor.mainTabView);
+将 mainTabView 占满默认 leftSplitView 所在区域，相当于把 leftTopTabView 的文件管理组件部分隐藏
+
+editor.openByJSON(fileType, url, name, json, path)
+- fileType: 'display'|'symbol'|'component'
+- url: 无限制，常用于表示文件唯一标示，例如全路径文件名
+- name: 显示在 Tab 页上的名称，一般为文件名
+- json: 图纸、图标或组件的 JSON 数据信息
+- path: 路径信息，可为空不处理
+
+通过添加监听器拦截图纸、图标和组件的保存事件，该例子将数据存于内容
+editor.addEventListener(function(event){
+    var params = event.params;
+    if (event.type === 'displayViewSaving') {
+        var data = listView.dm().getDataByTag(params.url);
+        data.a('content', params.displayView.content);
+        data.setIcon(hteditor.snapshot(params.displayView.graphView));
+        params.preventDefault = true;
+        params.displayView.dirty = false;
+    }
+    if (event.type === 'symbolViewSaving') {
+        var data = listView.dm().getDataByTag(params.url);
+        data.a('content', params.symbolView.content);
+        data.setIcon(hteditor.snapshot(params.symbolView.graphView));
+        params.preventDefault = true;
+        params.symbolView.dirty = false;
+    }
+    if (event.type === 'componentViewSaving') {
+        var data = listView.dm().getDataByTag(params.url);
+        data.a('content', params.componentView.content);
+        data.setIcon(hteditor.snapshot(params.componentView.graphView));
+        params.preventDefault = true;
+        params.componentView.hide();
+    }
+});
+
+//////////////////////////
+// http://localhost:5566/index-embeded.html
+将五个完整编辑器嵌入到页面部分演示，分别在两个 div 中嵌入两个编辑器，将两个编辑器直接布局在指定区域，在一个 iframe 中嵌入一个编辑器，同时演示从外界 HTML 组件 Drag and Drop 到图纸创建图元的流程。
+
+1：摆放在绝对位置 left: 50px, right: 100px, width: 500px, height: 400px 的区域，并打开 displays/telecom/topology.json 图纸
+editor1 = hteditor.createEditor({
+    container: [50, 100, 500, 400],
+    open: 'displays/telecom/topology.json'
+});
+
+2：摆放在父容器 id 为 'editor2Div' 的 div 容器上，并打开 symbols/可视化/basic/ht.json 图标
+editor2 = hteditor.createEditor({
+    container: 'editor2Div',
+    open: 'symbols/可视化/basic/ht_01.json'
+});
+
+3: 摆放在父容器 id 为 'editor3Div' 的 div 容器上，并创建一个新图纸
+editor3 = hteditor.createEditor({
+    container: document.getElementById('editor3Div'),
+    open: 'newdisplay'
+});
+
+4：手工布局编辑器摆放位置，参数 container 设为 null 则只创建编辑器不做任何 DOM 操作，控制权完全交给用户在 onEditorCreated 时处理
+editor4 = hteditor.createEditor({
+    container: null,
+    onEditorCreated: function(editor) {
+    	// 添加到 body 上
+        document.body.appendChild(editor.mainPane.getView());
+        // 设置摆放区域
+        editor.mainPane.layout(600, 550, 500, 400);
+        // 强制立刻进行更新，避免 fitContent 时得不到位置信息
+        editor.mainPane.validate();
+        // 创建一个新图标
+        editor.newSymbolView();
+    }
+});
+
+5：嵌入 iframe 创建编辑器，并打开 displays/可视化/lighting.json 图纸
+<iframe src="index.html?hteditor=displays/可视化/lighting.json" style="margin:50px;position:absolute;left:50px;top:1000px;width:1000px;height:500px"></iframe>
+

@@ -1,0 +1,62 @@
+==============================
+HT 编辑器文件系统说明
+==============================
+
+//////////////////////////
+// 目录文件结构说明
+- help: 帮助文档文件
+    - customProperties.txt: 编辑器自定义属性页说明
+    - events.txt: 编辑器派发事件说明
+    - expandedTitles.txt: 编辑器属性标题组展开状态
+    - files.txt: 编辑器文件系统说明
+    - i18n.txt: 编辑器国际化说明
+    - images.txt: 编辑器图片说明
+    - inspectorFilters.txt: 编辑器属性页过滤器说明
+    - integration.txt: 编辑器集成说明
+    - menus.txt: 编辑器菜单项说明
+    - params.txt: 编辑器参数说明
+    - inspectors.txt: 编辑器属性页说明
+    - readme.txt: 编辑器入门介绍
+    - renderHTML.txt: 编辑器渲染 HTML 元素说明
+    - service.txt: 服务端通讯协议
+    - toolbars.txt: 编辑器工具条项说明
+    - valueTypes.txt: 编辑器属性值类型说明
+    - explorer.txt: 编辑器目录文件管理类说明
+    - json.txt 编辑器多种 JSON 格式文件说明
+- client: 运行客户端的所有脚本和资源
+    - libs: 编辑器依赖的 HT 图形组件库
+        - client.js: 2d 编辑器客户端脚本代码
+        - client3d.js: 3d 编辑器客户端脚本代码
+    - locales: 编辑器预置的多国语言目录
+    - vs: 代码编辑使用的 Monaco Editor 库
+    - index.html: 2d 编辑器客户端启动页面
+    - index3d.html: 3d 编辑器客户端启动页面
+- server: 启动服务器的所有脚本代码
+    - node_modules: 服务端所用到的第三方 Node.js 模块脚本
+    - config.ini: 服务端配置文件，默认配置了 Default 实例
+    - package.json: 服务端所用到的第三方 Node.js 模块信息
+    - server.js: HT 编辑器服务端启动脚本
+- instance: 实例目录
+    - custom: 客户端自定义扩展目录
+        - configs: 客户端配置目录
+        - images: 客户端图片目录
+        - libs: 客户端扩展类库，或第三方类库
+        - locales: 客户端自定义多国语言目录
+        - previews: 客户端预览页面
+    - storage: 存储目录
+        - displays: 拓扑图纸（JSON 文件 + 缩略图）
+        - symbols: 矢量图标（JSON 文件 + 缩略图）
+        - components: 自定义组件（JSON 文件 + 缩略图）
+        - assets: 图片资源（PNG、JGP、JPEG 等常规栅格图片，及 OBJ/MTL 等 3D 模型资源）
+        - models: 3D 模型（JSON 文件 + 缩略图），包含 OBJ 和 自定义模型
+        - scenes: 3D 场景（JSON 文件 + 缩略图）
+        - previews: 图纸和图标的预览临时数据（JSON 文件）
+
+//////////////////////////
+// instance/custom/previews 目录说明
+实例工程的预览目录，会被 NodeJS 服务端映射到 HTTP 根目录下，例如 instance/custom/previews/display.html 页面，通过 http://localhost:port/display.html 即可访问到，预览目录也可理解为运行时或单元测试代码，用户可添加新的测试页面。
+
+
+
+
+

@@ -1,0 +1,1 @@
+window.htconfig={Default:{toolTipDelay:100,toolTipContinual:!0,convertURL:function(t){var i="";i&&t&&!/^data:image/.test(t)&&!/^http/.test(t)&&!/^https/.test(t)&&(t=i+"/"+t),t+=(t.indexOf("?")>=0?"&":"?")+"ts="+Date.now();var o=window.location.href.match("sid=([0-9a-z-]*)");return o&&(window.sid=o[1]),window.sid&&(t+="&sid="+window.sid),t}}};

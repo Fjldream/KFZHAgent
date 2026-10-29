@@ -1,0 +1,1 @@
+"use strict";exports.__esModule=!0,exports.default=function(t){for(var r=1,a=arguments.length;r<a;r++){var e=arguments[r]||{};for(var n in e)if(e.hasOwnProperty(n)){var f=e[n];f!==void 0&&(t[n]=f)}}return t};

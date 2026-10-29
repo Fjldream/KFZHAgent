@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Tank</title>
+    <meta charset="UTF-8">
+    <link rel="shortcut icon" href="custom/images/favicon.ico?v=2" />
+    <style>
+        html, body {
+            padding: 0px;
+            margin: 0px;
+        }
+    </style>
+
+    <script src='custom/configs/htconfig.js'></script>
+    <script src='libs/core/ht.js'></script>
+
+    <script>
+        function init() {
+            dataModel = new ht.DataModel();
+            graphView = new ht.graph.GraphView(dataModel);
+            graphView.addToDOM();
+            // graphView.setPannable(false)
+            graphView.setRectSelectable(false)
+            // graphView.handleScroll = function() {}
+            graphView.setMovableFunc(function() {return false})
+
+            ht.Default.xhrLoad('previews/display.json', function(text) {
+                var json = ht.Default.parse(text);
+                if (json.title) document.title = json.title;
+                dataModel.deserialize(json);
+                graphView.fitContent(true);
+
+                //抓手杆长度
+                gripRodLength = 285;
+                //抓手纵向移动
+                gripY = {
+                    'gripRod': 225
+                };
+                //抓手横向移动
+                gripX = {
+                    'gripRod': -571,
+                    'gripMotor':-557,
+                    'box': -571.13668
+                };
+                //货物纵向移动
+                boxY = {
+                    'box': 36.1608,
+                    'box2': -65.40793
+                };
+                //货物横向移动
+                boxX = {
+                    'box': -571.13668,
+                    'box2': -957.02733
+                };
+                //升降机
+                plate = {
+                    'plate': 73.86102
+                };
+                animation1(gripY,gripX,boxY,boxX,plate);
+                animation6();
+                animation7();
+                animation8();
+            });
+        }
+        //动作1到4关联
+        function animation1(gripY,gripX,boxY,boxX,plate) {
+            var speed = 2;
+            ht.Default.startAnim({
+                duration: 5500, // 动画周期毫秒数，默认采用`ht.Default.animDuration`
+                action: function(v, t){
+                    if (speed > 0) {
+                        gripY['gripRod'] += speed;
+                    }
+                    else if (speed < 0) {
+                        gripY['gripRod'] += speed;
+                        boxY['box']+=speed;
+                    }
+                    if (gripY['gripRod'] > 310) {
+                        speed = -2;
+                    }
+                    else if (gripY['gripRod'] < 60) {
+                        speed = 0;
+                    }
+                    var gripRod = dataModel.getDataByTag('gripRod');
+                    gripRod.setY(gripY['gripRod'] - 325);
+                    gripRod.setHeight(gripY['gripRod'])
+                    var box = dataModel.getDataByTag('box');
+                    box.setY(boxY['box']);
+
+                },
+                finishFunc: function(){
+                    var gripRod = dataModel.getDataByTag('gripRod');
+                    gripY['gripRod'] = gripRod.getHeight();
+                    var box = dataModel.getDataByTag('box');
+                    boxY['box'] = box.getY();
+                    animation2(gripY,gripX,boxY,boxX,plate);
+                    animation3(gripY,gripX,boxY,boxX,plate);
+                }
+            });
+        }
+        function animation2(gripY,gripX,boxY,boxX,plate) {
+            var speed1 = 2;
+            var speed2 = 1;
+            ht.Default.startAnim({
+                duration: 5500,
+                action: function (v, t) {
+                    for (var tags in gripX) {
+                        gripX[tags]+=speed1;
+                        if (gripX['gripRod'] > -350) {
+                            speed1 = 0;
+                        }
+                        if (speed1 === 0) {
+                            gripY['gripRod']+=speed2;
+                            if (gripY['gripRod'] > 150) {
+                                speed2 = -1;
+                            }
+                            else if (gripY['gripRod'] < 60) {
+                                speed2 = 0;
+                            }
+                            var gripRod = dataModel.getDataByTag('gripRod');
+                            gripRod.setY(gripY['gripRod'] - 325);
+                            gripRod.setHeight(gripY['gripRod'])
+                            if (speed2 > 0) {
+                                boxY['box']+=speed2;
+                                var box = dataModel.getDataByTag('box');
+                                box.setY(boxY['box']);
+                            }
+                        }
+                        var tagX = dataModel.getDataByTag(tags);
+                        tagX.setX(gripX[tags]);
+                    }
+                },
+                finishFunc: function () {
+                    var gripRod = dataModel.getDataByTag('gripRod');
+                    gripX['gripRod'] = gripRod.getX();
+                    var gripMotor = dataModel.getDataByTag('gripMotor');
+                    gripX['gripMotor'] = gripMotor.getX();
+                    delete gripX['box'];
+                    animation4(gripY,gripX,boxY,boxX,plate)
+                }
+            })
+        }
+        function animation3(gripY,gripX,boxY,boxX,plate) {
+            var speed = 2;
+            ht.Default.startAnim({
+                duration: 15000,
+                action :function (v, t) {
+                    var plates = dataModel.getDataByTag('plate');
+                    var box2 = dataModel.getDataByTag('box2');
+                    plate['plate'] -= speed;
+                    if (speed > 0) {
+                        boxY['box2'] -= speed;
+                    }
+                    if (plate['plate'] < -187) {
+                        speed = 0;
+                    }
+                    if (box2.getY() < -340) {
+                        speed = -2
+                    }
+                    if (speed < 0) {
+                        if (plates.getY() > 75) {
+                            speed = 0;
+                        }
+                    }
+                    plates.setY(plate['plate']);
+                    box2.setY(boxY['box2']);
+                }
+            })
+        }
+        function animation4(gripY,gripX,boxY,boxX,plate) {
+            var speed1 = 2;
+            var speed2 = 2;
+            ht.Default.startAnim({
+                duration: 4500,
+                action: function (v, t) {
+                    for (var tag in gripX) {
+                        gripX[tag] -= speed1;
+                        if (gripX[tag] < -428) {
+                            speed1 = 0;
+                        }
+                        if (speed1 === 0) {
+                            gripY['gripRod'] += speed2;
+                            if (gripY['gripRod'] > 80) {
+                                speed2 = -2;
+                            }
+                            else if (gripY['gripRod'] < 60) {
+                                speed2 = 0
+                            }
+                            if (speed2 < 0) {
+                                boxY['box2'] += speed2;
+                            }
+                        }
+                        var tags = dataModel.getDataByTag(tag);
+                        tags.setX(gripX[tag]);
+                        var gripRod = dataModel.getDataByTag('gripRod');
+                        gripRod.setHeight(gripY['gripRod']);
+                        gripRod.setY(gripY['gripRod'] - 325);
+                        var box2 = dataModel.getDataByTag('box2');
+                        box2.setY(boxY['box2']);
+                    }
+                },
+                finishFunc: function () {
+                    var jsonX = {};
+                    var jsonY = {};
+                    var gripRod = dataModel.getDataByTag('gripRod');
+                    jsonX['gripRod'] = gripRod.getX();
+                    jsonY['gripRod'] = gripRod.getHeight();
+                    var box2 = dataModel.getDataByTag('box2');
+                    jsonX['box2'] = box2.getX();
+                    jsonY['box2'] = box2.getY();
+                    var gripMotor = dataModel.getDataByTag('gripMotor');
+                    jsonX['gripMotor'] = gripMotor.getX();
+                    animation5(jsonX,jsonY);
+                }
+            })
+        }
+        function animation5(jsonX,jsonY) {
+            var speed1 = 3;
+            var speed2 = 2;
+            ht.Default.startAnim({
+                duration: 10000,
+                action: function (v, t) {
+                    for (var tag in jsonX) {
+                        jsonX[tag] += speed1;
+                        if (jsonX['gripRod'] > 286.5) {
+                            speed1 = 0;
+                        }
+                        if (speed1 === 0) {
+                            jsonY['gripRod'] += speed2;
+                            if (jsonY['gripRod'] > 250) {
+                                speed2 = -2;
+                            }
+                            else if (jsonY['gripRod'] < 60) {
+                                speed2 = 0;
+                            }
+                            if (speed2 > 0) {
+                                jsonY['box2']+=speed2;
+                            }
+                            var gripRod = dataModel.getDataByTag('gripRod');
+                            gripRod.setHeight(jsonY['gripRod']);
+                            gripRod.setY(jsonY['gripRod'] - 325);
+                            var box2 = dataModel.getDataByTag('box2');
+                            box2.setY(jsonY['box2']);
+                        }
+                        if (speed2 != 0) {
+                            var tags = dataModel.getDataByTag(tag);
+                            tags.setX(jsonX[tag]);
+                        }
+                    }
+                },
+                finishFunc: function () {
+                    var jsonX = {
+                        'gripRod': -570.56456,
+                        'gripMotor': -557,
+                        'box': -571.13668,
+                        'box2': -957.02733,
+                        'plate': -442.28464
+                    }
+                    var jsonY = {
+                        'gripRod': -125,
+                        'gripMotor': -308.25492,
+                        'box': 36.1608,
+                        'box2': -65.40793,
+                        'plate': 73.86102
+                    }
+                    for (var tag in jsonX) {
+                        var tags = dataModel.getDataByTag(tag);
+                        tags.setX(jsonX[tag]);
+                    }
+                    for (var tag2 in jsonY) {
+                        var tags2 = dataModel.getDataByTag(tag2);
+                        tags2.setY(jsonY[tag2]);
+                    }
+                    var gripRodHeight = dataModel.getDataByTag('gripRod');
+                    gripRodHeight.setHeight(200);
+
+                    gripRodLength2 = 285;
+                    gripY2 = {
+                        'gripRod': 225
+                    };
+                    gripX2 = {
+                        'gripRod': -571,
+                        'gripMotor':-557,
+                        'box': -571.13668
+                    };
+                    boxY2 = {
+                        'box': 36.1608,
+                        'box2': -65.40793
+                    };
+                    boxX2 = {
+                        'box': -571.13668,
+                        'box2': -957.02733
+                    };
+                    plate2 = {
+                        'plate': 73.86102
+                    }
+                    animation1(gripY2,gripX2,boxY2,boxX2,plate2);
+                }
+            })
+        }
+
+        //拖车送料
+        function animation6() {
+            var jsonX = {
+                'car': 17,
+                'box3': 63
+            }
+            var jsonY = {
+                'car': 170,
+                'box3':177
+            }
+            var speed1 = 0.5;
+            var speed2 = 0.35;
+            ht.Default.startAnim({
+                duration: 6000,
+                action: function () {
+                    for (var tag in jsonX) {
+                        jsonX[tag]+=speed1;
+                        if (jsonX['car'] > 50) {
+                            speed1 = 0;
+                        }
+                        if (speed1 === 0) {
+                            jsonY['box3']-=speed2
+                            if (jsonY['box3'] < 82) {
+                                speed2 = 0;
+                            }
+                        }
+                        var car = dataModel.getDataByTag('car');
+                        car.setX(jsonX['car']);
+                        var box3 = dataModel.getDataByTag('box3');
+                        box3.setX(jsonX['box3']);
+                        box3.setY(jsonY['box3']);
+                    }
+                },
+                finishFunc: function () {
+                    var jsonX2 = {
+                        'car': 17,
+                        'box3': 63
+                    }
+                    var jsonY2 = {
+                        'car': 170,
+                        'box3':177
+                    }
+                    for (var tag in jsonX2) {
+                        var tags = dataModel.getDataByTag(tag)
+                        tags.setX(jsonX2[tag]);
+                        tags.setY(jsonY2[tag]);
+                    }
+                    animation6();
+                }
+            })
+        }
+
+        //一堆石头落下动画
+        function animation7() {
+            var stoneJsonX = {};
+            var stoneJsonX2 = {};
+            var stoneJsonY = {};
+            var stoneJsonY2 = {};
+            var stoneSpeed1 = {};
+            var stoneSpeed2 = {};
+            var name = '';
+            var speed1 = '';
+            var deg = Math.PI/180*24.3;
+            var rotationJson = {};
+            for (var i = 1; i <= 10; i++) {
+                speed1 = (Math.random()*(6-2+1)+2).toFixed(2);
+                name = 'stone' + i;
+                var stoneTag = dataModel.getDataByTag(name);
+                stoneJsonX[name] = stoneTag.getX();
+                stoneJsonX2[name] = stoneTag.getX();
+                stoneJsonY[name] = stoneTag.getY();
+                stoneJsonY2[name] = stoneTag.getY();
+                stoneSpeed1[name] = speed1;
+                stoneSpeed2[name] = 2;
+                rotationJson[name] = 0;
+            }
+            ht.Default.startAnim({
+                duration:5000,
+                action: function () {
+                    for (var tags in stoneJsonY) {
+                        stoneJsonY[tags]+=parseInt(stoneSpeed1[tags]);
+                        if (stoneJsonY[tags] >= (stoneJsonX[tags]-297)*Math.sin(deg)+stoneJsonY2[tags]+(208-stoneJsonY2[tags])) {
+                            stoneSpeed1[tags] = 0;
+                        }
+                        if (stoneSpeed1[tags] === 0) {
+                            stoneJsonX[tags]+=stoneSpeed2[tags];
+                            stoneJsonY[tags]+=stoneSpeed2[tags]*Math.tan(deg);
+                            rotationJson[tags]+=Math.PI/180*10
+                        }
+                        if (stoneJsonX[tags] > 434) {
+                            stoneJsonX[tags]+=stoneSpeed2[tags]*0.01;
+                            stoneJsonY[tags]+=(stoneSpeed2[tags]*2)*Math.tan(deg);
+                        }
+                        if (stoneJsonY[tags] > 305) {
+                            stoneSpeed1[tags] = 0;
+                            stoneSpeed2[tags] = 0;
+                        }
+                        var stone = dataModel.getDataByTag(tags)
+                        stone.setY(stoneJsonY[tags]);
+                        stone.setX(stoneJsonX[tags]);
+                        stone.setRotation(rotationJson[tags]);
+                    }
+                },
+                finishFunc: function () {
+                    for (var tags in stoneJsonX2) {
+                        var stone = dataModel.getDataByTag(tags);
+                        stone.setX(stoneJsonX2[tags]);
+                        stone.setY(stoneJsonY2[tags]);
+                    }
+                    animation7();
+                }
+            })
+        }
+
+        //循环水流动
+        function animation8() {
+            var lineJson = {};
+            var name = '';
+            for (var i = 1; i <= 9; i++ ) {
+                if (i != 8) {
+                    name = 'line'+i;
+                    lineJson[name] = 0;
+                }
+            }
+            ht.Default.startAnim({
+                duration: 5000,
+                action: function () {
+                    for (var tags in lineJson) {
+                        if (tags.split('e')[1] % 2 == 0) {
+                            lineJson[tags] -= 2;
+                        } else {
+                            lineJson[tags] += 2;
+                        }
+                        var lines = dataModel.getDataByTag(tags);
+                        lines.setStyle('shape.dash.offset',lineJson[tags]);
+                    }
+                },
+                finishFunc: function () {
+                    animation8();
+                }
+            })
+        }
+    </script>
+</head>
+<body onload='setTimeout(init, 300)'>
+</body>
+</html>
