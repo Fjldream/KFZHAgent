@@ -1,0 +1,111 @@
+==============================
+# HT 编辑器自定义属性页说明
+==============================
+
+通过配置 hteditor_config.customProperties 可增加自定义属性，分为以下四种属性类型
+
+    - customProperties.display: 增加图纸属性
+    - customProperties.data: 增加图元属性
+    - customProperties.symbol: 增加图标属性
+    - customProperties.comp: 增加组件属性
+
+window.hteditor_config.customProperties = {
+    display: [
+        {
+            property: 'description' // 必填，属性名
+            valueType: 'String', // 值类型，参见 valueTypes.txt
+            name: 'Description', // 属性界面上的显示名称，可用 i18n 方式
+            defaultValue: true, // 默认值，用于模型没有初始值时，属性界面显示的默认值
+            accessType: 'a', // 'a' 代表 attr 属性；'p' 代表 get/set 属性。未指明时默认为 'a'
+            editable: false, // 默认值为 true，设置为 false 为不可编辑状态
+            extraInfo: {
+                visible: function(inspector) { return true; }, // 默认为空代表可见，可自定义规则动态显示隐藏属性
+                onPropertyChanged: function(event, inspector) { } // 默认为空，可根据属性变化更新属性页
+                buildUI: function(inspector, items, displayName, getter, setter, extraInfo) {
+                    // 可自定义属性界面元素，可返回空，也可返回行高和元素宽布局信息
+                    return { rowHeight: 40, widths: [hteditor.config.indent, 0.1, 0.1] }
+                }
+            }
+        }
+    ],
+    data: [
+        {
+            property: 'description' // 必填，属性名
+            valueType: 'String', // 值类型，参见 valueTypes.txt
+            name: 'Description', // 属性界面上的显示名称，可用 i18n 方式
+            defaultValue: true, // 默认值，用于模型没有初始值时，属性界面显示的默认值
+            accessType: 'a', // 'a' 代表 attr 属性；'s' 代表 style 属性；'p' 代表 get/set 属性。未指明时默认为 'a'
+            bindable: true // 默认值为 false，代表是否追加数据绑定按钮
+            editable: false, // 默认值为 true，设置为 false 为不可编辑状态
+            extraInfo: {
+                visible: function(inspector) { // 默认为空代表可见，可自定义规则动态显示隐藏属性
+                    return true;
+                }
+                onPropertyChanged: function(event, inspector) { // 默认为空，可根据属性变化更新属性页
+                    if (event.property === 'image') {
+                        inspector.filterPropertiesLater();
+                    }
+                }
+                buildUI: function(inspector, items, displayName, getter, setter, extraInfo) {
+                    // 可自定义属性界面元素，可返回空，也可返回行高和元素宽布局信息
+                    return { rowHeight: 40, widths: [hteditor.config.indent, 0.1, 0.1] }
+                }
+            }
+        }
+    ],
+    symbol: [
+        {
+            property: 'description' // 必填，属性名
+            valueType: 'String', // 值类型，参见 valueTypes.txt
+            name: 'Description', // 属性界面上的显示名称，可用 i18n 方式
+            defaultValue: true, // 默认值，用于模型没有初始值时，属性界面显示的默认值
+            bindable: true // 默认值为 false，代表是否追加数据绑定按钮
+            editable: false, // 默认值为 true，设置为 false 为不可编辑状态
+            extraInfo: {
+                visible: function(inspector) { return true; }, // 默认为空代表可见，可自定义规则动态显示隐藏属性
+                onPropertyChanged: function(event, inspector) { } // 默认为空，可根据属性变化更新属性页
+                buildUI: function(inspector, items, displayName, getter, setter, extraInfo) {
+                    // 可自定义属性界面元素，可返回空，也可返回行高和元素宽布局信息
+                    return { rowHeight: 40, widths: [hteditor.config.indent, 0.1, 0.1] }
+                }
+            }
+        }
+    ],
+    comp: [
+        {
+            property: 'description' // 必填，属性名
+            valueType: 'String', // 值类型，参见 valueTypes.txt
+            name: 'Description', // 属性界面上的显示名称，可用 i18n 方式
+            defaultValue: true, // 默认值，用于模型没有初始值时，属性界面显示的默认值
+            bindable: true // 默认值为 false，代表是否追加数据绑定按钮
+            editable: false, // 默认值为 true，设置为 false 为不可编辑状态
+            extraInfo: {
+                visible: function(inspector) { return true; }, // 默认为空代表可见，可自定义规则动态显示隐藏属性
+                onPropertyChanged: function(event, inspector) { } // 默认为空，可根据属性变化更新属性页
+                buildUI: function(inspector, items, displayName, getter, setter, extraInfo) {
+                    // 可自定义属性界面元素，可返回空，也可返回行高和元素宽布局信息
+                    return { rowHeight: 40, widths: [hteditor.config.indent, 0.1, 0.1] }
+                }
+            }
+        }
+    ]
+};
+
+除了通过 hteditor_config.customProperties 的配置可实现自定义扩展属性的显示、编辑和存储，但这些属性都会被归类在 TitleCustom 组，TitleCustom 默认摆放在属性页的第一个属性组，属性的显示和编辑方式只能根据目前预定义的 valueType 类型，编辑器自动生成相应的 key/value 的属性显示编辑方式。
+
+对于需要更灵活显示和编辑方式的需求，用户可以通过监听 titleCreating 或 TitleCreated 事件，对相应的 inspector 增加 GUI 显示和编辑自定义属性，参见 instance/custom/configs/2d/config-onTitleCreating.js 和 config-onTitleCreated.js。
+
+config-onTitleCreating.js 中使用到了 inspector.addCustomProperty(info) 函数，参数 info 结构如下：
+    info = {
+        property: 'description', // 必填，属性名
+        name: 'Description', // 属性界面上的显示名称，可用 i18n 方式
+        valueType: 'Multiline', // 必填，值类型，参见 valueTypes.txt
+        defaultValue: '', // 默认值，用于模型没有初始值时，属性界面显示的默认值
+        accessType: 'a', // 'a'|'s'|'p'，只对 inspector.type 为 'display' 的图纸 和 'data' 的图元有效
+        bindable: true  // 默认值为 false，代表是否追加数据绑定按钮
+    }
+
+最后需要注意的，图纸（display）和图元（data）的数据模型默认就会对 attr 上的所有属性进行存取，但图标（symbol）和组件（comp）默认只会存取预定义的属性，因此对于在 handleTitleCreating 示例中自定义 GUI 显示和编辑图标（symbol）和组件（comp）属性的 ，依然需要通过 hteditor_config.customProperties 配置相应的 symbol 和 comp 属性，才能实现存储功能，这种情况只需要配置 property 属性，不需要配置 valueType 等其他属性。
+
+
+

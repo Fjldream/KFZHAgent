@@ -1,0 +1,126 @@
+==============================
+# HT 编辑器派发事件说明
+
+有三种事件监听方式，以下为 titleCreating 为例：
+
+1、通过添加 on*** 的方式：
+hteditor_config.onTitleCreating = function(editor, params) {
+
+};
+
+2：通过配置 handleEvent 处理函数
+hteditor_config.handleEvent = function(editor, type, params) {
+    if (type === 'titleCreating') {
+
+    }
+};
+
+3: 通过对 editor 添加事件
+editor.addEventListener(function(event){
+    if (event.type === 'titleCreating') {
+
+    }
+});
+
+4: 通过创建 editor 对象时传入参数的 on*** 函数回调
+hteditor.createEditor({
+    onTitleCreating: function(editor, params) {
+
+    }
+});
+
+==============================
+# 事件参数 params 内容
+
+    error: { message }
+
+    editorCreated: {}
+    mainMenuCreated: {}
+    mainToolbarCreated: {}
+    rightToolbarCreated: {}
+    inspectorCreated: { inspector }
+
+    tabCreated: { tab }
+    tabClosed: { tab }
+    tabUpdated: { tab, oldTab }
+    tabPrompting: { tab, action(?|save|notSave|cancel) }
+
+    explorerUpdated: { explorer }
+    propertiesUpdated: { inspector }
+    inspectorUpdated: { inspector, oldInspector }
+
+    dataBindingAdding: { dataBinding, preventDefault(?) }
+
+    displayViewCreated: { displayView, json(?) }
+    displayViewOpening: { displayView, url }
+    displayViewOpened: { displayView, url, json(?) }
+    displayViewSaving: { displayView, url, preventDefault(?) }
+    displayViewSaved: { displayView(?), url }
+    displayViewReloading: { displayView, url, preventDefault(?) }
+    displayViewReloaded: { displayView, url, json }
+    displayViewClosing: { displayView, url, preventDefault(?) }
+    displayViewClosed: { displayView, url }
+    displayViewOutsideDropping: { displayView, event, preventDefault(?) }
+    displayViewPreviewing: { displayView, url, preventDefault(?) }
+    displayViewPreview: { displayView, url }
+    displayViewNewNameInputing: { displayView, name(?) }
+    displayViewCommitted: { displayView, url, json }
+    displayViewDataPropertyChanged: { displayView, event }
+    displayViewDataModelPropertyChanged: { displayView, event }
+    displayViewDataModelChanged: { displayView, event }
+
+    symbolViewCreated: { symbolView, json(?) }
+    symbolViewOpening: { symbolView, url }
+    symbolViewOpened: { symbolView, url, json(?) }
+    symbolViewSaving: { symbolView, url, preventDefault(?) }
+    symbolViewSaved: { symbolView, url }
+    symbolViewReloading: { symbolView, url, preventDefault(?) }
+    symbolViewReloaded: { symbolView, url, json }
+    symbolViewClosing: { symbolView, url, preventDefault(?) }
+    symbolViewClosed: { symbolView, url }
+    symbolViewOutsideDropping: { symbolView, event, preventDefault(?) }
+    symbolViewPreviewing: { symbolView, url, preventDefault(?) }
+    symbolViewPreview: { symbolView, url }
+    symbolViewNewNameInputing: { symbolView, name(?) }
+    symbolViewCommitted: { symbolView, url, json }
+    symbolViewDataPropertyChanged: { symbolView, event }
+    symbolViewDataModelPropertyChanged: { symbolView, event }
+    symbolViewDataModelChanged: { symbolView, event }
+
+    componentViewCreated: { componentView }
+    componentViewOpened: { componentView, url, json }
+    componentViewSaving: { componentView, url, json, preventDefault(?) }
+    componentViewSaved: { componentView, url, json }
+
+    fileDeleting: { data, url, preventDefault(?) }
+    fileDeleted: { data, url }
+    fileRenaming: { data, url, preventDefault(?) }
+    fileRenamed: { data, old, new, fileType }
+    fileMoving: { data, url, parent, preventDefault(?) }
+
+    explorerCrossDrop: { event, url, preventDefault(?) }
+
+    titleCreating: { title, oldTitle, inspector }
+    titleCreated: { title, oldTitle, inspector }
+    inspectorInitializing: { inspector: this }
+    inspectorInitialized: { inspector: this }
+
+    dataCreated: { data, displayView }
+    compCreated: { data, symbolView }
+
+    dataInited: { type, data, displayView }
+    compInited: { type, data, symbolView }
+
+    copy: { datas, info }
+    paste: { datas, info }
+
+    copyFile: { url }
+    pasteFile: { url }
+
+    undo: {}
+    redo: {}
+
+    keydown: { event, preventDefault(?) }
+    explorerCrossDrop:  { url, event, preventDefault(?) }
+    doubleClickBackgroundToUpLevel: { target, preventDefault(?) }
+

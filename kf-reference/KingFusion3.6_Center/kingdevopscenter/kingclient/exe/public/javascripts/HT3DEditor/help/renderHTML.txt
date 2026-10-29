@@ -1,0 +1,63 @@
+==============================
+# HT 编辑器渲染 HTML 元素说明
+==============================
+
+通过定义 HT 矢量 JSON 的 renderHTML 函数属性，可实现在 GraphView 拓扑图上，嵌入任意第三方 HTML DOM 元素。HT 的图纸是 Canvas 实现，renderHTML 的 DOM 一定在 Canvas 之上，使用 renderHTML 的 DOM 与常规 Canvas 上绘制的图元不可能有层级控制可能性。
+
+/**
+ * renderHTML 在图元属性变化后会被调用到，注意这个函数里面不要再改变 data 属性，更不要在这里起动画逻辑，改变数据要在运行时的外面代码进行
+ * @param  {[ht.Node]} data [图元对象]
+ * @param  {[ht.graph.GraphView]} gv [当前拓扑图组件]
+ * @param  {[object]} cache [缓存对象，用于存在 html 元素和相关信息，避免重复构建]
+ * @return {[HTMLElement]} [要显示的 HTML 元素，或 HT 组件对象]
+ */
+renderHTML: function(data, gv, cache) {
+    return html;
+}
+
+返回的 HTML 元素上有以下约定：
+1、layoutHTML 布局函数，每次 Node 图元被调用绘制刷新时调用，一般根据 Node 的位置信息摆放 HTML 元素
+2、onHTMLRemoved 删除回调，当 HTML 元素要从拓扑图上删除时调用，一般用于释放销毁资源等处理工作
+3、onHTMLAdded 添加回调，当 HTML 元素被添加到拓扑图上时调用，一般用于必须在父容器添加到界面才能进行的初始化工作
+4、autoAdjustIndex 默认为 true，当 dom 元素数量、层级发生变化时会重新 append 以保证层级跟 dataModel 一致，可以改为 false 避免 iframe 的自动刷新问题
+5、updateAppendMatrix 是否考虑父级的 transform 情况，影响交互
+6、beforeCanvas，插入的 dom 是否会在图纸的 canvas 之前，默认是 false，即在渲染的元素在图纸之上，可设置为 true 变更为在图纸之下
+
+/**
+ * 方便 HTML 元素根据图元信息布局的函数
+ * @param  {[ht.Node]} data [参考图元对象]
+ * @param  {[HTMLElement]} html [要布局的 HTML 元素，可传入 HT 组件对象]
+ * @param  {[boolean]} bound [默认为 false，HTML 元素完全重叠甚至被旋转图元，为 true 则根据图元矩形区域摆放]
+ *
+ * 注意 bound 为默认值 false 时，图元是通过 CSS 的 transform 设置，实现和图元对象的完全重合，
+ * 这种情况下拓扑图缩放时，HTML 元素会出现不清晰的问题。如果采用 true 的布局方式，则图元不设置
+ * transform 参数，而通过设置 top/left/width/height 进行布局，这种方式 HTML 元素会保持清晰，
+ * 但不具备旋转功能的效果
+ */
+graphView.layoutHTML(data, html, bound)
+
+
+// 显示 OBJ 模型的三维场景示例：
+function(data, gv, cache) {
+    // 判断以前是否缓存过
+    if (!cache.htmlView) {
+        // 构建 Graph3dView 对象
+        var g3d = new ht.graph3d.Graph3dView();
+        // 缓存 HTML 元素，避免重复构建
+        cache.htmlView = g3d;
+        // 构建并缓存 Node 对象，方便数据更新调用
+        cache.node = new ht.Node();
+        // 场景要显示的 OBJ 模型对应的 Node 图元
+        g3d.dm().add(cache.node);
+
+        // 定义 layoutHTML 函数
+        cache.htmlView.layoutHTML = function() {
+            // 用于将 3D 场景保持和图元完全重叠
+            gv.layoutHTML(data, cache.htmlView, false);
+        };
+    }
+    // 根据图元上属性更新 3D 场景模型内容
+    cache.node.s('shape3d', data.a('modelURL'));
+    // 返回要显示的 HTML 元素或 HT 组件对象，此例为 g3d
+    return cache.htmlView;
+}

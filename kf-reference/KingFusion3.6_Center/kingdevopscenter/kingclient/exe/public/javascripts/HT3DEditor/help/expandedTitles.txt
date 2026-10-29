@@ -1,0 +1,39 @@
+==============================
+# HT 编辑器属性标题组展开状态
+==============================
+
+=================
+# All Titles
+
+hteditor_config.expandedTitles = {
+    TitleBasic: true,
+    TitleCustom: true,
+    TitleShadow: false,
+    TitleBackground: true,
+    TitleForeground: false,
+    TitleBorder: true,
+    TitleText: true,
+    TitleImage: true,
+    TitleDash: false
+    TitleArc: true,
+    TitleLabel: false,
+    TitleNote: false,
+    TitleSelect: false,
+    TitleEdgeBasic: true,
+    TitleEdgeDash: false,
+    TitleEdgeEndpoint: false,
+    TitleShapeForeground: false,
+    TitleShapeBackground: true,
+    TitleShapeBorder: true,
+    TitleShapeDash: false,
+    TitleGroupBasic: true,
+    TitleGroupTitle: true,
+    TitleGroupBorder: false,
+    TitleGridsGuides: false,
+    TitleEditingPoint: true,
+    TitleLayout: true,
+    TitleDataBinding: true,
+    TitleComponent: true,
+    TitleChart: true,
+    TitleControl: false
+}

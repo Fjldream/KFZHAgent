@@ -1,0 +1,114 @@
+==============================
+# HT 编辑器菜单项说明
+==============================
+
+# ===========================
+# mainMenu:
+    - file
+     - newDisplayView
+     - newSymbolView
+     - newComponent
+
+# ===========================
+editor.mainTabView.menu
+    - closeTab
+    - closeOtherTabs
+    - closeTabsToTheRight
+
+# ===========================
+editor.displayView.graphView.menu
+    - copy
+    - paste
+    - bringToFront
+    - bringForward
+    - sendBackward
+    - sendToBack
+    - block
+    - unblock
+
+# ===========================
+editor.symbolView.graphView.menu
+    - copy
+    - paste
+    - bringToFront
+    - bringForward
+    - sendBackward
+    - sendToBack
+
+# ===========================
+# editor.displays.tree.menu / editor.symbols.tree.menu / editor.components.tree.menu / editor.assets.tree.menu
+    - locateFile
+    - newFolder
+    - (newDisplayView|newSymbolView|newComponent)
+    - rename
+    - delete
+
+# ===========================
+# editor.displays.list.menu
+    - locateFile
+    - newFolder
+    - newDisplayView
+    - copy
+    - paste
+    - rename
+    - delete
+    - export
+
+# ===========================
+# editor.symbols.list.menu
+    - locateFile
+    - newFolder
+    - newSymbolView
+    - copy
+    - paste
+    - rename
+    - delete
+    - export
+
+# ===========================
+# editor.components.list.menu
+    - locateFile
+    - newFolder
+    - newComponent
+    - copy
+    - paste
+    - rename
+    - delete
+    - export
+
+# ===========================
+# editor.assets.list.menu
+    - locateFile
+    - newFolder
+    - copy
+    - paste
+    - rename
+    - delete
+    - convertToSymbol
+    - convertToDisplay
+    - batchConvertSVG
+    - splitCubeMap
+
+# ===========================
+# editor.displayTree.menu
+    - folder
+    - unfolder
+    - copy
+    - paste
+    - delete
+    - bringToFront
+    - bringForward
+    - sendBackward
+    - sendToBack
+    - expandAll
+    - collapseAll
+
+# ===========================
+# editor.symbolList.menu
+    - copy
+    - paste
+    - delete
+    - bringToFront
+    - bringForward
+    - sendBackward
+    - sendToBack
