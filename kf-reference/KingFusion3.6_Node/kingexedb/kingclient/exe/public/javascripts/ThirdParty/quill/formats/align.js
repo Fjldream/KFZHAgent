@@ -1,0 +1,1 @@
+import t from"parchment";let i={scope:t.Scope.BLOCK,whitelist:["right","center","justify"]},e=new t.Attributor.Attribute("align","align",i),l=new t.Attributor.Class("align","ql-align",i),n=new t.Attributor.Style("align","text-align",i);export{e as AlignAttribute,l as AlignClass,n as AlignStyle};

@@ -1,0 +1,1 @@
+import a from"../blots/inline";class t extends a{static create(){return super.create()}static formats(){return!0}optimize(e){super.optimize(e),this.domNode.tagName!==this.statics.tagName[0]&&this.replaceWith(this.statics.blotName)}}t.blotName="bold",t.tagName=["STRONG","B"];export default t;

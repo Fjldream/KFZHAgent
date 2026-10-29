@@ -1,0 +1,1 @@
+function p(a,n){return n.replace(/([-A-y])/g,",$1").split(",").filter((t=>t!=="")).map((t=>{var r;const e=(r=t.match(/(\d+\.?\d*)/g))==null?void 0:r[0],o=parseFloat(e)*a;return t.replace(e,o.toString())})).join(" ")}export{p as s};

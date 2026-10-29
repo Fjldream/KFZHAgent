@@ -1,0 +1,1 @@
+import r from"../blots/inline";class t extends r{static create(e){return e==="super"?document.createElement("sup"):e==="sub"?document.createElement("sub"):super.create(e)}static formats(e){if(e.tagName==="SUB")return"sub";if(e.tagName==="SUP")return"super"}}t.blotName="script",t.tagName=["SUB","SUP"];export default t;

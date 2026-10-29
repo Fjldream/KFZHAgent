@@ -1,0 +1,1 @@
+let l=["error","warn","log","info"],f="warn";function i(e,...n){l.indexOf(e)<=l.indexOf(f)&&console[e](...n)}function o(e){return l.reduce(function(n,r){return n[r]=i.bind(console,r,e),n},{})}i.level=o.level=function(e){f=e};export default o;

@@ -1,0 +1,1 @@
+import t from"parchment";let i={scope:t.Scope.BLOCK,whitelist:["rtl"]},e=new t.Attributor.Attribute("direction","dir",i),r=new t.Attributor.Class("direction","ql-direction",i),o=new t.Attributor.Style("direction","direction",i);export{e as DirectionAttribute,r as DirectionClass,o as DirectionStyle};
