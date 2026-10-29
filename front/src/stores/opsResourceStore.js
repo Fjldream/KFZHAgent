@@ -84,6 +84,36 @@ export const useOpsResourceStore = defineStore(
         }
       }
     }
+    // modified by jinlong.feng at 0901 冗余功能开发
+    /**
+     * 更新指定节点下的 APP 状态。
+     *
+     * 冗余页面需要同时展示主、从节点状态，因此不能依赖当前节点选择。
+     * 此方法只更新传入 nodeId 对应的节点，不改变现有 currentNodeId 和原有更新流程。
+     *
+     * @param {string} nodeId 节点唯一标识
+     * @param {Array<Object>} data 节点代理返回的 APP 状态列表
+     */
+    function updateNodeAppListStatus(nodeId, data) {
+      const oldNodeInfo = nodeResourceData.value.find((item) => item.nodeId === nodeId);
+      if (!oldNodeInfo || !Array.isArray(oldNodeInfo.apps) || !Array.isArray(data)) return;
+
+      for (const newAppInfo of data) {
+        const appIndex = oldNodeInfo.apps.findIndex((item) => item.appId === newAppInfo.appId);
+        if (appIndex === -1) continue;
+        const perf = newAppInfo.perfData || {};
+        oldNodeInfo.apps.splice(appIndex, 1, {
+          ...oldNodeInfo.apps[appIndex],
+          ...newAppInfo,
+          aliveTime: perf.aliveTime ?? newAppInfo.aliveTime,
+          cpuUseRate: perf.cpuUseRate ?? newAppInfo.cpuUseRate,
+          memUseRate: perf.memUseRate ?? newAppInfo.memUseRate,
+          requestsLastMinute: perf.requestsLastMinute ?? newAppInfo.requestsLastMinute,
+          startTime: perf.startTime ?? newAppInfo.startTime,
+        });
+      }
+    }
+    // end
     //设置当前节点信息
     function setCurrentNodeId(nodeId) {
       currentNodeId.value = nodeId;
@@ -122,6 +152,9 @@ export const useOpsResourceStore = defineStore(
       setBalancerResourceData,
       updateNodeListStatus,
       updateAppListStatus,
+      // modified by jinlong.feng at 0901 冗余功能开发
+      updateNodeAppListStatus,
+      // end
       setCurrentNodeId,
       setCurrentNodesRes,
     };

@@ -1,0 +1,1 @@
+const router=require("express").Router(),{midware_response:midware_response}=require("../../core/middlewares");router.use("/",midware_response);const routerLoader=require("./route_loader");routerLoader.registerRoutes(router),module.exports=router;

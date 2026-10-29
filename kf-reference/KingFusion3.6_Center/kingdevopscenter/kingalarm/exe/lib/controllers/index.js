@@ -1,0 +1,1 @@
+const controllers={};controllers.project=require("./controller_project"),controllers.projectGroup=require("./controller_projectGroup"),controllers.alarm=require("./controller_alarm"),module.exports=controllers;

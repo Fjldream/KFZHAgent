@@ -1,0 +1,1 @@
+var path=require("path");module.exports.toUnixPath=function(t){t=t.replace(/\\/g,"/");for(var o=/\/\//;t.match(o);)t=t.replace(o,"/");return t},module.exports.toAbsolute=function(t,o){return path.isAbsolute(t)||(t=path.join(o,"/",t)),t};

@@ -1,0 +1,1 @@
+const path=require("path");global.__DIR=__dirname,global.ROOT_PATH=path.resolve(__DIR,"../../../"),global.LOG_PATH=path.resolve(global.ROOT_PATH,"./sdb/logs/kinglogcollector"),global.CONFIG=require(`${__DIR}/config`),global.responseMsg=require(__DIR+"/config/zh_CN.json");const Application=require(__DIR+"/app.js");let app=new Application;app.start();

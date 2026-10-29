@@ -1,0 +1,1 @@
+const authorizationChecker=require(`${global.commonDir}/authorization-utils`);module.exports=(o,e,r)=>{if(authorizationChecker.getRequestPermission())r();else return e.sendErr(-1,"\u6388\u6743\u4FE1\u606F\u5F02\u5E38")};

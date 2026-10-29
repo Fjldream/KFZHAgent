@@ -1,0 +1,1 @@
+function KMScriptSystem(){KMScriptBase.call(this)}kmUlits.extend(KMScriptSystem,KMScriptBase),KMScriptSystem.getInstance=function(){return KMScriptSystem.instance===void 0&&(KMScriptSystem.instance=new KMScriptSystem),KMScriptSystem.instance};

@@ -1,0 +1,1 @@
+const controllers={};controllers.alarm=require("./controller_alarm"),controllers.app=require("./controller_app"),controllers.customAlarm=require("./controller_customAlarm"),module.exports=controllers;

@@ -1,0 +1,1 @@
+"use strict";const enums={COMMONCONFIG:{ACCESS:"public",PATH:`${__dir}/../../../config/common.json`},OPSCENTERCONFIG:{ACCESS:"public",PATH:`${__dir}/../../../config/opscenterconfig.json`}};module.exports=enums;

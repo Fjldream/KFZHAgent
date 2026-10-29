@@ -1,0 +1,113 @@
+form label.error{width: 200px;margin-left: 10px; color: Red;}
+
+.newBuildField{
+	margin-left: 100px;
+	font-family:宋体,verdana,arial,微软雅黑,'Microsoft Yahei', 'Hiragino Sans GB', tahoma,serif;
+	font-weight:300;
+	font-size: 20px;
+}
+.copyProjectField{
+	margin-left: 100px;
+	font-family:宋体,verdana,arial,微软雅黑,'Microsoft Yahei', 'Hiragino Sans GB', tahoma,serif;
+	font-weight:300;
+	font-size: 20px;
+}
+#newProject{
+	font-size: 16px;
+	font-family:SimHei;
+	color:#fff;
+	display:inline-block;
+	padding-left: 17px;
+	background: url(../themes/icons/projectEdit/new.png) no-repeat left center;
+}
+#newProject:hover{
+	cursor:pointer;
+	color:#ea6912;
+	background: url(../themes/icons/projectEdit/addon.png) no-repeat left center;
+}
+#importProject{
+	font-size: 16px;
+	font-family:SimHei;
+	color:#fff;
+	display:inline-block;
+	margin-left: 20px;
+	padding-left: 17px;
+	background: url(../themes/icons/projectEdit/import.png) no-repeat left center;
+}
+#importProject:hover{
+	cursor:pointer;
+	color:#ea6912;
+	background: url(../themes/icons/projectEdit/imported.png) no-repeat left center;
+}
+#exportProject{
+	font-size: 16px;
+	font-family:SimHei;
+	color:#fff;
+	display:inline-block;
+	margin-left: 20px;
+	padding-left: 17px;
+	background: url(../themes/icons/projectEdit/export.png) no-repeat left center;
+}
+#exportProject:hover{
+	cursor:pointer;
+	color:#ea6912;
+	background: url(../themes/icons/projectEdit/exported.png) no-repeat left center;
+}
+#copyProjectButton{
+	font-size: 16px;
+	font-family:SimHei;
+	color:#fff;
+	display:inline-block;
+	margin-left: 20px;
+	padding-left: 17px;
+	background: url(../themes/icons/projectEdit/copy.png) no-repeat left center;
+}
+#copyProjectButton:hover{
+	cursor:pointer;
+	color:#ea6912;
+	background: url(../themes/icons/projectEdit/copyed.png) no-repeat left center;
+}
+#deleteProject{
+	font-size: 16px;
+	font-family:SimHei;
+	color:rgb(37, 34, 34);
+	display:inline-block;
+	margin-left: 20px;
+	padding-left: 17px;
+	background: url(../themes/icons/projectEdit/delete.png) no-repeat left center;
+}
+/* #deleteProject:hover{
+	cursor:pointer;
+	color:#ea6912;
+	background: url(../themes/icons/projectEdit/deleted.png) no-repeat left center;
+} */
+#encryptProject{
+	font-size: 16px;
+	font-family:SimHei;
+	color:#fff;
+	display:inline-block;
+	margin-left: 20px;
+	padding-left: 17px;
+	background: url(../themes/icons/projectEdit/encrypt.png) no-repeat left center;
+}
+#encryptProject:hover{
+	cursor:pointer;
+	color:#ea6912;
+	background: url(../themesthemes/icons/projectEdit/encrypted.png) no-repeat left center;
+}
+ /*数据网格表头样式*/
+/*.datagrid-header-row td{
+	background-color: #fff;
+	color:#2578b5;
+	text-align: center;
+	font-family: SimHei;
+	font-size: 15px;
+	border-width: 0px;
+}*/
+/* .textbox.searchbox{
+	border-radius: 0 0 0 0;
+} */
+#serviceTable input{
+	width:200px;
+	height:30px;
+}

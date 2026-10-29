@@ -1,0 +1,1 @@
+const enum_entity={};module.exports={enum_entity:enum_entity};

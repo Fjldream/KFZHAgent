@@ -1,0 +1,1 @@
+const{component}=require("../../../controllers");module.exports={get:{"/getNodeStatus":component.getNodeStatus},post:{"/serviceDiscovery":component.serviceDiscovery,"/httprequest":component.httpRequest}};

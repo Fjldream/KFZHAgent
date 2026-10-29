@@ -1,0 +1,1 @@
+const{errorMsg,successMsg,errorSystem}=require("../../lib/config/state");module.exports={getSuccessMsg(s){return successMsg[s]?successMsg[s]:successMsg.OPTION_SUCCESS},getErrorMsg(s){const e=s.message?s.message:"serverError",r=errorSystem[e]?errorSystem[e]:"SERVER_ERROR";return errorMsg[r]},getErrorRes(s){return errorMsg[s]?errorMsg[s]:errorMsg.SERVER_ERROR}};

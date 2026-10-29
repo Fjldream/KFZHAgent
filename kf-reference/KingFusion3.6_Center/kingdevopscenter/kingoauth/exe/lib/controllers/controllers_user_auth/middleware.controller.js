@@ -1,0 +1,1 @@
+const oauthserver=require(__DIR+"/lib/services/services_user_auth/oauthClient");class MiddlewaresController{middleAuth(){return oauthserver.getOauth().authorise()}errorHandle(){return oauthserver.getOauth().errorHandler()}}module.exports=new MiddlewaresController;

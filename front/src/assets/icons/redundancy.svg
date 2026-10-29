@@ -1,0 +1,31 @@
+<!-- modified by jinlong.feng at 0901 冗余功能开发 -->
+<symbol
+  fill="none"
+  viewBox="0 0 20 20"
+  class="design-iconfont"
+  id="icon-redundancy"
+>
+  <rect x="1.5" y="3" width="6" height="14" rx="1.25" fill="#23489A" />
+  <rect x="2.75" y="4.5" width="3.5" height="3" rx="0.5" fill="#EDF3FF" />
+  <rect x="2.75" y="9" width="3.5" height="3" rx="0.5" fill="#EDF3FF" />
+  <circle cx="5.45" cy="14.5" r="0.55" fill="#8EACEA" />
+  <rect x="12.5" y="3" width="6" height="14" rx="1.25" fill="#23489A" />
+  <rect x="13.75" y="4.5" width="3.5" height="3" rx="0.5" fill="#EDF3FF" />
+  <rect x="13.75" y="9" width="3.5" height="3" rx="0.5" fill="#EDF3FF" />
+  <circle cx="15.45" cy="14.5" r="0.55" fill="#8EACEA" />
+  <path
+    d="M8.25 7.25H11.6M10.45 6.1L11.6 7.25L10.45 8.4"
+    stroke="#23489A"
+    stroke-width="1.25"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M11.75 12.75H8.4M9.55 11.6L8.4 12.75L9.55 13.9"
+    stroke="#23489A"
+    stroke-width="1.25"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</symbol>
+<!-- end -->

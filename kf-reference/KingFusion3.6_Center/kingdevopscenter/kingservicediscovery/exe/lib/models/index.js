@@ -1,0 +1,1 @@
+const models={};models.serviceMng=require("./service_mng"),module.exports=models,process.on("SIGINT",function(e,s){logger.log("info","serviceDiscovery is closing casused by ",e,s),models.serviceMng.saveData(),process.exit()});

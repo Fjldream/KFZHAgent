@@ -1,0 +1,1 @@
+const router=require("express").Router(),api_v1_router=require("./v1/api_v1_router"),middleware=require(__dir+"/core/middlewares");router.use("/",middleware.resExtend),router.use("/api/v1",api_v1_router),module.exports=router;

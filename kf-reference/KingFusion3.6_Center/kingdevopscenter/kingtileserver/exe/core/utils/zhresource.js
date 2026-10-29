@@ -1,0 +1,1 @@
+function ZHResource(){this.REDISERR="\u6570\u636E\u7C7B\u578B\u4E0D\u6B63\u786E",this.NOMETHOD="\u4E0D\u5B58\u5728\u8BE5\u65B9\u6CD5",this.NOREDISCONNECT="\u6CA1\u6709\u5EFA\u7ACB\u8BE5redis\u8FDE\u63A5"}module.exports=new ZHResource;

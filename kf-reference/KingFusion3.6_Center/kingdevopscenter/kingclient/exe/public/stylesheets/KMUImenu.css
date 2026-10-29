@@ -1,0 +1,405 @@
+.km-clearfi+x:before,
+.km-clearfix:after {
+    display: table;
+    content: "";
+}
+
+.km-clearfix:after {
+    clear: both;
+}
+
+.km-menu {
+    height: 44.5px;
+    width: 100%;
+    min-width: 500px;
+    position: fixed;
+    background: rgba(83, 138, 193, 1);
+    font-size: 14px;
+    min-width: 800px;
+    /* add by ying.wu for bug 8822 客户端工程页面工程中对自定义图表进行详细配置后图层异常 */
+    z-index: 9999;
+}
+
+.km-menu a {
+    color: white;
+    text-decoration: none;
+    /* padding-left : 12px;
+    padding-right : 12px; */
+}
+
+.select-divcls .el-select {
+    height: 100%;
+    width: 100%;
+}
+
+.select-divcls .el-select input {
+    height: 100%;
+    width: 100%;
+}
+
+.select-divcls .el-input__icon {
+    line-height: 100%;
+}
+
+.upload-demo .el-upload {
+    width: 100%;
+    height: 80%;
+}
+
+.upload-demo .el-upload-dragger {
+    width: 100%;
+    height: 100%;
+}
+
+.upload-demo .el-upload__tip {
+    width: 100%;
+    height: 10%;
+}
+
+.upload-demo .el-upload-list {
+    width: 100%;
+    height: 10%;
+    overflow: auto;
+}
+
+.km-menu-level1 a {
+    color: white;
+    text-decoration: none;
+    padding-left: 30px;
+    padding-right: 12px;
+}
+
+.km-menu ul {
+    margin: 0;
+    padding: 0;
+    box-shadow: 1px 1px 3px rgba(133, 140, 151, 1);
+    background: rgba(83, 138, 193, 1);
+}
+
+.km-menu li {
+    list-style: none;
+    float: left;
+    width: 5.5%;
+    overflow: visible;
+    cursor: pointer;
+
+}
+
+.km-menu ul.km-menu-level0 {
+    overflow: visible;
+    /* margin-left: 35%; */
+    min-width: 30%;
+}
+
+ul.km-menu-level1,
+ul.km-menu-level2,
+ul.km-menu-level3 {
+    width: 90px;
+    display: none;
+    z-index: 4;
+}
+
+ul.km-menu-level2,
+ul.km-menu-level3 {
+    margin: -28px 0 0 222px;
+}
+
+ul.km-menu-level0>li {
+    height: 45px;
+    line-height: 45px;
+    text-align: center;
+    background-color: rgba(83, 138, 193, 1);
+    border-bottom: none;
+    z-index: 9999;
+}
+
+ul.km-menu-level1>li,
+ul.km-menu-level2>li,
+ul.km-menu-level3>li {
+    width: 222px;
+    height: 35px;
+    line-height: 35px;
+    background-color: rgba(83, 138, 193, 1);
+}
+
+ul.km-menu-level0>li:hover {
+    background-color: rgba(133, 140, 151, 1);
+}
+
+ul.km-menu-level1>li:hover,
+ul.km-menu-level2>li:hover,
+ul.km-menu-level3>li:hover {
+    background-color: rgba(133, 140, 151, 1);
+}
+
+.km-menu-border {
+    border-top-color: #c2cbd3;
+    border-top-width: 1px;
+    border-top-style: solid;
+}
+
+.km-menu-rightarrow {
+    background: url(../images/images/arrow_grey_right_state_white_16px.png) no-repeat 170px center;
+}
+
+.km-title {
+    color: white;
+    text-decoration: none;
+    float: left;
+    padding: 8px;
+}
+
+.km-chs {
+    float: right;
+    width: 50px;
+    padding-top: 8px;
+    cursor: pointer;
+    /* margin-right : 60px; */
+}
+
+.km-ens {
+    float: right;
+    width: 40px;
+    padding-top: 8px;
+    cursor: pointer;
+    /* margin-right : 30px; */
+}
+
+.km-username {
+    float: right;
+    width: 40px;
+    padding-top: 8px;
+    margin-right: 10px;
+}
+
+.km-exit {
+    float: right;
+    width: 40px;
+    padding-top: 8px;
+    margin-right: 30px;
+}
+
+.km-showgrid {
+    background: url(../images/images/check_24.png) no-repeat 8px center;
+}
+
+/* easyUI样式修改 */
+.accordion .accordion-header {
+    background-color: rgba(224, 236, 255, 1);
+}
+
+.accordion .accordion-header-selected .panel-title {
+    color: rgba(14, 45, 95, 1);
+}
+
+.panel-title {
+    color: rgba(14, 45, 95, 1);
+}
+
+.km-menu-closeSpan {
+    float: right;
+    color: rgba(255, 255, 255, 1);
+    font-size: 14px;
+    margin-right: 20px;
+    height: 45px;
+    line-height: 45px;
+}
+
+.km-menu-themeSelect {
+    float: right;
+    margin-top: 14px;
+    margin-right: 2%;
+    border: none;
+}
+
+.km-menu-themetit {
+    float: right;
+    color: rgba(255, 255, 255, 1);
+    margin-top: 13px;
+    margin-right: 10px;
+}
+
+.km-menu-closeSpan:hover {
+    cursor: pointer;
+    text-decoration: underline;
+}
+
+.km-editorName {
+    float: left;
+    margin-left: 15px;
+    margin-right: 8px;
+    width: 240px;
+    height: 44px;
+    display: inline-block;
+    /* background: url(static/images/images/help-icon.png) no-repeat center; */
+}
+
+/*  add by xiaoqiang.cui at 2020/06/23 bug:2597 图形模型库中，模型的右键图标重复 */
+.icon-paste {
+    background: url('../images/easyui-icon/page_paste.png') no-repeat center center;
+}
+
+.icon-rename {
+    background: url('../images/easyui-icon/custom-edit.png') no-repeat center center;
+}
+
+.icon-copy {
+    background: url('../images/easyui-icon/page_copy.png') no-repeat center center;
+}
+
+.icon-move {
+    background: url('../images/easyui-icon/move.png') no-repeat center center;
+}
+
+.icon-export {
+    background: url('../images/easyui-icon/derive.png') no-repeat center center;
+}
+
+.icon-import {
+    background: url('../images/easyui-icon/custom-import.png') no-repeat center center;
+}
+
+/* end */
+/* .eletabs-cls .el-tabs__nav {
+    z-index: unset;
+} */
+.eletabs-cls .el-tabs__content {
+    height: 80%;
+    padding: 0 !important;
+}
+
+.eletabs-cls .el-tabs {
+    height: 100%;
+}
+/* add by ying.wu for bug9625 elementUI组件图层显示问题 */
+.eletabs-cls .el-tabs__nav{
+    z-index: 0 !important;
+}
+.el-tabs__nav-wrap::after{
+    z-index: 0 !important;
+}
+
+.eletabs-cls .el-tab-pane {
+    width: 100%;
+    height: 100%;
+}
+
+.inputnumbercls .el-input-number {
+    width: 100%;
+    height: 99%;
+}
+
+.inputnumbercls .el-input-number__decrease,
+.inputnumbercls .el-input-number__increase {
+    /*modify by ying.wu for bug 9158 ElementUI二期计数器边框为展示全 */
+    height: 95%;
+}
+
+.tagcls .button-new-tag {
+    margin-left: 10px;
+    height: 32px;
+    line-height: 30px;
+    padding-top: 0;
+    padding-bottom: 0;
+}
+
+.tagcls .input-new-tag {
+    width: 90px;
+    height: 32px;
+    margin-left: 10px;
+    vertical-align: bottom;
+}
+
+.eletabs-cls .el-tabs__header {
+    margin: 0;
+}
+
+.el-select .el-input__inner {
+    height: 100% !important;
+}
+
+.tarnsfer-cls .el-input {
+    height: unset;
+}
+
+.tarnsfer-cls,
+.tarnsfer-cls .el-transfer-panel {
+    height: 100%;
+}
+
+/* add by ying.wu for bug9625 elementUI组件图层显示问题 */
+.el-transfer-panel .el-checkbox__inner{
+    z-index: 0 !important;
+}
+
+/* 版本设置样式部分 */
+.historyversion-body {
+    height: 100%;
+    overflow: auto;
+}
+.version-poupo section {
+    height: 100%;
+}
+.historyversion-body>ul {
+    margin: 0;
+    padding: 0;
+    margin-top: 15px;
+    font-size: 15px;
+    margin-bottom: 15px;
+}
+.historyversion-body ul li {
+    list-style: none;
+    height: 90px;
+    line-height: 30px;
+    float: left;
+    width: 100%;
+}
+
+.historyversion-body ul li .historyversion-list {
+    float: left;
+    margin-left: 10px;
+}
+
+.historyversion-body ul li .list-title {
+    font-size: 15px;
+    font-weight: bolder;
+}
+
+.historyversion-body ul li .list-time {
+    color: rgb(157, 157, 157);
+    padding-left: 30px;
+}
+
+.historyversion-body ul li .list-author {
+    list-style: disc;
+    padding-left: 30px;
+    font-weight: bold;
+}
+
+.historyversion-body ul li .history-button-div {
+    float: right;
+    padding-left: 10px;
+}
+
+.historyversion-body ul li .historyversion-restore {
+    float: left;
+    width: 100%;
+    height: 32px;
+    display: block;
+    margin-top: 30px;
+}
+
+.historyversion-body ul li .historyversion-export {
+    float: left;
+    width: 100%;
+    height: 32px;
+    display: block;
+}
+/* add by hang.su for 11586 【南水北调】级联选择器，选择时会发生错乱 at 2021/5/6 */
+.el-cascader__tags{
+    flex-wrap: nowrap !important;
+}
+.el-cascader__tags>.el-cascader__search-input{
+    visibility: hidden;
+}
+/* end */

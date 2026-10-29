@@ -1,0 +1,1 @@
+var Queue=require("tiny-queue"),Command=require("./command");class APPCommandResults{constructor(){this.commandResultQueue=new Queue}addCommandResult(e){this.commandResultQueue.push(e)}removeCommandResult(){return this.commandResultQueue.shift()}getCommandResults(){return this.commandResultQueue.slice()}}module.exports=new APPCommandResults;

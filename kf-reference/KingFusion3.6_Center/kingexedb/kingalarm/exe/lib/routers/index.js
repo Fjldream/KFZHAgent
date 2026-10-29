@@ -1,0 +1,1 @@
+const router=require("express").Router(),middlewares=require(`${__DIR}/core/middlewares`);for(let e=0;e<middlewares.length;e++)router.use("/",middlewares[e]);const routerLoader=require("./route_loader");routerLoader.registerRoutes(router),module.exports=router;

@@ -1,0 +1,1 @@
+const userAuthCotroller=require(`${__DIR}/lib/controllers/controllers_user_auth`);class UserAuthController{constructor(){}async multiChoice(t,o){userAuthCotroller.multiLogin.multiChoice(t,o)}async multiLoginStatus(t,o){userAuthCotroller.multiLogin.multiLoginStatus(t,o)}}module.exports=new UserAuthController;

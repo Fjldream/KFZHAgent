@@ -1,0 +1,1 @@
+var rimraf=require("rimraf"),path=require("path"),file=require("../Daemon/File");module.exports=function(r,u,e,n){var i=r.server.config.storageDir,t=r.server.config.customDir,m="/temp/",o=path.join(i,m,e.path),a=e.move;return a&&file.moveSourceFile(i,t,o),rimraf.sync(o),!0};

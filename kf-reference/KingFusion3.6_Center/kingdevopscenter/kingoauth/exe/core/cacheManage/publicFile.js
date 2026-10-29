@@ -1,0 +1,1 @@
+const path=require("path"),devOpsfiles={common:{path:path.resolve(`${global.rootPath}/config/common.json`),access:"public"},devconfig:{path:path.resolve(`${global.rootPath}/config/devconfig.json`),access:"public"},externalConfig:{path:path.resolve(`${global.__DIR}/config/externalConfig.json`),access:"public"}};module.exports={devOpsfiles};

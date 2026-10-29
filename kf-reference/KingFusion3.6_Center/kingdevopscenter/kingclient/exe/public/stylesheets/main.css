@@ -1,0 +1,120 @@
+.logo{
+	width: 20px;
+	height: 20px;
+	margin-left: 10px;
+	margin-top: 10px;
+	background-image: url('../images/images/develop_project.png');
+	/* 2020/04/20 xing.li*/
+	background-repeat: no-repeat;
+	background-position: center;
+	display: inline-block;
+
+}
+
+.newlog {
+	width: 30px;
+	height: 28px;
+	margin-left: 28px;
+	margin-top: 12px;
+	background-position: center;
+	display: inline-block;
+	background-image: url('../images/images/client.png');
+}
+.logoName{
+	font-family: Verdana, Arial, Helvetica, sans-serif;
+	margin-top : 10px;
+	margin-left: 10px;
+	font-size: 14px;
+	display: inline-block;
+	vertical-align: top;
+	color:#FFF;
+}
+.userInfo{
+	vertical-align:top;
+	margin-top:10px;
+	margin-left:2px;
+	display: inline-block;
+	font-family:  Verdana, Arial, Helvetica, sans-serif;
+	font-size:14px;
+	cursor: pointer;
+	color:#FFF;
+}
+
+.optimize .textbox.combo {
+	top: 17px !important;
+}
+
+.textbox.searchbox {
+	right: 0;
+}
+
+.km-event-btn-focus {
+	background: red;
+	color:#FFF
+}
+/* ended */
+/* added by yu.sun for bug element-dropdown */
+.el-dropdown .el-button-group{
+	width:100%;
+	height:100%;
+	padding:0;
+	overflow: hidden;
+}
+.el-dropdown .el-button-group button:nth-child(1){
+ width:75%;
+ height:100%;
+ border-right:none;
+}
+.el-dropdown .el-button-group button:nth-child(2){
+	width:25%;
+	height:100%;
+	border-top:1px solid
+}
+/* added by yu.sun for bug element-navmenu */
+.el-menu--horizontal>div>.el-submenu{
+	 float:left;
+}
+.el-menu--horizontal>div>.el-menu-item{
+	 float:left;
+}
+.el-menu--horizontal>div>.el-submenu .el-submenu__icon-arrow{
+	 position: static;
+	 vertical-align: middle;
+}
+
+.loading-first-bgImg {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	width: 217px;
+	height: 219px;
+	background-image: url(../images/loadingcontainer.png);
+}
+
+.loading-first-bool {
+	width: 206px;
+	height: 207px;
+	background-image: url(../images/loadingcontent.png);
+	animation: Loadingrotate 1s linear infinite;
+}
+
+.loading-first-container {
+	width: 100vw;
+	height: 100vh;
+	position: fixed;
+	top: 0;
+	left: 0;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	background-color: #eeeeee;
+}
+
+@keyframes Loadingrotate {
+	0% {
+		transform: rotate(0deg);
+	}
+	100% {
+		transform: rotate(360deg);
+	}
+}

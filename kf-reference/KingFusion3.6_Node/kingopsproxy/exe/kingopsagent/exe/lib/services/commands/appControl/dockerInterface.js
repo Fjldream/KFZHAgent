@@ -1,0 +1,1 @@
+class DockerInterface{constructor(){}initDocker(){}getDockerConfig(){}createContainer(){}startContainer(){}stopContainer(){}restartContainer(){}loadImage(){}deleteImage(){}deleteImage(){}getContainerPerformanceData(){}}module.exports=new DockerInterface;

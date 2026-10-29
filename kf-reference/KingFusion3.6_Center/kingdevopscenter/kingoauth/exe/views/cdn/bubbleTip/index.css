@@ -1,0 +1,75 @@
+@keyframes fadeIn {
+  0% {
+    transform: translate(-50%, -12px);
+  }
+
+  100% {
+    transform: translate(-50%, 0);
+  }
+}
+
+@keyframes fadeOut {
+  0% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+.bubbleTip {
+  position: absolute;
+  display: flex;
+  top: 6%;
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 320px;
+  height: 42px;
+  background: #fff;
+  border-radius: 4px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.17);
+  cursor: pointer;
+  z-index: 99999;
+}
+
+.bubbleTip.fadeIn {
+  animation: fadeIn .35s;
+  animation-fill-mode: forwards;
+}
+
+.bubbleTip.fadeOut {
+  animation: fadeOut .25s;
+  animation-fill-mode: forwards;
+}
+
+.bubbleTip .icon {
+  display: inline-block;
+  margin: 10px 0 8px 18px;
+  width: 24px;
+  height: 24px;
+  background-repeat: no-repeat;
+  vertical-align: top;
+}
+
+.bubbleTip .Success {
+  background: url("./img/success.png") no-repeat center center;
+}
+
+.bubbleTip .Warning {
+  background: url("./img/warning.png") no-repeat center center;
+}
+
+.bubbleTip .Failed {
+  background: url("./img/failed.png") no-repeat center center;
+}
+
+.bubbleTip .content {
+  flex: 1;
+  padding: 0 10px;
+  line-height: 42px;
+  font-size: 14px;
+  font-family: "微软雅黑";
+  font-weight: 400;
+  color: #606266;
+}

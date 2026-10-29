@@ -1,0 +1,1 @@
+module.exports=((r,e,t)=>{try{if("/importProjects"===r.originalUrl)return t();if(!r.headers.tenant_id)return e.sendErr(-500,"租户ID无效");t()}catch(r){return e.status(412),e.send(r),e.end()}});

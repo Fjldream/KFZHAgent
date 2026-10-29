@@ -1,0 +1,1 @@
+const commonPub=require(__dir+"/lib/services/common/public");class CommandResult{constructor(){this.commanId="",this.resultType=commonPub.commonPub.enumDeployCommandResultType.APP_DEPLOYCOMMAND_RESULT_UNKNOWN}setCommandId(e){this.commanId=e}getCommandId(){return this.commanId}setResultType(e){this.resultType=e}getResultType(){return this.resultType}}module.exports=CommandResult;

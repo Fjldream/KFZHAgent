@@ -1,0 +1,1 @@
+const myutil={};myutil.crypto=require(__DIR+"/core/utils/crypto.js"),myutil.format=require(__DIR+"/core/utils/format.js"),myutil.validator=require("validator"),myutil.util=require(__DIR+"/core/utils/function_util.js"),myutil.jsonValidator=require(__DIR+"/core/utils/json_schema.js"),module.exports=myutil;

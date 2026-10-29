@@ -1,0 +1,1 @@
+class KMcollectManager{constructor(){}setCollectInfo(e){let t="";return KMClientInterface.getInstance().setCollectInfo(e,function(n){t=n.data}),t}importCollectInfo(e){let t="";return KMClientInterface.getInstance().importCollectInfo(e,n=>{t=n.data}),t}}

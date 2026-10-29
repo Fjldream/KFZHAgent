@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<meta charset="utf-8" />
+<html lang="en">
+  <head>
+    <title></title>
+    <style>
+      html,
+      body {
+        text-align: center;
+        overflow: hidden;
+        width: 100%;
+        height: 100%;
+        /* added by yaru.wang for[5900 【3.6Linux】无法加载本地视频]20200904 */
+        margin: 0;
+      }
+      .container {
+        width: 100%;
+        height: 100%;
+      }
+      video {
+        object-fit: fill;
+      }
+    </style>
+  </head>
+  <!--modified by shuai.zhao for bug 5924 网页视频有白边 2020-09-07 -->
+  <body style="height: 100%; width: 100%; padding: 0; margin: 0">
+    <!-- end -->
+    <div class="container">
+      <video
+        id="media"
+        src="./video/视频1.mp4"
+        width="100%"
+        height="100%"
+        autoplay
+        controls
+        loop
+      ></video>
+    </div>
+    <script>
+      var params = (param = new URLSearchParams(location.search));
+      const src = params.get("src");
+      const videoMedio = document.getElementById("media");
+      if (src) {
+        videoMedio.src = `${location.origin}/broadCastVideo?path=${src}`;
+      }
+    </script>
+  </body>
+</html>

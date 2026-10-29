@@ -1,0 +1,1 @@
+function KMScriptCusFunc(){KMScriptBase.call(this)}kmUlits.extend(KMScriptCusFunc,KMScriptBase),KMScriptCusFunc.getInstance=function(){return KMScriptCusFunc.instance===void 0&&(KMScriptCusFunc.instance=new KMScriptCusFunc),KMScriptCusFunc.instance};

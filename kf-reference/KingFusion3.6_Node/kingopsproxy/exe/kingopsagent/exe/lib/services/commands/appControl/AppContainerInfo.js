@@ -1,0 +1,1 @@
+const uuid=require("uuid");class AppContainerInfo{constructor(t){this.appId=t,this.containerId=uuid.v4(),this.containerName=""}setAppId(t){this.appId=t}getAppId(){return this.appId}setContainerId(t){this.containerId=t}getContainerId(){return this.containerId}setContainerName(t){this.containerName=t}getContainerName(){return this.containerName}}module.exports=AppContainerInfo;

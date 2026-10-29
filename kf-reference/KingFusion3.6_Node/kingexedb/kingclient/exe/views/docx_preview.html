@@ -1,0 +1,40 @@
+<html>
+<head>
+    <!--polyfills for IE11-->
+    <script  src="static/javascripts/ThirdParty/docx_preview/polyfill.min.js"></script>
+    <!--dependencies-->
+    <script  src="static/javascripts/ThirdParty/docx_preview/jszip.min.js"></script>
+    <!--library-->
+    <script src="static/javascripts/ThirdParty/docx_preview/docx-preview.js"></script>
+</head>
+<body>
+    <div id="doc" style='min-width: max-content;'>  <!--add by xing.li for bug[9822]{previewDocx函数执行后，文件预览显示不完全}2021/02/02-->
+    </div>
+    <script>
+        // 获取api
+        var filePath = window.location.search;
+        // 获取反向代理字符串
+        var projectNameStr = '';
+        var pathName = window.location.pathname;
+        if(pathName){
+            var customStr = pathName.split('/docx_preview.html');
+            projectNameStr = customStr[0];
+        }
+        var apiPath = window.location.origin + projectNameStr + filePath.slice(1);
+        (function loadDocx() {
+          fetch(apiPath)
+          .then(response => 
+            response.blob()
+          ).then(myBlob => {
+            var container = document.getElementById("doc");
+            docx.renderAsync(myBlob, container, null, { 
+                debug: true,
+                experimental: true 
+            }).then(function(x){ console.log(x); }).catch(error=>{
+              console.log(error)
+            });
+          })
+        })()
+    </script>
+</body>
+</html>

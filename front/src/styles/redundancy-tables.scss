@@ -1,0 +1,19 @@
+/* modified by jinlong.feng at 0901 冗余功能开发 */
+/* 冗余模块统一居中表头、单元格及其中的弹性布局内容。 */
+.redundancy-centered-table {
+  .el-table__cell,
+  .el-table__cell .cell {
+    text-align: center;
+  }
+
+  .el-table__cell .cell {
+    justify-content: center;
+  }
+}
+
+// 清除旧版 Element Plus 消息样式遗留的横向自动边距。
+.el-message.redundancy-message.is-center {
+  right: auto;
+  margin: 0;
+}
+/* end */

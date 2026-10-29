@@ -1,0 +1,448 @@
+.km-layout {
+    position: absolute;
+    border: 1.5px solid rgba(83, 137, 192, 0.9);
+    background-Color: rgba(255, 255, 255, 1);
+}
+
+.km-main-layout {
+    background-Color: rgba(255, 255, 255, 1);
+    position: absolute;
+    top: 0;
+    left: 0;
+    /* z-index: 9500 ; */
+}
+
+.km-main-drag-layout {
+    background-Color: rgba(255, 255, 255, 1);
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+/* 左侧layout滚动条设置 */
+.km-main-layout .layout-panel-west .panel-body {
+    /* overflow-x: hidden; */
+    /* added by yu.sun for bug 5202 【公共库版本】所有编辑器 工具箱点开内容显示不完整，右侧没有滚动轴 */
+    overflow: auto !important
+        /* ended */
+}
+
+/* added by yu.sun for bug 5203 【公共库版本】图形模型-添加基本图素右击，界面显示异常 */
+.itemStyle {
+    font-size: 12px !important;
+}
+
+/* ended */
+/* 右侧layout滚动条设置 */
+.km-main-layout .layout-panel-east .panel-body {
+    overflow-x: hidden;
+}
+
+/* 右侧属性网格中table宽度自适应*/
+.km-main-layout .propertygrid .datagrid-btable {
+    width: 100%;
+}
+
+/*定义滚动条高宽及背景 高宽分别对应横竖滚动条的尺寸*/
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+    background-color: rgba(255, 255, 255, 1);
+}
+
+/*定义滚动条轨道 内阴影+圆角*/
+::-webkit-scrollbar-track {
+    display: none;
+}
+
+/*定义滑块 内阴影+圆角*/
+::-webkit-scrollbar-thumb {
+    border-radius: 10px;
+    -webkit-box-shadow: inset 0 0 6px rgba(0, 0, 0, 0.3);
+    background-color: rgba(221, 221, 221, 1);
+}
+
+/*定义滑块 内阴影+圆角*/
+::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(204, 204, 204, 1);
+}
+
+.km-richtext {
+    position: absolute;
+    border: 5px solid rgba(220, 220, 220, 1);
+    box-shadow: 0px 0px 1px 2px rgb(136, 134, 134) inset;
+    background-Color: white;
+    outline: none;
+}
+
+.km-ui-lable {
+    position: absolute;
+    border: 5px solid rgba(220, 220, 220, 1);
+    box-shadow: 0px 0px 1px 2px rgb(136, 134, 134) inset;
+    /* background-Color: white; */
+    outline: none;
+}
+
+.km-richtext1 {
+    position: absolute;
+    border: 1px solid rgba(220, 220, 220, 1);
+    background-Color: rgba(255, 255, 255, 1);
+    outline: none;
+    /* padding : 5px; */
+}
+
+#date {
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+
+.km-uilist {
+    position: absolute;
+    border: 5px solid rgba(220, 220, 220, 1);
+    box-shadow: 0px 0px 1px 2px rgb(136, 134, 134) inset;
+    background-Color: white;
+    outline: none;
+}
+
+/* modify by youyue.chen 2018.7.3 */
+.km-layoutH {
+    position: absolute;
+    border: 1.0px solid rgba(83, 137, 192, 1);
+    background-Color: rgba(255, 255, 255, 0);
+
+}
+.km-MAP {
+    position: absolute;
+    border: 1.0px solid rgba(83,137,192,1);
+    background-Color: rgba(255,255,255,0);
+    
+}
+.km-layoutV {
+    position: absolute;
+    border: 1.0px solid rgba(83, 137, 192, 1);
+    background-Color: rgba(255, 255, 255, 0);
+
+}
+
+/*added by yu.sun for 移动端布局 2019-09-02*/
+.km-layoutMX,
+.km-layoutMY {
+    position: absolute;
+    border: 1.0px solid rgba(83, 137, 192, 1);
+    background-Color: rgba(255, 255, 255, 0);
+    overflow-y: hidden;
+    overflow-x: hidden;
+}
+
+.km-layoutMX::-webkit-scrollbar,
+.km-layoutMY::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+}
+
+.km-layoutMX::-webkit-scrollbar-track,
+.km-layoutMY::-webkit-scrollbar-track {
+    border-radius: 10px;
+}
+
+.km-layoutMX::-webkit-scrollbar-thumb,
+.km-layoutMY::-webkit-scrollbar-thumb {
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0);
+}
+
+.km-layoutMX:hover {
+    overflow-y: auto;
+}
+
+.km-layoutMY:hover {
+    overflow-x: auto;
+}
+
+/*ended by yu.sun for 移动端布局 2019-09-02*/
+.km-layoutForm {
+    position: absolute;
+    border: 1.0px solid rgba(83, 137, 192, 1);
+    background-Color: rgba(255, 255, 255, 0);
+    overflow: auto;
+}
+
+.km-2Dlayout,
+.km-layoutHT {
+    position: absolute;
+    border: 1px solid rgba(83, 137, 192, 1);
+    background-Color: rgba(255, 255, 255, 0);
+    overflow: hidden;
+}
+
+.km-windiaglayout {
+    overflow: hidden;
+    position: absolute;
+    /* border: 1.0px solid rgba(83,137,192,1); */
+    background-Color: rgba(255, 255, 255, 0);
+}
+
+.km-layoutHS {
+    position: absolute;
+    border: 0.1px solid rgba(255, 255, 255, 0);
+    background-Color: rgba(255, 255, 255, 0);
+}
+
+.km-layoutVS {
+    position: absolute;
+    border: 0.1px solid rgba(255, 255, 255, 0);
+    background-Color: rgba(255, 255, 255, 0);
+}
+
+/* 手风琴样式 */
+.accordion {
+    overflow: hidden;
+    border-width: 1px;
+    border-style: solid
+}
+
+.accordion .accordion-header {
+    border-width: 0 0 1px;
+    cursor: pointer
+}
+
+.accordion .accordion-body {
+    border-width: 0 0 1px
+}
+
+.accordion-noborder {
+    border-width: 0
+}
+
+.accordion-noborder .accordion-header {
+    border-width: 0 0 1px
+}
+
+.accordion-noborder .accordion-body {
+    border-width: 0 0 1px
+}
+
+/* add by tian.he_2_bug_4131_【KF3.6 linux】手风琴展开、关闭按钮缺失 */
+.accordion-collapse {
+    background: url('../javascripts/ThirdParty/jquery-easyui-1.6.4/themes/metro/images/accordion_arrows.png') no-repeat 0 0;
+}
+
+.accordion-expand {
+    background: url('../javascripts/ThirdParty/jquery-easyui-1.6.4/themes/metro/images/accordion_arrows.png') no-repeat -16px 0;
+}
+
+/* end by tian.he */
+.accordion {
+    background: #fff;
+    border-color: #95B8E7
+}
+
+.accordion .accordion-header {
+    background: #E0ECFF;
+    filter: none
+}
+
+.accordion .accordion-header-selected {
+    background: #ffe48d
+}
+
+.accordion .accordion-header-selected .panel-title {
+    color: #000
+}
+
+.accordion .panel-last>.accordion-header {
+    border-bottom-color: #E0ECFF
+}
+
+.accordion .panel-last>.accordion-body {
+    border-bottom-color: #fff
+}
+
+.accordion .panel-last>.accordion-header-selected,
+.accordion .panel-last>.accordion-header-border {
+    border-bottom-color: #95B8E7
+}
+
+.accordion>.panel-hleft {
+    float: left
+}
+
+.accordion>.panel-hleft>.panel-header {
+    border-width: 0 1px 0 0
+}
+
+.accordion>.panel-hleft>.panel-body {
+    border-width: 0 1px 0 0
+}
+
+.accordion>.panel-hleft.panel-last>.accordion-header {
+    border-right-color: #E0ECFF
+}
+
+.accordion>.panel-hleft.panel-last>.accordion-body {
+    border-right-color: #fff
+}
+
+.accordion>.panel-hleft.panel-last>.accordion-header-selected,
+.accordion>.panel-hleft.panel-last>.accordion-header-border {
+    border-right-color: #95B8E7
+}
+
+.accordion>.panel-hright {
+    float: right
+}
+
+.accordion>.panel-hright>.panel-header {
+    border-width: 0 0 0 1px
+}
+
+.accordion>.panel-hright>.panel-body {
+    border-width: 0 0 0 1px
+}
+
+.accordion>.panel-hright.panel-last>.accordion-header {
+    border-left-color: #E0ECFF
+}
+
+.accordion>.panel-hright.panel-last>.accordion-body {
+    border-left-color: #fff
+}
+
+.accordion>.panel-hright.panel-last>.accordion-header-selected,
+.accordion>.panel-hright.panel-last>.accordion-header-border {
+    border-left-color: #95B8E7
+}
+
+
+/* 防止拖拽时选中页面中的元素 */
+div {
+    -moz-user-select: none;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+/* modified by tongtong.liao at 2021/0204 for bug 9970  工程变量鼠标滚轮无法下滑，无法查看该页最后的变量 */
+/* add by ying.wu for bug9145 客户端工程配置页面缩小后不会自适应，直接将原图截断，导致滑块无效 */
+.page-mng-grid-container .datagrid-view .datagrid-view2 .datagrid-body {
+    overflow-x: hidden;
+}
+
+/* 修改easyui-layout拆分栏样式 */
+.layout-split-proxy-h {
+    width: 1.5px;
+    cursor: e-resize;
+}
+
+.layout-split-proxy-v {
+    height: 1.5px;
+    cursor: n-resize;
+}
+
+.layout-split-north {
+    border-bottom: 1px solid #E6EEF8;
+}
+
+.layout-split-south {
+    border-top: 1px solid #E6EEF8;
+}
+
+.layout-split-east {
+    border-left: 1px solid #E6EEF8;
+    min-width: 150px;
+}
+
+.layout-split-west {
+    border-right: 1px solid #E6EEF8;
+}
+
+/*added by yu.sun for 移动端布局 2019-09-02*/
+.km-layoutMX,
+.km-layoutMY {
+    position: absolute;
+    border: 1.0px solid rgba(83, 137, 192, 1);
+    background-Color: rgba(255, 255, 255, 0);
+    overflow-y: hidden;
+    overflow-x: hidden;
+}
+
+.km-layoutMX::-webkit-scrollbar,
+.km-layoutMY::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+}
+
+.km-layoutMX::-webkit-scrollbar-track,
+.km-layoutMY::-webkit-scrollbar-track {
+    border-radius: 10px;
+}
+
+.km-layoutMX::-webkit-scrollbar-thumb,
+.km-layoutMY::-webkit-scrollbar-thumb {
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0);
+}
+
+.km-layoutMX:hover {
+    overflow-y: auto;
+}
+
+.km-layoutMY:hover {
+    overflow-x: auto;
+}
+
+/* modified by tongtong.liao at 2021/02/19 for bug 9356 安全对象中新建角色名称和描述不符合时弹窗显示问题 */
+#tip-msg {
+    position: fixed;
+    left: 0;
+    right: 0;
+    top: 50px;
+    text-align: center;
+    z-index: 9999;
+}
+
+#tip-msg span {
+    background-color: rgb(75, 151, 65);
+    padding: 15px 35px;
+    line-height: 54px;
+    border-radius: 5px;
+    text-align: center;
+    color: #fff;
+    font-size: 18px;
+}
+
+/* end for bug 9356 */
+
+#tip-msg span.error {
+    background-color: rgb(192, 46, 41);
+    font-weight: 100;
+}
+
+/*ended by yu.sun for 移动端布局 2019-09-02*/
+
+/*added by xiaoqiang.cui for bug2670-编辑变量信息导致变量窗口显示异常 2020-06-28*/
+.datagrid-view2 .textbox {
+    margin: 0;
+}
+
+/*ended by xiaoqiang.cui for bug3318-界面布局错乱 2020-06-28*/
+.km-gloScriptEditor-option>div:nth-child(6) button {
+    max-width: 50px !important;
+}
+
+.el-input {
+    height: 100%;
+}
+
+.el-input .el-input__inner {
+    height: 100%;
+}
+
+.el-input-number .el-input {
+    height: 100%;
+}
+
+.el-input-number .el-input-number__decrease,
+.el-input-number .el-input-number__increase {
+    height: 99%;
+}

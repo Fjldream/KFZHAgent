@@ -1,0 +1,1 @@
+const fs=require("fs");class GlobalCache{constructor(){}loadGlobalCache(){let o={};const l=`${global.rootPath}/config/common.json`;return o.common=JSON.parse(fs.readFileSync(l)),o}}module.exports=new GlobalCache;

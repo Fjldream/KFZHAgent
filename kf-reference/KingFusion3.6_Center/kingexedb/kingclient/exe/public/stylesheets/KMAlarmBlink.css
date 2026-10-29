@@ -1,0 +1,27 @@
+/* 设置报警窗闪烁的css样式 add by chaoru.yang in 2019.9.30 --bug 1309*/
+
+
+@-webkit-keyframes twinkling {
+    0%{
+        opacity:0.1;
+    } 
+    100%{
+        opacity:1;
+    }
+ }
+@keyframes twinkling {
+    0%{
+        opacity:0.1;
+    } 
+    100%{
+        opacity:1;
+    }
+}
+/* add by shuai.zhao for bug 7475 【富士电梯】运行态切换页面时，文本框会闪一下黑色边框 2020-11-09 */
+input{
+    border: none;
+}
+input.easyui-validatebox{
+    border-style: inset;
+}
+/* end */

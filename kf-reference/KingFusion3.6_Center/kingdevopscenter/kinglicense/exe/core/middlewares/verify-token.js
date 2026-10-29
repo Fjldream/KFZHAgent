@@ -1,0 +1,1 @@
+const{auth,resHandler}=require("../util");module.exports=(o,r,t)=>{try{const s=auth.getBearerToken(o);if(!s){const e=resHandler.getErrorRes("TOKEN_IS_MISSING");r.sendErr(e);return}var n=auth.verifyToken(s);if(n)t();else{const e={code:0,message:"token is invaild"};logger.log("info",e.message),r.status(400),r.sendErr(e)}}catch(s){const e=resHandler.getErrorMsg(s);r.sendErr(e)}};

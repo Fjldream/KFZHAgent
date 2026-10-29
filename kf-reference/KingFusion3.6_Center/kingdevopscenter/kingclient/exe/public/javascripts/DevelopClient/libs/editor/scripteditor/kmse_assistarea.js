@@ -1,0 +1,1 @@
+function KMSEAssistArea(t){this.keyword=new KMKeyword(t);var i=this;this.initialize=function(){i.thisElement=new KMUIPanel;var s=i.thisElement;s.setClass("km-script-assistArea"),s.addChild(this.keyword.thisElement.thisElement)},this.initialize()}

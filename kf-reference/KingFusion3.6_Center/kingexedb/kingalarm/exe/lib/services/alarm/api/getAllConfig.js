@@ -1,0 +1,1 @@
+function getAllAlarmConfig(n,t){try{const{tagName_Id_Map:e,alarmItemConfigMap:a}=n;let r=[];for(const[g,s]of e){let o={};const[I,m]=s;a.has(m)&&(o[g]=a.get(m)),r.push(o)}return t&&t(null,r),r}catch(e){return t&&t(`\u83B7\u53D6\u6240\u6709\u62A5\u8B66\u914D\u7F6E\u5F02\u5E38 ${e.stack}`)}}module.exports={getAllAlarmConfig};

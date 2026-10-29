@@ -1,0 +1,1 @@
+const cryptoJs=require("crypto-js"),config_app=require(_DIR+`/../../config/${global.KingOS}/config_app.json`),requestPassword=config_app.requestPassword;let hashedPassword="";requestPassword&&(hashedPassword=cryptoJs.SHA256("ServerManager").toString()),module.exports={requestPassword,hashedPassword};

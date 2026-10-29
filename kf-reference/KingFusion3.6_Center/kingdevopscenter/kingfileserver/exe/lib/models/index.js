@@ -1,0 +1,1 @@
+const models={};models.image=require("./image/image_mng"),models.project=require("./project/project_mng"),models.exec=require("./exec/exec_mng"),module.exports=models,process.on("SIGINT",function(e,r){logger.log("fatal","kingfileserver is closing casused by ",e,r),models.image.save(),models.project.save(),models.exec.save(),process.exit()});

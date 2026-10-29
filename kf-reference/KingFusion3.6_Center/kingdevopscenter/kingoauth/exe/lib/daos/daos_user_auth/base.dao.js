@@ -1,0 +1,1 @@
+const db_sqlite=require(__DIR+"/lib/datasources/sqlite");class BaseDao{constructor(){this.db=null,this.tablName="",this.primaryKey=""}getdb(){let e=this;if(e.db)return e.db;{let n="sqlite_auth",l=db_sqlite.findDataSourceByname(n).dbNameToConnHandleMap,t=l.get(n);return l.length&&t&&(e.db=t),t||null}}}module.exports=BaseDao;

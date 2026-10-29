@@ -1,0 +1,1 @@
+const profilesManage=require(__dir+"/lib/services/profiles/profiles_manage"),externalConfigJson=profilesManage.getGlobalCache(),configContainer={};configContainer.settings=externalConfigJson,module.exports=configContainer;

@@ -1,0 +1,1 @@
+importScripts("/public/javascripts/ThirdParty/luckyexcel/dist/luckyexcel.umd.js"),self.onmessage=function(e){const{file:c}=e.data;LuckyExcel.transformExcelToLucky(c,async s=>{self.postMessage(s==null?void 0:s.sheets)})};

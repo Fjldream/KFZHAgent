@@ -1,0 +1,359 @@
+/* modified by shuai.zhao for bug 11249 【昆明排水】最小值设置为0时，输入框依然可以输入负数 2021-04-01 */
+/* input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+}
+input[type="number"] {
+    -moz-appearance: textfield;
+} */
+.km-popup {
+  border: 1px solid rgb(170, 170, 170);
+  position: absolute;
+  /* top: 30%; */
+  /* left: 50%; */
+  background-color: rgba(255, 255, 255, 1);
+}
+/* {fan.wang 0912  动画连接调整} */
+.km-linkpopup {
+  border: 1px solid #ccc;
+  position: absolute;
+  width: 104px;
+  height: 224px;
+  background-color: rgba(255, 255, 255, 1);
+}
+
+.km-popup-titlebar {
+  height: 40px;
+  background-color: rgba(240, 240, 240, 1);
+  text-align: left;
+  line-height: 40px;
+  padding-left: 15px;
+  font-size: 16px;
+  border-bottom: 1px solid #ccc;
+}
+.km-linkpopup-titlebar {
+  height: 22px;
+  background-color: rgba(240, 240, 240, 1);
+  text-align: left;
+  line-height: 22px;
+  padding-left: 15px;
+  font-size: 12px;
+}
+
+.km-popup-titlebar .km-popup-closeSpan {
+  float: right;
+  margin-right: 15px;
+  background-image: url(../images/close.png);
+  background-repeat: no-repeat;
+  background-position: center;
+  width: 17px;
+  height: 17px;
+  margin-top: 11px;
+}
+.km-popup-titlebar .km-popup-closeSpan:hover {
+  cursor: pointer;
+  background-color: #ccc;
+}
+
+.km-popup .datagrid {
+  margin-top: 10px;
+  margin-left: 15px;
+}
+
+.km-popup .datagrid-view {
+  height: 100% !important;
+}
+
+.km-popup .datagrid-header {
+  height: 100% !important;
+  position: relative;
+  visibility: visible;
+}
+
+.km-popup .Button {
+  width: 56px;
+  height: 22px;
+  float: left;
+  margin: 15px 10px 0 15px;
+}
+
+.km-popupWrap {
+  background-color: rgba(0, 0, 0, 0.25);
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+#km-combobox-popup {
+  width: 478px;
+  height: 340px;
+}
+
+#km-radio-popup {
+  width: 478px;
+  height: 340px;
+}
+
+.km-imagePop {
+  width: 500px;
+  height: 550px;
+}
+
+.km-tab {
+  width: 500px;
+  height: 30px;
+  margin-left: -18px;
+  padding: 0;
+}
+
+.km-tab ul li {
+  width: 40px;
+  float: left;
+  list-style: none;
+  font-size: 12px;
+  line-height: 28px;
+  height: 28px;
+  text-align: center;
+  cursor: pointer;
+  border-left: 1px solid black;
+  border-right: 1px solid black;
+  border-top: 1px solid black;
+  margin: 1px;
+  padding: 0;
+}
+
+.km-tab .km-li1 {
+  font-size: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.km-tab .km-li2 {
+  font-size: 12px;
+  cursor: pointer;
+  list-style: none;
+  background-color: #ffffff;
+}
+
+.km-image {
+  width: 95%;
+  height: 74%;
+  margin: 0 auto;
+}
+
+.km-resource {
+  width: 95%;
+  height: 100%;
+  margin: 0 auto;
+  border: 1px solid rgba(83, 138, 193, 1);
+}
+
+.km-image .km-resource .km-showImage {
+  width: 100%;
+  height: 100%;
+}
+
+.km-image .km-load {
+  width: 95%;
+  height: 100%;
+  margin: 0 auto;
+  display: none;
+  border: 1px solid rgba(83, 138, 193, 1);
+}
+
+.km-property {
+  width: 100%;
+  height: 20%;
+  border-top: 0.1px dashed rgba(83, 138, 193, 1);
+  border-bottom: 1px solid #ccc;
+  margin: 0 auto;
+}
+
+.km-imagePanel {
+  width: 100%;
+  height: 80%;
+  border-top: 0.1px dashed rgba(83, 138, 193, 1);
+  border-bottom: 1px solid #ccc;
+  margin: 0 auto;
+}
+
+.km-imageShow {
+  margin: 20px auto;
+  width: 95%;
+  height: 90%;
+  background-color: #ccc;
+}
+
+.km-imageFile {
+  display: inline-block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 38px;
+  height: 19px;
+  opacity: 0;
+  -moz-opacity: 0;
+  filter: alpha(opacity=0);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+#span1 {
+  display: inline-block;
+  position: relative;
+  width: 38px;
+  height: 19px;
+  line-height: 19px;
+  background: #eee;
+  border: 1px solid blue;
+  text-align: center;
+}
+
+#span2 {
+  display: inline-block;
+  line-height: 19px;
+}
+
+.km-bigDiv {
+  width: 100px;
+  height: 118px;
+}
+
+.km-imageSpan {
+  margin: 0 auto;
+}
+
+.km-penPop {
+  width: 500px;
+  height: 380px;
+}
+
+.km-leftDiv {
+  width: 45%;
+  height: 75%;
+  margin-left: 4%;
+  margin-top: 4%;
+  float: left;
+}
+
+.km-rightDiv {
+  width: 45%;
+  height: 75%;
+  margin-top: 4%;
+  margin-right: 4%;
+  float: right;
+}
+
+.imageLineStyle:hover {
+  background: #4876ff;
+}
+
+.imageLineWidth:hover {
+  background: #4876ff;
+}
+/* add by yaping.feng 2018.12.13 */
+.imageLeftArrow:hover {
+  background: #4876ff;
+}
+.imageRightArrow:hover {
+  background: #4876ff;
+}
+
+/* ?????add by xiaojing.han 1030 */
+.kmui-about-li {
+  height: 35px;
+  font-size: 14px;
+  color: #fff;
+}
+.kmui-about-copyright {
+  height: 35px;
+  font-size: 10px;
+  color: rgb(228, 228, 228);
+  margin-top: 25px;
+}
+.kmui-about-tit {
+  margin-left: 38px;
+  color: #fff;
+  margin-bottom: 20px;
+}
+.kmui-about-main {
+  height: 250px;
+  background: url("../res/images/about.png") no-repeat;
+  background-size: 100% 100%;
+  padding-top: 30px;
+}
+
+/* 模型导入弹窗样式  add by yaping.feng*/
+.kmui-modelimport-listArea .datagrid {
+  margin-top: 0px;
+  margin-left: 0px;
+}
+.kmui-modelimport-listArea .panel-body {
+  border-color: #ccc;
+}
+.kmui-common-input {
+  height: 64%;
+  width: 78.5%;
+  border: 1px solid #c3c3c3;
+  padding: 1.7% 3.25% 1.34%;
+  box-sizing: border-box;
+}
+.kmui-common-input::-webkit-input-placeholder {
+  color: #c3c3c3;
+  font-size: 14px;
+}
+.kmui_tip::before {
+  content: "*";
+  color: red;
+}
+.kmui-roleBtn {
+  height: 8%;
+  text-align: right;
+  background: #fff;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding-bottom: 10px;
+}
+.kmui-roleConfirm {
+  background: #439efe;
+  border-radius: 5px;
+  padding: 1% 4.5%;
+  font-size: 16px;
+  color: #fff;
+  text-align: center;
+  float: right;
+}
+.kmui-roleConfirm:hover {
+  color: #f4f4f5;
+  background: #48a2d2;
+  border: 1px solid #f4f4f5;
+}
+.kmui-roleCancel {
+  border: 1px solid #48a2d2;
+  background: #f4f4f5;
+  border-radius: 5px;
+  padding: 0.8% 4%;
+  color: #48a2d2;
+  text-align: center;
+  font-size: 16px;
+  float: right;
+  margin-left: 2%;
+  margin-right: 4.5%;
+}
+.kmui-roleCancel:hover {
+  color: #f4f4f5;
+  background: #48a2d2;
+  border: 1px solid #f4f4f5;
+}
+.kmui-roleMsg-tip {
+  color: red;
+  font-size: 0.92%;
+  padding-left: 19.5%;
+  margin-top: 0;
+}
+.el-input__inner {
+  border-radius: unset;
+  border-color: #c3c3c3;
+}

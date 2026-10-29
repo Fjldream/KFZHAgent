@@ -1,0 +1,1 @@
+var Command=require("./command");const commonPub=require(__dir+"/lib/services/common/public");class StopCommand extends Command{constructor(){super(),this.cmdType=commonPub.enumDeployCommandType.NODE_DEPLOYCOMMAND_STOP,this.appId=""}setAppId(e){this.appId=e}getAppId(){return this.appId}}module.exports=StopCommand;

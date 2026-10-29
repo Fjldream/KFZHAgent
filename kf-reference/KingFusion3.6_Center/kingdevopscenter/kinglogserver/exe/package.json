@@ -1,0 +1,35 @@
+{
+    "name": "KingLogCollector",
+    "version": "1.0.0.6",
+    "description": "KingLogCollector",
+    "homepage": "index.html",
+    "main": "index.js",
+    "directories": {
+        "doc": "doc",
+        "lib": "lib",
+        "test": "test"
+    },
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "keywords": [
+        "LogCollector"
+    ],
+    "author": "zhiquan.wang",
+    "license": "ISC",
+    "dependencies": {
+        "csprng": "^0.1.2",
+        "ejs": "^2.7.1",
+        "express": "^4.17.1",
+        "http-proxy": "^1.18.0",
+        "jsonschema": "^1.2.4",
+        "moment": "^2.24.0",
+        "node-oauth2-server": "^2.4.0",
+        "node-zookeeper-client": "^1.1.0",
+        "redis": "^2.8.0",
+        "request": "^2.88.0",
+        "uuid": "^3.3.2",
+        "validator": "^11.1.0",
+        "when": "^3.5.1"
+    }
+}

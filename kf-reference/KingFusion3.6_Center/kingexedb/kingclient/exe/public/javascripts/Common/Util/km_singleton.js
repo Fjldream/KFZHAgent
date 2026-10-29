@@ -1,0 +1,1 @@
+function Singleton(n){this.clsName=n,this.instance=null}Singleton.prototype={getInstance:function(){if(this.instance==null){var express="new "+this.clsName+"()";this.instance=eval(express)}return this.instance}};

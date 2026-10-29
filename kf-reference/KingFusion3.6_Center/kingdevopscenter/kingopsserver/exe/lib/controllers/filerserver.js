@@ -1,0 +1,1 @@
+const axios=require("axios");class FileServer{async fileResourceData(s,a){let e=await axios.get("http://localhost:12001/api/v1/fileResourceData");e.status===200&&e.data.code===0?a.sendOk(e.data.data):a.sendErr(e.data.code,e.data.message)}}module.exports=new FileServer;

@@ -1,0 +1,1 @@
+global.__dir=__dirname;let option={path:__dir+"/../../.env"};require("dotenv").config(option);const profilesManage=require(__dir+"/lib/services/profiles/profiles_manage");profilesManage.init();const Application=require(__dir+"/lib/start.js");let app=new Application;app.start();

@@ -1,0 +1,1 @@
+function KMObjectLink(){var n=this;n.linkMng=new KMLinkManager(n)}KMObjectLink.prototype.getLinkManager=function(){return this.linkMng},KMObjectLink.prototype.getLinks=function(){return this.linkMng.getLinks()},KMObjectLink.prototype.getLinkById=function(n){return this.linkMng.getLinkById(n)};

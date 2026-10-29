@@ -1,0 +1,254 @@
+.km-chart {
+    position: absolute;
+    border-radius: 5px;
+    pointer-events: auto;
+}
+/* modified by he.chai at 2020/12/15 for bug8439:客户端工程自定义图表编辑时，右侧配置按钮样式与其他配置按钮样式不统一
+.km-customcharts-option-editor-button { 
+}*/
+.km-commonproperty-editor-panel {
+    /* width: 400px; */
+    -webkit-user-select:none;/*Chrome*/
+    -moz-user-select:none; /*/Firefox*/
+    -ms-user-select:none; /*IE 10+*/
+    user-select:none;
+    z-index: 100;
+    /* height: 308px;  */
+    border: 2px solid rgba(230,230,230,1);
+    position: absolute;
+    float:left;
+    /* top: 10%; */
+    /* left: 65%; */
+    background-color: rgba(255,255,255,1);
+    /* display: none; */
+    font-size: 14px;
+}
+.km-commonproperty-editor-titlebar {
+    -webkit-user-select:none;/*Chrome*/
+    -moz-user-select:none; /*Firefox*/
+    -ms-user-select:none;  /*IE 10+*/
+    user-select:none;
+    height: 40px;
+    background-color: rgba(240,240,240,1);
+    text-align: left;
+    line-height: 40px;
+    padding-left: 15px;
+    font-size: 16px;
+}
+.kmui-commonproperty-editor-button {
+    background-color: rgba(240,240,240,1);
+    position: absolute;
+    font-size: 15px;
+    padding: 4px 12px 4px 12px;
+    border: 0.5px solid rgba(222,222,222,1);
+    -webkit-box-shadow: 0 0.5px 1px rgba(0,0,0,.2); 
+    -moz-box-shadow: 0 0.5px 1px rgba(0,0,0,.2); 
+    box-shadow: 0 0.5px 1px rgba(0,0,0,.2); 
+}
+.kmui-commonproperty-editor-button:hover {
+    cursor: pointer;
+    background-color: rgba(237,247,255,1); 
+}
+.kmui-commonproperty-editor-input {
+    -moz-box-shadow: 0 0  0  rgba(222,222,222,1);
+    -webkit-box-shadow:  0 0 0  rgba(222,222,222,1);
+    box-shadow:  0 0 0  rgba(222,222,222,1);
+    text-indent: 2px;
+    height:10%;
+    resize:none ;
+}
+.kmui-commonproperty-editor-select {
+    -moz-box-shadow: 0 0  0  rgba(222,222,222,1);
+    -webkit-box-shadow:  0 0 0  rgba(222,222,222,1);
+    box-shadow:  0 0 0  rgba(222,222,222,1);
+    text-indent: 2px;
+    height:11%;
+    resize:none ;
+}
+.kmui-commonproperty-editor-textarea {
+    -moz-box-shadow: inset 0 1px 0.2px 0.5px rgba(222,222,222,1);
+    -webkit-box-shadow: inset 0 1px 0.2px 0.5px  rgba(222,222,222,1);
+    box-shadow: inset 0 1px 0.2px 0.5px  rgba(222,222,222,1);
+    text-indent: 2px;
+    resize:none ;
+}
+.kmui-commonEvent-editor-input {
+    -moz-box-shadow: 0 0  0  rgba(222,222,222,1);
+    -webkit-box-shadow:  0 0 0  rgba(222,222,222,1);
+    box-shadow:  0 0 0  rgba(222,222,222,1);
+    text-indent: 2px;
+    height:5%;
+    resize:none ;
+}
+
+/* �����¼� */
+.kmui-commonEvent-editor-publiceventlistname {
+    font-size: 16px;
+}
+.kmui-commonEvent-editor-publiceventlistbuttonspan {
+    position: absolute;
+    right: 5%;
+    top: 4%;
+}
+.kmui-commonEvent-editor-publiceventlistbutton {
+    width: 16px;
+    height: 16px;
+    display: block;
+    position: absolute;
+    top: 17%;
+    right: 6%;
+}
+.kmui-commonEvent-editor-publiceventlistbutton:hover {
+    border: 1px solid #b7d2ff;
+}
+.kmui-commonEvent-editor-publiceventlist {
+    width: 100%;
+    display: block;
+    padding-left: 10px;
+    margin: 10px 0;
+    box-sizing: border-box;}
+.kmui-commonEvent-editor-treewrap {
+    border-style: solid;
+    border-color: buttonshadow buttonhighlight buttonhighlight buttonshadow  ;
+    border-width: 2px;
+    background-Color: white;
+    position: absolute;
+    border-radius: 5px;
+    pointer-events: auto;
+    overflow :auto;
+}
+.km-customcharts-option-editor-panel {
+    /* width: 400px; */
+    z-index: 100;
+    height: 612px; 
+    border: 2px solid rgba(230,230,230,1);
+    position: absolute;
+    float:left;
+    /* top: 10%; */
+    /* left: 65%; */
+    background-color: rgba(255,255,255,1);
+    /* display: none; */
+}
+.contentClass{
+    color: #333333;
+    font-size: 17px;
+    text-align: center;
+    line-height: 90px;
+    overflow: hidden;
+}
+.km-customcharts-collection-editor-panel{
+    height: 350px;
+    width: 600px;
+    background-color: rgba(255,255,255,1);
+}
+.km-customcharts-collection-manage-panel{
+    height: 80%;
+    width: 50%;
+    background-color: rgba(255,255,255,1);
+}
+.km-customcharts-collection-content{
+    padding: 20px 48px;
+}
+.km-customcharts-collection-content input,textarea{
+    width: 80%;
+    vertical-align: top;
+    /* margin-left: 30px; */
+}
+.km-customcharts-collection-content textarea{
+    height: 160px;
+}
+.km-customcharts-collection-content div{
+    margin-top: 20px;
+}
+.km-collect-export-label {
+    font-weight: 800;
+}
+.km-collect-export-input{
+    margin-left: 22px;
+    width: 250px;
+}
+.km-customcharts-option-editor-titlebar {
+    height: 40px;
+    background-color: rgba(240,240,240,1);
+    text-align: left;
+    line-height: 40px;
+    padding-left: 15px;
+    font-size: 16px;
+}
+.km-customcharts-option-editor-toolbar{
+    padding-left: 15px;
+    text-align: left;
+    line-height: 30px;
+    font-size: 14px;
+    background-color: rgba(255,255,255,1);
+    border: 0.5px solid rgba(221,221,221,1);
+}
+.km-closeSpan {
+    float: right;
+    margin-right: 15px;
+    background-image: url(../images/images/close.png);
+    background-repeat: no-repeat;
+    background-position: center;
+    width: 17px;
+    height: 17px;
+    margin-top: 11px;
+}
+.km-closeSpan:hover {
+    cursor: pointer;
+    background-color: #ccc; 
+}
+.km-customcharts-option-editor-runbutton {
+    background-color:rgba(62,167,221,1);
+    margin: 3px 3px 3px 3px;  
+    color: white;
+}
+.km-customcharts-option-editor-savebutton ,
+.km-professional-option-editor-cancelbutton{/* add by tongtong.liao at 2020/10/09 for bug 6697 */
+    background-color:rgba(240,240,240,1);
+    margin: 3px 3px 3px 3px; 
+}
+.km-customcharts-option-editor-cancelbutton {
+    background-color:rgba(240,240,240,1);
+    margin: 3px 10px 3px 3px; 
+}
+.km-customcharts-option-editor-main {
+    margin-right:2.5px; 
+    margin-bottom:10px; 
+}
+.button { 
+    zoom: 1;
+    vertical-align: baseline; 
+    outline: none; 
+    cursor: pointer; 
+    text-align: center; 
+    text-decoration: none; 
+    -webkit-border-radius: .1em; 
+    -moz-border-radius: .1em; 
+    border-radius: .1em; 
+    -webkit-box-shadow: 0 0.5px 1px rgba(0,0,0,.2); 
+    -moz-box-shadow: 0 0.5px 1px rgba(0,0,0,.2); 
+    box-shadow: 0 0.5px 1px rgba(0,0,0,.2); 
+    height: 80%;
+    font-size: 14px;
+    padding: 4px 10px 4px 10px;
+    float: right;
+    border: 0.5px solid rgba(221,221,221,1);
+} 
+.button:hover { 
+    text-decoration: none; 
+} 
+.button:active { 
+    position: relative; 
+    top: 1px; 
+} 
+/* ��ϸ�����м���ģ�͵�������ʽ��add by xiaojing.han 2018/12/06 */
+.km-option-editor-model {
+    margin-left: 10px;
+    border: 1px solid #ccc;
+    padding: 1px 4px;
+    background-color: #f3f3f3;
+}
+.km-option-editor-model:hover {
+    background-color: rgba(62,167,221,1);
+    color: #fff;
+}

@@ -1,0 +1,1 @@
+module.exports=((e,s,d)=>{s.sendOk=(e=>{const d={errorCode:0,message:"操作成功！",data:e};s.status(200),s.send(d),s.end()}),s.sendErr=((e,d,n=null)=>{const r={errorCode:e,message:d,data:n||null};s.status(400),s.send(r),s.end()}),d()});

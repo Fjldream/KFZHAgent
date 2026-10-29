@@ -1,0 +1,102 @@
+:root {
+  --kf-primary: #0348dd;
+  --kf-primary-hover: #2867ea;
+  --kf-primary-soft: #e9f0ff;
+  --kf-canvas: #f7f9ff;
+  --kf-surface: #ffffff;
+  --kf-text: #1f2937;
+  --kf-text-secondary: #667085;
+  --kf-border: #e4e9f2;
+  --kf-border-strong: #d6deec;
+  --kf-success: #43b267;
+  --kf-warning: #f59e0b;
+  --kf-danger: #ef4d4f;
+  --kf-panel-radius: 12px;
+  --kf-control-radius: 4px;
+  --kf-panel-shadow: 0 2px 12px rgb(46 73 119 / 6%);
+  --z-dropdown: 200;
+  --z-popover: 300;
+  --z-header: 400;
+  --z-backdrop: 500;
+  --z-dialog: 600;
+  --z-drawer: 700;
+  --z-toast: 900;
+  --el-color-primary: var(--kf-primary);
+  --el-border-radius-base: var(--kf-control-radius);
+  --el-text-color-primary: var(--kf-text);
+  --el-text-color-regular: var(--kf-text-secondary);
+  --el-border-color: var(--kf-border);
+}
+
+html {
+  scrollbar-color: #b8c5d9 #eef2f8;
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: #eef2f8;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 2px solid #eef2f8;
+  border-radius: 8px;
+  background: #b8c5d9;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #94a5bf;
+}
+
+.redundancy-module {
+  min-width: 0;
+  color: var(--kf-text);
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  font-size: 14px;
+}
+
+.redundancy-panel {
+  border: 1px solid rgb(228 233 242 / 75%);
+  border-radius: var(--kf-panel-radius);
+  background: var(--kf-surface);
+  box-shadow: var(--kf-panel-shadow);
+}
+
+.redundancy-section-title {
+  margin: 0;
+  color: #252d3d;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.redundancy-muted {
+  color: var(--kf-text-secondary);
+}
+
+.redundancy-empty {
+  min-height: 180px;
+  display: grid;
+  place-items: center;
+  color: #98a2b3;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.1s !important;
+    animation-duration: 0.1s !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+@media (forced-colors: active) {
+  * {
+    scrollbar-color: auto;
+  }
+}

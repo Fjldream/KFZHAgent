@@ -1,0 +1,59 @@
+{
+    "NPMs": [
+        {
+            "name": "mathjs",
+            "type": "system",
+            "description": "常用数学函数"
+        },
+        {
+            "name": "mysql",
+            "type": "system",
+            "description": "mysql"
+        },
+        {
+            "name": "pg",
+            "type": "system",
+            "description": "PostgreSQL"
+        },
+        {
+            "name": "mssql",
+            "type": "system",
+            "description": "Microsoft SQL Server"
+        },
+        {
+            "name": "oracledb",
+            "type": "system",
+            "description": "oracledb"
+        },
+        {
+            "name": "redis",
+            "type": "system",
+            "description": "redis"
+        },
+        {
+            "name": "mongodb",
+            "type": "system",
+            "description": "mongodb"
+        },
+        {
+            "name": "worker_threads",
+            "type": "system",
+            "description": "多线程"
+        },
+        {
+            "name": "request",
+            "type": "system",
+            "description": "服务端发起请求"
+        },
+        {
+            "name": "nodejs-websocket",
+            "type": "system",
+            "description": "websocket"
+        },
+        {
+            "name": "md5",
+            "type": "system",
+            "description": "md5数据加密"
+        }
+    ]
+}

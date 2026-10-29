@@ -1,0 +1,85 @@
+/* 属性关联 */
+.km-property-panel {
+    width: 500px;
+    height: 350px;
+    border: 1px solid rgba(230, 230, 230, 1);
+    position: absolute;
+    top: 15%;
+    left: 53%;
+    background-color: rgba(255, 255, 255, 1);
+    text-align: left;
+}
+
+.km-event-panel {
+    width: 400px;
+    height: 350px;
+    border: 1px solid rgba(230, 230, 230, 1);
+    position: absolute;
+    top: 15%;
+    left: 53%;
+    background-color: rgba(255, 255, 255, 1);
+    text-align: left;
+}
+
+.datamodel-span {
+    margin-left: 20%;
+    display: inline-block;
+    width: 50px;
+    height: 40px;
+    line-height: 50px;
+    margin-right: 3%;
+    padding: 0 15px;
+    cursor: pointer;
+    margin-bottom: 8px;
+    color: rgba(30, 130, 240, 1);
+}
+
+.model-span {
+    margin-left: 20%;
+    display: inline-block;
+    width: 25px;
+    height: 40px;
+    line-height: 50px;
+    margin-right: 6%;
+    padding: 0 15px;
+    cursor: pointer;
+    margin-bottom: 8px;
+    /* color: blue; */
+    /* border-bottom: 1px solid #000; */
+}
+
+.km-inner-panel {
+    width: 80%;
+    height: 55%;
+    margin: 0 auto;
+}
+
+.km-inner-panel .datagrid-body {
+    overflow-x: hidden;
+}
+
+.km-script-bottom {
+    text-align: right;
+    height: 10%;
+    padding: 15px;
+    margin-right: 7%;
+}
+
+.km-script-bottom .km-script-btn {
+    margin-left: 25px;
+    width: 70px;
+    height: 28px;
+}
+
+.safetyOptimize .panel-header.panel-header-noborder.window-header .panel-tool {
+    width: 36px;
+}
+
+.safetyOptimize .panel.layout-panel.layout-panel-north.panel-htop.easyui-fluid .panel-body.panel-body-noheader.layout-body {
+    height: 44px !important;
+}
+
+.safetyOptimize .panel-header .panel-title {
+    width: 130px !important;
+    margin-top: 8px !important;
+}

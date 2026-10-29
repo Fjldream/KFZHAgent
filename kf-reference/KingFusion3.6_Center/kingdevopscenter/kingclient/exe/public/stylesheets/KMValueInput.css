@@ -1,0 +1,118 @@
+.km-valueInput-panel {
+    background-color: rgba(255,255,255,1);
+    width: 310px;
+    height: 187px;
+    position: absolute;
+    left: 30%;
+    top: 30%;
+    border-style: solid;
+    border-color: rgba(200,200,200,1);
+    border-width: 1px;
+    font-size: 14px;
+}
+.km-valueInput-titlebar {
+    background-color: rgba(220,220,220,1);
+    width: 98%;
+    height: 28px;
+    text-align: left;
+    padding-left: 2%;
+    line-height: 28px;
+}
+.km-valueInput-closeSpan {
+    float: right;
+    margin-right: 7px;
+    background-image: url(../images/images/close.png);
+    background-repeat: no-repeat;
+    background-position: center;
+    width: 15px;
+    height: 15px;
+    margin-top: 7px;
+}
+.km-valueInput-mid {
+    width: 250px;
+    height: 80px;
+    text-align: left;
+    margin: auto;
+    margin-top: 5px;
+    margin-bottom: 5px;
+}
+.km-valueInput-tipsInfo {
+    margin-left: 10px;
+}
+.km-valueInput-true {
+    width: 210px;
+    height: 40px;
+    position: absolute;
+    left: 45px;
+    top: 70px;
+    font-size: 14px;
+    cursor: pointer;
+    border: none;
+    box-shadow: 5px 5px 5px #888888;
+    background-color: #dddddd;
+}
+.km-valueInput-false {
+    width: 210px;
+    height: 40px;
+    position: absolute;
+    left: 45px;
+    top: 130px;
+    font-size: 14px;
+    cursor: pointer;
+    border: none;
+    box-shadow: 5px 5px 5px #888888;
+    background-color: #fafafa;
+}
+/* .km-valueInput-exit {
+    width: 90px;
+    height: 35px;
+    position: absolute;
+    left: 110px;
+    top: 130px;
+    font-size: 14px;
+} */
+.km-valueInput-center {
+    width: 250px;
+    height: 60px;
+}
+.km-stringInput {
+    width: 220px;
+    margin-left: 12px;
+    margin-top: 15px;
+    margin-bottom: 10px;
+}
+.km-analogInput {
+    width: 220px;
+    margin-left: 12px;
+    margin-top: 10px;
+    margin-bottom: 10px;
+}
+.km-valueInput-bottom {
+    width: 250px;
+    height: 40px;
+    margin: auto;
+    margin-top: 20px;
+}
+.km-valueInput-confirm {
+    width: 72px;
+    height: 27px;
+    font-size: 14px;
+}
+.km-valueInput-cancel {
+    width: 72px;
+    height: 27px;
+    margin-left: 40px;
+    font-size: 14px;
+}
+.km-valueInput-maxValueText {
+    margin-left: 15px;
+}
+.km-valueInput-maxValue {
+    margin-left: 5px;
+}
+.km-valueInput-minValueText {
+    margin-left: 70px;
+}
+.km-valueInput-minValue {
+    margin-left: 5px;
+}

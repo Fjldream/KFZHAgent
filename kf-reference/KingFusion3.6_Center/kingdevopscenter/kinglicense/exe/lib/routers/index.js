@@ -1,0 +1,1 @@
+const router=require("express").Router(),middleware=require(__dir+"/core/middlewares"),license_router=require(__dir+"/lib/routers/v1/license_router.js");router.use("/",middleware.resExtend),router.use("/license",license_router),module.exports=router;

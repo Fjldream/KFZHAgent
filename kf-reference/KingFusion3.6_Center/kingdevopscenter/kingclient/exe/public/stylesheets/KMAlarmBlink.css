@@ -1,0 +1,19 @@
+/* 设置报警窗闪烁的css样式 add by chaoru.yang in 2019.9.30 --bug 1309*/
+
+
+@-webkit-keyframes twinkling {
+    0%{
+        opacity:0.1;
+    } 
+    100%{
+        opacity:1;
+    }
+ }
+@keyframes twinkling {
+    0%{
+        opacity:0.1;
+    } 
+    100%{
+        opacity:1;
+    }
+}

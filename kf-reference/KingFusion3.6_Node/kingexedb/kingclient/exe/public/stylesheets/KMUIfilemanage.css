@@ -1,0 +1,103 @@
+.kmui-filemng-main {
+    height: 90%;
+}
+.kmui-filemng-toolbar {
+    height: 70px;
+    line-height: 70px;
+    padding-left: 20px;
+}
+.kmui-filemng-btn {
+    border-radius: 4px;
+    border-color: rgba(0,141,255,1);
+    color: rgba(0,141,255,1);
+    background-color: rgba(255,255,255,1);
+    padding: 5px 10px;
+    font-size: 16px;
+    margin-left: 10px;
+    line-height: initial
+}
+.kmui-filemng-btn:hover {
+    background-color: rgba(0,141,255,1);
+    color: rgba(255,255,255,1);
+}
+.kmui-filemng-searchInput {
+    width: 140px;
+    height: 25px;
+    float: right;
+    margin: 23px 15px;
+    /* position: absolute;
+    top: 10%;
+    right: 60px; */
+    border: 2px solid !important;
+}
+.kmui-filemng-searchBtn {
+    font-size: 16px;
+    margin-right: 20px;
+    float: right;
+}
+.kmui-filemng-searchBtn:hover {
+    text-decoration: underline;
+}
+.km-filemng-btnfocus {
+    background-color: rgba(0,141,255,1);
+    color: rgba(255,255,255,1);
+}
+.kmui-filemng-listArea {
+    width: 90%;
+    height: 80%;
+    margin: auto;
+}
+.kmui-filemng-listArea .datagrid-header {
+    border: none;
+    background: none;
+}
+.kmui-filemng-listArea .panel-body {
+    border: none;
+}
+.kmui-filemng-listArea .datagrid-header td ,
+.kmui-filemng-listArea .datagrid-body td {
+    border-right: none;
+}
+.kmui-filemng-listArea .datagrid-body {
+    overflow-x: hidden;
+}
+.kmui-filemng-listArea .datagrid {
+    margin: 0;
+}
+.kmui-filemng-listNavArea {
+    width: 90%;
+    font-size: 13px;
+}
+.kmui-filemng-listNav {
+    height: 50px;
+    height: 25px;
+    margin-left: 7%;
+    line-height: 25px;
+    display: inline-block;
+}
+.kmui-listNav-span {
+    color:rgba(59,140,255,1);
+}
+.kmui-listNav-span:hover {
+    text-decoration: underline;
+}
+.kmui-filemng-listStatus {
+    float: right;
+    margin-right: 2%;
+}
+.filemng-btn-hide {
+    display: none;
+}
+.filemng-btn-show {
+    display: inline-block;
+}
+.kmui-filemng-listArea {
+    width: 90%;
+    height: 80%;
+    margin: auto;
+}
+.km-fileupload-popup {
+    position: absolute;
+    right: 0%;
+    bottom: 0%;
+}

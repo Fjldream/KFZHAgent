@@ -4,6 +4,9 @@ import { ElMessage } from 'element-plus';
 import { useUserStore } from '@/stores/userStore.js';
 import router from '@/router/index.js';
 import { useLangStore } from '@/stores/langStore.js';
+// modified by jinlong.feng at 0901 冗余功能开发
+import { createRequestErrorMessageOptions } from '@/api/requestErrorMessage.js';
+// end
 
 let isLogout = false;
 let isShowingTokenExpired = false;
@@ -63,10 +66,12 @@ axiosInstance.interceptors.response.use(
         return;
       }
       if (data.code !== 20803) {
-        ElMessage({
-          message: `请求失败: ${data.message || data.msg || error.message || data.errorCode} `,
-          type: 'error',
-        });
+        ElMessage(
+          createRequestErrorMessageOptions(
+            `请求失败: ${data.message || data.msg || error.message || data.errorCode} `,
+            error.config,
+          ),
+        );
       }
 
       isLogout = false;
@@ -74,16 +79,15 @@ axiosInstance.interceptors.response.use(
     }
 
     if (error.code === 'ECONNABORTED') {
-      ElMessage({
-        message: `network timeout`,
-        type: 'error',
-      });
+      ElMessage(createRequestErrorMessageOptions(`network timeout`, error.config));
       return Promise.reject({ errorCode: 'ECONNABORTED' });
     }
-    ElMessage({
-      message: error.message || 'network error',
-      type: 'error',
-    });
+    ElMessage(
+      createRequestErrorMessageOptions(
+        error.message || 'network error',
+        error.config,
+      ),
+    );
     return Promise.reject({ errorCode: 'network error' });
   },
 );

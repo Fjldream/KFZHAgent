@@ -1,0 +1,1 @@
+var Command=require("./command");const commonPub=require(__dir+"/lib/services/common/public");class LogCommand extends Command{constructor(){super(),this.cmdType=commonPub.enumDeployCommandType.NODE_DEPLOYCOMMAND_LOG,this.logTime=7}setLogTime(e){this.logTime=e}getLogTime(){return this.logTime}}module.exports=LogCommand;

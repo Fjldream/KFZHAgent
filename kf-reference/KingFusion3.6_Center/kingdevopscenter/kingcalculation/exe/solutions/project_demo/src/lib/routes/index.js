@@ -1,0 +1,1 @@
+const router=require("express").Router(),{resExtend,tokenCheck}=require(__dir+"/core/middlewares"),{unifiedEntrance}=require(__dir+"/lib/controller");router.use("/",resExtend),router.use("/",unifiedEntrance),module.exports=router;

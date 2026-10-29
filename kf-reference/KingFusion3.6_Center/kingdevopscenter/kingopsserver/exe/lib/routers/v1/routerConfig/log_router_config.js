@@ -1,0 +1,1 @@
+const controllers=require(__dir+"/lib/controllers");module.exports={get:{"/getRetainTime":controllers.logserver.getRetainTime},post:{"/conditionQuery":controllers.logserver.conditionQuery,"/saveRetainTime":controllers.logserver.saveRetainTime},put:{},delete:{},patch:{}};

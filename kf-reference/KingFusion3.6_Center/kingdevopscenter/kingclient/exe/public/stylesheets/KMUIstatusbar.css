@@ -1,0 +1,83 @@
+.km-statusbar {
+    height: 28px;
+    width: 100%;
+    background: #548ac1;
+    font-size: 13px;
+    color: #FFFFFF;
+    position:absolute;
+}
+
+.km-mousePos {
+    margin-Left: 10px;
+    line-height: 28px;
+    display:inline
+}
+
+.km-objInfo {
+    margin: 1%;
+    line-height: 28px;
+    display:inline
+}
+
+.km-showPercent {
+    width: 50px;
+    margin-right: 15px;
+    margin-left: 2px;
+    line-height: 28px;
+    float: right
+}
+
+.km-slider {
+    margin-top: 3px;
+    float: right
+}
+
+.km-addA {
+    font-size: 15px;
+    margin-left: 10px;
+    position: relative;
+    top: 3px;
+    float: right
+}
+
+.km-minusA {
+    float: right;
+    font-size: 21px;
+    margin-right: 10px;
+}
+/* ×Ô¶¯±£´æadd by feng.zhang */
+.km-autosave {
+    float: right;
+    line-height: 28px;
+    margin-right: 20px;
+}
+.km-autosave div {
+    float: left;
+    margin-right: 10px;
+}
+.km-autosave .auto-save-image {
+    display: block;
+    height: 16px;
+    width: 16px;
+    float: left;
+    padding-top: 12px;
+    padding-right: 5px;
+}
+@keyframes autoSaveAnima {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.km-autosave .auto-saving {
+    animation: autoSaveAnima 1s linear infinite;
+}
+.el-select-dropdown {
+    z-index: 99999 !important;
+}
+.el-message-box__wrapper {
+    z-index: 99999 !important;
+}

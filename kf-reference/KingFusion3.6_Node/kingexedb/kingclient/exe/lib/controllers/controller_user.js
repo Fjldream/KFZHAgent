@@ -1,0 +1,466 @@
+const reqHandler = require("../../core/utils/request_handler"),
+  os = require("os"),
+  fs = require("fs"),
+  _ = require("lodash"),
+  { kp_getPath } = require("../../core/utils"),
+  nodeDisk = require("node-disk-info"),
+  userLoginAddressCache = require(
+    __DIR + "/lib/services/userMng/userLoginAddressCache",
+  ).getInstance(),
+  userMng = require("../services/userMng").getInstance(),
+  { kp_util } = require("../../core/utils"),
+  // modified by jinlong.feng at 2026-09-22 PAI门户Kafka单点登录
+  paiTokenLoginService = require(__DIR + "/lib/services/userMng/paiTokenLogin");
+// end
+let checkThirdToken = null;
+try {
+  checkThirdToken = require("../../core/utils/checkThirdToken");
+} catch {
+  console.log("\u65E0\u7B2C\u4E09\u65B9token\u6821\u9A8C\u6A21\u5757");
+}
+const userFieldArr = [
+  "userId",
+  "tenantId",
+  "userName",
+  "password",
+  "groupId",
+  "roles",
+  "description",
+  "isMultiLogin",
+  "nickName",
+  "userType",
+  "createdId",
+  "createdTime",
+  "lastEditTime",
+  "isUse",
+  "isLock",
+  "loginErrNumber",
+  "lastLoginErrTime",
+  "passwordValidTime",
+  "userInvalid",
+  "invalidDate",
+  "userBan",
+  "phone",
+  "email",
+  "lastPasswordEditTime",
+  "realName",
+  "companyName",
+  "isFirstLogin",
+  "saltKey",
+  "isSSO",
+  "extendField",
+];
+class UserController {
+  getPublicKey(t, e) {
+    userMng.getPublicKey((s, n) => {
+      s ? e.sendErr(-1, s) : e.send(n);
+    });
+  }
+  login(t, e) {
+    let s = reqHandler.httpGetData(t, e),
+      n = reqHandler.getReqIP(t),
+      o = reqHandler.getUserAgent(t);
+    userMng.login({ ...s, clientIp: n, userAgent: o }, (i, r) => {
+      (i
+        ? ((appLoggerConf.context = `${global.projectInfo.name}\u5BA2\u6237\u7AEFAPP \u767B\u5F55\u5931\u8D25,\u5931\u8D25\u539F\u56E0\uFF1A${JSON.stringify(i)}`),
+          e.write(JSON.stringify(i)),
+          e.end())
+        : ((appLoggerConf.context = `${global.projectInfo.name}\u5BA2\u6237\u7AEFAPP \u767B\u5F55\u6210\u529F`),
+          e.send(r)),
+        appLogger.system.info("\u767B\u5F55", appLoggerConf));
+    });
+  }
+  singleLogin(t, e) {
+    let s = reqHandler.httpGetData(t, e),
+      n = reqHandler.getReqIP(t),
+      o = reqHandler.getUserAgent(t),
+      i = t.protocol,
+      { singleUser: r, singlePassword: f, pageName: l } = s;
+    if (!r || !f) {
+      (e.send("\u672A\u586B\u5199\u7528\u6237\u540D\u5BC6\u7801!"),
+        (appLoggerConf.context = `${global.projectInfo.name}\u5BA2\u6237\u7AEFAPP \u901A\u7528\u5355\u70B9\u767B\u5F55\u5931\u8D25,\u5931\u8D25\u539F\u56E0\uFF1A\u672A\u586B\u5199\u7528\u6237\u540D\u5BC6\u7801`),
+        appLogger.system.info("\u767B\u5F55", appLoggerConf));
+      return;
+    }
+    if (!l) {
+      ((appLoggerConf.context = `${global.projectInfo.name}\u5BA2\u6237\u7AEFAPP \u901A\u7528\u5355\u70B9\u767B\u5F55\u5931\u8D25,\u5931\u8D25\u539F\u56E0\uFF1A\u53C2\u6570\u5F02\u5E38`),
+        appLogger.system.info("\u767B\u5F55", appLoggerConf),
+        e.send("\u8BF7\u68C0\u67E5\u53C2\u6570!"));
+      return;
+    }
+    userMng.singleLogin({ ...s, clientIp: n, userAgent: o }, (a, p) => {
+      (a
+        ? (e.write(JSON.stringify(a)),
+          e.end(),
+          (appLoggerConf.context = `${global.projectInfo.name}\u5BA2\u6237\u7AEFAPP \u901A\u7528\u5355\u70B9\u767B\u5F55\u5931\u8D25,\u5931\u8D25\u539F\u56E0\uFF1A${JSON.stringify(a)}`))
+        : (p.access_token
+            ? (i == "https" &&
+                e.cookie("singleInfo", JSON.stringify(p), {
+                  maxAge: 7200 * 1e3,
+                  httpOnly: !1,
+                  sameSite: "None",
+                  secure: !0,
+                }),
+              i == "http" &&
+                e.cookie("singleInfo", JSON.stringify(p), {
+                  maxAge: 7200 * 1e3,
+                  httpOnly: !1,
+                  sameSite: "Lax",
+                  secure: !1,
+                }),
+              e.redirect(`/#${l}`))
+            : e.send(JSON.stringify(p)),
+          (appLoggerConf.context = `${global.projectInfo.name}\u5BA2\u6237\u7AEFAPP \u901A\u7528\u5355\u70B9\u767B\u5F55\u6210\u529F`)),
+        appLogger.system.info("\u767B\u5F55", appLoggerConf));
+    });
+  }
+  thirdTokenLogin(t, e) {
+    let s = reqHandler.httpGetData(t, e),
+      n = reqHandler.getReqIP(t),
+      o = reqHandler.getUserAgent(t);
+    userMng.thirdTokenLogin({ ...s, clientIp: n, userAgent: o }, (i, r) => {
+      i ? (e.write(JSON.stringify(i)), e.end()) : e.send(r);
+    });
+  }
+  // modified by jinlong.feng at 2026-09-22 PAI门户Kafka单点登录
+  paiTokenLogin(t, e) {
+    let s = reqHandler.httpPostData(t, e),
+      n = reqHandler.getReqIP(t),
+      o = reqHandler.getUserAgent(t);
+    paiTokenLoginService({ ...s, clientIp: n, userAgent: o }, (i, r) => {
+      i ? (e.write(JSON.stringify(i)), e.end()) : e.send(r);
+    });
+  }
+  // end
+  SsoGetUserInfo(t, e) {
+    let s = reqHandler.httpGetData(t, e),
+      n = reqHandler.getReqIP(t),
+      o = reqHandler.getUserAgent(t);
+    userMng.SsoGetUserInfo({ ...s, clientIp: n, userAgent: o }, (i, r) => {
+      i ? (e.write(JSON.stringify(i)), e.end()) : e.send(r);
+    });
+  }
+  async getServerInfo(t, e) {
+    let s = reqHandler.httpGetData(t, e),
+      n = reqHandler.getReqIP(t),
+      o = os.cpus(),
+      i = os.arch(),
+      r = os.totalmem(),
+      f = os.freemem(),
+      l = await nodeDisk.getDiskInfo(),
+      a = await userLoginAddressCache.getOnlineUser(),
+      p = [];
+    l.forEach((d) => {
+      let c = {};
+      ((c.Disk = d.mounted),
+        (c.Blocks = d.blocks),
+        (c.Used = d.used),
+        (c.Available = d.available),
+        (c.Capacity = d.capacity),
+        p.push(c));
+    });
+    let g = {};
+    ((g.reqIp = n),
+      (g.cpus = o),
+      (g.arch = i),
+      (g.totalMemory = r),
+      (g.freeMemory = f),
+      (g.disk = p),
+      (g.loginUser = a),
+      e.send(g));
+  }
+  async checkThirdToken(t, e) {
+    let s = reqHandler.httpGetData(t, e),
+      n = reqHandler.getReqIP(t),
+      o = reqHandler.getUserAgent(t),
+      i = await checkThirdToken.checkHBYTthirdToken({ ...s });
+    i.hasOwnProperty("code")
+      ? i.code == 200
+        ? e.send({ flag: !0 })
+        : e.send({ flag: !1 })
+      : (e.write(JSON.stringify({ flag: !1 })), e.end());
+  }
+  logoff(t, e) {
+    let s = reqHandler.httpGetData(t, e);
+    ((s.userName = t.session.userName),
+      userMng.logoff(s, (n, o) => {
+        (n
+          ? ((appLoggerConf.context = `${global.projectInfo.name}\u5BA2\u6237\u7AEFAPP \u7528\u6237\u767B\u51FA\u5931\u8D25,\u5931\u8D25\u539F\u56E0\uFF1A${JSON.stringify(n)}`),
+            e.send({ status: -1, msg: n }))
+          : ((appLoggerConf.context = `${global.projectInfo.name}\u5BA2\u6237\u7AEFAPP \u7528\u6237\u767B\u51FA\u6210\u529F`),
+            e.send({ status: 0, msg: o })),
+          appLogger.system.info("\u7528\u6237\u767B\u51FA", appLoggerConf));
+      }));
+  }
+  getLoginHistory(t, e) {
+    let s = reqHandler.httpGetData(t, e);
+    userMng.getLoginHistory(s, (n, o) => {
+      n ? e.sendErr(n) : e.send(o);
+    });
+  }
+  getAllLoginHistory(t, e) {
+    let s = reqHandler.httpGetData(t, e);
+    userMng.getAllLoginHistory(s, (n, o) => {
+      n ? e.sendErr(n) : e.send(o);
+    });
+  }
+  verifyUser(t, e) {
+    let s = reqHandler.httpPostData(t, e),
+      n = reqHandler.getReqIP(t),
+      o = reqHandler.getUserAgent(t);
+    userMng.verifyUser({ ...s, clientIp: n, userAgent: o }, (i, r) => {
+      i ? e.sendErr(-1, i) : e.send(r);
+    });
+  }
+  getUserInfo(t, e) {
+    let s = reqHandler.httpGetData(t, e),
+      n = reqHandler.getReqIP(t),
+      o = reqHandler.getUserAgent(t);
+    ((s.token = s.token ? s.token : t.session.token),
+      userMng.getUserInfo({ ...s, clientIp: n, userAgent: o }, (i, r) => {
+        i ? (e.setHeader("RedirectUrl", "/"), e.redirect("/")) : e.send(r);
+      }));
+  }
+  organizationTree(t, e) {
+    let s = t.session.token;
+    userMng.organizationTree({ token: s }, (n, o) => {
+      n ? e.sendErr(-1, n) : e.send({ status: 200, data: o });
+    });
+  }
+  getUserList(t, e) {
+    let s = t.session.token;
+    userMng.getUserList(s, (n, o) => {
+      n ? e.sendErr(-1, n) : e.send({ status: 200, data: o.data });
+    });
+  }
+  getGroupList(t, e) {
+    let s = t.session.token;
+    userMng.getGroupList(s, (n, o) => {
+      n ? e.sendErr(-1, n) : e.send({ status: 200, data: o.data });
+    });
+  }
+  getRoleList(t, e) {
+    let s = t.session.token;
+    userMng.getRoleList(s, (n, o) => {
+      n ? e.sendErr(-1, n) : e.send({ status: 200, data: o.data });
+    });
+  }
+  refreshToken(t, e) {
+    let s = t.headers.refreshtoken;
+    userMng.refreshToken(s, (n, o) => {
+      n ? e.sendErr(-1, n) : e.send(o);
+    });
+  }
+  getAllUsersFromOauth(t, e) {
+    let s = reqHandler.httpGetData(t, e);
+    userMng.getAllUsersFromOauth(s, (n, o) => {
+      n ? (e.setHeader("RedirectUrl", "/"), e.sendErr(-1, n)) : e.send(o);
+    });
+  }
+  checkSoftLock(t, e) {
+    let s = reqHandler.httpGetData(t, e);
+    userMng.checkSoftLock(s, (n, o) => {
+      n ? e.sendErr(-1, n) : e.send(o);
+    });
+  }
+  multiLoginStatus(t, e) {
+    let s = reqHandler.httpPostData(t, e);
+    ((s.clientIp = kp_util.getClientIp(t)),
+      (s.userAgent = t.headers["user-agent"]),
+      (s.userInfo = t.session),
+      userMng.multiLoginStatus(s, (n, o) => {
+        n ? e.sendErr(-1, n) : e.send(o);
+      }));
+  }
+  multiChoice(t, e) {
+    let s = reqHandler.httpPostData(t, e);
+    ((s.clientIp = kp_util.getClientIp(t)),
+      (s.userAgent = t.headers["user-agent"]),
+      (s.userInfo = t.session),
+      userMng.multiChoice(s, (n, o) => {
+        n ? e.sendErr(-1, n) : e.send(o);
+      }));
+  }
+  createUser(t, e) {
+    let s = reqHandler.httpPostData(t, e),
+      { token: n, userID: o, userType: i } = t.session,
+      {
+        userName: r,
+        password: f,
+        groupId: l,
+        description: a,
+        isMultiLogin: p,
+        isSSO: g,
+        nickName: d,
+        userType: c,
+        roles: m,
+        extendField: h,
+        passwordValidTime: y,
+      } = s;
+    ((s = {
+      nickName: d,
+      userName: r,
+      password: f,
+      description: a || "",
+      groupId: l,
+      userType: c,
+      extendField: h || {},
+      isMultiLogin: p || !1,
+      isSSO: g || !1,
+      roles: m || "[]",
+      passwordValidTime: y || "0",
+    }),
+      userMng.createUser(s, n, (k, u) => {
+        k
+          ? e.sendErr(-1, k)
+          : u && u.errorCode !== 0
+            ? e.sendErr(u.errorCode, u.message)
+            : e.sendOk(u.data);
+      }));
+  }
+  changePassword(t, e) {
+    let s = reqHandler.httpPostData(t, e),
+      n = t.session.token;
+    userMng.changePassword(s, n, (o, i) => {
+      o
+        ? e.sendErr(-1, o)
+        : i && i.errorCode !== 0
+          ? e.sendErr(i.errorCode, i.message)
+          : e.sendOk(i.data);
+    });
+  }
+  changeUser(t, e) {
+    let s = reqHandler.httpPutData(t, e),
+      { token: n, userID: o, userType: i } = t.session;
+    const r = { userId: Number(s.userId) },
+      f = (l, a) => Object.prototype.hasOwnProperty.call(l, a);
+    (userFieldArr.forEach((l) => {
+      f(s, l) &&
+        (l === "roles"
+          ? (r[l] = typeof s[l] == "string" ? s[l] : JSON.stringify(s[l] || []))
+          : (r[l] = s[l]));
+    }),
+      userMng.changeUser(r, n, (l, a) => {
+        l
+          ? e.sendErr(-1, l)
+          : a && a.errorCode !== 0
+            ? e.sendErr(a.errorCode, a.message)
+            : e.sendOk(a.data);
+      }));
+  }
+  resetPassword(t, e) {
+    let s = reqHandler.httpPostData(t, e),
+      n = t.session.token;
+    userMng.resetPassword(s, n, (o, i) => {
+      o
+        ? e.sendErr(-1, o)
+        : i && i.errorCode !== 0
+          ? e.sendErr(i.errorCode, i.message)
+          : e.sendOk({ password: i.data.password });
+    });
+  }
+  deleteUser(t, e) {
+    let s = reqHandler.httpDeleteData(t, e),
+      n = t.session.token;
+    userMng.deleteUser(s, n, (o, i) => {
+      o
+        ? e.sendErr(-1, o)
+        : i && i.errorCode !== 0
+          ? e.sendErr(i.errorCode, i.message)
+          : e.sendOk(i.data);
+    });
+  }
+  createGroup(t, e) {
+    let s = reqHandler.httpPostData(t, e),
+      n = t.session.token;
+    userMng.createGroup(s, n, (o, i) => {
+      o
+        ? e.sendErr(-1, o)
+        : i && i.errorCode !== 0
+          ? e.sendErr(i.errorCode, i.message)
+          : e.sendOk(i.data);
+    });
+  }
+  changeGroup(t, e) {
+    let s = reqHandler.httpPutData(t, e),
+      n = t.session.token;
+    userMng.changeGroup(s, n, (o, i) => {
+      o
+        ? e.sendErr(-1, o)
+        : i && i.errorCode !== 0
+          ? e.sendErr(i.errorCode, i.message)
+          : e.sendOk(i.data);
+    });
+  }
+  deleteGroup(t, e) {
+    let s = reqHandler.httpDeleteData(t, e),
+      n = t.session.token;
+    userMng.deleteGroup(s, n, (o, i) => {
+      o
+        ? e.sendErr(-1, o)
+        : i && i.errorCode !== 0
+          ? e.sendErr(i.errorCode, i.message)
+          : e.sendOk(i.data);
+    });
+  }
+  getClientNumOnline(t, e) {
+    userMng.getClientNumOnline(t.session.token, (s, n) => {
+      s ? e.sendErr(-1, s) : e.send(n);
+    });
+  }
+  async ssoLogin(t, e) {
+    let s = kp_getPath({ name: "loginConfig", type: 7 }),
+      n = fs.readFileSync(s, "utf8");
+    n && (n = JSON.parse(n));
+    let o = !!t.get("X-Forwarded-For"),
+      i = reqHandler.httpGetData(t, e),
+      r = reqHandler.getReqIP(t),
+      f = reqHandler.getUserAgent(t);
+    userMng.ssoLogin({ ...i, clientIp: r, userAgent: f }, (l, a) => {
+      var g;
+      let p = !0;
+      if (
+        (a
+          ? e.cookie("singleInfo", JSON.stringify(a), {
+              maxAge: 7200 * 1e3,
+              httpOnly: !1,
+              sameSite: "Lax",
+            })
+          : ((p = !1),
+            e.cookie("singleInfo", null, {
+              maxAge: 7200 * 1e3,
+              httpOnly: !0,
+              sameSite: "Lax",
+            })),
+        p)
+      )
+        o ? e.redirect(`/${externalConfig.APPName}`) : e.redirect("/");
+      else {
+        let d = (g = n.config.redirection) == null ? void 0 : g.url;
+        d ? e.redirect(d) : e.redirect("/");
+      }
+    });
+  }
+  expireChangePassWord(t, e) {
+    let s = reqHandler.httpPostData(t, e);
+    userMng.expireChangePassWord(s, (n, o) => {
+      n
+        ? e.sendErr(-1, n)
+        : o && o.errorCode !== 0
+          ? e.sendErr(o.errorCode, o.message)
+          : e.sendOk(o.data);
+    });
+  }
+  editUserPassWordValid(t, e) {
+    let s = reqHandler.httpPostData(t, e),
+      n = t.session.token;
+    userMng.editUserPassWordValid(s, n, (o, i) => {
+      o
+        ? e.sendErr(-1, o)
+        : i && i.errorCode !== 0
+          ? e.sendErr(i.errorCode, i.message)
+          : e.sendOk(i.data);
+    });
+  }
+}
+module.exports = new UserController();

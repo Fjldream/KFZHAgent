@@ -1,0 +1,146 @@
+.customecalendar {
+    height:100%;
+    width:100%;
+    overflow:hidden;
+    border: 1px #f0f0f0 solid;
+}
+.customecalendar .el-calendar__header {
+    display: none;
+}
+.customecalendar .el-calendar__body {
+    padding: 0 0;
+    height: 100%;
+}
+.customecalendar .el-calendar-table {
+  height: 100%;
+}
+.customecalendar .el-calendar-table__row {
+    height: 16%;
+}
+.customecalendar .calendar-pannel{
+    height:100%;
+    float: left;
+}
+.customecalendar .calendar-header-ldiv {
+    height:100%;
+    width:20px;
+    line-height:30px; 
+    height:30px; 
+    float: left;
+}
+
+.customecalendar .calendar-header-select {
+    height:100%;
+    width:120px;
+    padding-right: 5px;    
+    float: left;
+}
+
+.customecalendar .eventTypespan {
+    color: #fff;
+    width: 18px;
+    height: 18px;
+    border-radius: 100%;
+    display: block;
+    line-height: 16px;
+    font-size: 14px;
+    float: right;
+    text-align: center;
+}
+
+.customecalendar .evenTypespan {
+    color: #fff;
+    width: 18px;
+    height: 18px;
+    border-radius: 100%;
+    display: block;
+    line-height: 16px;
+    font-size: 14px;
+    float: right;
+    text-align: center;
+}
+
+.customecalendar .el-calendar-table .el-calendar-day {
+    /* height: 90px; */
+    min-height: 70px;
+}
+.customecalendar .task-config-tree {
+    width: 20%;
+    height:100%;
+    float: left;
+    border: 1px #f0f0f0 solid;
+    box-sizing: border-box;
+}
+.customecalendar .task-tree-header {
+    width: 100%;
+    height:30px;
+    line-height: 30px;
+    font-size: 17px;
+    font-weight: bold;
+    overflow: hidden;
+}
+
+.customecalendar .task-options {
+    text-align: center;
+    font-size: 12px;
+    width: 100%;
+    margin: 5px 0;
+}
+
+.customecalendar .task-tree-add-btn {
+    height: 30px;
+    width: 30px;
+    margin: 0;
+    padding: 0;
+    float: left;
+    background: url('/kingclient/static/images/images/customecalendar/添加.png') no-repeat center;
+}
+/* 左边日期类型选择树 */
+.customecalendar .task-tree-body {
+    overflow: auto;
+    height: 100%;
+}
+.customecalendar .task-tree-body ul {
+    list-style-type: none;
+    margin: 0;
+    padding: 0;
+    margin-top: 40px;
+}
+.customecalendar .task-tree-body ul li {
+    list-style-type: none;
+    margin: 0;
+    padding: 0;
+    height: 30px;
+    line-height: 30px;
+    float: left;
+    width: 100%;
+}
+.customecalendar .task-tree-body ul li .event-type-color {
+    width: 16px;
+    height: 16px;
+    border-radius: 100%;
+    float: left;
+    margin-left: 20px;
+    margin-top: 6px;
+    margin-right: 10px;
+}
+.customecalendar .task-tree-body ul li .event-type-text {
+    width: 40%;
+    float: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    height: 30px;
+    display: block;
+    line-height: 30px;
+    white-space: nowrap;
+}
+.customecalendar .task-tree-body ul li .event-type-config {
+    width: 60px;
+    float: right;
+    height: 30px;
+}
+.customecalendar .task-tree-body ul li .event-type-config span {
+    width: 30px;
+    float: left;
+    height: 30px;
+}

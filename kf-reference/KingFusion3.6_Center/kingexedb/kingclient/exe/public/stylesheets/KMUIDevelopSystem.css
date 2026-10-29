@@ -1,0 +1,43 @@
+html {
+    width: 100%;
+    height: 100%;
+}
+body {
+    position: absolute;
+    width: 100%;
+    min-width: 1024px;
+    min-height: 650px;
+    height: 100%;
+    padding: 0;
+    margin: 0;
+    z-index: -4;
+}
+.km-ds-container {
+    width: 100%;
+    z-index: -3;
+}
+.km-ds-header {
+    position: absolute;
+    width: 100%;
+    height: 45px;
+    background: rgba(83, 138, 193, 1);
+    z-index: -1;
+}
+.km-ds-tree {
+    position: absolute;
+    left: 0;
+    top: 45px;
+    bottom: 0;
+    width: 300px;
+    border-right: 1px solid rgb(105, 173, 250);
+    z-index: -2;
+}
+.km-ds-content {
+    position: absolute;
+    left: 300px;
+    right: 0;
+    top: 45px;
+    bottom: 0;
+    z-index: -2;
+    overflow-x: auto;
+}

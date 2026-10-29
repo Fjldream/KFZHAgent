@@ -1,0 +1,104 @@
+.km-btn{
+    background: linear-gradient(#f5f5f5, #dadada, #f1f1f1);
+    border: 1px solid #cacaca;
+    border-radius: 0px;
+    color: #565656;
+    cursor: pointer;
+    margin: 10px;
+    font-size: 14px;
+    padding: 5px 10px;
+    box-shadow: 0px 0px 1px 0px #d4d4d4;
+    cursor: pointer;
+}
+/* 
+* start
+* add by lilang on 2020-6-16 {bug_2847_权限设置界面缩小界面时权限管理部分被遮挡}
+*/
+.km-pageSetAuthority-btn{
+    background: linear-gradient(#f5f5f5, #dadada, #f1f1f1);
+    border: 1px solid #cacaca;
+    border-radius: 0px;
+    color: #565656;
+    cursor: pointer;
+    margin: 0 10px 0 10px;
+    font-size: 14px;
+    padding: 5px 10px;
+    box-shadow: 0px 0px 1px 0px #d4d4d4;
+    cursor: pointer;
+}
+/* ended */
+
+.km-btn:focus{
+    outline: none;
+}
+.km-btn:active{
+    border: 1px solid #797979;
+}
+.km-btn:hover{
+
+}
+
+.km-btn .km-creation-btn{
+
+}
+
+.km-btn .km-editor-btn{
+
+}
+
+.km-btn .km-deletion-btn{
+
+}
+
+.km-btn .km-import-btn{
+
+}
+
+.km-btn .km-export-btn{
+
+}
+
+.km-btn.km-confirm-btn {
+    line-height: 22px;
+}
+
+.km-btn.row-test-btn{
+    background: linear-gradient(#00ce63, #51e471, #00bd5b);
+    border: 1px solid #00b103;
+    color: #fff;
+}
+.km-btn.row-edit-btn{
+    background: linear-gradient(#0078a2, #00c4ff, #0078a2);
+    border: 1px solid #0087b7;
+    color: #fff;
+    border-radius: 2px;
+}
+.km-btn.row-delete-btn {
+    background: linear-gradient(#d20000, #ff7878, #bf0000);
+    border: 1px solid #f58484;
+    color: #fff;
+    border-radius: 2px;
+}
+
+
+
+
+
+
+.km-input{
+    height: 12px;
+    padding: 5px 10px;
+    border: 1px solid #d0d0d0;
+    font-size: 13px;
+    min-width: 60px;
+    cursor: pointer;
+}
+.km-input:focus{
+    outline: none;
+    border: 1px solid #9e9e9e;
+}
+select.km-input{
+    box-sizing: border-box;
+    height: 24px;
+    padding: 3px 5px;
+}

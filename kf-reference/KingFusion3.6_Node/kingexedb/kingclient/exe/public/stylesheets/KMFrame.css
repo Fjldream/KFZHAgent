@@ -1,0 +1,115 @@
+html,body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+}
+.loading-first-bgImg {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	width: 217px;
+	height: 219px;
+	background-image: url(../images/images/loadingcontainer.png);
+}
+
+.loading-first-bool {
+	width: 206px;
+	height: 207px;
+	background-image: url(../images/images/loadingcontent.png);
+	animation: Loadingrotate 1s linear infinite;
+}
+
+.loading-first-container {
+	width: 100vw;
+	height: 100vh;
+	position: fixed;
+	top: 0;
+	left: 0;
+	display: flex;
+	justify-content: center;
+    flex-direction: column;
+	align-items: center;
+	background-color: #eeeeee;
+    z-index: 999;
+}
+#loadingText{
+    font-size: larger;
+    color:#666666;
+    font-weight: bolder;
+    margin-top: 20px;
+}
+
+@keyframes Loadingrotate {
+	0% {
+		transform: rotate(0deg);
+	}
+	100% {
+		transform: rotate(360deg);
+	}
+}
+/*演示模式水印CSS*/
+.waterMark {
+    position: absolute;
+    top: 3%;
+    right: 3%;
+    transform: translate(-50%,-50%);
+    color: rgba(255,0,0,.5);
+    font-size: 24px;
+    font-weight: bolder;
+    pointer-events: none;
+    user-select: none;
+}
+
+.run-frame {
+    width:100%;
+    height:100%;
+    position: relative;
+    -webkit-user-select:none;/*�ȸ� /Chrome*/
+    -moz-user-select:none; /*���/Firefox*/
+    -ms-user-select:none;    /*IE 10+*/
+    user-select:none;
+    overflow: auto;
+    position: absolute;
+    left:0;
+    top:0;
+}
+/* add by mingcai.gong 2019/9/20 图片预览功能*/
+.preview-mask {
+	position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 998;
+	background-color: rgba(0,0,0,.5);
+	display: flex;
+	justify-content: center;
+	align-items: center;
+}
+
+.preview-img {
+	width: 100%;
+	height: 100%;
+}
+
+.preview-mask-close {
+	position: absolute;
+	top: 0;
+	right: 0;
+}
+/* end */
+
+/* added by yu.sun for 图片轮播 2020-06-01*/
+.el-carousel--horizontal {
+    height: 100%
+}
+
+.el-carousel__container {
+    height: 100% !important;
+}
+
+.el-carousel__item {
+    height: 100%
+}
+/* ended */

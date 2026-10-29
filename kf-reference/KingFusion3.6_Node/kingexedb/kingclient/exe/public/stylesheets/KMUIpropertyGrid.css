@@ -1,0 +1,14 @@
+/* KMUIpropertyGrid */
+.km-publicproperty-import {
+    background:url("../res/images/excelimport.png");
+}
+.km-publicproperty-export {
+    background:url("../res/images/excelexport.png");
+}
+
+.km-localvariable-import {
+    background:url("../res/images/excelimport.png");
+}
+.km-localvariable-export {
+    background:url("../res/images/excelexport.png");
+}

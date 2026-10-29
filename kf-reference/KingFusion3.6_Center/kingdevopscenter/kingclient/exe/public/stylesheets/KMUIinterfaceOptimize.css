@@ -1,0 +1,2229 @@
+.optimize .panel-noscroll #allLayout>.panel,
+.optimize .panel.layout-expand.layout-expand-east.panel-htop {
+    box-shadow:
+        rgba(94, 119, 161, 0.28) 0px 0px 22px 0px;
+    background: #fff;
+}
+
+/*
+.optimize .panel.layout-panel.layout-panel-west.panel-htop.layout-split-west {
+    padding-top: 9px;
+} */
+
+.optimize .panel-header,
+.optimize .panel-body {
+    border-style: none;
+}
+
+.optimize .panel.layout-panel.layout-panel-west.panel-htop.layout-split-west>.panel-header {
+    background: #e3edff;
+}
+
+.optimize .icon-add {
+    background: url('../images/images/addition.png') no-repeat center center;
+}
+
+#mainTreeTitle .icon-add {
+    top: 2px;
+}
+
+#mainTreeTitle .icon-remove {
+    top: 2px;
+}
+
+
+.optimize .icon-remove {
+    background: url('../images/images/deleterBlue.png') no-repeat center center;
+}
+
+.optimize .datagrid-toolbar {
+    background-color: #fff;
+}
+
+.optimize .l-btn-icon-left .icon-add,
+.optimize .l-btn-icon-left .km-localvariable-import,
+/* add by xing.li for bug[5510]{编辑器内变量配置窗图表显示异常} 2020/08/26 */
+.optimize .l-btn-icon-left .km-localvariable-export,
+/* add by xing.li for bug[5510] {编辑器内变量配置窗图表显示异常}2020/08/26 */
+.optimize .l-btn-icon-left .icon-modify-link,
+/* add by xing.li for bug[5510] {编辑器内变量配置窗图表显示异常}2020/08/26 */
+.optimize .l-btn-icon-left .icon-remove {
+    left: 28px;
+    width: 15px;
+    height: 15px;
+    margin-top: 3px;
+}
+
+.optimize .l-btn-icon-left .l-btn-text {
+    margin-left: 48px;
+    margin-top: 4px;
+    font-size: 14px;
+    line-height: 14px;
+    width: 28px;
+    height: 16px;
+    font-family: "微软雅黑";
+    font-weight: 400;
+    color: rgba(32, 34, 34, 1);
+
+}
+
+.optimize #mainTreeTitle>.datagrid {
+    height: 35px;
+    box-shadow: 0 3px 4px 0 rgba(94, 119, 161, 0.2);
+}
+
+.optimize .datagrid-toolbar {
+    height: 35px;
+    padding: 0;
+    box-shadow:
+        rgba(94, 119, 161, 0.28) 0px 0px 22px 0px
+}
+
+.optimize .l-btn-plain .l-btn-icon{
+    top: 0px;
+}
+
+#righttitle .l-btn-plain .l-btn-icon{
+    top: 10px;
+}
+
+.optimize .datagrid-toolbar>table {
+    width: 220px;
+    height: 36px;
+}
+
+/* .optimize .l-btn-plain .l-btn-icon {
+    top: 0;
+} */
+
+.optimize #mainMenuContent .tree-title {
+    margin-top: 5px;
+}
+
+.optimize #mainMenuContent .tree-expanded,
+.optimize .tree-collapsed {
+    margin-top: 6px;
+    margin-left: 28px;
+}
+
+.optimize #mainMenuContent .icon-develop-project {
+    margin-left: 7px;
+    margin-top: 5px;
+}
+
+.optimize .alalcenter {
+    padding: 20px 20px;
+}
+
+.optimize .tree-title {
+    margin-left: 6px;
+    margin-top: 6px;
+}
+
+.optimize .tree-node-selected {
+    color: none;
+}
+
+.optimize .tree-node {
+    height: 28px;
+}
+
+.optimize .icon-project-manager {
+    margin-top: 7px;
+    margin-left: 8px;
+}
+
+.optimize .icon-project-group {
+    margin-top: 13px;
+    margin-left: 21px;
+}
+
+.optimize .icon-menu-print,
+.optimize .icon-menu-authority {
+    margin-top: 7px;
+    margin-left: 37px;
+}
+
+.optimize {
+    overflow-y: hidden;
+}
+
+.optimize .datagrid-toolbar .l-btn-icon-left：hover {
+    nav-down: auto;
+}
+
+.optimize .datagrid-toolbar .l-btn:hover {
+    color: #409eff;
+    border: 1px solid #fff;
+    background: none;
+}
+
+.optimize .datagrid-toolbar .l-btn-text:hover {
+    color: #409eff;
+}
+
+/* #mainMenuContent .tree-node {
+    margin-top: 5px;
+} */
+
+.optimize .layout-body #titleup {
+    font-size: 16px;
+    height: 17px;
+    font-family: "微软雅黑";
+    font-weight: bold;
+    color: rgba(74, 90, 127, 1);
+    padding: 0;
+}
+
+.optimize .navigation {
+    margin-top: 18px;
+    height: 32px;
+    line-height: 32px;
+    margin-bottom: 10px;
+    padding: 1px;
+}
+
+.optimize .navigation .l-btn-small {
+    width: 64px;
+    height: 30px;
+    border: 1px solid rgba(179, 216, 255, 1);
+    background: rgba(236, 245, 255, 1);
+    margin-right: 4px;
+}
+
+.optimize .hoverblue:hover {
+    border: 1px solid rgba(64, 158, 255, 1);
+}
+
+.optimize .navigation .delete:hover {
+    border: 1px solid rgba(245, 108, 108, 1);
+}
+
+.optimize .construction .l-btn-icon {
+    background: url(../images/images/addicon.png) no-repeat center
+}
+
+.optimize .delete .l-btn-icon {
+    background: url(../images/images/deleter.png) no-repeat center
+}
+
+.optimize .copy .l-btn-icon {
+    background: url(../images/images/procopy.png) no-repeat center
+}
+
+.optimize .encryption .l-btn-icon {
+    background: url(../images/images/encryption.png) no-repeat center
+}
+
+.optimize .tolead .l-btn-icon {
+    background: url(../images/images/tolead.png) no-repeat center
+}
+
+.optimize .issue .l-btn-icon {
+    background: url(../images/images/issue.png  ) no-repeat center
+}
+
+.optimize .updata .l-btn-icon {
+    background: url(../images/images/updata.png) no-repeat center
+}
+
+.optimize .debugging .l-btn-icon.icon-help {
+    background: url(../images/images/debugging.png) no-repeat center
+}
+
+.optimize .debugging .l-btn-icon {
+    background: url(../images/easyui-icon/move.png) no-repeat center
+}
+
+.optimize .setting .l-btn-icon {
+    background: url(../images/images/addicon.png) no-repeat center
+}
+
+.optimize #mainMenuContent .userManage {
+    background: url(../images/images/userGroup.png) no-repeat center
+}
+
+.optimize #mainMenuContent .dataManage {
+    background: url(../images/images/data_source.png) no-repeat center
+}
+
+.optimize .navigation .l-btn-icon {
+    left: 11px;
+    margin-top: -5px;
+    width: 13px;
+    height: 13px;
+}
+
+.optimize .navigation .l-btn-icon-left {
+    height: 30px;
+    width: 64px;
+}
+
+.optimize .navigation .l-btn-text {
+    width: 30px;
+    height: 13px;
+    color: rgba(64, 158, 255, 1);
+    font-size: 12px;
+    margin-left: 21px;
+    margin-top: 11px;
+    line-height: 13px
+}
+
+.optimize .delete .l-btn-text {
+    color: rgba(245, 108, 108, 1);
+
+}
+
+.optimize .navigation .delete {
+    border: 1px solid rgba(251, 196, 196, 1);
+    background: rgba(254, 240, 240, 1);
+}
+
+.optimize .proListLayOut .panel-header {
+    width: 100px;
+}
+
+.optimize .panel.layout-panel.layout-panel-east.panel-htop.layout-split-east.easyui-fluid {
+    width: 300px !important;
+    box-shadow: rgba(94, 119, 161, 0.28) 0px 0px 22px 0px;
+}
+
+.optimize #proListLayOut .panel.layout-panel.layout-panel-east.panel-htop.layout-split-east {
+    box-shadow: rgba(94, 119, 161, 0.28) 0px 0px 22px 0px;
+}
+/* deleted by tongtong.liao at 2021/01/28 开发主界面属性窗标题不居中 */
+/* .optimize .panel.layout-panel.layout-panel-east.panel-htop.layout-split-east.easyui-fluid>.panel-header>.panel-title,
+.optimize #proListLayOut .panel.layout-panel.layout-panel-east.panel-htop.layout-split-east>.panel-header>.panel-title {
+    margin-top: 12px;
+    margin-left: 10px;
+} */
+
+.optimize .panel.layout-panel.layout-panel-east.panel-htop.layout-split-east.easyui-fluid>.panel-header,
+.optimize #proListLayOut .panel.layout-panel.layout-panel-east.panel-htop.layout-split-east>.panel-header {
+    background: #fff !important;
+    height: 24px;
+    box-shadow:
+        rgba(94, 119, 161, 0.28) 0px 2px 2px 0px;
+    margin-bottom: 7px;
+    padding: 0px;
+}
+
+.optimize .panel.layout-panel.layout-panel-east.panel-htop.layout-split-east.easyui-fluid>.panel-header>.panel-tool,
+.optimize #proListLayOut .panel.layout-panel.layout-panel-east.panel-htop.layout-split-east>.panel-header>.panel-tool {
+    margin-top: -15px;
+}
+
+.optimize .propertygrid .datagrid-group,
+.optimize .propertygrid .datagrid-view1 .datagrid-body,
+.optimize .propertygrid .datagrid-view1 .datagrid-row-over,
+.optimize .propertygrid .datagrid-view1 .datagrid-row-selected {
+    background: #fff;
+}
+
+.optimize .datagrid-body-inner>.datagrid-group {
+    border-width: none;
+    border-style: none;
+}
+
+.optimize .datagrid-body-inner .datagrid-row.datagrid-row-editing.datagrid-row-checked.datagrid-row-selected {
+    background: #fff;
+}
+
+.optimize .panel.datagrid.panel-htop.propertygrid.easyui-fluid .datagrid-group>.datagrid-group-title {
+    width: 49px;
+    height: 12px;
+    font-size: 12px;
+    font-family: "微软雅黑";
+    font-weight: 400;
+    color: rgba(64, 66, 68, 1);
+    line-height: 12px;
+    margin-left: 6px;
+}
+
+.optimize .datagrid-view>.datagrid-view1.datagrid-header {
+    border-style: none;
+}
+
+.optimize .datagrid-view2>.datagrid-header {
+    border-width: none;
+    border-style: none;
+    /* border-top: 1px solid rgba(210, 210, 210, 1);
+    border-left: 1px solid rgba(210, 210, 210, 1);
+    border-bottom: 1px solid rgba(210, 210, 210, 1); */
+}
+
+/* .optimize .datagrid-btable {
+    border-left: 1px solid rgba(210, 210, 210, 1);
+} */
+
+.optimize .datagrid-header {
+    border-style: none;
+
+}
+
+.optimize .datagrid-header td,
+.optimize .datagrid-body td,
+.optimize .datagrid-footer td {
+    /* padding-left: 10px; */
+    font-size: 14px;
+    color: rgba(96, 98, 102, 1);
+    font-weight: 400
+}
+
+.optimize .titlecenter>.panel.datagrid.panel-htop.easyui-fluid {
+    border-radius: 4px 4px 0px 0px;
+
+}
+
+.optimize .titlecenter .panel.datagrid.panel-htop.easyui-fluid .datagrid-view2 .datagrid-htable {
+    width: 100%;
+}
+
+.optimize .titlecenter .panel.datagrid.panel-htop.easyui-fluid .datagrid-view2 .datagrid-header-inner {
+    width: 100%;
+}
+
+.optimize .titlecenter .panel.datagrid.panel-htop.easyui-fluid .datagrid-view2 .datagrid-btable {
+    width: 100%;
+
+}
+
+.optimize .panel.datagrid.panel-htop.propertygrid.easyui-fluid {
+    border: none;
+}
+
+/* added by hang.su at 2020/10/14 for bug 6810 系统脚本点击确认出现弹窗仍可操作 */
+.optimize .container {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    top: 0;
+    left: 0;
+    background: rgba(229, 229, 229, .1);
+    z-index: 9999;
+}
+
+/* end */
+.optimize .deletepopup {
+    width: 350px;
+    height: 134px;
+    background: rgba(255, 255, 255, 1);
+    position: absolute;
+    top: 35%;
+    left: 35%;
+    border-radius: 4px;
+    box-shadow: 0px 4px 18px 0px rgba(0, 0, 0, 0.17);
+    padding: 15px 30px;
+    z-index: 9999;
+}
+
+.optimize .deletespan {
+    width: 50%;
+    height: 14px;
+    font-size: 14px;
+    font-family: "微软雅黑";
+    font-weight: bold;
+    color: rgba(64, 66, 68, 1);
+    line-height: 14px;
+    position: relative;
+    display: block;
+    float: left;
+}
+
+.optimize .deleteclose {
+    width: 12px;
+    height: 14px;
+    background: url('../images/images/close.png');
+    background-repeat: no-repeat;
+    position: relative;
+    float: right;
+}
+
+.optimize .delectwith {
+    width: 350px;
+    height: 4px;
+    background: rgba(240, 240, 240, 1);
+    position: relative;
+    left: 0px;
+    top: 25px;
+
+}
+
+.optimize .deletewarning {
+    width: 23px;
+    height: 18px;
+    background: url('../images/images/deletewarning.png');
+    background-repeat: no-repeat;
+    float: left;
+}
+
+.optimize .delectreminder {
+    width: 266px;
+    height: 15px;
+    font-size: 14px;
+    font-family: "微软雅黑";
+    font-weight: 400;
+    color: rgba(96, 98, 102, 1);
+    display: block;
+    float: left;
+    margin-left: 12px;
+
+}
+
+.optimize .deletecenter {
+    width: 350px;
+    height: 84px;
+    position: relative;
+    top: 36px;
+    overflow: hidden;
+}
+
+.optimize .canceldiv {
+    width: 60px;
+    height: 32px;
+    background: rgba(255, 255, 255, 1);
+    border: 1px solid rgba(229, 229, 229, 1);
+    border-radius: 4px;
+    float: right;
+    margin-top: 31px;
+    margin-right: 9px;
+}
+
+.optimize .countersigndiv {
+    width: 60px;
+    height: 32px;
+    background: rgba(236, 245, 255, 1);
+    border: 1px solid rgba(179, 216, 255, 1);
+    border-radius: 4px;
+    float: right;
+    margin-top: 31px;
+}
+
+.optimize .delectcancel,
+.optimize .delectcountersign {
+    width: 25px;
+    height: 32px;
+    font-size: 12px;
+    font-family: "微软雅黑";
+    font-weight: 400;
+    line-height: 32px;
+    margin-left: 18px;
+}
+
+.optimize .delectcancel {
+    color: rgba(96, 98, 102, 1);
+}
+
+.optimize .delectcountersign {
+    color: rgba(64, 158, 255, 1);
+}
+
+.optimize .chooseproject,
+.chooseproject {
+    width: 400px;
+    height: 48px;
+    background: rgba(255, 255, 255, 1);
+    position: absolute;
+    top: 5.7%;
+    left: 35%;
+    border-radius: 4px;
+    box-shadow: 0px 4px 18px 0px rgba(0, 0, 0, 0.17);
+    z-index: 9999;
+}
+
+.optimize .reminderwarning,
+.reminderwarning {
+    width: 24px;
+    height: 24px;
+    background: url('../images/images/reminderwarning.png');
+    background-repeat: no-repeat;
+    float: left;
+    margin-top: 14px;
+    margin-left: 20px;
+}
+
+.optimize .reminderwarning.successed {
+    background: url('../images/images/success_0728.png');
+}
+
+.optimize .reminderreminder {
+    width: 266px;
+    height: 48px;
+    font-size: 14px;
+    font-family: "微软雅黑";
+    font-weight: 400;
+    color: rgba(96, 98, 102, 1);
+    display: block;
+    float: left;
+    margin-left: 12px;
+    line-height: 48px;
+}
+
+.optimize .panel.window.panel-htop {
+    background: #fff;
+    box-shadow: 0px 4px 18px 0px rgba(0, 0, 0, 0.17);
+    border-radius: 4px;
+    border: none;
+}
+
+.optimize .panel-header.panel-header-noborder.window-header {
+    background: #ffffff;
+    margin-top: 0;
+    height: 14px;
+    padding: 0px;
+    margin-bottom: 11px;
+}
+
+.optimize .panel-header.panel-header-noborder.window-header>.panel-title {
+    margin-top: 0px;
+}
+
+.optimize .panel-header-noborder.window-header>.panel-title {
+    font-size: 14px;
+    font-weight: bold;
+    color: rgba(64, 66, 68, 1);
+}
+
+/* .centerinterval {
+    width: 350px;
+    height: 4px;
+    background: rgba(240, 240, 240, 1);
+    margin-left: 28px;
+    margin-bottom: 14px;
+} */
+
+.optimize #newProjectDialog {
+    border: none;
+    width: 350px;
+}
+
+.optimize #pageFooterOfNewProject {
+    background: #ffffff;
+    border: none;
+}
+
+.optimize #newBuildProjectConcle,
+.optimize #newProjectConfirm,
+.optimize .cancelBtn,
+.optimize .confirmBtn,
+.optimize .cancelButton,
+.optimize .confirmButton,
+.optimize .parojectconfirm,
+.optimize .projectcanel,
+.optimize #newpopup-margin-left,
+.optimize #newpopup-margin-right {
+    height: 32px;
+    width: 60px;
+    border: 1px solid rgba(229, 229, 229, 1);
+    border-radius: 4px;
+}
+
+.optimize #newBuildProjectConcle,
+.optimize .cancelBtn,
+.optimize .projectcanel {
+    background: #ffff;
+}
+
+.optimize #newProjectConfirm {
+    background: rgba(179, 216, 255, 1);
+    margin-right: 11px;
+}
+
+.optimize .confirmBtn,
+.optimize .parojectconfirm,
+.optimize #newpopup-margin-right {
+    background: rgba(179, 216, 255, 1);
+    float: right;
+}
+
+.optimize .cancelBtn {
+    float: left;
+    margin-left: 290px;
+}
+
+.optimize #newProjectConfirm .l-btn-text,
+.optimize .confirmBtn,
+.optimize #newpopup-margin-right {
+    line-height: 34px;
+    color: rgba(64, 158, 255, 1);
+    font-weight: 400;
+    font-family: "微软雅黑";
+}
+
+.optimize #newBuildProjectConcle .l-btn-text,
+.optimize .cancelBtn,
+.optimize #newpopup-margin-left {
+    line-height: 34px;
+    color: rgb(96, 98, 102, 1);
+    font-weight: 400;
+    font-family: "微软雅黑";
+}
+
+.optimize .confirmButton,
+.optimize .parojectconfirm {
+    background: rgba(179, 216, 255, 1);
+    line-height: 30px;
+    color: rgba(64, 158, 255, 1);
+    font-weight: 400;
+    font-family: "微软雅黑";
+}
+
+.optimize .cancelButton,
+.optimize .projectcanel {
+    line-height: 30px;
+    color: rgb(96, 98, 102, 1);
+    background: rgba(255, 255, 255, 1);
+    font-weight: 400;
+    font-family: "微软雅黑";
+}
+
+.optimize .panel-tool>.panel-tool-close {
+    background: url('../images/images/Newclose.png') no-repeat center center;
+}
+
+.optimize .panel.window.panel-htop.easyui-fluid>.panel-header.panel-header-noborder.window-header>.panel-tool>.panel-tool-close {
+    background: url('../images/images/Newclose.png') no-repeat center center;
+}
+
+.optimize .panel-tool>.panel-tool-max {
+    background: url('../images/images/maxiMize3.png') no-repeat center center;
+}
+
+/* added by tongtong.liao at 2020/09/15 for bug 6089 工程配置放大和缩小框按钮相同*/
+.optimize .panel-tool>.panel-tool-max.panel-tool-restore {
+    background: url('../images/images/maximize.png') no-repeat center center;
+    opacity: 0.8;
+    filter: alpha(opacity=80);
+}
+
+.optimize #projectSearchText #_easyui_textbox_input2 {
+    height: 30px;
+    line-height: 30px;
+    font-size: 12px;
+    font-family: "微软雅黑";
+    font-weight: 400;
+    color: rgba(144, 146, 153, 1);
+}
+
+.optimize .textbox.searchbox {
+    border: 1px solid rgba(210, 210, 210, 1);
+    border-radius: 4px;
+}
+
+.optimize .datagrid-btable td div {
+    text-overflow: ellipsis;
+}
+
+.optimize #centerhover .panel.datagrid.panel-htop.easyui-fluid .datagrid-view2 .datagrid-body tr:hover {
+    background: rgba(238, 238, 238, 1);
+}
+
+.optimize .datagrid-row-selected {
+    background: rgba(238, 238, 238, 1) !important;
+}
+
+.optimize .datagrid-body .datagrid-btable tr:hover {
+    background: rgba(238, 238, 238, 1);
+}
+
+.optimize #mainMenuContent .tree-node:hover {
+    background: rgba(238, 238, 238, 1);
+}
+
+.optimize .tree-node-selected {
+    background: #e3eeff !important;
+    color: #106ff8 !important;
+
+}
+
+.optimize .tree-node-selected .tree-title {
+    color: #106ff8 !important;
+}
+
+.optimize #mainMenuContent {
+    margin-top: 10px;
+}
+
+.optimize #centerhover .datagrid-pager.pagination,
+.optimize .project-variable-grid-pagination.pagination,
+.optimize .pagination {
+    background: rgba(255, 255, 255, 1);
+    border-radius: 4px;
+    /* margin-top: 13px; delete by yaping.feng at 2020.09.09 for 分页 */
+    border-style: none;
+    height: 40px;
+    font-size: 14px;
+    font-family: "微软雅黑";
+    font-weight: 400;
+    color: rgba(96, 98, 102, 1);
+    padding: 0;
+
+}
+
+.optimize .datagrid-pager.pagination .pagination-page-list,
+.optimize .project-variable-grid-pagination.pagination .pagination-page-list,
+.optimize .pagination .pagination-page-list {
+    width: 75px;
+    height: 30px;
+    background: rgba(255, 255, 255, 1);
+    border: 1px solid rgba(229, 229, 229, 1);
+    border-radius: 3px 3px 3px 3px;
+    margin: 5px 10px;
+    margin-left: 0px;
+    padding-left: 13px;
+    padding-right: 5px;
+    font-size: 14px;
+    font-family: "微软雅黑";
+    font-weight: 400;
+    color: rgba(96, 98, 102, 1);
+}
+
+.optimize .datagrid-pager.pagination a .l-btn-icon {
+    height: 33px;
+    line-height: 33px;
+}
+
+.optimize #centerhover .datagrid-pager.pagination .l-btn-left.l-btn-icon-left,
+.optimize .project-variable-grid-pagination.pagination .l-btn-left.l-btn-icon-left,
+.optimize .pagination .l-btn-left.l-btn-icon-left {
+    width: 20px;
+}
+
+.optimize #centerhover .datagrid-pager.pagination .pagination-btn-separator,
+.optimize .project-variable-grid-pagination.pagination .pagination-btn-separator,
+.optimize .pagination .pagination-btn-separator {
+    margin: 3px 5px;
+    height: 14px;
+}
+
+.optimize .datagrid-pager.pagination .pagination-num,
+.optimize .project-variable-grid-pagination.pagination .pagination-num,
+.optimize .pagination .pagination-num {
+    width: 46px;
+    height: 26px;
+    background: rgba(255, 255, 255, 1);
+    border: 1px solid rgba(229, 229, 229, 1);
+    border-radius: 3px 3px 3px 3px;
+    margin: 0 10px;
+}
+
+.optimize #centerhover .datagrid-pager.pagination .pagination-info {
+    line-height: 42px;
+}
+
+.optimize #centerhover .datagrid-view {
+    /* width: 1350px;
+    height: 224px; */
+    border: 1px solid rgba(210, 210, 210, 1);
+    right: 1px;
+    bottom: 1px;
+    /* border-radius: 4px; */
+}
+
+.optimize #allDiv {
+    height: 30px;
+    width: 64px;
+    background: rgba(236, 245, 255, 1);
+    border: 1px solid rgba(179, 216, 255, 1);
+    border-radius: 4px;
+    padding: 0;
+    margin-right: 0;
+}
+
+.optimize #notexploit {
+    height: 30px;
+    width: 64px;
+    padding: 0;
+    margin-right: 0;
+    background-color: rgba(244, 244, 245, 1);
+    border: 1px solid rgba(211, 212, 214, 1);
+    border-radius: 4px;
+
+
+}
+
+.optimize .notexploitspan {
+    color: rgba(144, 146, 153, 1);
+    font-weight: 400;
+    font-family: "微软雅黑";
+    font-size: 12px;
+    float: left;
+    height: 32px;
+    line-height: 32px;
+    width: 65px;
+    text-align: center;
+    background-position: 10px;
+    padding-left: 10px;
+}
+
+.optimize #delDIV {
+    height: 30px;
+    width: 64px;
+    background: rgba(254, 240, 240, 1);
+    border: 1px solid rgba(251, 196, 196, 1);
+    border-radius: 4px;
+    padding: 0;
+    margin-right: 0px;
+}
+
+.optimize #redDelete {
+    background: rgba(254, 240, 240, 1) !important;
+    border: 1px solid rgba(251, 196, 196, 1) !important;
+}
+
+.optimize #redDelete .l-btn-text {
+    color: rgba(245, 108, 108, 1) !important;
+}
+
+.optimize .allImg {
+    left: 11px;
+    margin-top: 5px;
+    width: 20px;
+    height: 20px;
+    background-position: 5px 5px;
+    float: left;
+    margin-right: 4px;
+    margin-left: 4px;
+}
+
+.optimize .addBtnImg {
+    background: url(../images/images/addicon.png) no-repeat left;
+
+}
+
+.optimize .elBtnImg {
+    background: url(../images/images/deleter.png) no-repeat center;
+}
+
+.optimize .editBtnImg {
+    background: url(../images/images/procopy.png) no-repeat center;
+}
+
+.optimize .importImg {
+    background: url(../images/images/tolead.png) no-repeat center;
+}
+
+
+.optimize .notimportImg {
+    background: url(../images/images/notexportImg.png) no-repeat center;
+    background-position: 10px;
+}
+
+
+.optimize .exportImg {
+    background: url(../images/images/derive.png) no-repeat center;
+}
+
+.optimize .notexportImg {
+    background: url(../images/images/notimportImg.png) no-repeat center;
+    background-position: 10px;
+
+}
+
+.optimize .cutBtnImg {
+    background: url(../images/images/tolead.png) no-repeat center;
+}
+
+.optimize .copyBtnImg {
+    background: url(../images/images/procopy.png) no-repeat center;
+}
+
+.optimize .pasteBtnImg {
+    background: url(../images/images/tolead.png) no-repeat center;
+}
+
+.optimize .addNextImg {
+    width: 100px !important;
+    background: url(../images/images/tolead.png) no-repeat center;
+}
+
+.optimize .quickAddImg {
+    width: 90px !important;
+    background: url(../images/images/tolead.png) no-repeat center;
+}
+.optimize .updatePageImg {
+    width: 90px !important;
+    background: url(../images/images/updata.png) no-repeat center;
+}
+
+.optimize .resourceMngRoleImg {
+    background: url(../images/images/tolead.png) no-repeat center;
+}
+
+/* modified by he.chai at 2020/12/15 for bug8553:  图形模型库重命名图标错误 */
+.optimize .renameImg {
+    background: url('../images/easyui-icon/custom-edit.png') no-repeat center;
+}
+
+.optimize .allspan {
+    color: rgba(64, 158, 255, 1);
+    font-weight: 400;
+    font-family: "微软雅黑";
+    font-size: 12px;
+    float: left;
+    height: 32px;
+    line-height: 32px;
+    width: 65px;
+    text-align: center;
+    background-position: 10px;
+    padding-left: 10px;
+}
+
+.optimize .allspan.elBtnSpanRed {
+    color: rgba(245, 108, 108, 1);
+}
+
+.optimize .panel.window.panel-htop.easyui-fluid .panel-tool {
+    /* width: 56px;*/
+    width: 20px;
+    /* add by xing.li for bug[5482]{工程管理界面最大化后，点击收起左侧菜单栏后不可恢复} 2020/08/26 */
+    height: 18px;
+}
+
+.optimize .panel.window.panel-htop.easyui-fluid .panel-tool .panel-tool-max {
+    /* margin-right: 20px; */
+    margin-right: 16px;
+}
+
+/* add by xing.li for bug[5479]{工程管理界面最大化视图只有一半} 2020/08/26 */
+.optimize .panel.window.panel-htop.easyui-fluid .panel-tool .panel-tool-close {
+    margin-right: 0px;
+}
+
+/* end */
+
+.optimize .panel-body.panel-body-noborder.window-body.panel-noscroll {
+    border: 0;
+}
+
+.optimize #addnextbutton,
+.optimize #quickAddButton,
+.optimize #resourceMngRoleBtn,
+.optimize #updatePageButton,
+.optimize #renamediv {
+    height: 30px;
+    background: rgba(236, 245, 255, 1);
+    border: 1px solid rgba(179, 216, 255, 1);
+    border-radius: 4px;
+    padding: 0;
+    margin-right: 0;
+}
+
+.optimize #addnextbutton {
+    width: 100px;
+}
+
+
+.optimize #quickAddButton {
+    width: 90px;
+}
+
+.optimize #resourceMngRoleBtn {
+    width: 90px;
+}
+
+.optimize #renamediv {
+    width: 80px;
+}
+.optimize #updatePageButton {
+    width: 90px;
+}
+.optimize .panel.window.panel-htop.easyui-fluid {
+    padding-right: 10px;
+    padding-left: 5px;
+    width: 1400px;
+    /* height: 325px;  */
+    /* add by xing.li for bug[5479]{工程管理界面最大化视图只有一半} 2020/08/26 */
+    background: rgba(255, 255, 255, 1);
+    box-shadow: 0px 4px 18px 0px rgba(0, 0, 0, 0.17);
+    border-radius: 4px;
+}
+
+.optimize .panel-header.panel-header-noborder.window-header {
+    height: 30px;
+    padding-bottom: 11px;
+    margin-left: 25px;
+    margin-right: 25px;
+}
+
+.optimize .panel.window.panel-htop .panel-header.panel-header-noborder.window-header {
+    border-bottom: 2px solid rgba(240, 240, 240, 1);
+}
+
+.optimize .panel-header.panel-header-noborder.window-header>.panel-title {
+    width: 100%;
+    height: 28px;
+    font-size: 14px;
+    font-family: "微软雅黑";
+    font-weight: bold;
+    color: rgba(64, 66, 68, 1);
+    line-height: 14px;
+    margin-left: 0;
+    text-align: -webkit-left;
+    padding-top: 14px;
+}
+
+.optimize .panel.layout-panel.layout-panel-west.panel-htop>.panel-header {
+    height: 43px;
+    background: rgba(241, 241, 241, 1);
+    border-bottom: 1px solid rgba(210, 210, 210, 1);
+}
+
+.optimize .panel.layout-panel.layout-panel-west.panel-htop {
+    margin-top: 0;
+}
+
+.optimize .panel.layout-panel.layout-panel-west.panel-htop .panel-header {
+    padding: 0;
+    margin-top: 0;
+}
+
+.optimize .panel.layout-panel.layout-panel-west.panel-htop .panel-header .panel-title {
+    margin-top: 0;
+    height: 43px;
+    margin-left: auto;  /* modified by tongtong.liao at 2021/01/28 */
+    color: #202222;
+    line-height: 43px;
+}
+
+.optimize .panel.window.panel-htop.easyui-fluid .panel-title {
+    margin-left: 11px;
+}
+
+.optimize #devvarDialog .panel.layout-panel.layout-panel-west.panel-htop .panel-header .panel-tool {
+    right: 7px;
+    width: 15px;
+}
+
+.optimize .panel.window.panel-htop.easyui-fluid {
+    width: 1340px;
+}
+
+.optimize .devvar {
+    padding: 0 25px;
+}
+
+.optimize .panel.window.panel-htop>.panel-header.panel-header-noborder.window-header>.panel-tool {
+    width: 52px;
+    text-align: right;
+}
+
+.optimize .panel-header.panel-header-noborder.window-header .panel-tool .panel-tool-max {
+    margin-right: 15px;
+}
+
+/* add by xing.li for bug[5479]{工程管理界面最大化视图只有一半} 2020/08/26 */
+.optimize .panel-header.panel-header-noborder.window-header .panel-tool .panel-tool-close {
+    margin-right: 0px;
+}
+
+/* end */
+
+.optimize .projectConfiguration #_easyui_tree_6 .tree-hit.tree-expanded {
+    background: url(../images/images/menu_arrows.png) no-repeat -3px 0px;
+    margin-left: 11px;
+}
+
+.optimize .projectConfiguration #_easyui_tree_6 .tree-hit.tree-collapsed {
+    background: url(../images/images/menu_arrows.png) no-repeat -32px 0px;
+    margin-left: 11px;
+    margin-top: 4px;
+}
+
+.optimize .projectConfiguration .tree-title {
+    margin-top: 0px;
+}
+
+.optimize .projectConfiguration {
+    margin-top: 16px;
+    height: 92% !important;
+}
+
+.optimize .projectConfiguration #tree li .tree-hit.tree-collapsed {
+    margin-left: 12px;
+    background: url(../images/images/unfold.png) no-repeat 6px 5px;
+    margin-top: 5px;
+}
+
+.optimize .projectConfiguration #tree li .tree-hit.tree-expanded {
+    margin-left: 12px;
+    background: url(../images/images/unfold.png) no-repeat 0px 5px;
+}
+
+.optimize .projectConfiguration #tree li .tree-title {
+    line-height: 28px;
+    font-size: 14px;
+    color: rgba(64, 66, 68, 1);
+    font-family: "微软雅黑";
+}
+
+.optimize .projectConfiguration #tree li .tree-indent.tree-line,
+.optimize .tree-indent.tree-joinbottom,
+.optimize .tree-indent.tree-join {
+    background: none;
+}
+
+.optimize .projectConfiguration li .tree-node:hover {
+    background: rgba(238, 238, 238, 1)
+}
+
+.optimize .devGroupTree .panel.layout-panel.layout-panel-west.panel-htop {
+    height: 99.7%;
+    background: rgba(255, 255, 255, 1);
+    border: 1px solid rgbA(229, 229, 229, 1);
+    margin-right: 10px;
+}
+
+.optimize .topBarTop {
+    width: 1000px;
+    height: 20px;
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+.newpagination .l-btn-icon {
+    top: 0px !important;
+}
+
+.optimize .topBarBottom {
+    width: 950px;
+    height: 44px;
+    position: absolute;
+    top: 24px;
+    left: -9px;
+}
+
+.optimize .topBarBottom .km-btn {
+    float: left;
+}
+
+.optimize #top-bar {
+    padding: 0px;
+    border: none;
+    height: 70px;
+}
+
+.optimize .devGroupTree .panel.layout-panel.layout-panel-center.panel-htop {
+    margin-left: 10px;
+    outline: none;
+    overflow-x: auto;
+    height: 100%;
+}
+
+.optimize .devGroupTree .page-mng-grid-container.panel-noscroll,
+.optimize .kmui-datasource-mng-container .page-mng-grid-container,
+.optimize .panel-body.panel-body-noheader.layout-body .page-mng-grid-container.panel-noscroll {
+    top: 77px;
+    /* add by ying.wu for bug 9145 客户端工程配置页面缩小后不会自适应，直接将原图截断，导致滑块无效 */
+    width: 950px;
+    /* height: 80%; */
+}
+
+.optimize .topBarTop .kmui-page-list-top-bar-title-span {
+    width: 61px;
+    height: 15px;
+    font-size: 14px;
+    font-family: "微软雅黑";
+    font-weight: bold;
+    color: rgba(74, 90, 127, 1);
+}
+
+.optimize .topBarTop .kmui-page-list-top-bar-number-span {
+    height: 12px;
+    font-size: 12px;
+    font-family: "微软雅黑";
+    font-weight: 400;
+    color: rgba(128, 130, 136, 1);
+}
+
+.optimize .devGroupTree .l-btn-icon {
+    top: 10px;
+}
+
+.optimize .kmui-datasource-mng-container>.kmui-page-list-top-bar,
+.optimize .panel-body.panel-body-noheader.layout-body .kmui-page-list-top-bar {
+    border-bottom: none;
+}
+
+.optimize .projectSearch {
+    height: 40px;
+    width: 100%;
+    padding: 5px 10px;
+    box-sizing: border-box;
+    position: absolute;
+    left: 850px;
+    top: 29px;
+    right: 0px;
+}
+
+.optimize .projectSearch #_easyui_textbox_input5 {
+    font-size: 12px;
+    font-family: "微软雅黑";
+    font-family: 400;
+    color: rgba(144, 146, 153, 1);
+}
+
+.optimize .page-mng-this-element.panel-noscroll .panel.layout-panel.layout-panel-center.panel-htop {
+    margin-left: 0px;
+}
+
+.optimize .panel.layout-panel.layout-panel-north.panel-htop.easyui-fluid {
+    height: 70px;
+}
+
+.optimize .center_page_mng_grid {
+    margin-top: 27px;
+    border: none;
+}
+
+.optimize .page-mng-this-element {
+    outline: none;
+}
+
+.optimize .km-popupWrap .km-popup {
+    width: 440px;
+}
+
+.optimize #devGroupTreeLayout .easyui-linkbutton.l-btn.l-btn-small {
+    height: 30px;
+    width: 64px;
+    background: rgba(236, 245, 255, 1);
+    border: 1px solid rgba(179, 216, 255, 1);
+    border-radius: 4px;
+    padding: 0;
+    margin-right: 10px;
+    margin-bottom: 20px;
+}
+
+.optimize #devGroupTreeLayout .easyui-linkbutton.l-btn.l-btn-small .l-btn-left .l-btn-text {
+    color: rgba(64, 158, 255, 1);
+    font-weight: 400;
+    font-family: "微软雅黑";
+    font-size: 12px;
+    height: 32px;
+    line-height: 32px;
+    margin-top: 0px;
+    margin-left: 30px;
+
+}
+
+.optimize #devGroupTreeLayout .easyui-linkbutton.l-btn.l-btn-small .l-btn-left .l-btn-icon {
+    margin-top: -3px;
+    margin-left: 3px;
+}
+
+.optimize .km-gloScriptEditor-btn-icon.l-btn.l-btn-small {
+    width: 32px;
+    height: 32px;
+    border: 1px solid rgba(210, 210, 210, 1);
+    border-radius: 4px;
+}
+
+.optimize .km-gloScriptEditor-btn-icon.l-btn.l-btn-small .l-btn-left.l-btn-icon-left {
+    margin-top: 8px;
+    height: 16px;
+}
+
+/* .optimize #allpage-mng .datagrid-view2 .datagrid-body {
+    height: 450px !important;
+    width: 1151px !important;
+} */
+
+.optimize .notExploit {
+    background-color: rgba(244, 244, 245, 1) !important;
+    border: 1px solid rgba(211, 212, 214, 1) !important;
+    border-radius: 4px;
+
+}
+
+.optimize .notExploit .l-btn-text {
+    color: rgba(144, 146, 153, 1);
+}
+
+.optimize .notExploit .l-btn-icon.icon-ok {
+    background: url(../images/images/notProcopy.png) no-repeat center;
+}
+
+.optimize .notExploit .l-btn-icon.icon-lock {
+    background: url(../images/images/notEncryption.png) no-repeat center;
+}
+
+.optimize .textbox-addon.textbox-addon-right .searchbox-button {
+    background: url(../images/images/searchNew.png) no-repeat center;
+}
+
+.optimize .l-btn-icon.pagination-first {
+    background: url(../images/images/leftpage_0724.png) no-repeat center;
+}
+
+.optimize .l-btn-icon.pagination-prev {
+    background: url(../images/images/left_0724.png) no-repeat center;
+}
+
+.optimize .l-btn-icon.pagination-next {
+    background: url(../images/images/right_0724.png) no-repeat center;
+}
+
+.optimize .l-btn-icon.pagination-last {
+    background: url(../images/images/rightpage_0724.png) no-repeat center;
+}
+
+.optimize .l-btn-icon.pagination-load {
+    background: url(../images/images/refleshpage_0724.png) no-repeat center;
+}
+
+.optimize .l-btn.l-btn-small.l-btn-plain:hover {
+    border: 1px solid #fff;
+    background: #fff;
+
+}
+
+.optimize .l-btn.l-btn-small.l-btn-plain {
+    outline: none;
+    border: none;
+}
+
+.optimize .panel.layout-expand.layout-expand-west.panel-htop .panel-header {
+    background: rgba(227, 238, 255, 1);
+    /* modified by ying.wu for bug 6963 权限配置界面样式异常 2020/10/20*/
+    /* border-bottom: 1px solid rgba(104, 186, 255, 1); */
+    /*end*/
+}
+
+.optimize .panel.layout-expand.layout-expand-east.panel-htop .layout-button-left {
+    background: url(../images/images/layout-left_0730.png) no-repeat center;
+}
+
+.optimize .panel.layout-expand.layout-expand-east.panel-htop .panel-header {
+    box-shadow: 0px 1px 0px 0px rgba(210, 210, 210, 1);
+}
+
+.optimize .panel-body.panel-body-noborder.window-body.NewProject {
+    border: none;
+    height: 210px !important;
+}
+
+.optimize #pageFooterGroup {
+    background: #fff;
+    border: none;
+}
+
+.optimize #newGroupConfirm {
+    background: rgba(179, 216, 255, 1);
+    margin-right: 11px;
+    line-height: 34px;
+    color: rgba(64, 158, 255, 1);
+    font-weight: 400;
+    font-family: "微软雅黑";
+    width: 62px;
+    height: 34px;
+    border: 1px solid rgba(179, 216, 255, 1);
+    line-height: 34px;
+    border-radius: 4px;
+
+}
+
+.optimize #newGroupConfirm .l-btn-text,
+.optimize #newGroupCancle .l-btn-text {
+    line-height: 36px;
+}
+
+
+.optimize #newGroupCancle {
+    background: #ffff;
+    height: 34px;
+    width: 62px;
+    font-family: "微软雅黑";
+    font-weight: 400;
+    border: 1px solid rgba(229, 229, 229, 1);
+    border-radius: 4px;
+    line-height: 34px;
+}
+
+.optimize .datagrid-row-over,
+.optimize .datagrid-header td.datagrid-header-over {
+    background: rgba(243, 243, 243) !important;
+    color: rgba(96, 98, 102, 1);
+}
+
+.optimize .panel.window.panel-htop.easyui-fluid>.panel-header.panel-header-noborder.window-header {
+    border-bottom: 2px solid rgba(240, 240, 240, 1);
+}
+
+.optimize .panel.window.panel-htop.easyui-fluid>.panel-header.panel-header-noborder.window-header .panel-title {
+    margin-left: 0px;
+}
+
+.optimize .datagrid-wrap.panel-body.panel-body-noheader {
+    padding: 1px;
+}
+
+
+
+.optimize .Newdatas {
+    width: 97%;
+    height: 310px;
+    background: rgba(255, 255, 255, 1);
+    position: absolute;
+    top: 186px;
+    z-index: 1;
+    left: 241px;
+    border: 1px solid rgba(210, 210, 210, 1);
+
+
+}
+
+.optimize .Newdatasimage {
+    background: url(../images/images/NOinformation.png) no-repeat center;
+    width: 90px;
+    height: 90px;
+    margin-top: 90px;
+    margin-left: 641px;
+    margin-bottom: 15px;
+}
+
+.optimize .Newdatasspan {
+    width: 57px;
+    height: 15px;
+    font-size: 14px;
+    font-family: "微软雅黑";
+    font-weight: 400;
+    color: rgba(179, 181, 188, 1);
+    margin-left: 663px;
+}
+
+.optimize .NewPageDatas.Newdatas {
+    width: 99.5%;
+    top: 105px;
+    left: 1px;
+}
+
+.optimize .NewPageImage.Newdatasimage {
+    margin-left: 530px;
+}
+
+.optimize .NewPageSpan.Newdatasspan {
+    margin-left: 551px;
+}
+
+/* 气泡 */
+.optimize #mytitle,
+.optimize #mytitleright {
+    position: absolute;
+    color: #000;
+    max-width: 400px;
+    font-size: 14px;
+    line-height: 28px;
+    padding: 0 7px;
+    background: #fff;
+    border: 1px solid #e9f7f6;
+    border-radius: 5px;
+    box-shadow: 0px 5px 5px 0px rgba(94, 119, 161, 0.28);
+    z-index: 999999;
+}
+
+.optimize #mytitleright {
+    position: absolute;
+    color: #000;
+    max-width: 400px;
+    font-size: 14px;
+    line-height: 28px;
+    padding: 0 7px;
+    background: #fff;
+    border: 1px solid #e9f7f6;
+    border-radius: 5px;
+    box-shadow: 0px 5px 5px 0px rgba(94, 119, 161, 0.28);
+}
+
+.optimize #mytitleright {
+    z-index: 999999;
+}
+
+.optimize .datagrid-body .datagrid-body-inner .datagrid-row.datagrid-row-over {
+    background: #fff !important;
+}
+
+.optimize .bar-wrap,
+.bar-wrap {
+    width: 450px;
+    height: 36px;
+    position: absolute;
+    top: 40%;
+    left: 40%;
+    background: #eee;
+    border-radius: 23px;
+    border: 5px solid #fff;
+    box-shadow: 0px 4px 18px 0px rgba(0, 0, 0, 0.17);
+}
+
+.optimize .bar-warning,
+.bar-warning {
+    position: relative;
+    border-radius: 18px;
+    width: 10%;
+    height: 36px;
+    background-color: #fff;
+    border: 1px solid #93c6FF;
+    background-size: 3em 3em;
+    background-image: linear-gradient(-45deg, transparent 0em, transparent 0.8em, #93c6FF 0.9em, #93c6FF 2.1em, transparent 2.1em, transparent 2.9em, #93c6FF 3.1em);
+}
+
+.optimize .bar-warning.animation,
+.bar-warning.animation {
+    -webkit-animation: warning-animation 750ms infinite linear;
+    -moz-animation: warning-animation 750ms infinite linear;
+    animation: warning-animation 750ms infinite linear;
+}
+
+.optimize .bar-warning.animation:before,
+.bar-warning.animation:before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 100%;
+}
+
+@-webkit-keyframes warning-animation {
+    0% {
+        background-position: 0 0;
+    }
+
+    100% {
+        background-position: 3em 0;
+    }
+}
+
+@-moz-keyframes warning-animation {
+    0% {
+        background-position: 0 0;
+    }
+
+    100% {
+        background-position: 3em 0;
+    }
+}
+
+@keyframes warning-animation {
+    0% {
+        background-position: 0 0;
+    }
+
+    100% {
+        background-position: 3em 0;
+    }
+}
+
+.optimize #exportdatagrid .datagrid-wrap.panel-body.panel-body-noheader {
+    width: auto;
+}
+
+.optimize .panel.datagrid.panel-htop {
+    margin-left: 0px;
+}
+
+.optimize .km-popupWrap #exportproject {
+    background-color: rgba(255, 255, 255, 1) !important;
+    box-shadow: 0px 4px 18px 0px rgba(0, 0, 0, 0.17);
+    border-radius: 4px;
+    border: none;
+}
+
+/* 滚动条 */
+.optimize .datagrid-body::-webkit-scrollbar {
+    position: absolute;
+    width: 4px;
+}
+
+/* add by jie.li 2021-7-26 13015 【博大实地】【Windows1015】客户端建变量，映射变量，选择变量，变量很多的情况下需要拖动滚动条，但是滚动条很难选中 */
+.optimize #newpopuppanel .datagrid-body::-webkit-scrollbar {
+    position: absolute;
+    width: 20px;
+}
+
+.optimize .datagrid-body::-webkit-scrollbar-thumb {
+    height: 20px;
+    border-radius: 2.5px;
+    background-color: #d4d4d4;
+}
+
+
+.optimize .datagrid-body::-webkit-scrollbar-thumb:hover {
+    background-color: #e4e4e4;
+}
+
+.optimize .project-variable-grid-pagination.pagination .pagination-info {
+    margin: 0 10px;
+}
+
+.optimize #allpage-mng .datagrid-btable {
+    border: 1px solid rgba(210, 210, 210, 1);
+}
+
+.optimize #allpage-mng .datagrid-header {
+    border-top: 1px solid rgba(210, 210, 210, 1);
+    border-left: 1px solid rgba(210, 210, 210, 1);
+}
+
+.optimize .kmui-datasource-mng-container .datagrid-header{
+    border: 1px solid rgba(210, 210, 210, 1);
+}
+
+.optimize .newsafety .datagrid-header{
+    border: 1px solid rgba(210, 210, 210, 1);
+}
+
+.optimize .kmresource .datagrid-header{
+    border: 1px solid rgba(210, 210, 210, 1);
+}
+
+.optimize .pagination .pagination-info {
+    margin: 0 15px;
+    /* add by he.chai at 2021/1/20 bug 9545 【新版本包权限测试】安全对象下角色管理的分页栏显示问题 */
+    line-height: 40px;
+}
+
+.optimize #centerhover .datagrid-wrap.panel-body.panel-body-noheader {
+    max-height: 650px !important;
+}
+
+/* .optimize .km-popupWrap .km-popup .datagrid-body {
+    height: 500px !important;
+} */
+
+.optimize .newlog.clientlog {
+    background-image: url(../images/images/clientlog.png);
+}
+
+
+.optimize .devGroupTree .panel.layout-panel.layout-panel-west.panel-htop .layout-button-left {
+    background: url(../images/images/layout-left_0730.png) no-repeat center;
+}
+
+.optimize .panel.layout-panel.layout-panel-west.panel-htop .panel-header .panel-title {
+    font-size: 14px;
+    color: rgba(96, 98, 102, 1);
+}
+
+.optimize .panel.layout-panel.layout-panel-west.panel-htop .panel-header {
+    height: 34px;
+
+}
+
+.optimize .panel.layout-panel.layout-panel-west.panel-htop .panel-header .panel-title {
+    line-height: 34px;
+}
+
+.optimize .km-gloScriptEditor-tree .tree-node .tree-title {
+    margin-top: 3px;
+}
+
+.optimize .l-btn-icon.icon-custom-delete {
+    background: url(../images/images/deleter.png) no-repeat center;
+}
+
+
+.optimize #newpopup-margin-right {
+    /* modify by di.wu for bug6794 */
+    /* margin: 4px; */
+    line-height: initial;
+    /* margin-top: 7px; */
+    /* end*/
+    margin-right: 15px;
+}
+
+.optimize #newpopup-margin-left {
+    background: #ffff;
+    line-height: initial;
+    margin-right: 6px;
+}
+
+.optimize #newpopuppanel {
+    box-shadow: rgba(0, 0, 0, 0.17) 0px 4px 18px 0px;
+    border-radius: 4px;
+    border: 1px solid rgb(170, 170, 170);
+}
+
+.optimize .km-ds-popup-closeSpan.newCloseSpan {
+    background: url(../images/images/Newclose.png) no-repeat center;
+}
+
+.optimize #resourceMngTree .tree-icon.tree-file,
+.optimize #resourceMngTree .tree-checkbox.tree-checkbox0,
+.optimize #resourceMngTree .tree-checkbox.tree-checkbox1 {
+    margin-top: 12px;
+}
+
+.optimize .combobox-item.combobox-item-selected {
+    background-color: rgba(238, 238, 238, 1);
+    color: rgba(64, 158, 255, 1);
+}
+
+.optimize #midPanel .datagrid-wrap.panel-body.panel-body-noheader {
+    height: 301px;
+}
+
+.optimize #newpopuppanel .right-layout .datagrid-header {
+    border-top: 1px solid rgba(210, 210, 210, 1);
+    border-left: 1px solid rgba(210, 210, 210, 1);
+}
+
+.optimize #newpopuppanel .right-layout .datagrid-btable {
+    border-left: 1px solid rgba(210, 210, 210, 1);
+}
+
+.optimize #newPagination .l-btn-icon.pagination-first,
+.optimize #newPagination .l-btn-icon.pagination-prev,
+.optimize #newPagination .l-btn-icon.pagination-next,
+.optimize #newPagination .l-btn-icon.pagination-last,
+.optimize #newPagination .l-btn-icon.pagination-load {
+    margin-top: 0px;
+}
+
+.optimize #newpopuppanel .left-layout .tree-title {
+    margin-top: 6px;
+}
+
+.optimize #newpopuppanel .left-layout .tree-hit.tree-expanded {
+    margin-left: 30px;
+    background: url(../images/images/unfold.png) no-repeat 4px 7px;
+}
+
+.optimize #newpopuppanel .left-layout .tree-hit.tree-collapsed {
+    background: url(../images/images/unfold.png) no-repeat 5px 8px;
+    transform: rotate(-90deg);
+}
+
+.optimize #newpopuppanel .left-layout .tree-indent {
+    margin-left: 15px;
+}
+
+.optimize #exportdatagrid .datagrid-header-inner .datagrid-htable {
+    border-top: 1px solid rgba(210, 210, 210, 1);
+    border-left: 1px solid rgba(210, 210, 210, 1);
+}
+
+.optimize #exportdatagrid .datagrid-btable {
+    border-left: 1px solid rgba(210, 210, 210, 1);
+}
+
+.optimize .km-popup .km-popup-titlebar {
+    width: auto;
+}
+
+.optimize .km-fun-left .tree-hit.tree-collapsed {
+    margin-left: 0;
+}
+
+.optimize .km-fun-left .tree-hit.tree-expanded {
+    margin-top: 7px;
+}
+
+.optimize .km-fun-left .tree-title {
+    margin-top: 6px;
+}
+
+.optimize #newTabContaniner .tabs-header {
+    border-color: rgba(210, 210, 210, 1);
+    background-color: rgba(241, 241, 241, 1);
+}
+
+.optimize #newTabContaniner .tabs-panels,
+.optimize #newTabContaniner .tabs {
+    border-color: rgba(210, 210, 210, 1);
+}
+
+.optimize .newkmuibutton {
+    height: 32px;
+    width: 60px;
+    border: 1px solid rgba(229, 229, 229, 1);
+    background: rgba(255, 255, 255, 1);
+    color: rgba(96, 98, 102, 1);
+    font-size: 12px;
+    font-family: "微软雅黑";
+    font-weight: 400;
+}
+
+.optimize .newkmuibutton.newFirmButton {
+    background: rgba(236, 245, 255, 1);
+    border: 1px solid rgba(179, 216, 255, 1);
+    border-radius: 4px;
+    color: rgba(64, 158, 255, 1);
+}
+
+.optimize .newTreEle .tree-title {
+    margin-top: 5px;
+}
+
+.optimize .newTreEle .tree-hit.tree-collapsed {
+    margin-left: 0;
+}
+
+.optimize .textbox.easyui-fluid .textbox-icon.icon-search.textbox-icon-disabled {
+    background: url(../images/images/searchNew.png) no-repeat center;
+}
+
+.optimize .kmui-page-list-popup-main-body-row.newUsingRowDiv .textbox-label.textbox-label-after {
+    width: 110px !important;
+}
+
+.optimize .l-btn-icon.icon-custom-encrypt {
+    background: url(../images/images/encryption.png) no-repeat center;
+}
+
+.optimize .l-btn-icon.icon-custom-decrypt {
+    background: url(../images/images/procopy.png) no-repeat center;
+}
+
+.optimize .page-mng-grid-container.newDataRridContainer .datagrid-htable {
+    border-top: 1px solid rgba(210, 210, 210, 1);
+    border-left: 1px solid rgba(210, 210, 210, 1);
+}
+
+.optimize .page-mng-grid-container.newDataRridContainer .datagrid-btable {
+    border: 1px solid rgba(210, 210, 210, 1);
+}
+
+.optimize .page-mng-grid-container.newDataRridContainer.panel-noscroll {
+    top: 55px !important;
+}
+
+.notOptimize .optimize .km-gloScriptEditor-editor .tree-hit.tree-collapsed {
+    margin-left: 0;
+}
+
+.notOptimize .page-mng-this-element.panel-noscroll .panel-header {
+    margin-top: 0;
+}
+
+.notOptimize #deleteProject .km-popup-titlebar {
+    width: auto;
+    border-bottom: none;
+}
+
+.notOptimize .km-popup .km-popup-titlebar {
+    width: auto;
+    border-bottom: none;
+    background: none !important;
+}
+
+.notOptimize .km-popup .kmui-import-buttonPanel {
+    background: none !important;
+}
+
+.optimize #midPanel#midPanel {
+    height: 200px;
+}
+
+.optimize .page-mng-this-element .textbox.searchbox {
+    position: absolute;
+    right: 5px;
+    top: 38px;
+}
+
+/* .optimize #botPanel {
+    margin-top: 105px;
+} */
+
+.optimize #deleteProject {
+    padding: 15px 30PX;
+    border-radius: 4px;
+    box-shadow: 0px 4px 18px 0px rgba(0, 0, 0, 0.17);
+    padding: 15px 30px;
+    z-index: 9999
+}
+
+.optimize .importConfirm {
+    width: 60px;
+    height: 32px;
+    background: rgba(236, 245, 255, 1);
+    border: 1px solid rgba(179, 216, 255, 1);
+    border-radius: 4px;
+    float: right;
+    margin-top: 31px;
+    color: rgba(64, 158, 255, 1);
+}
+
+.optimize .importCancel {
+    width: 60px;
+    height: 32px;
+    background: rgba(255, 255, 255, 1);
+    border: 1px solid rgba(229, 229, 229, 1);
+    border-radius: 4px;
+    margin-top: 31px;
+    margin-left: 260px;
+}
+
+.optimize .popupDelet {
+    position: absolute;
+    top: 75px;
+    left: 20px;
+}
+
+.optimize .modelBarHotKey {
+    width: 60px;
+}
+
+.optimize .demo_hotKey {
+    background-color: rgb(0, 174, 255);
+}
+
+.optimize .notOptimize .panel-header .panel-title {
+    margin-top: 8px;
+}
+
+/* #devGroupTreeLayout .panel-body {
+    height: 550px !important;
+} */
+
+.optimize .km-ds-popup-titlebar {
+    border-bottom: none !important;
+}
+
+.optimize .notdatagrid .datagrid-pager.pagination {
+    margin-top: 3px;
+}
+
+.optimize .notdatagrid .panel.layout-panel.layout-panel-center.panel-htop {
+    margin-top: -15px;
+}
+
+.optimize .notdatagrid .panel-header {
+    text-align: -webkit-center;
+}
+
+.optimize #devGroupTreeLayout .panel-tool {
+    right: 20px;
+    /* top: 10px; */
+}
+
+.optimize #Newcenterdata {
+    top: 136px;
+    left: 20px;
+    border-top: none;
+    border-bottom: none;
+    display: none;
+}
+
+.optimize .newPagenation .l-btn-icon {
+    top: 10px;
+}
+
+.optimize #devGroupTreeLayout .page-mng-this-element .datagrid-view2 .datagrid-body {
+    overflow: auto;
+}
+
+.bar-wrap-contain {
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.1);
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+/* start 脚本混淆样式 */
+.confusionform {
+    width: 350px;
+    height: 134px;
+    background: rgba(255, 255, 255, 1);
+    position: absolute;
+    top: 35%;
+    left: 35%;
+    border-radius: 4px;
+    box-shadow: 0px 4px 18px 0px rgba(0, 0, 0, 0.17);
+    padding: 15px 30px;
+    z-index: 99999;
+}
+
+.confusiontitle {
+    width: 50%;
+    height: 14px;
+    font-size: 14px;
+    font-family: "微软雅黑";
+    font-weight: bold;
+    color: rgba(64, 66, 68, 1);
+    line-height: 14px;
+    position: relative;
+    display: block;
+    float: left;
+}
+
+.confusionclose {
+    width: 12px;
+    height: 14px;
+    background: url('../images/images/close.png');
+    background-repeat: no-repeat;
+    position: relative;
+    float: right;
+}
+
+.horizontalline {
+    width: 350px;
+    height: 4px;
+    background: rgba(240, 240, 240, 1);
+    position: relative;
+    left: 0px;
+    top: 25px;
+}
+
+.warningImg {
+    width: 23px;
+    height: 18px;
+    background: url('../images/images/deletewarning.png');
+    background-repeat: no-repeat;
+    float: left;
+}
+
+.popupWarning {
+    width: 30px;
+    height: 30px;
+    background: url('../images/images/popupWarning.png');
+    background-repeat: no-repeat;
+    float: left;
+    margin-top: 10px;
+    margin-left: 10px;
+}
+.popupWarningTip {
+    width: 40px;
+    height: 30px;
+    background: url('../images/images/popupWarning.png');
+    background-repeat: no-repeat;
+    float: left;
+    margin-left: 10px;
+}
+.warningNote {
+    width: 266px;
+    height: 15px;
+    font-size: 14px;
+    font-family: "微软雅黑";
+    font-weight: 400;
+    color: rgba(96, 98, 102, 1);
+    display: block;
+    float: left;
+    margin-left: 12px;
+}
+
+.confusionCenter {
+    width: 350px;
+    height: 84px;
+    position: relative;
+    top: 36px;
+    overflow: hidden;
+}
+
+.confusionCancelDiv {
+    width: 60px;
+    height: 32px;
+    background: rgba(255, 255, 255, 1);
+    border: 1px solid rgba(229, 229, 229, 1);
+    border-radius: 4px;
+    float: right;
+    margin-top: 31px;
+    margin-right: 9px;
+}
+
+.confusionConfirmDiv {
+    width: 60px;
+    height: 32px;
+    background: rgba(236, 245, 255, 1);
+    border: 1px solid rgba(179, 216, 255, 1);
+    border-radius: 4px;
+    float: right;
+    margin-top: 31px;
+}
+
+.confusionCancelMsg {
+    width: 25px;
+    height: 32px;
+    font-size: 12px;
+    font-family: "微软雅黑";
+    font-weight: 400;
+    line-height: 32px;
+    margin-left: 18px;
+}
+
+.confusionConfirmMsg {
+    width: 25px;
+    height: 32px;
+    font-size: 12px;
+    font-family: "微软雅黑";
+    font-weight: 400;
+    line-height: 32px;
+    margin-left: 18px;
+}
+
+/* end 脚本混淆样式 */
+
+/* add by ysw 权限配置 */
+.optimize .navigation .permission-btn {
+    width: 90px;
+}
+.optimize .navigation .permission-btn .l-btn-icon-left{
+    width: 90px;
+}
+.optimize .navigation .permission-btn .l-btn-text{
+    width: 70px;
+}
+.optimize .auProjectConf .panel-header{
+    margin-top: 0px;
+    height: 25px;
+}
+
+.optimize .auProjectConf .panel-title {
+    margin-left: 0px;
+}
+
+.optimize .auProjectConf .panel-header .panel-title{
+    font-size: 16px;
+}
+
+.optimize .auProjectConf .panel-header .panel-title{
+    font-size: 14px;
+    color: rgba(96, 98, 102, 1);
+    line-height: 25px;
+    margin-top: 0px;
+}
+
+.optimize .auProLayOutEdit .panel-header{
+    margin-top: 0px;
+    height: 25px;
+}
+
+.optimize .auProLayOutEdit .panel-title {
+    margin-left: 0px;
+}
+
+.optimize .auProLayOutEdit .panel-header .panel-title{
+    font-size: 16px;
+}
+.optimize .auProLayOutEdit .panel-header .panel-title{
+    font-size: 14px;
+    color: rgba(96, 98, 102, 1);
+    line-height: 25px;
+    margin-top: 0px;
+}
+/* add by bing.bai 1123  */
+#auProjectDialog .auProjectConf #auProLayOutCheck .layout-panel.layout-panel-east.panel-htop .panel-header{
+    height: 34px;
+    margin-bottom: 0px;
+    background: #e3edff !important;
+}
+#auProjectDialog .auProjectConf #auProLayOutCheck .layout-panel.layout-panel-east.panel-htop .panel-header .panel-title{
+    margin-left: auto;
+    height: 100%;
+    line-height: 34px;
+}
+#auProjectDialog #auProLayOutEdit .layout-panel.layout-panel-east.panel-htop .panel-header{
+    height: 34px;
+    margin-bottom: 0px;
+    background: #e3edff !important;
+}
+#auProjectDialog #auProLayOutEdit .layout-panel.layout-panel-east.panel-htop .panel-header .panel-title{
+    margin-left: auto;
+    height: 100%;
+    line-height: 34px;
+}

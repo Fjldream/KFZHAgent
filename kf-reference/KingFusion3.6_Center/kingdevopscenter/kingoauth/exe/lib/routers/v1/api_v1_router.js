@@ -1,0 +1,1 @@
+"use strict";const router=require("express").Router(),routerLoader=require(__DIR+"/lib/routers/route_loader.js"),userManageContrller=require(__DIR+"/lib/controllers/controllers_user_manage");router.use(userManageContrller.middleware.userAuthority()),routerLoader.init(router),module.exports={baseRouter:router};

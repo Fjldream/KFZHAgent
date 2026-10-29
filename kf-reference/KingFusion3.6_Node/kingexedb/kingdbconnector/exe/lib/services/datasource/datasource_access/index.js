@@ -1,0 +1,21 @@
+const datasourceAccess = {};
+
+datasourceAccess.DatasourceIOServer = require("./datasource_ioserver");
+datasourceAccess.DatasourceKS = require("./datasource_ks");
+datasourceAccess.DatasourceKH = require("./datasource_kh");
+datasourceAccess.DatasourceMysql = require("./datasource_mysql");
+datasourceAccess.DatasourceOracle = require("./datasource_oracle");
+datasourceAccess.DatasourcePG = require("./datasource_pg");
+datasourceAccess.DatasourceSQLServer = require("./datasource_sqlserver");
+datasourceAccess.DatasourceEmqx = require("./datasource_emqx");
+datasourceAccess.DatasourceIORedis = require("./datasource_ioredis");
+datasourceAccess.DatasourceAlarmServer = require("./datasource_alarm_server");
+datasourceAccess.DatasourceMongodb = require("./datasource_mongodb");
+datasourceAccess.DatasourceKV = require("./datasource_kv");
+datasourceAccess.DatasourceUADS = require("./datasource_uads");
+datasourceAccess.DatasourceKSLinux = require("./datasource_ks_linux");
+datasourceAccess.DatasourceDM = require("./datasource_dm");
+datasourceAccess.DatasourceTdengine = require("./datasource_tdengine");
+datasourceAccess.DatasourceRedis = require("./datasource_ioredis");
+datasourceAccess.DatasourceKH4_0 = require("./datasource_kh4.0");
+module.exports = datasourceAccess;

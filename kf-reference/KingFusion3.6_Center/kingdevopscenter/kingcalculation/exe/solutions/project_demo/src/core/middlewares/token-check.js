@@ -1,0 +1,1 @@
+module.exports=(o,r,n)=>{const{auth:s}=require("../utils");try{let e=s.getBearerToken(o);if(!e){r.sendErr("TOKEN_IS_MISSING");return}if(s.verifyToken(e))n();else{let t={code:0,message:"token is invaild"};logger.log("debug",t.message),r.sendErr(t)}}catch(e){r.sendErr(e.message)}};

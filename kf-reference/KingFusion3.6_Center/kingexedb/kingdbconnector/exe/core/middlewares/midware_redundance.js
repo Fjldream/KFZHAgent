@@ -1,0 +1,1 @@
+const{common:commonEnums}=require(`${__DIR}/core/enums`);module.exports=(t,e,n)=>{if(global.useRedundanceGateway===!0&&global.redundanceState===commonEnums.enum_RedandunceState.STANDBY){const a={errorCode:-9999,message:"cannot operate standby datasource",data:[]};e.status(200),e.send(a),e.end();return}n()};

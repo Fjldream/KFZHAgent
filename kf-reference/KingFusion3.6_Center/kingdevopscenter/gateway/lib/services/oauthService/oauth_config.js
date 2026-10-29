@@ -1,0 +1,1 @@
+const fs=require("fs"),path=require("path");class OauthInfo{getOauthInfo(){try{const n=JSON.parse(fs.readFileSync(path.join(__dirname,"../../../../../config/devconfig.json"))),e=JSON.parse(fs.readFileSync(path.join(__dirname,"../../../../../config/common.json")));return{...n.oauthClient,...e.tenant}}catch(n){return null}}}module.exports=new OauthInfo;

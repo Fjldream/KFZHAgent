@@ -1,0 +1,178 @@
+.km-ds-popup-wrap{
+    background-color :rgba(0,0,0,0.25);
+    width: 100%;
+    height: 100%;
+    position: absolute !important;
+    top: 0 !important;  
+    left: 0 !important;
+    z-index:10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.km-ds-popup-panel{
+    min-width: 400px;
+    background-color: rgba(255,255,255,1);
+    border: 3px solid rgba(240,240,240,1);
+    border-radius: 7px;
+    position: absolute;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.km-ds-popup-titlebar{
+    height: 40px;
+    background-color: rgba(240,240,240,1);
+    text-align: left;
+    line-height: 40px;
+    padding-left: 15px;
+    font-size: 16px;
+}
+
+.km-ds-popup-closeSpan{
+    float: right;
+    margin-right: 15px;
+    background-image: url(../images/close.png);
+    background-repeat: no-repeat;
+    background-position: center;
+    width: 14px;
+    height: 14px;
+    margin-top: 12px;
+}
+
+.km-ds-popup-closeSpan:hover {
+    cursor: pointer;
+    background-color: #ccc; 
+}
+
+.km-ds-popup-content{
+    width: 100%;
+    padding: 20px 0 20px 10px;
+    height:100%;
+    box-sizing: border-box;
+    overflow: auto;
+}
+
+.km-ds-popup-footerPanel{
+    height: 50px;
+    line-height: 50px;
+    text-align: right;
+    border-top: 2px solid rgba(240,240,240,1);
+    background: #f0f0f0;
+    box-sizing: border-box;
+}
+
+.km-ds-popup-margin-right{
+    margin-right:20px;
+}
+
+.kmImageSelected{
+    background-color:#67c23a;
+}
+
+.kmImageActive:hover{
+    background-color: #909399;
+}
+.kmImageActive{
+    background-color:#ffffff;
+}
+.km-btn{
+    background: linear-gradient(#f5f5f5, #dadada, #f1f1f1);
+    border: 1px solid #cacaca;
+    border-radius: 0px;
+    color: #fff;
+    margin: 10px;
+    font-size: 14px;
+    padding: 5px 10px;
+    box-shadow: 0px 0px 1px 0px #d4d4d4;
+    cursor: pointer;
+    height:30px;
+    line-height: 20px;
+}
+/* added by hang.su for 11069 【昆明排水】elementui,select选择器高度调节运行态不生效，多选样式高度有问题 at 2021/3/26 */
+.select-divcls .el-select {
+    height: 100%;
+    width: 100%;
+}
+/* added by hang.su for 11074 【昆明排水】elementui,穿梭框样式混乱 at 2021/3/26 */
+.tarnsfer-cls .el-input{
+    height: unset;
+}
+/* modified by shuai.zhao for bug 12378 页面中已有的elementUI选择器在运行态不显示下边框 2021-06-24*/
+.select-divcls .el-select input{
+    height: 100% !important;
+    width: 100%;
+}
+/* end */
+.select-divcls .el-input__icon {
+    line-height: 100%;
+}
+.select-divcls .el-input {
+    height:100%;
+}
+.upload-demo .el-upload {
+    width: 100%;
+    height: 80%;
+}
+.upload-demo .el-upload-dragger {
+    width: 100%;
+    height: 100%;
+}
+.upload-demo .el-upload__tip {
+    width: 100%;
+    height: 10%;
+}
+.upload-demo .el-upload-list {
+    width: 100%;
+    height: 10%;
+    overflow: auto;
+}
+.eletabs-cls .el-tabs__content {
+    height: 80%;
+    padding: 0 !important;
+}
+.eletabs-cls .el-tabs {
+    height: 100%;
+}
+.eletabs-cls .el-tab-pane {
+    width: 100%;
+    height: 100%;
+}
+
+.inputnumbercls .el-input-number{
+    width: 100%;
+    height: 95%;
+}
+.inputnumbercls .el-input-number__decrease, .inputnumbercls .el-input-number__increase {
+    /*modify by ying.wu for bug 9158 ElementUI二期计数器边框为展示全 */
+    height:98%;
+}
+.tagcls .button-new-tag {
+    margin-left: 10px;
+    height: 32px;
+    line-height: 30px;
+    padding-top: 0;
+    padding-bottom: 0;
+}
+ 
+.tagcls .input-new-tag {
+    width: 90px;
+    height: 32px;
+    margin-left: 10px;
+    vertical-align: bottom;
+} 
+.eletabs-cls .el-tabs__header {
+    margin: 0;
+} 
+
+#userGroupTree .tree-title{
+    display: inline-block;
+    max-width: 62%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    vertical-align: middle;
+}

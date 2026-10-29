@@ -1,0 +1,255 @@
+.km-developtoolbar {
+    display: inline-block;
+    line-height: 45px;
+    float: right;
+}
+
+.km-developuser {
+    display: inline-block;
+    width: 15%;
+    height: 60px;
+    min-width: 160px;
+}
+.km-developuser a:first-child {
+    font-size: 24px;
+    color: rgba(103, 105, 108, 1);
+    line-height: 60px;
+}
+.km-developuser a:last-child {
+    float: right;
+    line-height: 70px;
+}
+.km-develophandle {
+    display: inline-block;
+    /* margin: 15px; */
+    /* float: right; */
+    /* line-height: 35px; */
+}
+.km-toolbar-develop {
+    display: inline-block;
+    padding-right: 7px;
+    padding-left: 7px;
+}
+/* 页面组样式 */
+.km-pagehandle {
+    height: 50px;
+    padding: 0 6px;
+    border-bottom: 1px solid rgba(226, 231, 234, 1);
+    min-width: 650px;
+}
+.km-pagehandle span {
+    padding: 0 10px;
+    font-size: 24px;
+    line-height: 50px;
+}
+.km-pagehandle i {
+    /* padding-left: 60%; */
+    line-height: 50px;
+    font: normal 14px "宋体";
+}
+.km-pagehandle button {
+    width: 80px;
+    height: 28px;
+    margin: 7px 6px;
+    /* float: right;
+    border-radius: 18px;
+    background: transparent;
+    color: rgba(131, 184, 241, 1);
+    border: 1px solid rgba(131, 184, 241, 1); */
+    cursor: pointer;
+}
+.km-pagetable {
+    position: absolute;
+    width: 95%;
+    top: 66px;
+    bottom: 0;
+}
+/* 表格样式更改 */
+.km-pagetable .datagrid .panel-body {
+    position: absolute;
+    
+    top: 0;
+    bottom: 0;
+    left: 4%;
+    height: 99%;
+    overflow: hidden;
+}
+.km-pagetable .datagrid-row {
+    height: 50px;
+}
+.km-pagetable .datagrid-btable tr:nth-child(2n), 
+.km-pagetable .datagrid-htable {
+    background: linear-gradient(to bottom,#F9F9F9 0,#efefef 100%);
+}
+.km-pagetable .datagrid-btable {
+    border-left: 1px solid rgba(204, 204, 204, 1);
+   
+}
+.km-pagetable .datagrid-htable {
+    border-left: 1px solid rgba(204, 204, 204, 1);
+    border-top: 1px solid rgba(204, 204, 204, 1);
+  
+    height: 50px;
+}
+.km-pagetable .datagrid-body td, 
+.km-pagetable .datagrid-footer td, 
+.km-pagetable .datagrid-header td{
+    margin: 0;
+    padding: 0;
+    border-width: 0 1px 1px 0;
+    border-style: solid;
+    position: relative;
+}
+.km-star-span {
+    display: inline-block;
+    width: 18px;
+    height: 18px;
+    float: left;
+    margin-right: 5px;
+    cursor: pointer;
+}
+.km-star-unselect {
+    background: url("../res/images/star1.png") no-repeat left;
+}
+.km-star-select {
+    background: url("../res/images/star2.png") no-repeat left;
+}
+.km-pagetable .datagrid-header {
+    /* width: 1030px; */
+   
+    height: 50px;
+    overflow: hidden;
+    cursor: default;
+    border-width: 0;
+    background: transparent;
+}
+.km-pagetable .datagrid-header-inner {
+    
+}
+/* easyUI边框颜色，默认是蓝色 */
+.km-pagetable .panel-header, .km-pagetable .panel-body {
+    border-color: rgba(226, 231, 234, 1)
+}
+.km-pagetable .panel-body-noheader {
+    border-top-width: 0;
+    /* border-left-width: 0; */
+}
+/* 数据模型 */
+.km-develop-datamodel {
+    width: 100%;
+    height: 91%;
+}
+.km-develop-datamodel-tree {
+    width: 30%;
+    height: 100%;
+    margin-left: 50px;
+    float: left;
+}
+.km-develop-datamodel-button {
+    width: 15%;
+    height: 100%;
+    margin-top: 20px;
+    float: right;
+}
+.km-develop-datamodel-button input {
+    width: 100px;
+    height: 30px;
+    border-radius: 5px;
+    background: rgba(242, 242, 242, 1);
+}
+.km-pagetable .datagrid-editable-input {
+    height: 43px ! important;
+}
+.km-pagetable .textbox {
+    /* width: 80% ! important; */
+    height: 47px ! important;
+    /* left: -8px ! important; */
+}
+.km-pagetable .textbox a {
+    height: 47px ! important;
+}
+.km-pagetable .textbox-text {
+    height: 45px ! important;
+    line-height: 45px ! important;
+}
+.km-pagetable .combo-panel {
+    height: 88px ! important;
+}
+.role-develop-login {
+    height: 5%;
+    min-height: 40px;
+    margin-top: 10px;
+    text-align: center;
+    font-size: 18px;
+}
+#pageTotal {
+    font-size: 16px;
+}
+.exit-develop {
+    position: absolute;
+    right: 2%;
+    line-height: 30px;
+    cursor: pointer;
+}
+.km-pagetable .datagrid-header-row td {
+    background-color:#FFFFF0;
+}
+.km-runlogin {
+    display: block;
+    height: 30px;
+    padding: 0 6px;
+    line-height: 30px;
+}
+.km-radio {
+    vertical-align: middle;
+}
+.km-setrunparam input,span {
+    vertical-align: middle
+}
+.km-picchange {
+    margin: 10px 60px;
+}
+.km-picchange span {
+    display: inline-block;
+    width: 75px;
+}
+.km-radioChange {
+    margin: 10px 30px;
+}
+.km-buttonChange {
+    display: inline-block;
+    margin: 0 10px;
+    border-radius: 6px;
+}
+.km-buttonChange:focus {
+    outline:none;
+}
+.km-runset-param {
+    width: 300px;
+    height: 320px; 
+    position: absolute;
+    top: 10%;
+    left: 30%;
+    background-color: rgba(255,255,255,1);
+    border: 3px solid rgba(240,240,240,1);
+}
+.km-tree-pageGroup {
+    width: 100%;
+    height: 80%;
+    overflow: auto;
+    border: 1px solid #ccc;
+}
+.km-tree-pageGroup ul {
+    margin: 0 20px;
+}
+.km-runset-btn {
+    margin: 1% 10px;
+}
+.km-runset-titlebar {
+    height: 11%;
+    background-color: rgba(240,240,240,1);
+    text-align: left;
+    line-height: 33px;
+    padding-left: 15px;
+    font-size: 1.5vh; 
+}

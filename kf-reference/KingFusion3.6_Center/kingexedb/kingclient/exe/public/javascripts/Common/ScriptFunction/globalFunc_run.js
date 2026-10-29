@@ -1,0 +1,4222 @@
+if (typeof kmParameterIteam > "u")
+  var kmParameterIteam = {
+    KM_PARAMETER_REQUESTTYPE: "requestType",
+    KM_PARAMETER_REQUESTID: "requestId",
+    KM_PARAMETER_SPACENAME: "spaceName",
+    KM_PARAMETER_POSITIONNAME: "positionName",
+    KM_PARAMETER_DATAVERSION: "dataVersion",
+    KM_PARAMETER_timeMode: "timeMode",
+    KM_PARAMETER_STARTTIME: "startTime",
+    KM_PARAMETER_ENDTIME: "endTime",
+    KM_PARAMETER_STIMEPOSITION: "sTimePosition",
+    KM_PARAMETER_ETIMEPOSITION: "eTimePosition",
+    KM_PARAMETER_FILTER: "filter",
+    KM_PARAMETER_DATA: "data",
+  };
+if (typeof ELEMENTLANGUAGE > "u") var ELEMENTLANGUAGE = "zhCN";
+let requestAnimationFrame = (function () {
+    return (
+      window.requestAnimationFrame ||
+      window.webkitRequestAnimationFrame ||
+      window.mozRequestAnimationFrame ||
+      window.oRequestAnimationFrame ||
+      window.msRequestAnimationFrame ||
+      function (e) {
+        return window.setTimeout(function () {
+          e();
+        }, 1e3 / 60);
+      }
+    );
+  })(),
+  cancelAnimationFrame = (function () {
+    return (
+      window.cancelAnimationFrame ||
+      window.mozCancelAnimationFrame ||
+      window.cancelRequestAnimationFrame ||
+      function () {
+        clearTimeout(timeId);
+      }
+    );
+  })(),
+  timeId = requestAnimationFrame(onTimer),
+  expireTimeId = null;
+function onTimer() {
+  let e = KMDevRunMng.getInstance().getNeedUpdateCanvas(),
+    t = e.length;
+  for (let n = 0; n < t; ++n) {
+    let a = e[n],
+      r = a.getStage(),
+      o = a.getIsTile(),
+      i = a.getIsGrid(),
+      l = a.getViewObj();
+    if (
+      !(
+        KMDevRunMng.getInstance().flag === systemState.RUN_SYSTEM &&
+        l.twoDimenObj &&
+        !l.twoDimenObj.pageVisible
+      )
+    ) {
+      if ((r.clear(), o && l.draw(!1), i)) {
+        let s = r.scaleX;
+        l.grid.drawGrid(s);
+      }
+      r.update();
+    }
+  }
+  (KMDevRunMng.getInstance().clearNeedUpdateCanvas(),
+    requestAnimationFrame(onTimer));
+}
+function gSyscallback(e) {
+  try {
+    var t = e.data;
+    if (
+      (typeof t == "string" && (t = JSON.parse(t)),
+      t.type === "login" && t.errorCode === -1009)
+    )
+      return (alert(t.message), monitorDevice.gSyscallback());
+    var n = t.dataType;
+    (n === 1 ? gSubScribleSyscallBack(t) : n === 2 && operateDbcallBack(t),
+      t.type === "auth" && authSysCallback(t));
+  } catch (a) {
+    console.error(a);
+  }
+}
+function authSysCallback(e) {
+  if (
+    !e.authState &&
+    (e.errorCode === 1007 && console.log("\u6F14\u793A\u6A21\u5F0F\u4E2D..."),
+    e.errorCode === STATUSEUME.AUTHSUPERUSE)
+  )
+    return (
+      alert(
+        "\u6F14\u793A\u6A21\u5F0F\u5230\u671F,\u8BF7\u5B89\u88C5\u6388\u6743\u6216\u91CD\u542FAPP",
+      ),
+      (window.location.href = monitorDevice.getSearch())
+    );
+  e instanceof Object && e.authState && authExpireAlert(e.expiredTime, e.now);
+}
+function addWaterMark() {
+  document.getElementsByClassName("waterMark").length ||
+    ((window.waterMarkDiv = document.createElement("div")),
+    waterMarkDiv.classList.add("waterMark"),
+    (waterMarkDiv.textContent = "\u6F14\u793A\u6A21\u5F0F"),
+    document.body.appendChild(waterMarkDiv));
+}
+function authExpireAlert(e, t) {
+  if (e - t < 2592e6) {
+    if (e - t < 1296e6) {
+      if (e - t < 6048e5) {
+        if (e - t < 864e5 && !window.expireTimeId) return timerHandle(1, e, t);
+        if (!window.expireTimeId) return timerHandle(4, e, t);
+      }
+      if (!window.expireTimeId) return timerHandle(8, e, t);
+    }
+    window.expireTimeId || timerHandle(72, e, t);
+  }
+}
+function timerHandle(e, t, n) {
+  let a = SOFT_LOCK.AUTHLAST.replace(
+    "$expireTime",
+    new Date(t).toLocaleDateString(),
+  ).replace(/\//g, "-");
+  (t < n && (a = a.replace("\u5373\u5C06\u8FC7\u671F", "\u5DF2\u8FC7\u671F")),
+    confirm(a),
+    (window.expireTimeId = !0));
+  const r = e * 60 * 60 * 1e3;
+  setTimeout(() => {
+    window.expireTimeId = !1;
+  }, r);
+}
+function gSubScribleSyscallBack(e) {
+  typeof e == "string" && (e = JSON.parse(e));
+  var t = KMDevRunMng.getInstance().subscribeMap;
+  if (t.has(subscribeType.KPSYSTEMSUBSCRIBE)) {
+    var n = t.get(subscribeType.KPSYSTEMSUBSCRIBE);
+    for (let a = 0; a < n.length; a++) n[a](e.data);
+  }
+}
+function operateDbcallBack(e) {
+  typeof e == "string" && (e = JSON.parse(e));
+  var t = KMDevRunMng.getInstance().requestCallBackMap;
+  if (t.has(e.requestId)) {
+    var n = t.get(e.requestId);
+    n(e);
+  }
+}
+function ExportToExcel(e, t, n = [], a = []) {
+  var r = !1,
+    o = 0;
+  if (t === void 0 || t === "") o = -1;
+  else if (!Array.isArray(e) || (e[0] && typeof e[0] != "object"))
+    ((o = -1),
+      console.warn(
+        "ExportToExcel()\uFF1A\u6570\u636E\u683C\u5F0F\u9519\u8BEF!",
+      ));
+  else {
+    let w = function (m) {
+        var M = new ArrayBuffer(m.length),
+          C = new Uint8Array(M);
+        for (let S = 0; S != m.length; ++S) C[S] = m.charCodeAt(S) & 255;
+        return M;
+      },
+      y = function (m) {
+        let M = "",
+          C = "",
+          S = 0;
+        for (; m > 0; )
+          ((S = (m % 26) + 1),
+            (C = String.fromCharCode(S + 64) + C),
+            (m = (m - S) / 26));
+        return C;
+      };
+    var v = w,
+      I = y,
+      i = kmUlits.deepClone(e),
+      f = i[0];
+    i.unshift({});
+    let E = [];
+    var l = kmUlits.deepClone(a);
+    for (let m = 0; m < a.length; m++)
+      if (a[m].children) {
+        r = !0;
+        var s = a[m].children;
+        a.splice(m, 1);
+        for (let M = 0; M < s.length; M++) a.splice(m + M, 0, s[M]);
+      }
+    var c = [];
+    let D = {};
+    if (a && a.length > 0) {
+      for (let m in f) i[0][m] = m;
+      for (let m in a) ((i[0][a[m].prop] = a[m].label), c.push(a[m].prop));
+    } else for (let m in f) (c.push(m), (i[0][m] = m));
+    for (let m = 0; m < l.length; m++) {
+      if (l[m].children) {
+        var u = l[m].children;
+        for (let M = 0; M < u.length - 1; M++) E.push(l[m].label);
+      }
+      E.push(l[m].label);
+    }
+    for (let m = 0; m < c.length; m++) D[c[m]] = E[m];
+    var f = [];
+    (r && i.unshift(D),
+      i
+        .map((m, M) =>
+          c.map((C, S) =>
+            Object.assign(
+              {},
+              {
+                v: m[C],
+                position:
+                  (S > 25 ? y(S) : String.fromCharCode(65 + S)) + (M + 1),
+              },
+            ),
+          ),
+        )
+        .reduce((m, M) => m.concat(M))
+        .forEach(
+          (m, M) =>
+            (f[m.position] = { v: m.v, t: typeof m.v == "number" ? "n" : "s" }),
+        ));
+    var g = Object.keys(f);
+    f["!merges"] = n;
+    var h = {
+        SheetNames: ["mySheet"],
+        Sheets: {
+          mySheet: Object.assign({}, f, {
+            "!ref": g[0] + ":" + g[g.length - 1],
+          }),
+        },
+      },
+      d = new Blob(
+        [w(XLSX.write(h, { bookType: "xlsx", bookSST: !1, type: "binary" }))],
+        { type: "" },
+      ),
+      p = document.createElement("a");
+    ((p.href = URL.createObjectURL(d)),
+      (p.download = t + ".xlsx"),
+      document.body.appendChild(p),
+      p.click(),
+      setTimeout(function () {
+        (URL.revokeObjectURL(d), document.body.removeChild(p));
+      }, 100));
+  }
+  return o;
+}
+function ImportByExcel(e = [], t) {
+  var n,
+    a = !1;
+  function r(l) {
+    for (var s = "", c = 0, u = 10240; c < l.byteLength / u; ++c)
+      s += String.fromCharCode.apply(
+        null,
+        new Uint8Array(l.slice(c * u, c * u + u)),
+      );
+    return (
+      (s += String.fromCharCode.apply(null, new Uint8Array(l.slice(c * u)))),
+      s
+    );
+  }
+  var o = document.createElement("input");
+  ((o.type = "file"), (o.style.display = "none"), (o.id = "IMPORT_BY_EXCEL"));
+  let i = o;
+  (document.body.appendChild(o),
+    $(o).trigger("click"),
+    (o.onchange = function () {
+      if (i.files) {
+        var l = i.files[0],
+          s = l.name,
+          c = s.split("."),
+          u = c[c.length - 1],
+          f = ["xlsx", "xls"];
+        if (!f.includes(u)) {
+          showErrorMsg(IDS_FILE_FORMAT_DISCREPANCY, 3e3);
+          return;
+        }
+        var g = new FileReader();
+        ((g.onload = function (h) {
+          var d = h.target.result;
+          ((n = null),
+            a
+              ? (n = XLSX.read(btoa(r(d)), { type: "base64" }))
+              : (n = XLSX.read(d, { type: "binary" })));
+          const p = {};
+          (!e || e.length === 0) && (e = n.SheetNames);
+          for (let v of e) {
+            if (!n.Sheets[v]) {
+              p[v] = !1;
+              continue;
+            }
+            p[v] = XLSX.utils.sheet_to_json(n.Sheets[v], {
+              raw: !1,
+              dateNF: "hh:mm:ss",
+            });
+          }
+          (t(p), $("#" + o.id).remove());
+        }),
+          a ? g.readAsArrayBuffer(l) : g.readAsBinaryString(l));
+      }
+    }));
+}
+function SQLConnect(e, t, n, a, r, o, i) {
+  var l = KMClientInterface.getInstance();
+  l.SQLConnect(e, t, n, a, r, o, i);
+}
+function SQLExecute(e, t, n, a, r, o) {
+  var i = o || 3e3,
+    l = KMDatasourceMng.getInstance().getDataSource(e),
+    s = KMClientInterface.getInstance().getFileRequest();
+  l
+    ? typeof e == "string" &&
+      typeof t == "number" &&
+      typeof n == "number" &&
+      typeof a == "string" &&
+      typeof r == "function" &&
+      sqlParam[t] == l.type
+      ? l.SQLExecute(n, a, i, (c) => {
+          c.errorCode !== 0 &&
+          c.message &&
+          c.message.indexOf("en is invalid") > -1
+            ? new RegExp(sessionStorage.getItem("WellinUserToken")).test(
+                c.message,
+              ) || l.SQLExecute(n, a, i, r)
+            : r(c);
+        })
+      : alert(RS.CHECK_PARAM)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function SQLExecute1(e, t, n, a, r) {
+  var o = r || 3e3,
+    i = KMDatasourceMng.getInstance().getDataSource(e),
+    l = KMClientInterface.getInstance().getFileRequest();
+  i
+    ? typeof e == "string" &&
+      typeof t == "number" &&
+      typeof n == "string" &&
+      typeof a == "function" &&
+      i.SQLExecute1
+      ? i.SQLExecute1(t, n, o, (s) => {
+          s.errorCode !== 0 &&
+          s.message &&
+          s.message.indexOf("en is invalid") > -1
+            ? new RegExp(sessionStorage.getItem("WellinUserToken")).test(
+                s.message,
+              ) || i.SQLExecute1(t, n, o, a)
+            : a(s);
+        })
+      : alert(RS.CHECK_PARAM)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function SQLExecute2(e, t, n, a) {
+  var r = KMDatasourceMng.getInstance().getDataSource(e);
+  r
+    ? typeof e == "string" &&
+      typeof t == "string" &&
+      typeof n == "object" &&
+      typeof a == "function" &&
+      r.SQLExecute2
+      ? r.SQLExecute2(sqltype, n, (o) => {
+          o.errorCode !== 0 && o.message.indexOf("en is invalid") > -1
+            ? new RegExp(sessionStorage.getItem("WellinUserToken")).test(
+                o.message,
+              )
+            : a(o);
+        })
+      : alert(RS.CHECK_PARAM)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function SyncSQLExecute(e, t, n, a, r) {
+  var o = r || 3e3,
+    i = KMDatasourceMng.getInstance().getDataSource(e);
+  i
+    ? i.SyncSQLExecute
+      ? i.SyncSQLExecute(t, n, o, a)
+      : alert(RS.CHECK_PARAM)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function SyncSQLExecute1(e, t, n, a, r) {
+  var o = r || 3e3,
+    i = KMDatasourceMng.getInstance().getDataSource(e);
+  i
+    ? i.SyncSQLExecute1
+      ? i.SyncSQLExecute1(t, n, o, a)
+      : alert(RS.CHECK_PARAM)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function SyncSQLExecute2(e, t, n, a, r) {
+  var o = r || 3e3,
+    i = KMDatasourceMng.getInstance().getDataSource(e);
+  i
+    ? i.SyncSQLExecute2
+      ? i.SyncSQLExecute2(t, n, o, a)
+      : alert(RS.CHECK_PARAM)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function ExcuteSqlSelect(e, t, n) {
+  var a = KMDatasourceMng.getInstance().getDataSource(e);
+  a
+    ? a.SQLExecute(0, t, n)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function ExcuteSqlNoSelect(e, t, n) {
+  var a = KMDatasourceMng.getInstance().getDataSource(e);
+  a
+    ? a.SQLExecute(1, t, n)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function RedisExecute(e, t, n, a) {
+  var r = KMDatasourceMng.getInstance().getDataSource(e);
+  r
+    ? r.RedisExecute(!0, t, n, a)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function SyncRedisExecute(e, t, n) {
+  var a = KMDatasourceMng.getInstance().getDataSource(e);
+  if (a) return a.RedisExecute(!1, t, n);
+  alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function SQLDisconnect(e, t, n) {
+  var a = KMClientInterface.getInstance();
+  a.SQLDisconnect(e, t, n);
+}
+function MongoDBExecute(e, t, n, a) {
+  var r = KMDatasourceMng.getInstance().getDataSource(e);
+  r
+    ? r.MongoDBExecute(!1, t, n, a)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function setTagValues(e, t, n, a, r) {
+  var o = r || 3e3,
+    i = KMDatasourceMng.getInstance().getDataSource(e),
+    l = KMClientInterface.getInstance().getFileRequest();
+  i
+    ? i.setTagValues(t, n, o, (s) => {
+        (s.errorCode !== 0 && s.message.indexOf("en is invalid") > -1) || a(s);
+      })
+    : showErrorMsg(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`, 2e3);
+}
+function AsynQueryHistoryDatas(e, t, n, a, r, o, i, l, s, c, u, f) {
+  var g = c || 3e3,
+    h = KMDatasourceMng.getInstance().getDataSource(e),
+    d = KMClientInterface.getInstance().getFileRequest();
+  h
+    ? h.AsynQueryHistoryDatas(
+        t,
+        n,
+        a,
+        r,
+        o,
+        i,
+        l,
+        g,
+        (p) => {
+          (p.errorCode !== 0 && p.message.indexOf("en is invalid") > -1) ||
+            s(p);
+        },
+        u,
+        f,
+      )
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+// modified by jinlong.feng at 2026-10-13 KingSCADA4.0历史报警全局查询
+function AsynQueryHistoryAlarmDatas(
+  dataSourceName,
+  startTime,
+  endTime,
+  callback,
+  queryCondition,
+) {
+  var dataSource = KMDatasourceMng.getInstance().getDataSource(dataSourceName);
+  if (!dataSource) {
+    alert(`Data source ${dataSourceName} was not found!`);
+    return;
+  }
+
+  var historyAlarmQueryCondition = queryCondition || {};
+  if (dataSource.type === "KingSuperSCADA") {
+    dataSource.KSSAsynQueryHistoryAlarmDatas(startTime, endTime, callback);
+    return;
+  }
+  if (dataSource.type === "AlarmEngineering") {
+    var eventTypes = Array.isArray(historyAlarmQueryCondition.recordType)
+      ? historyAlarmQueryCondition.recordType
+      : [];
+    dataSource.AlarmProjectQueryHistoryAlarmDatas(
+      startTime,
+      endTime,
+      eventTypes,
+      callback,
+    );
+    return;
+  }
+  if (typeof dataSource.AsynQueryHistoryAlarmDatas !== "function") {
+    alert(`Data source ${dataSourceName} does not support historical alarm queries!`);
+    return;
+  }
+
+  var kingScadaQueryCondition = {
+    alarmType: Array.isArray(historyAlarmQueryCondition.alarmType)
+      ? historyAlarmQueryCondition.alarmType
+      : [],
+    recordType: Array.isArray(historyAlarmQueryCondition.recordType)
+      ? historyAlarmQueryCondition.recordType
+      : [],
+  };
+  dataSource.AsynQueryHistoryAlarmDatas(
+    startTime,
+    endTime,
+    callback,
+    kingScadaQueryCondition,
+  );
+}
+// end
+function AsynQueryKVHistoryDatas(e, t, n, a, r, o, i, l) {
+  var s = l || 3e3,
+    c = KMDatasourceMng.getInstance().getDataSource(e);
+  c
+    ? c.AsynQueryKVHistoryDatas(t, n, a, r, o, s, (u) => {
+        i(u);
+      })
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function GetTagValue(e, t, n) {
+  var a = n || 3e3,
+    r = [];
+  typeof e == "string" ? r.push(e) : e instanceof Array && (r = e);
+  var o = KMProjectVariableMng.getInstance().projectVariablesMap.get(r[0]);
+  if (o) {
+    var i = KMDatasourceMng.getInstance().getDataSource(
+      o.dataSourceItem.appName + "." + o.dataSourceItem.dataSourceName,
+    );
+    i
+      ? (result = i.GetTagValue(r, a, t))
+      : alert(
+          `\u6570\u636E\u6E90${o.dataSourceItem.dataSourceName}\u672A\u627E\u5230!`,
+        );
+  }
+}
+function SyncGetFieldValues(e, t, n, a) {
+  var r = a || 3e3,
+    o = GetTagFieldValue(e, t, r, n, KMTransmissionType.SYNC);
+  ((n.errorCode = o.errorCode), (n.data = o.data));
+}
+function GetFieldValues(e, t, n, a) {
+  var r = a || 3e3;
+  GetTagFieldValue(e, t, r, n, KMTransmissionType.ASYN);
+}
+function GetTagFieldValue(e, t, n, a, r) {
+  var o = [],
+    i = [];
+  typeof e == "string" ? o.push(e) : e instanceof Array && (o = e);
+  var l = KMProjectVariableMng.getInstance().projectVariablesMap.get(o[0]);
+  if (l) {
+    var s = KMDatasourceMng.getInstance().getDataSource(
+      l.dataSourceItem.appName + "." + l.dataSourceItem.dataSourceName,
+    );
+    s
+      ? (i = s.GetFieldValues(o, t, n, a, r))
+      : alert(
+          `\u6570\u636E\u6E90${l.dataSourceItem.dataSourceName}\u672A\u627E\u5230!`,
+        );
+  } else alert(`${o[0]}\u53D8\u91CF\u672A\u627E\u5230!`);
+  return i;
+}
+function SyncSetFieldValues(e, t, n, a) {
+  var r = a || 3e3,
+    o = KMDatasourceMng.getInstance().getDataSource(e);
+  if (o) return o.SetFieldValues(t, r, n, KMTransmissionType.SYNC);
+  alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function SetFieldValues(e, t, n, a) {
+  var r = a || 3e3,
+    o = KMDatasourceMng.getInstance().getDataSource(e);
+  o
+    ? o.SetFieldValues(
+        t,
+        r,
+        (i) => {
+          n(i);
+        },
+        KMTransmissionType.ASYN,
+      )
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function _getFieldData(e, t, n, a) {
+  try {
+    return e
+      .map((r, o) => {
+        if (a.get(r)) return { N: r, fields: [t[o]], fieldvalues: [n[o]] };
+      })
+      .filter((r) => !!r);
+  } catch {
+    return [];
+  }
+}
+function getAlarmConfig(e, t, n, a, r, o) {
+  const i = KMDatasourceMng.getInstance().getDataSource(e);
+  if ((r || (r = 3e3), i)) {
+    if ((typeof n == "string" && (n = n.split(",")), !(n instanceof Array))) {
+      a({
+        code: -1,
+        msg: "alarmFeild\u53C2\u6570\u7C7B\u578B\u9519\u8BEF,\u5E94\u4F20\u5165\u6570\u7EC4\u6216\u5B57\u7B26\u4E32",
+      });
+      return;
+    }
+    let l = {};
+    (o === "condition"
+      ? (l.condition_name = t)
+      : o === "tag" && (l.tag_name = t),
+      (l.attribute = n),
+      o === "all" && (l = {}),
+      i.queryAlarmConfig(l, r, a, o));
+  } else alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function GetAlarmField(e, t, n) {
+  getAlarmConfig(e, "", "", t, n, "all");
+}
+function GetAlarmFieldByItem(e, t, n, a, r) {
+  getAlarmConfig(e, t, n, a, r, "condition");
+}
+function setAlarmConfig(e, t, n, a, r, o) {
+  var i = KMDatasourceMng.getInstance().getDataSource(e);
+  i
+    ? (a || (a = 3e3), o && (t.type = o), i.setAlarmConfig(t, a, n, r))
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function SetAlarmFieldByItem(e, t, n, a, r, o) {
+  setAlarmConfig(e, t, n, a, r, o, "condition");
+}
+function KHQueryRawDatas(e, t, n, a, r, o, i, l, s) {
+  var c = s || 3e3,
+    u = KMDatasourceMng.getInstance().getDataSource(e);
+  u
+    ? u.KHQueryRawDatas(operator, t, n, a, r, o, i, c, l)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function KHAddDatas(e, t, n) {
+  var a = KMDatasourceMng.getInstance().getDataSource(e);
+  a ? a.KHAddDatas(t, n) : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function KHQuerySampleDatas1(e, t, n, a, r) {
+  var o = KMDatasourceMng.getInstance().getDataSource(e);
+  o
+    ? o.KHQuerySampleDatas1(data, callBack)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function GetHistoryDatasKH351(e, t, n, a, r, o, i, l, s = 0) {
+  var c = KMDatasourceMng.getInstance().getDataSource(e),
+    u = l || 3e3;
+  c
+    ? r === 1
+      ? ((u = i || 3e3), c.KHQueryRawDatas(t, n, a, s, "", 1, u, o, 1))
+      : r === 3 ||
+        ((i === void 0 || i < 500) && (i = 500),
+        c.KHQuerySampleDatas2(t, n, a, s, i, 0, "", 1, u, o, 1))
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function GetHistoryDatasKH(e, t, n, a, r, o, i, l, s) {
+  var c = s || 3e3,
+    u = KMDatasourceMng.getInstance().getDataSource(e);
+  u
+    ? u.KHQueryRawDatas(t, n, a, r, o, i, c, l, 0)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function GetHistoryDatasKHEx1(e, t, n, a, r, o, i, l, s, c, u) {
+  var f = u || 3e3,
+    g = KMDatasourceMng.getInstance().getDataSource(e);
+  g
+    ? g.KHQuerySampleDatas2(t, n, a, r, o, i, l, s, f, c)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function GetRealDatasKH351(e, t, n, a) {
+  var r = KMDatasourceMng.getInstance().getDataSource(e),
+    o = a || 3e3;
+  r
+    ? r.KHQueryRealKHDatas(t, 1, o, n)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function GetKingHistoryGroupList(e, t, n) {
+  var a = KMDatasourceMng.getInstance().getDataSource(e),
+    r = n || 3e3;
+  a
+    ? a.KHQueryGroupList(r, t)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function GetKingHistoryTagList(e, t, n, a) {
+  var r = KMDatasourceMng.getInstance().getDataSource(e),
+    o = a || 3e3;
+  r
+    ? r.KHQueryTagList(t, o, n)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function GetRealDatasKH(e, t, n, a) {
+  var r = a || 3e3,
+    o = KMDatasourceMng.getInstance().getDataSource(e);
+  o
+    ? o.KHQueryRealKHDatas(t, 0, r, n)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function GetDataSourceName() {
+  var e = KMDatasourceMng.getInstance().datasourceMap,
+    t = [];
+  return (
+    e.forEach((n, a) => {
+      t.push(a);
+    }),
+    t
+  );
+}
+function GetFilesList(e, t) {
+  var n = KMClientInterface.getInstance();
+  n.GetFilesList(e, t);
+}
+function UploadFiles(e, t, n) {
+  var a = new KMUIInput();
+  ((a.thisElement.id = "kmui-file"),
+    a.thisElement.setAttribute("type", "file"),
+    a.thisElement.setAttribute("multiple", "true"),
+    (a.thisElement.style.display = "none"),
+    document.body.appendChild(a.thisElement),
+    $("#kmui-file")
+      .unbind("change")
+      .bind("change", function () {
+        var r = KMClientInterface.getInstance(),
+          o = document.getElementById("kmui-file").files;
+        let i = [];
+        var l = [
+          "js",
+          "xml",
+          "jsp",
+          "php",
+          "master",
+          "asp",
+          "ascx",
+          "aspx",
+          "bat",
+          "exe",
+          "dll",
+        ];
+        for (let f = 0; f < o.length; f++) {
+          var s = o[f],
+            c = s.name.replace(/.+\./, "");
+          if (l.includes(c)) {
+            alert(c + IDS_UPLOAD_NOTPROMISE);
+            return;
+          }
+          n === "project"
+            ? r.uploadImg(e, s, null, t)
+            : (i = r.UploadFiles(e, s, i, t));
+        }
+        i.length > 0 && u(i[0]);
+        function u(f) {
+          new KMUIFileConfirmPopup(f.pathName, f.formData, f.upload, (g) => {
+            (i.splice(0, 1), i.length && u(i[0]), t(g));
+          });
+        }
+        document.body.removeChild(a.thisElement);
+      }),
+    $("#kmui-file").click());
+}
+function UploadReportFiles(e, t) {
+  var n = new KMUIInput();
+  ((n.thisElement.id = "kmui-file"),
+    n.thisElement.setAttribute("type", "file"),
+    n.thisElement.setAttribute("multiple", "true"),
+    (n.thisElement.style.display = "none"),
+    document.body.appendChild(n.thisElement),
+    $("#kmui-file")
+      .unbind("change")
+      .bind("change", function () {
+        var a = KMClientInterface.getInstance(),
+          r = document.getElementById("kmui-file").files;
+        let o = [];
+        var i = [
+          "js",
+          "xml",
+          "jsp",
+          "php",
+          "master",
+          "asp",
+          "ascx",
+          "aspx",
+          "bat",
+          "exe",
+          "dll",
+        ];
+        for (let u = 0; u < r.length; u++) {
+          var l = r[u],
+            s = l.name.replace(/.+\./, "");
+          if (i.includes(s)) {
+            alert(s + IDS_UPLOAD_NOTPROMISE);
+            return;
+          }
+          o = a.UploadReportFiles(e, l, o, t);
+        }
+        o.length > 0 && c(o[0]);
+        function c(u) {
+          new KMUIFileConfirmPopup(u.pathName, u.formData, u.upload, (f) => {
+            (o.splice(0, 1), o.length && c(o[0]), t(f));
+          });
+        }
+        document.body.removeChild(n.thisElement);
+      }),
+    $("#kmui-file").click());
+}
+function UploadFilesByFilebox(e, t, n, a) {
+  var r = KMClientInterface.getInstance();
+  let o = [];
+  for (let s = 0; s < e.length; s++) {
+    var i = e[s];
+    a === "project"
+      ? r.uploadImg(t, i, null, n)
+      : (o = r.UploadFiles(t, i, o, n));
+  }
+  o.length > 0 && l(o[0]);
+  function l(s) {
+    new KMUIFileConfirmPopup(s.pathName, s.formData, s.upload, (c) => {
+      (o.splice(0, 1), o.length ? l(o[0]) : n(c));
+    });
+  }
+}
+function DownloadFiles(e, t) {
+  var n = KMClientInterface.getInstance();
+  n.DownloadFiles(e, t);
+}
+function DeleteFiles(e, t) {
+  var n = KMClientInterface.getInstance();
+  n.DeleteFiles(e, t);
+}
+function CreateFolder(e, t) {
+  var n = KMClientInterface.getInstance();
+  n.CreateFolder(e, t);
+}
+function DeleteFolder(e, t) {
+  var n = window.sessionStorage.userhandle,
+    a = KMClientInterface.getInstance();
+  a.DeleteFolder(n, e, t);
+}
+function RenameFile(e, t, n) {
+  var a = window.sessionStorage.userhandle,
+    r = KMClientInterface.getInstance();
+  r.RenameFile(a, e, t, n);
+}
+function SearchFile(e, t, n) {
+  var a = window.sessionStorage.userhandle,
+    r = KMClientInterface.getInstance();
+  r.SearchFile(a, e, t, n);
+}
+function CopyFile(e, t, n) {
+  var a = window.sessionStorage.userhandle,
+    r = KMClientInterface.getInstance();
+  r.CopyFile(a, e, t, n);
+}
+function onInconsistentFormat(e, t, n) {
+  var a = { status: "", fileList: null },
+    r = [],
+    o = { fileRelativePath: e, fileFormat: t };
+  (r.push(o), (a.status = "incon-format"), (a.fileList = r), n(a));
+}
+function ReadExcelFile(e, t) {
+  var n = e.match(/(\.[^.]+|)$/)[0];
+  if (((n = n.replace("/", "")), n === ".xls" || n === ".xlsx")) {
+    var a = window.sessionStorage.userhandle,
+      r = KMClientInterface.getInstance();
+    r.ReadFile(a, e, t);
+  } else {
+    var o = ".xls or .xlsx";
+    onInconsistentFormat(e, o, t);
+  }
+}
+function WriteExcelFile(e, t, n) {
+  var a = e.match(/(\.[^.]+|)$/)[0];
+  if (((a = a.replace("/", "")), a === ".xls" || a === ".xlsx")) {
+    var r = window.sessionStorage.userhandle,
+      o = KMClientInterface.getInstance();
+    o.WriteFile(r, e, t, n);
+  } else {
+    var i = ".xls or .xlsx";
+    onInconsistentFormat(e, i, n);
+  }
+}
+function ReadJsonFile(e, t) {
+  var n = e.match(/(\.[^.]+|)$/)[0];
+  if (((n = n.replace("/", "")), n === ".json")) {
+    var a = window.sessionStorage.userhandle,
+      r = KMClientInterface.getInstance();
+    r.ReadFile(a, e, t);
+  } else {
+    var o = ".json";
+    onInconsistentFormat(e, o, t);
+  }
+}
+function WriteJsonFile(e, t, n) {
+  var a = e.match(/(\.[^.]+|)$/)[0];
+  if (((a = a.replace("/", "")), a === ".json")) {
+    var r = window.sessionStorage.userhandle,
+      o = KMClientInterface.getInstance();
+    o.WriteFile(r, e, t, n);
+  } else {
+    var i = ".json";
+    onInconsistentFormat(e, i, n);
+  }
+}
+function ReadTextFile(e, t) {
+  var n = e.match(/(\.[^.]+|)$/)[0];
+  if (((n = n.replace("/", "")), n === ".txt")) {
+    var a = window.sessionStorage.userhandle,
+      r = KMClientInterface.getInstance();
+    r.ReadFile(a, e, t);
+  } else {
+    var o = ".txt";
+    onInconsistentFormat(e, o, t);
+  }
+}
+function WriteTextFile(e, t, n) {
+  var a = e.match(/(\.[^.]+|)$/)[0];
+  if (((a = a.replace("/", "")), a === ".txt")) {
+    var r = window.sessionStorage.userhandle,
+      o = KMClientInterface.getInstance();
+    o.WriteFile(r, e, t, n);
+  } else {
+    var i = ".txt";
+    onInconsistentFormat(e, i, n);
+  }
+}
+function GetCurrentUser() {
+  var e = "";
+  return (
+    window.sessionStorage.user !== "" && (e = window.sessionStorage.user),
+    e
+  );
+}
+function GetCurrentUnit() {
+  var e = "";
+  return (
+    window.sessionStorage.unit !== "" && (e = window.sessionStorage.unit),
+    e
+  );
+}
+function getDataModel(e, t) {
+  var n = KMClientInterface.getInstance();
+  e === KMDataModelENUM.RTO
+    ? n.EnumDataModels(
+        window.sessionStorage.userhandle,
+        kmOperateFlag.KM_RTO_MODEL_DEF_ENUM_BY_TYPE,
+        t,
+      )
+    : e === KMDataModelENUM.HISTORY
+      ? n.EnumDataModels(
+          window.sessionStorage.userhandle,
+          kmOperateFlag.KM_HIS_MODEL_DEF_ENUM_BY_TYPE,
+          t,
+        )
+      : e === KMDataModelENUM.PLAY &&
+        n.EnumDataModels(
+          window.sessionStorage.userhandle,
+          kmOperateFlag.KM_PLO_MODEL_DEF_ENUM_BY_TYPE,
+          t,
+        );
+}
+function getUserRole(e) {
+  var t = KMClientInterface.getInstance();
+  t.EnumRoles(window.sessionStorage.userhandle, e);
+}
+function fileManager(e) {
+  var t = new KMUIFileManagePopup(e);
+}
+function openDevelopWin(e, t, n, a, r, o, i) {
+  var l = new KMRunLogin();
+  l.userLoginChecked(e, t, n, a, r, o, i);
+}
+function getInfoByStatusCode(e) {
+  var t = 0;
+  switch (e) {
+    case kmResponseStatusCodes.SUCCESS:
+      t = kmResponseStatusInfos.SUCCESS;
+      break;
+    case kmResponseStatusCodes.UNEXIST_USERNAME:
+      t = kmResponseStatusInfos.UNEXIST_USERNAME;
+      break;
+    case kmResponseStatusCodes.INCORRECT_PASSWORD:
+      t = kmResponseStatusInfos.INCORRECT_PASSWORD;
+      break;
+    case kmResponseStatusCodes.USERNOTLOGIN:
+      t = kmResponseStatusInfos.USERNOTLOGIN;
+      break;
+    case kmResponseStatusCodes.NOAUTH:
+      t = kmResponseStatusInfos.NOAUTH;
+      break;
+    case kmResponseStatusCodes.EXPIRE:
+      t = kmResponseStatusInfos.EXPIRE;
+      break;
+    case kmResponseStatusCodes.MADATELOGIN:
+      t = kmResponseStatusInfos.MADATELOGIN;
+      break;
+    case kmResponseStatusCodes.MAXONLINELINITED:
+      t = kmResponseStatusInfos.MAXONLINELINITED;
+      break;
+    case kmResponseStatusCodes.INCORRECT_OLD_PASSWORD:
+      t = kmResponseStatusInfos.INCORRECT_OLD_PASSWORD;
+      break;
+    case kmResponseStatusCodes.FAILED:
+      t = kmResponseStatusInfos.FAILED;
+      break;
+    default:
+      break;
+  }
+  return t;
+}
+function httpRequestExec(e, t, n, a, r, o, i, l = !0) {
+  var s = KMClientInterface.getInstance();
+  (t[0] === "/" && (t = t.substring(1, t.length)),
+    s.httpRequestExec(e, t, n, a, r, o, i, l));
+}
+function httpRequestExecSync(e, t, n, a, r, o) {
+  var i = KMClientInterface.getInstance();
+  (t[0] === "/" && (t = t.substring(1, t.length)),
+    i.httpRequestExecSync(e, t, n, a, r, o));
+}
+function SystemSubscribe(e) {
+  var t = KMClientInterface.getInstance();
+  t.systemSubscribe(e);
+}
+function sendEmail(e, t, n, a, r, o, i, l) {
+  var s = KMClientInterface.getInstance(),
+    c = {
+      sendToList: JSON.stringify(e),
+      CCList: JSON.stringify(t),
+      subject: n,
+      body: a,
+      sender: JSON.stringify(r),
+    };
+  typeof o == "function"
+    ? s.kmSendEMail(c, o)
+    : ((c.html = o), (c.attachments = i), s.kmSendEMail(c, l));
+}
+function addRole(e) {
+  var t = new KMRole(),
+    n = e;
+  t.jsonToObject(n);
+  var a = KMRoleManager.getInstance().add(t);
+  if (a) KMRoleManager.getInstance().saveData(function () {});
+  else return;
+}
+function roleExecute(e, t, n) {
+  var a = KMRoleManager.getInstance();
+  switch (t) {
+    case "query":
+      a.roleList && n(a.roleList);
+      break;
+    case "add":
+      var r = KMRoleManager.getInstance().add(role);
+      if (r) a.saveData(n);
+      else return;
+      break;
+    case "modify":
+      var r = a.updateRole(e, n);
+      if (r) a.saveData(n);
+      else return;
+      break;
+    case "delete":
+      a.roleRemoveByName(e, n) && a.saveData(n);
+      break;
+  }
+}
+function roleModify(e, t) {
+  roleExecute(e, "modify", t);
+}
+function roleQuery(e, t) {
+  roleExecute(e, "query", t);
+}
+function roleDelete(e, t) {
+  roleExecute(e, "delete", t);
+}
+function getPath() {
+  return (
+    urlType.WEBDATASERVER_URL + urlType.IMGPATH + urlType.PROJECTPICTURE_URL
+  );
+}
+function user_list() {
+  return new OauthClient().getUserMap();
+}
+function getServerInfo() {
+  var e = KMClientInterface.getInstance().getFileRequest();
+  let t = urlType.WEBDATASERVER_URL + "/getServerInfo",
+    n;
+  return (
+    e.KMAjaxGetSyn(urlType.WEBDATASERVER_URL, t, (a) => {
+      n = a;
+    }),
+    n
+  );
+}
+function user_info(e) {
+  return new OauthClient().getUserInfo(e);
+}
+function all_user_info() {
+  return new OauthClient().getAllUserInfo();
+}
+function all_group_info() {
+  return new OauthClient().getAllGroupInfo();
+}
+function update_user_info(e) {
+  return new OauthClient().updateUserInfo(e);
+}
+function user_add(e) {
+  return new OauthClient().createUser(e);
+}
+function editUserPassWordValid(e, t) {
+  return new OauthClient().editUserPassWordValid(e, t);
+}
+function user_password(e) {
+  return new OauthClient().updatePassword(e);
+}
+function user_modifyold(e, t) {
+  let n = new OauthClient();
+  return n.userMap.hasOwnProperty(e)
+    ? n.updateUser(e, t)
+    : {
+        errorCode: -1,
+        message:
+          "\u7528\u6237\u4FE1\u606F\u4FEE\u6539\u5931\u8D25, \u8BE5\u7528\u6237\u4E0D\u5B58\u5728",
+      };
+}
+function user_delete(e) {
+  return new OauthClient().deleteUser(e);
+}
+function group_list() {
+  return new OauthClient().getGroupMap();
+}
+function role_list() {
+  return new OauthClient().getRoleMap();
+}
+function group_add(e) {
+  let t = new OauthClient();
+  return e.parentName !== "root" && !t.groupMap.hasOwnProperty(e.parentName)
+    ? {
+        errorCode: -1,
+        message:
+          "\u7528\u6237\u7EC4\u6DFB\u52A0\u5931\u8D25, \u7236\u7528\u6237\u7EC4\u4E0D\u5B58\u5728",
+      }
+    : t.createGroup(e);
+}
+function group_modify(e, t) {
+  return new OauthClient().updateGroup(e, t);
+}
+function group_delete(e) {
+  return new OauthClient().deleteGroup(e);
+}
+function getSecurityGroup() {
+  var e = KMClientInterface.getInstance(),
+    t = {
+      name: "securitySectionManager",
+      type: operateType.ROLEIN,
+      guid: e.currentProName,
+    },
+    n = [];
+  return (
+    e.kmGetProjectInFile(1, t, function (a) {
+      for (let r = 0; r < a.length; r++) n.push(a[r].name);
+    }),
+    n
+  );
+}
+function getResourceGroup(e) {
+  var t = KMClientInterface.getInstance(),
+    n = { userName: "hehehe" };
+  t.kmGetResourceGroup(n, e);
+}
+function user_modifyById(e) {
+  return new OauthClient().updateUserbyId(e);
+}
+function GetParentGroupByUserName(e) {
+  var t = new OauthClient().getUserInfo(e);
+  if (t && t.groupId) {
+    var n = t.groupId;
+    return (
+      oauthCommon.ajaxGet(`/api/v1/groupInfo?groupId=${n}`, !0, function (a) {
+        a && (result = a);
+      }),
+      result
+    );
+  } else throw new Error("OauthClient getUserInfo error: get userInfo error");
+}
+function getLoginHistory(e, t, n, a) {
+  var r = KMClientInterface.getInstance();
+  r.getLoginHistory(e, t, n, function (o) {
+    let i = [];
+    (o.forEach((l) => {
+      let s = l.token_name.split("_")[1];
+      e === s && i.push(l);
+    }),
+      a(i));
+  });
+}
+function getAllLoginHistory(e) {
+  var t = KMClientInterface.getInstance();
+  t.getAllLoginHistory(e);
+}
+function CustomImport(e) {
+  CustomImportByExcel((t, n) => {
+    var a = KMClientInterface.getInstance();
+    a.customReport(
+      JSON.stringify({ data: t, name: n }),
+      CustomExportToExcel,
+      e,
+    );
+  });
+}
+function CustomExportToExcel(e, t) {
+  $(".km-ds-popup-wrap").remove();
+  var n = e.data,
+    a = e.name,
+    r,
+    o = XLSX.writeFile(n, a, {});
+}
+function CustomImportByExcel(e, t, n) {
+  var a,
+    r = !1;
+  function o(l) {
+    for (var s = "", c = 0, u = 10240; c < l.byteLength / u; ++c)
+      s += String.fromCharCode.apply(
+        null,
+        new Uint8Array(l.slice(c * u, c * u + u)),
+      );
+    return (
+      (s += String.fromCharCode.apply(null, new Uint8Array(l.slice(c * u)))),
+      s
+    );
+  }
+  var i = document.createElement("input");
+  ((i.type = "file"),
+    (i.style.display = "none"),
+    (i.id = "IMPORT_BY_EXCEL"),
+    (obj = i),
+    document.body.appendChild(i),
+    $(i).trigger("click"),
+    (i.onchange = function () {
+      if (obj.files) {
+        var l = obj.files[0],
+          s = obj.files[0].name,
+          c = ["xlsx", "xls"],
+          u = l.name.match(/^(.*)(\.)(.{1,8}$)/)[3];
+        if (c.indexOf(u.toLowerCase()) === -1) {
+          alert(RS.FILE_TYPE_MISMATCH);
+          return;
+        }
+        var f = new FileReader();
+        ((f.onload = function (g) {
+          var h = g.target.result;
+          r
+            ? (a = XLSX.read(btoa(o(h)), { type: "base64" }))
+            : (a = XLSX.read(h, { type: "binary" }));
+          var d = a;
+          (e(d, s),
+            $("#" + i.id).remove(),
+            (self.popup = new KMPopupBase()),
+            self.popup.setPanelWidth(400),
+            self.popup.setTitleBarText("\u67E5\u8BE2\u4E2D..."));
+          let v = $(`
+                    <div style = "height: 25px">
+                        <img id ="imgProgress" src="static/images/010.gif"  width="100%" height="100%">
+                    </div>
+                `)[0];
+          (self.popup.cancelBtn.thisElement.remove(),
+            self.popup.closeSpan.thisElement.remove(),
+            self.popup.confirmBtn.thisElement.remove(),
+            self.popup.content.thisElement.appendChild(v));
+        }),
+          r ? f.readAsArrayBuffer(l) : f.readAsBinaryString(l));
+      }
+    }));
+}
+var $WorkFlow = {
+  allWorkFlow: (e, t) => {
+    var n = e + "/api/v1.0/workflow/getworkflowInfo",
+      a = n + "?username=" + window.sessionStorage.user,
+      r = KMClientInterface.getInstance().getFileRequest();
+    r.KMAjaxGetWorkFlow("", a, (o) => {
+      t(o);
+    });
+  },
+  startWorkFlowTags: (e, t, n, a) => {
+    var r = e + "/api/v1.0/engine/getworkflowpublicvariable",
+      o = [],
+      i =
+        r +
+        "?username=" +
+        window.sessionStorage.user +
+        "&workflowId=" +
+        t +
+        "&version=" +
+        n,
+      l = KMClientInterface.getInstance().getFileRequest();
+    l.KMAjaxGetWorkFlow("", i, (s) => {
+      a(s);
+    });
+  },
+  startWorkFlow: (e, t, n, a, r, o, i) => {
+    var l = e + "/api/v1.0/engine/startworkflow";
+    let s = {
+      sponsor: window.sessionStorage.user,
+      workflowId: t,
+      workflowName: n,
+      workflowTitle: a,
+      publicvariable: r,
+      version: o,
+    };
+    var c = KMClientInterface.getInstance().getFileRequest();
+    c.KMAjaxPostWorkFlow("", l, s, (u) => {
+      i(u);
+    });
+  },
+  todoWorkFlow: (e, t, n) => {
+    var a = e + "/api/v1.0/activity/getworkflowactivity",
+      r =
+        a +
+        "?username=" +
+        window.sessionStorage.user +
+        "&type=1&page=1&pagecount=" +
+        t,
+      o = KMClientInterface.getInstance().getFileRequest();
+    o.KMAjaxGetWorkFlow("", r, (i) => {
+      n(i);
+    });
+  },
+  doneWorkFlow: (e, t, n) => {
+    var a = e + "/api/v1.0/activity/getworkflowactivity",
+      r =
+        a +
+        "?username=" +
+        window.sessionStorage.user +
+        "&type=2&page=1&pagecount=" +
+        t,
+      o = KMClientInterface.getInstance().getFileRequest();
+    o.KMAjaxGetWorkFlow("", r, (i) => {
+      n(i);
+    });
+  },
+  cancelWorkFlow: (e, t, n, a) => {
+    var r = e + "/api/v1.0/engine/cancelworkflow";
+    let o = {
+      username: window.sessionStorage.user,
+      workflowInstanceId: n,
+      workflowId: t,
+    };
+    var i = KMClientInterface.getInstance().getFileRequest();
+    i.KMAjaxPostWorkFlow("", r, o, (l) => {
+      a(l);
+    });
+  },
+  jumpWorkFlow: (e, t, n, a) => {
+    var r = e + "/api/v1.0/activity/activityjump";
+    let o = {
+      username: window.sessionStorage.user,
+      workflowInstanceId: t,
+      activityId: n,
+    };
+    var i = KMClientInterface.getInstance().getFileRequest();
+    i.KMAjaxPostWorkFlow("", r, o, (l) => {
+      a(l);
+    });
+  },
+  getCollectWorkFlow: (e, t) => {
+    var n = e + "/api/v1.0/workflow/getmyworkflow",
+      a = n + "?username=" + window.sessionStorage.user,
+      r = KMClientInterface.getInstance().getFileRequest();
+    r.KMAjaxGetWorkFlow("", a, (o) => {
+      t(o);
+    });
+  },
+  addCollectWorkFlow: (e, t, n, a) => {
+    var r = e + "/api/v1.0/workflow/setfavoriteworkflow",
+      o = [],
+      i =
+        r +
+        "?username=" +
+        window.sessionStorage.user +
+        "&workflowId=" +
+        t +
+        "&workflowversion=" +
+        n,
+      l = KMClientInterface.getInstance().getFileRequest();
+    l.KMAjaxGetWorkFlow("", i, (s) => {
+      a(s);
+    });
+  },
+  delCollectWorkFlow: (e, t, n, a) => {
+    var r = e + "/api/v1.0/workflow/cancelfavoriteworkflow",
+      o = [],
+      i =
+        r +
+        "?username=" +
+        window.sessionStorage.user +
+        "&workflowId=" +
+        t +
+        "&workflowversion=" +
+        n,
+      l = KMClientInterface.getInstance().getFileRequest();
+    l.KMAjaxGetWorkFlow("", i, (s) => {
+      a(s);
+    });
+  },
+  getAllWorkFlow: (e, t) => {
+    var n = e + "/api/v1.0/workflow/getallworkflow",
+      a = n + "?page=&pagecount=65535",
+      r = KMClientInterface.getInstance().getFileRequest();
+    r.KMAjaxGetWorkFlow("", a, (o) => {
+      t(o);
+    });
+  },
+  getAllNodeInfo: (e, t, n) => {
+    var a = e + "/api/v1.0/engine/getworkflowtasktime",
+      r = a + "?workflowInstanceId=" + t,
+      o = KMClientInterface.getInstance().getFileRequest();
+    o.KMAjaxGetWorkFlow("", r, (i) => {
+      n(i);
+    });
+  },
+};
+function updateExcelSheet(e, t, n) {
+  var a = KMClientInterface.getInstance();
+  a.updateExcelSheet(e, t, n);
+}
+function printExcelSheet(e, t) {
+  var n = KMClientInterface.getInstance();
+  n.printExcelSheet(e, t);
+}
+function WriteLog(e, t, n) {
+  try {
+    var a = "../../../../../sdb/logs/operate.log",
+      r = KMClientInterface.getInstance(),
+      o = new Date(),
+      i = o.toLocaleString("chinese", { hour12: !1 });
+    i = i.replace("/", "-").replace("/", "-");
+    var l = { logmsg: i + " operate " + t + " " + n, path: a };
+    r.WriteFile("", "", l, function (s) {
+      return s.status === "success" ? 0 : 1;
+    });
+  } catch {
+    return 1;
+  }
+}
+function EnumKIOVariable(e, t, n, a) {
+  new DataSourceAccess().GetDataSourceContentsAsync(
+    getToken(),
+    e,
+    t,
+    n,
+    function (o) {
+      o.code === "success"
+        ? a(o.data.objectList)
+        : (a(o.code),
+          alert(RS.UPDATED_DATASOURCE_VARIABLE_FAILED + ": " + o.code));
+    },
+  );
+}
+function EnumKIODataSource(e, t) {
+  let n = new DataSourceAccess(),
+    a = [];
+  return (
+    n.GetDataSourceInfosAsync(getToken(), e, t, function (r) {
+      r.code === "success"
+        ? (a = r.data)
+        : ((a = []),
+          alert(
+            "\u8BF7\u786E\u8BA4\u6570\u636E\u6E90\u8BBF\u95EEAPP\u670D\u52A1\u662F\u5426\u6B63\u5E38\uFF1A" +
+              r.code,
+          ));
+    }),
+    a
+  );
+}
+function AdminRegister(e, t) {
+  let n = "/user/adminRegister",
+    a = getToken(),
+    r = "";
+  if (
+    (oauthCommon.ajaxPost(n, e, a, !1, (o) => {
+      o && (typeof t == "function" ? t(o) : (r = o));
+    }),
+    r !== "")
+  )
+    return r;
+}
+function GetAdminInfo(e) {
+  let t = "/api/v1/user/adminInfo",
+    n = getToken(),
+    a = "";
+  if (
+    (oauthCommon.ajaxGet(t, {}, n, !1, (r) => {
+      r && (typeof e == "function" ? e(r) : (a = r));
+    }),
+    a !== "")
+  )
+    return a;
+}
+function GetUserInfo(e, t) {
+  let n = "/api/v1/user/info",
+    a = getToken(),
+    r = "";
+  if (
+    (oauthCommon.ajaxPost(n, e, a, !1, (o) => {
+      o && (typeof t == "function" ? t(o) : (r = o));
+    }),
+    r !== "")
+  )
+    return r;
+}
+function GetMessage(e, t) {
+  let n = { phone: e },
+    a = "/user/verificationCode",
+    r = getToken(),
+    o = "";
+  if (
+    (oauthCommon.ajaxPost(a, n, r, !1, (i) => {
+      i && (typeof t == "function" ? t(i) : (o = i));
+    }),
+    o !== "")
+  )
+    return o;
+}
+function UpdateEmail(e, t, n) {
+  let a = { userId: e, email: t },
+    r = "/api/v1/user/updateEmail",
+    o = getToken(),
+    i = "";
+  if (
+    (oauthCommon.ajaxPost(r, a, o, !1, (l) => {
+      l && (typeof n == "function" ? n(l) : (i = l));
+    }),
+    i !== "")
+  )
+    return i;
+}
+function UpdatePassword(e, t) {
+  let n = "/api/v1/userPassword",
+    a = getToken(),
+    r = "";
+  if (
+    (oauthCommon.ajaxPost(n, e, a, !1, (o) => {
+      o && (typeof t == "function" ? t(o) : (r = o));
+    }),
+    r !== "")
+  )
+    return r;
+}
+function GetTenantList(e) {
+  let t = {},
+    n = "/api/v1/user/tenantList",
+    a = getToken(),
+    r = "";
+  if (
+    (oauthCommon.ajaxPost(n, t, a, !1, (o) => {
+      o && (typeof e == "function" ? e(o) : (r = o));
+    }),
+    r !== "")
+  )
+    return r;
+}
+function UpdateNickName(e, t, n) {
+  let a = { userId: e, nickName: t },
+    r = "/api/v1/user/updateNickName",
+    o = getToken(),
+    i = "";
+  if (
+    (oauthCommon.ajaxPost(r, a, o, !1, (l) => {
+      l && (typeof n == "function" ? n(l) : (i = l));
+    }),
+    i !== "")
+  )
+    return i;
+}
+function UpdatePhoneNumber(e, t, n, a) {
+  let r = { userId: e, phone: t, phoneCode: n },
+    o = "/api/v1/user/updatePhoneNumber",
+    i = getToken(),
+    l = "";
+  if (
+    (oauthCommon.ajaxPut(o, r, i, !1, (s) => {
+      s && (typeof a == "function" ? a(s) : (l = s));
+    }),
+    l !== "")
+  )
+    return l;
+}
+function VerifyMessage(e, t, n) {
+  let a = { phoneNumber: e, phoneCode: t },
+    r = "/user/verifyCode",
+    o = getToken(),
+    i = "";
+  if (
+    (oauthCommon.ajaxPost(r, a, o, !1, (l) => {
+      l && (typeof n == "function" ? n(l) : (i = l));
+    }),
+    i !== "")
+  )
+    return i;
+}
+function ImageUpload(e, t) {
+  var n = new KMUIInput();
+  ((n.thisElement.id = "kmui-file"),
+    n.thisElement.setAttribute("type", "file"),
+    n.thisElement.setAttribute("multiple", "true"),
+    (n.thisElement.style.display = "none"),
+    document.body.appendChild(n.thisElement),
+    $("#kmui-file")
+      .unbind("change")
+      .bind("change", function () {
+        var a = KMClientInterface.getInstance(),
+          r = document.getElementById("kmui-file").files[0];
+        let o = "/api/v1/user/imageUpload",
+          i = getToken();
+        var l = new FormData();
+        (l.append("userImage", r), l.append("userId", e));
+        function s(c, u, f, g, h) {
+          let d = {
+            Authorization: "Bearer " + f,
+            Accept: "application/json",
+            Connection: "keep-alive",
+          };
+          fetch("http://" + a.oauthIp + c, {
+            headers: d,
+            method: "PUT",
+            body: u,
+          })
+            .then((p) => p.json())
+            .then((p) => {
+              h(p);
+            });
+        }
+        s(o, l, i, !0, function (c) {
+          (t(c), document.body.removeChild(n.thisElement));
+        });
+      }),
+    $("#kmui-file").click());
+}
+function RegisteredCode(e, t) {
+  let n = { phoneNumber: e },
+    a = "/user/registeredCode",
+    r = getToken(),
+    o = "";
+  if (
+    (oauthCommon.ajaxPost(a, n, r, !1, (i) => {
+      i && (typeof t == "function" ? t(i) : (o = i));
+    }),
+    o !== "")
+  )
+    return o;
+}
+function ModifyPhoneCode(e, t) {
+  let n = { phoneNumber: e },
+    a = "/user/modifyPhoneCode",
+    r = getToken(),
+    o = "";
+  if (
+    (oauthCommon.ajaxPost(a, n, r, !1, (i) => {
+      i && (typeof t == "function" ? t(i) : (o = i));
+    }),
+    o !== "")
+  )
+    return o;
+}
+function SmsNotification(e, t) {
+  let n = { phoneNumber: e },
+    a = "/user/SmsNotification",
+    r = getToken(),
+    o = "";
+  if (
+    (oauthCommon.ajaxPost(a, n, r, !1, (i) => {
+      i && (typeof t == "function" ? t(i) : (o = i));
+    }),
+    o !== "")
+  )
+    return o;
+}
+function NotificationCode(e, t) {
+  let n = { phoneNumber: e },
+    a = "/user/NotificationCode",
+    r = getToken(),
+    o = "";
+  if (
+    (oauthCommon.ajaxPost(a, n, r, !1, (i) => {
+      i && (typeof t == "function" ? t(i) : (o = i));
+    }),
+    o !== "")
+  )
+    return o;
+}
+function ResetPasswordCode(e, t) {
+  let n = { phoneNumber: e },
+    a = "/user/resetPasswordCode",
+    r = getToken(),
+    o = "";
+  if (
+    (oauthCommon.ajaxPost(a, n, r, !1, (i) => {
+      i && (typeof t == "function" ? t(i) : (o = i));
+    }),
+    o !== "")
+  )
+    return o;
+}
+function ResetPassword(e, t) {
+  return new OauthClient().resetPassword({ userName: e }, t);
+}
+function ResetUserPassword(e, t) {
+  let n = "/api/v1/resetPassword",
+    a = getToken(),
+    r = "";
+  if (
+    (oauthCommon.ajaxPost(n, e, a, !1, (o) => {
+      o && (typeof t == "function" ? t(o) : (r = o));
+    }),
+    r !== "")
+  )
+    return r;
+}
+function UpdateRealName(e, t) {
+  let n = "/api/v1/user/updateRealName",
+    a = getToken(),
+    r = "";
+  if (
+    (oauthCommon.ajaxPost(n, e, a, !1, (o) => {
+      o && (typeof t == "function" ? t(o) : (r = o));
+    }),
+    r !== "")
+  )
+    return r;
+}
+function UpdateCompanyName(e, t) {
+  let n = "/api/v1/user/updateCompanyName",
+    a = getToken(),
+    r = "";
+  if (
+    (oauthCommon.ajaxPost(n, e, a, !1, (o) => {
+      o && (typeof t == "function" ? t(o) : (r = o));
+    }),
+    r !== "")
+  )
+    return r;
+}
+function AddUser(e, t) {
+  let n = "/api/v1/user",
+    a = getToken(),
+    r = "";
+  if (
+    (oauthCommon.ajaxPost(n, e, a, !1, (o) => {
+      o && (typeof t == "function" ? t(o) : (r = o));
+    }),
+    r !== "")
+  )
+    return r;
+}
+function UpdateUser(e, t) {
+  let n = "/api/v1/user",
+    a = getToken(),
+    r = "";
+  if (
+    (oauthCommon.ajaxPut(n, e, a, !1, (o) => {
+      o && (typeof t == "function" ? t(o) : (r = o));
+    }),
+    r !== "")
+  )
+    return r;
+}
+function DeleteUser(e, t) {
+  let n = "/api/v1/user",
+    a = getToken(),
+    r = "";
+  if (
+    (oauthCommon.ajaxDelete(n, e, a, !1, (o) => {
+      o && (typeof t == "function" ? t(o) : (r = o));
+    }),
+    r !== "")
+  )
+    return r;
+}
+function GetUserList(e, t) {
+  let n = "/api/v1/userList",
+    a = getToken(),
+    r = "";
+  if (
+    (oauthCommon.ajaxGet(n, !0, (o) => {
+      o && (typeof t == "function" ? t(o) : (r = o));
+    }),
+    r !== "")
+  )
+    return r;
+}
+function playSound(e, t) {
+  var n = monitorDevice.getOrigin() + e;
+  KMUIMusicPlay.getInstance().modePlay(n, t);
+}
+function isFile(e, t) {
+  var n = KMClientInterface.getInstance();
+  n.kmIsFile(e, t);
+}
+function AsynDBQuery(e, t, n, a) {
+  var r = KMDatasourceMng.getInstance().getDataSource(e),
+    o = "queryTable";
+  r
+    ? r.executeSQLByTable3(o, t, n, a)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function AsynDBDelete(e, t, n, a) {
+  var r = KMDatasourceMng.getInstance().getDataSource(e),
+    o = "deleteData";
+  r
+    ? r.executeSQLByTable3(o, t, n, a)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function AsynDBInsert(e, t, n, a, r) {
+  var o = KMDatasourceMng.getInstance().getDataSource(e),
+    i = "insertData";
+  o
+    ? o.executeSQLByTable2(i, t, n, a, r)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function AsynDBUpdate(e, t, n, a) {
+  var r = KMDatasourceMng.getInstance().getDataSource(e),
+    o = "updateData";
+  r
+    ? r.executeSQLByTable3(o, t, n, a)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function AsynDBCreateTable(e, t, n, a, r) {
+  var o = KMDatasourceMng.getInstance().getDataSource(e),
+    i = "createTable";
+  o
+    ? o.executeSQLByTable2(i, t, n, a, r)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function AsynDBAlterTable(e, t, n, a, r) {
+  var o = KMDatasourceMng.getInstance().getDataSource(e),
+    i = "updateTable";
+  o
+    ? o.executeSQLByTable2(i, t, n, a, r)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function AsynDBClearTable(e, t, n, a) {
+  var r = KMDatasourceMng.getInstance().getDataSource(e),
+    o = "clearTable";
+  r
+    ? r.executeSQLByTable1(o, t, n, a)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function AsynDBDeleteTable(e, t, n, a) {
+  var r = KMDatasourceMng.getInstance().getDataSource(e),
+    o = "dropTable";
+  r
+    ? r.executeSQLByTable1(o, t, n, a)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function AsynDBGetTableColumns(e, t, n, a) {
+  var r = KMDatasourceMng.getInstance().getDataSource(e),
+    o = "getTableInfo";
+  r
+    ? r.executeSQLByTable1(o, t, n, a)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function AsynDBGetTableCount(e, t, n, a) {
+  var r = KMDatasourceMng.getInstance().getDataSource(e),
+    o = "getTableCount";
+  r
+    ? r.executeSQLByTable1(o, t, n, a)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function AsynDBGetTables(e, t, n, a) {
+  var r = KMDatasourceMng.getInstance().getDataSource(e),
+    o = "getTableName";
+  r
+    ? r.executeSQLByTable1(o, t, n, a)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function AsynDBGetPages(e, t, n, a, r, o) {
+  var i = KMDatasourceMng.getInstance().getDataSource(e),
+    l = "getTablePagination";
+  i
+    ? i.executeSQLByTable4(l, t, n, a, r, o)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function AsynDBQuerySP(e, t, n, a, r, o) {
+  var i = KMDatasourceMng.getInstance().getDataSource(e),
+    l = "executeSP";
+  i
+    ? i.executeSQLByTable4(l, t, n, a, r, o)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function AsynDBGetViews(e, t, n, a, r) {
+  var o = KMDatasourceMng.getInstance().getDataSource(e),
+    i = "getViews";
+  o
+    ? o.executeSQLByTable2(i, t, n, a, r)
+    : alert(`\u6570\u636E\u6E90${e}\u672A\u627E\u5230!`);
+}
+function ShowAlert(e) {
+  element_popup.render("alert", e);
+}
+function ShowLoading(e) {
+  return element_popup.render("loading", e);
+}
+function ShowMessage(e) {
+  element_popup.render("message", e);
+}
+function ShowMsgBox(e, t, n) {
+  element_popup.render("messagebox", t, e, n);
+}
+function ShowNotification(e) {
+  element_popup.render("notification", e);
+}
+var element_popup = (function () {
+  var t = null,
+    n = function () {
+      var r = document.createElement("div");
+      (document.body.appendChild(r),
+        (r.id = "ElementShowFunction"),
+        (r.style.position = "absolute"),
+        (r.style.top = 0),
+        (r.style.left = 0),
+        (r.style.width = "100%"),
+        (r.style.zIndex = 100));
+      var o = `
+        <component :is="name" :options="options" ref="component" :mode="mode" :cb="cb"></component>
+        `;
+      ((r.innerHTML = o), window.removeEventListener("load", n, !1));
+    };
+  window.addEventListener("load", n, !1);
+  var a = {
+    alert: {
+      name: "element-alert",
+      props: { options: { type: Object, required: !1 } },
+      template: `
+                <el-alert
+                    :title="options.title?options.title:''",
+                    :type="options.type?options.type:'info'",
+                    :description="options.description?options.description:''"
+                    :closable="(options.closable === false)?options.closable:true",
+                    :center="options.center?options.center:false",
+                    :show-icon="(options['show_icon'] === false)?options['show_icon']:true" 
+                    :effect="options.effect?options.effect:'light'"
+                ></el-alert>
+            `,
+    },
+    loading: {
+      name: "element-loading",
+      props: { options: { type: Object, required: !1 } },
+      template: `
+                <div></div>
+            `,
+      mounted() {
+        var r = {
+          lock: !0,
+          text: this.options.text ? this.options.text : "",
+          background: this.options.background
+            ? this.options.background
+            : "rgba(0,0,0,0.7)",
+          iconUrl: this.options.iconUrl ? this.options.iconUrl : "",
+        };
+        (r.iconUrl || delete r.iconUrl,
+          (this.load = this.$loading(r)),
+          $(".el-loading-mask").css({
+            width: this.options.width,
+            height: this.options.height,
+            left: this.options.left,
+            top: this.options.top,
+            "z-index": getMaxZIndexOfDom(),
+          }));
+      },
+      methods: {
+        close: function () {
+          (this.load.close(), $(".el-loading-mask").remove());
+        },
+      },
+    },
+    message: {
+      name: "element-message",
+      props: { options: { type: Object, required: !1 } },
+      template: "<div></div>",
+      mounted() {
+        (this.$message(this.options),
+          $(".el-message").css({
+            minWidth: "200px",
+            width: this.options.width,
+            height: this.options.height,
+            backgroundColor: this.options.backgroundColor,
+            border: this.options.border,
+            borderRadius: this.options.borderRadius,
+          }),
+          $(".el-message__content").css("color", this.options.color));
+      },
+    },
+    messagebox: {
+      name: "element-message",
+      props: {
+        options: { type: Object, required: !1 },
+        mode: { type: String, required: !0 },
+        cb: { type: Function, require: !0, default: function () {} },
+      },
+      template: "<div></div>",
+      mounted() {
+        var r = this.options.message ? this.options.message : "",
+          o = this.options.title ? this.options.title : "";
+        (this.options.message && delete this.options.message,
+          this.options.title && delete this.options.title,
+          this["$" + this.mode](r, o, this.options)
+            .then((i) => {
+              this.mode !== "prompt"
+                ? this.cb({ action: i, inputValue: "" })
+                : this.cb({ action: i.action, inputValue: i.value });
+            })
+            .catch((i) => {
+              this.cb({ action: i, inputValue: "" });
+            }),
+          this.options.titleStyle
+            ? $(".el-message-box__title").css({
+                "font-size": this.options.titleStyle.fontSize,
+                "text-align": this.options.titleStyle.textAlign,
+              })
+            : $(".el-message-box__title").css({
+                "font-size": "18px",
+                "text-align": "left",
+              }),
+          this.options.messageStyle
+            ? $(".el-message-box__content").css({
+                "font-size": this.options.messageStyle.fontSize,
+                "text-align": this.options.messageStyle.textAlign,
+              })
+            : $(".el-message-box__content").css({
+                "font-size": "14px",
+                "text-align": "left",
+              }));
+      },
+    },
+    notication: {
+      name: "element-message",
+      props: { options: { type: Object, required: !1 } },
+      template: "<div></div>",
+      mounted() {
+        this.$notify(this.options);
+      },
+    },
+  };
+  return {
+    render(r, o, i, l) {
+      if (
+        (t &&
+          r === "loading" &&
+          t.name !== r &&
+          ((t = null),
+          (document.getElementById("ElementShowFunction").innerHTML =
+            '<component :is="name" :options="options" ref="component" :mode="mode" :cb="cb"></component>')),
+        document.getElementById("ElementShowFunction") ||
+          window.addEventListener("load", n, !1),
+        t
+          ? t.name === r
+            ? ((t.name = ""),
+              t.$nextTick(() => {
+                ((t.name = r),
+                  (t.options = o),
+                  i && (t.mode = i),
+                  l && (t.cb = l));
+              }))
+            : ((t.name = r),
+              (t.options = o),
+              i && (t.mode = i),
+              l && (t.cb = l))
+          : (t = new Vue({
+              el: "#ElementShowFunction",
+              data: { name: r, options: o, mode: i || "", cb: l || null },
+              components: {
+                alert: a.alert,
+                loading: a.loading,
+                message: a.message,
+                messagebox: a.messagebox,
+                notification: a.notication,
+              },
+            })),
+        r === "loading")
+      )
+        return t.$refs.component.close;
+    },
+  };
+})();
+function getAbsImgList(e, t, n) {
+  var a = KMClientInterface.getInstance();
+  e = e.replace("/", "//");
+  var r = { imgPath: e, imgName: t };
+  a.getAbsImgList(r, function (o) {
+    if (n) n(o);
+    else return o;
+  });
+}
+function getImageCarsuelList(e, t, n) {
+  getAbsImgList(e, t, function (a) {
+    if (Array.isArray(a)) {
+      var r = [];
+      if (
+        (a.forEach((o) => {
+          if (window.plus) {
+            o = sessionStorage.getItem("urlObj") + "/imgAbs/?imgPath=" + o;
+            var i = { src: o };
+            r.push(i);
+          } else {
+            o = monitorDevice.getOrigin() + "/imgAbs/?imgPath=" + o;
+            var i = { src: o };
+            r.push(i);
+          }
+        }),
+        n)
+      )
+        n(r);
+      else return r;
+    } else throw new Error("data type  error!");
+  });
+}
+function ImportByCsv(e) {
+  var t,
+    n = !1,
+    a = !1;
+  function r(i) {
+    for (var l = "", s = 0, c = 10240; s < i.byteLength / c; ++s)
+      l += String.fromCharCode.apply(
+        null,
+        new Uint8Array(i.slice(s * c, s * c + c)),
+      );
+    return (
+      (l += String.fromCharCode.apply(null, new Uint8Array(i.slice(s * c)))),
+      l
+    );
+  }
+  var o = document.createElement("input");
+  ((o.type = "file"),
+    (o.style.display = "none"),
+    (o.id = "IMPORT_BY_EXCEL"),
+    (obj = o),
+    document.body.appendChild(o),
+    $(o).trigger("click"),
+    (o.onchange = function () {
+      if (obj.files) {
+        var i = obj.files[0],
+          l = new FileReader();
+        ((l.onload = function (s) {
+          var c = s.target.result;
+          if (((t = null), a)) {
+            c = n ? new Uint8Array(c) : c;
+            var u = cptable.utils.decode(936, c);
+            t = XLSX.read(u, { type: "string" });
+          }
+          t ||
+            (t =
+              n || a
+                ? XLSX.read(btoa(r(c)), { type: "base64" })
+                : XLSX.read(c, { type: "binary" }));
+          var f = XLSX.utils.sheet_to_json(t.Sheets[t.SheetNames[0]]);
+          (e(f), $("#" + o.id).remove());
+        }),
+          i.name.split(".").reverse()[0] == "csv" && (a = !0),
+          n ? l.readAsArrayBuffer(i) : l.readAsText(i));
+      }
+    }));
+}
+function ShowAddRoleBox(e, t) {
+  var n = new KMRoleResource(),
+    a = new KMUIAuthRoleResource(n, e, t, "add");
+}
+function PasteRole(e, t) {
+  e instanceof KMRoleResource
+    ? KMRoleManager.getInstance().roleExecute(e, "add", t)
+    : t("\u53C2\u6570\u9519\u8BEF");
+}
+function ShowModifyRoleBox(e, t, n) {
+  KMRoleManager.getInstance().updateRoleList();
+  var a = KMRoleManager.getInstance().getRoleResourceByName(e);
+  if (a.length > 0) var r = new KMUIAuthRoleResource(a[0], t, n, "edit");
+  else {
+    showErrorMsg(IDS_ROLE_NOTFOUNG, 3e3);
+    return;
+  }
+}
+function QueryRoleObject(e, t) {
+  let n;
+  if (
+    (e
+      ? (n = KMRoleManager.getInstance().getRoleResourceByName(e))
+      : (n = KMRoleManager.getInstance().roleResourceList),
+    n)
+  ) {
+    const r = n.map((o) => ({ ...o, resourceAuthInfoObj: a(o.id) }));
+    t(r);
+  } else {
+    const r = { errorCode: -1, message: IDS_ROLE_NOTFOUNG };
+    t(r);
+  }
+  function a(r) {
+    let o = [];
+    const i = KMClientInterface.getInstance().getFileRequest(),
+      l =
+        urlType.WEBDATASERVER_URL +
+        urlType.GETPAGERESOURCEBYROLENAME +
+        `?roleId=${r}`;
+    return (
+      i.KMAjaxGetSyn(urlType.WEBDATASERVER_URL, l, (s) => {
+        o = s.message;
+      }),
+      o
+    );
+  }
+}
+function QueryAuthDescObjectByRole(e, t) {
+  var n = KMRoleManager.getInstance().getRoleResourceByName(e),
+    a = KMRoleManager.getInstance().getResTreeData(n[0].resourceAuthInfo);
+  t(a);
+}
+function ModifyAuthDescObjectRole(e, t, n) {
+  var a = KMRoleManager.getInstance().getRoleResourceByName(e);
+  ((a[0].resourceAuthInfo = t),
+    KMRoleManager.getInstance().roleExecute(a, "edit", function (r) {
+      n(r);
+    }));
+}
+function DeleteRoleObject(e, t) {
+  var n = "",
+    a = [];
+  for (let i = 0; i < e.length; i++) {
+    var r = KMRoleManager.getInstance().getRoleResourceByName(e[i]);
+    if (r.length < 1) {
+      var o = { errorCode: -1, message: IDS_ROLE_NOTFOUNG };
+      (showErrorMsg(IDS_ROLE_NOTFOUNG, 3e3), t(o));
+    } else a.push(r[i]);
+  }
+  if (a.length)
+    KMRoleManager.getInstance().remove(a, function (i) {
+      t(i);
+    });
+  else {
+    var o = { errorCode: -1, message: IDS_ROLE_NOTFOUNG };
+    (showErrorMsg(IDS_ROLE_NOTFOUNG, 3e3), t(o));
+  }
+}
+function GetRolesByUserName() {
+  new KMUIResourceConfigPopup("role");
+}
+function GetRolesByUserName_name(e) {
+  var t = KMRoleManager.getInstance().roleResourceList,
+    n = [];
+  for (let a = 0; a < t.length; a++)
+    t[a].userGroupMsg.includes(e) && n.push(t[a]);
+  return n;
+}
+function GetAuthInfoByUserName() {
+  new KMUIResourceConfigPopup("resource");
+}
+function GetUserNameByAuthInfo() {
+  new KMUIResourceConfigPopup("user");
+}
+function rolesCopy(e, t) {
+  var n = KMRoleManager.getInstance().copyData(e);
+  PasteRole(n, t);
+}
+function FuzzyQueryRole(e, t) {
+  var n = KMRoleManager.getInstance().getRoleResourceByNameFuzzy(e);
+  t(n);
+}
+function checkAuthApi(e, t, n, a) {
+  let r;
+  for (const o in KMUIFrame.getInstance().getPageMng().$PicManager)
+    o == e && (r = KMUIFrame.getInstance().getPageMng().$PicManager[o].guid);
+  if (!r)
+    return (
+      (a.errorCode = 2),
+      (a.errorCodeDescription =
+        "\u8BF7\u786E\u8BA4\u5F53\u524D\u6253\u5F00\u7684\u9875\u9762\u662F\u5426\u6B63\u786E"),
+      a
+    );
+  for (const o in n)
+    if (o == r && n[o][0].name == "\u8BBF\u95EE\u6743\u9650") {
+      let i = !1;
+      if (n[o][1].children) {
+        let l = n[o][1].children;
+        for (let s = 0; s < l.length; s++)
+          l[s].name == t && ((a.id = l[s].id), (a.errorCode = 0), (i = !0));
+        i ||
+          ((a.errorCode = 2),
+          (a.errorCodeDescription =
+            "\u6743\u9650\u63CF\u8FF0\u4E0D\u5B58\u5728"));
+        break;
+      } else
+        ((a.errorCode = 2),
+          (a.errorCodeDescription =
+            "\u6743\u9650\u63CF\u8FF0\u4E0D\u5B58\u5728"));
+    }
+  return a;
+}
+function SetAuthDescObject(e, t, n) {
+  var a = { errorCode: -1, errorCodeDescription: "" };
+  if (KMUserAuthManager.getInstance().userAdminType)
+    ((a.errorCode = 0), (a.errorCodeDescription = "\u6210\u529F"), n(a));
+  else {
+    var r = KMPageResourceMng.getInstance().pageResource,
+      o = checkAuthApi(e, t, r, a),
+      i = KMUserAuthManager.getInstance().userPageAuth;
+    (o.errorCode === 0
+      ? i.includes(o.id)
+        ? (a = { errorCode: 0, errorCodeDescription: "\u6210\u529F" })
+        : (a = { errorCode: -1, errorCodeDescription: "\u5931\u8D25" })
+      : o.errorCode === 0 &&
+        ((a.errorCode = 2),
+        (a.errorCodeDescription =
+          "\u6743\u9650\u63CF\u8FF0\u4E0D\u5B58\u5728")),
+      n(a));
+  }
+}
+function getProjectPath(e) {
+  var t = KMClientInterface.getInstance();
+  t.getProjectPath(e);
+}
+function ShowUserLinkRoleBox(e, t, n) {
+  var a = KMRoleManager.getInstance().getRoleByName(e);
+  if (a) {
+    var r = new KMUIAuthRoleManager();
+    r.userLink1(a, t, n);
+  } else {
+    var o = { errorCode: -1, message: IDS_ROLE_NOTFOUNG };
+    (showErrorMsg(IDS_ROLE_NOTFOUNG, 3e3), t(o));
+  }
+}
+function rightFilter(e) {
+  var t = [],
+    n = {};
+  ((n.errorCode = -1), (n.massage = " "), (n.data = []));
+  var a = new Set(),
+    r = KMUserManager.getInstance(),
+    o = KMRoleManager.getInstance(),
+    i = KMPageResourceMng.getInstance(),
+    l = o.roleResourceList.length;
+  for (let u = 0; u < l; u++)
+    o.roleResourceList[u].user.includes(r.loginUser.userId + "") &&
+      o.roleResourceList[u].resourceAuthInfo.forEach((f) => a.add(f));
+  var s = i.pageResource.children,
+    c = addObj(s, e);
+  for (let u = 0; u < [...a].length; u++)
+    for (let f = 0; f < c.length; f++)
+      [...a][u] == c[f].id && t.push(c[f].name);
+  return (
+    t.length > 0
+      ? ((n.errorCode = 0),
+        (n.massage = "\u8FC7\u6EE4\u6210\u529F"),
+        (n.data = t))
+      : ((n.errorCode = -1),
+        (n.massage = "\u8FC7\u6EE4\u5931\u8D25"),
+        (n.data = t)),
+    (t = []),
+    n
+  );
+}
+var qxArr = [];
+function addObj(e, t) {
+  if (e.length > 0)
+    for (let n = 0; n < e.length; n++)
+      (e[n].name == t &&
+        e[n].children.forEach(function (a) {
+          a.name == "\u64CD\u4F5C\u6743\u9650" && (qxArr = a.children);
+        }),
+        e[n].children && addObj(e[n].children, t));
+  return qxArr;
+}
+function UserLinkRole(e, t, n, a) {
+  var r = KMRoleManager.getInstance().getRoleByName(e),
+    o = KMUserManager.getInstance().userList;
+  o.length === 0 && updateUserData("group");
+  var i = KMUserManager.getInstance().getIdByUserName(t);
+  if (r) {
+    var l = new Set(r.user);
+    n === 0
+      ? (i.forEach((s) => {
+          l.add(s);
+        }),
+        (r.user = Array.from(l)))
+      : n === 1 &&
+        (i.forEach((s) => {
+          l.delete(s);
+        }),
+        (r.user = Array.from(l)));
+  }
+  KMRoleManager.getInstance().roleExecute(r, "edit", a);
+}
+function KKFPreview(e, t) {
+  if (typeof e == "string") {
+    var n = KMClientInterface.getInstance();
+    n.kkfPreview(e, t);
+  }
+}
+function GPSCoordinate2AmapCoordinate(e, t) {
+  if (typeof e == "string" || typeof t == "string") {
+    if (GPSTypeConversion(e) === -1 || GPSTypeConversion(t) === -1)
+      return (
+        alert(
+          `GPS\u5750\u6807\u4E0D\u662F\u6807\u51C6\u7684DMS(X\xB0Y'M")\u683C\u5F0F`,
+        ),
+        -1
+      );
+    ((e = GPSTypeConversion(e)), (t = GPSTypeConversion(t)));
+  }
+  var n = 6378245,
+    a = 0.006693421622965943,
+    r = g(t - 105, e - 35),
+    o = h(t - 105, e - 35),
+    i = (e / 180) * Math.PI,
+    l = Math.sin(i);
+  l = 1 - a * l * l;
+  var s = Math.sqrt(l);
+  ((r = (r * 180) / (((n * (1 - a)) / (l * s)) * Math.PI)),
+    (o = (o * 180) / ((n / s) * Math.cos(i) * Math.PI)));
+  var c = e + r,
+    u = t + o,
+    f = { lon: u.toFixed(8), lat: c.toFixed(8) };
+  return f;
+  function g(d, p) {
+    var v =
+      -100 +
+      2 * d +
+      3 * p +
+      0.2 * p * p +
+      0.1 * d * p +
+      0.2 * Math.sqrt(Math.abs(d));
+    return (
+      (v +=
+        ((20 * Math.sin(6 * d * Math.PI) + 20 * Math.sin(2 * d * Math.PI)) *
+          2) /
+        3),
+      (v +=
+        ((20 * Math.sin(p * Math.PI) + 40 * Math.sin((p / 3) * Math.PI)) * 2) /
+        3),
+      (v +=
+        ((160 * Math.sin((p / 12) * Math.PI) +
+          320 * Math.sin((p * Math.PI) / 30)) *
+          2) /
+        3),
+      v
+    );
+  }
+  function h(d, p) {
+    var v =
+      300 +
+      d +
+      2 * p +
+      0.1 * d * d +
+      0.1 * d * p +
+      0.1 * Math.sqrt(Math.abs(d));
+    return (
+      (v +=
+        ((20 * Math.sin(6 * d * Math.PI) + 20 * Math.sin(2 * d * Math.PI)) *
+          2) /
+        3),
+      (v +=
+        ((20 * Math.sin(d * Math.PI) + 40 * Math.sin((d / 3) * Math.PI)) * 2) /
+        3),
+      (v +=
+        ((150 * Math.sin((d / 12) * Math.PI) +
+          300 * Math.sin((d / 30) * Math.PI)) *
+          2) /
+        3),
+      v
+    );
+  }
+}
+function GPSTypeConversion(e) {
+  var t = "\xB0",
+    n = e.indexOf(t),
+    a = e.indexOf("\u2032"),
+    r = e.indexOf("\u2033");
+  if (n === -1 || a === -1 || r === -1) return -1;
+  var o = parseFloat(e.substr(0, n)),
+    i = parseFloat(e.substr(n + 1, a - n - 1)) / 60,
+    l = parseFloat(e.substr(a + 1, r - a - 1)) / 3600;
+  return o + i + l;
+}
+function GetTimeDifference(e) {
+  var t = KMClientInterface.getInstance();
+  return t.getTimeDifference(e);
+}
+function GetPublicKeyKC(e) {
+  var t = KMClientInterface.getInstance();
+  return t.getPublicKeyKC(e);
+}
+function GetCurrentPageName() {
+  return KMUIFrame.getInstance().showingPageName;
+}
+function importProject(e, t, n, a) {
+  var r = KMClientInterface.getInstance();
+  if (a) {
+    var i = a;
+    if (i.size / 1024 / 1024 > 500) {
+      showErrorMsg("\u5BFC\u5165\u7684\u5DE5\u7A0B\u8FC7\u5927", 3e3);
+      return;
+    }
+    if (i.name.indexOf(".gz") !== -1) var l = i.name.split(".gz")[0];
+    else {
+      showErrorMsg("\u8BF7\u5BFC\u5165\u6B63\u786E\u7684\u5DE5\u7A0B", 3e3);
+      return;
+    }
+    var s = {
+      createTime: new Date().format("yyyy-MM-dd hh:mm:ss"),
+      creator: sessionStorage.getItem("user") || sessionStorage.getItem("user"),
+      describe: t.projectDescript,
+      id: idBuilder.generateUUID(),
+      importname: t.projectName,
+      name: l,
+      projectGroupId: "",
+    };
+    return (
+      r.upDateProjectGroupInfo(function (c) {
+        var u = [];
+        (c.projectMng &&
+          c.projectMng.projectArray &&
+          c.projectMng.projectArray.forEach(function (h) {
+            u.push(h.name);
+          }),
+          c.projectGroups.forEach(function (h) {
+            h.projectArray.forEach(function (d) {
+              u.push(d.name);
+            });
+          }));
+        var f = u.filter((h) => h === s.importname);
+        if (f.length !== 0)
+          return (
+            n({
+              errorCode: 21100,
+              message: "\u5DE5\u7A0B\u540D\u79F0\u91CD\u590D",
+            }),
+            !1
+          );
+        $.messager.progress({
+          title: "\u5DE5\u7A0B\u5BFC\u5165",
+          msg: "\u5BFC\u5165\u4E2D...",
+          text: '<img src="./static/images/010.gif"  width="100%" height="100%">',
+          interval: 0,
+        });
+        var g = new FormData();
+        (g.append("uploadproject", i),
+          r.importProject("importProject", s, g, function (h, d) {
+            ($.messager.progress("close"),
+              d
+                ? d &&
+                  (showSuccessMsg("\u5BFC\u5165\u6210\u529F", 3e3),
+                  publishProject(h, s, n))
+                : h.flag
+                  ? ((c.errorCode = !1),
+                    showErrorMsg(
+                      "\u670D\u52A1\u5668\u672A\u56DE\u590D\u4FE1\u606F\uFF0C\u53EF\u80FD\u4E0E\u670D\u52A1\u5668\u65AD\u5F00\u8FDE\u63A5",
+                    ))
+                  : n(h));
+          }));
+      }),
+      !0
+    );
+  } else {
+    var o = new KMUIInput();
+    ((o.thisElement.id = "import-project-file"),
+      o.thisElement.setAttribute("type", "file"),
+      (o.thisElement.style.display = "none"),
+      document.body.appendChild(o.thisElement),
+      $("#import-project-file")
+        .unbind("change")
+        .bind("change", function (c) {
+          if (+e == 1) {
+            var u = c.target.files[0];
+            if (u.size / 1024 / 1024 > 500) {
+              showErrorMsg("\u5BFC\u5165\u7684\u5DE5\u7A0B\u8FC7\u5927", 3e3);
+              return;
+            }
+            if (($(c.target).remove(), u.name.indexOf(".gz") !== -1))
+              var f = u.name.split(".gz")[0];
+            else {
+              showErrorMsg(
+                "\u8BF7\u5BFC\u5165\u6B63\u786E\u7684\u5DE5\u7A0B",
+                3e3,
+              );
+              return;
+            }
+            var g = {
+              createTime: new Date().format("yyyy-MM-dd hh:mm:ss"),
+              creator:
+                sessionStorage.getItem("user") ||
+                sessionStorage.getItem("user"),
+              describe: t.projectDescript,
+              id: idBuilder.generateUUID(),
+              importname: t.projectName,
+              name: f,
+              projectGroupId: t.projectGroupId,
+            };
+            return (
+              r.upDateProjectGroupInfo(function (h) {
+                var d = [];
+                (h.projectMng.projectArray.forEach(function (I) {
+                  d.push(I.name);
+                }),
+                  h.projectGroups.forEach(function (I) {
+                    I.projectArray.forEach(function (w) {
+                      d.push(w.name);
+                    });
+                  }));
+                var p = d.filter((I) => I === g.importname);
+                if (p.length !== 0)
+                  return (showErrorMsg(IDS_NAME_REPEAT, 3e3), !1);
+                $.messager.progress({
+                  title: "\u5DE5\u7A0B\u5BFC\u5165",
+                  msg: "\u5BFC\u5165\u4E2D...",
+                  text: '<img src="./static/images/010.gif"  width="100%" height="100%">',
+                  interval: 0,
+                });
+                var v = new FormData();
+                (v.append("uploadproject", u),
+                  r.importProject("importProject", g, v, function (I, w) {
+                    ($.messager.progress("close"),
+                      w
+                        ? w &&
+                          (showSuccessMsg("\u5BFC\u5165\u6210\u529F", 3e3),
+                          publishProject(I, g, n))
+                        : I.flag
+                          ? ((h.errorCode = !1),
+                            showErrorMsg(
+                              "\u670D\u52A1\u5668\u672A\u56DE\u590D\u4FE1\u606F\uFF0C\u53EF\u80FD\u4E0E\u670D\u52A1\u5668\u65AD\u5F00\u8FDE\u63A5",
+                            ))
+                          : n(I));
+                  }));
+              }),
+              !0
+            );
+          }
+        }),
+      $("#import-project-file").click());
+  }
+}
+function publishProject(e, t, n) {
+  $.messager.progress({
+    title: "\u5DE5\u7A0B\u53D1\u5E03",
+    msg: "\u53D1\u5E03\u4E2D...",
+    text: '<img src="./static/images/010.gif"  width="100%" height="100%">',
+    interval: 0,
+  });
+  var a = KMClientInterface.getInstance();
+  a.publishProject(function (r) {
+    var o = {
+      name: "pageManager",
+      type: operateType.PAGEMNG,
+      guid: t.id + "/1.0.0.1",
+    };
+    a.kmGetProjectInFileDev(o, function (i) {
+      i = typeof i == "string" ? JSON.parse(i) : i;
+      var l = i.default,
+        s = !1;
+      for (let g = 0; g < i.Pages.length; g++)
+        if (l === i.Pages[g].name) {
+          s = !0;
+          break;
+        }
+      s ||
+        ($.messager.progress("close"),
+        showErrorMsg(
+          "\u53D1\u5E03\u5931\u8D25\uFF0C\u8BF7\u524D\u5F80\u5F00\u53D1\u6001\u8BBE\u7F6E\u8FD0\u884C\u6001\u9996\u9875",
+          3e3,
+        ));
+      var f = {
+        projectName: e.groupName || "\u5DE5\u7A0B\u7BA1\u7406",
+        proName: null,
+      };
+      a.kmDeployGlobalScript(JSON.stringify(f), o.guid, function (g) {});
+      var c = KMUserManager.getInstance().getLoginUser(),
+        u = {
+          tenantId: c.tenantId || "",
+          projectId: e.id || e.GUID,
+          projectGroupName: e.groupName || "\u5DE5\u7A0B\u7BA1\u7406",
+          solutionId: r.solutions.GUID,
+          solutionName: r.solutions.solutionName,
+          creator: c.userName,
+          createTime: e.createtime,
+          modifyTime: new Date().format("yyyy-MM-dd hh:mm:ss"),
+          projectName: e.text || e.name,
+          projectType: 1,
+          projectTypeVersion: [e.version],
+          publishTime: new Date().format("yyyy-MM-dd hh:mm:ss"),
+          projectDescription: e.des,
+          projectVersion: e.version,
+        },
+        f = { projectInfo: u, token: getToken(), type: "uploadProject" };
+      a.projectHandle(JSON.stringify(f), function (g) {
+        ($.messager.progress("close"),
+          showSuccessMsg("\u5DE5\u7A0B\u53D1\u5E03\u6210\u529F", 3e3),
+          Number(g) === 0
+            ? n({
+                code: 0,
+                message: "success",
+                data: {
+                  projectId: f.projectInfo.projectId,
+                  projectVersion: f.projectInfo.projectVersion,
+                },
+              })
+            : n({
+                code: 400,
+                message: "failed",
+                data: {
+                  projectId: f.projectInfo.projectId,
+                  projectVersion: f.projectInfo.projectVersion,
+                },
+              }));
+      });
+    });
+  });
+}
+function GetCurrentAppName() {
+  let t = KMClientInterface.getInstance().getFileRequest(),
+    n = "/getProjectName",
+    a = urlType.WEBDATASERVER_URL + "/getProjectName",
+    r;
+  return (
+    t.KMAjaxGetSyn(n, a, (o) => {
+      o ? (r = o) : (r = "Response Failed");
+    }),
+    r
+  );
+}
+function SaveImgWithBase64ToUpload(e, t) {
+  var n = KMClientInterface.getInstance();
+  n.saveImgWithBase64ToUpload(e, t);
+}
+function getCurrentPageVariableNames(e) {
+  var t = [],
+    n = [],
+    a = KMProjectVariableMng.getInstance(),
+    r = e.dataSourceMng.dataSourceMng;
+  for (let l = 0; l < r.length; l++) {
+    var o = r[l].subscribe,
+      i = r[l].query;
+    for (let s = 0; s < o.length; s++) n.push(o[s].id);
+    for (let s = 0; s < i.length; s++) n.push(i[j].id);
+  }
+  for (let l = 0; l < n.length; l++) t.push(a.getVariableNameById(n[l]));
+  return t;
+}
+function getAllProVariableNames() {
+  var e = [],
+    t = [],
+    n = KMProjectVariableMng.getInstance();
+  t = n.getAllProjectVariables();
+  for (let a = 0; a < t.length; a++)
+    t[a].name.match(/\$/g) || e.push(t[a].name);
+  return e;
+}
+function GetMqttDeviceModelList(e, t) {
+  var n = "/getMqttDeviceModelList",
+    a = KMClientInterface.getInstance();
+  a.MqttKpToKc(e, n, "", t);
+}
+function CreateMqttDeviceByModel(e, t, n, a, r, o, i) {
+  var l = "/createMqttDeviceByModel",
+    s = {
+      deviceName: t,
+      description: n,
+      deviceIdentity: a,
+      belongGroup: r,
+      modelName: o,
+    },
+    c = KMClientInterface.getInstance();
+  c.MqttKpToKc(e, l, s, i);
+}
+function ModifyMqttDeviceInfoByName(e, t, n, a, r) {
+  var o = "/modifyMqttDeviceInfoByName",
+    i = { deviceName: t, operate: n, data: a },
+    l = KMClientInterface.getInstance();
+  l.MqttKpToKc(e, o, i, r);
+}
+function DeleteMqttDevice(e, t, n) {
+  var a = "/deleteMqttDevice",
+    r = KMClientInterface.getInstance();
+  r.MqttKpToKc(e, a, t, n);
+}
+function GetMqttDeviceList(e, t) {
+  var n = "/getMqttDeviceList",
+    a = KMClientInterface.getInstance();
+  a.MqttKpToKc(e, n, "", t);
+}
+function PrintPage(e) {
+  if (typeof e == "string") {
+    var t = KMUIFrame.getInstance(),
+      n = t.pageMng.getPageByName(e);
+    if (n !== null) {
+      let d = $(document.head).clone();
+      $(d)
+        .find("script")
+        .each((p, v) => {
+          v.src.indexOf("easyui") === -1 &&
+            v.src.indexOf("element-ui") === -1 &&
+            d[0].removeChild(v);
+        });
+      var a = n.thisElement.outerHTML;
+      $(document.body)
+        .children()
+        .each((p, v) => {
+          v.tagName === "STYLE" && (a += v.outerHTML);
+        });
+      var r = document.querySelectorAll("#" + n.thisElement.id + " input"),
+        o = [];
+      for (let p = 0; p < r.length; p++) o.push(r[p].value);
+      var i = document.querySelectorAll("#" + n.thisElement.id + " canvas"),
+        l = [];
+      for (let p = 0; p < i.length; p++) l.push(i[p].toDataURL("image/png"));
+      var s = { head: d[0].outerHTML, body: a },
+        c = {
+          height: 800,
+          width: 1e3,
+          left: (window.screen.availWidth - 10 - 1e3) / 2,
+          top: (window.screen.availHeight - 30 - 800) / 2,
+        },
+        u = `<!doctype html><html>${s.head} <body>${s.body}</body></html>`,
+        f = window.open(
+          "",
+          "",
+          "height=" +
+            c.height +
+            ", width=" +
+            c.width +
+            ",left=" +
+            c.left +
+            ",top=" +
+            c.top,
+        ),
+        g = f.document;
+      (g.open(),
+        g.write(u),
+        g.close(),
+        f.focus(),
+        (f.onload = function () {
+          let p = g.querySelectorAll("input");
+          if (p.length !== 0 && p.length === o.length)
+            for (let y = p.length - 1; y >= 0; y--) p[y].value = o[y];
+          var v = [];
+          let I = g.querySelectorAll("img");
+          for (let y = 0; y < I.length; y++)
+            v.push(
+              (function () {
+                return new Promise((E, D) => {
+                  var m = new Image();
+                  ((m.src = I[y].src),
+                    (m.onload = function () {
+                      E();
+                    }));
+                });
+              })(),
+            );
+          let w = g.querySelectorAll("canvas");
+          if (w.length !== 0 && w.length === l.length)
+            for (let y = w.length - 1; y >= 0; y--)
+              v.push(
+                (function () {
+                  return new Promise((E, D) => {
+                    let m = w[y].getContext("2d"),
+                      M = new Image();
+                    ((M.onload = function () {
+                      (m.drawImage(this, 0, 0), E());
+                    }),
+                      (M.src = l[y]));
+                  });
+                })(),
+              );
+          Promise.all(v)
+            .then(
+              () =>
+                new Promise((y) => {
+                  let E = setTimeout(() => {
+                    (f.print(), f.close(), clearTimeout(E), y());
+                  });
+                }),
+            )
+            .catch((y) => {});
+        }));
+    } else if (t.projectServer.pageMng.Pages.some((d) => d.name === e))
+      var h = RS.PAGE_NOT_LOAD.replace("XX", e);
+    else var h = RS.PAGE_NOT_EXIST.replace("XX", e);
+  }
+}
+function WriteExcel(e, t, n) {
+  var a = KMClientInterface.getInstance();
+  a.WriteExcel(e, t, n);
+}
+function scriptConfusionDialog(e, t, n) {
+  ((self.confusionForm = new KMUIHtml("div", [["class", "confusionform"]])),
+    (self.confusionTitle = new KMUIHtml("span", [
+      ["class", "confusiontitle"],
+      ["innerText", e],
+    ])),
+    (self.confusionClose = new KMUIHtml("div", [["class", "confusionclose"]])),
+    (self.horizontalLine = new KMUIHtml("div", [["class", "horizontalline"]])),
+    (self.warningImg = new KMUIHtml("div", [["class", "warningImg"]])),
+    (self.warningNote = new KMUIHtml("span", [
+      ["class", "warningNote"],
+      ["innerText", t],
+    ])),
+    (self.confusionCenter = new KMUIHtml("div", [
+      ["class", "confusionCenter"],
+    ])),
+    (self.confusionCancelDiv = new KMUIHtml("div", [
+      ["class", "confusionCancelDiv"],
+    ])),
+    (self.confusionConfirmDiv = new KMUIHtml("div", [
+      ["class", "confusionConfirmDiv"],
+    ])),
+    (self.confusionCancelMsg = new KMUIHtml("span", [
+      ["class", "confusionCancelMsg"],
+      ["innerText", IDS_CANCEL],
+    ])),
+    (self.confusionConfirmMsg = new KMUIHtml("span", [
+      ["class", "confusionConfirmMsg"],
+      ["innerText", IDS_CONFIRM],
+    ])),
+    (self.barwrapContain = new KMUIHtml("div", [
+      ["class", "bar-wrap-contain"],
+    ])),
+    document.body.appendChild(self.barwrapContain.thisElement),
+    self.barwrapContain.appendChild(self.confusionForm),
+    self.confusionForm.appendChild(self.confusionTitle),
+    self.confusionForm.appendChild(self.confusionClose),
+    self.confusionForm.appendChild(self.horizontalLine),
+    self.confusionCenter.appendChild(self.warningImg),
+    self.confusionCenter.appendChild(self.warningNote),
+    self.confusionCancelDiv.appendChild(self.confusionCancelMsg),
+    self.confusionConfirmDiv.appendChild(self.confusionConfirmMsg),
+    self.confusionCenter.appendChild(self.confusionConfirmDiv),
+    self.confusionCenter.appendChild(self.confusionCancelDiv),
+    self.confusionForm.appendChild(self.confusionCenter),
+    (self.confusionCancelDiv.thisElement.onclick = function () {
+      (self.barwrapContain.remove(),
+        $("#glo-script-win").window("close"),
+        n && n(!1));
+    }),
+    (self.confusionClose.thisElement.onclick = function () {
+      self.barwrapContain.remove();
+    }),
+    (self.confusionConfirmDiv.thisElement.onclick = function (a) {
+      (self.barwrapContain.remove(), n && n(!0));
+    }));
+}
+function showHTPreview(e, t = "center", n) {
+  var a = decodeURIComponent(window.location.hash).replace("#", ""),
+    r = KMUIFrame.getInstance().getPageMng().getPageByName(a);
+  if (!r) {
+    alert("\u5F53\u524D\u9875\u9762\u5F02\u5E38, \u8BF7\u68C0\u67E5");
+    return;
+  }
+  if (!r.$Children[e]) {
+    alert(
+      "\u5F53\u524D\u9875\u9762\u4E2D\u4E0D\u5B58\u5728" +
+        e +
+        ", \u8BF7\u68C0\u67E5",
+    );
+    return;
+  }
+  let o = KMClientInterface.getInstance().currentProName;
+  o ||
+    getProjectPath((s) => {
+      o = KMClientInterface.getInstance().currentProName = s
+        .split("kingclient")[1]
+        .split("1.0.0.1")[0]
+        .replace(/[\\\/]/g, "");
+    });
+  let i = "",
+    l = "";
+  (window.plus
+    ? (i = localStorage.getItem("urlObj").split("://")[1].split(":")[0])
+    : (i = monitorDevice.getHostName()),
+    KMClientInterface.getInstance().kmGetHT3DSceneInfo(() => {
+      l =
+        "https://" +
+        i +
+        "/kingclient3d/display.html?tag=displays/" +
+        n +
+        ".json&projectInfo=" +
+        o +
+        "/1.0.0.1";
+      var s = new KMUIHT3DPreviewContainer(l),
+        c = r.$Children[e].getRegionDiv(t);
+      ($(c).empty(), c.appendChild(s.iframeElement3d.thisElement));
+    }));
+}
+function closeHTPreview() {
+  $("#iframeElement3d").remove();
+}
+function showHTEditor(e, t = "center") {
+  var n = decodeURIComponent(window.location.hash).replace("#", ""),
+    a = KMUIFrame.getInstance().getPageMng().getPageByName(n);
+  if (!a) {
+    alert("\u5F53\u524D\u9875\u9762\u5F02\u5E38, \u8BF7\u68C0\u67E5");
+    return;
+  }
+  if (!a.$Children[e]) {
+    alert(
+      "\u5F53\u524D\u9875\u9762\u4E2D\u4E0D\u5B58\u5728" +
+        e +
+        ", \u8BF7\u68C0\u67E5",
+    );
+    return;
+  }
+  let r = KMClientInterface.getInstance().currentProName;
+  r ||
+    getProjectPath((l) => {
+      r = KMClientInterface.getInstance().currentProName = l
+        .split("kingclient")[1]
+        .split("1.0.0.1")[0]
+        .replace(/[\\\/]/g, "");
+    });
+  let o = "",
+    i = "";
+  (window.plus
+    ? (o = localStorage.getItem("urlObj").split("://")[1].split(":")[0])
+    : (o = monitorDevice.getHostName()),
+    KMClientInterface.getInstance().kmGetHT3DSceneInfo(() => {
+      i =
+        "https://" +
+        o +
+        "/kingclient3d/?projectInfo=" +
+        KMClientInterface.getInstance().currentProName +
+        "/1.0.0.1";
+      var l = new KMUIHT3DEditorContainer(i),
+        s = a.$Children[e].getRegionDiv(t);
+      ($(s).empty(), s.appendChild(l.iframeElement3d.thisElement));
+    }));
+}
+function exitHTEditor() {
+  $("#iframeElement3d").remove();
+}
+function getHTNodeAttr(e, t, ...n) {
+  if (!e || typeof e != "string") {
+    alert("\u8282\u70B9\u540D\u79F0\u4E0D\u6B63\u786E, \u8BF7\u68C0\u67E5");
+    return;
+  }
+  if (!t || typeof t != "string") {
+    alert("\u65B9\u6CD5\u540D\u4E0D\u6B63\u786E, \u8BF7\u68C0\u67E5");
+    return;
+  }
+  let a = { type: "get", nodeName: e, method: t, args: n };
+  $("#iframeElement3d")[0].contentWindow.postMessage(
+    a,
+    $("#iframeElement3d")[0].src,
+  );
+}
+function setHTNodeAttr(e, t, ...n) {
+  if (!e || typeof e != "string") {
+    alert("\u8282\u70B9\u540D\u79F0\u4E0D\u6B63\u786E, \u8BF7\u68C0\u67E5");
+    return;
+  }
+  if (!t || typeof t != "string") {
+    alert("\u65B9\u6CD5\u540D\u4E0D\u6B63\u786E, \u8BF7\u68C0\u67E5");
+    return;
+  }
+  let a = { type: "set", nodeName: e, method: t, args: n };
+  $("#iframeElement3d")[0].contentWindow.postMessage(
+    a,
+    $("#iframeElement3d")[0].src,
+  );
+}
+function showHTTrack(e, t = !0) {
+  if ((!e) instanceof Array) {
+    alert("\u8F68\u8FF9\u6570\u7EC4\u9519\u8BEF, \u8BF7\u68C0\u67E5");
+    return;
+  }
+  var n = { type: "showTrack", track: e, isShow: t };
+  $("#iframeElement3d")[0].contentWindow.postMessage(
+    n,
+    $("#iframeElement3d")[0].src,
+  );
+}
+function trackPlayback(e, t, n, a) {
+  if (!e || typeof e != "string") {
+    alert(
+      "\u8F68\u8FF9\u56DE\u653E\u76EE\u6807\u8282\u70B9\u540D\u9519\u8BEF, \u8BF7\u68C0\u67E5",
+    );
+    return;
+  }
+  if ((!t) instanceof Array) {
+    alert(
+      "\u8F68\u8FF9\u56DE\u653E\u6570\u7EC4\u9519\u8BEF, \u8BF7\u68C0\u67E5",
+    );
+    return;
+  }
+  var r = { type: "trackPlayback", target: e, track: t, animID: n };
+  ($("#iframeElement3d")[0].contentWindow.postMessage(
+    r,
+    $("#iframeElement3d")[0].src,
+  ),
+    window.animationMap.set(n, a));
+}
+function togglePlayback(e) {
+  if (!e || typeof e != "string") {
+    alert("\u52A8\u753BID\u9519\u8BEF, \u8BF7\u68C0\u67E5");
+    return;
+  }
+  var t = { type: "togglePlayback", animID: e };
+  $("#iframeElement3d")[0].contentWindow.postMessage(
+    t,
+    $("#iframeElement3d")[0].src,
+  );
+}
+function changePlaybackSpeed(e, t = 1) {
+  if (!e || typeof e != "string") {
+    alert("\u52A8\u753BID\u9519\u8BEF, \u8BF7\u68C0\u67E5");
+    return;
+  }
+  var n = { type: "changePlaybackSpeed", animID: e, speed: t };
+  $("#iframeElement3d")[0].contentWindow.postMessage(
+    n,
+    $("#iframeElement3d")[0].src,
+  );
+}
+function setHTAnimation(e, t) {
+  if (!e || typeof e != "string") {
+    alert("\u8282\u70B9\u540D\u4E0D\u6B63\u786E, \u8BF7\u68C0\u67E5");
+    return;
+  }
+  if (!t || typeof t != "object") {
+    alert("\u52A8\u753B\u5BF9\u8C61\u4E0D\u6B63\u786E, \u8BF7\u68C0\u67E5");
+    return;
+  }
+  let n = { type: "setAnimation", targetName: e, animationObj: t };
+  $("#iframeElement3d")[0].contentWindow.postMessage(
+    n,
+    $("#iframeElement3d")[0].src,
+  );
+}
+function toggleHTAnimation(e) {
+  if (!e || typeof e != "string") {
+    alert("\u8282\u70B9\u540D\u4E0D\u6B63\u786E, \u8BF7\u68C0\u67E5");
+    return;
+  }
+  let t = { type: "toggleAnimation", targetName: e };
+  $("#iframeElement3d")[0].contentWindow.postMessage(
+    t,
+    $("#iframeElement3d")[0].src,
+  );
+}
+function createHTSymbol(e, t) {
+  if (!e || typeof e != "string") {
+    alert("\u56FE\u6807\u540D\u4E0D\u6B63\u786E, \u8BF7\u68C0\u67E5");
+    return;
+  }
+  if (!t || typeof t != "object") {
+    alert(
+      "\u52A8\u6001\u521B\u5EFA\u5BF9\u8C61\u4FE1\u606F\u4E0D\u6B63\u786E, \u8BF7\u68C0\u67E5",
+    );
+    return;
+  }
+  let n = { type: "createSymbol", symbolName: e, objectArr: t };
+  $("#iframeElement3d")[0].contentWindow.postMessage(
+    n,
+    $("#iframeElement3d")[0].src,
+  );
+}
+function createHTSymbolApp(e, t, n, a) {
+  if (!e || typeof e != "string") {
+    alert("\u56FE\u6807\u540D\u4E0D\u6B63\u786E, \u8BF7\u68C0\u67E5");
+    return;
+  }
+  if (!t || typeof t != "object") {
+    alert(
+      "\u52A8\u6001\u521B\u5EFA\u5BF9\u8C61\u4FE1\u606F\u4E0D\u6B63\u786E, \u8BF7\u68C0\u67E5",
+    );
+    return;
+  }
+  let r = { type: "createSymbolApp", symbolName: e, objectArr: t };
+  if (a) {
+    let o =
+      $System.$PicManager[a.pageProperty.name].thisElement.getElementsByTagName(
+        "iframe",
+      );
+    o[0].contentWindow.postMessage(r, o[0].src);
+  } else
+    $("#iframeElement3d")[0].contentWindow.postMessage(
+      r,
+      $("#iframeElement3d")[0].src,
+    );
+  window.HTDataMap.set("createAppCallback", n);
+}
+function deleteHTSymbol(e, t) {
+  if (!e || typeof e != "object") {
+    alert(
+      "\u56FE\u6807\u540D\u6570\u7EC4\u4E0D\u6B63\u786E, \u8BF7\u68C0\u67E5",
+    );
+    return;
+  }
+  let n = { type: "deleteSymbol", nameArr: e };
+  if (t) {
+    let a =
+      $System.$PicManager[t.$PageBelong].thisElement.getElementsByTagName(
+        "iframe",
+      );
+    a[0].contentWindow.postMessage(n, a[0].src);
+  } else
+    $("#iframeElement3d")[0].contentWindow.postMessage(
+      n,
+      $("#iframeElement3d")[0].src,
+    );
+}
+function getHTAllDatas(e, t) {
+  let n = { type: "getAllDatas" };
+  if (t) {
+    let a =
+      $System.$PicManager[t.$PageBelong].thisElement.getElementsByTagName(
+        "iframe",
+      );
+    a[0].contentWindow.postMessage(n, a[0].src);
+  } else
+    $("#iframeElement3d")[0].contentWindow.postMessage(
+      n,
+      $("#iframeElement3d")[0].src,
+    );
+  window.HTDataMap.set("allDatas", e);
+}
+function getHTData(e, t, n) {
+  let a = { type: "getData", displayName: e };
+  if (n) {
+    let r =
+      $System.$PicManager[n.$PageBelong].thisElement.getElementsByTagName(
+        "iframe",
+      );
+    r[0].contentWindow.postMessage(a, r[0].src);
+  } else
+    $("#iframeElement3d")[0].contentWindow.postMessage(
+      a,
+      $("#iframeElement3d")[0].src,
+    );
+  window.HTDataMap.set(e, t);
+}
+function getAttrdata(e, t) {
+  getHTData(e, (n) => {
+    let a = {};
+    var r = n.getAttrObject();
+    for (let l in r)
+      if (l.indexOf("_") !== -1) {
+        var o = l.substr(l.indexOf("_") + 1);
+        if (
+          ((keyName = l.substr(0, l.indexOf("_"))), JSON.stringify(a) == "{}")
+        ) {
+          var i = {};
+          ((i[keyName] = r[l]), (a[o] = i));
+        } else if (a[o]) a[o][keyName] = r[l];
+        else {
+          var i = {};
+          ((i[keyName] = r[l]), (a[o] = i));
+        }
+      }
+    typeof t == "function" && t(a);
+  });
+}
+function shieldCovering(e, t, n) {
+  let a = { type: "shieldCovering", belongLayer: e, isDisplay: t };
+  if (n) {
+    let r =
+      $System.$PicManager[n.$PageBelong].thisElement.getElementsByTagName(
+        "iframe",
+      );
+    r[0].contentWindow.postMessage(a, r[0].src);
+  } else
+    $("#iframeElement3d")[0].contentWindow.postMessage(
+      a,
+      $("#iframeElement3d")[0].src,
+    );
+}
+function displayCovering(e, t) {
+  let n = { type: "displayCovering", belongLayer: e };
+  if (t) {
+    let a =
+      $System.$PicManager[t.$PageBelong].thisElement.getElementsByTagName(
+        "iframe",
+      );
+    a[0].contentWindow.postMessage(n, a[0].src);
+  } else
+    $("#iframeElement3d")[0].contentWindow.postMessage(
+      n,
+      $("#iframeElement3d")[0].src,
+    );
+}
+function getCurrentNodeName() {
+  return window.currentNodeName;
+}
+function zoomToAll(e) {
+  let t = { type: "zoomToAll" };
+  if (e) {
+    let n =
+      $System.$PicManager[e.$PageBelong].thisElement.getElementsByTagName(
+        "iframe",
+      );
+    n[0].contentWindow.postMessage(t, n[0].src);
+  } else
+    $("#iframeElement3d")[0].contentWindow.postMessage(
+      t,
+      $("#iframeElement3d")[0].src,
+    );
+}
+function zoomToTarget(e, t, n) {
+  let a = { type: "zoomToTarget", target: e, zoom: t };
+  if (n) {
+    let r =
+      $System.$PicManager[n.$PageBelong].thisElement.getElementsByTagName(
+        "iframe",
+      );
+    r[0].contentWindow.postMessage(a, r[0].src);
+  } else
+    $("#iframeElement3d")[0].contentWindow.postMessage(
+      a,
+      $("#iframeElement3d")[0].src,
+    );
+}
+function drawDomain(e, t) {
+  let n = { type: "drawDomain" };
+  if (t) {
+    let a =
+      $System.$PicManager[t.$PageBelong].thisElement.getElementsByTagName(
+        "iframe",
+      );
+    a[0].contentWindow.postMessage(n, a[0].src);
+  } else
+    $("#iframeElement3d")[0].contentWindow.postMessage(
+      n,
+      $("#iframeElement3d")[0].src,
+    );
+  window.HTDataMap.set("frameSelect", e);
+}
+function getDrawCoordinate(e, t) {
+  let n = { type: "getDrawCoordinate" };
+  if (t) {
+    let a =
+      $System.$PicManager[t.pageProperty.name].thisElement.getElementsByTagName(
+        "iframe",
+      );
+    a[0].contentWindow.postMessage(n, a[0].src);
+  } else
+    $("#iframeElement3d")[0].contentWindow.postMessage(
+      n,
+      $("#iframeElement3d")[0].src,
+    );
+  window.HTDataMap.set("frameSelect", e);
+}
+function removeGetDrawCoordinate(e, t) {
+  let n = { type: "removeGetDrawCoordinate" };
+  if (t) {
+    let a =
+      $System.$PicManager[t.pageProperty.name].thisElement.getElementsByTagName(
+        "iframe",
+      );
+    a[0].contentWindow.postMessage(n, a[0].src);
+  } else
+    $("#iframeElement3d")[0].contentWindow.postMessage(
+      n,
+      $("#iframeElement3d")[0].src,
+    );
+}
+function getDrawDomainDataByCoordinate(e, t, n, a) {
+  let r = { type: "getDrawDomainDataByCoordinate", data: e, zoom: t };
+  if (a) {
+    let o =
+      $System.$PicManager[a.$PageBelong].thisElement.getElementsByTagName(
+        "iframe",
+      );
+    o[0].contentWindow.postMessage(r, o[0].src);
+  } else
+    $("#iframeElement3d")[0].contentWindow.postMessage(
+      r,
+      $("#iframeElement3d")[0].src,
+    );
+  window.HTDataMap.set("drawDomainData", n);
+}
+function closeDrawDomain(e, t) {
+  let n = { type: "closeDrawDomain", data: e };
+  if (t) {
+    let a =
+      $System.$PicManager[t.$PageBelong].thisElement.getElementsByTagName(
+        "iframe",
+      );
+    a[0].contentWindow.postMessage(n, a[0].src);
+  } else
+    $("#iframeElement3d")[0].contentWindow.postMessage(
+      n,
+      $("#iframeElement3d")[0].src,
+    );
+}
+function drawPolygon(e, t) {
+  debugger;
+  let n = { type: "drawPolygon" };
+  if (t) {
+    let a =
+      $System.$PicManager[t.$PageBelong].thisElement.getElementsByTagName(
+        "iframe",
+      );
+    a[0].contentWindow.postMessage(n, a[0].src);
+  } else
+    $("#iframeElement3d")[0].contentWindow.postMessage(
+      n,
+      $("#iframeElement3d")[0].src,
+    );
+  window.HTDataMap.set("PolygonSelect", e);
+}
+function getDrawPolygonDataByCoordinate(e, t, n, a) {
+  let r = { type: "getDrawPolygonDataByCoordinate", data: e, zoom: t };
+  if (a) {
+    let o =
+      $System.$PicManager[a.$PageBelong].thisElement.getElementsByTagName(
+        "iframe",
+      );
+    o[0].contentWindow.postMessage(r, o[0].src);
+  } else
+    $("#iframeElement3d")[0].contentWindow.postMessage(
+      r,
+      $("#iframeElement3d")[0].src,
+    );
+  window.HTDataMap.set("drawPolygonData", n);
+}
+function sendSQLDataToHT(e, t, n) {
+  let a = { type: "sendSQLDataToHT", dataName: e, data: t };
+  if (n) {
+    let r =
+      $System.$PicManager[n.$PageBelong].thisElement.getElementsByTagName(
+        "iframe",
+      );
+    r[0].contentWindow.postMessage(a, r[0].src);
+  } else
+    $("#iframeElement3d")[0].contentWindow.postMessage(
+      a,
+      $("#iframeElement3d")[0].src,
+    );
+}
+function operateHTOverview(e, t) {
+  let n = { type: "operateHTOverview", operateType: e };
+  if (t) {
+    let a =
+      $System.$PicManager[t.$PageBelong].thisElement.getElementsByTagName(
+        "iframe",
+      );
+    a[0].contentWindow.postMessage(n, a[0].src);
+  } else
+    $("#iframeElement3d")[0].contentWindow.postMessage(
+      n,
+      $("#iframeElement3d")[0].src,
+    );
+}
+function QueryAlarmInfo(e, t, n, a) {
+  var r = a || 3e3;
+  if (e) {
+    var o = KMDatasourceMng.getInstance().getDataSource(e);
+    o && (result = o.AsynGetAlarmValues(t, n, r));
+  }
+}
+function getCurrentHTZoom() {
+  return window.currentHTZoom;
+}
+function ExportToExcelForEasyui(e) {
+  var t = 0;
+  if (!e) t = -1;
+  else if (
+    !Array.isArray(e.data) ||
+    (e.data[0] && typeof e.data[0] != "object")
+  )
+    ((t = -1),
+      console.warn(
+        "ExportToExcelForEasyui()\uFF1A\u6570\u636E\u683C\u5F0F\u9519\u8BEF!",
+      ));
+  else if (
+    !Array.isArray(e.columns) ||
+    !Array.isArray(e.columns[0]) ||
+    (e.columns[0][0] && typeof e.columns[0][0] != "object")
+  )
+    ((t = -1),
+      console.warn(
+        "ExportToExcelForEasyui()\uFF1A\u8868\u5934\u683C\u5F0F\u9519\u8BEF!",
+      ));
+  else {
+    var n = "",
+      a = [];
+    for (let s = 0; s < e.columns.length; s++) {
+      n += '<tr style="text-align:center;background:#cccccc">';
+      for (let c = 0; c < e.columns[s].length; c++)
+        (e.columns[s][c].field && a.push(e.columns[s][c].field),
+          e.columns[s][c].rowspan && !e.columns[s][c].colspan
+            ? (n += `<th rowspan="${e.columns[s][c].rowspan}">${e.columns[s][c].title}</th>`)
+            : !e.columns[s][c].rowspan && e.columns[s][c].colspan
+              ? (n += `<th colspan="${e.columns[s][c].colspan}">${e.columns[s][c].title}</th>`)
+              : e.columns[s][c].rowspan && e.columns[s][c].colspan
+                ? (n += `<th rowspan="${e.columns[s][c].rowspan}" colspan="${e.columns[s][c].colspan}">${e.columns[s][c].title}</th>`)
+                : (n += `<th>${e.columns[s][c].title}</th>`));
+      n += "</tr>";
+    }
+    e.merges &&
+      e.merges.length !== 0 &&
+      e.merges.forEach(function (s) {
+        if (((s.index = Number(s.index)), s.rowspan && !s.colspan)) {
+          s.rowspan = Number(s.rowspan);
+          for (let f = s.index; f < s.index + s.rowspan; f++)
+            f === s.index
+              ? (e.data[f][s.field] = {
+                  field: e.data[f][s.field],
+                  rowspan: s.rowspan,
+                  isShow: !0,
+                })
+              : (e.data[f][s.field] = {
+                  field: e.data[f][s.field],
+                  isShow: !1,
+                });
+        }
+        if (!s.rowspan && s.colspan) {
+          s.colspan = Number(s.colspan);
+          var c = null,
+            u = 0;
+          for (let f in e.data[s.index])
+            (u++,
+              f === s.field &&
+                ((c = u),
+                (e.data[s.index][f] = {
+                  field: e.data[s.index][f],
+                  colspan: s.colspan,
+                  isShow: !0,
+                })),
+              c &&
+                u > c &&
+                u < c + s.colspan &&
+                (e.data[s.index][f] = {
+                  field: e.data[s.index][f],
+                  isShow: !1,
+                }));
+        }
+        if (s.rowspan && s.colspan) {
+          ((s.rowspan = Number(s.rowspan)), (s.colspan = Number(s.colspan)));
+          for (let f = s.index; f < s.index + s.rowspan; f++)
+            if (f === s.index) {
+              var c = null,
+                u = 0;
+              for (let d in e.data[f])
+                (u++,
+                  d === s.field &&
+                    ((c = u),
+                    (e.data[f][d] = {
+                      field: e.data[f][d],
+                      colspan: s.colspan,
+                      rowspan: s.rowspan,
+                      isShow: !0,
+                    })),
+                  c &&
+                    u > c &&
+                    u < c + s.colspan &&
+                    (e.data[f][d] = { field: e.data[f][d], isShow: !1 }));
+            } else {
+              var c = null,
+                u = 0;
+              for (let d in e.data[f])
+                (u++,
+                  d === s.field &&
+                    ((c = u),
+                    (e.data[f][d] = { field: e.data[f][d], isShow: !1 })),
+                  c &&
+                    u > c &&
+                    u < c + s.colspan &&
+                    (e.data[f][d] = { field: e.data[f][d], isShow: !1 }));
+            }
+        }
+      });
+    for (let s = 0; s < e.data.length; s++) {
+      n += '<tr style="text-align:center;">';
+      for (let c in e.data[s])
+        e.data[s][c] && a.includes(c) && typeof e.data[s][c] == "object"
+          ? e.data[s][c].isShow &&
+            (e.data[s][c].rowspan &&
+              !e.data[s][c].colspan &&
+              (n += `<td rowspan="${e.data[s][c].rowspan}">${e.data[s][c].field}</td>`),
+            !e.data[s][c].rowspan &&
+              e.data[s][c].colspan &&
+              (n += `<td colspan="${e.data[s][c].colspan}">${e.data[s][c].field}</td>`),
+            e.data[s][c].rowspan &&
+              e.data[s][c].colspan &&
+              (n += `<td rowspan="${e.data[s][c].rowspan}" colspan="${e.data[s][c].colspan}">${e.data[s][c].field}</td>`))
+          : a.includes(c) &&
+            (n += `<td>${e.data[s][c] ? e.data[s][c] : ""}</td>`);
+      n += "</tr>";
+    }
+    var r = e.worksheetName ? e.worksheetName : "Sheet1",
+      o = "data:application/vnd.ms-excel;base64,",
+      i = `
+        <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+            <head>
+                <!--[if gte mso 9]>
+                <xml>
+                    <x:ExcelWorkbook>
+                        <x:ExcelWorksheets>
+                            <x:ExcelWorksheet>
+                                <x:Name>${r}</x:Name>
+                                <x:WorksheetOptions>
+                                    <x:DisplayGridlines/>
+                                </x:WorksheetOptions>
+                            </x:ExcelWorksheet>
+                        </x:ExcelWorksheets>    
+                    </x:ExcelWorkbook>
+                </xml>
+                <![endif]-->
+            </head>
+            <body>
+                <table border="1" cellspacing="0">${n}</table>
+            </body>
+        </html>
+        `,
+      l = document.createElement("a");
+    ((l.style.display = "none"),
+      (l.href = o + window.btoa(unescape(encodeURIComponent(i)))),
+      (l.download = e.fileName ? e.fileName : "\u4E0B\u8F7D\u6587\u4EF6.xls"),
+      $("body").append(l),
+      l.click(),
+      $(l).remove());
+  }
+  return t;
+}
+function subscribeKDBAlarm(e, t, n, a, r) {
+  let o = window.sessionStorage.getItem("WellinUserToken");
+  if (!o)
+    return console.error(
+      "subscribeKDBAlarm\u65B9\u6CD5\u672A\u83B7\u53D6\u5230token\u4FE1\u606F",
+    );
+  (DataSourceManagerRunningAPI.getInstance().AsynSubscribeTagAlarm(
+    e,
+    t,
+    o,
+    n,
+    a,
+  ),
+    DataSourceManagerRunningAPI.getInstance().registerAlarmSubscribeCallBack(
+      r,
+    ));
+}
+function ElementTableToExcel(e, t) {
+  try {
+    let c = function (u) {
+      (XSU.setAlignmentHorizontalAll(u, i, "center"),
+        XSU.setAlignmentVerticalAll(u, i, "center"),
+        XSU.setAlignmentWrapTextAll(u, i, !0));
+    };
+    var s = c,
+      n = e.$vm.$el,
+      a = n.querySelector(".el-table__fixed");
+    a || (a = n);
+    var r = { bookType: "xlsx", bookSST: !1, type: "binary" },
+      o = XLSX.utils.table_to_book(a, { raw: !0 }),
+      i = o.SheetNames[0];
+    c(o);
+    var l = xlsxStyle.write(o, r);
+    saveAs(
+      new Blob([XSU.s2ab(l)], { type: "application/octet-stream" }),
+      `${t}.xlsx`,
+    );
+  } catch (c) {
+    typeof console < "u" && console.error(c);
+  }
+}
+function ElementTableNotopToExcel(e, t, n) {
+  try {
+    var a = e.$vm.$el,
+      r = a.querySelector(".el-table__fixed");
+    r || (r = a);
+    var o = { bookType: "xlsx", bookSST: !1, type: "binary" },
+      i = XLSX.utils.table_to_book(r, { raw: !0 }),
+      l = i.SheetNames[0];
+    (XSU.setAlignmentHorizontalAll(i, l, "center"),
+      XSU.setAlignmentVerticalAll(i, l, "center"),
+      XSU.setAlignmentWrapTextAll(i, l, !0),
+      XSU.setBorderDefaultAll(i, l));
+    for (let u = 0; u < n.length; u++) {
+      var s = n[u];
+      i.Sheets.Sheet1[s].s.border = {};
+    }
+    var c = xlsxStyle.write(i, o);
+    saveAs(
+      new Blob([XSU.s2ab(c)], { type: "application/octet-stream" }),
+      `${t}.xlsx`,
+    );
+  } catch (u) {
+    typeof console < "u" && console.error(u);
+  }
+}
+function ElementTableToExcel2(e, t, n = "\u5BFC\u51FA") {
+  let a = e.$vm.$el,
+    r = a.querySelector(".el-table__fixed");
+  r || (r = a);
+  let o = t.concat(e.GetData()),
+    i = XLSX.utils.table_to_sheet(r);
+  const l = XLSX.utils.book_new();
+  let s = XLSX.utils.json_to_sheet(o, { skipHeader: !0 });
+  ((s["!merges"] = i["!merges"]),
+    XLSX.utils.book_append_sheet(l, s, "Sheet1"),
+    XLSX.writeFile(l, `${n}.xlsx`));
+}
+function getCookie(e) {
+  const n = `; ${document.cookie}`.split(`; ${e}=`);
+  return n.length === 2 ? decodeURIComponent(n.pop().split("; ").shift()) : "";
+}
+function getClientNumOnline(e) {
+  var t = KMClientInterface.getInstance().getFileRequest();
+  let n = urlType.WEBDATASERVER_URL + "/api/v1/getClientNumOnline",
+    a;
+  t.KMAjaxGetSyn(urlType.WEBDATASERVER_URL, n, (r) => {
+    e(r);
+  });
+}
+function ExecutePageAccessRightsFilter(e) {
+  let t = {};
+  ((t.errorCode = -1), (t.massage = " "), (t.data = []));
+  let n = new Set(),
+    a = KMUserManager.getInstance(),
+    r = KMRoleManager.getInstance(),
+    o = KMUIFrame.getInstance().projectServer.pageMng.Pages,
+    i = r.roleResourceList.length;
+  for (let c = 0; c < i; c++)
+    r.roleResourceList[c].user.includes(a.loginUser.userId + "") &&
+      r.roleResourceList[c].resourceAuthInfo.forEach((u) => n.add(u));
+  let l = addObjRes(o, n),
+    s = deletePageGroup(e, l);
+  return (
+    s
+      ? ((t.errorCode = 0),
+        (t.massage = "\u8FC7\u6EE4\u6210\u529F"),
+        (t.data = s))
+      : ((t.errorCode = -1),
+        (t.massage = "\u8FC7\u6EE4\u5931\u8D25"),
+        (t.data = s)),
+    (nameArr = []),
+    (index = 0),
+    t
+  );
+}
+function addObjRes(e, t) {
+  let n = [];
+  if (e.length > 0)
+    for (let a = 0; a < e.length; a++)
+      t.has(e[a].id + "v") && n.push(e[a].name);
+  return n;
+}
+function deletePageGroup(e, t) {
+  if (e.children.length > 0)
+    for (let n = 0; n < e.children.length; n++) {
+      if (t.includes(e.children[n].title) === !1) {
+        (e.children.splice(n, 1), n--);
+        continue;
+      }
+      e.children[n] &&
+        e.children[n].hasOwnProperty("children") &&
+        deletePageGroup(e.children[n], t);
+    }
+  return e;
+}
+function setRoleByUserName(
+  { roleName: e = "", userName: t = "" },
+  n = () => {},
+) {
+  if (!t || !e)
+    return $.messager.alert(
+      "\u63D0\u793A",
+      "\u7528\u6237\u540D\u548C\u89D2\u8272\u540D\u662F\u5FC5\u586B\u7684",
+    );
+  const r = user_list()[t];
+  if (!r)
+    return $.messager.alert(
+      "\u63D0\u793A",
+      "\u975E\u6709\u6548\u7528\u6237,\u8BF7\u786E\u8BA4",
+    );
+  const o = { projectId: KMClientInterface.getInstance().currentProName };
+  var i = urlType.WEBDATASERVER_URL + urlType.GETROLELIST;
+  let l = new KMFileRequest();
+  l.KMDataAjaxGetSyn(urlType.GETROLELIST, i, o, (s) => {
+    const { roleResourceList: c } = s.message,
+      u = c.find((g) => g.name === e);
+    if (!u)
+      return $.messager.alert(
+        "\u63D0\u793A",
+        "\u672A\u67E5\u8BE2\u5230\u89D2\u8272,\u8BF7\u786E\u8BA4\u89D2\u8272\u662F\u5426\u6B63\u786E",
+      );
+    var f = urlType.WEBDATASERVER_URL + urlType.EDITROLE;
+    (u.user.push(r),
+      u.userGroupMsg.push(t),
+      l.KMAjaxPostBodyParserSync(urlType.EDITROLE, f, u, n));
+  });
+}
+function ExecutePageAccessFilter() {
+  let e = {};
+  ((e.errorCode = -1), (e.massage = " "), (e.data = []));
+  let t = new Set(),
+    n = KMUserManager.getInstance(),
+    a = KMRoleManager.getInstance(),
+    r = KMUIFrame.getInstance().projectServer.pageMng.Pages,
+    o = a.roleResourceList.length;
+  for (let l = 0; l < o; l++)
+    a.roleResourceList[l].user.includes(n.loginUser.userId + "") &&
+      a.roleResourceList[l].resourceAuthInfo.forEach((s) => t.add(s));
+  let i = addObjRes(r, t);
+  return (
+    i
+      ? ((e.errorCode = 0),
+        (e.massage = "\u8FC7\u6EE4\u6210\u529F"),
+        (e.data = i))
+      : ((e.errorCode = -1),
+        (e.massage = "\u8FC7\u6EE4\u5931\u8D25"),
+        (e.data = i)),
+    (nameArr = []),
+    (index = 0),
+    e
+  );
+}
+function setElementLanguage(e) {
+  ((ELEMENTLANGUAGE = e),
+    ELEMENT.locale(ELEMENT.lang[e]),
+    window.dispatchEvent(new Event("kmLangChange")));
+}
+function hikHeadersApi(e, t, n, a = "POST") {
+  try {
+    const r = generateUUID(),
+      o = Date.now().toString(),
+      i = [
+        a,
+        "*/*",
+        "application/json",
+        `x-ca-key:${e}`,
+        `x-ca-nonce:${r}`,
+        `x-ca-timestamp:${o}`,
+        n,
+      ].join(`
+`),
+      l = CryptoJS.HmacSHA256(i, t).toString(CryptoJS.enc.Base64);
+    return {
+      code: 0,
+      data: {
+        Accept: "*/*",
+        "Content-Type": "application/json",
+        "x-ca-key": e,
+        "x-ca-nonce": r,
+        "x-ca-timestamp": o,
+        "x-ca-signature": l,
+        "x-ca-signature-headers": "x-ca-key,x-ca-nonce,x-ca-timestamp",
+      },
+      message: "OK",
+    };
+  } catch (r) {
+    return { code: -1, data: "", message: r.stack };
+  }
+}
+function compressImage(e, t = {}) {
+  const n = { maxWidth: 1200, quality: 0.8, maxSize: 2097152 },
+    { maxWidth: a, quality: r, maxSize: o } = { ...n, ...t };
+  return new Promise((i, l) => {
+    if (r < 0 || r > 1) {
+      l(
+        new Error(
+          "\u538B\u7F29\u8D28\u91CF\u5FC5\u987B\u5728 0-1 \u4E4B\u95F4",
+        ),
+      );
+      return;
+    }
+    if (a <= 0 || o <= 0) {
+      l(
+        new Error(
+          "\u6700\u5927\u5BBD\u5EA6\u548C\u6700\u5927\u4F53\u79EF\u5FC5\u987B\u4E3A\u6B63\u503C",
+        ),
+      );
+      return;
+    }
+    const s = new Image();
+    ((s.onload = function () {
+      let c = s.width,
+        u = s.height;
+      if (c > a) {
+        const h = a / c;
+        ((c = a), (u = Math.round(u * h)));
+      }
+      const f = document.createElement("canvas");
+      ((f.width = c),
+        (f.height = u),
+        f.getContext("2d").drawImage(s, 0, 0, c, u),
+        f.toBlob(
+          (h) => {
+            if (!h) {
+              l(
+                new Error(
+                  "\u538B\u7F29\u5931\u8D25,\u65E0\u6CD5\u751F\u6210\u56FE\u7247\u6570\u636E",
+                ),
+              );
+              return;
+            }
+            const d = h.size,
+              p = d > o,
+              v = new FileReader();
+            ((v.onload = (I) => {
+              const w = I.target.result,
+                y = {
+                  blob: h,
+                  base64: w,
+                  compressedWidth: c,
+                  compressedHeight: u,
+                  usedQuality: r || "\u9ED8\u8BA4\u503C1",
+                  size: d,
+                  isOverMaxSize: p,
+                };
+              (console.log("\u538B\u7F29\u7ED3\u679C: ", {
+                原始尺寸: `${s.width} x ${s.height}`,
+                压缩后尺寸: `${c} x ${u}`,
+                使用质量: y.usedQuality,
+                压缩后体积: (d / 1024).toFixed(2) + "KB",
+                是否超过最大体积: p ? "\u662F" : "\u5426",
+              }),
+                i(y));
+            }),
+              v.readAsDataURL(h));
+          },
+          e.type || "image/jpeg",
+          r,
+        ));
+    }),
+      (s.onerror = (c) =>
+        l(new Error("\u56FE\u7247\u52A0\u8F7D\u5931\u8D25: " + c.message))),
+      (s.src = URL.createObjectURL(e)));
+  });
+}
+async function exportPdf(e, t) {
+  const n = e.cloneNode(!0);
+  ((n.style.position = "absolute"),
+    (n.style.top = "-99999px"),
+    (n.style.left = "0"),
+    (n.style.width = e.scrollWidth + "px"),
+    (n.style.overflow = "visible"),
+    document.body.appendChild(n));
+  const a = await html2canvas(e, {
+    scale: 2,
+    useCORS: !0,
+    allowTaint: !0,
+    logging: !1,
+    windowWidth: e.scrollWidth,
+    windowHeight: e.scrollHeight,
+  });
+  document.body.removeChild(n);
+  const r = a.toDataURL("image/jpeg", 1),
+    o = new jspdf.jsPDF("p", "mm", "a4");
+  let i = 210,
+    l = 297,
+    s = i,
+    c = a.height * (s / a.width),
+    u = c,
+    f = 0;
+  for (o.addImage(r, "JPEG", 0, 0, s, c), u -= l; u > 0; )
+    ((f = u - c), o.addPage(), o.addImage(r, "JPEG", 0, f, s, c), (u -= l));
+  o.save(t || `${Date.now()}.pdf`);
+}
+function _isPlusReady() {
+  return typeof window < "u" && window.plus;
+}
+function _pcFallback(e) {
+  const t = {
+    errorCode: -1,
+    message:
+      "\u5F53\u524D\u73AF\u5883\u4E0D\u652F\u6301 plus\uFF0C\u4EC5\u652F\u6301\u624B\u673A\u7AEF",
+    data: null,
+  };
+  return (typeof e == "function" && e(t), t);
+}
+function _buildPath(e, t = "sqlite") {
+  return ((e = e.replace(/^\/+/, "")), `_doc/${t}/${e}`);
+}
+function openDatabaseFile_App(e, t, n, a) {
+  if (!_isPlusReady()) return _pcFallback(a);
+  n || (n = "sqlite");
+  const r = _buildPath(t, n);
+  plus.sqlite.openDatabase({
+    name: e,
+    path: r,
+    success: (o) => a({ errorCode: 0, message: "success", data: o }),
+    fail: (o) => a({ errorCode: -1, message: "error", data: o }),
+  });
+}
+function checkDatabaseOpened_App(e, t, n) {
+  if (!_isPlusReady()) return !1;
+  n || (n = "sqlite");
+  const a = _buildPath(t, n);
+  return plus.sqlite.isOpenDatabase({ name: e, path: a });
+}
+function executeSQL_App(e, t, n) {
+  if (!_isPlusReady()) return _pcFallback(n);
+  plus.sqlite.executeSql({
+    name: e,
+    sql: t,
+    success: (a) => n({ errorCode: 0, message: "success", data: a }),
+    fail: (a) => n({ errorCode: -1, message: "error", data: a }),
+  });
+}
+function selectSQL_App(e, t, n) {
+  if (!_isPlusReady()) return _pcFallback(n);
+  plus.sqlite.selectSql({
+    name: e,
+    sql: t,
+    success: (a) => n({ errorCode: 0, message: "success", data: a }),
+    fail: (a) => n({ errorCode: -1, message: "error", data: a }),
+  });
+}
+function closeDatabase_App(e, t) {
+  if (!_isPlusReady()) return _pcFallback(t);
+  plus.sqlite.closeDatabase({
+    name: e,
+    success: (n) => t({ errorCode: 0, message: "success", data: n }),
+    fail: (n) => t({ errorCode: -1, message: "error", data: n }),
+  });
+}
+function ensureDatabaseFile_App(e, t, n) {
+  if (!_isPlusReady()) return _pcFallback(n);
+  t || (t = "sqlite");
+  const a = _buildPath(e, t);
+  plus.io.requestFileSystem(plus.io.PRIVATE_DOC, (r) => {
+    r.root.getFile(
+      a,
+      { create: !0, exclusive: !0 },
+      (o) =>
+        n({
+          errorCode: 0,
+          message: "success",
+          data: { fullPath: o.fullPath, size: o.size, isNew: o.size === 0 },
+        }),
+      (o) => {
+        o.code === 12
+          ? r.root.getFile(a, {}, (i) =>
+              n({
+                errorCode: 0,
+                message: "exists",
+                data: { fullPath: i.fullPath, size: i.size, isNew: !1 },
+              }),
+            )
+          : n({ errorCode: -1, message: "error: " + o.message, data: null });
+      },
+    );
+  });
+}
+function removeDatabaseFile_App(e, t, n) {
+  if (!_isPlusReady()) return _pcFallback(n);
+  t || (t = "sqlite");
+  const a = _buildPath(e, t);
+  plus.io.requestFileSystem(plus.io.PRIVATE_DOC, (r) => {
+    r.root.getFile(
+      a,
+      {},
+      (o) =>
+        o.remove(
+          () =>
+            n({
+              errorCode: 0,
+              message: "success",
+              data: { fullPath: o.fullPath },
+            }),
+          (i) =>
+            n({
+              errorCode: -1,
+              message: "\u5220\u9664\u5931\u8D25: " + i.message,
+              data: null,
+            }),
+        ),
+      (o) =>
+        n({
+          errorCode: -1,
+          message: o.code === 1 ? "not found" : "error: " + o.message,
+          data: null,
+        }),
+    );
+  });
+}
+function scanDatabaseFiles_App(e = "sqlite", t) {
+  if (!_isPlusReady()) return _pcFallback(t);
+  ((e = e || "sqlite"),
+    plus.io.requestFileSystem(plus.io.PRIVATE_DOC, (n) => {
+      n.root.getDirectory(
+        e,
+        { create: !1 },
+        (a) => {
+          const r = [],
+            o = a.createReader();
+          (() => {
+            o.readEntries(
+              (l) => (
+                l.forEach((s) => {
+                  !s.isDirectory &&
+                    s.name.endsWith(".db") &&
+                    r.push({ name: s.name, fullPath: s.fullPath });
+                }),
+                t({ errorCode: 0, message: "success", data: r })
+              ),
+              (l) =>
+                t({
+                  errorCode: -1,
+                  message: "\u8BFB\u53D6\u5931\u8D25: " + l.message,
+                  data: null,
+                }),
+            );
+          })();
+        },
+        (a) =>
+          t({
+            errorCode: -1,
+            message: "\u5B9A\u4F4D\u5B50\u76EE\u5F55\u5931\u8D25: " + a.message,
+            data: null,
+          }),
+      );
+    }));
+}
+function getCurrentNetworkType_App() {
+  return _isPlusReady() ? plus.networkinfo.getCurrentType() : -1;
+}
+function setRoleByUserNameList(e, t) {
+  if (!e.userName || !e.roleName)
+    return $.messager.alert(
+      "\u63D0\u793A",
+      "\u7528\u6237\u540D\u548C\u89D2\u8272\u540D\u662F\u5FC5\u586B\u7684",
+    );
+  const n = user_list();
+  for (let i = 0; i < e.userName.length; i++) {
+    let l = e.userName[i];
+    if (!n[l])
+      return $.messager.alert(
+        "\u63D0\u793A",
+        l + "\u975E\u6709\u6548\u7528\u6237,\u8BF7\u786E\u8BA4",
+      );
+  }
+  const a = { projectId: KMClientInterface.getInstance().currentProName };
+  var r = urlType.WEBDATASERVER_URL + urlType.GETROLELIST;
+  let o = new KMFileRequest();
+  o.KMDataAjaxGetSyn(urlType.GETROLELIST, r, a, (i) => {
+    const { roleResourceList: l } = i.message;
+    let s = e.roleName.find((u) => !l.some((f) => f.name == u));
+    if (s)
+      return $.messager.alert(
+        "\u63D0\u793A",
+        `\u672A\u67E5\u8BE2\u5230\u89D2\u8272${s},\u8BF7\u786E\u8BA4\u89D2\u8272\u662F\u5426\u6B63\u786E`,
+      );
+    for (let u = 0; u < l.length; u++)
+      for (let f = 0; f < e.roleName.length; f++)
+        e.roleName[f] == l[u].name &&
+          e.userName.forEach((g) => {
+            (l[u].userGroupMsg.includes(g) || l[u].userGroupMsg.push(g),
+              l[u].user.includes(n[g]) || l[u].user.push(n[g]));
+          });
+    var c = urlType.WEBDATASERVER_URL + urlType.EDITROLE;
+    o.KMAjaxPostBodyParserSync(urlType.EDITROLE, c, { roleResourceList: l }, t);
+  });
+}
+function compressPhoto(
+  e,
+  { maxWidth: t, maxHeight: n, quality: a = 0.8, mimeType: r = "image/jpeg" },
+) {
+  return new Promise((o, i) => {
+    const l = new Image(),
+      s = new FileReader();
+    ((s.onload = (c) => {
+      l.src = c.target.result;
+    }),
+      (s.onerror = i),
+      s.readAsDataURL(e),
+      (l.onload = () => {
+        let { width: c, height: u } = l;
+        const f = Math.min(t / c, n / u, 1),
+          g = Math.round(c * f),
+          h = Math.round(u * f),
+          d = document.createElement("canvas");
+        ((d.width = g),
+          (d.height = h),
+          d.getContext("2d").drawImage(l, 0, 0, g, h),
+          d.toBlob(
+            (v) => {
+              if (!v) return i(new Error("Canvas toBlob failed"));
+              o(v);
+            },
+            r,
+            a,
+          ));
+      }),
+      (l.onerror = i));
+  });
+}
+function getRoleList(e, t) {
+  let a = { projectId: KMClientInterface.getInstance().currentProName },
+    r = urlType.GETROLELIST,
+    o = new KMFileRequest(),
+    i = urlType.WEBDATASERVER_URL + urlType.GETROLELIST;
+  o.KMDataAjaxGetSyn(r, i, a, function (l) {
+    let s = l.message;
+    if (s && s.roleResourceList)
+      if (e) {
+        let c = s.roleResourceList.filter((u) => u.name === e);
+        t(c);
+      } else t(s.roleResourceList);
+    else t(null);
+  });
+}
+function getVariableGroupFnc() {
+  let { variableGroup: e } = KMProjectVariableMng.getInstance();
+  return e || {};
+}
+function requestCalculationPost(e, t, n, a) {
+  let r =
+    DataSourceManagerRunningAPI.getInstance().getRunningServerInfoByAppName(
+      e,
+      getToken(),
+    );
+  if (!r.appInfo)
+    return a({
+      errorCode: -1,
+      msg: "\u670D\u52A1\u53D1\u73B0\u8BF7\u6C42\u5931\u8D25.",
+    });
+  try {
+    typeof n == "string" && (n = JSON.parse(n));
+    let o = { RequestID: 162441, RequestType: "normal", InParam: n };
+    new KMClientInterface().httpRequestExecSync(
+      "http://" + r.appInfo,
+      t,
+      "post",
+      o,
+      "object",
+      a,
+    );
+  } catch (o) {
+    return a({ errorCode: -1, msg: `Error:${o}` });
+  }
+}

@@ -1,0 +1,1 @@
+const controllers=require(__dir+"/lib/controllers");module.exports={get:{"/system/oemConfig":controllers.oemConfig.getOemconfigInfo},post:{"/system/setOEMConfig":controllers.oemConfig.setOEMConfig},put:{"/system/resetOEMConfig":controllers.oemConfig.resetOEMConfig},delete:{},patch:{}};

@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8">
+	<title>KingPortal Manager Center Menu</title>
+
+	<script>
+		debugger
+		var script = `<script type="text/javascript" src="..` + projectNameStr + `/public/javascripts/DevelopClient/ProjectDevelp/libs/developclient/projectManager/kmui_projectgroupmanager.js">` + `<` + `/script>`;
+		document.write(script);// add by xing.li 更新IDE预览界面 2020/04/28
+	</script>
+
+</head>
+<body style="padding:0px;margin: 0px;width:1715px;height: 979px;" >
+	<style lang='scss' scoped>
+		.firstpage{
+			width: 100%;
+			height: 100%;
+			display: flex;
+		}
+		.administration{
+			height: 88%;
+		}
+		.icon_head {
+			display: inline-block;
+			width: 5px;
+			height: 25px;
+			margin: 0px 13px 5px 18px;
+			background-color: rgb(42, 121, 240);
+			position: relative;
+			top: 4px;
+		}
+		.introduction {
+			border-left: 1px solid lightgray;
+    		margin-top: 10px;
+		}
+		.fun_name_list {
+			color: rgb(42, 121, 240);
+			font-size:20px;
+				font-weight: Bold;
+			line-height: 30px;
+			margin: 0 0 0 10px;
+		}
+		.fun_content {
+			width: 90%;
+			height: 150px;
+			line-height: 24px;
+			padding: 5px 60px 5px 15px;
+			text-indent: 2em;
+			font-size: 12px;
+			color: gray;
+		}
+		.icon_list .tipRight{
+			padding: 5px 10px 5px 35%;
+		}
+		.tipLeft {
+			box-shadow: 0 2px 12px 0 rgba(0,0,0,0.1);
+			margin: 10px 10px;
+			width: 60%;
+			height: 47%;
+		}
+		.tipRight{
+			height: 47%;
+			box-shadow: 0 2px 12px 0 rgba(0,0,0,0.1);
+			width: 40%;
+			margin: 10px 10px;
+		}
+		.tiptop{
+			margin-top: 10px;
+    		padding-bottom: 10px;
+		}
+		.case{
+			overflow: hidden;
+		}
+		.casetext{
+			color: rgba(96, 98, 102);
+			background-color: rgba(255, 255, 255, 0);
+			font-weight: normal;
+			text-align: left;
+			box-sizing: content-box;
+			margin-left: 20px;
+			margin-top: 30px;
+		}
+		.casedown{
+			color: #409eff;
+			margin-right: 10px;
+			margin-top: 30px;
+		}
+		.administration{
+			border-top: 1px solid lightgray;
+		}
+		.wrap {
+			position: absolute;
+			top: 0;
+			bottom: 0;
+			left: 0;
+			right: 0;
+			user-select: none;
+		}
+
+		.icon_head {
+		display: inline-block;
+		width: 5px;
+		height: 26px;
+		margin: 0 14px 0 18px;
+		background-color: rgb(42, 121, 240);
+		position: relative;
+		top: 4px;
+		}
+
+		.fun_intro {
+		width: 100%;
+		}
+
+		.fun_name_list {
+		color: rgb(42, 121, 240);
+		font-size:20px;
+			font-weight: Bold;
+		line-height: 30px;
+		margin: 0 0 0 10px;
+		}
+		.link_list{
+		padding: 5px 0 0 10px;
+		font-size: 12px;
+		}
+		.link_list a{
+		text-decoration: none;
+		color: rgb(42, 121, 240);
+		}
+		.icon_list {
+		padding: 5px 10px 5px 35%;
+		}
+		.function_case_head {
+		margin: 0 0 15px 0;
+		}
+		.fun_intro_head{
+			width: 100%;
+			box-shadow: 0 0px 5px rgba(223, 222, 222, 0.925);
+			margin-left: 15px;
+			padding: 10px 0;
+
+		}
+		.clearfix span {
+		font-size:20px;
+		font-weight:Bold;
+		color: rgb(42, 121, 240);
+		}
+		.text_list {
+		height: 100%;
+		overflow-y: auto;
+		}
+		.text_list::-webkit-scrollbar {
+		width: 8px;
+		height: 8px;
+		/* // background-color: gray; */
+		}
+		.text_item {
+		margin: 24px 0 0 0;
+		}
+		.project_case_list {
+		position: relative;
+		margin-top: 20px;
+		width: 100%;
+		height: 100%;
+		}
+		.download {
+		width: 100%;
+		position: absolute;
+		bottom: 2%;
+		text-align: right;
+		line-height: 24px;
+		background: rgba(0,0,0,0.5);
+		padding: 5px 5px 0 0;
+		}
+		.download a {
+		text-decoration: none;
+		color: white;
+		}
+		.function_case {
+		width: 100%;
+		margin-top: 2px;
+		padding: 20px 0 0 0;
+		}
+		.effect {
+		width: 99.5%;
+		margin-top: 25%;
+		padding: 20px 0 0 0;
+		}
+	</style>
+	<div class="firstpage">
+		<div class="tipLeft">
+			<div class="tiptop">
+				<span class="icon_head"></span>
+					<span style="color: grey;font-weight: Bold; font-size:24px">功能介绍</span>
+			</div>
+			<div class="administration">
+				<div style="display: flex;">
+					<div class="" style="margin-top: 10px;">
+						<div class="fun_name_list">
+						<span>用户管理</span>
+						</div>
+						<div class="fun_content">用于管理KingProtal2.0平台用户，包括用户的创建、删除、分组管理、安全策略设置。</div>
+						<div class="icon_list">
+						<img src="static/images/images/icon_user.png" alt="" style="max-width: 60%;max-height: 60%;">
+						</div>
+					</div>
+					<div class="introduction">
+						<div class="fun_name_list">
+						<span>客户端管理</span>
+						</div>
+						<div class="fun_content">用于管理KingProtal2.0平台用户，包括用户的创建、删除、分组管理、安全策略设置。</div>
+						<div class="icon_list">
+						<img src="static/images/images/icon_client.png" alt="" style="max-width: 60%;max-height: 60%;">
+						</div>
+					</div>
+					<div class="introduction">
+						<div class="fun_name_list">
+						<span>数据源管理</span>
+						</div>
+						<div class="fun_content">用于管理KingProtal2.0平台用户，包括用户的创建、删除、分组管理、安全策略设置。</div>
+						<div class="icon_list">
+						<img src="static/images/images/icon_datasource.png" alt="" style="max-width: 60%;max-height: 60%;">
+						</div>
+					</div>
+				</div>
+				<div></div>
+				<div></div>
+			</div>
+		</div>
+		<div class="tipRight">
+			<div class="tiptop">
+				<span class="icon_head"></span>
+					<span style="color: grey;font-weight: Bold; font-size:24px">功能案例</span>
+			</div>
+			<div class="administration">
+				<div class="case">
+					<div class="casetext" style="float: left;">gis地图demo示例</div>
+					<div class="casedown" style="float: right;">下载</div>
+				</div>
+				<div class="case">
+					<div  class="casetext" style="float: left;">gis地图demo示例</div>
+					<div  class="casedown" style="float: right;">下载</div>
+				</div>
+				<div class="case" >
+					<div class="casetext" style="float: left;">gis地图demo示例</div>
+					<div class="casedown" style="float: right;">下载</div>
+				</div>
+				<div class="case">
+					<div class="casetext" style="float: left;">gis地图demo示例</div>
+					<div class="casedown" style="float: right;">下载</div>
+				</div>
+				<div class="case">
+					<div class="casetext" style="float: left;">gis地图demo示例</div>
+					<div class="casedown" style="float: right;">下载</div>
+				</div>
+				<div class="case">
+					<div class="casetext" style="float: left;">gis地图demo示例</div>
+					<div class="casedown" style="float: right;">下载</div>
+				</div>
+
+			</div>
+		</div>
+
+	</div>
+	<div id="functionIntroduction">
+	</div>
+
+	<script>
+		debugger
+
+	var imageElemnt = `
+	<div class="wrap">
+			<div class="effect">
+				<div class="fun_intro_head">
+					<span class="icon_head"></span>
+					<span style="color: grey;font-weight: Bold; font-size:24px">{{titleList.scenecase}}</span>
+					<el-button style="float: right; padding: 3px 0 0 0; margin-right: 20px" type="text">{{titleList.viewMore}}</el-button>
+				</div>
+				<div style="background-color: white; padding: 0 15px 0 15px; height:320px">
+					<el-carousel :interval="5000" arrow="always" style="height:100%">
+					<el-carousel-item v-for="(colt, indext) in imgList" :key="indext" style="height:320px">
+						<el-row :gutter="20">
+						<el-col class="el-col-tit" :class="colt.dataIndex" :span='8'
+						v-for="(colt, index) in imgList[indext]" :key="index">
+							<div class="project_case_list">
+							<img :src="colt.src" alt="" style="max-width: 100%;max-height: 100%;">
+							<div class="download">
+								<a href="">{{qew}}</a><i></i>
+							</div>
+							</div>
+						</el-col>
+						</el-row>
+					</el-carousel-item>
+					</el-carousel>
+				</div>
+			</div>
+	</div>`
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+	var centerDiv = document.getElementById("functionIntroduction")
+	centerDiv.innerHTML = imageElemnt;
+	this.$vm = new Vue({
+		el: "#functionIntroduction",
+		data() {
+			debugger
+			return {
+				columsList: [
+					{ title: "用户管理", dataIndex: "this.templet.VIEW_TYPE.USER_MANAGER", context: "用于管理KingProtal2.0平台用户，包括用户的创建、删除、分组管理、安全策略设置。", src: `static/images/images/icon_user.png` },
+					{ title: "客户端管理", dataIndex: "this.templet.VIEW_TYPE.CLIENT_MANAGER", context: "解决数据展示问题，基于BS的组态开发模式，实现2D工艺流程图、3D场景、多种UI组件、BI展示、视频展示、GIS等，实现快速布局，自适应不同终端（PC、手机、平板）。", src: `static/images/images/icon_client.png` },
+					{ title: "数据源管理", dataIndex: "this.templet.VIEW_TYPE.CALCULATE_MANAGER", context: "解决数据来源问题，支持各类系统数据接入，包括关系库、非关系库、工业库数据", src: `static/images/images/icon_calculate.png` },
+				],
+				imgList: [
+					[{ src: `static/images/images/example2.png` },
+					{ src: `static/images/images/example3.png` },
+					{ src: `static/images/images/example4.png` }],
+					[{ src: `static/images/images/example5.png` },
+					{ src: `static/images/images/example6.png` },
+					{ src: `static/images/images/example2.png` }]
+
+				],
+				functionList: [
+					{
+						function_name: "客户端功能案例",
+						function_list: [
+							{ title: '页面管理', url: '' },
+							{ title: '页面管理', url: '' },
+							{ title: '页面管理', url: '' },
+							{ title: '页面管理', url: '' },
+							{ title: '页面管理', url: '' },
+							{ title: '页面管理', url: '' },
+							{ title: '页面管理', url: '' },
+							{ title: '页面管理', url: '' },
+						]
+					}
+				],
+				titleList: {
+					functionIntroduction:"功能介绍",
+					functioncase:"功能案例",
+					scenecase:"现场案例",
+					viewTutorial:"查看详细教程",
+					viewMore:"查看更多"
+
+				}
+			};
+		},
+		methods: {
+
+		},
+    })
+	</script>
+</body>
+</html>

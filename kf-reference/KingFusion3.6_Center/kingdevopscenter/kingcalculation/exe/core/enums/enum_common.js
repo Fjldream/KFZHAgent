@@ -1,0 +1,1 @@
+const enum_ProductId={CLIENT:1158,COMPUTE:1159,DATA_SOURCE:1160},enum_wsStatus={ready:1},enum_scriptType={1:"global_variable",2:"period_script",3:"datachange_script",4:"conditionalevent_script",5:"askcalculate_script",6:"selfdefinefunc_script"};module.exports={enum_wsStatus,enum_ProductId,enum_scriptType};

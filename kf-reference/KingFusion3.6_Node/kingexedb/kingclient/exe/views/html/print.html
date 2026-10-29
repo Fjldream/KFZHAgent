@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>数据打印</title>
+    <link rel="stylesheet" type="text/css" href="../../../ThirdParty/jquery-easyui-1.6.4/themes/default/easyui.css" />
+    <style>
+        .datagrid-body td {
+            border-style: solid;
+        }
+    </style>
+</head>
+ <script>
+     window.onload = function(){
+        var value = sessionStorage.getItem("dataGridPrint");
+        sessionStorage.setItem("dataGridPrint","");
+        if(value){
+            document.body.innerHTML = value;
+            setTimeout(function() {
+                window.print();
+            }, 1000);
+        }
+     }
+ </script>
+<body>
+</body>
+</html>

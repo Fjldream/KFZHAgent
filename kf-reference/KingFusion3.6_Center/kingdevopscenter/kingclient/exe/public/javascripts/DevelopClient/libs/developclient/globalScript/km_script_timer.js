@@ -1,0 +1,1 @@
+function KMScriptTimer(){KMScriptBase.call(this)}kmUlits.extend(KMScriptTimer,KMScriptBase),KMScriptTimer.getInstance=function(){return KMScriptTimer.instance===void 0&&(KMScriptTimer.instance=new KMScriptTimer),KMScriptTimer.instance};

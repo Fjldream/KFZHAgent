@@ -1,0 +1,1 @@
+global.__DIR=__dirname;const Application=require("./app");let app=new Application;app.start();

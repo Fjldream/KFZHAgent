@@ -1,0 +1,183 @@
+/* 页面编辑器工具箱拖拽 */
+.km-page-drag {
+    /* height: 25px;
+    width: 100px;  */
+    /* font-size: 14px; */
+    /* font-family: "微软雅黑", "Yahei Mono"; */
+    /* text-align: center; */
+    /* line-height: 1.8;
+    margin-top: 30px;
+    margin-bottom: 30px;
+    display: block; */
+
+    /* border: 1px dashed rgba(241, 176, 176, 1);
+    background-color: rgba(219, 217, 217, 1);  */
+}
+
+.km-page-drag:hover {
+    background-color: rgba(192, 192, 192, 1);
+    cursor: move;
+}
+
+.km-page-drag:active {
+    background-color: rgba(83,137,192, 1);
+    border: 1px dashed rgba(0, 0, 0, 1);
+    cursor: hand
+}
+
+.km-page-drag:visited {
+    background-color: rgb(224, 223, 223);
+    border: 1px dashed rgba(0, 0, 0, 1);
+    cursor: hand
+}
+.km-page-drag:dp {
+    opacity: 0.5;
+    filter: alpha(opacity=50);
+}
+
+.km-page-drag:over {
+    background: rgba(83,137,192, 1);
+}
+
+/* 组合模型编辑器工具箱拖拽 */
+.km-composite-drag {
+    /* height: 25px;
+    width: 100px;  */
+    /* font-size: 14px; */
+    /* font-family: "微软雅黑", "Yahei Mono"; */
+    /* text-align: center; */
+    /* line-height: 1.8;
+    margin-top: 30px;
+    margin-bottom: 30px;
+    display: block; */
+
+    /* border: 1px dashed rgba(241, 176, 176, 1);
+    background-color: rgba(219, 217, 217, 1);  */
+}
+
+.km-composite-drag:hover,
+.km-UImodel-drag:hover {
+    background-color: rgba(192, 192, 192, 1);
+    cursor: move;
+}
+
+.km-composite-drag:active,
+.km-UImodel-drag:active {
+    background-color: rgba(83,137,192, 1);
+    border: 1px dashed rgba(0, 0, 0, 1);
+    cursor: hand
+}
+
+.km-composite-drag:visited,
+.km-UImodel-drag:visited {
+    background-color: rgb(224, 223, 223);
+    border: 1px dashed rgba(0, 0, 0, 1);
+    cursor: hand
+}
+.km-composite-drag:dp,
+.km-UImodel-drag:dp {
+    opacity: 0.5;
+    filter: alpha(opacity=50);
+}
+
+.km-composite-drag:over,
+.km-UImodel-drag:over {
+    background: rgba(83,137,192, 1);
+}
+
+/* 专业模型编辑器 */
+.km-professional-drag:hover {
+    background-color: rgba(192, 192, 192, 1);
+}
+/* 
+.km-professional-drag:active {
+    background-color: rgba(83,137,192, 1);
+    border: 1px dashed rgba(0, 0, 0, 1);
+    cursor: hand
+} */
+
+.km-professional-drag:visited {
+    background-color: rgb(224, 223, 223);
+    border: 1px dashed rgba(0, 0, 0, 1);
+    cursor: hand
+}
+.km-professional-drag:dp {
+    opacity: 0.5;
+    filter: alpha(opacity=50);
+}
+.UITextEdit {
+    position:absolute;
+    width: 300px;
+    height: 260px;
+    top:40%;
+    right:20%;
+    background:rgba(240, 240, 240, 1);
+    border-top: 40px solid rgba(198, 221, 244, 1);
+    border-left: 5px solid rgba(198, 221, 244, 1);
+    border-bottom: 5px solid rgba(198, 221, 244, 1);
+    border-right: 5px solid rgba(198, 221, 244, 1);
+    border-radius: 5px;
+    z-index:1000;
+    text-align: center;
+}
+#calendarEdit {
+    position:absolute;
+    width: 260px;
+    height: 200px;
+    top: 42%;
+    right: 0;
+    background:rgba(240, 240, 240, 1);
+    border-radius: 5px;
+    z-index:1000;
+}
+.UITextEdit div{
+    position:absolute;
+    top: -30px;
+    font-size: 15px;
+}
+.UITextEdit label{
+    display: inline-block;
+    width: 88%;
+    margin: 5px;
+    text-align: left;
+}
+.UITextEdit textarea{
+    width: 88%;
+    height: 70%;
+    overflow:scroll; 
+}
+.UITextEdit input{
+    position: absolute;
+    bottom: 8px;
+     
+}
+#textUIConfirm {
+    right: 100px;
+}
+#textUICancle {
+    right: 40px;
+}
+#timeShow {
+    float: left;
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+}
+#addDeleteTime {
+    float:right;
+}
+#addDeleteTime input {
+    display:block;
+}
+#addButton {
+    height: 50%;
+    position: absolute;
+    right: 0;
+    top:0;
+}
+#deleteButton {
+    height: 50%;
+    position: absolute;
+    right: 0;
+    bottom:0;
+}

@@ -1,0 +1,1 @@
+const crypto=require("crypto");module.exports={encrypted(r,c){const e=crypto.createCipher("bf",c);let t="";return t+=e.update(r,"utf8","hex"),t+=e.final("hex"),t},decrypted(r,c){const e=crypto.createDecipher("bf",c);let t="";return t+=e.update(r,"hex","utf8"),t+=e.final("utf8"),t},checkPasswd(r,c){let e;return r===c?e=!0:e=!1,e}};

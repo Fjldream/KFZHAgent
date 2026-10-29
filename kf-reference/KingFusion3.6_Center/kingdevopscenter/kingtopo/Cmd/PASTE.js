@@ -1,0 +1,1 @@
+var fs=require("fs"),path=require("path"),file=require("../Daemon/File"),base64Reg=/^\s*data:([a-z]+\/[a-z0-9-+.]+(;[a-z-]+=[a-z0-9-]+)?)?(;base64)?,/i,zipReg=/\.zip$/i;module.exports=function(o,f,e,n){var r=o.server.config.storageDir,i=e.destDir,t=i?path.join(r,i):r,a=e.fileList;return a instanceof Array&&a.forEach(function(s){file.copyFile(r,s,t)}),!0};

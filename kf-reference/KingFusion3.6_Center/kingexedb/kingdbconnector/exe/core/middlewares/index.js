@@ -1,0 +1,1 @@
+const middlewares=[];middlewares.push(require("./midware_redundance")),middlewares.push(require("./midware_response")),middlewares.push(require("./midware_datasourcename")),middlewares.push(require("./midware_authorization")),module.exports=middlewares;

@@ -1,0 +1,1 @@
+const routerConfig={};routerConfig.appbase=require("./app_router_config"),routerConfig.alarm=require("./alarm_router_config"),routerConfig.customAlarm=require("./customAlarm_router_config"),module.exports=routerConfig;

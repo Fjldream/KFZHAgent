@@ -1,0 +1,1 @@
+class NativeProcessMemoryMetric{constructor(){this.size=0,this.rss_bytes=0,this.rss_pct=0}setSize(s){this.size=s}getSize(){return this.size}setRss_bytes(s){this.rss_bytes=s}getRss_bytes(){return this.rss_bytes}setRss_pct(s){this.rss_pct=s}getRss_pct(){return this.rss_pct}}module.exports=NativeProcessMemoryMetric;

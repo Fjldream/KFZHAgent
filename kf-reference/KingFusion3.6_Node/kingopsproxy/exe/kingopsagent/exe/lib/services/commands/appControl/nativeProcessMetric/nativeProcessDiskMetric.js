@@ -1,0 +1,1 @@
+class NativeProcessDiskMetric{constructor(){this.readBytesPerSec=0,this.writeBytesPerSec=0}setReadBytesPerSec(e){this.readBytesPerSec=e}getReadBytesPerSec(){return this.readBytesPerSec}setWriteBytesPerSec(e){this.writeBytesPerSec=e}getWriteBytesPerSec(){return this.writeBytesPerSec}}module.exports=NativeProcessDiskMetric;

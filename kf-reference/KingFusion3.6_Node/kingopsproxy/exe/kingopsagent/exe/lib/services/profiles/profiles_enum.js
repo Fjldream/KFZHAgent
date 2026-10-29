@@ -1,0 +1,1 @@
+"use strict";const enums={COMMONCONFIG:{ACCESS:"public",PATH:`${__dir}/../../../../config/common.json`},PROXYCONFIG:{ACCESS:"public",PATH:`${__dir}/../../../../config/proxyconfig.json`}};module.exports=enums;

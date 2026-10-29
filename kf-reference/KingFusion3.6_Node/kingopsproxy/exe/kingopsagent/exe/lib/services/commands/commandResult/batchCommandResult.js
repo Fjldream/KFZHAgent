@@ -1,0 +1,1 @@
+var CommandResult=require("./commandResult");const commonPub=require(__dir+"/lib/services/common/public");class BatchCommandResult extends CommandResult{constructor(){super(),this.result=[],this.message=""}setResult(e){this.result=e}getResult(){return this.result}setMessage(e){this.message=e}getMessage(){return this.message}}module.exports=BatchCommandResult;

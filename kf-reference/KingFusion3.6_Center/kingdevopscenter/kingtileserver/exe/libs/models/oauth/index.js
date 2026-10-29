@@ -1,0 +1,1 @@
+"use strict";const Authorise=require(__dir+"/core/utils/oauth/authorise");function OAuth2Client(){OAuth2Client.prototype.authorise=function(){var t=this;return function(e,u,r){return new Authorise(t,e,r)}}}module.exports=new OAuth2Client;

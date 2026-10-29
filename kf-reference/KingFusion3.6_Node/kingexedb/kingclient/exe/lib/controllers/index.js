@@ -1,0 +1,1 @@
+const controllers={};controllers.user=require("./controller_user"),controllers.project=require("./controller_project"),controllers.resource=require("./controller_resource"),controllers.component=require("./controller_component"),controllers.tile=require("./controller_tile"),controllers.video=require("./controller_video"),module.exports=controllers;

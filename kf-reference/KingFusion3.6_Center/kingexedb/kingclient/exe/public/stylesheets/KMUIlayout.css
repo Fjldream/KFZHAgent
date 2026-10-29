@@ -1,0 +1,458 @@
+.km-layout {
+    position: absolute;
+    border: 1.5px solid rgba(83,137,192,0.9);
+    background-Color: rgba(255,255,255,1);    
+}
+.km-MAP {
+    position: absolute;
+    border: 1.0px solid rgba(83,137,192,1);
+    background-Color: rgba(255,255,255,0);
+    
+}
+.km-main-layout {
+    background-Color: rgba(255,255,255,1);
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+.km-main-drag-layout {
+    background-Color: rgba(255,255,255,1);
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+/* 左侧layout滚动条设置 */
+.km-main-layout .layout-panel-west .panel-body {
+    /* overflow-x: hidden; */
+}
+/* 右侧layout滚动条设置 */
+.km-main-layout .layout-panel-east .panel-body {
+    overflow-x: hidden;
+}
+/* 右侧属性网格中table宽度自适应*/
+.km-main-layout .propertygrid .datagrid-btable{
+    width: 100%;
+}
+
+/*定义滚动条高宽及背景 高宽分别对应横竖滚动条的尺寸*/
+::-webkit-scrollbar
+{
+    width: 8px;
+    height: 8px;
+    background-color: rgba(255,255,255,1);
+}
+ 
+/*定义滚动条轨道 内阴影+圆角*/
+::-webkit-scrollbar-track{
+    display: none;
+}
+ 
+/*定义滑块 内阴影+圆角*/
+::-webkit-scrollbar-thumb{
+    border-radius: 10px;
+    -webkit-box-shadow: inset 0 0 6px rgba(0,0,0,0.3);
+    background-color: rgba(221,221,221,1);
+}
+
+/*定义滑块 内阴影+圆角*/
+::-webkit-scrollbar-thumb:hover{
+    background-color: rgba(204,204,204,1);
+}
+.km-richtext {
+    position: absolute;
+    border: 5px solid rgba(220,220,220,1);
+    box-shadow: 0px 0px 1px 2px rgb(136, 134, 134) inset;
+    background-Color: white;
+    outline:none;
+}
+.km-ui-lable {
+    position: absolute;
+    border: 5px solid rgba(220,220,220,1);
+    box-shadow: 0px 0px 1px 2px rgb(136, 134, 134) inset;
+    /* background-Color: white; */
+    outline:none;
+}
+.km-richtext1 {
+    position: absolute;
+    border: 1px solid rgba(220, 220, 220, 1);
+    background-Color: rgba(255, 255, 255, 1);
+    outline:none;
+    /* padding : 5px; */
+}
+#date {
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+.km-uilist{
+    position: absolute;
+    border: 5px solid rgba(220,220,220,1);
+    box-shadow: 0px 0px 1px 2px rgb(136, 134, 134) inset;
+    background-Color: white;
+    outline:none;
+}
+
+/* modify by youyue.chen 2018.7.3 */
+.km-layoutH {
+    position: absolute;
+    border: 1.0px solid rgba(83,137,192,1);
+    background-Color: rgba(255,255,255,0);
+    
+}
+.km-layoutV {
+    position: absolute;
+    border: 1.0px solid rgba(83,137,192,1);
+    background-Color: rgba(255,255,255,0);
+    
+}
+/*added by zhiming.lv for bug0004207: 表单布局和移动端布局显示边框设置无效*/
+.km-layoutMX,
+.km-layoutMY {
+    position: absolute;
+    border: 1.0px solid rgba(83,137,192,1);
+    background-Color: rgba(255,255,255,0);
+    overflow-y:hidden;
+    overflow-x:hidden;
+}
+.km-layoutMX::-webkit-scrollbar,
+.km-layoutMY::-webkit-scrollbar {
+    width: 5px;
+    height:5px;
+}
+.km-layoutMX::-webkit-scrollbar-track,
+.km-layoutMY::-webkit-scrollbar-track {
+    border-radius: 10px;
+}
+.km-layoutMX::-webkit-scrollbar-thumb,
+.km-layoutMY::-webkit-scrollbar-thumb {
+    border-radius: 10px;
+    background:rgba(0,0,0,0);
+}
+.km-layoutMX:hover {
+    overflow-y:auto;
+}
+
+.km-layoutMY:hover {
+    overflow-x:auto;
+}
+/* modified by shuai.zhao 无bug号: 移动端布局移动端无法滑动 2020-07-01 */
+.km-layoutMMX {
+    position: absolute;
+    border: 1.0px solid rgba(83,137,192,1);
+    background-Color: rgba(255,255,255,0);
+    overflow-y:auto;
+    overflow-x:hidden;
+}
+.km-layoutMMY {
+    position: absolute;
+    border: 1.0px solid rgba(83,137,192,1);
+    background-Color: rgba(255,255,255,0);
+    overflow-y:hidden;
+    overflow-x:auto;
+}
+/* end */
+/*ended*/
+.km-layoutForm {
+    position: absolute;
+    border: 1.0px solid rgba(83,137,192,1);
+    background-Color: rgba(255,255,255,0);
+    overflow: auto;
+}
+.km-2Dlayout,.km-layoutHT{
+    position: absolute;
+    border: 1px solid rgba(83,137,192,1);
+    background-Color: rgba(255,255,255,0);
+    overflow: hidden;
+}
+.km-windiaglayout {
+    overflow: hidden;
+    position: absolute;
+    /* border: 1.0px solid rgba(83,137,192,1); */
+    background-Color: rgba(255,255,255,0);
+}
+.km-layoutHS {
+    position: absolute;
+    border: 0.1px solid rgba(255,255,255,0);
+    background-Color: rgba(255,255,255,0);
+}
+.km-layoutVS {
+    position: absolute;
+    border: 0.1px solid rgba(255,255,255,0);
+    background-Color: rgba(255,255,255,0);
+}
+/* add by zhiming.lv at 2020/05/21 bug:2687 【KF3.6环境】运行态ShowPage弹出式页面无滚动条 */
+.popoup-wrap{
+    overflow-x:auto;
+    overflow-y:auto;
+}
+/* 手风琴样式 */
+.accordion{
+    overflow:hidden;
+    border-width:1px;
+    border-style:solid
+}
+.accordion .accordion-header{
+    border-width:0 0 1px;
+    cursor:pointer
+}
+.accordion .accordion-body{
+    border-width:0 0 1px
+}
+.accordion-noborder{
+    border-width:0
+}
+.accordion-noborder .accordion-header{
+    border-width:0 0 1px
+}
+.accordion-noborder .accordion-body{
+    border-width:0 0 1px
+}
+/* .accordion-collapse{
+    background:url('/public/javascripts/ThirdParty/jquery-easyui-1.6.4/themes/metro/images/accordion_arrows.png') no-repeat 0 0
+}
+.accordion-expand{
+    background:url('/public/javascripts/ThirdParty/jquery-easyui-1.6.4/themes/metro/images/accordion_arrows.png') no-repeat -16px 0
+} */
+.accordion{
+    background:#fff;
+    border-color:#95B8E7
+}
+.accordion .accordion-header{
+    background:#E0ECFF;
+    filter:none;
+    height:auto !important
+}
+.accordion .accordion-header-selected{
+    background:#ffe48d
+}
+.accordion .accordion-header-selected .panel-title{
+    color:#000
+}
+.accordion .panel-last>.accordion-header{
+    border-bottom-color:#E0ECFF
+}
+.accordion .panel-last>.accordion-body{
+    border-bottom-color:#fff
+}
+.accordion .panel-last>.accordion-header-selected,.accordion .panel-last>.accordion-header-border{
+    border-bottom-color:#95B8E7
+}
+.accordion>.panel-hleft{
+    float:left
+}
+.accordion>.panel-hleft>.panel-header{
+    border-width:0 1px 0 0
+}
+.accordion>.panel-hleft>.panel-body{
+    border-width:0 1px 0 0
+}
+.accordion>.panel-hleft.panel-last>.accordion-header{
+    border-right-color:#E0ECFF
+}
+.accordion>.panel-hleft.panel-last>.accordion-body{
+    border-right-color:#fff
+}
+.accordion>.panel-hleft.panel-last>.accordion-header-selected,.accordion>.panel-hleft.panel-last>.accordion-header-border{
+    border-right-color:#95B8E7
+}
+.accordion>.panel-hright{
+    float:right
+}
+.accordion>.panel-hright>.panel-header{
+    border-width:0 0 0 1px
+}
+.accordion>.panel-hright>.panel-body{
+    border-width:0 0 0 1px
+}
+.accordion>.panel-hright.panel-last>.accordion-header{
+    border-left-color:#E0ECFF
+}
+.accordion>.panel-hright.panel-last>.accordion-body{
+    border-left-color:#fff
+}
+.accordion>.panel-hright.panel-last>.accordion-header-selected,.accordion>.panel-hright.panel-last>.accordion-header-border{
+    border-left-color:#95B8E7
+}
+
+
+/* 防止拖拽时选中页面中的元素 */
+div {
+    -moz-user-select:none;
+    -webkit-user-select:none;
+    user-select:none;    
+}
+
+/* add by ying.wu for bug9625 elementUI组件图层显示问题 */
+.el-tabs__nav.is-top{
+    z-index: 0 !important;
+}
+
+/* 修改easyui-layout拆分栏样式 */
+.layout-split-proxy-h {
+    width: 1.5px;
+    cursor: e-resize;
+}
+.layout-split-proxy-v {
+    height: 1.5px;
+    cursor: n-resize;
+}
+.layout-split-north {
+    border-bottom: 1px solid #E6EEF8;
+}
+.layout-split-south {
+    border-top: 1px solid #E6EEF8;
+}
+.layout-split-east {
+    border-left: 1px solid #E6EEF8;
+    min-width: 150px;
+}
+.layout-split-west {
+    border-right: 1px solid #E6EEF8;
+}
+/* add by shuai.zhao 2020-10-22 */
+#tip-msg {
+    position: fixed;
+    left:45%;
+    top:60px;
+    text-align: center;
+    z-index: 9999;
+}
+#tip-msg span{
+    background-color: rgb(75, 151, 65);
+    padding: 15px 35px;
+    border-radius: 5px;
+    text-align: center;
+    color: #fff;
+    font-size: 18px;
+}
+#tip-msg span.error{
+    background-color: rgb(192, 46, 41);
+}
+/* end */
+/* add by ying.wu for bug 9668 滑块运行态显示异常 */
+.slider.slider-h {
+    display: block;
+    box-shadow: 0 0 0px rgba(0, 0, 0, 0.3);
+    background: #fff !important;
+}
+
+.el-tabs__nav-wrap::after{
+    z-index: 0 !important;
+}
+.el-transfer-panel .el-checkbox__inner{
+    z-index: 0 !important;
+}
+
+/* add by hang.su for 数据网格样式会缩小 at 2021/6/10*/
+/* .datagrid-view2 .datagrid-header-inner{
+    width: 100%;
+}
+.datagrid-view2 .datagrid-header-inner .datagrid-htable{
+    width: 100%;
+}
+.datagrid-view2 .datagrid-btable{
+    width: 100%;
+} */
+/*end by hang.su*/
+#progress {
+    margin: 0;
+    top: 0;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'montserrat', sans-serif;
+    background-color: rgb(3, 33, 64);
+    opacity: 0.7;
+    position: relative;
+}
+
+.loading {
+    width: 100px;
+    height: 100px;
+    box-sizing: border-box;
+    border-radius: 50%;
+    border-top: 10px solid #e74c3c;
+    position: relative;
+    animation: a1 2s linear infinite;
+}
+
+.loading::before,
+.loading::after {
+    content: '';
+    width: 100px;
+    height: 100px;
+    position: absolute;
+    left: 0;
+    top: -10px;
+    box-sizing: border-box;
+    border-radius: 50%;
+}
+
+.loading::after {
+    border-top: 10px solid #3398db;
+    transform: rotate(240deg);
+}
+
+.loading::before {
+    border-top: 10px solid #e67e22;
+    transform: rotate(120deg);
+}
+
+#progress .progressSpan {
+    width: 100px;
+    height: 100px;
+    color: #fff;
+    text-align: center;
+    line-height: 100px;
+    font: 400 30px 'Comic Sans MS';
+    position: absolute;
+    top: 48%;
+}
+
+@keyframes a1 {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+
+.skeleton{
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    /* background: linear-gradient(to right, #f6f7f8 0%, #edeef1 10%, #f6f7f8 100%); */
+    background-size: 200% 100%;
+    padding-left: 20px;
+    animation: flow 1s linear infinite;
+}
+.skeleton div{
+    /* background:linear-gradient(90deg, #f2f2f2 25%, #e6e6e6 37%); */
+    margin-top:15px;
+    border-radius: 6px;
+}
+
+@keyframes flow{
+    0%{
+        background-position: 50% 0;
+    }
+    100%{
+        background-position: -150% 0;
+    }
+}
+.el-input {
+    height: 100%;
+}
+
+.el-input .el-input__inner {
+    height: 100%;
+}
+
+.el-input-number .el-input {
+    height: 100%;
+}
+
+.el-input-number .el-input-number__decrease,
+.el-input-number .el-input-number__increase {
+    height: 98%;
+}

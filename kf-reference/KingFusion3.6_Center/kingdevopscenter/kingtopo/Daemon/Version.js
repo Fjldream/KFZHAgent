@@ -1,0 +1,1 @@
+var fs=require("fs"),path=require("path");module.exports.getVersion=function(){if(global.globalConfig&&global.globalConfig.version)return global.globalConfig.version;var a=path.join(path.normalize(__dirname),"/"),o=path.join(a,"/","../../package.json"),e=fs.readFileSync(o,"utf-8"),r;try{r=JSON.parse(e)}catch{r={}}return r.version||"0.0.1"};

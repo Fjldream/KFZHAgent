@@ -1,0 +1,1 @@
+function KMAction(t){this.viewObj=t,this.description=""}KMAction.prototype.undo=function(){throw new Error("abstract method")},KMAction.prototype.redo=function(){throw new Error("abstract method")},KMAction.prototype.getDescription=function(){throw new Error("abstract method")};

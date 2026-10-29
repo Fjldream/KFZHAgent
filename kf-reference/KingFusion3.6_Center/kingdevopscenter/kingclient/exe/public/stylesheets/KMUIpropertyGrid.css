@@ -1,0 +1,23 @@
+/* KMUIpropertyGrid */
+.km-publicproperty-import {
+    background:url("../images/images/excelimport.png");
+}
+.km-publicproperty-export {
+    background:url("../images/images/excelexport.png");
+}
+
+.km-localvariable-import {
+    background:url("../images/images/excelimport.png");
+}
+.km-localvariable-export {
+    background:url("../images/images/excelexport.png");
+}
+/* add by shuai.zhao bug 4590 ??¡ì¡§¡ã¡§|¡§?¡§a?¡§????¨¤?|¨¬????¨¢?¡§o?D?-¡§¡ão??¨¬?¨¢?¡§???¨º?¡ì2¡§2??¡èdemo???¨¢??D¡§¡§¡§¡ãa?¨º?2020-08-06 */
+@font-face {
+    font-family: 'UnidreamLED';
+    /* src:url(../../lib/UnidreamLED/UnidreamLED.eot); **??¡§¡§Yie9** */
+    /* src:url(../../lib/UnidreamLED/UnidreamLED.eot?#iefix)format('embedded-opentype'), **??¡§¡§Yie6-ie8** */
+    src: url('./UnidreamLED/UnidreamLED.woff') format('woff'), 
+    local('UnidreamLED'), url("./UnidreamLED/UnidreamLED.woff");/***??¡§¡§?¡§o1¡§???¨¤?|¨¬?|¨¬?***/
+} 
+/* end */

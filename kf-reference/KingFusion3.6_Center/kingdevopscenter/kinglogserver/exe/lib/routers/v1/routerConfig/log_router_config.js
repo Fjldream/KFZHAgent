@@ -1,0 +1,1 @@
+const controllers=require(__DIR+"/lib/controllers");module.exports={get:{"/dbList":controllers.log.getLogDbs,"/tableList":controllers.log.getLogTables},post:{"/filterConditions":controllers.log.getFilterConditions,"/conditionQuery":controllers.log.conditionQuery},put:{},delete:{"/conditionDelete":controllers.log.conditionDelete}};

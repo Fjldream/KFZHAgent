@@ -1,0 +1,244 @@
+
+html {
+    width: 100%;
+    height: 100%;
+}
+body {
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    margin: 0;
+    background: url("../res/images/login.png") no-repeat;
+    background-size: 100% 100%;
+}
+.developloginMain {
+    position: absolute;
+    top: 30%;
+    left: 57%;
+    width: 25%;
+    height: 35%;
+    min-width: 400px;
+    min-height: 290px;
+    background: url("../res/images/loginbox.png") no-repeat;
+    background-size: 100% 100%;
+}
+.developlogin {
+    margin-top: 3%;
+    margin-left: 2%;
+    width: 98.8%;
+    height: 73%;
+    min-height: 300px;
+}
+.server {
+    width: 480px;
+    height: 100px;
+}
+.user {
+    width: 480px;
+    height: 200px;
+}
+.serverLeft {
+    padding-left: 65px;
+    font-size: 20px;
+    font-family: "微软雅黑";
+    -webkit-text-fill-color: white;/*文字的填充色*/
+    -webkit-text-stroke: 0.35px rgba(0,36,131,1);/*描边的像素，也就是粗细，这里指定是2像素的黑色边框*/
+    font-weight: bold;
+}
+.userLeft {
+    font-size: 20px;
+    font-family: "微软雅黑";
+    -webkit-text-fill-color: white;/*文字的填充色*/
+    -webkit-text-stroke: 0.35px rgba(0,36,131,1);/*描边的像素，也就是粗细，这里指定是2像素的黑色边框*/
+    font-weight: bold;
+    position: absolute;
+    left:15%;
+    top:22%;
+}
+.passWordLeft {
+    font-size: 20px;
+    font-family: "微软雅黑";
+    -webkit-text-fill-color: white;/*文字的填充色*/
+    -webkit-text-stroke: 0.35px rgba(0,36,131,1);/*描边的像素，也就是粗细，这里指定是2像素的黑色边框*/
+    font-weight: bold;
+    position: absolute;
+    left:15%;
+    top:42%;
+}
+.formSeperator {
+    margin-top: 5px;
+    margin-bottom: 5px;
+    height: 1px;
+    width: 400px;
+    border: 0;
+    background: #333;
+    background-image: linear-gradient(to right, #6b6b6b,#ddd, #fff, #ddd,#6b6b6b);
+}
+.developLoginForm {
+    margin-left: 100px;
+    width: 360px;
+    height: 300px;
+}
+input {
+    /* border-radius:5px; */
+    background-color: rgba(255,255,255,1);
+    border:1px solid rgb(181, 183, 185);
+    outline: none;
+    font-size: 16px; 
+    color: rgb(13, 52, 156);
+}
+input::-webkit-input-placeholder {
+    color: rgb(13, 52, 156);
+    opacity: 1;
+    font-size: 16px;
+    /* padding: 5px; */
+}
+.ipInput {
+    width: 218px;
+    height: 25px;
+    margin-top: 20px;
+    margin-left: 35px;
+    padding-left: 5px;
+}
+.portInput {
+    width: 218px;
+    height: 25px;
+    margin-top: 10px;
+    margin-left: 160px;
+    padding-left: 5px;
+}
+.comInput {
+    width: 218px;
+    height: 25px;
+    margin-top: 10px;
+    margin-left: 45px;
+    padding-left: 5px;
+}
+.userInput {
+    width: 220px;
+    height: 31px;
+    /* margin-top: 50px;
+    margin-left: 40px;*/
+    padding-left: 10px; 
+    position: absolute;
+    left:28%;
+    top:21%;
+}
+.pswInput {
+    width: 220px;
+    height: 31px;
+    /* margin-top: 22px;
+    margin-left: 40px;*/
+    padding-left: 10px; 
+    position: absolute;
+    left:28%;
+    top: 41%;
+}
+.timeInput {
+    width: 218px;
+    height: 25px;
+    margin-top: 10px;
+    margin-left: 160px;
+    margin-bottom: 5px;
+    padding-left: 5px;
+}
+.rem {
+    /* margin-left: 240px;
+    margin-top: 20px; */
+    height: 20px;
+    position: absolute;
+    left:60%;
+    top:55%;
+}
+.remCheck {
+    width: 18px;
+    height: 18px;
+    vertical-align:middle;
+}
+.remSpan {
+    font-size: 14px;
+    font-family: 微软雅黑;
+    color: #fff;
+    vertical-align:middle;
+}
+.buttonGroup {
+    /* margin-left: 80px;
+    margin-top: 0px;
+    margin-bottom: 5px; */
+    width: 250px;
+    height: 30px;
+    position: absolute;
+    left:27%;
+    top:70%;
+}
+.loginButton {
+    margin: 0px 12px 0px 8px;
+    /* width:90px; */
+    border: 1px solid #8498ad;
+    background-color: rgb(7, 50, 113);
+    text-align: center;
+    cursor: pointer;
+    font-size: 16px;
+    font-family: "微软雅黑";
+    -webkit-text-fill-color: white;
+    -webkit-text-stroke: 0.35px black;
+    padding: 7px 32px 7px 32px;
+    padding-left: auto;
+    padding-right: auto;
+    border-radius: 3px;
+}
+.loginingButton{
+    margin: 0px 12px 0px 8px;
+    border: 1px solid #8498ad;
+    background-color: rgb(7, 50, 113);
+    text-align: center;
+    cursor: pointer;
+    font-size: 16px;
+    font-family: "微软雅黑";
+    -webkit-text-fill-color: white;
+    -webkit-text-stroke: 0.35px black;
+    padding: 7px 18px 7px 18px;
+    border-radius: 3px;
+}
+.loginButton:hover,
+.resetButton:hover {
+    background: rgb(116, 8, 26);
+}
+.loginButton:active ,
+.loginingButton:active ,
+.resetButton:active { 
+    background: rgb(7, 50, 113);
+    /* position: relative;  */
+    /* top: 1px;  */
+}
+.resetButton {
+    margin: 0px 0px 0px 12px;
+    border: 1px solid #8498ad;
+    background: rgb(7, 50, 113);
+    text-align: center;
+    cursor: pointer;
+    font-size: 16px;
+    font-family: "微软雅黑";
+    -webkit-text-fill-color: white;
+    -webkit-text-stroke: 0.35px black;
+    padding: 7px 32px 7px 32px;
+    border-radius: 3px;
+}
+.filterGray-add{
+    -webkit-filter: grayscale(40%);
+    -moz-filter:grayscale(40%);
+    -ms-filter:grayscale(40%);
+    -moz-filter:grayscale(40%);
+    filter:grayscale(40%);
+    filter:gray(40%);
+    pointer-events: none;
+}
+.filterGray-remove{
+    -webkit-filter: grayscale(0%);
+    -moz-filter:grayscale(0%);
+    -ms-filter:grayscale(0%);
+    -moz-filter:grayscale(0%);
+    filter:grayscale(0%);
+    filter:gray(0%);
+    pointer-events: auto;
+}

@@ -1,0 +1,1 @@
+class SystemScript{constructor(){this.endScriptFunc=null}init(t,c){this.vm_startSystemFunc(t),this.endScriptFunc=c}vm_startSystemFunc(t){try{t()}catch(c){console.log(c)}}vm_endSystemFunc(){try{this.endScriptFunc()}catch(t){console.log(t)}}}module.exports=new SystemScript;

@@ -1,0 +1,309 @@
+.kmui-page-list-top-bar {
+    height: 50px;
+    border-bottom: 1px solid #aaa;
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    flex-wrap: wrap;
+}
+
+/* start
+*  add by lilang on 2020-6-16 {bug_2847_权限设置界面缩小界面时权限管理部分被遮挡}
+*/
+.kmui-pageSetAuthority-list-top-bar {
+    height: 100%;
+    border-bottom: 1px solid #aaa;
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    flex-wrap: wrap;
+}
+/* add by xiaoqiang.cui on 2020-6-24 {bug_3151_工程配置窗口缩小后会遮挡工具栏} */
+.kmui-graphic-model-mng-popup-tool-container,
+.kmui-graphic-model-popup-main-container {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    right: 0;
+    min-width: 800px;
+}
+/* ended */
+
+.kmui-page-list-top-bar-title-span {
+    font-size: 20px;
+    font-weight: bold;
+}
+
+.kmui-page-list-top-bar-number-span {
+    font-size: 14px;
+    margin: 0 10px;
+}
+
+.kmui-page-list-popup-main-body {
+    position: relative;
+    width: 100%;
+}
+
+.kmui-page-list-popup-main-body-row {
+    height: 35px;
+    margin-bottom: 20px;
+    font-size: 15px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+}
+
+.kmui-page-list-mng-popup-label {
+    width: 100px;
+    padding-right: 20px;
+    text-align: right;
+}
+/* modified by mingcai.gong 设置移动端运行态首页 2020/04/23 */
+.km-star-unselect {
+    background: url(../images/images/computer-unselect.png) no-repeat left;
+}
+
+.km-star-select {
+    background: url(../images/images/computer-select.png) no-repeat left;
+}
+.km-appstar-unselect {
+    background: url(../images/images/mobile-unselect.png) no-repeat left;
+}
+.km-appstar-select {
+    background: url(../images/images/mobile-select.png) no-repeat left;
+}
+.km-star-span,
+.km-appstar-span {
+    /* display: inline-block; */
+    width: 18px;
+    height: 18px;
+    float: left;
+    margin-right: 5px;
+    cursor: pointer;
+}
+/* end */
+.page-mng-grid {
+    position: absolute;
+    width: 100%;
+    top: 53px;
+    bottom: 0;
+    overflow: auto;
+}
+
+.page-mng-grid-container {
+    position: absolute;
+    top: 50px;
+    bottom: 40px;
+    left: 0;
+    right: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+.page-mng-this-element {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    right: 0;
+    /* min-width: 800px; */
+}
+
+
+.kmui-datasource-popup-main-body {
+    position: relative;
+    height: 100%;
+    width: 100%;
+}
+
+.kmui-datasource-top-bar-title-span{
+    flex: 1;
+}
+
+.connect-info-even{
+    padding:3px 10px;
+    display:flex;
+    margin: 0 -5px;
+}
+.connect-info-odd{
+    padding:3px 10px;
+    display:flex;
+    margin: 0 -5px;
+    background:#eee;
+}
+.connect-info-title{
+    width: 90px;
+    font-weight: bold;
+    font-size: 12px;
+}
+.connect-info-value{
+    padding: 0 10px;
+}
+.datagrid-row-selected .connect-info-odd{
+    background: #ffe48d;
+}
+
+/* .row-test-btn {} */
+
+
+/* 变量部分 */
+.project-variable-popup-body {
+    position: relative;
+}
+.project-variable-base-info-container,
+.project-variable-basic-item-container,
+.project-variable-extend-field-container,
+.project-variable-data-source-container{
+    position: relative;
+    border: 1px solid #dcdcdc;
+    margin-top: 25px;
+    padding: 10px 0;
+}
+.project-variable-base-info-container .project-variable-popup-module-title,
+.project-variable-extend-field-container .project-variable-popup-module-title,
+.project-variable-data-source-container .project-variable-popup-module-title,
+.project-variable-basic-item-container .project-variable-popup-module-title{
+    position: absolute;
+    top: -10px;
+    left: 20px;
+    background: #fff;
+    padding: 0 10px;
+}
+
+.project-variable-popup-module-container {
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.project-variable-popup-row{
+    width:50%;
+    display:flex;
+    align-items:center;
+    padding:5px 0 0 0;
+}
+
+.project-variable-popup-label{
+    width:60px;
+    margin-left: 20px;
+    font-size:12px;
+    font-weight:bold
+}
+.km-varible{
+    position: absolute;
+    width:24px;
+    height:17px;
+    border-radius:3px;
+    border:1px solid #94bdb9;
+    right:22px;
+    font-size:12px;
+    text-align: center;
+    font-weight:bold;
+    background:#e7f9fb;
+    cursor: pointer;
+}
+.ban-input{
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+/* 数据源管理部分 */
+.kmui-datasource-container{
+    position: relative;
+    border: 1px solid #dcdcdc;
+    /* margin-top: 25px; */
+    padding: 10px 0;
+}
+.kmui-datasource-container .kmui-datasource-popup-module-title {
+    position: absolute;
+    top: -10px;
+    left: 20px;
+    background: #fff;
+    padding: 0 10px;
+}
+.datasource-mng-popup-module-container {
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+}
+.datasource-mng-popup-row{
+    width:50%;
+    display:flex;
+    align-items:center;
+    padding:5px 0 0 0;
+}
+.datasource-mng-popup-label{
+    width:60px;
+    margin-left: 20px;
+    font-size:12px;
+    font-weight:bold
+}
+
+/*模型管理*/
+
+
+.kmui-graphic-model-popup-main-container {
+    display: flex;
+}
+.kmui-graphic-model-mng-popup-tree-container {
+    overflow-y: auto;
+    padding-right: 10px;
+}
+.kmui-graphic-model-mng-popup-model-container{
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    justify-content: flex-start;
+    align-items: flex-start;
+    overflow-y: auto;
+    /* padding: 15px 10px; */
+    outline: none;
+}
+
+.kmui-graphic-model-mng-popup-model-layout {
+    width: 90px;
+    min-height: 70px;
+    margin: 5px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    border: 1px solid #e4e4e4;
+    background: #f9f9f9;
+}
+
+.kmui-graphic-model-mng-popup-model-layout.selected {
+    background: #e0ecff;
+}
+
+.kmui-graphic-model-mng-popup-model-layout.selected .kmui-graphic-model-mng-popup-model-name[contenteditable=true] {
+    border: 1px solid #aaa;
+    padding: 3px 5px;
+    background: #ffec03;
+}
+
+.filter-popup-main-container .checkbox {
+    position: relative;
+    border: 2px solid #03A9F4;
+    -moz-border-radius: 5px 5px 5px 5px;
+    -webkit-border-radius: 5px 5px 5px 5px;
+    border-radius: 5px 5px 5px 5px;
+}
+
+.km-ds-popup-content .checkbox-checked {
+    border: 0;
+    background: #03A9F4;
+}
+.km-ds-popup-content .radiobutton-inner{
+    background: #03A9F4;
+}
+.km-ds-popup-content .checkbox{
+    border-color: #03A9F4;
+}
+.km-ds-popup-content .radiobutton {
+    border-color: #03A9F4;
+}

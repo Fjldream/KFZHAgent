@@ -1,0 +1,1 @@
+var file=require("../Daemon/File"),fs=require("fs");module.exports=function(n,l,r,t){var u=r.url||r,f=file.getFullPath(n,u,t),i;try{i=fs.readFileSync(f)}catch{}if(!i)return"";var e;return i?r.encoding?e=new Buffer(i).toString(r.encoding):/\.(png|jpg|gif|jpeg|bmp)$/i.test(f)?e=new Buffer(i).toString("base64"):e=new Buffer(i).toString():e="",r.prefix&&(e=r.prefix+e),e};

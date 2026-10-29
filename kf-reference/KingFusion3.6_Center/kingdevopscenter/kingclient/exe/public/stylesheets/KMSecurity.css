@@ -1,0 +1,382 @@
+.km-ds-popup-wrap{
+    background-color :rgba(0,0,0,0.25);
+    width: 100%;
+    height: 100%;
+    position: absolute !important;
+    top: 0 !important;  
+    left: 0 !important;
+    z-index:10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.km-ds-popup-panel{
+    min-width: 400px;
+    background-color: rgba(255,255,255,1);
+    border: 3px solid rgba(240,240,240,1);
+    border-radius: 7px;
+    position: absolute;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.km-ds-popup-titlebar{
+    height: 40px;
+    background-color: rgba(240,240,240,1);
+    text-align: left;
+    line-height: 40px;
+    padding-left: 15px;
+    font-size: 16px;
+}
+
+.km-ds-popup-closeSpan{
+    float: right;
+    margin-right: 15px;
+    background-image: url(../images/images/Newclose.png);
+    background-repeat: no-repeat;
+    background-position: center;
+    width: 14px;
+    height: 14px;
+    margin-top: 12px;
+}
+
+.km-ds-popup-closeSpan:hover {
+    cursor: pointer;
+    background-color: #ccc; 
+}
+
+.km-ds-popup-content{
+    width: 100%;
+    padding: 20px;
+    box-sizing: border-box;
+    overflow-x: hidden;
+}
+
+.km-ds-popup-footerPanel{
+    height: 50px;
+    line-height: 50px;
+    text-align: right;
+    border-top: 2px solid rgba(240,240,240,1);
+    background: #f0f0f0;
+    box-sizing: border-box;
+}
+
+.km-ds-popup-margin-right{
+    margin-right:20px;
+}
+.km_ds_security_roleSetting_title{
+    font-weight: bold;
+    position: relative;
+    top: -14px;
+    background: rgba(255,255,255,1);
+}
+.km_ds_security_roleSetting_title_security{
+    font-weight: bold;
+    position: relative;
+    top: -9px;
+    background: rgba(255,255,255,1);
+}
+.km_ds_security_roleSetting_page_security{
+    position: relative;
+    line-height: 30px;
+    font-size: 12px;
+    background: rgba(243,243,243,1);
+}
+.km_ds_security_roleSetting .km_ds_rolePopUpOuter{
+    height: 450px; 
+    width: 500px; 
+    top: 10%; 
+    left: 35%; 
+    background-color: rgba(255,255,255,1); 
+    border: 3px solid rgba(240,240,240,1);
+    border-radius:7px; 
+    position: absolute;
+}
+.km_ds_security_roleSetting .km_ds_security_roleSetting_leftPanel{
+    float:left;
+    width:500px;
+    height:350px;
+}
+.km_ds_wrap {
+    position: absolute;
+    width:100%;
+    height:100%;
+    z-index: 5000;
+    background: rgba(0,0,0,0.5)
+}
+.km_ds__safePanel {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right:0;
+    bottom: 0;
+    width: 300px;
+    height:350px;
+    margin:300px auto 0;
+    background: #fff;
+}
+
+.km_ds_security_roleSetting{
+    background-color :rgba(0,0,0,0.25);
+    width: 100%;
+    height: 100%;
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    z-index: 9000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.km_ds_security_roleSetting .km_ds_security_roleSetting_rightPanel {
+    float: left;
+    width: 480px;
+    height: 275px;
+    margin-top: 20px;
+    box-sizing: border-box;
+    border-radius: 5px;
+    border:1px solid rgba(240,240,240,1);
+}
+
+.km_ds_security_roleSetting .km_ds_security_roleSetting_footerPanel {
+    width: 100%;
+    height: 50px;
+    line-height: 50px;
+    position: absolute;
+    bottom: 9px;
+    float: left;
+    text-align: center;
+}
+.km_ds_security_roleSetting_infoPanel{
+    box-sizing: border-box;
+    margin-top: 10px;
+    margin-left: 10px;
+    width: 250px;
+    border: 1px solid rgba(240,240,240,1);
+    padding:5px;
+    border-radius: 5px;
+}
+
+.km_ds_security_roleSetting_ycr_infoPanel{
+    box-sizing: border-box;
+    margin-top: 10px;
+    margin-left: 20px;
+    width: 450px;
+    border: 1px solid rgba(240,240,240,1);
+    padding:5px;
+    border-radius: 2px;
+}
+.km_ds_security_roleSetting_infoDetail{
+    margin:0 0 10px 0;
+}
+.km_ds_safebody {
+    height:250px;
+    width:210px;
+    margin:14px auto 0;
+    border:1px solid rgba(200,200,200,1);
+    overflow-x: scroll;
+}
+.km_ds_safeArea{
+    width:450px;
+    float: left;
+}
+.km-btn1 {
+    margin-left:110px;
+    width: 60px;
+    border-radius: 3px;
+    border: 1px solid #666;
+    background:#f3f3f3
+}
+.km-btn2 {
+    margin-left:40px;
+    width: 60px;
+    border-radius: 3px;
+    border: 1px solid #666;
+    background:#f3f3f3
+}
+.km_ds_safeBtn {
+    position: relative;
+    bottom:-22px;
+}
+.km_ds_security_roleSetting .km_ds_security_roleSetting_securityCheckBoxPanelOuter{
+    height:250px;
+    width:400px;
+    margin:0 5px;
+    border:1px solid rgba(200,200,200,1);
+    overflow-x: scroll;
+}
+.km_ds_security_roleSetting .km_ds_security_roleSetting_securityCheckBoxPanel{
+    height:90%;
+}
+.km_ds_security_roleSetting .km_ds_security_roleSetting_securityCheckAllPanel{
+    height:40px;
+    padding-top:5px;
+    padding-left: 5px;
+    box-sizing: border-box;
+}
+.km_ds_safeSetting {
+    float:left;
+    width:65px;
+}
+.km_ds_safeSettingPanel {
+    float:left;
+    width:65px;
+}
+.km_ds_security_roleSetting .km_ds_security_roleSetting_securitySectionDiv{
+    float:left;
+    width:65px;
+}
+.km_ds_security_roleSetting .km_ds_security_roleSetting_securityCheckBoxPanel{
+    width:450px;
+}
+.km-page-set-content{
+    width:100%;
+}
+.km-page-set {
+    padding:10px 20px;
+}
+.km-page-set-datail {
+    height:32px;
+    line-height: 32px;
+    list-style: none;
+    margin-top:10px;
+}
+.km-page-set-message {
+    font-size: 14px;
+    text-align: left;
+    padding-right:30px;
+}
+.km-page-set-input {
+    width:240px;
+    height:26px;
+}
+.km-page-set-time {
+    font-size: 14px;
+    text-align: left;
+    padding-right:3px;
+}
+
+
+.km_ds_security_roleSetting{
+    background-color :rgba(0,0,0,0.25);
+    width: 100%;
+    height: 100%;
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    z-index: 9000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.km_ds_security_roleSetting_title{
+    font-weight: bold;
+    position: relative;
+    top: -14px;
+    background: rgba(255,255,255,1);
+}
+.km_ds_security_roleSetting_title_security{
+    font-weight: bold;
+    position: relative;
+    top: -9px;
+    background: rgba(255,255,255,1);
+}
+
+.km_ds_security_roleSetting .km_ds_rolePopUpOuter {
+    height: 408px;
+    width: 510px;
+    top: 10%;
+    left: 35%;
+    background-color: rgba(255, 255, 255, 1);
+    border: 3px solid rgba(240, 240, 240, 1);
+    border-radius: 7px;
+    position: absolute;
+}
+.km_ds_security_roleSetting .km_ds_security_roleSetting_leftPanel{
+    float:left;
+    width:500px;
+    height:350px;
+}
+
+.km_ds_security_roleSetting .km_ds_security_roleSetting_rightPanel {
+    float: left;
+    width: 480px;
+    height: 275px;
+    margin-top: 20px;
+    box-sizing: border-box;
+    border-radius: 5px;
+    border:1px solid rgba(240,240,240,1);
+}
+
+.km_ds_security_roleSetting .km_ds_security_roleSetting_footerPanel {
+    width: 100%;
+    height: 50px;
+    line-height: 50px;
+    position: absolute;
+    bottom: 9px;
+    float: left;
+    text-align: center;
+}
+.km_ds_security_roleSetting_infoPanel{
+    box-sizing: border-box;
+    margin-top: 10px;
+    margin-left: 10px;
+    width: 250px;
+    border: 1px solid rgba(240,240,240,1);
+    padding:5px;
+    border-radius: 5px;
+}
+.km_ds_security_roleSetting_infoDetail{
+    margin:0 0 10px 0;
+}
+
+.km_ds_security_roleSetting .km_ds_security_roleSetting_securityCheckBoxPanelOuter {
+    height: 250px;
+    width: 467px;
+    margin: 0 5px;
+    border: 1px solid rgba(200, 200, 200, 1);
+    overflow-x: scroll;
+}
+.km_ds_security_roleSetting .km_ds_security_roleSetting_securityCheckBoxPanel{
+    height:90%;
+}
+.km_ds_security_roleSetting .km_ds_security_roleSetting_securityCheckAllPanel{
+    height:40px;
+    padding-top:5px;
+    padding-left: 5px;
+    box-sizing: border-box;
+}
+.km_ds_security_roleSetting .km_ds_security_roleSetting_securitySectionDiv{
+    float:left;
+    width:65px;
+}
+.km_ds_security_roleSetting .km_ds_security_roleSetting_securityCheckBoxPanel{
+    width:450px;
+}
+.km_ds_newUserGroupPopupContent{
+    width:100%;
+    height:60px;
+    line-height:60px;
+}
+.km_ds_newUserGroupPopupContent>span{
+    font-size: 16px;
+    display: inline-block;
+    margin:0 10px;
+}
+.km_ds_newUserGroupPopupContent>input{
+    width:70%;
+    height:25px;
+    border:2px solid rgba(220,220,220,1);
+    border-radius: 7px;
+    vertical-align: middle;
+}
+.km_ds_prioritySetting_title{
+    /* font-weight: bold;
+    position: relative; */
+    top: -14px;
+    background: rgba(255,255,255,1);
+}

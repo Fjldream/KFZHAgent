@@ -1,0 +1,1 @@
+function KMUIGraphicModelMng(){var n=KMGraphicModelManager.getInstance();KMUIGraphicModelMngBase.call(this,n)}KMUIGraphicModelMng.getInstance=function(){return KMUIGraphicModelMng.instance===void 0&&(KMUIGraphicModelMng.instance=new KMUIGraphicModelMng),KMUIGraphicModelMng.instance},kmUlits.extend(KMUIGraphicModelMng,KMUIGraphicModelMngBase);

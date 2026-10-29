@@ -1,0 +1,1 @@
+var globalVar={};globalVar.kmCSTypeEnum={KM_COMM_NULL:null,KM_COMM_SERVER:0,KM_COMM_CLIENT:1},globalVar.kmProtocolTypeEnum={KM_COMM_HTTP:"KMHttp",KM_COMM_HTTPS:"KMHttps",KM_COMM_WS:"KMWs",KM_COMM_WSS:"KMWss"},module.exports=globalVar;

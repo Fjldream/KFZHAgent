@@ -1,0 +1,20 @@
+.run-view {
+    width:100%;
+    height:100%;
+    overflow: hidden;
+    background-color: rgba(83, 83, 83, 1);
+    border: 1px solid lightgray;
+    position: relative;
+}
+.run-progressBar{
+    position: absolute;
+    left:30%;
+    top:48%;
+    width:40%;
+    background-color: rgba(255, 255, 255, 1);
+}
+.run-view-page {
+    border: 1.5px solid rgba(83,137,192,0.9);
+    position: absolute;
+    pointer-events: none;
+}

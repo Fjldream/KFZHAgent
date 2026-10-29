@@ -1,0 +1,5 @@
+const{fileUtil}=require(__dir+"/core/utils");class customFunction{constructor(){}init(){this.initCustomFunc()}initCustomFunc(){for(let i=0;i<customFuncdata.functions.length;i++)try{customFuncdata.functions[i].data=fileUtil.syncReadFile(global.execProjectPath+"/"+customFuncdata.functions[i].file,"utf-8");let string=customFuncdata.functions[i].data,reg=/ await /,strCunstomFunction="";reg.test(string)===!0?strCunstomFunction="async function "+customFuncdata.functions[i].expression+`{
+\r`+customFuncdata.functions[i].data+`
+\r}`:strCunstomFunction="function "+customFuncdata.functions[i].expression+`{
+\r`+customFuncdata.functions[i].data+`
+\r}`;var rpath=require(global.execProjectPath+"/"+customFuncdata.functions[i].file),strTTT="global."+customFuncdata.functions[i].functionName+" = rpath;";eval(strTTT)}catch(t){console.log(`${customFuncdata.functions[i].file.split(".")[0]} init failed,error info:${t.message}`),logger.log("debug",`${customFuncdata.functions[i].file.split(".")[0]} init failed,error info:${t.message}`)}}}module.exports=new customFunction;

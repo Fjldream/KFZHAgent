@@ -1,0 +1,223 @@
+html, body {
+	background-color: rgba(250,250,252,1);
+	font-family: Arial, Helvetica, sans-serif;
+	font-size: 14px;
+    margin:0;
+    padding: 0;
+}
+.km-clearfi+x:before, 
+.km-clearfix:after {
+    display : table;
+    content : "";
+}
+.km-clearfix:after {
+    clear : both;
+}
+.km-help-menu {           
+    height : 50px;   
+    width : 100%;
+    min-width : 500px;
+    position : fixed;
+    background : rgba(41,60,85,1);
+    z-index: 100;
+} 
+.km-help-menu a { 
+    color : white;
+    text-decoration : none; 
+} 
+.km-help-menu-level1 a 
+{ 
+    color : white;
+    text-decoration : none; 
+    padding-left : 30px;
+    padding-right : 12px;
+    float: left;
+} 
+.km-help-menu ul { 
+    margin : 0; 
+    padding : 0; 
+    box-shadow : 1px 1px 3px rgba(169,51,76, 1); 
+    background : rgba(83, 138, 193, 1);
+} 
+.km-help-menu li { 
+    list-style : none; 
+    float : left; 
+    width : 90px; 
+    overflow : visible; 
+    cursor : pointer; 
+    
+} 
+.km-help-menu ul.km-help-menu-level0 {  
+    overflow : visible; 
+    margin-left: 15px;
+    min-width : 30%;
+} 
+ul.km-help-menu-level1, 
+ul.km-help-menu-level2, 
+ul.km-help-menu-level3 { 
+    width : 90px; 
+    display : none;  
+    z-index : 4;
+} 
+ul.km-help-menu-level2, 
+ul.km-help-menu-level3 { 
+    margin : -28px 0 0 210px; 
+} 
+ul.km-help-menu-level0 > li { 
+    height : 50px; 
+    line-height : 50px; 
+    text-align : center; 
+    background-color : rgba(41,60,85,1);
+    border-bottom : none;
+    z-index : 9999;
+} 
+ul.km-help-menu-level1 > li, 
+ul.km-help-menu-level2 > li, 
+ul.km-help-menu-level3 > li { 
+    width : 190px; 
+    height : 42px; 
+    line-height : 42px; 
+    background-color : rgba(22,36,54,1); 
+} 
+ul.km-help-menu-level0 > li:hover {
+    background-color : rgba(22,36,54,1);
+}
+ul.km-help-menu-level1 > li:hover, 
+ul.km-help-menu-level2 > li:hover, 
+ul.km-help-menu-level3 > li:hover { 
+    background-color : rgba(169,51,76, 1);
+} 
+ul.km-help-menu-level0 > li.km-help-menuli:hover > ul, 
+ul.km-help-menu-level1 > li.km-help-menuli:hover > ul, 
+ul.km-help-menu-level2 > li.km-help-menuli:hover > ul,
+ul.km-help-menu-level3 > li.km-help-menuli:hover > ul { 
+    display : block;
+    z-index : 9999;
+} 
+.km-help-menu-border{
+    border-top-color : #c2cbd3;
+    border-top-width : 1px;
+    border-top-style : solid;
+}
+.km-help-menu .km-help-icon {
+    float: left;
+    background: url(../res/images/help-icon.png) no-repeat 15px center;
+    width: 50px;
+    height: 50px;
+    display: inline-block;
+}
+.km-help-menu .km-help-title {
+    float: left;
+    color: white;
+    font-size: 20px;
+    line-height: 50px;
+    margin-right: 15px;
+}
+.km-title{
+    color : white;
+    text-decoration : none;  
+    float : left;
+    padding : 8px;
+}
+.km-help-main {
+    padding-top: 50px;
+    width: 100%;
+    min-height: 1024px;
+}
+.km-help-list {
+    float: left;
+    width: 20%;
+    /* min-height: 1024px; */
+    height: 100%;
+    position: fixed;
+    overflow: auto;
+    bottom: 0;
+}
+.km-help-detail {
+    float: left;
+    width: 77%;
+    min-height: 1024px;
+    height: 100%;
+    border-left: 1px solid #ccc;
+    margin-left: 20%;
+}
+.km-help-list ul {
+    list-style-type: none;
+    line-height: 28px;
+    padding-left: 0;
+}
+.km-help-list ul li{
+    padding-left: 15%;
+    white-space: nowrap;
+}
+.km-help-list ul li:hover{
+    cursor: pointer;
+    background-color: rgba(179,122,154,1);
+}
+.km-help-search {
+    width: 80%;
+    height: 16px;
+    margin-top: 68px;
+    margin-left: 9%;
+    padding: 3px;
+}
+.km-list-focus {
+    background-color: rgba(176,58,91,1);
+}
+.km-menu-focus {
+    background-color : rgba(22,36,54,1);
+}
+.help-detail-inner {
+    margin-left: 20px;
+}
+.help-detail-inner h2{
+    font-size: 20px;
+    margin: 15px 0 10px 0;
+    color: #a9334c;
+}
+.help-detail-inner p{
+    line-height: 25px;
+    margin: 10px 0;
+}
+.help-detail-inner ol,
+.help-detail-inner ul{
+    line-height: 25px;
+    margin: 10px 0;
+}
+.help-detail-inner img {
+    margin-left: 30px;
+}
+.help-detail-inner pre {
+	font-size: 12px;
+	padding: 0;
+	margin: 0;
+	background: #f0f0f0;
+	line-height: 20px; /* 行距 */
+	overflow: auto; /* 超出宽度出现滑动条 */
+	overflow-Y:hidden; /* 作用是隐藏IE的右侧滑动条 */
+}
+#help-top {
+    position: fixed;
+    bottom: 74px;
+    right: 12px;
+    width: 42px;
+    z-index: 999;
+    display: none;
+}    
+#goPageTop {
+    width: 40px;
+    height: 40px;
+    margin-bottom: 10px;
+    background: url(../res/images/go_top.png) no-repeat 0 0;
+    display: block;
+}
+.km-list-title {
+    white-space: nowrap;
+    font-size: 18px;
+    font-weight: bold;
+    border-bottom: 2px solid rgba(176,58,91,1);
+    margin-top: 10px;
+    padding-left: 15%;
+    line-height: 30px;
+    color: #a9334c;
+}

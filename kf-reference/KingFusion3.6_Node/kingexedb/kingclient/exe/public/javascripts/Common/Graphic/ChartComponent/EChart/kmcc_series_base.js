@@ -1,0 +1,1 @@
+class KMCCSeriesBase{constructor(t){this.type=null,this.name=t,this.data=[]}setName(t){this.name=t}getName(){return this.name}setData(t){this.data=t}getData(){return this.data}clearData(){this.data=[]}}

@@ -46,6 +46,9 @@ export default defineConfig(({ mode }) => {
           target: env.VITE_BACKEND_ORIGIN,
           changeOrigin: true,
           secure: false,
+          // modified by jinlong.feng at 0901 冗余功能开发
+          ws: true,
+          // end
         },
       },
     },

@@ -1,0 +1,1 @@
+class NativeProcessOtherMetric{constructor(){this.threadNum=0,this.handle=0}setThreadNum(e){this.threadNum=e}getThreadNum(){return this.threadNum}setHandle(e){this.handle=e}getHandle(){return this.handle}}module.exports=NativeProcessOtherMetric;

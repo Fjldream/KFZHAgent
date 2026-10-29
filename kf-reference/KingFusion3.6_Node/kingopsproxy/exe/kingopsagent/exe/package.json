@@ -1,0 +1,32 @@
+{
+  "name": "deployclient",
+  "version": "1.0.0",
+  "description": "运维代理&&部署服务客户端",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "test:redundancy": "node ./test/redundancy/run_all.js",
+    "start": "node ./index"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "address": "^1.1.2",
+    "concat-files": "^0.1.1",
+    "dockerode": "^3.0.2",
+    "express": "^4.17.1",
+    "express-rate-limit": "^5.0.0",
+    "jsonschema": "^1.2.4",
+    "log4js": "^5.1.0",
+    "moment": "^2.24.0",
+    "node-uuid": "^1.4.8",
+    "readline-sync": "^1.4.10",
+    "redis": "^2.8.0",
+    "request": "^2.88.0",
+    "validator": "^11.1.0",
+    "tiny-queue": "^0.2.0",
+    "sleepjs": "^3.0.1",
+    "compressing": "^1.4.0"
+  }
+}

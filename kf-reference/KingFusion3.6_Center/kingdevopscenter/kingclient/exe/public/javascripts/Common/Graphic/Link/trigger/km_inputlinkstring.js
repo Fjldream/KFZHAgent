@@ -1,0 +1,49 @@
+// modified by jinlong.feng at 2026-10-29 KF源码精简入库
+// Reference snapshot: credential literals redacted; do not deploy this copy.
+if (typeof KMEchoStyle > "u")
+    var KMEchoStyle = { KMECHOSTYLE_NONE: 0, KMECHOSTYLE_NORMAL: 1, KMECHOSTYLE_PASSWORD: 2 };
+function KMInputLinkString(t) { KMInputLink.call(this); var e = this; e.ownerObject = t, e.tipsInfo = IDS_VALINPUTSTRING_TEXT, e.hideFlag = !1, e.echoStyle = KMEchoStyle.KMECHOSTYLE_NONE, e.password = "KF_REFERENCE_REDACTED", e.inputMode = KMInputMode.KMINPUTMODE_EDITBOX, e.linkId = KMLinkId.KMLINKID_GRAPHY_STRINGINPUT, e.expressionType = KMExpressionType.KMLINKEXPRESSIONTYPE_STRING; }
+kmUlits.extend(KMInputLinkString, KMInputLink), KMInputLinkString.prototype.getLinkExpressionType = function () { return this.expressionType; }, KMInputLinkString.prototype.getLinkVariable = function () {
+    let t = this.getLinkExpression();
+    if (t.substring(0, 2) == "$$") {
+        let n = t.substring(2, t.length);
+        return KMProjectVariableMng.getInstance().getProjectVariableByName(n);
+    }
+    else {
+        var e = this.ownerObject.parentVariableMng.getLocalVariableByName(t);
+        return e;
+    }
+}, KMInputLinkString.prototype.getInputValueDataType = function () { return KMInputValueDataType.KMINPUTVALUEDATATYPE_STRING; }, KMInputLinkString.prototype.onInput = function () { this.ownerObject.enable && new KMValueInput(this); }, KMInputLinkString.prototype.getEchoStyle = function () { return this.echoStyle; }, KMInputLinkString.prototype.setEchoStyle = function (t) { this.echoStyle = t; }, KMInputLinkString.prototype.setPassword = function (t) { this.password = t; }, KMInputLinkString.prototype.getPassword = function () { return this.getPassword; }, KMInputLinkString.prototype.setTips = function (t) { this.tipsInfo = t; }, KMInputLinkString.prototype.getTips = function () { return this.tipsInfo; }, KMInputLinkString.prototype.setHide = function (t) { this.hideFlag = t; }, KMInputLinkString.prototype.getHide = function () { return this.hideFlag; }, KMInputLinkString.prototype.setInputMode = function (t) { this.inputMode = t; }, KMInputLinkString.prototype.getInputMode = function () { return this.inputMode; }, KMInputLinkString.prototype.setValue = function (t) { var e = this, n = e.getLinkVariable(); n && (n instanceof KMProjectVariable && setVariableInput(t, n), n.setValue(t, n)); }, KMInputLinkString.prototype.jsonToObject = function (t) {
+    var e = this, n = t;
+    typeof t == "string" && (n = JSON.parse(t));
+    for (var i in n)
+        if (n.hasOwnProperty(i))
+            switch (i) {
+                case "linkId":
+                    e.linkId = n[i];
+                    break;
+                case "enable":
+                    e.enable = n[i];
+                    break;
+                case "tipsInfo":
+                    e.tipsInfo = n[i];
+                    break;
+                case "hideFlag":
+                    e.hideFlag = n[i];
+                    break;
+                case "echoStyle":
+                    e.echoStyle = n[i];
+                    break;
+                case "password":
+                    e.password = n[i];
+                    break;
+                case "linkExpression":
+                    e.linkExpression = n[i];
+                    break;
+                case "inputMode":
+                    e.inputMode = n[i];
+                    break;
+                default: break;
+            }
+}, KMInputLinkString.prototype.objectToJson = function () { var t = this, e = {}; return e.linkId = this.linkId, e.enable = this.enable, e.tipsInfo = this.tipsInfo, e.hideFlag = this.hideFlag, e.echoStyle = this.echoStyle, e.password = this.password, e.inputMode = this.inputMode, e.linkExpression = this.linkExpression, e; };
+// end

@@ -1,0 +1,1 @@
+"use strict";const NGINXTYPE={ISHTTP:0,ISHTTPS:1,NOPROTOCOL:2};var getRequestUrl=t=>{let r=require(t),e="";try{e=r.kingGateWay.host+"/license/getAuthInfo"}catch{logger.log("fatal","Get Authorized url failed.")}return e};module.exports=getRequestUrl;

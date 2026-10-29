@@ -1,0 +1,103 @@
+/* modified by yu.sun for bug 1285 工程配置中新建角色安全区等位置显示错乱  1265 2D工艺流程图连接添加事件页面布局混乱 1291 任意图素填充及缩放动画连接界面显示异常*/
+body {
+    font-family: verdana, helvetica, arial, sans-serif;
+    /* padding: 20px; */
+    font-size: 12px;
+    margin: 0;
+}
+
+h2 {
+    font-size: 18px;
+    font-weight: bold;
+    margin: 0;
+    margin-bottom: 15px;
+}
+
+.demo-info {
+    padding: 0 0 12px 0;
+}
+
+.demo-tip {
+    display: none;
+}
+
+.label-top {
+    display: block;
+    height: 22px;
+    line-height: 22px;
+    vertical-align: middle;
+}
+
+/* added by yu.sun for 图片轮播 2020-06-01*/
+.el-carousel--horizontal {
+    height: 100%
+}
+
+.el-carousel__container {
+    height: 100% !important;
+}
+
+.el-carousel__item {
+    height: 100%
+}
+/* added by yu.sun for bug 6044 */
+.el-cascader input {
+    width:100%;
+    height:100% !important;
+}
+/* ended */
+/* ended */
+/* added by yu.sun for bug element-dropdown */
+.el-dropdown .el-button-group{
+	width:100%;
+	height:100%;
+	padding:0;
+	overflow: hidden;
+}
+.el-dropdown .el-button-group button:nth-child(1){
+ width:75%;
+ height:100%;
+ border-right:none;
+}
+.el-dropdown .el-button-group button:nth-child(2){
+	width:25%;
+	height:100%;
+	border-top:1px solid
+}
+/* added by yu.sun for bug element-navmenu */
+.el-menu--horizontal>div>.el-submenu{
+	 float:left;
+}
+.el-menu--horizontal>div>.el-menu-item{
+	 float:left;
+}
+.el-menu--horizontal>div>.el-submenu .el-submenu__icon-arrow{
+	 position: static;
+	 vertical-align: middle;
+}
+/* added by yu.sun for bug 6044 */
+.el-cascader input {
+    width:100%;
+    height:100% !important;
+}
+/* ended */
+/* added by yu.sun for bug 6626 【客户端】设置边框后，缩放单选框的大小，导致同级关系的多选框未对齐 */
+.el-radio-group label {
+    margin: 0 !important;
+}
+/* ended */
+
+/*added by tongtong.liao at 2020/10/30 for  bug 7161 elmentui table 显示不全/bug 7154 来回切换页面时部分表格数据行数显示不全，下方为空白*/
+.el-table__body-wrapper{ height:88%; 
+} /* add by xing.li for bug[9096]{element-table运行态图片显示异常} 2020/12/29 */
+/*end*/
+
+/* add by di.wu for bug7317  2020/11/2  table中数据与表头错位*/
+ body .el-table th.gutter{
+    display: table-cell!important;
+}
+/*end*/
+/* add by hang.su for 奥思表格留白问题处理 at 2021/6/3 */
+/* .el-table__body-wrapper{ 
+    height:88%!important; 
+} */

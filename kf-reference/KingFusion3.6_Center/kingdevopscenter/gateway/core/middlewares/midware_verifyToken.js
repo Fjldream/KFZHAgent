@@ -1,0 +1,1 @@
+const{appPort:appPort}=require("../../config/config_app"),OauthClient=require("../../../../common/oauth-utils"),httpType="http",ip="localhost",port=appPort.Oauth,nginxUrl=null;let oauthClient=new OauthClient({httpType:0,ip:ip,port:port,nginxFlag:!1,nginxUrl:null});module.exports=oauthClient.tokenCheckMidderwares();

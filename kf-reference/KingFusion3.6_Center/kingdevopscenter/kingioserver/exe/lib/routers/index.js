@@ -1,0 +1,1 @@
+const router=require("express").Router(),{midware_response:midware_response,midware_tenantId:midware_tenantId,midware_auth:midware_auth}=require("../../core/middlewares");router.use(midware_response),router.use(midware_tenantId),router.use(midware_auth.extractUserInfo);const routerLoader=require("./route_loader");routerLoader.registerRoutes(router),module.exports=router;

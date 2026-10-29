@@ -1,0 +1,1 @@
+"use strict";const path=require("path"),enums={ENCRYPTCONFIG:{ACCESS:"public",PATH:path.resolve(`${__dir}/../../../config/common.json`)},DEVCONFIG:{ACCESS:"public",PATH:path.resolve(`${__dir}/../../../config/devconfig.json`)},OPSCENTERCONFIG:{ACCESS:"public",PATH:path.resolve(`${__dir}/../../../config/opscenterconfig.json`)}};module.exports=enums;

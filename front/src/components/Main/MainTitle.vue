@@ -6,6 +6,12 @@ import { useUserStore } from '@/stores/userStore.js';
 import { useConfirm } from '@/composables/useConfirm.js';
 import CustomIcon from '@/components/Icons/CustomIcon.vue';
 import OemConifgDialog from '@/components/Main/OemConifgDialog.vue';
+// modified by jinlong.feng at 0901 冗余功能开发
+// modified by jinlong.feng at 2026-10-10 冗余功能构建期开关
+import { REDUNDANCY_ENABLED } from '@/config/features.js';
+// end modified by jinlong.feng at 2026-10-10 冗余功能构建期开关
+import RedundancyNotificationCenter from '@/components/Redundancy/RedundancyNotificationCenter.vue';
+// end
 
 const { t } = useI18n();
 const router = useRouter();
@@ -54,6 +60,11 @@ const handleCommand = async (command) => {
         </template>
       </el-dropdown>
 
+      <!-- modified by jinlong.feng at 0901 冗余功能开发 -->
+      <!-- modified by jinlong.feng at 2026-10-10 冗余功能构建期开关：关闭时不挂载组件，也就不会建立冗余 WS 连接与拉取异常列表 -->
+      <RedundancyNotificationCenter v-if="REDUNDANCY_ENABLED" />
+      <!-- end modified by jinlong.feng at 2026-10-10 冗余功能构建期开关 -->
+      <!-- end -->
       <el-divider class="vertical-divider" direction="vertical" />
       <!-- 用户名和退出按钮容器，带线框 -->
       <div class="user-logout-wrapper">

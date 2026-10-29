@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8" language="zh"/>
+    <meta name="product" content="KP2.0"/>
+    <title></title>
+    <script type="text/javascript">
+        // add by shuai.zhao for bug 12173 【神东项目0125定制版本】智能感知界面打开时较慢，，显示5s左右的空白 2021-06-24
+        window.plus && plus.nativeUI.showWaiting('页面加载中...', {
+            background: 'rgba(0,0,0,1)'
+        })
+        //语言切换
+        const language = {
+            'zh': ["运行系统客户端"],
+            'ko': ["페이지 클라이언트"],
+            'ja': ["运行系统客户端"],
+            'en': ["运行系统客户端"]
+        }
+        window.langStore = document.querySelector('meta').getAttribute('language') || 'zh';
+        let scriptLangList = ``
+        if (langStore) {
+            let jsLangFileArr = language[langStore];
+            document.title = jsLangFileArr[0];
+          }
+        // end
+        //added by junxue.zheng 2020/03/05
+        //工程名字，反向代理配置的项目app名称;
+        window.projectNameStr = '';
+        //var projectNameStr = window.location.pathname === '/' ? '': window.location.pathname;
+        if (window.location.pathname === '/') {
+            projectNameStr = '';
+        } else {
+            var customStr = window.location.pathname;
+            projectNameStr = customStr.slice(0,customStr.length -1)
+        }
+    </script>
+    <script type="text/javascript">
+        var kingPortal_entrance ='<script type="text/javascript" src="' + projectNameStr + '/public/extension/KingPortal_entrance.js">' + '<' + '/script>';
+        document.write(kingPortal_entrance);
+    </script>
+</head>
+<body onbeforeunload="bodyBeforeUnload()" onunload="bodyUnload()">
+</body>
+
+<script>
+    // added by yaru.wang for[联通项目：运行态关闭浏览器之后，token信息不清除，导致运行态直接免登陆]20210204
+    function bodyBeforeUnload() {
+        window.handleTime = new Date().getTime();
+    }
+    function bodyUnload(){
+        let timeOut = new Date().getTime() - window.handleTime;
+        if (timeOut < 3) {
+            window.localStorage.removeItem('UserName');
+            window.localStorage.removeItem('WellinUserToken');
+            window.localStorage.removeItem('refreshToken');
+        }
+        window.handleTime = null;
+    }
+    // end by yaru.wang 20210204
+</script>
+</html>

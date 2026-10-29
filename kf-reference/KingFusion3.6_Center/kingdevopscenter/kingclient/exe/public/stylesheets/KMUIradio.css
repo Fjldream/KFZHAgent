@@ -1,0 +1,34 @@
+#radio1 {
+    display: inline-block;  
+    margin-top: 5%;
+    margin-bottom: 5%;
+}
+
+#radio2 {
+    display: inline-block;  
+    margin-bottom: 5%;
+}
+
+#radio3 {
+    display: inline-block;  
+    margin-bottom: 5%;
+}
+
+#span1 {
+    display: inline-block;
+    height: 17px;
+    line-height: 15px;
+    margin-top: 7px;
+}
+
+#span2 {
+    display: inline-block;  
+    height: 20px; 
+    line-height: 20px;  
+}
+
+#span3 {
+    display: inline-block; 
+    height: 20px; 
+    line-height: 20px; 
+}

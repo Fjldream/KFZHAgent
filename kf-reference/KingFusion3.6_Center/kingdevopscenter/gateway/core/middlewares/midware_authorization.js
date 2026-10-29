@@ -1,0 +1,1 @@
+const authorizationChecker=require(`${global.commonDir}/authorization-utils`);module.exports=((e,r,o)=>{if(!authorizationChecker.getRequestPermission())return r.sendErr(-1,"授权信息异常");o()});

@@ -1,0 +1,99 @@
+.sidenav {
+    height: 100%;
+    width: 0;
+    position: fixed;
+    z-index: 100;
+    top: 0;
+    left: 0;
+    background-color: rgba(41,60,85,1);
+    overflow-x: hidden;
+    transition: 0.5s;
+    padding-top: 60px;
+    /* border-Left: 3px solid buttonhighlight;  */
+    border-Right:  3px solid buttonhighlight;
+    border-Top:  3px solid buttonhighlight; 
+    border-Bottom:  3px solid buttonhighlight;
+    -webkit-user-select:none;/*�ȸ� /Chrome*/
+    -moz-user-select:none; /*���/Firefox*/
+    -ms-user-select:none;    /*IE 10+*/
+    user-select:none;
+}
+
+.sidenav a {
+    padding: 8px 8px 8px 32px;
+    text-decoration: none;
+    font-size: 25px;
+    color: #818181;
+    display: block;
+    transition: 0.1s;
+}
+
+.sidenav a:hover, .offcanvas a:focus{
+    color: #f1f1f1;
+    cursor: pointer;
+}
+
+.sidenav .closebtn {
+    position: absolute;
+    top: 0;
+    right: 25px;
+    font-size: 36px;
+    margin-left: 50px;
+}
+
+@media screen and (max-height: 450px) {
+.sidenav {padding-top: 15px;}
+.sidenav a {font-size: 18px;}
+}
+#km_avigationBar .tree-expanded,
+#km_avigationBar .tree-collapsed,
+#km_avigationBar .tree-folder,
+#km_avigationBar .tree-file,
+#km_avigationBar .tree-checkbox,
+#km_avigationBar .tree-indent {
+  display: inline-block;
+  width: 10px;
+  height: 18px;
+  vertical-align: top;
+  overflow: hidden;
+}
+
+#km_avigationBar .tree-title {
+    font-family:"Helvetica Neue", Helvetica, Arial, sans-serif;
+    padding-top: 9px;
+    padding-bottom: 7px;
+    font-size: 15px;
+    /* color: #777;  */
+}
+/* .tree li{
+    margin-top: 4px;
+} */
+#km_avigationBar .tree-node{
+    height:35px;
+}
+#km_avigationBar .tree-node-hover{
+    background-color:rgba(22,36,54,1);
+}
+
+#km_avigationBar .tree-node-selected {
+    background-color:rgba(228,60,89,1);
+}
+#km_avigationBar .tree-expanded {
+    background: url('../../../../res/images/openstatus.png') no-repeat 0px 7px;
+    padding-right: 8px;
+}
+#km_avigationBar .tree-collapsed {
+    background: url('../../../../res/images/closestatus.png') no-repeat 0px 7px;
+    padding-right: 8px;
+}
+
+#km_avigationBar .tree-folder {
+    background: url('') no-repeat -208px 0;
+}
+#km_avigationBar .tree-folder-open {
+    background: url('') no-repeat -224px 0;
+}
+#km_avigationBar .tree-file {
+    background: url('') no-repeat -240px 0;
+    padding-right: 8px;
+} 

@@ -1,8 +1,34 @@
 .reasonix/
 kf-src/
-KingFusion3.6_Center/
-KingFusion3.6_Node/
+# modified by jinlong.feng at 2026-10-29 KF源码精简入库
+/KingFusion3.6_Center/
+/KingFusion3.6_Node/
+# end
 .toolchain/
 .superpowers/
 .worktrees/
 .pnpm-store/
+# modified by jinlong.feng at 2026-10-29 KF源码精简入库
+**/node_modules/
+.DS_Store
+outputs/
+agent-app/outputs/
+front/build/
+front/build.prev*/
+front/dist/
+front/premium-audit.json
+.workbuddy/
+.freebuff/
+中车现场代码/
+*.log
+*.RPT
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+.env
+.env.*
+!.env.example
+# Installed KF trees above stay private. The audited copy lives in kf-reference/.
+# end

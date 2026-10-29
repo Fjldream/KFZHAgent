@@ -1,0 +1,215 @@
+.km-brush-wrap {
+    background-color :rgba(0,0,0,0.25);
+    width: 100%;
+    height: 100%;
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+}
+.km-brush-panel {
+    width: 390px;
+    height: 515px; 
+    border: 1px solid rgba(230,230,230,1);
+    position: absolute;
+    top: 13%;
+    right: 18%;
+    background-color: rgba(255,255,255,1);
+    text-align: left;
+}
+.km-brush-titlebar {
+    height: 40px;
+    background-color: rgba(240,240,240,1);
+    text-align: left;
+    line-height: 40px;
+    padding-left: 15px;
+    font-size: 16px;
+}
+.km-brush-titlebar .km-brush-closeSpan {
+    float: right;
+    margin-right: 15px;
+    background-image: url(../images/images/close.png);
+    background-repeat: no-repeat;
+    background-position: center;
+    width: 17px;
+    height: 17px;
+    margin-top: 11px;
+}
+.km-brush-titlebar .km-brush-closeSpan:hover {
+    cursor: pointer;
+    background-color: #ccc; 
+}
+.km-brush-main {
+    width: 100%;
+    height: 90%;
+}
+.km-brush-changePanel {
+    float: left;
+    width: 100%;
+    height: 100%;
+}
+.km-brush-previewPanel {
+    float: left;
+    width: 30%;
+    height: 100%;
+}
+.km-brush-brushTypeDiv {
+    height: 40px;
+    line-height: 40px;
+    text-align: center;
+    margin: 0 5px;
+    border-bottom: 1px solid #ccc;
+}
+.km-brush-select {
+    width: 200px;
+    margin-left: 6px;
+    height: 22px;
+}
+.km-brush-custom {
+    width: 100%;
+    height: 100%;
+}
+.km-brush-left {
+    float: left;
+    width: 68%;
+    border-right: solid 1px #ccc;
+    margin-top: 5px;
+    height: 90%;
+}
+.km-brush-right {
+    float: left;
+    width: 30%;
+}
+.km-pic-panel,
+.km-picradial-panel{
+    margin: 15px 0 15px 10px;
+}
+.km-pic-panel img {
+    padding: 2px;
+}
+.km-pic-panel img:hover {
+    background-color: #5393f5;
+}
+.km-img-click {
+    background-color: #5393f5;
+}
+#km-brush-material .km-pic-panel img {
+    margin-right: 5px;
+}
+.km-linerMain {
+    width: 90%;
+    border: 1px solid #ccc;
+    margin-left: 5%;
+}
+.liner-color {
+    display: inline-block;
+    width: 30px;
+    height: 20px;
+    background-color: #ccc;
+    margin-left: 5px;
+    margin-bottom: 10px;
+}
+.brush-span {
+    margin-left: 8%;
+    margin-bottom: 10px;
+}
+.km-brush-pre {
+    width: 80px;
+    height: 160px;
+    border: none;
+    display: block;
+    border: solid 1px #666;
+    margin-left: 16%;
+    margin-top: 5px;
+}
+.km-brush-cancel {
+    font-size: 11px;
+    color: #d93f3f !important;
+    margin: 0;
+    padding: 2px;
+    margin-right: 5px;
+    vertical-align: middle;
+    text-decoration: none;
+}
+.km-brush-cancel:hover {
+    text-decoration: underline;
+}
+.km-brush-confirm {
+    border: 1px solid #ccc;
+    border-bottom: 1px solid #bbb;
+    border-radius: 3px;
+    color: #333;
+    font-size: 12px;
+    line-height: 1;
+    padding: 4px 10px;
+    text-align: center;
+    text-shadow: 0 1px 0 #eee;
+    vertical-align: middle;
+}
+.km-brush-confirm:hover {
+    background-color: #dddddd;
+    background-image: -webkit-linear-gradient(top, #dddddd, #bbbbbb);
+    background-image: -moz-linear-gradient(top, #dddddd, #bbbbbb);
+    background-image: -ms-linear-gradient(top, #dddddd, #bbbbbb);
+    background-image: -o-linear-gradient(top, #dddddd, #bbbbbb);
+    background-image: linear-gradient(to bottom, #dddddd, #bbbbbb);
+    border: 1px solid #bbb;
+    border-bottom: 1px solid #999;
+    cursor: pointer;
+    text-shadow: 0 1px 0 #ddd;
+}
+.km-button-div {
+    position: absolute;
+    bottom: 30px;
+    right: 20px;
+}
+.km-brush-canvas {
+    width: 80px; 
+    height: 80px;
+    margin-top: -4px;
+    border-top: 1px solid #666;
+}
+#km-brush-radial .radial-pic {
+    border:1px solid #666;
+}
+
+#km-brush-tile .km-tile-div {
+    text-align: center;
+    margin-top: 20px;
+}
+#km-brush-tile .km-tile-button {
+    width: 25px;
+    height: 20px;
+    margin-left: 5px;
+}
+
+#km-brush-tile .km-overlay-tile-div {
+    text-align: center;
+    margin-top: 20px;
+}
+#km-brush-tile .km-overlay-tile-button {
+    width: 25px;
+    height: 20px;
+    margin-left: 5px;
+}
+
+
+.kmui-tilefile-main {
+    height: 90%;
+}
+.kmui-tilefile-listArea {
+    width: 93%;
+    height: 77%;
+}
+.kmui-tilefile-listArea .datagrid-header {
+    border: none;
+}
+.map-panel {
+    width: 390px;
+    height: 260px;
+    border: 1px solid rgba(230, 230, 230, 1);
+    position: absolute;
+    top: 15%;
+    right: 18%;
+    background-color: rgba(255, 255, 255, 1);
+    text-align: left;
+}

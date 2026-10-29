@@ -1,0 +1,1 @@
+var fs=require("fs"),rimraf=require("rimraf"),file=require("../Daemon/File");module.exports=function(i,f,e,u){var r=file.getFullPath(i,e,u);return fs.existsSync(r)?file.isPredefined(e)?!1:(rimraf.sync(r),!0):!0};

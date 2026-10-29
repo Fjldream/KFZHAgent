@@ -1,0 +1,1 @@
+"use strict";module.exports=()=>{const a=require(__dir+"/lib/service/globalVarMng/dataDictionary/globalVar.js");global.dataInfoKIO=[],global.dataInfoKS=[],global.dataInfoAll=[],global.dataInfoKH=[],a.init()};

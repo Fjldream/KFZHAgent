@@ -1,0 +1,1 @@
+const oauthserver=require(__DIR+"/lib/services/services_user_auth/oauthClient");class ClientController{async getClient(r,e){try{await oauthserver.handleGetClient(r,e)}catch(t){e.sendErr(400,t.message)}}async createClient(r,e){try{await oauthserver.handleSaveClient(r,e)}catch(t){e.sendErr(400,t.message)}}}module.exports=new ClientController;

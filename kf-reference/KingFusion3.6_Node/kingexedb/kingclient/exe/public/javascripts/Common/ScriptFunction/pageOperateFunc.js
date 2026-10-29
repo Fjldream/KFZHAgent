@@ -1,0 +1,1 @@
+function ShowPage(e,n,a){var t=this,r=KMUIFrame.getInstance();return r.showPage(e,n,a)}function ClosePage(e){var n=this,a=KMUIFrame.getInstance();return a.closePage(e)}function HidePage(e){var n=this,a=KMUIFrame.getInstance();return a.hidePage(e)}

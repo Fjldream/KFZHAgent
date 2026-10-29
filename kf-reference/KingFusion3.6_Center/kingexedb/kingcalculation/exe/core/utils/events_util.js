@@ -1,0 +1,1 @@
+const EventEmitter=require("events").EventEmitter;var eventEmitter=new EventEmitter;function eventsUtil(){this.onEvent=(e,t)=>{eventEmitter.on(e,t)},this.emitEvent=(e,t)=>eventEmitter.emit(e,...t),this.removeListener=(e,t)=>{eventEmitter.removeListener(e,t)}}module.exports=new eventsUtil;

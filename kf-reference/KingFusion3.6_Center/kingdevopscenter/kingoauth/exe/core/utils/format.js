@@ -1,0 +1,1 @@
+"use strict";const moment=require("moment");module.exports={formatDate(e){let t;return e?t=moment(e).format("YYYY-MM-DD HH:mm:ss"):t="",t},user(e){return delete e.password,e.createdAt=this.formatDate(e.createdAt),e.updatedAt=this.formatDate(e.updatedAt),e.lastLogin?e.lastLogin=this.formatDate(e.lastLogin):e.lastLogin="\u6682\u65E0\u767B\u5F55\u8BB0\u5F55",e}};

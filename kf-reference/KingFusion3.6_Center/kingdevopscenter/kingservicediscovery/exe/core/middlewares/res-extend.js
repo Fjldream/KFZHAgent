@@ -1,0 +1,1 @@
+module.exports=(a,s,e)=>{s.sendOk=d=>{const t={code:0,message:"success",data:d};s.status(200),s.send(t),s.end()},s.sendErr=(d,t)=>{const n={code:d,message:t,data:null};s.status(200),s.send(n),s.end()},e()};

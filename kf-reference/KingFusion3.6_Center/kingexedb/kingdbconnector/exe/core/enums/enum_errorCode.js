@@ -1,0 +1,1 @@
+let enum_errorCode={ERROR_CODE_SUCCESS:0};const enum_KHRestErrorCode={success:0,realDataFail:-11003,RawDataFail:-11004,recordNumbersFail:-11005,SampleDatasFail:-11006,AddDataFail:-11007,noHandle:-11008};module.exports={enum_errorCode,enum_KHRestErrorCode};

@@ -1,0 +1,1 @@
+module.exports=(a,e,d)=>{let t=decodeURIComponent(a.get("datasourcename"));if(t)a.kdb_dataSourceName=t;else{const o={errorCode:-1,message:"\u8BF7\u6C42\u5934\u6CA1\u6709datasourcename",data:{}};return e.status(412),e.send(o),e.end()}d()};

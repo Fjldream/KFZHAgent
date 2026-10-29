@@ -1,0 +1,1 @@
+if(process.env.NODE_ENV&&process.env.NODE_ENV==="production")var logConfig=require(__dir+"/lib/config/log/log4js").production;else var logConfig=require(__dir+"/lib/config/log/log4js").development;const configContainer={};configContainer.logConfig=logConfig,module.exports=configContainer;

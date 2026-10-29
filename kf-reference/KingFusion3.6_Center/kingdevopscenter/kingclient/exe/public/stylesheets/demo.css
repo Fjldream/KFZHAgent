@@ -1,0 +1,103 @@
+/* modified by yu.sun for bug 1285 工程配置中新建角色安全区等位置显示错乱  1265 2D工艺流程图连接添加事件页面布局混乱 1291 任意图素填充及缩放动画连接界面显示异常*/
+body {
+    font-family:verdana,helvetica,arial,sans-serif;
+    padding:20px;
+    font-size:12px;
+    margin:0;
+}
+h2 {
+    font-size:18px;
+    font-weight:bold;
+    margin:0;
+    margin-bottom:15px;
+}
+.demo-info{
+	padding:0 0 12px 0;
+}
+.demo-tip{
+	display:none;
+}
+.label-top{
+    display: block;
+    height: 22px;
+    line-height: 22px;
+    vertical-align: middle;
+}
+/*  add by zhiming.lv at 2020/05/14 bug:870 热键80界面缺少设置热键按钮 */
+.demo_hotKey{
+    background: rgb(0, 174, 255);
+}
+/* end */
+/* added by yu.sun for 图片轮播 2020-06-01*/
+.el-carousel--horizontal {
+    height:100%
+}
+.el-carousel__container{
+    height:100% !important;
+}
+.el-carousel__item{
+    height:100% 
+}
+/* added by yu.sun for bug 6044 */
+.el-cascader input {
+    width:100%;
+    height:100% !important;
+}
+/* ended */
+/* added by yu.sun for bug element-dropdown */
+.el-dropdown .el-button-group{
+	width:100%;
+	height:100%;
+	padding:0;
+	overflow: hidden;
+}
+.el-dropdown .el-button-group button:nth-child(1){
+ width:75%;
+ height:100%;
+ border-right:none;
+}
+.el-dropdown .el-button-group button:nth-child(2){
+	width:25%;
+	height:100%;
+	border-top:1px solid
+}
+/* added by yu.sun for bug element-navmenu */
+.el-menu--horizontal>div>.el-submenu{
+	 float:left;
+}
+.el-menu--horizontal>div>.el-menu-item{
+	 float:left;
+}
+.el-menu--horizontal>div>.el-submenu .el-submenu__icon-arrow{
+	 position: static;
+	 vertical-align: middle;
+}
+/* ended */
+/* added by yu.sun for bug 6626 【客户端】设置边框后，缩放单选框的大小，导致同级关系的多选框未对齐 */
+.el-radio-group label {
+    margin: 0 !important;
+}
+/* add by zhiming at 2020/09/09 for 权限描述管理 */
+.author-des-grid{
+    width: 100%;
+    top: 53px;
+    bottom: 0;
+    overflow: auto;
+}
+.km-res-des-input{
+    height: 100%;
+    width: 100%;
+    /* border: 1px solid #d0d0d0; */
+    font-size: 13px;
+    cursor: pointer;
+}
+.km-res-des-input:focus{
+    outline: none;
+    border: 1px solid #9e9e9e;
+}
+/* select.km-input{
+    box-sizing: border-box;
+    height: 24px;
+    padding: 3px 5px;
+} */
+/* end */

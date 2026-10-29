@@ -1,18 +1,22 @@
 <script setup>
-import { useRoute } from 'vue-router';
-import { useI18n } from 'vue-i18n';
-import router from '@/router/index.js';
-import { useMainLeftMenus } from '@/stores/mainLeftMenusStore.js';
-import { useOpsResourceData, useUpdateOpsResourcStatus, useUpdateNodesResStatus } from '@/composables/useOpsResource';
-import { delNodesServer } from '@/api/allRequest/verifyAPI.js';
-import { useRefreshToken } from '@/composables/useRefreshToken.js';
-import { useConfirm } from '@/composables/useConfirm';
-import { useOpsResourceStore } from '@/stores/opsResourceStore.js';
-import { useSystemConfigStore } from '@/stores/systemConfigStore.js';
+import { useRoute } from "vue-router";
+import { useI18n } from "vue-i18n";
+import router from "@/router/index.js";
+import { useMainLeftMenus } from "@/stores/mainLeftMenusStore.js";
+import {
+  useOpsResourceData,
+  useUpdateOpsResourcStatus,
+  useUpdateNodesResStatus,
+} from "@/composables/useOpsResource";
+import { delNodesServer } from "@/api/allRequest/verifyAPI.js";
+import { useRefreshToken } from "@/composables/useRefreshToken.js";
+import { useConfirm } from "@/composables/useConfirm";
+import { useOpsResourceStore } from "@/stores/opsResourceStore.js";
+import { useSystemConfigStore } from "@/stores/systemConfigStore.js";
 
-import MainLable from '@/components/Main/MainLable.vue';
-import CustomLayoutContainer from '@/components/Main/CustomLayout/CustomLayoutContainer.vue';
-import MainTitle from '@/components/Main/MainTitle.vue';
+import MainLable from "@/components/Main/MainLable.vue";
+import CustomLayoutContainer from "@/components/Main/CustomLayout/CustomLayoutContainer.vue";
+import MainTitle from "@/components/Main/MainTitle.vue";
 
 const { t } = useI18n();
 const opsResourceStore = useOpsResourceStore();
@@ -21,8 +25,8 @@ const mainLeftMenusStore = useMainLeftMenus();
 const systemConfigStore = useSystemConfigStore();
 const { setLeftRowSelect } = mainLeftMenusStore;
 const route = useRoute();
-const mainContainClass = ref('main-contain-class');
-const asideWidth = ref('220px');
+const mainContainClass = ref("main-contain-class");
+const asideWidth = ref("220px");
 
 // 启动轮询token刷新
 useRefreshToken();
@@ -35,10 +39,15 @@ nextTick(async () => {
   await systemConfigStore.getConfig();
   await useOpsResourceData();
   // 登录后默认显示首个运行节点的信息
-  if (mainLeftMenusStore?.mainLeftMenus?.length && mainLeftMenusStore.mainLeftMenus[0]?.children?.length) {
-    const runningNodes = mainLeftMenusStore.mainLeftMenus[0].children.find((node) => {
-      return node?.id && node?.nodeStatus === 'running';
-    });
+  if (
+    mainLeftMenusStore?.mainLeftMenus?.length &&
+    mainLeftMenusStore.mainLeftMenus[0]?.children?.length
+  ) {
+    const runningNodes = mainLeftMenusStore.mainLeftMenus[0].children.find(
+      (node) => {
+        return node?.id && node?.nodeStatus === "running";
+      },
+    );
     menuClickHandle(runningNodes);
   }
   if (mainLeftMenusStore.leftRowSelect.id) {
@@ -46,11 +55,35 @@ nextTick(async () => {
   }
 });
 
+// modified by jinlong.feng at 2026-10-09 冗余导航高亮
+/**
+ * 未经过左侧菜单点击进入的路由，其左侧导航高亮需按路由名补齐。
+ * 冗余管理页与事件记录页共用「节点冗余管理」菜单项。
+ */
+const MENU_ID_BY_ROUTE_NAME = {
+  redundancy: "redundancy",
+  redundancyEvents: "redundancy",
+};
+
+/** 按当前路由名同步左侧导航高亮，避免从通知等入口跳转后高亮停留在原菜单。 */
+const syncLeftRowSelectByRoute = () => {
+  const menuId = MENU_ID_BY_ROUTE_NAME[route.name];
+  if (!menuId) return;
+  const menu = mainLeftMenusStore.mainLeftMenus.find((item) => item.id === menuId);
+  if (menu && mainLeftMenusStore.leftRowSelect.id !== menuId) {
+    setLeftRowSelect(menu);
+  }
+};
+// end modified by jinlong.feng at 2026-10-09 冗余导航高亮
+
 watch(
   () => route.name,
   () => {
     nextTick(() => {
       updateHeaderVisibility();
+      // modified by jinlong.feng at 2026-10-09 冗余导航高亮
+      syncLeftRowSelectByRoute();
+      // end modified by jinlong.feng at 2026-10-09 冗余导航高亮
     });
   },
   {
@@ -58,14 +91,19 @@ watch(
   },
 );
 
+/** 根据当前路由切换主内容区的页面留白与阴影布局。 */
 const updateHeaderVisibility = () => {
   //点击节点将节点数据接入
-  mainContainClass.value = 'main-contain-class';
-  if (route.name === 'runningNodesManager' || route.name === 'loadBalancer') {
-    mainContainClass.value += 'no-box-shadow';
+  mainContainClass.value = "main-contain-class";
+  // modified by jinlong.feng at 0901 冗余功能开发
+  if (route.name === "runningNodesManager" || route.name === "loadBalancer") {
+    mainContainClass.value += "no-box-shadow";
+  } else if (route.name === "redundancy") {
+    mainContainClass.value += " redundancy-layout";
   } else {
-    mainContainClass.value.replace('no-box-shadow', '');
+    mainContainClass.value.replace("no-box-shadow", "");
   }
+  // end
 };
 /**
  * 处理菜单点击事件
@@ -73,15 +111,17 @@ const updateHeaderVisibility = () => {
  * @param {object} row - 被点击的行数据
  */
 const menuClickHandle = (row) => {
-  if (row.id !== 'runningNodesManager') {
+  if (row.id !== "runningNodesManager") {
     setLeftRowSelect(row);
   }
-  const nodeIdStatus = opsResourceStore.nodeResourceData.some((item) => item.nodeId === row.id);
+  const nodeIdStatus = opsResourceStore.nodeResourceData.some(
+    (item) => item.nodeId === row.id,
+  );
   if (nodeIdStatus) {
     setCurrentNodeId(row.id);
   } else {
-    if (row.path === 'loadBalancer') {
-      setCurrentNodeId('');
+    if (row.path === "loadBalancer") {
+      setCurrentNodeId("");
     }
   }
   router.push({ name: row.path });
@@ -93,10 +133,10 @@ const menuClickHandle = (row) => {
  */
 const menuDeleteClickHandle = async (row) => {
   try {
-    await useConfirm(`${t(`messageDeleteNode`)}`, t('messageTitle'));
+    await useConfirm(`${t(`messageDeleteNode`)}`, t("messageTitle"));
     const { errorCode } = await delNodesServer({ nodeId: row.id });
     if (errorCode === 0) {
-      ElMessage.success(t('messageDeleteSuccess'));
+      ElMessage.success(t("messageDeleteSuccess"));
     }
   } catch (error) {}
 };
@@ -119,14 +159,20 @@ const menuDeleteClickHandle = async (row) => {
     <template #left>
       <header class="main-header">
         <div class="header-left">
-          <el-image :src="systemConfigStore.homeLogoImageUrl" alt="KingDevClient" class="header-left-img" />
+          <el-image
+            :src="systemConfigStore.homeLogoImageUrl"
+            alt="KingDevClient"
+            class="header-left-img"
+          />
         </div>
         <div class="header-right">
-          <div class="header-right-top">{{ systemConfigStore.config.productName }}</div>
+          <div class="header-right-top">
+            {{ systemConfigStore.config.productName }}
+          </div>
           <div class="header-right-bottom">
             {{
-              systemConfigStore.config.productInfo === '管控一体化全组态平台'
-                ? t('mainTitle')
+              systemConfigStore.config.productInfo === "管控一体化全组态平台"
+                ? t("mainTitle")
                 : systemConfigStore.config.productInfo
             }}
           </div>
@@ -277,6 +323,14 @@ const menuDeleteClickHandle = async (row) => {
       height: calc(100vh - 70px);
       box-shadow: none;
     }
+
+    // modified by jinlong.feng at 0901 冗余功能开发
+    .redundancy-layout {
+      height: calc(100vh - 70px);
+      padding: 20px;
+      box-shadow: none;
+    }
+    // end
   }
 }
 </style>

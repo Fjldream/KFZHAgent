@@ -1,0 +1,70 @@
+{
+    "globalVars": [{
+            "name": "$Year",
+            "id": 1,
+            "description": "",
+            "type": "Number",
+            "value": ""
+        },
+        {
+            "name": "$Month",
+            "id": 2,
+            "description": "",
+            "type": "Number",
+            "value": ""
+
+        },
+        {
+            "name": "$DayofWeek",
+            "id": 3,
+            "description": "",
+            "type": "Number",
+            "value": ""
+
+        },
+        {
+            "name": "$Day",
+            "id": 4,
+            "description": "",
+            "type": "Number",
+            "value": ""
+
+        },
+        {
+            "name": "$Hour",
+            "id": 5,
+            "description": "",
+            "type": "Number",
+            "value": ""
+
+        },
+        {
+            "name": "$Minute",
+            "id": 6,
+            "description": "",
+            "type": "Number",
+            "value": ""
+        },
+        {
+            "name": "$Second",
+            "id": 7,
+            "description": "",
+            "type": "Number",
+            "value": ""
+        },
+        {
+            "id": 8,
+            "name": "$MilliSecond",
+            "description": "",
+            "type": "Number",
+            "value": ""
+        },
+        {
+            "name": "$User",
+            "id": 9,
+            "description": "",
+            "type": "Number",
+            "value": ""
+        }
+    ]
+}

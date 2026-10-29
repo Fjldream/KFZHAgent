@@ -1,0 +1,1 @@
+module.exports={printWidth:200,tabWidth:4,useTabs:!1,semi:!0,singleQuote:!0,quoteProps:"preserve",trailingComma:"all",bracketSpacing:!0,bracketSameLine:!0,objectCurlySpacing:!1,arrowParens:"always",rangeStart:0,rangeEnd:1/0,requirePragma:!1,insertPragma:!1,endOfLine:"auto"};

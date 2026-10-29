@@ -1,0 +1,1 @@
+const Metric=require("./metric");class Metricset{constructor(){this.name="",this.metrics=[]}setName(t){this.name=t}getName(){return this.name}setMetrics(t){this.metrics=t}getMetrics(){return this.metrics}}module.exports=Metricset;

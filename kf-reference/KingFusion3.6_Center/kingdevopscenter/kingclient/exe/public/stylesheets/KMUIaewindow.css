@@ -1,0 +1,214 @@
+.km-aewindow-hidehgrid td {
+    border-top: 0px;
+    border-bottom: 0px;
+}
+
+.km-aewindow-hidevgrid td {
+    border-left: 0px;
+    border-right: 0px;
+}
+/* 报警窗事件窗图例按钮部分 */
+.km-aewindow-colormsgpannel {
+    position:relative;
+    min-height:250px;
+    max-height:350px;
+    overflow:auto;
+    /* max-width: 250px; */
+    width:100%;
+    margin: 0;
+}
+
+/* 事件窗、报警窗状态栏部分 */
+.km-aewindow-statuspannel {
+    width: 100%; 
+    height: 30px; 
+    background-color: #b5b7b9; 
+    border: 1px solid #b5b7b9; 
+    font-size: 24px; 
+    position: absolute; 
+    bottom: 0; 
+    overflow: hidden; 
+    display: none;
+}
+/* 单个状态快 */
+.km-aewindow-statusdiv {
+    height: 100%;
+    background-color: #ffffff;
+    border: 2px solid #b5b7b9;
+    box-sizing: border-box;
+    overflow: hidden;
+    float: left;
+}
+/* 状态名称 */
+.km-aewindow-statusnamespan {
+    margin-left: 2%; 
+    font-size: 16px; 
+    font-family: "微软雅黑"; 
+    text-align: left;
+}
+/* 状态数目 */
+.km-aewindow-statusnumspan {
+    margin-left: 5%; 
+    font-size: 16px; 
+    font-family: "微软雅黑";
+}
+
+/* 报警窗、事件窗过滤条件弹窗 */
+.km-aewindow-filterwindow {
+    height: 680px; 
+    width: 590px; 
+    top: 10%; 
+    left: 35%; 
+    background-color: rgba(255,255,255,1); 
+    border: 3px solid rgba(240,240,240,1); 
+    position: absolute;
+}
+.km-aewindow-datasource {
+    height: 280px; 
+    width: 300px; 
+    top: 10%; 
+    left: 35%; 
+    background-color: rgba(255,255,255,1); 
+    border: 3px solid rgba(240,240,240,1); 
+    position: absolute;
+}
+.km-dataSourceConfig {
+    display: block;
+    width:90%;
+    height:200px;
+    margin-left:5.5%;
+    box-sizing: border-box;
+}
+.km-aewindow-libraryspan {
+    margin-left: 5%; 
+    margin-top: 2%; 
+    border: 1px solid rgba(240,240,240,1); 
+    width: 90%; 
+    height: 6%;
+}
+
+.km-aewindow-librarytitle {
+    margin-left: 40px; 
+    margin-top: 5px; 
+    font-size: 16px; 
+    vertical-align: middle;
+}
+
+.km-aewindow-libraryselect {
+    margin-left: 30px; 
+    margin-top: 5px; 
+    border: 1px solid rgba(0,0,0,1);
+     width: 70%; 
+    height: 70%; 
+    vertical-align: middle;
+}
+
+.km-aewindow-libraryword {
+    margin-left: 5%;
+    margin-top: 2%; 
+    border: 1px solid rgba(240,240,240,1); 
+    width: 90%;
+    height: 30%;
+}
+
+.km-aewindow-wordlist {
+    margin-left: 3%; 
+    margin-top: 2%; 
+    display: inline-block; 
+    border: 1px solid rgba(0,0,0,0.5); 
+    width: 45%; 
+    height: 90%; 
+    overflow: auto; 
+    vertical-align: middle;
+}
+
+.km-aewindow-wordlisttitle {
+    font-size: 16px;
+    margin-left: 10%;
+}
+
+.km-aewindow-filtershowspan {
+    margin-left: 5%; 
+    margin-top: 2%; 
+    border: 1px solid rgba(240,240,240,1); 
+    width: 90%; 
+    height: 40%;
+}
+
+.km-aewindow-filterlist {
+    margin-left: 3%; 
+    margin-top: 2%; 
+    display: inline-block; 
+    border: 1px solid rgba(0,0,0,0.5); 
+    width: 45%; 
+    height: 90%; 
+    overflow: auto; 
+    vertical-align: middle;
+}
+
+.km-aewindow-filterwordsbutton {
+    margin-left: 3%; 
+    margin-top: 2%; 
+    display: inline-block; 
+    width: 45%; 
+    height: 90%;  
+    border: none; 
+    vertical-align: middle;
+}
+/* 添加过滤条件按钮 */
+.km-aewindow-filterwordsaddbutton {
+    margin-left: 20%; 
+    margin-top: 10%; 
+    width: 60%; 
+    height: 30px; 
+    font-size: 16px;
+}
+/* 插入过滤条件按钮 */
+.km-aewindow-filterwordsinsertbutton {
+    margin-left: 20%; 
+    margin-top: 15%; 
+    width: 60%; 
+    height: 30px; 
+    font-size: 16px;
+}
+/* 过滤条件按钮 */
+.km-aewindow-filterbutton {
+    margin-left: 3%; 
+    margin-top: 2%; 
+    display: inline-block; 
+    width: 45%; 
+    height: 90%;  
+    border: none; 
+    vertical-align: middle;
+}
+/* 删除按钮 */
+.km-aewindow-filterdelbutton {
+    margin-left: 20%; 
+    margin-top: 5%; 
+    width: 60%; 
+    height: 30px; 
+    font-size: 16px;
+}
+/* 运算符元素 */
+.km-aewindow-operatorsspan {
+    display: block; 
+    font-size: 16px; 
+    margin-left: 2%; 
+    margin-top: 2%
+}
+/* (运算符 */
+.km-aewindow-operatorsbutton {
+    margin-left: 13%; 
+    margin-top: 2%; 
+    width: 30%; 
+    height: 30px; 
+    font-size: 16px;
+}
+/* &和）运算符 */
+.km-aewindow-operatorrightsbutton {
+    margin-left: 10%; 
+    margin-top: 2%; 
+    width: 30%; 
+    height: 30px; 
+    font-size: 16px;
+}

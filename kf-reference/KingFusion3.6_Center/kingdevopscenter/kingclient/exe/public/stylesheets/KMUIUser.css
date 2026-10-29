@@ -1,0 +1,456 @@
+.km_ds_roleBtn{
+    width:90px;
+    height:30px;
+    margin-left:20px;
+    box-sizing:border-box;
+}
+.km-ds-btn-disabled{
+    background: rgba(240,240,240,1);
+    color:rgba(200,200,200,1);
+}
+.km_ds_userDataPanel{
+    height:100%;
+    width:50%;
+    float:left;
+    box-sizing: border-box;
+    border-right:1px solid rgba(200,200,200,1);
+}
+.km_ds_userListDataPanel{
+    height:90%;
+    width:100%;
+    min-width: 950px;
+    float:left;
+}
+.km_ds_userDataGridPanel{
+    height:90%;
+    width:100%;
+    min-width: 500px;
+    padding:10px 50px;
+    box-sizing: border-box;
+    border-top:1px solid rgba(240,240,240,1);
+}
+.km_ds_userGroupPanel{
+    width:100%;
+    height:50px;
+    box-sizing: border-box;
+    padding-bottom:5px;
+    position: relative;
+    left:1px;
+    line-height:50px;
+    border-right:1px solid  rgba(255,255,255,1);
+}
+.km_ds_rolePanel{
+    width:100%;
+    height:100%;
+    float:left;
+}
+.km_ds_rolegridPanel{
+    height:90%;
+    width:100%;
+    min-width: 500px;
+    padding:10px 50px;
+    box-sizing: border-box;
+    border-top:1px solid rgba(240,240,240,1);
+}
+.km_ds_rolegridPanel_role{
+    height:90%;
+    width:100%;
+    /* min-width: 1100px; */
+    /* padding:10px 50px; */
+    box-sizing: border-box;
+    margin-left:0px;
+    border-top:1px solid rgba(240,240,240,1);
+}
+.km_ds_btnPanel{
+    width:100%;
+    height:50px;
+    box-sizing: border-box;
+    line-height:50px;
+    padding-bottom:5px;
+    position: relative;
+}
+.km_ds_roleListText{
+    display: inline-block;
+    margin-left:20px;
+    font-size:20px;
+    font-weight: bold;
+}
+.km_ds_roleListCount{
+    display: inline-block;
+    margin-left:20px;
+    font-size:14px;
+}
+.km_ds_userListText{
+    display: inline-block;
+    margin-left:20px;
+    font-size:20px;
+    font-weight: bold;
+}
+.km_ds_userListCount{
+    display: inline-block;
+    margin-left:20px;
+    font-size:14px;
+}
+.km_ds_userGroupText{
+    display: inline-block;
+    margin-left:80px;
+    font-size:14px;
+}
+.km_ds_userGroupSelect{
+    margin-left:20px;
+    top: 12px;
+    width:120px;
+    height: 26px;
+    border-radius: 5px;
+    border: 1px solid rgba(200,200,200,1);
+}
+.km_ds_roleSetting{
+    background-color :rgba(0,0,0,0.25);
+    width: 100%;
+    height: 100%;
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    z-index: 9053;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.km_ds_roleSetting_title{
+    font-weight: bold;
+    position: relative;
+    top: -14px;
+    background: rgba(255,255,255,1);
+}
+.km_ds_roleSetting_title_security{
+    font-weight: bold;
+    position: relative;
+    top: -9px;
+    background: rgba(255,255,255,1);
+}
+.km_ds_roleSetting .km_ds_rolePopUpOuter{
+    height: 500px; 
+    width: 510px; 
+    top: 10%; 
+    left: 35%; 
+    background-color: rgba(255,255,255,1); 
+    border: 3px solid rgba(240,240,240,1);
+    border-radius:7px; 
+    position: absolute;
+}
+.km_ds_roleSetting .km_ds_roleSetting_leftPanel{
+    float:left;
+    width:500px;
+    height:350px;
+}
+.km_ds_roleSetting .km_ds_roleSetting_rightPanel{
+    float:left;
+    width: 220px;
+    height:320px;
+    margin-top:10px; 
+    box-sizing: border-box;
+    border-radius: 5px;
+    border:1px solid rgba(240,240,240,1);
+}
+.km_ds_roleSetting .km_ds_roleSetting_footerPanel{
+    width:100%;
+    height:50px;
+    line-height:50px;
+    position:absolute;
+    bottom:0;
+    border-top:3px solid rgba(240,240,240,1);
+    float:left;
+    text-align:center;
+}
+.km_ds_roleSetting_infoPanel{
+    box-sizing: border-box;
+    margin-top: 10px;
+    margin-left: 10px;
+    width: 250px;
+    border: 1px solid rgba(240,240,240,1);
+    padding:5px;
+    border-radius: 5px;
+}
+.km_ds_roleSetting_infoDetail{
+    margin:0 0 10px 0;
+}
+.km_ds_roleSetting .km_ds_roleSetting_securityCheckBoxPanelOuter{
+    height:250px;
+    width:210px;
+    margin:0 5px;
+    border:1px solid rgba(200,200,200,1);
+    overflow-x: scroll;
+}
+.km_ds_roleSetting .km_ds_roleSetting_securityCheckBoxPanel{
+    height:90%;
+}
+.km_ds_roleSetting .km_ds_roleSetting_securityCheckAllPanel{
+    height:40px;
+    padding-top:5px;
+    padding-left: 5px;
+    box-sizing: border-box;
+}
+.km_ds_roleSetting .km_ds_roleSetting_securitySectionDiv{
+    float:left;
+    width:65px;
+}
+.km_ds_roleSetting .km_ds_roleSetting_securityCheckBoxPanel{
+    width:450px;
+}
+.km_ds_newUserGroupPopupContent{
+    width:100%;
+    height:60px;
+    line-height:60px;
+}
+.km_ds_newUserGroupPopupContent>span{
+    font-size: 16px;
+    display: inline-block;
+    margin:0 10px;
+}
+.km_ds_newUserGroupPopupContent>input{
+    width:70%;
+    height:25px;
+    border:2px solid rgba(220,220,220,1);
+    border-radius: 7px;
+    vertical-align: middle;
+}
+/*弹窗面板*/
+#km-cognate-panel{
+    height: 680px; 
+    width: 590px; 
+    top: 10%; 
+    left: 35%; 
+    background-color: rgba(255,255,255,1); 
+    border: 3px solid rgba(240,240,240,1); 
+    position: absolute;
+    font-size: 16px;
+}
+/*当前用户名称*/
+#km-cognate-panel .km-popup-username{
+    width: 100%;
+    height: 22px;
+    padding: 5px 0px;
+    margin: 0px;  
+}
+#km-cognate-panel .km-user-panel{
+    width: 100%;
+    height: 30px;
+    line-height: 30px;
+    padding: 4px;
+    border-bottom: 1px dashed rgba(0, 0, 0, 1);
+}
+/*所有角色列表*/
+#km-cognate-panel .km-rolelist-pannle{
+    width: 40%;
+    height: 80%;
+    margin-left: 3%; 
+    margin-top: 2%;
+    float: left;
+    border: 1px solid rgba(0, 0, 0, 0.5);
+    overflow: auto;
+    
+}
+/* 右边用户详情列 */
+#km-cognate-panel .km-userdetail-pannel{
+    width: 48%;
+    height: 80%;
+    margin-left: 3%; 
+    margin-top: 2%;
+    float: left;
+    border: 1px solid rgba(0, 0, 0, 0.5);
+    overflow: auto;
+    padding-right: 20px;
+}
+#km-cognate-panel .km-userdetail-span{
+    width: 100%;
+    height: 30px;
+    line-height: 30px;
+    padding: 4px;
+}
+#km-cognate-panel .km-userdetail{
+    padding:10px 4px;
+    width: 100%;
+    height: 30px;
+    line-height: 30px;
+    
+}
+#km-cognate-panel .km-user-span{
+    padding: 4px;
+    width: 100px;
+}
+#km-cognate-panel .km-userdetail-input{
+    width: 100px;
+    float: right;
+    height: 20px;
+}
+#km-cognate-panel .km-confirm-button{
+    float: right;
+    width: 60px;
+    height: 30px;
+    text-align: center;
+    margin-right: 20px;
+    line-height: 30px;
+    margin-top: 20px;
+}
+
+/* #km-cognate-panel .km-allrole-span{
+    width: 100%;
+    height: 30px;
+    line-height: 30px;
+    padding: 4px;
+}
+#km-cognate-panel .km-allrole-pannel{
+    height:100%;
+    width: 100%;
+    border: 1px solid rgba(0, 0, 0, 0.5);
+    overflow: auto;
+} */
+/* #km-cognate-panel .km-allrole-panne ul li{
+    list-style: none;
+    height: 20px;
+    line-height: 20px;
+    padding: 0 10px;
+} */
+/*按钮*/
+/*安全区编辑框样式*/
+.km-ds-securitySectionContainer{
+    float:left;
+    width:100px;
+    height:300px;
+}
+.km-ds-btnsContainer{
+    float:right;
+    width:80px;
+    text-align: center;
+    position: absolute;
+    bottom:25px;
+    right:0;
+}
+.km-ds-btnsContainer button{
+    width:60px;
+    height:28px;
+    margin:10px;
+}
+/*安全区选择*/
+.km_ds_selectableOuterPanel{
+    width:200px;
+    height:320px;
+    float:left;
+}
+.km_ds_selectableSecurityText{
+    width:200px;
+    height:30px;
+    padding-left:15px;
+    box-sizing: border-box;
+    font-size: 14px;
+    line-height:30px;
+}
+.km_ds_selectableSecurityPanel{
+    width:180px;
+    height:270px;
+    border:1px solid rgba(220, 220, 220, 1);
+    margin-left:15px;
+    overflow-y:auto;
+}
+.km_ds_active{
+    background-color: rgba(50,150,255,1);
+    color: rgba(255,255,255,1)
+}
+.km_ds_hidden{
+    display:none;
+}
+.km_ds_show{
+    display:block;
+}
+.km_ds_operateBtnPanel{
+    width:100px;
+    height:320px;
+    float:left;
+    padding-top:97px;
+    box-sizing: border-box;
+}
+.km_ds_arrowBtn{
+    display: block;
+    margin:10px auto;
+    width:50px;
+    height:24px;
+}
+.km_ds_selectedOuterPanel{
+    width:200px;
+    height:320px;
+    float:left;
+}
+.km_ds_selectedText{
+    width:200px;
+    height:30px;
+    font-size: 14px;
+    line-height:30px;
+}
+.km_ds_selectedPanel{
+    width:180px;
+    height:270px;
+    border:1px solid rgba(220, 220, 220, 1);
+    margin-right:15px;
+    overflow-y:auto;
+}
+/*用户管理*/
+.km_ds_user_btnPanel{
+    width:100%;
+    height:50px;
+    box-sizing: border-box;
+    line-height:50px;
+    padding-bottom:5px;
+    position: relative;
+}
+.km_ds_userConfig_userDetailPanel{
+    box-sizing: border-box;
+    padding-left: 10px;
+}
+.km_ds_userConfig_outTimeConfigContent{
+    box-sizing: border-box;
+    padding-left: 10px;
+}
+.km_ds_userConfig_logonTimeOutPanel,.km_ds_userConfig_userTimeOutPanel{
+    margin-top:5px;
+}
+.km_ds_userConfig_logonTimeOutPanel{
+    display: inline-block;
+    width:50%;
+}
+.km_ds_userConfig_userTimeOutPanel{
+    display: inline-block;
+    width:50%;
+}
+.km_ds_userConfigCheckbox{
+    position:relative;
+    top:3px;
+    margin:0;
+}
+.km_ds_userConfig_logonConfigPanel{
+    box-sizing: border-box;
+    width:100%;
+    height:50px;
+}
+.km_ds_userConfig_logonConfigPanel>div{
+    width:100%;
+    padding-left: 10px;
+    box-sizing: border-box;
+}
+.km_ds_userConfig_text{
+    position:relative;
+    top:5px;
+    font-weight: bold;
+}
+.km_ds_userConfig_mandateLoginBar{
+    width: 50%;
+    display: inline-block;
+}
+/*用户管理扩展信息*/
+.km_ds_detailInfoPanel>div{
+    float:left;
+    width:50%;
+}
+.km_ds_detailInfoPanel{
+    box-sizing: border-box;
+    padding-left:10px;
+}

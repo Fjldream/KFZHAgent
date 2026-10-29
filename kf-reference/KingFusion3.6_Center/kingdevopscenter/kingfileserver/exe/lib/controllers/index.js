@@ -1,0 +1,1 @@
+const controllers={};controllers.upload=require("./upload"),controllers.download=require("./download"),controllers.images=require("./images"),controllers.projects=require("./projects"),controllers.execs=require("./execs"),controllers.resourceVerify=require("./resource_verify"),module.exports=controllers;

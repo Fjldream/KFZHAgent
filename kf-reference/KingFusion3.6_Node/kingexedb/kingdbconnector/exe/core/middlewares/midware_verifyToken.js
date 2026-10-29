@@ -1,0 +1,1 @@
+const OauthClient=require(`${global.commonDir}/oauth-utils-exedb`),host=global.externalConfig.kingGateway.host;let oauthClient=new OauthClient({host});module.exports=oauthClient.tokenCheckMidderwares();

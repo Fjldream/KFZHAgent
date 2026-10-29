@@ -1,0 +1,1 @@
+const routerConfig={};routerConfig.project=require("./project_router_config"),routerConfig.projectGroup=require("./projectGroup_router_config.js"),routerConfig.alarm=require("./alarm_router_config.js"),module.exports=routerConfig;

@@ -1,0 +1,1 @@
+var LQM_S_to_D_map=[{ds_name:"LqmLinuxRBD",map:{"group0.tag0":"tag0","group0.tag1":"Tag2501","group0.tag2":"Tag2502","group0.tag3":"Tag1"}},{ds_name:"ds3",map:{tagS4:"tagD1",tagS6:"tagD2",tagS7:"tagD3",tagS8:"tagD5"}},{ds_name:"ds2",map:{tagS9:"tagD7",tagS12:"tagD8",tagS12:"tagD9",tagS14:"tagD10"}}];

@@ -1,0 +1,119 @@
+const khInterface = require("../interface/kh_interface.js"),
+    {
+        DATASOURCEMESSAGE
+    } = require(__dir + "/core/enums").enumCode;
+class khManger {
+    getDataInfo(e) {
+        let I = null;
+        for (let n = 0; n < dataInfoKH.length; n++)
+            if (dataInfoKH[n].name == e) {
+                I = dataInfoKH[n];
+                break
+            } return I
+    }
+    async KHAddDatas(e, I, n, A) {
+        let a = appAllInfo.getAppNameIPPortMap(),
+            t = this.getDataInfo(e);
+        if (!t) return logger.log("error", "KHAddDatas dataSourceName: " + e + " not find"), DATASOURCEMESSAGE.APPERR_INVAILD_INPARAM;
+        if (!a.has(t.serverName)) return logger.log("error", "\u672A\u83B7\u53D6\u5230\u6570\u636E\u6E90\u540D\u79F0\u4E3A" + e + "\u7684ip\u3001\u7AEF\u53E3\u4FE1\u606F\u3002\u3002\u3002"), DATASOURCEMESSAGE.APPERR_INVAILD_INPARAM;
+        let o = a.get(t.serverName);
+        return t.IP2 = o.ip, t.portHttp = o.port, t.nginxHttpType = o.nginxHttpType, await khInterface.KHAddDatasPool(token, t, I, n, A)
+    }
+    async KHQueryRawDatas(e, I, n, A, a, t, o, p, g) {
+        let i = appAllInfo.getAppNameIPPortMap(),
+            r = this.getDataInfo(e);
+        if (!r) return logger.log("error", "KHQueryRawDatas dataSourceName: " + e + " not find"), DATASOURCEMESSAGE.APPERR_INVAILD_INPARAM;
+        if (!i.has(r.serverName)) return logger.log("error", "\u672A\u83B7\u53D6\u5230\u6570\u636E\u6E90\u540D\u79F0\u4E3A" + e + "\u7684ip\u3001\u7AEF\u53E3\u4FE1\u606F\u3002\u3002\u3002"), DATASOURCEMESSAGE.APPERR_INVAILD_INPARAM;
+        let l = i.get(r.serverName);
+        return r.IP2 = l.ip, r.portHttp = l.port, r.nginxHttpType = l.nginxHttpType, await khInterface.KHQueryRawDatasPool(token, r, I, n, A, a, t, o, p, g)
+    }
+    async KHQuerySampleDatas1(e, I, n, A, a, t) {
+        let o = appAllInfo.getAppNameIPPortMap(),
+            p = this.getDataInfo(e);
+        if (!p) return logger.log("error", "KHQuerySampleDatas1 dataSourceName: " + e + " not find"), DATASOURCEMESSAGE.APPERR_INVAILD_INPARAM;
+        if (!o.has(p.serverName)) return logger.log("error", "\u672A\u83B7\u53D6\u5230\u6570\u636E\u6E90\u540D\u79F0\u4E3A" + e + "\u7684ip\u3001\u7AEF\u53E3\u4FE1\u606F\u3002\u3002\u3002"), DATASOURCEMESSAGE.APPERR_INVAILD_INPARAM;
+        let g = o.get(p.serverName);
+        return p.IP2 = g.ip, p.portHttp = g.port, p.nginxHttpType = g.nginxHttpType, await khInterface.KHQuerySampleDatas1Pool(token, p, I, n, A, a, t)
+    }
+    async KHQuerySampleDatas2(e, I, n, A, a, t, o, p, g) {
+        let i = appAllInfo.getAppNameIPPortMap(),
+            r = this.getDataInfo(e);
+        if (!r) return logger.log("error", "KHQuerySampleDatas2 dataSourceName: " + e + " not find"), DATASOURCEMESSAGE.APPERR_INVAILD_INPARAM;
+        if (!i.has(r.serverName)) return logger.log("error", "\u672A\u83B7\u53D6\u5230\u6570\u636E\u6E90\u540D\u79F0\u4E3A" + e + "\u7684ip\u3001\u7AEF\u53E3\u4FE1\u606F\u3002\u3002\u3002"), DATASOURCEMESSAGE.APPERR_INVAILD_INPARAM;
+        let l = i.get(r.serverName);
+        return r.IP2 = l.ip, r.portHttp = l.port, r.nginxHttpType = l.nginxHttpType, await khInterface.KHQuerySampleDatas2Pool(token, r, I, n, A, a, t, o, p, g)
+    }
+    async KHGetCurrentValue(e, I, n, A) {
+        let a = appAllInfo.getAppNameIPPortMap(),
+            t = this.getDataInfo(e);
+        if (!t) return logger.log("error", "KHGetCurrentValue dataSourceName: " + e + " not find"), DATASOURCEMESSAGE.APPERR_INVAILD_INPARAM;
+        if (!a.has(t.serverName)) return logger.log("error", "\u672A\u83B7\u53D6\u5230\u6570\u636E\u6E90\u540D\u79F0\u4E3A" + e + "\u7684ip\u3001\u7AEF\u53E3\u4FE1\u606F\u3002\u3002\u3002"), DATASOURCEMESSAGE.APPERR_INVAILD_INPARAM;
+        let o = a.get(t.serverName);
+        return t.IP2 = o.ip, t.portHttp = o.port, t.nginxHttpType = o.nginxHttpType, await khInterface.KHGetCurrentValuePool(token, t, I, n, A)
+    }
+    AsynKHAddDatas(e, I, n, A) {
+        let a = appAllInfo.getAppNameIPPortMap(),
+            t = this.getDataInfo(e);
+        if (!t) {
+            logger.log("error", "AsynKHAddDatas dataSourceName: " + e + " not find"), n(DATASOURCEMESSAGE.APPERR_INVAILD_INPARAM, []);
+            return
+        }
+        if (!a.has(t.serverName)) {
+            logger.log("error", "\u672A\u83B7\u53D6\u5230\u6570\u636E\u6E90\u540D\u79F0\u4E3A" + e + "\u7684ip\u3001\u7AEF\u53E3\u4FE1\u606F\u3002\u3002\u3002"), n(DATASOURCEMESSAGE.APPERR_INVAILD_INPARAM, []);
+            return
+        }
+        let o = a.get(t.serverName);
+        t.IP2 = o.ip, t.portHttp = o.port, t.nginxHttpType = o.nginxHttpType, khInterface.AsynKHAddDatasPool(token, t, I, n, A)
+    }
+    AsynKHQueryRawDatas(e, I, n, A, a, t, o, p, g) {
+        let i = appAllInfo.getAppNameIPPortMap(),
+            r = this.getDataInfo(e);
+        if (!r) {
+            logger.log("error", "AsynKHQueryRawDatas dataSourceName: " + e + " not find"), p(DATASOURCEMESSAGE.APPERR_INVAILD_INPARAM, []);
+            return
+        }
+        if (!i.has(r.serverName)) {
+            logger.log("error", "\u672A\u83B7\u53D6\u5230\u6570\u636E\u6E90\u540D\u79F0\u4E3A" + e + "\u7684ip\u3001\u7AEF\u53E3\u4FE1\u606F\u3002\u3002\u3002"), p(DATASOURCEMESSAGE.APPERR_INVAILD_INPARAM, []);
+            return
+        }
+        let l = i.get(r.serverName);
+        r.IP2 = l.ip, r.portHttp = l.port, r.nginxHttpType = l.nginxHttpType, khInterface.AsynKHQueryRawDatasPool(token, r, I, n, A, a, t, o, p, g)
+    }
+    AsynKHQuerySampleDatas1(e, I, n, A, a, t) {
+        let o = appAllInfo.getAppNameIPPortMap(),
+            p = this.getDataInfo(e);
+        if (!p) {
+            logger.log("error", "AsynKHQuerySampleDatas1 dataSourceName: " + e + " not find"), a(DATASOURCEMESSAGE.APPERR_INVAILD_INPARAM, []);
+            return
+        }
+        if (!o.has(p.serverName)) {
+            logger.log("error", "\u672A\u83B7\u53D6\u5230\u6570\u636E\u6E90\u540D\u79F0\u4E3A" + e + "\u7684ip\u3001\u7AEF\u53E3\u4FE1\u606F\u3002\u3002\u3002"), a(DATASOURCEMESSAGE.APPERR_INVAILD_INPARAM, []);
+            return
+        }
+        let g = o.get(p.serverName);
+        p.IP2 = g.ip, p.portHttp = g.port, p.nginxHttpType = g.nginxHttpType, khInterface.AsynKHQuerySampleDatas1Pool(token, p, I, n, A, a, t)
+    }
+    AsynKHQuerySampleDatas2(e, I, n, A, a, t, o, p, g) {
+        let i = appAllInfo.getAppNameIPPortMap(),
+            r = this.getDataInfo(e);
+        if (!r) {
+            logger.log("error", "KHQueryRawDatas dataSourceName: " + e + " not find"), p(DATASOURCEMESSAGE.APPERR_INVAILD_INPARAM, []);
+            return
+        }
+        if (!i.has(r.serverName)) {
+            logger.log("error", "\u672A\u83B7\u53D6\u5230\u6570\u636E\u6E90\u540D\u79F0\u4E3A" + e + "\u7684ip\u3001\u7AEF\u53E3\u4FE1\u606F\u3002\u3002\u3002"), p(DATASOURCEMESSAGE.APPERR_INVAILD_INPARAM, []);
+            return
+        }
+        let l = i.get(r.serverName);
+        r.IP2 = l.ip, r.portHttp = l.port, r.nginxHttpType = l.nginxHttpType, khInterface.AsynKHQuerySampleDatas2Pool(token, r, I, n, A, a, t, o, p, g)
+    }
+    AsynKHGetCurrentValue(e, I, n, A) {
+        let a = appAllInfo.getAppNameIPPortMap(),
+            t = this.getDataInfo(e);
+        if (!t) return logger.log("error", "KHQueryRawDatas dataSourceName: " + e + " not find"), DATASOURCEMESSAGE.APPERR_INVAILD_INPARAM;
+        if (!a.has(t.serverName)) return logger.log("error", "\u672A\u83B7\u53D6\u5230\u6570\u636E\u6E90\u540D\u79F0\u4E3A" + e + "\u7684ip\u3001\u7AEF\u53E3\u4FE1\u606F\u3002\u3002\u3002"), DATASOURCEMESSAGE.APPERR_INVAILD_INPARAM;
+        let o = a.get(t.serverName);
+        t.IP2 = o.ip, t.portHttp = o.port, t.nginxHttpType = o.nginxHttpType, khInterface.AsynKHGetCurrentValuePool(token, t, I, n, A)
+    }
+}
+module.exports = new khManger;

@@ -1,0 +1,1 @@
+class NativeProcessNetworkMetric{constructor(){this.networkRevBytes=0,this.networkSendBytes=0}setNetworkRevBytes(e){this.networkRevBytes=e}getNetworkRevBytes(){return this.networkRevBytes}setNetworkSendBytes(e){this.networkSendBytes=e}getNetworkSendBytes(){return this.networkSendBytes}}module.exports=NativeProcessNetworkMetric;

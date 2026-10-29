@@ -1,0 +1,414 @@
+.km-ds-popup-wrap{
+    background-color :rgba(0,0,0,0.25);
+    width: 100%;
+    height: 100%;
+    position: absolute !important;
+    top: 0 !important;  
+    left: 0 !important;
+    z-index:10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.km-ds-popup-panel{
+    min-width: 400px;
+    background-color: rgba(255,255,255,1);
+    border: 3px solid rgba(240,240,240,1);
+    border-radius: 7px;
+    position: absolute;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.km-ds-popup-titlebar{
+    height: 40px;
+    background-color: rgba(240,240,240,1);
+    text-align: left;
+    line-height: 40px;
+    padding-left: 15px;
+    font-size: 16px;
+}
+
+.km-ds-popup-closeSpan{
+    float: right;
+    margin-right: 15px;
+    background-image: url('../images/images/close.png');
+    background-repeat: no-repeat;
+    background-position: center;
+    width: 14px;
+    height: 14px;
+    margin-top: 12px;
+}
+
+.km-ds-popup-maxSpan{
+    float: right;
+    width: 14px;
+    height: 14px;
+    color: #000000;
+    margin-right:8px;
+    margin-top: 10px;
+    cursor: pointer;
+}
+
+.km-ds-popup-closeSpan:hover {
+    cursor: pointer;
+    background-color: #ccc; 
+}
+
+.km-ds-popup-content{
+    width: 100%;
+    padding: 20px;
+    box-sizing: border-box;
+    overflow: auto;
+}
+
+.km-ds-popup-footerPanel{
+    height: 50px;
+    line-height: 50px;
+    text-align: right;
+    border-top: 2px solid rgba(240,240,240,1);
+    background: #f0f0f0;
+    box-sizing: border-box;
+}
+
+.km-ds-popup-margin-right{
+    margin-right:20px;
+}
+.km_ds_roleSetting_title{
+    font-weight: bold;
+    position: relative;
+    top: -14px;
+    background: rgba(255,255,255,1);
+}
+.km_ds_roleSetting_title_security{
+    font-weight: bold;
+    position: relative;
+    top: -9px;
+    background: rgba(255,255,255,1);
+}
+.km_ds_roleSetting_page_security{
+    position: relative;
+    line-height: 30px;
+    font-size: 12px;
+    background: rgba(243,243,243,1);
+}
+.km_ds_roleSetting .km_ds_rolePopUpOuter{
+    height: 520px; 
+    width: 500px; 
+    top: 10%; 
+    left: 35%; 
+    background-color: rgba(255,255,255,1); 
+    border: 3px solid rgba(240,240,240,1);
+    border-radius:7px; 
+    position: absolute;
+}
+.km_ds_roleSetting .km_ds_roleSetting_leftPanel{
+    float:left;
+    width:500px;
+    height:350px;
+}
+.km_ds_wrap {
+    position: absolute;
+    width:100%;
+    height:100%;
+    z-index: 5000;
+    background: rgba(0,0,0,0.5)
+}
+.km_ds__safePanel {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right:0;
+    bottom: 0;
+    width: 300px;
+    height:350px;
+    margin:300px auto 0;
+    background: #fff;
+}
+.km_ds_projectVariable {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right:0;
+    bottom: 0;
+    width: 650px;
+    height:400px;
+    margin:300px auto 0;
+    background: #fff;
+}
+.km_ds_variableTitle{
+    height:28px;
+    background:#f0f0f0;
+    overflow: hidden;
+    border-radius:8px;
+}
+.km_ds_titleContent{
+    font-size:14px;
+    line-height: 28px;
+    padding-left:20px;
+    float: left;
+}
+.km_ds_km_ds_projectVariableClose{
+    font-size:14px;
+    line-height: 28px;
+    padding-right:20px;
+    font-weight: bold;
+    float: right;
+}
+.km_ds_variableBody{
+    width: 100%;
+    height:332px;
+    overflow: hidden;
+}
+.km_ds_dataSource{
+    float: left;
+    width: 29.5%;
+    height:100%;
+    border-right:1px solid #ccc;
+    padding-left: 10px;
+    box-sizing: border-box;
+    padding-top:10px;
+    /* bug 0003998 修改树结构为超出可拖拽形式 */
+    overflow: auto;
+}
+.km_ds_variablePanel{
+    float: left;
+    height:100%;
+    width: 70%;
+}
+.km_ds_variableSearch{
+    height:40px;
+    border-bottom: 1px solid #aaa;
+}
+.km_ds_variableGridPanel{
+    height:90%;
+    width:100%;
+    box-sizing: border-box;
+    border-top:1px solid rgba(240,240,240,1);
+}
+.km_ds_bottomPanel{
+    height:40px;
+    background:#f0f0f0;
+    overflow: hidden;
+    box-sizing: border-box;
+    padding-top:5px;
+}
+.km_ds_confirm{
+    float: right;
+    width:70px;
+    height:30px;
+    background: #1d83e8;
+    font-size:14px;
+    line-height: 30px;
+    text-align: center;
+    border-radius: 4px;
+    color:#fff;
+}
+.km_ds_cancel{
+    float: right;
+    width:70px;
+    height:30px;
+    background: #1d83e8;
+    font-size:14px;
+    line-height: 30px;
+    text-align: center;
+    margin-right:20px;
+    margin-left:40px;
+    border-radius: 4px;
+    color:#fff;
+}
+.km_ds_roleSetting .km_ds_roleSetting_rightPanel{
+    float:left;
+    width: 415px;
+    height:320px;
+    margin-top:10px; 
+    box-sizing: border-box;
+    border-radius: 5px;
+    border:1px solid rgba(240,240,240,1);
+}
+.km_ds_roleSetting .km_ds_roleSetting_footerPanel{
+    width:100%;
+    height:50px;
+    line-height:50px;
+    position:absolute;
+    bottom:0;
+    border-top:3px solid rgba(240,240,240,1);
+    float:left;
+    text-align:center;
+}
+.km_ds_roleSetting_infoPanel{
+    box-sizing: border-box;
+    margin-top: 10px;
+    margin-left: 10px;
+    width: 250px;
+    border: 1px solid rgba(240,240,240,1);
+    padding:5px;
+    border-radius: 5px;
+}
+
+.km_ds_roleSetting_ycr_infoPanel{
+    box-sizing: border-box;
+    margin-top: 10px;
+    margin-left: 20px;
+    width: 450px;
+    border: 1px solid rgba(240,240,240,1);
+    padding:5px;
+    border-radius: 2px;
+}
+.km_ds_roleSetting_infoDetail{
+    margin:0 0 10px 0;
+}
+.km_ds_safebody {
+    height:250px;
+    width:210px;
+    margin:14px auto 0;
+    border:1px solid rgba(200,200,200,1);
+    overflow-x: scroll;
+}
+.km_ds_safeArea{
+    width:450px;
+    float: left;
+}
+.km-btn1 {
+    margin-left:110px;
+    width: 60px;
+    border-radius: 3px;
+    border: 1px solid #666;
+    background:#f3f3f3
+}
+.km-btn2 {
+    margin-left:40px;
+    width: 60px;
+    border-radius: 3px;
+    border: 1px solid #666;
+    background:#f3f3f3
+}
+.km_ds_safeBtn {
+    position: relative;
+    bottom:-22px;
+}
+.km_ds_roleSetting .km_ds_roleSetting_securityCheckBoxPanelOuter{
+    height:250px;
+    width:400px;
+    margin:0 5px;
+    border:1px solid rgba(200,200,200,1);
+    overflow-x: scroll;
+}
+.km_ds_roleSetting .km_ds_roleSetting_securityCheckBoxPanel{
+    height:90%;
+}
+.km_ds_roleSetting .km_ds_roleSetting_securityCheckAllPanel{
+    height:40px;
+    padding-top:5px;
+    padding-left: 5px;
+    box-sizing: border-box;
+}
+.km_ds_safeSetting {
+    float:left;
+    width:65px;
+}
+.km_ds_safeSettingPanel {
+    float:left;
+    width:65px;
+}
+.km_ds_roleSetting .km_ds_roleSetting_securitySectionDiv{
+    float:left;
+    width:65px;
+}
+.km_ds_roleSetting .km_ds_roleSetting_securityCheckBoxPanel{
+    width:450px;
+}
+.km-page-set-content{
+    width:100%;
+}
+.km-page-set {
+    padding:10px 20px;
+}
+.km-page-set-datail {
+    height:32px;
+    line-height: 32px;
+    list-style: none;
+    margin-top:10px;
+}
+.km-page-set-message {
+    font-size: 14px;
+    text-align: left;
+    padding-right:30px;
+}
+.km-page-set-input {
+    width:240px;
+    height:26px;
+}
+.km-page-set-time {
+    font-size: 14px;
+    text-align: left;
+    padding-right:3px;
+}
+.km-fuzzy-body {
+    background-color: rgba(214,221,230,1);
+    position: relative;
+    /* mondified by hang.su at 2020/10/16 for bug5743 变量选择界面工具栏按钮加上悬浮提示*/
+    margin-top:15px;
+    left:51px;
+    /* end */
+}
+.km-fuzzy-result {
+    display: flex;
+    
+    width:70px;
+    height:30px;
+    left:210px;
+    position: absolute;
+    /*¨º¦Ì??¡ä1?¡À?¨®?D*/
+    align-items: center;
+	/*¨º¦Ì???????¨®?D*/
+	justify-content: center;
+	text-align: justify;
+}
+.km-fuzzy-manage {
+    border-right: 1px solid rgba(214,221,230,1);
+    
+    display: inline-block;
+    padding-top: 8px;
+    padding-right: 7px;
+    padding-left: 7px;
+    height:22px;
+    left:280px;
+    position: absolute;
+}
+.fuzzy-btn {
+    padding:8px 13px;
+    cursor: pointer;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+.fuzzy-btn:hover {
+    background-color: #ccc;
+}
+.icon-querycase {
+    background: url('../images/filemanage/pic1.png') no-repeat center;
+}
+.icon-queryall {
+    background: url('../images/filemanage/pic2.png') no-repeat center;
+}
+.icon-queryreg {
+    background: url('../images/filemanage/pic3.png') no-repeat center;
+}
+.km-variable-innerpanel {
+    width: 80%;
+    height: 55%;
+    margin: 0 auto;
+    margin-top: 15px;
+    margin-bottom: 9px;
+}
+.el-input__inner{
+    /* modified by he.chai for {Bug12218_ElementUI日期时间选择器 图标与时间显示重合} at 2021/6/16  */
+    /* padding-left:0 !important; */
+    /* end by he.chai at 2021/6/16 */
+}
+.el-select__caret{
+    /*transform: none !important*/
+}

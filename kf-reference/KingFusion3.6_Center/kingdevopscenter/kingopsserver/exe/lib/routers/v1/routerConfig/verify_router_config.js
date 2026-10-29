@@ -1,0 +1,1 @@
+const controllers=require(__dir+"/lib/controllers");module.exports={get:{"/opsResourceData":controllers.resourceVerify.getOpsResourceData,"/nodeResourceData":controllers.resourceVerify.getNodeResourceData,"/appResourceData":controllers.resourceVerify.getAppResourceData,"/balancerResourceData":controllers.resourceVerify.getBalancerResourceData},post:{},put:{},delete:{},patch:{}};

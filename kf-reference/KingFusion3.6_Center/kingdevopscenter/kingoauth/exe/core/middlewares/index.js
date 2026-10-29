@@ -1,0 +1,1 @@
+"use strict";const middleware={};middleware.resExtend=require(__DIR+"/core/middlewares/res-extend.js"),middleware.schemaValidator=require(__DIR+"/core/middlewares/schemaValidator.js"),module.exports=middleware;

@@ -1,0 +1,1 @@
+function KMScriptHotKey(){KMScriptBase.call(this)}kmUlits.extend(KMScriptHotKey,KMScriptBase),KMScriptHotKey.getInstance=function(){return KMScriptHotKey.instance===void 0&&(KMScriptHotKey.instance=new KMScriptHotKey),KMScriptHotKey.instance};

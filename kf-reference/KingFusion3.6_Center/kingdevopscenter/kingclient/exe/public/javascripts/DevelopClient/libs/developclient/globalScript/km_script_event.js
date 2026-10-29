@@ -1,0 +1,1 @@
+function KMScriptEvent(){KMScriptBase.call(this)}kmUlits.extend(KMScriptEvent,KMScriptBase),KMScriptEvent.getInstance=function(){return KMScriptEvent.instance===void 0&&(KMScriptEvent.instance=new KMScriptEvent),KMScriptEvent.instance};
