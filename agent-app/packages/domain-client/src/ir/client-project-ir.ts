@@ -6,7 +6,7 @@ import {
   type ClientProjectIR as ClientProjectIRValue,
 } from "./client-project-ir.schema.js";
 
-/** All IR control discriminants, in template-review order. */
+/** 所有IR控制判别器，按模板审查顺序排列。 */
 export const CONTROL_TYPES = [
   "text",
   "button",

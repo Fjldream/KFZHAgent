@@ -8,8 +8,7 @@ const LOCK_WINDOW_MS = 15 * 60 * 1000;
 const LOCK_DURATION_MS = 15 * 60 * 1000;
 
 /**
- * User identity lookups, password verification, and failed-login lockout.
- * Usernames are scoped to a tenant, so login is keyed by (tenant, username).
+ * 用户身份查询、密码验证和登录失败锁定。用户名以租户为作用域，因此登录以（租户，用户名）为键。
  */
 @Injectable()
 export class UsersService {
@@ -24,7 +23,7 @@ export class UsersService {
     });
   }
 
-  /** Registers one failed attempt; locks the account past the threshold. */
+  /** 注册一个失败尝试；锁定账户超过阈值。 */
   async recordLoginFailure(user: User): Promise<void> {
     const now = new Date();
     await this.prisma.auditLog.create({
@@ -53,7 +52,7 @@ export class UsersService {
     }
   }
 
-  /** Clears lockout state and resets the failed-attempt counter. */
+  /** 清除锁定状态并重置失败尝试计数。 */
   async recordLoginSuccess(user: User): Promise<void> {
     await this.prisma.user.update({
       where: { id: user.id },
@@ -78,9 +77,8 @@ export class UsersService {
   }
 
   /**
-   * Verifies the current password and stores a fresh Argon2id hash. Returns
-   * false when the current password does not match.
-   */
+ * 验证当前密码并存储新的Argon2id哈希。返回false时，当前密码不匹配。
+ */
   async changePassword(
     userId: string,
     currentPassword: string,

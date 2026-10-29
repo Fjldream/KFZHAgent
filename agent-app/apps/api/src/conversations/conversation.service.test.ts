@@ -1,3 +1,4 @@
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Test } from "@nestjs/testing";
 
@@ -22,7 +23,10 @@ import { AuditService } from "../audit/audit.service.js";
 import { DeliverySnapshotService } from "../delivery/delivery-snapshot.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { PG_POOL } from "./checkpointer.js";
-import { ConversationService } from "./conversation.service.js";
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+import { ConversationService as CurrentConversationService } from "./conversation.service.js";
+import { LegacyConversationDriver as ConversationService } from "../../test-support/legacy-conversation-driver.js";
+// end
 import {
   CONVERSATION_TURN_LEASE,
   ConversationTurnBusyError,
@@ -43,7 +47,7 @@ describe("ConversationService graph dependency wiring", () => {
     const creativeSolutionCompiler = { compile: vi.fn() };
     const moduleRef = await Test.createTestingModule({
       providers: [
-        ConversationService,
+        CurrentConversationService,
         { provide: PrismaService, useValue: {} },
         { provide: AuditService, useValue: {} },
         { provide: MODEL_PORT, useValue: {} },
@@ -58,7 +62,7 @@ describe("ConversationService graph dependency wiring", () => {
         { provide: CAPABILITY_RETRIEVAL_PORT, useValue: injectedRetrieval },
       ],
     }).compile();
-    const service = moduleRef.get(ConversationService);
+    const service = moduleRef.get(CurrentConversationService);
 
     await (service as unknown as { getGraph(): Promise<unknown> }).getGraph();
 
@@ -181,7 +185,7 @@ describe("ConversationService graph dependency wiring", () => {
       }),
       [Symbol.asyncIterator]() { return this; },
     };
-    async function* emptySource() { /* later retry */ }
+    async function* emptySource() { /* 稍后重试 */ }
     mocks.compileSolutionGraph.mockReturnValue({
       getState: vi.fn().mockResolvedValue({ values: { stage: "design-review" }, tasks: [] }),
       stream: vi.fn().mockResolvedValueOnce(source).mockResolvedValueOnce(emptySource()),
@@ -428,3 +432,4 @@ async function settlesWithin(promise: Promise<void>, timeoutMs: number): Promise
     if (timer !== undefined) clearTimeout(timer);
   }
 }
+// end

@@ -16,9 +16,9 @@ export interface IntrinsicSize {
 }
 export interface IntrinsicFontMetrics {
   readonly fontSize: number; readonly lineHeight: number; readonly letterSpacing?: number;
-  /** Per-side resolved values. */
+  /** 侧边解析值 */
   readonly padding?: Readonly<{ horizontal: number; vertical: number }>;
-  /** Per-side resolved values. */
+  /** 侧边解析值 */
   readonly border?: Readonly<{ horizontal: number; vertical: number }>;
 }
 export interface IntrinsicWidthConstraint { readonly available: number; readonly min?: number; readonly max?: number; }

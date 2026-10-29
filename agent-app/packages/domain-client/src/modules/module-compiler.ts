@@ -62,7 +62,7 @@ export interface ModuleCompilationBlockedResult {
   readonly assetBindings: readonly ResolvedAssetBinding[];
   readonly gaps: readonly ModuleDeliveryGap[];
   readonly metadata: ModuleCompilationMetadata;
-  /** Diagnostic-only candidate; blocked output can never be signed or built. */
+  /** 仅供诊断的候选项；被阻止的输出绝不能签名或构建。 */
   readonly implementation?: UIImplementationSpec;
   readonly deliveryReport?: ModuleDeliveryReport;
   readonly diff?: ModulePlanDiff;
@@ -72,18 +72,18 @@ export type ModuleCompilationOutcome = ModuleCompilationResult | ModuleCompilati
 
 export interface CompileModulePlanInput {
   readonly plan: ModulePlan;
-  /** Runtime-branded result of verifying the persisted accepted blueprint artifact. */
+  /** 对已持久化、已接受的蓝图制品进行校验后得到的运行时品牌结果。 */
   readonly acceptedBlueprintArtifact: VerifiedAcceptedBlueprintArtifact;
   readonly registry: ModuleRegistry;
-  /** Opaque IDs resolve to safe metadata only; paths and storage keys never enter this boundary. */
+  /** 不透明 ID 只能解析为安全元数据；路径和存储键绝不会进入该边界。 */
   readonly assetsById: Readonly<Record<string, ResolvedAsset>>;
-  /** Server-scoped integrity facts, never model-authored or exposed in the planning catalog. */
+  /** 服务器范围的完整性事实，绝不由模型编写，也不在规划目录中公开。 */
   readonly approvedAssetsById?: Readonly<Record<string, ApprovedAssetFacts>>;
-  /** Required only when both previousPlan and previousImplementation form a module revision. */
+  /** 当且仅当 previousPlan 和 previousImplementation 形成一个模块修订时才要求。 */
   readonly previousCompilationArtifact?: VerifiedModuleCompilationArtifact;
   readonly previousPlan?: ModulePlan;
   readonly previousImplementation?: UIImplementationSpec;
-  /** Trusted capability and WebContainer authorization facts. Strictly empty by default. */
+  /** 受信任的能力和 WebContainer 授权事实。默认情况下，严格是空的。 */
   readonly validationContext?: ModuleValidationContext;
 }
 

@@ -1,4 +1,7 @@
 import { types as utilTypes } from "node:util";
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+import { readVerifiedGeneratedStateReuse, type VerifiedGeneratedStateReuseHandle } from "./generated-state-reuse.js";
+// end
 import {
   ApprovedAssetFactsSchema,
   CapabilityCandidateBundleSchema,
@@ -36,7 +39,7 @@ import { compileResolvedStyle } from "../style/style-engine.js";
 import { resolveStyle } from "../style/theme-resolver.js";
 import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
 import { validateGeneratedComponentProperties } from "./component-properties.js";
-import { compileInteractions } from "../interaction/interaction-compiler.js";
+import { compileInteractions, interactionDiagnosticsBlockCompilation } from "../interaction/interaction-compiler.js";
 import {
   attachRuntimeCorrelation,
   readVerifiedExistingRuntimeCorrelation,
@@ -59,9 +62,13 @@ export interface CompileCreativeUIImplementationV2Input {
   readonly evidenceVersion: string;
   readonly verifiedAssets?: VerifiedCreativeAssetProofHandle;
   readonly verifiedExisting?: VerifiedExistingRuntimeCorrelationHandle;
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  readonly verifiedStateReuse?: VerifiedGeneratedStateReuseHandle;
+  // end
 }
 
-function explicitlyUnresolvedImageClickActions(plan: SolutionImplementationPlan): ReadonlySet<string> {
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+export function explicitlyUnresolvedImageClickActions(plan: SolutionImplementationPlan): ReadonlySet<string> {
   const actions = new Set<string>();
   const collect = (node: SolutionImplementationPlan["pages"][number]["root"]): void => {
     if (node.kind === "layout") { node.children.forEach(collect); return; }
@@ -76,6 +83,7 @@ function explicitlyUnresolvedImageClickActions(plan: SolutionImplementationPlan)
   plan.overlays.forEach((overlay) => collect(overlay.root));
   return actions;
 }
+// end
 
 declare const verifiedCreativeAssetProofBrand: unique symbol;
 export interface VerifiedCreativeAssetProofHandle { readonly [verifiedCreativeAssetProofBrand]: true }
@@ -103,7 +111,7 @@ interface ServerScopedCreativePayloadIssuer {
 
 export interface CreativeUIImplementationV2CompileResult {
   readonly plan: InternalChangePlan;
-  /** Compiler-owned authorization for exact Datagrid payloads present in the emitted plan. */
+  /** 编译器对精确的Datagrid数据包在生成的计划中的所有权授权。 */
   readonly semanticOperations: readonly TrustedSemanticOperationInput[];
   readonly capabilityReport: CapabilityReport;
   readonly verifiedAssets: readonly VerifiedCreativeAsset[];
@@ -161,26 +169,30 @@ function safeClone(input: unknown): unknown {
   return clone(input, 0);
 }
 
-function rootValues(input: unknown): { plain: Record<string, unknown>; existing?: VerifiedExistingRuntimeCorrelationHandle; assets?: VerifiedCreativeAssetProofHandle } {
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+function rootValues(input: unknown): { plain: Record<string, unknown>; existing?: VerifiedExistingRuntimeCorrelationHandle; assets?: VerifiedCreativeAssetProofHandle; stateReuse?: VerifiedGeneratedStateReuseHandle } {
   if (typeof input !== "object" || input === null || Array.isArray(input) || utilTypes.isProxy(input)) fail("CREATIVE_INPUT_PROXY_FORBIDDEN", "input must be a plain non-proxy object");
   const prototype: unknown = Object.getPrototypeOf(input) as unknown;
   if (prototype !== Object.prototype && prototype !== null) fail("CREATIVE_INPUT_NON_PLAIN", "input must have a plain prototype");
-  const allowed = new Set(["workspaceId", "baseRevisionId", "blueprint", "candidateBundle", "semanticPlan", "implementation", "compilerVersion", "evidenceVersion", "verifiedAssets", "verifiedExisting"]);
+  const allowed = new Set(["workspaceId", "baseRevisionId", "blueprint", "candidateBundle", "semanticPlan", "implementation", "compilerVersion", "evidenceVersion", "verifiedAssets", "verifiedExisting", "verifiedStateReuse"]);
   const descriptors = Object.getOwnPropertyDescriptors(input);
   const keys = Reflect.ownKeys(input);
-  if (keys.some((key) => typeof key !== "string" || !allowed.has(key)) || keys.length < 8 || keys.length > 10) fail("CREATIVE_INPUT_UNKNOWN_FIELD", "invalid input keys");
+  if (keys.some((key) => typeof key !== "string" || !allowed.has(key)) || keys.length < 8 || keys.length > 11) fail("CREATIVE_INPUT_UNKNOWN_FIELD", "invalid input keys");
   const plain: Record<string, unknown> = {};
   let existing: VerifiedExistingRuntimeCorrelationHandle | undefined;
   let assets: VerifiedCreativeAssetProofHandle | undefined;
+  let stateReuse: VerifiedGeneratedStateReuseHandle | undefined;
   for (const key of keys) {
     if (typeof key !== "string") continue;
     const descriptor = descriptors[key]; if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) fail("CREATIVE_INPUT_ACCESSOR_FORBIDDEN", key);
     if (key === "verifiedExisting") existing = descriptor.value as VerifiedExistingRuntimeCorrelationHandle;
+    else if (key === "verifiedStateReuse") stateReuse = descriptor.value as VerifiedGeneratedStateReuseHandle;
     else if (key === "verifiedAssets") assets = descriptor.value as VerifiedCreativeAssetProofHandle;
     else plain[key] = descriptor.value;
   }
-  return { plain: safeClone(plain) as Record<string, unknown>, ...(existing === undefined ? {} : { existing }), ...(assets === undefined ? {} : { assets }) };
+  return { plain: safeClone(plain) as Record<string, unknown>, ...(existing === undefined ? {} : { existing }), ...(assets === undefined ? {} : { assets }), ...(stateReuse === undefined ? {} : { stateReuse }) };
 }
+// end
 
 function exactString(value: unknown, field: string): string {
   if (typeof value !== "string" || value.length < 1 || value.length > 100 || value.trim() !== value) fail("CREATIVE_INPUT_INVALID", field);
@@ -346,7 +358,9 @@ function compileCreativeUIImplementationV2(
   issuer: ServerScopedCreativePayloadIssuer,
   verifiedAssetPayloads: WeakMap<object, Readonly<{ workspaceId: string; assets: readonly VerifiedCreativeAsset[] }>>,
 ): CreativeUIImplementationV2CompileResult {
-  const { plain, existing: handle, assets: assetProof } = rootValues(input);
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  const { plain, existing: handle, assets: assetProof, stateReuse } = rootValues(input);
+  // end
   const workspaceId = exactString(plain.workspaceId, "workspaceId");
   const baseRevisionId = exactString(plain.baseRevisionId, "baseRevisionId");
   const blueprint = CustomerSolutionBlueprintSchema.parse(plain.blueprint);
@@ -400,10 +414,7 @@ function compileCreativeUIImplementationV2(
   const recoverableRequestActionIds = new Set(authoritativeInteractions.diagnostics.requests
     .filter((request) => request.reason === "TRIGGER_EVENT_UNSUPPORTED" && imageClickActions.has(request.actionId))
     .map((request) => request.actionId));
-  const hasBlockingInteraction = authoritativeInteractions.diagnostics.errors.some((diagnostic) =>
-    diagnostic.code !== "INTERACTION_CLOSURE_MISSING" || !recoverableRequestActionIds.has(diagnostic.nodeId))
-    || authoritativeInteractions.diagnostics.requests.some((request) => !recoverableRequestActionIds.has(request.actionId));
-  if (hasBlockingInteraction) {
+  if (interactionDiagnosticsBlockCompilation(authoritativeInteractions.diagnostics, recoverableRequestActionIds)) {
     fail("CREATIVE_INTERACTION_COMPILATION_BLOCKED", canonicalServerHash(authoritativeInteractions.diagnostics));
   }
   if (canonicalServerHash(authoritativeInteractions.implementation) !== canonicalServerHash(implementation)) {
@@ -421,6 +432,9 @@ function compileCreativeUIImplementationV2(
     ApprovedAssetFactsSchema.parse(asset.approvedAsset); assets.set(asset.assetId, asset);
   }
   const projection = handle === undefined ? undefined : readVerifiedExistingRuntimeCorrelation(handle, workspaceId, baseRevisionId);
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  const reusedStates = stateReuse === undefined ? [] : readVerifiedGeneratedStateReuse(stateReuse, workspaceId, baseRevisionId, semanticPlan);
+  // end
   const controlSource = new Map(projection?.controls.map((entry) => [entry.semanticControlId, entry]));
   const pageSource = new Map(projection?.pages.map((entry) => [entry.semanticPageId, entry]));
   const correlationControl = new Map(runtimeCorrelation.controls.map((entry) => [entry.semanticControlId, entry.instanceName]));
@@ -461,6 +475,9 @@ function compileCreativeUIImplementationV2(
       structuredStyle: resolveStyle(semanticPlan.theme, roleStyle, control.style ?? EMPTY_STYLE) }] as const;
   }));
   const evidence = {
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    ...(reusedStates.length === 0 ? {} : { states: reusedStates.map(state => ({ ...state, existing: { ...state.existing } })) }),
+    // end
     pages: nativePages.map((page) => ({
       source: pageSource.get(page.id)?.source ?? "workspace-derived" as const,
       semanticPageId: page.id,
@@ -491,11 +508,9 @@ function compileCreativeUIImplementationV2(
   });
   const artifactHash = canonicalCreativeBuildArtifactHash(artifact);
   const operations: ChangeOperation[] = [];
-  const materializedStates: Array<{
-    semanticStateId: string; variableName: string;
-    stateType: "boolean" | "number" | "text" | "record-key" | "record-key-list";
-    dataType: 1 | 2 | 3; defaultValue: boolean | number | string | null; comment: string;
-  }> = [];
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  const materializedStates: NonNullable<TrustedNativeMaterialization["states"]> = [];
+  // end
   const stateCorrelation = new Map((runtimeCorrelation.states ?? []).map((entry) => [entry.semanticStateId, entry.variableName]));
   for (const state of [...semanticPlan.localState].sort((left, right) => compareCreativeIdentifiers(left.id, right.id))) {
     const variableName = stateCorrelation.get(state.id);
@@ -515,7 +530,11 @@ function compileCreativeUIImplementationV2(
       op: "create", entityType: "variable", entityId: variableName,
       properties: { semanticStateId: state.id, stateType: state.type, dataType, defaultValue, comment: state.purpose },
     });
-    materializedStates.push({ semanticStateId: state.id, variableName, stateType: state.type, dataType, defaultValue, comment: state.purpose });
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    const previousState = reusedStates.find(previous => previous.semanticStateId === state.id);
+    materializedStates.push({ semanticStateId: state.id, variableName, stateType: state.type, dataType, defaultValue, comment: state.purpose,
+      ...(previousState === undefined ? {} : { existing: { ...previousState.existing } }) });
+    // end
   }
   const materializedPages = nativePages.map((page, order) => {
     const pageGuid = correlationPage.get(page.id)!; const source = pageSource.get(page.id)?.source ?? "workspace-derived";

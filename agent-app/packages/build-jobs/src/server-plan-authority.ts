@@ -48,7 +48,7 @@ interface TrustedCreativePayloadIssuer {
   }): TrustedCreativePayloadHandle;
 }
 
-/** Server-only brand issued after the complete plan/artifact/materialization projection is verified. */
+/** 完整的计划/制品/物化投影通过校验后签发的服务器专用品牌。 */
 function issueTrustedCreativePayload(authorityIdentity: object, input: {
   readonly plan: InternalChangePlan;
   readonly artifact: CreativeBuildArtifact;
@@ -90,7 +90,7 @@ export interface ServerCreativeBuildFacade<TCompiler> {
   readonly compiler: TCompiler;
 }
 
-/** Same server HMAC key, with discriminator-prefixed bytes to prevent cross-artifact replay. */
+/** 使用相同的服务器 HMAC 密钥，并在字节前添加判别器前缀以防止跨制品重放。 */
 export interface AcceptedBlueprintArtifactExpectations {
   readonly projectKey?: string;
   readonly revisionId?: string;
@@ -136,7 +136,7 @@ const verifiedCreativeMaterializations = new WeakMap<object, Readonly<{
   materialization: TrustedNativeMaterialization;
 }>>();
 
-/** Mints the propertyless worker capability only from this exact authority's verified result. */
+/** 仅根据这一确切权限主体的校验结果签发无属性的 worker 能力。 */
 export function claimVerifiedCreativeMaterialization(
   authority: Pick<ServerPlanAuthority, "verify">,
   envelope: ServerPlanEnvelope,
@@ -338,7 +338,7 @@ export function createHmacServerPlanAuthority(key: Uint8Array): ServerPlanAuthor
   return createHmacServerPlanAuthorityParts(key).authority;
 }
 
-/** Server bootstrap composition: the issuer is closure-injected and never exposed by the returned authority. */
+/** 服务器启动组合：签发器通过闭包注入，返回的权限对象绝不会将其暴露。 */
 export function createHmacCreativeBuildFacade<TCompiler>(
   key: Uint8Array,
   bindCompiler: (issuer: TrustedCreativePayloadIssuer) => TCompiler,

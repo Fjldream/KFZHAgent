@@ -1,6 +1,9 @@
-// modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
 import type { PrismaClient } from "@prisma/client";
 import { FENCE_REJECTED, type ClaimedRunLease } from "./run-store.js";
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+import { recordApprovalDecision } from "./run-audit.js";
+// end
 
 export interface RunStepStore {
   findCompleted(input: {
@@ -8,7 +11,7 @@ export interface RunStepStore {
     runId: string;
     stepKey: string;
     inputHash: string;
-  }): Promise<unknown | null>;
+  }): Promise<unknown>;
   complete(input: {
     lease: ClaimedRunLease;
     tenantId: string;
@@ -32,7 +35,7 @@ export class PrismaRunStepStore implements RunStepStore {
     runId: string;
     stepKey: string;
     inputHash: string;
-  }): Promise<unknown | null> {
+  }): Promise<unknown> {
     const row = await this.prisma.agentRunStep.findFirst({
       where: {
         tenantId: input.tenantId,
@@ -59,7 +62,6 @@ export class PrismaRunStepStore implements RunStepStore {
     inputHash: string;
     output: unknown;
   }): Promise<void> {
-    const now = new Date();
     await this.prisma.$transaction(async (tx) => {
       // 旧 fence 不得写步骤结果，否则恢复时会复用过期执行者的输出。
       const leaseRows = await tx.$queryRaw<Array<{ id: string }>>`
@@ -68,10 +70,24 @@ export class PrismaRunStepStore implements RunStepStore {
           AND "tenantId" = ${input.tenantId}
           AND "leaseOwner" = ${input.lease.ownerId}
           AND "fence" = ${input.lease.fence}
-          AND "leaseExpiresAt" > ${now}
           AND "status" NOT IN ('SUCCEEDED','FAILED','CANCELLED')
+        FOR UPDATE
       `;
       if (leaseRows.length === 0) throw new Error(FENCE_REJECTED);
+
+      // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+      // 墙钟检查必须在取得行锁之后，不能使用等待锁之前的 JS 时间或事务起始时间。
+      const [check] = await tx.$queryRaw<Array<{ active: boolean }>>`
+        SELECT "leaseExpiresAt" > clock_timestamp()::timestamp AS active FROM "AgentRun"
+        WHERE "id" = ${input.lease.runId}
+      `;
+      if (check?.active !== true) throw new Error(FENCE_REJECTED);
+      if (input.stepKey === "approval-decision") {
+        const run = await tx.agentRun.findUniqueOrThrow({ where: { id: input.lease.runId } });
+        if (run.status === "CANCEL_REQUESTED") throw new Error(FENCE_REJECTED);
+        await recordApprovalDecision(tx, run, input.output);
+      }
+      // end
 
       const outputRef = JSON.stringify(input.output ?? null);
       await tx.agentRunStep.upsert({

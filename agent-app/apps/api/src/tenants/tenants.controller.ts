@@ -22,9 +22,7 @@ import { TenantGuard, type AuthenticatedRequest } from "../auth/tenant.guard.js"
 const TEMP_PASSWORD_MIN_LENGTH = 12;
 
 /**
- * Closed provisioning endpoints. No route here is reachable anonymously and
- * none creates accounts for an arbitrary requester. Tenant/user creation and
- * platform-admin content access are audit-trailed (brief Step 7).
+ * 封闭式预配端点。这里没有任何路由可匿名访问，也没有任何端点会为任意请求者创建账户。租户/用户创建以及平台管理员的内容访问都会记录审计轨迹（简要步骤 7）。
  */
 @Controller("api/tenants")
 @UseGuards(TenantGuard, RolesGuard)

@@ -4,6 +4,12 @@ import { describe, expect, it } from "vitest";
 import RunPill from "./RunPill.vue";
 
 describe("RunPill", () => {
+  it("keeps cancellation pending visible and prevents repeated stop requests", () => {
+    const wrapper = mount(RunPill, { props: { status: "CANCEL_REQUESTED" } });
+    expect(wrapper.text()).toContain("正在停止");
+    expect(wrapper.find(".btn-stop").attributes("disabled")).toBeDefined();
+    wrapper.unmount();
+  });
   it("renders only while the run is active, with elapsed seconds and stop", () => {
     const busy = mount(RunPill, { props: { status: "RUNNING", elapsedSeconds: 12 } });
     expect(busy.text()).toContain("RUNNING");
@@ -20,9 +26,9 @@ describe("RunPill", () => {
     expect(wrapper.emitted("stop")).toHaveLength(1);
   });
 
-  it("hides the stop button when the run is not cancelable", () => {
+  it("disables the stop button when server cancellation is unavailable", () => {
     const wrapper = mount(RunPill, { props: { status: "QUEUED", cancelable: false } });
-    expect(wrapper.find(".btn-stop").exists()).toBe(false);
+    expect(wrapper.find(".btn-stop").attributes("disabled")).toBeDefined();
   });
 });
 // end

@@ -10,7 +10,9 @@ assertSafeTestDatabase({
 });
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { createRunTestFixture, messageInput, type RunTestFixture } from "./run-test-fixture.js";
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+import { createRunTestFixture, messageInput, runTestPolicy, type RunTestFixture } from "./run-test-fixture.js";
+// end
 import { GraphRunExecutor, RunPaused, type ExecutableStep } from "./run-executor.js";
 import { PrismaRunStepStore } from "./run-step-store.js";
 import { PrismaRunStore } from "./run-store.js";
@@ -61,7 +63,7 @@ describe("run executor", () => {
       where: { runId: lease.runId }, orderBy: { seq: "asc" },
     });
     expect(events.map((event) => event.type)).toEqual([
-      "run.queued", "step.started", "step.completed", "step.started", "step.completed", "run.finished",
+      "run.queued", "run.started", "step.started", "step.completed", "step.started", "step.completed", "run.completed",
     ]);
     const completed = await fixture.prisma.agentRunStep.findMany({
       where: { runId: lease.runId, status: "COMPLETED" },
@@ -103,18 +105,21 @@ describe("run executor", () => {
     expect(failed).toHaveLength(1);
   });
 
-  it("finishes as CANCELLED when the signal is already aborted", async () => {
+  it("leaves a recoverable lease on worker shutdown rather than pretending the build was cancelled", async () => {
     const lease = await startRun("exec-cancel");
     const controller = new AbortController();
     controller.abort();
     const executor = new GraphRunExecutor({ store: fixture.store, steps });
 
-    const snapshot = await executor.execute(lease, fixture.tenantA, [step()], controller.signal);
-    expect(snapshot).toMatchObject({ status: "CANCELLED", failureCode: "RUN_CANCELLED" });
+    await expect(executor.execute(lease, fixture.tenantA, [step()], controller.signal)).rejects.toThrow("run aborted");
+    const row = await fixture.prisma.agentRun.findUniqueOrThrow({ where: { id: lease.runId } });
+    expect(row.status).toBe("RUNNING");
   });
 
   it("keeps the lease alive across a step that outlives the lease window", async () => {
-    const shortStore = new PrismaRunStore(fixture.prisma, 60);
+    // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+    const shortStore = new PrismaRunStore(fixture.prisma, 60, runTestPolicy([fixture.tenantA]));
+    // end
     await fixture.resetRuns();
     const conversationId = await fixture.newConversation();
     const created = await shortStore.create(messageInput(fixture, "exec-renew", "长任务", { conversationId }));

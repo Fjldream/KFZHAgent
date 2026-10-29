@@ -12,7 +12,7 @@ export interface ControlGeometryIssue {
   message: string;
 }
 
-/** Shared geometry policy for generated IR and ChangePlan control creation. */
+/** 共享几何政策，用于生成IR和ChangePlan控制创建。 */
 export function controlGeometryIssues(
   capabilityId: string,
   geometry: ControlGeometryInput,

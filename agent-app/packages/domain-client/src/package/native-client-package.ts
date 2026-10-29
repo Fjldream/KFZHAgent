@@ -13,19 +13,17 @@ import {
 } from "./safe-unzip.js";
 
 /**
- * KF native client package IO.
+ * KF 客户端包文件系统。
  *
- * A native client `.gz` file is a ZIP container holding exactly one version
- * directory (`x.y.z.w`) plus optional, allow-listed top-level metadata. This
- * module provides safe import (unpacking) and deterministic packaging.
+ * 一个客户端`.gz` 文件是一个 ZIP 容器，包含一个精确版本目录（`x.y.z.w`）以及可选的允许列表顶部元数据。本模块提供安全导入（解压缩）和确定性包装。
  */
 
-/** Normalized timestamp for every entry so identical inputs pack identically. */
+/** 每个条目中的标准化时间戳，以确保相同的输入打包相同的内容。 */
 export const PACKAGE_FIXED_MTIME = new Date("2020-01-01T00:00:00.000Z");
 
 const VERSION_DIR_RE = /^\d+\.\d+\.\d+\.\d+$/;
 
-/** Top-level metadata files allowed next to the version directory. */
+/** 允许在版本目录旁边的所有顶级元数据文件。 */
 const ALLOWED_TOP_LEVEL_METADATA = new Set([
   "readme.md",
   "readme.txt",
@@ -39,7 +37,7 @@ const ALLOWED_TOP_LEVEL_METADATA = new Set([
   "package.json",
 ]);
 
-/** Path segments excluded from packaged output. */
+/** 打包输出中排除的路径段。 */
 const EXCLUDED_PATH_SEGMENTS = new Set([
   // pagerecord 骨架（pageRecordManager.json/空 recordpages）由编译器生成、
   // KF 打开工程必需，必须打进产物；排除它会导致每次部署都要手动补。
@@ -51,20 +49,18 @@ const EXCLUDED_PATH_SEGMENTS = new Set([
   "node_modules",
 ]);
 
-/** Basenames excluded from packaged output. */
+/** 打包输出中排除的基名。 */
 const EXCLUDED_BASENAMES = new Set([".ds_store", "thumbs.db"]);
 
 const ZIP_LEVEL = 6;
 const FILE_MODE = 0o644 << 16;
 const DIR_MODE = 0o755 << 16;
 
-// ZIP record signatures and DOS time/date layout.
+// ZIP记录签名和DOS时间/日期布局。
 const LOCAL_SIG = 0x04034b50;
 const CEN_SIG = 0x02014b50;
 const EOCD_SIG = 0x06054b50;
-// Fixed DOS date for 2020-01-01 (UTC): ((2020-1980) << 9) | (1 << 5) | 1 = 0x5021.
-// The DOS time is 0 (00:00:00). Written byte-for-byte so the archive does not
-// depend on the local time zone of the packaging host.
+// 2020-01-01（UTC）的固定 DOS 日期：((2020-1980) << 9) | (1 << 5) | 1 = 0x5021。DOS 时间为 0（00:00:00）。按字节直接写入，避免归档结果依赖打包主机的本地时区。
 const DOS_DATE_FIXED = 0x5021;
 
 function readU16(data: Uint8Array, offset: number): number {
@@ -95,15 +91,9 @@ function locateEndOfCentralDirectory(data: Uint8Array): number {
 }
 
 /**
- * Overwrites the DOS time/date fields of every local file header and central
- * directory entry with a fixed value. fflate encodes those fields using the
- * host's local time zone (see its wzh() helper), so without this normalization
- * the same input packs to different bytes under different TZ settings, which
- * would break SHA-256 integrity across machines.
+ * 使用固定值覆盖每个本地文件头和中央目录项中的 DOS 时间/日期字段。fflate 通过主机本地时区对这些字段编码（参见其 wzh() 辅助函数）；如果不进行此规范化，同一输入在不同 TZ 设置下会打包成不同字节，从而破坏跨机器的 SHA-256 完整性。
  *
- * Layout note: a local file header stores DOS time at +10 and DOS date at +12;
- * a central directory entry stores them at +12/+14 because it has an extra
- * two-byte "version made by" field after the signature.
+ * 布局说明：本地文件头将 DOS 时间存储在 +10、日期存储在 +12；中央目录项则分别存储在 +12/+14，因为它在签名后多了一个两字节的“version made by”字段。
  */
 function normalizeZipTimestamps(data: Uint8Array): Uint8Array {
   const eocd = locateEndOfCentralDirectory(data);
@@ -115,16 +105,16 @@ function normalizeZipTimestamps(data: Uint8Array): Uint8Array {
     if (readU32(data, pos) !== CEN_SIG) {
       throw new Error("corrupt ZIP during timestamp normalization");
     }
-    // Central directory entry: DOS time at +12, DOS date at +14.
+    // 中央目录条目：+12的DOS时间，+14的DOS日期。
     writeU16(data, pos + 12, 0);
     writeU16(data, pos + 14, DOS_DATE_FIXED);
 
-    // Corresponding local file header (offset stored at +42 in the CEN entry).
+    // 与CEN条目中存储的+42相对应的本地文件头。
     const localOffset = readU32(data, pos + 42);
     if (readU32(data, localOffset) !== LOCAL_SIG) {
       throw new Error("corrupt ZIP during timestamp normalization");
     }
-    // Local file header: DOS time at +10, DOS date at +12.
+    // 本地文件头：+10的DOS时间，+12的DOS日期。
     writeU16(data, localOffset + 10, 0);
     writeU16(data, localOffset + 12, DOS_DATE_FIXED);
 
@@ -138,7 +128,7 @@ function normalizeZipTimestamps(data: Uint8Array): Uint8Array {
 }
 
 export interface ImportNativeClientPackageOptions {
-  /** Overrides for the safe-unzip limits (merged over defaults). */
+  /** 为安全解压限制设置的覆盖值（合并到默认值中）。 */
   limits?: Partial<UnzipLimits>;
 }
 

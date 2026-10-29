@@ -12,6 +12,20 @@ const validEvent = {
 };
 
 describe("RunActionSchema", () => {
+  // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+  it("preserves bounded visual receipt and choices in action identity while reading old internal actions", () => {
+    const legacy = { type: "accept_visual_reference", expectedRunId: "r1", analysisId: "a1", analysisHash: "a".repeat(64) };
+    const action = { ...legacy, receipt: `vref1:${"b".repeat(64)}:${"c".repeat(64)}`,
+      acceptedDifferences: [{ regionId: "heading", disposition: "omit", capabilityId: null, reason: "不生成标题" }] };
+    expect(RunActionSchema.parse(action)).toEqual(action);
+    expect(RunActionSchema.parse(legacy)).toEqual(legacy);
+    for (const invalid of [{ ...action, route: {} }, { ...action, receipt: "forged" },
+      { ...action, acceptedDifferences: Array.from({ length: 101 }, () => action.acceptedDifferences[0]) },
+      { ...action, acceptedDifferences: [{ ...action.acceptedDifferences[0], native: {} }] }]) {
+      expect(RunActionSchema.safeParse(invalid).success).toBe(false);
+    }
+  });
+  // end
   it("accepts the five documented actions", () => {
     expect(RunActionSchema.safeParse({ type: "message", text: "生成一个页面" }).success).toBe(true);
     expect(RunActionSchema.safeParse({ type: "confirm_blueprint", expectedRunId: "r1", receipt: "abc" }).success)

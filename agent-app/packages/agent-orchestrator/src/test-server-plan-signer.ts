@@ -4,7 +4,7 @@ import {
 } from "@kf/contracts";
 import type { ServerPlanSignerPort } from "./ports.js";
 
-/** Test-only structural signer; cryptographic behavior is tested in @kf/build-jobs. */
+/** 仅用于测试的结构签名；加密行为在@kf/build-jobs中测试。 */
 export const TEST_SERVER_PLAN_SIGNER: ServerPlanSignerPort = Object.freeze({
   sign(input: Parameters<ServerPlanSignerPort["sign"]>[0]) {
     return ServerPlanEnvelopeSchema.parse({

@@ -1,0 +1,1128 @@
+{
+  "schemaVersion": 1,
+  "analysisId": "a8ee5694-46af-4b7e-8d9f-aa9c873f0806",
+  "specHash": "b47dc840412561e070443f807f70eaa40462cc5b7c14d0992bcb286a177e1cac",
+  "spec": {
+    "schemaVersion": 1,
+    "sourceAssetId": "1358c388-5419-4205-81cc-f2d4d098b25f",
+    "sourceHash": "3a79f4361e1e48b80ce64b1ec4053be63b4827df1c3f42deb5c7887bd3f2488c",
+    "viewport": {
+      "width": 1586,
+      "height": 992
+    },
+    "regions": [
+      {
+        "id": "root",
+        "parentId": null,
+        "role": "content",
+        "box": {
+          "x": 0,
+          "y": 0,
+          "width": 1,
+          "height": 1
+        },
+        "text": [],
+        "confidence": 0.9,
+        "interactionHint": null
+      },
+      {
+        "id": "header",
+        "parentId": "root",
+        "role": "header",
+        "box": {
+          "x": 0,
+          "y": 0,
+          "width": 1,
+          "height": 0.087
+        },
+        "text": [],
+        "confidence": 0.92,
+        "interactionHint": null
+      },
+      {
+        "id": "title",
+        "parentId": "header",
+        "role": "text",
+        "box": {
+          "x": 0.022,
+          "y": 0.018,
+          "width": 0.152,
+          "height": 0.05
+        },
+        "text": [
+          "能源管理系统"
+        ],
+        "confidence": 0.95,
+        "interactionHint": null
+      },
+      {
+        "id": "pageTitle",
+        "parentId": "header",
+        "role": "text",
+        "box": {
+          "x": 0.193,
+          "y": 0.025,
+          "width": 0.105,
+          "height": 0.033
+        },
+        "text": [
+          "园区能源总览"
+        ],
+        "confidence": 0.95,
+        "interactionHint": null
+      },
+      {
+        "id": "demoBadge",
+        "parentId": "header",
+        "role": "text",
+        "box": {
+          "x": 0.303,
+          "y": 0.022,
+          "width": 0.065,
+          "height": 0.035
+        },
+        "text": [
+          "演示数据"
+        ],
+        "confidence": 0.9,
+        "interactionHint": null
+      },
+      {
+        "id": "sidebar",
+        "parentId": "root",
+        "role": "sidebar",
+        "box": {
+          "x": 0,
+          "y": 0.087,
+          "width": 0.157,
+          "height": 0.913
+        },
+        "text": [],
+        "confidence": 0.9,
+        "interactionHint": null
+      },
+      {
+        "id": "navOverview",
+        "parentId": "sidebar",
+        "role": "action",
+        "box": {
+          "x": 0.005,
+          "y": 0.124,
+          "width": 0.145,
+          "height": 0.065
+        },
+        "text": [
+          "能源总览"
+        ],
+        "confidence": 0.9,
+        "interactionHint": null
+      },
+      {
+        "id": "navMonitor",
+        "parentId": "sidebar",
+        "role": "action",
+        "box": {
+          "x": 0.005,
+          "y": 0.218,
+          "width": 0.145,
+          "height": 0.055
+        },
+        "text": [
+          "设备监测"
+        ],
+        "confidence": 0.9,
+        "interactionHint": null
+      },
+      {
+        "id": "navAlarm",
+        "parentId": "sidebar",
+        "role": "action",
+        "box": {
+          "x": 0.005,
+          "y": 0.298,
+          "width": 0.145,
+          "height": 0.055
+        },
+        "text": [
+          "告警中心"
+        ],
+        "confidence": 0.9,
+        "interactionHint": null
+      },
+      {
+        "id": "content",
+        "parentId": "root",
+        "role": "content",
+        "box": {
+          "x": 0.157,
+          "y": 0.087,
+          "width": 0.843,
+          "height": 0.913
+        },
+        "text": [],
+        "confidence": 0.9,
+        "interactionHint": null
+      },
+      {
+        "id": "contentHeading",
+        "parentId": "content",
+        "role": "text",
+        "box": {
+          "x": 0.175,
+          "y": 0.118,
+          "width": 0.175,
+          "height": 0.055
+        },
+        "text": [
+          "能源总览"
+        ],
+        "confidence": 0.95,
+        "interactionHint": null
+      },
+      {
+        "id": "contentSubheading",
+        "parentId": "content",
+        "role": "text",
+        "box": {
+          "x": 0.175,
+          "y": 0.187,
+          "width": 0.225,
+          "height": 0.032
+        },
+        "text": [
+          "掌握园区用能与设备运行状态"
+        ],
+        "confidence": 0.9,
+        "interactionHint": null
+      },
+      {
+        "id": "statCardElectricity",
+        "parentId": "content",
+        "role": "card",
+        "box": {
+          "x": 0.175,
+          "y": 0.255,
+          "width": 0.262,
+          "height": 0.234
+        },
+        "text": [],
+        "confidence": 0.92,
+        "interactionHint": null
+      },
+      {
+        "id": "labelElectricity",
+        "parentId": "statCardElectricity",
+        "role": "text",
+        "box": {
+          "x": 0.263,
+          "y": 0.278,
+          "width": 0.09,
+          "height": 0.028
+        },
+        "text": [
+          "今日用电量"
+        ],
+        "confidence": 0.95,
+        "interactionHint": null
+      },
+      {
+        "id": "valueElectricity",
+        "parentId": "statCardElectricity",
+        "role": "text",
+        "box": {
+          "x": 0.229,
+          "y": 0.318,
+          "width": 0.158,
+          "height": 0.09
+        },
+        "text": [
+          "12,480"
+        ],
+        "confidence": 0.97,
+        "interactionHint": null
+      },
+      {
+        "id": "unitElectricity",
+        "parentId": "statCardElectricity",
+        "role": "text",
+        "box": {
+          "x": 0.288,
+          "y": 0.418,
+          "width": 0.045,
+          "height": 0.028
+        },
+        "text": [
+          "kWh"
+        ],
+        "confidence": 0.95,
+        "interactionHint": null
+      },
+      {
+        "id": "statCardPower",
+        "parentId": "content",
+        "role": "card",
+        "box": {
+          "x": 0.45,
+          "y": 0.255,
+          "width": 0.262,
+          "height": 0.234
+        },
+        "text": [],
+        "confidence": 0.92,
+        "interactionHint": null
+      },
+      {
+        "id": "labelPower",
+        "parentId": "statCardPower",
+        "role": "text",
+        "box": {
+          "x": 0.538,
+          "y": 0.278,
+          "width": 0.09,
+          "height": 0.028
+        },
+        "text": [
+          "当前总功率"
+        ],
+        "confidence": 0.95,
+        "interactionHint": null
+      },
+      {
+        "id": "valuePower",
+        "parentId": "statCardPower",
+        "role": "text",
+        "box": {
+          "x": 0.535,
+          "y": 0.318,
+          "width": 0.09,
+          "height": 0.09
+        },
+        "text": [
+          "856"
+        ],
+        "confidence": 0.97,
+        "interactionHint": null
+      },
+      {
+        "id": "unitPower",
+        "parentId": "statCardPower",
+        "role": "text",
+        "box": {
+          "x": 0.558,
+          "y": 0.418,
+          "width": 0.03,
+          "height": 0.028
+        },
+        "text": [
+          "kW"
+        ],
+        "confidence": 0.95,
+        "interactionHint": null
+      },
+      {
+        "id": "statCardOnline",
+        "parentId": "content",
+        "role": "card",
+        "box": {
+          "x": 0.725,
+          "y": 0.255,
+          "width": 0.262,
+          "height": 0.234
+        },
+        "text": [],
+        "confidence": 0.92,
+        "interactionHint": null
+      },
+      {
+        "id": "labelOnline",
+        "parentId": "statCardOnline",
+        "role": "text",
+        "box": {
+          "x": 0.813,
+          "y": 0.278,
+          "width": 0.09,
+          "height": 0.028
+        },
+        "text": [
+          "设备在线率"
+        ],
+        "confidence": 0.95,
+        "interactionHint": null
+      },
+      {
+        "id": "valueOnline",
+        "parentId": "statCardOnline",
+        "role": "text",
+        "box": {
+          "x": 0.797,
+          "y": 0.318,
+          "width": 0.115,
+          "height": 0.09
+        },
+        "text": [
+          "98.6"
+        ],
+        "confidence": 0.97,
+        "interactionHint": null
+      },
+      {
+        "id": "unitOnline",
+        "parentId": "statCardOnline",
+        "role": "text",
+        "box": {
+          "x": 0.846,
+          "y": 0.418,
+          "width": 0.02,
+          "height": 0.028
+        },
+        "text": [
+          "%"
+        ],
+        "confidence": 0.95,
+        "interactionHint": null
+      },
+      {
+        "id": "devicePanel",
+        "parentId": "content",
+        "role": "card",
+        "box": {
+          "x": 0.175,
+          "y": 0.507,
+          "width": 0.397,
+          "height": 0.355
+        },
+        "text": [],
+        "confidence": 0.92,
+        "interactionHint": null
+      },
+      {
+        "id": "devicePanelTitle",
+        "parentId": "devicePanel",
+        "role": "text",
+        "box": {
+          "x": 0.192,
+          "y": 0.528,
+          "width": 0.09,
+          "height": 0.028
+        },
+        "text": [
+          "重点设备"
+        ],
+        "confidence": 0.95,
+        "interactionHint": null
+      },
+      {
+        "id": "deviceRow1Name",
+        "parentId": "devicePanel",
+        "role": "text",
+        "box": {
+          "x": 0.192,
+          "y": 0.607,
+          "width": 0.085,
+          "height": 0.028
+        },
+        "text": [
+          "1号配电室"
+        ],
+        "confidence": 0.95,
+        "interactionHint": null
+      },
+      {
+        "id": "deviceRow1Status",
+        "parentId": "devicePanel",
+        "role": "text",
+        "box": {
+          "x": 0.48,
+          "y": 0.607,
+          "width": 0.075,
+          "height": 0.028
+        },
+        "text": [
+          "运行正常"
+        ],
+        "confidence": 0.93,
+        "interactionHint": null
+      },
+      {
+        "id": "deviceRow2Name",
+        "parentId": "devicePanel",
+        "role": "text",
+        "box": {
+          "x": 0.192,
+          "y": 0.692,
+          "width": 0.065,
+          "height": 0.028
+        },
+        "text": [
+          "中央空调"
+        ],
+        "confidence": 0.95,
+        "interactionHint": null
+      },
+      {
+        "id": "deviceRow2Status",
+        "parentId": "devicePanel",
+        "role": "text",
+        "box": {
+          "x": 0.48,
+          "y": 0.692,
+          "width": 0.075,
+          "height": 0.028
+        },
+        "text": [
+          "运行正常"
+        ],
+        "confidence": 0.93,
+        "interactionHint": null
+      },
+      {
+        "id": "deviceRow3Name",
+        "parentId": "devicePanel",
+        "role": "text",
+        "box": {
+          "x": 0.192,
+          "y": 0.777,
+          "width": 0.085,
+          "height": 0.028
+        },
+        "text": [
+          "光伏逆变器"
+        ],
+        "confidence": 0.95,
+        "interactionHint": null
+      },
+      {
+        "id": "deviceRow3Status",
+        "parentId": "devicePanel",
+        "role": "text",
+        "box": {
+          "x": 0.48,
+          "y": 0.777,
+          "width": 0.065,
+          "height": 0.028
+        },
+        "text": [
+          "待检修"
+        ],
+        "confidence": 0.93,
+        "interactionHint": null
+      },
+      {
+        "id": "summaryPanel",
+        "parentId": "content",
+        "role": "card",
+        "box": {
+          "x": 0.585,
+          "y": 0.507,
+          "width": 0.402,
+          "height": 0.355
+        },
+        "text": [],
+        "confidence": 0.92,
+        "interactionHint": null
+      },
+      {
+        "id": "summaryPanelTitle",
+        "parentId": "summaryPanel",
+        "role": "text",
+        "box": {
+          "x": 0.602,
+          "y": 0.528,
+          "width": 0.085,
+          "height": 0.028
+        },
+        "text": [
+          "运行摘要"
+        ],
+        "confidence": 0.95,
+        "interactionHint": null
+      },
+      {
+        "id": "alarmLabel",
+        "parentId": "summaryPanel",
+        "role": "text",
+        "box": {
+          "x": 0.602,
+          "y": 0.597,
+          "width": 0.075,
+          "height": 0.028
+        },
+        "text": [
+          "当前告警"
+        ],
+        "confidence": 0.95,
+        "interactionHint": null
+      },
+      {
+        "id": "alarmValue",
+        "parentId": "summaryPanel",
+        "role": "text",
+        "box": {
+          "x": 0.918,
+          "y": 0.597,
+          "width": 0.02,
+          "height": 0.03
+        },
+        "text": [
+          "2"
+        ],
+        "confidence": 0.93,
+        "interactionHint": null
+      },
+      {
+        "id": "alarmUnit",
+        "parentId": "summaryPanel",
+        "role": "text",
+        "box": {
+          "x": 0.943,
+          "y": 0.6,
+          "width": 0.02,
+          "height": 0.026
+        },
+        "text": [
+          "项"
+        ],
+        "confidence": 0.93,
+        "interactionHint": null
+      },
+      {
+        "id": "targetLabel",
+        "parentId": "summaryPanel",
+        "role": "text",
+        "box": {
+          "x": 0.602,
+          "y": 0.673,
+          "width": 0.09,
+          "height": 0.028
+        },
+        "text": [
+          "今日能耗目标"
+        ],
+        "confidence": 0.95,
+        "interactionHint": null
+      },
+      {
+        "id": "targetValue",
+        "parentId": "summaryPanel",
+        "role": "text",
+        "box": {
+          "x": 0.855,
+          "y": 0.672,
+          "width": 0.075,
+          "height": 0.028
+        },
+        "text": [
+          "15,000"
+        ],
+        "confidence": 0.95,
+        "interactionHint": null
+      },
+      {
+        "id": "targetUnit",
+        "parentId": "summaryPanel",
+        "role": "text",
+        "box": {
+          "x": 0.936,
+          "y": 0.675,
+          "width": 0.04,
+          "height": 0.026
+        },
+        "text": [
+          "kWh"
+        ],
+        "confidence": 0.93,
+        "interactionHint": null
+      },
+      {
+        "id": "updateLabel",
+        "parentId": "summaryPanel",
+        "role": "text",
+        "box": {
+          "x": 0.602,
+          "y": 0.748,
+          "width": 0.105,
+          "height": 0.028
+        },
+        "text": [
+          "数据更新时间"
+        ],
+        "confidence": 0.95,
+        "interactionHint": null
+      },
+      {
+        "id": "updateValue",
+        "parentId": "summaryPanel",
+        "role": "text",
+        "box": {
+          "x": 0.888,
+          "y": 0.748,
+          "width": 0.06,
+          "height": 0.028
+        },
+        "text": [
+          "14:30"
+        ],
+        "confidence": 0.95,
+        "interactionHint": null
+      },
+      {
+        "id": "detailButton",
+        "parentId": "summaryPanel",
+        "role": "action",
+        "box": {
+          "x": 0.602,
+          "y": 0.793,
+          "width": 0.367,
+          "height": 0.052
+        },
+        "text": [
+          "查看运行说明"
+        ],
+        "confidence": 0.92,
+        "interactionHint": null
+      },
+      {
+        "id": "footerNote",
+        "parentId": "content",
+        "role": "text",
+        "box": {
+          "x": 0.748,
+          "y": 0.955,
+          "width": 0.235,
+          "height": 0.022
+        },
+        "text": [
+          "仅用于界面与工程生成验收 · 所有数值均为演示数据"
+        ],
+        "confidence": 0.85,
+        "interactionHint": null
+      }
+    ],
+    "designTokens": {
+      "background": "#f2f5f7",
+      "foreground": "#1a2b33",
+      "accent": "#0f8f8f",
+      "spacing": [
+        8,
+        16,
+        24
+      ],
+      "radius": [
+        4,
+        8
+      ]
+    },
+    "uncertainties": [
+      {
+        "regionId": "navOverview",
+        "question": "侧栏导航项在真实客户端中是否有悬停/选中交互？"
+      },
+      {
+        "regionId": "detailButton",
+        "question": "查看运行说明按钮在真实系统中应触发什么行为或打开什么内容？"
+      },
+      {
+        "regionId": null,
+        "question": "演示数据是否来自固定静态样例，未来是否有真实数据接入方式？"
+      }
+    ]
+  },
+  "mappings": [
+    {
+      "regionId": "root",
+      "controlType": "layout.2",
+      "capabilityId": "layout.2",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "header",
+      "controlType": "layout.2",
+      "capabilityId": "layout.2",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "title",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "pageTitle",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "demoBadge",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "sidebar",
+      "controlType": "layout.4",
+      "capabilityId": "layout.4",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "navOverview",
+      "controlType": "button",
+      "capabilityId": "button",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "navMonitor",
+      "controlType": "button",
+      "capabilityId": "button",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "navAlarm",
+      "controlType": "button",
+      "capabilityId": "button",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "content",
+      "controlType": "layout.2",
+      "capabilityId": "layout.2",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "contentHeading",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "contentSubheading",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "statCardElectricity",
+      "controlType": "layout.2",
+      "capabilityId": "layout.2",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "labelElectricity",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "valueElectricity",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "unitElectricity",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "statCardPower",
+      "controlType": "layout.2",
+      "capabilityId": "layout.2",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "labelPower",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "valuePower",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "unitPower",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "statCardOnline",
+      "controlType": "layout.2",
+      "capabilityId": "layout.2",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "labelOnline",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "valueOnline",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "unitOnline",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "devicePanel",
+      "controlType": "layout.2",
+      "capabilityId": "layout.2",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "devicePanelTitle",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "deviceRow1Name",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "deviceRow1Status",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "deviceRow2Name",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "deviceRow2Status",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "deviceRow3Name",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "deviceRow3Status",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "summaryPanel",
+      "controlType": "layout.2",
+      "capabilityId": "layout.2",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "summaryPanelTitle",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "alarmLabel",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "alarmValue",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "alarmUnit",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "targetLabel",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "targetValue",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "targetUnit",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "updateLabel",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "updateValue",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "detailButton",
+      "controlType": "button",
+      "capabilityId": "button",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    },
+    {
+      "regionId": "footerNote",
+      "controlType": "richtext",
+      "capabilityId": "richtext",
+      "support": "supported_unverified",
+      "reason": "目录状态 pending-verification。缺少覆盖全部所需属性、交互和目标运行时的有效制品报告。",
+      "evidenceIds": [],
+      "fallback": null
+    }
+  ]
+}

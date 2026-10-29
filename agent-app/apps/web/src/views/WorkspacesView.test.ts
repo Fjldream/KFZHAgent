@@ -190,3 +190,24 @@ describe("WorkspacesView", () => {
     expect(pushMock).toHaveBeenCalledWith("/workspaces/ws-1");
   });
 });
+
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+describe("workspace create failures", () => {
+  it.each(["create-workspace", "upload-workspace"])("shows duplicate-name or network failures and allows retry from %s", async action => {
+    listWorkspacesMock.mockResolvedValue([]);
+    createWorkspaceMock.mockRejectedValueOnce(new Error("WORKSPACE_NAME_EXISTS：请更换名称"));
+    const wrapper = mount(WorkspacesView);
+    await flushPromises();
+    await wrapper.get('[data-testid="workspace-name"]').setValue("重复工程");
+    await wrapper.get(`[data-testid="${action}"]`).trigger("click"); await flushPromises();
+    expect(wrapper.get('[data-testid="create-workspace-error"]').text()).toContain("WORKSPACE_NAME_EXISTS");
+    expect(wrapper.get(`[data-testid="${action}"]`).attributes("disabled")).toBeUndefined();
+    expect(pushMock).not.toHaveBeenCalled();
+    createWorkspaceMock.mockResolvedValueOnce({ id: "retry" });
+    await wrapper.get('[data-testid="workspace-name"]').setValue("另一个工程");
+    await wrapper.get(`[data-testid="${action}"]`).trigger("click"); await flushPromises();
+    expect(pushMock).toHaveBeenCalledWith("/workspaces/retry");
+    wrapper.unmount();
+  });
+});
+// end

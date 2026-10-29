@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+// modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+import { validateObservationJourneys } from "./observation-journeys.js";
+// end
 import { ApprovedAssetFactsSchema } from "./asset.js";
 import { CapabilityCandidateBundleSchema } from "./capability-candidates.js";
 import { CompiledNativeActionSchema, CompilerPageGuidSchema } from "./action-graph.js";
@@ -55,7 +58,25 @@ const DeltaAllowlistPolicySchema = z.object({
   }
 });
 
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+export const ExistingGeneratedStateEvidenceSchema = z.object({
+  baseRevisionId: boundedId, scope: z.literal("workspace-generated-local"),
+  nativeId: z.number().int().positive(), file: z.string().max(256).regex(/^project\/Tag\/(?:variables\/)?[A-Za-z0-9_.-]+\.json$/),
+  recordHash: hash, previousArtifactHash: hash, previousMaterializationHash: hash,
+  stateType: z.enum(["boolean", "number", "text", "record-key", "record-key-list"]), dataType: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+  defaultValue: z.union([z.boolean(), z.number().finite(), z.string().max(2000), z.null()]), comment: z.string().min(1).max(2000),
+  recordScope: z.object({ mockDataId: boundedId, keyField: boundedId }).strict().optional(),
+}).strict().superRefine((state, context) => {
+  if ((state.stateType === "record-key" || state.stateType === "record-key-list") !== (state.recordScope !== undefined)) {
+    context.addIssue({ code: "custom", path: ["recordScope"], message: "record state requires exact prior record scope" });
+  }
+});
+export type ExistingGeneratedStateEvidence = z.infer<typeof ExistingGeneratedStateEvidenceSchema>;
+// end
 const CreativeBuildEvidenceSchema = z.object({
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  states: z.array(z.object({ semanticStateId: boundedId, variableName: z.string().min(1).max(100), existing: ExistingGeneratedStateEvidenceSchema }).strict()).max(64).optional(),
+  // end
   pages: z.array(z.object({
     source: z.enum(["uploaded-existing", "workspace-derived"]),
     semanticPageId: boundedId,
@@ -122,6 +143,16 @@ export const CreativeBuildArtifactSchema = z.object({
     evidenceHash: hash,
   }).strict(),
 }).strict().superRefine((artifact, ctx) => {
+  // modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+  validateObservationJourneys(artifact.blueprint, artifact.semanticPlan, artifact.implementation).forEach((issue) =>
+    ctx.addIssue({ code: "custom", path: ["implementation"], message: `unproven observation ${issue.stepKey}: ${issue.expectedText}` }));
+  const journeys = new Map(artifact.blueprint.journeys.map((journey) => [journey.id, journey]));
+  artifact.semanticPlan.actions.forEach((action, actionIndex) => (action.journeyStepRefs ?? []).forEach((reference) => {
+    if (journeys.get(reference.journeyId)?.steps[reference.stepIndex]?.kind === "observe") {
+      ctx.addIssue({ code: "custom", path: ["semanticPlan", "actions", actionIndex, "journeyStepRefs"], message: "observation cannot be covered by an action" });
+    }
+  }));
+  // end
   const actual = {
     blueprintHash: canonicalJsonHash(artifact.blueprint),
     candidateBundleHash: canonicalJsonHash(artifact.candidateBundle),
@@ -206,6 +237,9 @@ const MaterializedStyleDataSchema = z.object({
 }).strict();
 
 const MaterializedStateSchema = z.object({
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  existing: ExistingGeneratedStateEvidenceSchema.optional(),
+  // end
   semanticStateId: boundedId,
   variableName: z.string().trim().min(1).max(100).regex(/^\$kf_[a-z0-9_]+_[0-9a-f]{12}$/),
   stateType: z.enum(["boolean", "number", "text", "record-key", "record-key-list"]),
@@ -213,6 +247,11 @@ const MaterializedStateSchema = z.object({
   defaultValue: z.union([z.boolean(), z.number().finite(), z.string().max(2_000), z.null()]),
   comment: z.string().min(1).max(2_000),
 }).strict().superRefine((state, ctx) => {
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  if (state.existing && (state.existing.stateType !== state.stateType || state.existing.dataType !== state.dataType)) {
+    ctx.addIssue({ code: "custom", path: ["existing"], message: "existing generated local state type cannot change" });
+  }
+  // end
   const compatible = state.stateType === "boolean" && state.dataType === 1 && typeof state.defaultValue === "boolean"
     || state.stateType === "number" && state.dataType === 2 && typeof state.defaultValue === "number"
     || state.stateType === "text" && state.dataType === 3 && typeof state.defaultValue === "string"
@@ -351,7 +390,23 @@ export function validateCreativeArtifactMaterializationProjection(
     dataType: state.type === "boolean" ? 1 : state.type === "number" ? 2 : 3,
     defaultValue: state.type === "record-key-list" ? JSON.stringify(state.initialValue) : state.initialValue,
     comment: state.purpose,
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    ...((artifact.evidence.states ?? []).find(entry => entry.semanticStateId === state.id)?.existing === undefined ? {} : {
+      existing: (artifact.evidence.states ?? []).find(entry => entry.semanticStateId === state.id)!.existing,
+    }),
+    // end
   }));
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  const stateEvidence = artifact.evidence.states ?? [];
+  if (new Set(stateEvidence.map(state => state.semanticStateId)).size !== stateEvidence.length
+    || new Set(stateEvidence.map(state => `${state.existing.file}:${state.existing.nativeId}`)).size !== stateEvidence.length
+    || stateEvidence.some(state => variableName.get(state.semanticStateId) !== state.variableName
+      || state.existing.baseRevisionId !== materialization.baseRevisionId || !expectedStates.some(expected => expected.semanticStateId === state.semanticStateId)
+      || artifact.semanticPlan.localState.find(semantic => semantic.id === state.semanticStateId)?.mockDataId !== state.existing.recordScope?.mockDataId
+      || artifact.semanticPlan.localState.find(semantic => semantic.id === state.semanticStateId)?.keyField !== state.existing.recordScope?.keyField)) {
+    throw new Error("CREATIVE_MATERIALIZATION_PROJECTION_MISMATCH: existing state evidence");
+  }
+  // end
   if (stableJson(expectedStates) !== stableJson(materialization.states ?? [])) {
     throw new Error("CREATIVE_MATERIALIZATION_PROJECTION_MISMATCH: states");
   }
@@ -420,7 +475,13 @@ export function validateCreativeArtifactMaterializationProjection(
       ...Object.entries(implementationControl.nativeProperties).map(([key, value]) => ({ path: `/${key}`, value })),
       ...(implementationControl.content === undefined ? [] : [{ path: "/text", value: implementationControl.content }]),
     ].filter((candidate) => allowedFields.has(candidate.path.slice(1)));
-    if (stableJson(control.existingDeltas) !== stableJson(candidates)) {
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    // JSONB may reorder nativeProperties object keys, while signed delta arrays retain their order.
+    // Compare distinct paths independently; stable sorting preserves order among repeated paths.
+    const orderedDeltas = control.existingDeltas?.slice().sort((left, right) => compareCreativeIdentifiers(left.path, right.path));
+    const orderedCandidates = candidates.slice().sort((left, right) => compareCreativeIdentifiers(left.path, right.path));
+    if (stableJson(orderedDeltas) !== stableJson(orderedCandidates)) {
+    // end
       throw new Error(`CREATIVE_MATERIALIZATION_PROJECTION_MISMATCH: delta allowlist policy ${control.semanticControlId}`);
     }
   });

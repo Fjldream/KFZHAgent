@@ -1,0 +1,88 @@
+{
+  "physicalRequests": 5,
+  "acceptanceMode": "full-new-reference",
+  "planningFixtureRequests": 0,
+  "publicFactsHash": null,
+  "invocations": [
+    {
+      "task": "vision",
+      "requestedModel": "deepseek-flash",
+      "actualModel": "deepseek-flash",
+      "status": "SUCCEEDED",
+      "failureCode": null,
+      "inputTokens": 1534,
+      "outputTokens": 3307,
+      "cacheHitTokens": 1280,
+      "cacheMissTokens": 254,
+      "latencyMs": 10795
+    },
+    {
+      "task": "blueprint",
+      "requestedModel": "deepseek-flash",
+      "actualModel": "deepseek-flash",
+      "status": "SUCCEEDED",
+      "failureCode": null,
+      "inputTokens": 11936,
+      "outputTokens": 2604,
+      "cacheHitTokens": 384,
+      "cacheMissTokens": 11552,
+      "latencyMs": 12952
+    },
+    {
+      "task": "repair",
+      "requestedModel": "deepseek-flash",
+      "actualModel": "deepseek-flash",
+      "status": "SUCCEEDED",
+      "failureCode": null,
+      "inputTokens": 14588,
+      "outputTokens": 2859,
+      "cacheHitTokens": 11904,
+      "cacheMissTokens": 2684,
+      "latencyMs": 11139
+    },
+    {
+      "task": "implementation",
+      "requestedModel": "deepseek-flash",
+      "actualModel": "deepseek-flash",
+      "status": "SUCCEEDED",
+      "failureCode": null,
+      "inputTokens": 30054,
+      "outputTokens": 7838,
+      "cacheHitTokens": 4352,
+      "cacheMissTokens": 25702,
+      "latencyMs": 24138
+    },
+    {
+      "task": "repair",
+      "requestedModel": "deepseek-flash",
+      "actualModel": "deepseek-flash",
+      "status": "SUCCEEDED",
+      "failureCode": null,
+      "inputTokens": 27337,
+      "outputTokens": 1167,
+      "cacheHitTokens": 4352,
+      "cacheMissTokens": 22985,
+      "latencyMs": 4685
+    }
+  ],
+  "outcomes": [
+    {
+      "id": "bc14981a-cc20-40ed-b2ed-9e0bdc24a5c3",
+      "status": "CANCELLED",
+      "failureCode": null
+    },
+    {
+      "id": "848a6d99-b191-4dab-b744-f25aeb9febf6",
+      "status": "CANCELLED",
+      "failureCode": null
+    },
+    {
+      "id": "7ab7a58a-2cee-42aa-a20a-ef750bf49844",
+      "status": "FAILED",
+      "failureCode": "INVALID_MODEL_OUTPUT"
+    }
+  ],
+  "productionRollout": false,
+  "nativeKfAccepted": false,
+  "browserAccepted": false
+}

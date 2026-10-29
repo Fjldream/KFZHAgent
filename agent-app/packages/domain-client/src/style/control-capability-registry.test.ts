@@ -50,7 +50,7 @@ describe("control capability registry", () => {
       fromLookup!.limitations.push("forged limitation");
       fromList!.style.supported.push("forged token");
     } catch {
-      // Frozen records reject mutation in strict-mode ESM; snapshots may instead absorb it.
+      // 冻结记录在严格模式的ESM中拒绝修改；快照可能相反地吸收它
     }
 
     expect(getControlCapability("button")?.style.status).toBe("pending-verification");

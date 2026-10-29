@@ -4,10 +4,7 @@ import { PrismaService } from "../prisma/prisma.service.js";
 import { PasswordService } from "../auth/password.service.js";
 
 /**
- * Closed account provisioning. There is no public registration route: a
- * platform admin provisions a Tenant plus its first tenant_admin with a
- * one-time password; tenant admins then create member accounts inside the
- * same tenant.
+ * 关闭账户的配置。没有公开的注册途径：平台管理员为租户及其第一个租户管理员提供一次性密码；租户管理员然后在同一个租户内创建成员账户。
  */
 @Injectable()
 export class TenantsService {

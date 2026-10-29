@@ -4,6 +4,13 @@ import { KF36_RUNTIME_PROFILE } from "../runtime-profile.js";
 import { getStyleAdapter, listStyleAdapters } from "./base-adapters.js";
 
 describe("base style adapters", () => {
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  it("emits layout backgrounds as CSS because the native layout JSON reader has no backgroundColor case", () => {
+    expect(getStyleAdapter("layout.4")!.compile({ declarations: { backgroundColor: "#f0f5f8" }, states: {} })).toEqual({
+      nativeFields: {}, cssDeclarations: { normal: { backgroundColor: "#f0f5f8" } }, unsupported: [],
+    });
+  });
+  // end
   it("registers every pending capability plus only the evidence-mapped preserve-only rollout", () => {
     const pendingCapabilityIds = listControlCapabilities()
       .filter((capability) => capability.style.status === "pending-verification")
@@ -16,7 +23,9 @@ describe("base style adapters", () => {
       .toEqual([...pendingCapabilityIds, ...evidenceMappedPreserveOnly].sort());
   });
 
-  it("maps a reviewed common background field natively and leaves other approved declarations for CSS", () => {
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  it("emits ElementUI backgrounds as CSS because its JSON reader has no backgroundColor case", () => {
+  // end
     const adapter = getStyleAdapter("button");
 
     expect(adapter).toBeDefined();
@@ -24,8 +33,10 @@ describe("base style adapters", () => {
       declarations: { backgroundColor: "#2563eb", fontSize: 14 },
       states: {},
     })).toEqual({
-      nativeFields: { backgroundColor: "#2563eb" },
-      cssDeclarations: { normal: { fontSize: 14 } },
+      // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+      nativeFields: {},
+      cssDeclarations: { normal: { backgroundColor: "#2563eb", fontSize: 14 } },
+      // end
       unsupported: [],
     });
   });
@@ -84,7 +95,9 @@ describe("base style adapters", () => {
 
     expect(root.cssProperties).toContain("overflow");
     expect(root.nativeProperties).not.toContain("overflow");
-    expect(root.nativeProperties).toEqual(["backgroundColor"]);
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    expect(root.nativeProperties).toEqual([]);
+    // end
   });
 
   it("leaves margin and gap exclusively owned by semantic layout", () => {

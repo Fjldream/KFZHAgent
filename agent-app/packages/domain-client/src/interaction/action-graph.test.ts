@@ -100,6 +100,35 @@ describe("normalizeActionGraph", () => {
     expect(normalizeActionGraph({ plan: ordered, implementation: implementation() }).executionOrder).toEqual(["action-a", "action-b"]);
   });
 
+  it("expands one repeater-template action chain for each correlated runtime item", () => {
+    const repeated = plan({
+      pages: [{
+        id: "home", title: "首页", purpose: "演示", canvas: "desktop", sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["region"], initialStateIds: [],
+        root: {
+          kind: "repeater", id: "cards", mockDataId: "cards-data", itemAlias: "card", keyField: "id", maxItems: 2,
+          sourceBlueprintRegionIds: ["region"], intent: node("unused", []).intent,
+          template: node("card-button", [{ semanticEvent: "click", actionIds: ["open-detail"] }]),
+        },
+      }],
+    });
+    const runtime = implementation([
+      { id: "cards--one--card-button", capabilityId: "button", sourceSolutionNodeId: "cards--one--card-button", sourceRepeaterId: "cards" },
+      { id: "cards--two--card-button", capabilityId: "button", sourceSolutionNodeId: "cards--two--card-button", sourceRepeaterId: "cards" },
+    ]);
+
+    const result = normalizeActionGraph({ plan: repeated, implementation: runtime });
+
+    expect(result.executionOrder).toEqual([
+      "open-detail--1", "open-detail--2", "populate-detail--1", "populate-detail--2",
+    ]);
+    expect(result.graph.actions).toMatchObject([
+      { id: "open-detail--1", trigger: { controlId: "cards--one--card-button" }, afterActionIds: ["populate-detail--1"] },
+      { id: "open-detail--2", trigger: { controlId: "cards--two--card-button" }, afterActionIds: ["populate-detail--2"] },
+      { id: "populate-detail--1", trigger: { controlId: "cards--one--card-button" } },
+      { id: "populate-detail--2", trigger: { controlId: "cards--two--card-button" } },
+    ]);
+  });
+
   it("rejects multiple trigger owners, cycles, and orphan actions with stable node errors", () => {
     const multi = plan();
     multi.pages[0]!.root = {

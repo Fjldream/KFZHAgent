@@ -63,6 +63,9 @@ import easyuiValidateboxTemplate from "../templates/control-templates/easyui-val
 import easyuiWindowTemplate from "../templates/control-templates/easyui-window.json" with { type: "json" };
 import layoutTemplate from "../templates/control-templates/layout.json" with { type: "json" };
 import prototypeBaseTemplate from "../templates/control-templates/prototype-base.json" with { type: "json" };
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+import { nativeStyleStorage } from "./native-presentation.js";
+// end
 import type { ControlIR, RestrictedAction, EasyuiControlIR, LayoutContainerIR } from "../ir/client-project-ir.js";
 import type { ThemeSpec } from "@kf/contracts";
 import {
@@ -88,22 +91,16 @@ import { KF36_RUNTIME_PROFILE } from "../style/runtime-profile.js";
 import { mergeManagedStyleData } from "../style/style-data-merge.js";
 
 /**
- * Per-control compilation (brief Step 5 + Step 6).
+ * 逐控件编译（简要步骤 5 + 步骤 6）。
  *
- * Every KF control object is built as:
+ * 每个 KF 控件对象按以下方式构建：
  *
  *   result = mergeControlTemplate(mergeControlTemplate(baseFields, template), overrides)
  *          = { ...baseFields, ...template, ...overrides }
  *
- * - `baseFields` and the per-type `template` come from the REVIEWED templates
- *   under `src/templates/`; the compiler never invents fields.
- * - `overrides` contains ONLY schema-approved runtime values: the KF `name`,
- *   the derived KF GUID, geometry, and the type-specific semantic values
- *   (text / precision / restricted actions).
- * - Model-provided raw fields are never copied: foreign OBJECT fields are
- *   ignored (template wins), while foreign STRING fields are rejected with
- *   MODEL_OUTPUT_INVALID because a raw string is the vehicle for arbitrary
- *   JavaScript injection (brief Step 6).
+ * - `baseFields` 和各类型的 `template` 来自 `src/templates/` 下已审查的模板；编译器绝不会虚构字段。
+ * - `overrides` 只包含 schema 批准的运行时值：KF `name`、派生的 KF GUID、几何信息以及类型特定的语义值（文本 / 精度 / 受限 action）。
+ * - 绝不复制模型提供的原始字段：外来 OBJECT 字段会被忽略（以模板为准），外来 STRING 字段则以 MODEL_OUTPUT_INVALID 拒绝，因为原始字符串可以承载任意 JavaScript 注入（简要步骤 6）。
  */
 
 export const MODEL_OUTPUT_INVALID = "MODEL_OUTPUT_INVALID";
@@ -147,10 +144,14 @@ interface ExpectedCompiledControlScriptTarget {
  * current IR schema only produces `navigatePage` and `setVariable`.
  */
 export type CompiledAction = {
-  action: "navigatePage" | "setVariable" | "openDialog";
+  action?: "setVariable" | "openDialog";
   pageId?: string;
   variableId?: string;
   value?: string | number | boolean;
+  linkId?: number;
+  enable?: boolean;
+  name?: string;
+  script?: string;
 };
 
 const BASE_FIELDS: TemplateJson = baseFields;
@@ -571,6 +572,49 @@ function serializedFeedbackActionScript(marker: CompiledFeedbackActionMarker): s
   return `ShowMessage(${JSON.stringify({ message: marker.message, type: marker.level })});`;
 }
 
+function nativeActionScriptModule(action: CompiledNativeAction): CompiledScriptModule {
+  let source: string;
+  let instanceReferences: Array<{ semanticId: string; instanceName: string }> = [
+    { semanticId: action.sourceActionId, instanceName: action.ownerInstanceName },
+  ];
+  let pageReferences: Array<{ semanticId: string; pageGuid: string }> = [];
+  switch (action.kind) {
+    case "navigate-page":
+      source = `ShowPage(${JSON.stringify(action.targetPageName)},1);\n`;
+      pageReferences = [{ semanticId: action.targetPageName, pageGuid: action.targetPageGuid }];
+      break;
+    case "set-state":
+      source = `$Variable.${action.targetVariableName} = ${JSON.stringify(action.value)};\n`;
+      break;
+    case "show-feedback":
+      source = `ShowMessage(${JSON.stringify({ message: action.message, type: action.level })});\n`;
+      break;
+    case "open-overlay":
+    case "close-overlay": {
+      const visible = action.kind === "open-overlay";
+      const targets = visible ? action.targetControls : [...action.targetControls].reverse();
+      source = targets.map((target) => `${target.instanceName}.setVisible(${String(visible)});`).join("\n") + "\n";
+      instanceReferences = [
+        { semanticId: action.ownerSemanticControlId, instanceName: action.ownerInstanceName },
+        ...action.targetControls.map((target) => ({ semanticId: target.semanticControlId, instanceName: target.instanceName })),
+      ].filter((reference, index, all) => all.findIndex((candidate) => candidate.semanticId === reference.semanticId) === index);
+      break;
+    }
+    default:
+      throw new ModelOutputInvalidError(`native action kind lacks reviewed KF 3.6 script serialization: ${action.kind}`);
+  }
+  return CompiledScriptModuleSchema.parse({
+    id: `kf$script:action-${createHash("sha256").update(action.id, "utf8").digest("hex").slice(0, 24)}`,
+    sourceScriptId: action.sourceActionId,
+    placement: "event",
+    ownerInstanceName: action.ownerInstanceName,
+    instanceReferences,
+    pageReferences,
+    source,
+    sourceHash: createHash("sha256").update(source, "utf8").digest("hex"),
+  });
+}
+
 function isCanonicalShowMessageSource(source: string): boolean {
   if (!source.startsWith("ShowMessage(") || !source.endsWith(");")) return false;
   let payload: unknown;
@@ -958,12 +1002,26 @@ export function serializeReviewedNativeInteractions(
     const first = group[0]!;
     const sources: string[] = [];
     const declaredEffects: Array<{ kind: "action"; value: Record<string, unknown> } | { kind: "script" }> = [];
+    const groupNativeActions = group.flatMap((binding) => binding.nativeActionIds.map((id) => actionById.get(id)!));
+    // KF owns one executable slot per event identity. Navigation is a real
+    // ShowPage call (not the compiler's former declarative command), and any
+    // multi-effect event must share that one ordered script slot.
+    const actionsUseScriptSlot = groupNativeActions.length > 1
+      || groupNativeActions.some((action) => action.kind === "navigate-page"
+        || ((action.kind === "open-overlay" || action.kind === "close-overlay") && action.targetControls.length > 1));
     let scriptEffectStarted = false;
     let actionAfterScript = false;
     for (const binding of group) {
       for (const actionId of binding.nativeActionIds) {
         if (scriptEffectStarted) actionAfterScript = true;
-        declaredEffects.push({ kind: "action", value: serializeCompiledNativeAction(actionById.get(actionId)!, binding) });
+        const action = actionById.get(actionId)!;
+        if (actionsUseScriptSlot) {
+          if (!scriptEffectStarted) declaredEffects.push({ kind: "script" });
+          scriptEffectStarted = true;
+          sources.push(serializedCompiledModule(nativeActionScriptModule(action), binding));
+        } else {
+          declaredEffects.push({ kind: "action", value: serializeCompiledNativeAction(action, binding) });
+        }
       }
       if (binding.scriptModuleIds.length > 0) {
         if (actionAfterScript) {
@@ -1135,11 +1193,14 @@ function applyControlStyle(compiled: TemplateJson, control: ControlIR): Template
       },
     };
   }
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  const { field } = nativeStyleStorage(compiled);
   return {
     ...compiled,
     ...result.nativeFields,
-    styleDataNew: mergeManagedStyleData(compiled["styleDataNew"], result.styleDataNew),
+    [field]: mergeManagedStyleData(compiled[field], result.styleDataNew),
   };
+  // end
 }
 
 function styleEngineErrorMessage(error: unknown): string {
@@ -1608,7 +1669,13 @@ export function compileAction(
 ): CompiledAction {
   switch (action.kind) {
     case "navigate":
-      return { action: "navigatePage", pageId: ctx.resolvePageGuid(action.pageId) };
+      ctx.resolvePageGuid(action.pageId);
+      return {
+        linkId: 200001,
+        enable: true,
+        name: "onClick",
+        script: `ShowPage(${JSON.stringify(action.pageId)},1);`,
+      };
     case "setVariable":
       return {
         action: "setVariable",

@@ -125,7 +125,11 @@ function unsupportedStateDeclarations(
 function createAdapter(capabilityId: string): StyleAdapter {
   const selectorRoles = KF36_RUNTIME_PROFILE.selectors[capabilityId];
   if (selectorRoles === undefined) throw new Error(`STYLE_SELECTOR_UNAVAILABLE: ${capabilityId}`);
-  const nativeAllowed = !PRESERVE_ONLY_EVIDENCE_ADAPTERS.has(capabilityId);
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  const isElementUi = selectorRoles.parts["root"]?.evidence.runtimePath.includes("/Graphic/ElementUI/") === true;
+  const nativeAllowed = !PRESERVE_ONLY_EVIDENCE_ADAPTERS.has(capabilityId)
+    && !capabilityId.startsWith("layout.") && !isElementUi;
+  // end
   const parts = Object.values(selectorRoles.parts).map((mapping) =>
     createPartAdapter(capabilityId, mapping, nativeAllowed));
   const rootPart = parts.find((candidate) => candidate.semanticPart === "root");

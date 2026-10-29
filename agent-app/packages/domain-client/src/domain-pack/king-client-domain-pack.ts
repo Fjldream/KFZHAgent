@@ -58,6 +58,7 @@ export function createKingClientDomainPack(options: {
     async patch({ baseWorkspace, changePlan, expectedPlanHash, semanticOperations, assets, creativeMaterialization, workRoot }) {
       const workspace = await applyClientPatch(baseWorkspace.rootDir, changePlan, {
         planHash: expectedPlanHash,
+        replaceGenerativeBootstrap: baseWorkspace.mode === "candidate",
         ...(semanticOperations === undefined ? {} : { semanticOperations }),
         ...(assets === undefined ? {} : { assets }),
         ...(creativeMaterialization === undefined ? {} : {
@@ -81,6 +82,7 @@ export function createKingClientDomainPack(options: {
           ...(creativeMaterialization === undefined ? {} : {
             creativeMaterialization: creativeMaterialization as VerifiedCreativeMaterialization,
           }),
+          replaceGenerativeBootstrap: baseWorkspace.mode === "candidate",
         },
       );
     },
@@ -90,7 +92,7 @@ export function createKingClientDomainPack(options: {
       return {
         artifactKind: "client-package",
         domainProjectKind: "client-package",
-        // KF's native `.gz` filename is a ZIP container, not a gzip stream.
+        // KF的原始`.gz`文件名是一个ZIP容器，而不是gzip流。
         mediaType: "application/zip",
         fileExtension: ".gz",
         bytes,

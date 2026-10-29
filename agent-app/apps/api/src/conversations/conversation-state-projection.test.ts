@@ -1,6 +1,8 @@
 import { createHmacModuleArtifactAuthority } from "@kf/build-jobs";
 import { describe, expect, it } from "vitest";
-import { finalStateData } from "./conversation.service.js";
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+import { finalStateData } from "../../test-support/legacy-conversation-driver.js";
+// end
 
 const authority = createHmacModuleArtifactAuthority(Buffer.alloc(32, 0x46));
 

@@ -9,6 +9,9 @@ import { ARTIFACT_STORAGE } from "../artifacts/artifact-storage.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import type { ArtifactStorage } from "@kf/artifact-storage";
 import { DeepSeekModelPort } from "./deepseek-model.js";
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+import { resolveModelRoutes } from "../models/model-config.js";
+// end
 import { DeterministicFakeModelPort } from "./fake-model.js";
 import { DEFAULT_MODEL_PORT, MODEL_PORT } from "./model-port.js";
 import {
@@ -21,6 +24,11 @@ import {
   CONVERSATION_TURN_LEASE,
   createConversationTurnLeaseManagerFromEnvironment,
 } from "./conversation-turn-lease.js";
+// modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+import { ReferenceAssetsModule } from "../vision/reference-assets.module.js";
+import { VISUAL_PLANNING_RUNTIME, composeVisualBlueprintModel, type VisualPlanningRuntime } from "../vision/visual-blueprint-runtime.js";
+import type { ModelPort } from "@kf/agent-orchestrator";
+// end
 
 /**
  * 图运行所需的可复用 providers（不含 HTTP controller）。
@@ -33,7 +41,7 @@ import {
 @Module({
     // PrismaModule 是 @Global，但只在注册它的根模块内全局；worker 用独立上下文启动，
   // 必须显式 import，否则 DeliverySnapshotService 解析不到 PrismaService。
-  imports: [PrismaModule, ArtifactsModule, AssetsModule, DeliveryModule],
+  imports: [PrismaModule, ArtifactsModule, AssetsModule, DeliveryModule, ReferenceAssetsModule],
   providers: [
     {
       provide: CONVERSATION_TURN_LEASE,
@@ -57,7 +65,11 @@ import {
       // 默认 stub 抛 ModelPortNotConfiguredError（不产生任何计划）；
       // `MODEL_PORT_MODE=fake` 注入确定性演示模型（E2E / 演示环境）；
       // `MODEL_PORT_MODE=deepseek` 注入真实 DeepSeek LLM（需 DEEPSEEK_API_KEY）。
-      useFactory: () => {
+      // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+      inject: [VISUAL_PLANNING_RUNTIME],
+      useFactory: (visual: VisualPlanningRuntime) => {
+        let base: ModelPort;
+      // end
         if (process.env.MODEL_PORT_MODE === "deepseek") {
           const apiKey = process.env.DEEPSEEK_API_KEY;
           if (apiKey === undefined || apiKey === "") {
@@ -65,17 +77,23 @@ import {
               "MODEL_PORT_MODE=deepseek requires DEEPSEEK_API_KEY environment variable",
             );
           }
-          return new DeepSeekModelPort({
+          base = new DeepSeekModelPort({
             apiKey,
+            // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+            timeoutMs: resolveModelRoutes(process.env).implementation.timeoutMs,
+            semanticPlanningThinking: resolveModelRoutes(process.env).implementation.supportsThinking,
+            // end
             ...(process.env.DEEPSEEK_BASE_URL !== undefined
               ? { baseUrl: process.env.DEEPSEEK_BASE_URL }
               : {}),
             ...(process.env.DEEPSEEK_MODEL !== undefined ? { model: process.env.DEEPSEEK_MODEL } : {}),
           });
+        } else {
+          base = process.env.MODEL_PORT_MODE === "fake" ? new DeterministicFakeModelPort() : DEFAULT_MODEL_PORT;
         }
-        return process.env.MODEL_PORT_MODE === "fake"
-          ? new DeterministicFakeModelPort()
-          : DEFAULT_MODEL_PORT;
+        // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+        return composeVisualBlueprintModel(base, visual.blueprints, visual.semantics);
+        // end
       },
     },
   ],

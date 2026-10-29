@@ -690,6 +690,9 @@ describe("KF UI style contracts", () => {
         compiledActions: [{
           id: "kf$action:navigate", sourceActionId: "navigate", ownerInstanceName: "Text1",
           kind: "navigate-page", targetPageGuid,
+          // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+          targetPageName: "home",
+          // end
         }],
       };
     };
@@ -764,6 +767,27 @@ describe("KF UI style contracts", () => {
     expect(compiledLayout.scrollContentExtent).toEqual({ width: 1_360, height: 332 });
     expect(parsedPage.controls[2]!.geometry.y + parsedPage.controls[2]!.geometry.height)
       .toBeGreaterThan(parsedPage.height);
+  });
+
+  it("accepts two-decimal scroll boundaries despite binary floating-point addition noise", () => {
+    const fixture = scrollV2Fixture();
+    const controls = fixture.pages[0]!.controls;
+    const scrollRoot = controls[0]!;
+    if (!("compiledLayout" in scrollRoot) || scrollRoot.compiledLayout === undefined) {
+      throw new Error("scroll fixture root must expose compiled layout metadata");
+    }
+    scrollRoot.geometry.x = 38.8;
+    scrollRoot.geometry.width = 10;
+    scrollRoot.compiledLayout.scrollContentExtent.width = 18.9;
+    controls[1]!.geometry.x = 38.8;
+    controls[1]!.geometry.width = 10;
+    controls[2]!.geometry.x = 54.59;
+    controls[2]!.geometry.width = 3.11;
+    controls[3]!.geometry.x = 54.6;
+    controls[3]!.geometry.width = 1;
+
+    expect(38.8 + 18.9).toBeLessThan(54.59 + 3.11);
+    expect(UIImplementationSpecV2Schema.safeParse(fixture).success).toBe(true);
   });
 
   it("requires scroll extents at compiler two-decimal precision", () => {

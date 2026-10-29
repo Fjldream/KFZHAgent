@@ -20,8 +20,11 @@ async function bootstrap(): Promise<void> {
   app.use(cookieParser());
 
   const port = Number(process.env.PORT ?? 3000);
-  await app.listen(port);
-  console.log(`[api] KF Solution Agent API listening on http://localhost:${port}`);
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  const host = process.env.API_HOST ?? "0.0.0.0";
+  await app.listen(port, host);
+  console.log(`[api] KF Solution Agent API listening on http://${host}:${port}`);
+  // end
 }
 
 void bootstrap().catch((error) => {

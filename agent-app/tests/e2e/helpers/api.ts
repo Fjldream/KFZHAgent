@@ -1,188 +1,97 @@
-import { API_BASE } from "./config";
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+import { expect, type APIRequestContext, type Page } from "@playwright/test";
+import { randomUUID } from "node:crypto";
+import type { RunAction, RunEvent, RunSnapshot } from "../../../packages/contracts/src/agent-run.js";
+import { API_BASE, WEB_BASE, type E2eUser } from "./config.js";
 
-/**
- * 基于 Playwright APIRequestContext 的 E2E API 客户端。
- * page.context().request 与页面共享 Cookie，因此登录后即可访问受保护端点。
- */
-
-export interface SseFrame {
-  event: string;
-  data: unknown;
+export async function loginViaApi(request: APIRequestContext, user: E2eUser) {
+  const response = await request.post(`${API_BASE}/api/auth/login`, { data: user, headers: { Origin: WEB_BASE } });
+  expect(response.status(), await response.text()).toBe(200);
+  return response.json() as Promise<{ user: { id: string } }>;
 }
-
-export interface ApprovalInterruptLike {
-  type?: string;
-  planHash?: string;
-  summary?: string;
-  changeRequestId?: string;
-  changePlanId?: string;
-  diffArtifactId?: string;
-  previewArtifactId?: string;
+export async function login(page: Page, user: E2eUser) {
+  await page.goto("/login");
+  await page.getByTestId("login-tenant").fill(user.tenant);
+  await page.getByTestId("login-username").fill(user.username);
+  await page.getByTestId("login-password").fill(user.password);
+  await page.getByTestId("login-submit").click();
+  await page.waitForURL(/\/workspaces(\?.*)?$/);
 }
-
-export interface DonePayloadLike {
-  stage?: string | null;
-  planHash?: string | null;
-  changePlanId?: string | null;
-  changeRequestId?: string | null;
-  buildJobId?: string | null;
-  lastErrorCode?: string | null;
-  interrupt?: ApprovalInterruptLike | null;
+export async function createWorkspace(request: APIRequestContext, name: string, mode: "new" | "upload" = "new") {
+  const response = await request.post(`${API_BASE}/api/workspaces`, { data: { name, mode }, headers: { Origin: WEB_BASE } });
+  expect(response.status(), await response.text()).toBe(201);
+  return response.json() as Promise<{ id: string; name: string; mode: string }>;
 }
-
-export async function loginViaApi(
-  request: import("@playwright/test").APIRequestContext,
-  user: { tenant: string; username: string; password: string },
-): Promise<{ user: { id: string } }> {
-  const res = await request.post(`${API_BASE}/api/auth/login`, {
-    data: { tenant: user.tenant, username: user.username, password: user.password },
+export async function createWorkspaceInBrowser(page: Page, name: string, mode: "new" | "upload" = "new") {
+  await page.getByTestId("workspace-name").fill(name);
+  await page.getByTestId(mode === "upload" ? "upload-workspace" : "create-workspace").click();
+  await page.waitForURL(/\/workspaces\/[0-9a-f-]{36}\/workbench(?:\/[^?]+)?(?:\?.*)?$/);
+  await expect(page.getByRole("textbox", { name: "描述你的需求" })).toBeVisible();
+  return new URL(page.url()).pathname.split("/")[2]!;
+}
+export async function createConversation(request: APIRequestContext, workspaceId: string, title = "E2E 对话") {
+  const response = await request.post(`${API_BASE}/api/conversations`, { data: { workspaceId, title }, headers: { Origin: WEB_BASE } });
+  expect(response.status(), await response.text()).toBe(201);
+  return response.json() as Promise<{ id: string; title: string }>;
+}
+export function runBody(action: RunAction, mode: "discuss" | "plan" | "build" = "build") {
+  return { action, mode, clientRequestId: randomUUID(), clientMessageId: randomUUID() };
+}
+export async function startRun(request: APIRequestContext, conversationId: string, action: RunAction, mode: "discuss" | "plan" | "build" = "build") {
+  const response = await request.post(`${API_BASE}/api/conversations/${conversationId}/runs`, { data: runBody(action, mode), headers: { Origin: WEB_BASE } });
+  expect(response.status(), await response.text()).toBe(202);
+  return response.json() as Promise<RunSnapshot>;
+}
+export async function snapshot(request: APIRequestContext, runId: string): Promise<RunSnapshot> {
+  const response = await request.get(`${API_BASE}/api/runs/${runId}`);
+  expect(response.status(), await response.text()).toBe(200);
+  return response.json() as Promise<RunSnapshot>;
+}
+export async function waitForRun(request: APIRequestContext, runId: string, status: RunSnapshot["status"]) {
+  let result: RunSnapshot;
+  await expect.poll(async () => {
+    result = await snapshot(request, runId);
+    if (result.status === "FAILED" && status !== "FAILED") throw new Error(`Run ${runId} failed: ${result.failureCode}`);
+    return result.status;
+  }, { timeout: 120_000, intervals: [100, 250, 500, 1000] }).toBe(status);
+  return result!;
+}
+/** A real UI action; capture only the accepted Run receipt, never fabricate a job/result. */
+export async function submitInBrowser(page: Page, action: () => Promise<unknown>): Promise<RunSnapshot> {
+  const response = page.waitForResponse(res => /\/api\/conversations\/[^/]+\/runs$/.test(res.url()) && res.request().method() === "POST");
+  await action();
+  const accepted = await response;
+  expect(accepted.status(), await accepted.text()).toBe(202);
+  return accepted.json() as Promise<RunSnapshot>;
+}
+export async function sendInBrowser(page: Page, text: string) {
+  await page.getByRole("textbox", { name: "描述你的需求" }).fill(text);
+  return submitInBrowser(page, () => page.getByRole("button", { name: "发送", exact: true }).click());
+}
+export async function events(request: APIRequestContext, runId: string, after = 0): Promise<RunEvent[]> {
+  const response = await request.get(`${API_BASE}/api/runs/${runId}/events?after=${after}`, { timeout: 40_000 });
+  expect(response.status(), await response.text()).toBe(200);
+  return (await response.text()).split("\n\n").flatMap(block => {
+    const data = block.split("\n").find(line => line.startsWith("data:"));
+    return data ? [JSON.parse(data.slice(5)) as RunEvent] : [];
   });
-  if (res.status() !== 200) {
-    throw new Error(`login failed (${res.status()}): ${await res.text()}`);
-  }
-  return (await res.json()) as { user: { id: string } };
 }
-
-export async function createWorkspace(
-  request: import("@playwright/test").APIRequestContext,
-  name: string,
-  mode: "new" | "upload" = "new",
-): Promise<{ id: string; name: string; mode: string }> {
-  const res = await request.post(`${API_BASE}/api/workspaces`, {
-    data: { name, ...(mode === "upload" ? { mode } : {}) },
-  });
-  if (res.status() !== 201) {
-    throw new Error(`create workspace failed (${res.status()}): ${await res.text()}`);
-  }
-  return (await res.json()) as { id: string; name: string; mode: string };
+export async function listBuildArtifacts(request: APIRequestContext, jobId: string) {
+  const response = await request.get(`${API_BASE}/api/build-jobs/${jobId}/artifacts`);
+  expect(response.status(), await response.text()).toBe(200);
+  return response.json() as Promise<Array<{ id: string; kind: string; storageKey: string }>>;
 }
-
-export async function createConversation(
-  request: import("@playwright/test").APIRequestContext,
-  workspaceId: string,
-  title = "E2E 对话",
-): Promise<{ id: string; title: string }> {
-  const res = await request.post(`${API_BASE}/api/conversations`, {
-    data: { workspaceId, title },
-  });
-  if (res.status() !== 201) {
-    throw new Error(`create conversation failed (${res.status()}): ${await res.text()}`);
-  }
-  return (await res.json()) as { id: string; title: string };
+export async function getValidationReport(request: APIRequestContext, jobId: string) {
+  const response = await request.get(`${API_BASE}/api/build-jobs/${jobId}/report`);
+  expect(response.status(), await response.text()).toBe(200);
+  return response.json() as Promise<{ outcome: string }>;
 }
-
-export function parseSse(text: string): SseFrame[] {
-  const frames: SseFrame[] = [];
-  for (const block of text.split("\n\n")) {
-    if (block.trim().length === 0) continue;
-    let event = "message";
-    const dataLines: string[] = [];
-    for (const line of block.split("\n")) {
-      if (line.startsWith("event:")) event = line.slice("event:".length).trim();
-      else if (line.startsWith("data:")) dataLines.push(line.slice("data:".length).trim());
-    }
-    if (dataLines.length > 0) {
-      frames.push({ event, data: JSON.parse(dataLines.join("\n")) as unknown });
-    }
-  }
-  return frames;
+export async function downloadArtifactBytes(request: APIRequestContext, artifactId: string): Promise<Buffer> {
+  const tokenResponse = await request.post(`${API_BASE}/api/artifacts/${artifactId}/download-token`, { headers: { Origin: WEB_BASE } });
+  expect(tokenResponse.status(), await tokenResponse.text()).toBe(200);
+  const { token } = await tokenResponse.json() as { token: string };
+  const response = await request.get(`${API_BASE}/api/artifacts/download/${token}`);
+  expect(response.status()).toBe(200);
+  return Buffer.from(await response.body());
 }
-
-export function doneOf(text: string): DonePayloadLike {
-  const done = parseSse(text).find((frame) => frame.event === "done");
-  if (done === undefined) {
-    throw new Error(`no done SSE frame in response: ${text}`);
-  }
-  return done.data as DonePayloadLike;
-}
-
-export async function sendMessageAndGetDone(
-  request: import("@playwright/test").APIRequestContext,
-  conversationId: string,
-  content: string,
-): Promise<DonePayloadLike> {
-  const res = await request.post(`${API_BASE}/api/conversations/${conversationId}/messages`, {
-    data: { content },
-  });
-  if (res.status() !== 200) {
-    throw new Error(`send message failed (${res.status()}): ${await res.text()}`);
-  }
-  return doneOf(await res.text());
-}
-
-export async function resumeApproval(
-  request: import("@playwright/test").APIRequestContext,
-  conversationId: string,
-  action: "approve" | "revise" | "cancel",
-  planHash: string,
-): Promise<Record<string, unknown>> {
-  const res = await request.post(`${API_BASE}/api/conversations/${conversationId}/resume`, {
-    data: { action, planHash },
-  });
-  if (res.status() !== 200) {
-    throw new Error(`resume ${action} failed (${res.status()}): ${await res.text()}`);
-  }
-  return (await res.json()) as Record<string, unknown>;
-}
-
-export async function waitForBuildJob(
-  request: import("@playwright/test").APIRequestContext,
-  jobId: string,
-  timeoutMs = 120_000,
-): Promise<{ id: string; status: string }> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const res = await request.get(`${API_BASE}/api/build-jobs/${jobId}`);
-    if (res.status() !== 200) {
-      throw new Error(`build job fetch failed (${res.status()})`);
-    }
-    const job = (await res.json()) as { id: string; status: string };
-    if (job.status === "SUCCEEDED") return job;
-    if (job.status === "FAILED") {
-      throw new Error(`build job FAILED: ${JSON.stringify(job)}`);
-    }
-    if (Date.now() > deadline) {
-      throw new Error(`build job ${jobId} did not finish within ${timeoutMs}ms (${job.status})`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 1_000));
-  }
-}
-
-export async function listBuildArtifacts(
-  request: import("@playwright/test").APIRequestContext,
-  jobId: string,
-): Promise<{ id: string; kind: string; storageKey: string }[]> {
-  const res = await request.get(`${API_BASE}/api/build-jobs/${jobId}/artifacts`);
-  if (res.status() !== 200) {
-    throw new Error(`artifacts fetch failed (${res.status()})`);
-  }
-  return (await res.json()) as { id: string; kind: string; storageKey: string }[];
-}
-
-export async function getValidationReport(
-  request: import("@playwright/test").APIRequestContext,
-  jobId: string,
-): Promise<{ outcome: string; summary?: string }> {
-  const res = await request.get(`${API_BASE}/api/build-jobs/${jobId}/report`);
-  if (res.status() !== 200) {
-    throw new Error(`report fetch failed (${res.status()})`);
-  }
-  return (await res.json()) as { outcome: string; summary?: string };
-}
-
-/** 两段式下载：POST download-token → GET download/:token，返回原始字节。 */
-export async function downloadArtifactBytes(
-  request: import("@playwright/test").APIRequestContext,
-  artifactId: string,
-): Promise<Buffer> {
-  const tokenRes = await request.post(`${API_BASE}/api/artifacts/${artifactId}/download-token`, {});
-  if (tokenRes.status() !== 200) {
-    throw new Error(`download-token failed (${tokenRes.status()}): ${await tokenRes.text()}`);
-  }
-  const { token } = (await tokenRes.json()) as { token: string };
-  const res = await request.get(`${API_BASE}/api/artifacts/download/${token}`);
-  if (res.status() !== 200) {
-    throw new Error(`artifact download failed (${res.status()})`);
-  }
-  return Buffer.from(await res.body());
-}
+// end

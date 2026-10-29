@@ -2,15 +2,7 @@ import type { AgentGraphStateValue, AgentGraphUpdate } from "../state.js";
 import type { SolutionGraphDeps } from "../ports.js";
 
 /**
- * Clarify node: persists the model's clarifying question as an assistant
- * message, records one clarifying turn, and returns the graph to idle so the
- * user can answer.
- *
- * The question/options are carried in `state.clarifyingQuestion` (written by
- * the classify-intent node's CLARIFY branch) and cleared once persisted so a
- * later turn never re-sends a stale question. When no structured question is
- * present (e.g. a future entry path that only wrote `state.reply`) the reply
- * text is used as a fallback.
+ * 澄清节点：保留模型澄清问题为助手消息，记录澄清回合并返回图以使用户可以回答。问题/选项存储在 `state.clarifyingQuestion`（由 classify-intent 节点的 CLARIFY 分支写入）中，一旦被持久化则不再发送，以防止后来的回合重复发送过时的问题。当没有结构化的问题（例如，只有在写入 `state.reply` 的情况下才写入的未来路径）时，回复文本用于备用。
  */
 export function createClarifyNode(deps: SolutionGraphDeps) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {

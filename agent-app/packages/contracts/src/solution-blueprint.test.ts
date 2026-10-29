@@ -76,6 +76,27 @@ function page(id: string, regionId: string) {
   };
 }
 
+// modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+describe("optional journey display completion", () => {
+  it("preserves an absent display caption without inventing a completion fact", () => {
+    const journey: Record<string, unknown> = { ...valid.journeys[0] };
+    delete journey.completion;
+    const parsed = CustomerSolutionBlueprintSchema.parse({ ...valid, journeys: [journey] });
+    expect(Object.hasOwn(parsed.journeys[0]!, "completion")).toBe(false);
+    expect(parsed.journeys[0]!.steps).toEqual(valid.journeys[0].steps);
+  });
+  it.each(["", null, 0])("retains validation when an invalid display caption is explicitly provided: %s", completion => {
+    expect(CustomerSolutionBlueprintSchema.safeParse({ ...valid, journeys: [{ ...valid.journeys[0], completion }] }).success).toBe(false);
+  });
+  it("still requires executable or observable journey steps", () => {
+    const journey: Record<string, unknown> = { ...valid.journeys[0] };
+    delete journey.completion;
+    delete journey.steps;
+    expect(CustomerSolutionBlueprintSchema.safeParse({ ...valid, journeys: [journey] }).success).toBe(false);
+  });
+});
+// end
+
 function journey(id: string, pageId = "visitor-overview", regionId = "records") {
   return { ...valid.journeys[0], id, steps: [{ ...valid.journeys[0].steps[0], pageId, regionId }] };
 }
@@ -91,6 +112,37 @@ function withPrimaryRegion(change: Record<string, unknown>) {
 }
 
 describe("CustomerSolutionBlueprintSchema", () => {
+  // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+  it("preserves legacy region shape and accepts bounded visual provenance without implementation data", () => {
+    const legacy = CustomerSolutionBlueprintSchema.parse(valid);
+    expect(legacy.pages[0]!.regions[0]).not.toHaveProperty("visualRegionIds");
+    const candidate = { ...valid, pages: [{ ...valid.pages[0], regions: valid.pages[0].regions.map((region) => ({ ...region, visualRegionIds: ["image-region-1"] })) }] };
+    expect(CustomerSolutionBlueprintSchema.parse(candidate).pages[0]!.regions[0]!.visualRegionIds).toEqual(["image-region-1"]);
+  });
+  it.each([[], ["duplicate", "duplicate"], ["not:a-visual-id"], Array.from({ length: 101 }, (_, index) => `r-${index}`)].map((visualRegionIds) => ({ visualRegionIds })))("rejects invalid visual source references %j", ({ visualRegionIds }) => {
+    expect(CustomerSolutionBlueprintSchema.safeParse({ ...valid, pages: [{ ...valid.pages[0], regions: valid.pages[0].regions.map((region) => ({ ...region, visualRegionIds })) }] }).success).toBe(false);
+  });
+  // end
+  // modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+  it("preserves legacy steps and accepts explicit bounded observation text", () => {
+    const legacy = CustomerSolutionBlueprintSchema.parse(valid).journeys[0]!.steps[0]!;
+    expect(legacy).not.toHaveProperty("kind");
+    const observed = structuredClone(valid) as unknown as Record<string, unknown>;
+    observed.journeys = [{ ...valid.journeys[0], steps: [{ ...legacy, kind: "observe", expectedTexts: ["待审核预约数"] }] }];
+    expect(CustomerSolutionBlueprintSchema.parse(observed).journeys[0]!.steps[0]).toMatchObject({ kind: "observe", expectedTexts: ["待审核预约数"] });
+  });
+  it.each([
+    { kind: "observe" }, { kind: "observe", expectedTexts: [] },
+    { kind: "observe", expectedTexts: ["重复", "重复"] },
+    { kind: "observe", expectedTexts: [" "] },
+    { kind: "observe", expectedTexts: Array.from({ length: 13 }, (_, index) => `文字${index}`) },
+    { kind: "interact", expectedTexts: ["不可使用"] }, { expectedTexts: ["不可隐式观察"] },
+    { kind: "read", expectedTexts: ["未知类型"] },
+  ])("rejects ambiguous observation contract %j", (change) => {
+    const candidate = { ...valid, journeys: [{ ...valid.journeys[0], steps: [{ ...valid.journeys[0].steps[0], ...change }] }] };
+    expect(CustomerSolutionBlueprintSchema.safeParse(candidate).success).toBe(false);
+  });
+  // end
   it("accepts a customer solution blueprint expressed only in customer semantics", () => {
     expect(CustomerSolutionBlueprintSchema.parse(valid).pages[0]?.id).toBe("visitor-overview");
     expect(DesignPlanSchema.safeParse(valid).success).toBe(true);
@@ -103,6 +155,21 @@ describe("CustomerSolutionBlueprintSchema", () => {
       visualDirection: { ...valid.visualDirection, tone: "专业、友好且便于一线同事理解" },
     }).success).toBe(true);
   });
+
+  it.each([
+    "Node.js 与 TypeScript 项目经验",
+    "代码主页：https://github.com/example/profile",
+    "头像：https://images.example.com/avatar.png",
+  ])("accepts benign customer-facing dotted text: %s", (content) => {
+    expect(CustomerSolutionBlueprintSchema.safeParse(withPrimaryRegion({ content: [content] })).success).toBe(true);
+  });
+
+  it.each(["content.hero", "data.status-grid", "navigation.top"])(
+    "rejects a KF implementation namespace token: %s",
+    (objective) => {
+      expect(CustomerSolutionBlueprintSchema.safeParse({ ...valid, objective }).success).toBe(false);
+    },
+  );
 
   it.each(["Version(3.6)", "KPI(关键指标)"])("accepts an unspaced benign product label: %s", (content) => {
     expect(CustomerSolutionBlueprintSchema.safeParse(withPrimaryRegion({ content: [content] })).success).toBe(true);

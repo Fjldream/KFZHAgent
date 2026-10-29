@@ -59,6 +59,15 @@ const validCapabilityReport = {
 };
 
 describe("AgentGraphState v2", () => {
+  // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+  it("preserves explicit visual checkpoint clearing and rejects malformed accepted input", async () => {
+    const cleared = { ...base, stage: "idle", acceptedVisualPlanningInput: null, visualSemanticPlan: null, visualPlanConfirmationHash: null };
+    await expect(AgentGraphState.validateInput(cleared)).resolves.toMatchObject({
+      acceptedVisualPlanningInput: null, visualSemanticPlan: null, visualPlanConfirmationHash: null,
+    });
+    await expect(AgentGraphState.validateInput({ ...cleared, acceptedVisualPlanningInput: { approved: true } })).rejects.toThrow();
+  });
+  // end
   it("accepts clarificationCount and designPlan fields", async () => {
     await expect(
       AgentGraphState.validateInput({

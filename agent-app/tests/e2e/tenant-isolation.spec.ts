@@ -1,101 +1,75 @@
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
 import { expect, test, type APIRequestContext } from "@playwright/test";
 import { readFile } from "node:fs/promises";
-import { API_BASE, TENANT_A, TENANT_B } from "./helpers/config";
-import {
-  createConversation,
-  createWorkspace,
-  loginViaApi,
-  resumeApproval,
-  sendMessageAndGetDone,
-} from "./helpers/api";
-import { fixturePath } from "./helpers/unzip";
+import { API_BASE, WEB_BASE, TENANT_A, TENANT_B, TENANT_C } from "./helpers/config.js";
+import { createConversation, createWorkspace, events, login, loginViaApi, runBody, startRun, waitForRun } from "./helpers/api.js";
+import { fixturePath } from "./helpers/unzip.js";
 
-/**
- * Brief Step 8：租户隔离与上传安全。
- *  - 第二租户不能 list/view/resume/download/delete 第一租户的 workspace；
- *  - 上传 path-traversal 与 zip-bomb fixture 被拒绝且不创建 Source Revision。
- */
-test("tenant isolation and upload security", async ({ browser }) => {
-  test.setTimeout(180_000);
+test("Run isolation, CSRF, idempotency, retired endpoints and hostile source uploads", async ({ browser }) => {
   const contextA = await browser.newContext();
   const contextB = await browser.newContext();
-  const reqA = contextA.request;
-  const reqB = contextB.request;
-
-  await loginViaApi(reqA, TENANT_A);
-  await loginViaApi(reqB, TENANT_B);
-
-  // ---- 租户 A 准备资源 ------------------------------------------------
-  const wsA = await createWorkspace(reqA, `Isolated WS ${Date.now()}`, "upload");
-  const pkgBytes = await readFile(fixturePath("client-unknown-field.gz"));
-  const upload = await reqA.post(`${API_BASE}/api/workspaces/${wsA.id}/uploads`, {
-    data: Buffer.from(pkgBytes),
-    headers: { "Content-Type": "application/octet-stream" },
-  });
-  expect(upload.status()).toBe(201);
-  const packageUrl = ((await upload.json()) as { packageUrl: string }).packageUrl;
-
-  const convA = await createConversation(reqA, wsA.id);
-  const done = await sendMessageAndGetDone(reqA, convA.id, "请把按钮改成红色");
-  const planHash = done.interrupt?.planHash;
-  expect(planHash).toMatch(/^[0-9a-f]{64}$/);
-  const changePlanId = done.changePlanId;
-  expect(changePlanId).toBeTruthy();
-  const resumed = await resumeApproval(reqA, convA.id, "approve", planHash!);
-  const jobId = resumed.buildJobId as string;
-  expect(jobId).toBeTruthy();
-
-  // ---- 租户 B 对所有租户 A 资源一律 404（防枚举） ----------------------
-  await expect404(reqB, "GET", `${API_BASE}/api/workspaces/${wsA.id}`);
-  await expect404(reqB, "GET", `${API_BASE}/api/conversations/${convA.id}`);
-  await expect404(reqB, "GET", `${API_BASE}/api/conversations/${convA.id}/messages`);
-  await expect404(reqB, "POST", `${API_BASE}/api/conversations/${convA.id}/resume`, {
-    action: "approve",
-    planHash,
-  });
-  await expect404(reqB, "POST", `${API_BASE}/api/artifacts/${packageUrl}/download-token`);
-  await expect404(reqB, "GET", `${API_BASE}/api/build-jobs/${jobId}`);
-  await expect404(reqB, "GET", `${API_BASE}/api/build-jobs/${jobId}/artifacts`);
-  await expect404(reqB, "GET", `${API_BASE}/api/build-jobs/${jobId}/report`);
-  await expect404(reqB, "GET", `${API_BASE}/api/change-plans/${changePlanId}`);
-  await expect404(reqB, "DELETE", `${API_BASE}/api/workspaces/${wsA.id}`, { confirm: true });
-
-  // 租户 A 自己的资源仍然可达（对照证明隔离而非服务故障）
-  const selfCheck = await reqA.get(`${API_BASE}/api/workspaces/${wsA.id}`);
-  expect(selfCheck.status()).toBe(200);
-
-  // ---- 上传安全：path-traversal 与 zip-bomb 均被拒绝 ------------------
-  const evilWs = await createWorkspace(reqB, `Evil WS ${Date.now()}`, "upload");
-
-  for (const fixture of ["evil-path-traversal.gz", "evil-zip-bomb.gz"]) {
-    const evilBytes = await readFile(fixturePath(fixture));
-    const evilUpload = await reqB.post(`${API_BASE}/api/workspaces/${evilWs.id}/uploads`, {
-      data: Buffer.from(evilBytes),
-      headers: { "Content-Type": "application/octet-stream" },
-    });
-    expect(evilUpload.status(), `fixture ${fixture} should be rejected`).toBe(422);
-    const body = (await evilUpload.json()) as { error?: { code?: string } };
-    expect(body.error?.code).toBe("PACKAGE_UNPACK_FAILED");
-  }
-
-  // 被拒绝的包不会创建 Source Revision，workspace 保持无修订状态。
-  const revisions = await reqB.get(`${API_BASE}/api/workspaces/${evilWs.id}/revisions`);
-  expect(revisions.status()).toBe(200);
-  expect((await revisions.json()) as unknown[]).toHaveLength(0);
-
-  await contextA.close();
-  await contextB.close();
+  try {
+    const reqA = contextA.request;
+    const reqB = contextB.request;
+    await loginViaApi(reqA, TENANT_A);
+    await loginViaApi(reqB, TENANT_B);
+    const workspace = await createWorkspace(reqA, `E2E Isolation ${Date.now()}`);
+    const conversation = await createConversation(reqA, workspace.id);
+    const body = runBody({ type: "message", text: "创建隔离检查页面" }, "plan");
+    expect((await reqA.post(`${API_BASE}/api/conversations/${conversation.id}/runs`, { data: body })).status()).toBe(403);
+    const accepted = await reqA.post(`${API_BASE}/api/conversations/${conversation.id}/runs`, { data: body, headers: { Origin: WEB_BASE } });
+    expect(accepted.status()).toBe(202);
+    const { id } = await accepted.json() as { id: string };
+    const replay = await reqA.post(`${API_BASE}/api/conversations/${conversation.id}/runs`, { data: body, headers: { Origin: WEB_BASE } });
+    expect(replay.status()).toBe(202);
+    expect((await replay.json() as { id: string }).id).toBe(id);
+    await waitForRun(reqA, id, "WAITING_INPUT");
+    for (const url of [`workspaces/${workspace.id}`, `conversations/${conversation.id}`, `conversations/${conversation.id}/messages`, `conversations/${conversation.id}/runs/latest`, `runs/${id}`, `runs/${id}/events`, `runs/${id}/usage`]) {
+      expect((await reqB.get(`${API_BASE}/api/${url}`)).status(), url).toBe(404);
+    }
+    for (const [url, data] of [[`runs/${id}/cancel`, {}], [`runs/${id}/retry`, { clientRequestId: "foreign-retry" }], [`conversations/${conversation.id}/runs`, runBody({ type: "message", text: "foreign" })]] as const) {
+      expect((await reqB.post(`${API_BASE}/api/${url}`, { data, headers: { Origin: WEB_BASE } })).status(), url).toBe(404);
+    }
+    for (const req of [reqA, reqB]) {
+      for (const suffix of ["messages", "resume"]) expect((await req.post(`${API_BASE}/api/conversations/${conversation.id}/${suffix}`, { data: { content: "retired" }, headers: { Origin: WEB_BASE } })).status()).toBe(404);
+    }
+    expect((await reqB.delete(`${API_BASE}/api/workspaces/${workspace.id}`, { data: { confirm: true } })).status()).toBe(404);
+    const receipt = (await events(reqA, id)).find(event => event.type === "input.required")?.payload.receipt;
+    expect(typeof receipt).toBe("string");
+    const completed = await startRun(reqA, conversation.id, { type: "confirm_blueprint", expectedRunId: id, receipt: receipt as string });
+    const delivered = await waitForRun(reqA, completed.id, "SUCCEEDED");
+    expect(delivered.buildJobId).toBeTruthy();
+    const artifacts = await reqA.get(`${API_BASE}/api/build-jobs/${delivered.buildJobId}/artifacts`);
+    const artifact = (await artifacts.json() as Array<{ id: string; kind: string }>).find(item => item.kind === "client-package")!;
+    for (const suffix of ["", "/artifacts", "/report"]) expect((await reqB.get(`${API_BASE}/api/build-jobs/${delivered.buildJobId}${suffix}`)).status()).toBe(404);
+    expect((await reqB.post(`${API_BASE}/api/artifacts/${artifact.id}/download-token`, { headers: { Origin: WEB_BASE } })).status()).toBe(404);
+    expect((await reqA.get(`${API_BASE}/api/workspaces/${workspace.id}`)).status()).toBe(200);
+    const evilWorkspace = await createWorkspace(reqB, `E2E Hostile ${Date.now()}`, "upload");
+    await rejectHostileUploads(reqB, evilWorkspace.id);
+  } finally { await contextA.close(); await contextB.close(); }
 });
 
-async function expect404(
-  request: APIRequestContext,
-  method: string,
-  url: string,
-  data?: unknown,
-): Promise<void> {
-  const res = await request.fetch(url, {
-    method,
-    ...(data !== undefined ? { data } : {}),
-  });
-  expect(res.status(), `${method} ${url} should 404 for another tenant`).toBe(404);
+test("tenant outside rollout sees a readonly workbench and cannot bypass it via Run HTTP", async ({ page }) => {
+  await login(page, TENANT_C);
+  const workspace = await createWorkspace(page.request, `E2E Readonly ${Date.now()}`);
+  const conversation = await createConversation(page.request, workspace.id);
+  await page.goto(`/workspaces/${workspace.id}/workbench/${conversation.id}`);
+  await expect(page.getByRole("textbox", { name: "描述你的需求" })).toBeDisabled();
+  await expect(page.getByRole("status")).toContainText("暂未开放");
+  const denied = await page.request.post(`${API_BASE}/api/conversations/${conversation.id}/runs`, { data: runBody({ type: "message", text: "bypass" }), headers: { Origin: WEB_BASE } });
+  expect(denied.status()).toBe(403);
+  expect(await denied.json()).toMatchObject({ error: { code: "FEATURE_NOT_ENABLED" } });
+  const history = await page.request.get(`${API_BASE}/api/conversations/${conversation.id}/messages`);
+  expect(await history.json()).toEqual([]);
+});
+
+async function rejectHostileUploads(request: APIRequestContext, workspaceId: string) {
+  for (const fixture of ["evil-path-traversal.gz", "evil-zip-bomb.gz"]) {
+    const response = await request.post(`${API_BASE}/api/workspaces/${workspaceId}/uploads`, { data: await readFile(fixturePath(fixture)), headers: { "Content-Type": "application/octet-stream", Origin: WEB_BASE } });
+    expect(response.status(), fixture).toBe(422);
+    expect(await response.json()).toMatchObject({ error: { code: "PACKAGE_UNPACK_FAILED" } });
+  }
+  const revisions = await request.get(`${API_BASE}/api/workspaces/${workspaceId}/revisions`);
+  expect(await revisions.json()).toEqual([]);
 }
+// end

@@ -3,9 +3,14 @@ import type { RunAction } from "@kf/contracts";
 import { createHash } from "node:crypto";
 import { routeRunAction, type ActionRoute } from "./action-router.js";
 import { canonicalJson } from "../models/canonical-json.js";
+// modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+import { VISUAL_RUN_PLAN_VERSION } from "@kf/contracts";
+// end
 
 /** 计划版本：节点逻辑一改，所有 inputHash 自动失效，避免复用旧语义输出。 */
-export const RUN_PLAN_VERSION = "run-plan@2";
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+export const RUN_PLAN_VERSION = "run-plan@6";
+// end
 
 export type PlannedStep = {
   stepKey: string;
@@ -39,5 +44,24 @@ export function planRunSteps(action: RunAction, baseRevisionId: string | null): 
       .update(canonicalJson({ planVersion: RUN_PLAN_VERSION, route, action, baseRevisionId }), "utf8")
       .digest("hex"),
   }];
+}
+// modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+export function planVisualReferenceSteps(action: Extract<RunAction, { type: "message" }>, baseRevisionId: string | null, admissionHash: string): PlannedStep[] {
+  return [{ stepKey: "visual-reference", label: "识别参考图并等待核对",
+    inputHash: createHash("sha256").update(canonicalJson({ planVersion: VISUAL_RUN_PLAN_VERSION, route: "analyze-reference",
+      action, baseRevisionId, admissionHash }), "utf8").digest("hex") }];
+}
+export function planVisualBlueprintSteps(action: Extract<RunAction, { type: "accept_visual_reference" }>, baseRevisionId: string | null, continuationHash: string): PlannedStep[] {
+  return [{ stepKey: "visual-blueprint", label: "规划参考图蓝图并等待独立确认",
+    inputHash: createHash("sha256").update(canonicalJson({ planVersion: VISUAL_RUN_PLAN_VERSION, route: "visual-blueprint",
+      action, baseRevisionId, continuationHash }), "utf8").digest("hex") }];
+}
+// end
+// end
+// modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+export function planVisualEngineeringSteps(action: Extract<RunAction, { type: "confirm_blueprint" }>, baseRevisionId: string | null, engineeringHash: string): PlannedStep[] {
+  return [{ stepKey: "visual-engineering", label: "按已确认视觉蓝图生成客户端工程",
+    inputHash: createHash("sha256").update(canonicalJson({ planVersion: VISUAL_RUN_PLAN_VERSION, route: "visual-engineering",
+      action, baseRevisionId, engineeringHash }), "utf8").digest("hex") }];
 }
 // end

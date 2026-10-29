@@ -18,24 +18,16 @@ import { DownloadTokenService } from "./download-token.service.js";
 import { PreviewService } from "./preview.service.js";
 
 /**
- * Artifact download flow.
+ * Artifact 下载流程。
  *
- * The brief's Step 6 path `GET /api/artifacts/:id/download` is intentionally
- * REPLACED by a two-step token flow (a deliberate, documented deviation):
+ * 步骤 6 的简短路径 `GET /api/artifacts/:id/download` 通过一个两步令牌流（一个故意的、文档化的偏离）替换：
  *
- *   POST /api/artifacts/:id/download-token  -> short-lived single-use token
- *   GET  /api/artifacts/download/:token     -> revalidates all bindings and
- *                                              the active session, then streams
- *                                              the artifact bytes.
+ *   POST /api/artifacts/:id/download-token -> 短期一次性令牌
+ *   GET /api/artifacts/download/:token -> 重新验证所有绑定和
+ *                                              活跃会话，并然后流式传输
+ *                                              该文件的文件字节。
  *
- * Why the deviation: a direct `GET /:id/download` forces the artifact bytes
- * through a single request/response, which couples URL lifetime to artifact
- * lifetime and gives a long-lived, replayable download link. The two-step
- * flow bounds exposure to a 10-minute single-use token bound to the caller's
- * userId + tenantId + artifactId (brief Step 6 "short-lived single-use
- * download token"). The Task 12 web client consumes this protocol. The brief's
- * direct path is kept explicitly mapped to a 404 so it never silently
- * resolves to a different endpoint.
+ * 为什么偏离：直接 `GET /:id/download` 会将文件字节通过单个请求/响应，这将 URL 生命周期与文件生命周期耦合，并给长生命周期、可重播的下载链接。两步流将暴露限制为与调用者 userId + tenantId + artifactId（简短的单次使用下载令牌）绑定的 10 分钟一次性令牌。任务 12 的 web 客户端消费此协议。简短路径的直接路径被明确映射到 404，以确保它永远不会无害地解析到其他端点。
  */
 @Controller("api/artifacts")
 @UseGuards(TenantGuard)
@@ -68,11 +60,9 @@ export class ArtifactController {
   }
 
   /**
-   * The brief's original direct download route. Deliberately not implemented:
-   * downloads go through the two-step token flow above. This explicit mapping
-   * guarantees `GET /api/artifacts/:id/download` returns a clear 404 with a
-   * pointer to the current protocol instead of silently matching elsewhere.
-   */
+ * 原简短的直接下载路线。故意未实现:
+ * 下载通过上述两步令牌流传递。这种明确的映射确保了 `GET /api/artifacts/:id/download` 返回一个明确的 404 错误，指向当前协议，而不是默默地匹配到其他地方。
+ */
   @Get(":id/download")
   downloadDirect(@Param("id") _id: string): never {
     void _id;
@@ -82,11 +72,8 @@ export class ArtifactController {
   }
 
   /**
-   * Static HTML preview of the artifact's client project (browser visual
-   * preview). Tenant ownership is revalidated at every data-source hop
-   * (Artifact -> BuildJob -> SolutionRevision); upload-mode projects without
-   * a renderable ClientProjectIR state return 404.
-   */
+ * Artifact 客户端项目静态 HTML 预览（浏览器可视化预览）。租户所有权在每次数据源跳转（Artifact -> BuildJob -> SolutionRevision）时重新验证；没有渲染的 ClientProjectIR 状态的上传模式项目返回 404。
+ */
   @Get(":id/preview")
   @Header("Content-Type", "text/html; charset=utf-8")
   @Header("Cache-Control", "no-store")

@@ -31,6 +31,9 @@ model Tenant {
   users      User[]
   workspaces SolutionWorkspace[]
   createdAt  DateTime            @default(now())
+  // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+  imageEgressAllowed Boolean @default(false)
+  // end
 }
 
 model User {
@@ -75,6 +78,10 @@ model SolutionWorkspace {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
   assets            WorkspaceAsset[]
+  // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+  referenceAssets   ReferenceAsset[]
+  visualAnalysisCaches VisualAnalysisCacheEntry[]
+  // end
 
   runs              AgentRun[]
 
@@ -93,6 +100,10 @@ model Conversation {
   forkedFromConversationId String?
   forkedFromMessageId    String?
   forkedFromRevisionId   String?
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  forkRequests          ConversationForkRequest[] @relation("ForkSource")
+  forkResults           ConversationForkRequest[] @relation("ForkResult")
+  // end
   runs                   AgentRun[]
   // T05：结构化长期记忆（schemaVersion + 基线绑定）；summary 旧字段保留兼容。
   memory                 Json?
@@ -105,6 +116,23 @@ model Conversation {
   @@index([tenantId, workspaceId, archivedAt, lastActivityAt, id])
   @@unique([tenantId, id])
 }
+
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+model ConversationForkRequest {
+  id                   String @id @default(uuid())
+  tenantId             String
+  sourceConversationId String
+  clientRequestId      String
+  requestHash          String
+  resultConversationId String
+  source               Conversation @relation("ForkSource", fields: [tenantId, sourceConversationId], references: [tenantId, id], onDelete: Cascade, map: "ConversationForkRequest_source_fkey")
+  result               Conversation @relation("ForkResult", fields: [tenantId, resultConversationId], references: [tenantId, id], onDelete: Cascade, map: "ConversationForkRequest_result_fkey")
+  createdAt            DateTime @default(now())
+
+  @@unique([tenantId, sourceConversationId, clientRequestId], map: "ConversationForkRequest_scope_request_key")
+  @@index([tenantId, resultConversationId])
+}
+// end
 
 /// 持久化的故障关闭标记，仅在有界 SSE 清理期限前无法确认图取消时使用。所属 API 进程通过一个独立的会话咨询锁证明存活；任何隔离标记记录都不会占用 PostgreSQL 连接池客户端。
 model ConversationTurnFence {
@@ -168,6 +196,10 @@ model ChangePlan {
   planHash        String
   plan            Json?
   createdAt       DateTime @default(now())
+  // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+  generationSnapshots GenerationSnapshot[]
+  @@unique([tenantId, workspaceId, id], map: "ChangePlan_generation_scope_key")
+  // end
 
   @@index([tenantId, workspaceId])
 }
@@ -182,6 +214,11 @@ model SolutionRevision {
   parentRevisionId String? // 不可变的链节；回滚点指向历史修订
   state            Json?
   createdAt        DateTime @default(now())
+  // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+  generationBases GenerationSnapshot[] @relation("GenerationBase")
+  generationResults GenerationSnapshot[] @relation("GenerationResult")
+  @@unique([tenantId, workspaceId, id], map: "SolutionRevision_generation_scope_key")
+  // end
 
   @@index([tenantId, workspaceId])
 }
@@ -219,6 +256,15 @@ model BuildJob {
   attemptCount   Int       @default(0)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+  // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+  agentRunId        String?   @unique
+  cancelRequestedAt DateTime?
+  terminalReason    String?
+  // end
+  // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+  generationSnapshots GenerationSnapshot[]
+  @@unique([tenantId, workspaceId, id], map: "BuildJob_generation_scope_key")
+  // end
 
   @@index([status, leaseExpiresAt, createdAt, tenantId, workspaceId], map: "BuildJob_status_leaseExpiresAt_createdAt_tenantId_workspaceId_i")
   @@index([tenantId, status, leaseExpiresAt, createdAt, workspaceId], map: "BuildJob_tenantId_status_leaseExpiresAt_createdAt_workspaceId_i")
@@ -272,6 +318,94 @@ model WorkspaceAsset {
   @@unique([tenantId, workspaceId, sha256])
   @@index([tenantId, workspaceId])
 }
+
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+// Reference-only inputs are deliberately absent from WorkspaceAsset / res/images.
+model ReferenceAsset {
+  id          String @id @default(uuid())
+  tenantId    String
+  workspaceId String
+  name        String
+  mimeType    String
+  sourceHash  String
+  storageKey  String
+  byteSize    Int
+  width       Int
+  height      Int
+  totalBytes  Int
+  createdAt   DateTime @default(now())
+  workspace   SolutionWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade, map: "ReferenceAsset_workspace_fkey")
+  derivative  ReferenceAssetDerivative?
+  analyses    VisualReferenceAnalysis[]
+
+  @@unique([tenantId, workspaceId, sourceHash])
+  @@unique([tenantId, workspaceId, id, sourceHash])
+  @@index([tenantId])
+}
+
+model ReferenceAssetDerivative {
+  id             String @id @default(uuid())
+  tenantId       String
+  workspaceId    String
+  assetId        String @unique
+  sourceHash     String
+  derivativeHash String
+  mimeType       String
+  width          Int
+  height         Int
+  storageKey     String
+  byteSize       Int
+  transform      Json
+  createdAt      DateTime @default(now())
+  asset          ReferenceAsset @relation(fields: [tenantId, workspaceId, assetId, sourceHash], references: [tenantId, workspaceId, id, sourceHash], onDelete: Cascade, map: "ReferenceAssetDerivative_asset_fkey")
+
+  @@unique([tenantId, workspaceId, assetId, sourceHash], map: "ReferenceAssetDerivative_owner_source_key")
+  @@index([tenantId, workspaceId])
+}
+// end
+
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+model VisualReferenceAnalysis {
+  id              String @id @default(uuid())
+  tenantId        String
+  workspaceId     String
+  assetId         String
+  sourceHash      String
+  derivativeHash  String
+  analysisVersion String
+  modelConfigHash String
+  instructionHash String
+  status          String @default("VALID")
+  spec            Json
+  specHash        String
+  parentId        String? @unique
+  createdAt       DateTime @default(now())
+  expiresAt       DateTime
+  asset           ReferenceAsset @relation(fields: [tenantId, workspaceId, assetId, sourceHash], references: [tenantId, workspaceId, id, sourceHash], onDelete: Cascade, map: "VisualReferenceAnalysis_asset_fkey")
+  parent          VisualReferenceAnalysis? @relation("VisualAnalysisVersions", fields: [tenantId, workspaceId, parentId], references: [tenantId, workspaceId, id], onDelete: NoAction, map: "VisualReferenceAnalysis_parent_fkey")
+  children        VisualReferenceAnalysis[] @relation("VisualAnalysisVersions")
+  cacheEntries    VisualAnalysisCacheEntry[]
+  // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+  generationSnapshots GenerationSnapshot[]
+  // end
+
+  @@unique([tenantId, workspaceId, id])
+  @@index([tenantId, workspaceId, assetId])
+}
+
+model VisualAnalysisCacheEntry {
+  cacheKey       String @id
+  tenantId       String
+  workspaceId    String
+  analysisId     String?
+  leaseOwner     String?
+  leaseExpiresAt DateTime?
+  workspace      SolutionWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade, map: "VisualAnalysisCacheEntry_workspace_fkey")
+  analysis       VisualReferenceAnalysis? @relation(fields: [tenantId, workspaceId, analysisId], references: [tenantId, workspaceId, id], onDelete: NoAction, map: "VisualAnalysisCacheEntry_analysis_fkey")
+
+  @@index([tenantId, workspaceId])
+}
+// end
 
 model ValidationReport {
   id           String   @id @default(uuid())
@@ -407,6 +541,10 @@ model AgentRun {
   events       AgentRunEvent[]
   steps        AgentRunStep[]
   invocations  ModelInvocation[]
+  // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+  generationSnapshots GenerationSnapshot[]
+  @@unique([tenantId, workspaceId, id], map: "AgentRun_generation_scope_key")
+  // end
 
   @@unique([tenantId, conversationId, clientRequestId])
   @@index([status, leaseExpiresAt, createdAt])
@@ -448,3 +586,31 @@ model AgentRunStep {
   @@unique([runId, stepKey, inputHash])
   @@index([tenantId, runId])
 }
+
+// modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+model GenerationSnapshot {
+  id                        String @id @default(uuid())
+  tenantId                  String
+  workspaceId               String
+  runId                     String
+  stepKey                   String
+  baseRevisionId            String
+  changePlanId              String
+  visualSpecId              String?
+  content                   Json
+  contentHash               String
+  creativeArtifactHash      String
+  nativeMaterializationHash String
+  revisionId                String?
+  buildJobId                String?
+  createdAt                 DateTime @default(now())
+  run        AgentRun @relation(fields: [tenantId, workspaceId, runId], references: [tenantId, workspaceId, id], onDelete: NoAction, map: "GenerationSnapshot_run_fkey")
+  base       SolutionRevision @relation("GenerationBase", fields: [tenantId, workspaceId, baseRevisionId], references: [tenantId, workspaceId, id], onDelete: NoAction, map: "GenerationSnapshot_base_fkey")
+  result     SolutionRevision? @relation("GenerationResult", fields: [tenantId, workspaceId, revisionId], references: [tenantId, workspaceId, id], onDelete: NoAction, map: "GenerationSnapshot_result_fkey")
+  plan       ChangePlan @relation(fields: [tenantId, workspaceId, changePlanId], references: [tenantId, workspaceId, id], onDelete: NoAction, map: "GenerationSnapshot_plan_fkey")
+  build      BuildJob? @relation(fields: [tenantId, workspaceId, buildJobId], references: [tenantId, workspaceId, id], onDelete: NoAction, map: "GenerationSnapshot_build_fkey")
+  visual     VisualReferenceAnalysis? @relation(fields: [tenantId, workspaceId, visualSpecId], references: [tenantId, workspaceId, id], onDelete: NoAction, map: "GenerationSnapshot_visual_fkey")
+  @@unique([runId, stepKey])
+  @@index([tenantId, workspaceId])
+}
+// end

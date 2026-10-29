@@ -117,6 +117,79 @@ function fixture(kind: "native" | "script" | "planned" = "native") {
 }
 
 describe("compileInteractions", () => {
+  // modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+  function observationFixture() {
+    const input = fixture();
+    input.blueprint.journeys[0]!.steps.push({ kind: "observe", pageId: "bp-detail", regionId: "detail-region",
+      action: "阅读详情", result: "看到详情文字", expectedTexts: ["详情"] });
+    const page = input.implementation.pages[1]!;
+    if (page.compatibility !== "native") throw new Error("native fixture required");
+    page.controls[0]!.content = "详情";
+    page.controls[0]!.nativeProperties = { text: "详情" };
+    return input;
+  }
+  function compileObservation(input: ReturnType<typeof fixture>) {
+    input.plan.blueprintHash = canonicalServerHash(input.blueprint);
+    input.implementation.sourceSolutionPlanHash = canonicalServerHash(input.plan);
+    return compileInteractions(input);
+  }
+  it("proves an explicit observation from native text without inventing an action", () => {
+    const result = compileObservation(observationFixture());
+    expect(result.diagnostics.errors).toEqual([]);
+    expect(result.implementation.compiledActions).toHaveLength(1);
+  });
+  it.each(["semantic-text", "native-text", "page", "region", "opacity", "geometry", "markup", "mock", "template", "native-hidden", "native-alpha"])("rejects unproven observation: %s", (failure) => {
+    const input = observationFixture();
+    const node = input.plan.pages[1]!.root;
+    const page = input.implementation.pages[1]!;
+    if (node.kind !== "control" || page.compatibility !== "native") throw new Error("text fixture required");
+    const control = page.controls[0]!;
+    if (failure === "semantic-text") node.content = "别的文字";
+    if (failure === "native-text") control.nativeProperties = { text: "别的文字" };
+    if (failure === "page") input.blueprint.journeys[0]!.steps[1] = { kind: "observe", pageId: "bp-home", regionId: "region", action: "阅读详情", result: "看到详情文字", expectedTexts: ["详情"] };
+    if (failure === "region") control.sourceBlueprintRegionIds = ["region"];
+    if (failure === "opacity") control.style = { declarations: { opacity: 0 }, states: {} };
+    if (failure === "geometry") control.geometry.x = 1200;
+    if (failure === "markup") node.content = "<span>详情</span>";
+    if (failure === "mock") node.mockDataId = "visitor-records";
+    if (failure === "template") control.sourceRepeaterId = "repeater";
+    if (failure === "native-hidden") control.nativeProperties["runVisible"] = false;
+    if (failure === "native-alpha") input.implementation.theme.textPrimary = "rgba(0,0,0,0)";
+    if (failure === "geometry") expect(() => compileObservation(input)).toThrow("control geometry exceeds page bounds");
+    else expect(compileObservation(input).diagnostics.errors.some((error) => error.code === "JOURNEY_OBSERVATION_UNPROVEN")).toBe(true);
+  });
+  it("rejects action references impersonating an observation", () => {
+    const input = observationFixture();
+    input.plan.actions[0]!.journeyStepRefs!.push({ journeyId: "review-record", stepIndex: 1 });
+    expect(compileObservation(input).diagnostics.errors.some((error) => error.code === "JOURNEY_OBSERVATION_ACTION_REFERENCE")).toBe(true);
+  });
+  it("keeps legacy and explicit interactive steps action-gated", () => {
+    for (const kind of [undefined, "interact"] as const) {
+      const input = observationFixture();
+      input.blueprint.journeys[0]!.steps[1] = { pageId: "bp-detail", regionId: "detail-region", action: "阅读详情", result: "看到详情文字", ...(kind === undefined ? {} : { kind }) };
+      expect(compileObservation(input).diagnostics.errors.some((error) => error.code === "JOURNEY_STEP_UNCOVERED")).toBe(true);
+    }
+  });
+  it("rejects observations in a hidden compiled parent chain", () => {
+    const input = observationFixture();
+    const detail = input.plan.pages[1]!;
+    const node = detail.root;
+    detail.root = { kind: "layout", id: "detail-container", layout: "column", intent,
+      sourceBlueprintRegionIds: ["detail-region"], children: [node] };
+    const page = input.implementation.pages[1]!;
+    if (page.compatibility !== "native") throw new Error("native fixture required");
+    const child = page.controls[0]!;
+    child.parentId = "detail-container";
+    child.depth = 1;
+    const parent = { ...child, id: "detail-container", sourceSolutionNodeId: "detail-container", capabilityId: "layout.4", depth: 0,
+      nativeProperties: {}, compiledLayout: { kind: "column" as const, overflow: "visible" as const }, style: { declarations: { opacity: 0 }, states: {} } };
+    delete parent.parentId;
+    delete parent.content;
+    page.controls.push(parent);
+    input.implementation.runtimeCorrelation!.controls.push({ semanticControlId: "detail-container", instanceName: "Layout2" });
+    expect(compileObservation(input).diagnostics.errors.some((error) => error.code === "JOURNEY_OBSERVATION_UNPROVEN")).toBe(true);
+  });
+  // end
   it("compiles native navigation first and closes its declared trigger", () => {
     const input = fixture("native");
     const original = structuredClone(input);

@@ -65,6 +65,7 @@ export interface TrustedActionCompilationContext {
     readonly instanceName: string;
     readonly capabilityId: string;
     readonly pageId: string;
+    readonly parentId?: string;
   }[];
   readonly pages: readonly { readonly semanticPageId: string; readonly pageGuid: string }[];
   readonly states: readonly {
@@ -91,7 +92,12 @@ export interface NormalizeActionGraphInput {
 }
 
 type NativeControl = Extract<UIImplementationSpecV2["pages"][number], { compatibility: "native" }>["controls"][number];
-type TriggerOwner = { readonly controlId: string; readonly semanticEvent: string };
+type TriggerOwner = {
+  readonly controlId: string;
+  readonly semanticEvent: string;
+  readonly sourceOwnerId: string;
+  readonly repeated: boolean;
+};
 
 function codePointCompare(left: string, right: string): number {
   const a = Array.from(left);
@@ -243,20 +249,27 @@ function resolveTriggerControl(
   owner: SolutionNode,
   controls: readonly NativeControl[],
   correlatedIds: ReadonlySet<string>,
-): NativeControl {
-  const candidates = controls.filter((control) =>
+): Readonly<{ controls: readonly NativeControl[]; repeated: boolean }> {
+  const direct = controls.filter((control) =>
     control.sourceSolutionNodeId === owner.id || (owner.kind === "registered-module" && control.sourceModuleId === owner.id));
+  if (direct.length > 1) {
+    throw new ActionGraphNormalizationError("ACTION_TRIGGER_RUNTIME_AMBIGUOUS", owner.id, String(direct.length));
+  }
+  const repeated = direct.length === 0 && owner.kind === "control"
+    ? controls.filter((control) =>
+        control.sourceRepeaterId !== undefined
+        && control.sourceSolutionNodeId.endsWith(`--${owner.id}`))
+    : [];
+  const candidates = direct.length === 1 ? direct : repeated;
   if (candidates.length === 0) {
     throw new ActionGraphNormalizationError("ACTION_TRIGGER_RUNTIME_MISSING", owner.id);
   }
-  if (candidates.length !== 1) {
-    throw new ActionGraphNormalizationError("ACTION_TRIGGER_RUNTIME_AMBIGUOUS", owner.id, String(candidates.length));
-  }
-  const candidate = candidates[0]!;
-  if (!correlatedIds.has(candidate.id)) {
-    throw new ActionGraphNormalizationError("ACTION_RUNTIME_CORRELATION_MISSING", owner.id, candidate.id);
-  }
-  return candidate;
+  candidates.forEach((candidate) => {
+    if (!correlatedIds.has(candidate.id)) {
+      throw new ActionGraphNormalizationError("ACTION_RUNTIME_CORRELATION_MISSING", owner.id, candidate.id);
+    }
+  });
+  return { controls: candidates, repeated: direct.length === 0 };
 }
 
 const MAX_INPUT_DEPTH = 128;
@@ -495,13 +508,20 @@ export function normalizeActionGraph(input: NormalizeActionGraphInput): Normaliz
   for (const owner of nodesOf(plan)) {
     if (owner.kind !== "control" && owner.kind !== "registered-module") continue;
     if (owner.eventBindings.length === 0) continue;
-    const runtimeControl = resolveTriggerControl(owner, controls, correlatedIds);
+    const resolvedTriggers = resolveTriggerControl(owner, controls, correlatedIds);
     for (const binding of owner.eventBindings) {
       for (const actionId of binding.actionIds) {
         if (!actionById.has(actionId)) throw new ActionGraphNormalizationError("ACTION_UNKNOWN", actionId, owner.id);
-        const key = `${runtimeControl.id}\u0000${binding.semanticEvent}`;
         const actionOwners = owners.get(actionId) ?? new Map<string, TriggerOwner>();
-        actionOwners.set(key, { controlId: runtimeControl.id, semanticEvent: binding.semanticEvent });
+        resolvedTriggers.controls.forEach((runtimeControl) => {
+          const key = `${runtimeControl.id}\u0000${binding.semanticEvent}`;
+          actionOwners.set(key, {
+            controlId: runtimeControl.id,
+            semanticEvent: binding.semanticEvent,
+            sourceOwnerId: owner.id,
+            repeated: resolvedTriggers.repeated,
+          });
+        });
         owners.set(actionId, actionOwners);
       }
     }
@@ -539,10 +559,20 @@ export function normalizeActionGraph(input: NormalizeActionGraphInput): Normaliz
     throw new ActionGraphNormalizationError("ACTION_DEPENDENCY_CYCLE", cyclicId);
   }
 
+  const expandedActionIds = new Map<string, Map<string, string>>();
   for (const action of plan.actions) {
-    const count = owners.get(action.id)?.size ?? 0;
+    const entries = [...(owners.get(action.id)?.entries() ?? [])]
+      .sort(([left], [right]) => codePointCompare(left, right));
+    const count = entries.length;
     if (count === 0) throw new ActionGraphNormalizationError("ACTION_TRIGGER_MISSING", action.id);
-    if (count !== 1) throw new ActionGraphNormalizationError("ACTION_TRIGGER_OWNERSHIP_MISMATCH", action.id, String(count));
+    if (count > 1 && (!entries.every(([, owner]) => owner.repeated)
+      || new Set(entries.map(([, owner]) => owner.sourceOwnerId)).size !== 1)) {
+      throw new ActionGraphNormalizationError("ACTION_TRIGGER_OWNERSHIP_MISMATCH", action.id, String(count));
+    }
+    expandedActionIds.set(action.id, new Map(entries.map(([key], index) => [
+      key,
+      count === 1 ? action.id : `${action.id}--${index + 1}`,
+    ])));
   }
 
   const scriptsById = new Map(plan.scripts.map((script) => [script.id, script]));
@@ -560,15 +590,22 @@ export function normalizeActionGraph(input: NormalizeActionGraphInput): Normaliz
       mockDataIds: plan.mockData.map((data) => data.id),
       scriptIds: plan.scripts.map((script) => script.id),
     },
-    actions: executionOrder.map((id) => {
-      const action = actionById.get(id)!;
-      return {
-        id,
-        trigger: Array.from(owners.get(id)!.values())[0]!,
+    actions: executionOrder.flatMap((semanticId) => {
+      const action = actionById.get(semanticId)!;
+      const entries = [...owners.get(semanticId)!.entries()].sort(([left], [right]) => codePointCompare(left, right));
+      return entries.map(([ownerKey, owner]) => ({
+        id: expandedActionIds.get(semanticId)!.get(ownerKey)!,
+        trigger: { controlId: owner.controlId, semanticEvent: owner.semanticEvent },
         conditions: action.conditions ?? [],
         effects: [effectOf(action)],
-        afterActionIds: [...action.afterActionIds],
-      };
+        afterActionIds: action.afterActionIds.map((successorId) => {
+          const successor = expandedActionIds.get(successorId)?.get(ownerKey);
+          if (successor === undefined) {
+            throw new ActionGraphNormalizationError("ACTION_TRIGGER_OWNERSHIP_MISMATCH", successorId);
+          }
+          return successor;
+        }),
+      }));
     }),
   });
   if (!graphResult.success) {
@@ -578,6 +615,7 @@ export function normalizeActionGraph(input: NormalizeActionGraphInput): Normaliz
     throw new ActionGraphNormalizationError("ACTION_INPUT_INVALID", nodeId, first?.message, { cause: graphResult.error });
   }
   const graph = graphResult.data;
+  const expandedExecutionOrder = graph.actions.map((action) => action.id);
   const scriptClosures = new Map<string, ScriptClosureCandidate>();
   scriptsById.forEach((script, id) => scriptClosures.set(id, {
     status: "unverified",
@@ -585,7 +623,7 @@ export function normalizeActionGraph(input: NormalizeActionGraphInput): Normaliz
   }));
   const normalized: NormalizedActionGraph = {
     graph: deepFreeze(structuredClone(graph)),
-    executionOrder: Object.freeze([...executionOrder]),
+    executionOrder: Object.freeze(expandedExecutionOrder),
     scriptsById,
     scriptClosures,
   };
@@ -595,6 +633,7 @@ export function normalizeActionGraph(input: NormalizeActionGraphInput): Normaliz
     instanceName: controlCorrelation.get(control.id)!,
     capabilityId: control.capabilityId,
     pageId: page.id,
+    ...(control.parentId === undefined ? {} : { parentId: control.parentId }),
   })) : []);
   const overlayHosts = implementation.pages.flatMap((page) => page.compatibility === "native" ? page.controls.flatMap((control) =>
     control.overlayHost === undefined ? [] : [{ overlayId: control.overlayHost.overlayId, controlId: control.id, pageId: page.id }]) : []);

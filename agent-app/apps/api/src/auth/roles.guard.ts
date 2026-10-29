@@ -9,8 +9,7 @@ import { ROLES_KEY } from "./roles.decorator.js";
 import type { AuthenticatedRequest } from "./tenant.guard.js";
 
 /**
- * Enforces @Roles(...) metadata on top of the tenant guard. Requires the
- * session principal to have already been attached by TenantGuard.
+ * 在租户守卫上强制执行 @Roles(...) 元数据。需要 session 原则已经通过 TenantGuard 被附加。
  */
 @Injectable()
 export class RolesGuard implements CanActivate {

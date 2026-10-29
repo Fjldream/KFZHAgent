@@ -3,12 +3,12 @@ import {
   workspaceAssetIdToModelId,
 } from "@kf/contracts";
 
-/** Stable, model-safe alias for a private WorkspaceAsset UUID. */
+/** 稳定、模型安全的别名，用于私有WorkspaceAsset UUID。 */
 export function toModelAssetId(id: string): string {
   return workspaceAssetIdToModelId(id);
 }
 
-/** Strict reverse mapping; raw UUIDs and non-canonical aliases are rejected. */
+/** 严格反向映射；原始UUID和非标准别名被拒绝。 */
 export function fromModelAssetId(id: string): string {
   return modelAssetIdToWorkspaceAssetId(id);
 }

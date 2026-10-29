@@ -7,12 +7,13 @@ export type GraphLike = {
   getState: (config: unknown) => Promise<{
     tasks?: ReadonlyArray<{ interrupts?: ReadonlyArray<unknown> }>;
     values?: Record<string, unknown>;
+    next?: readonly string[];
   }>;
 };
 
 export type GraphRunOutcome =
-  | { kind: "completed"; stage: string | null }
-  | { kind: "interrupted" };
+  | { kind: "completed"; stage: string | null; values: Record<string, unknown> }
+  | { kind: "interrupted"; values: Record<string, unknown>; interrupt: Record<string, unknown> };
 
 export const threadConfig = (conversationId: string) => ({
   configurable: { thread_id: conversationId },
@@ -32,18 +33,33 @@ export async function runGraphOnce(options: {
   input: unknown;
   conversationId: string;
   signal?: AbortSignal;
+  onNode?: (name: string) => Promise<void>;
+  completedSnapshot?: Awaited<ReturnType<GraphLike["getState"]>>;
 }): Promise<GraphRunOutcome> {
-  const config = threadConfig(options.conversationId);
-  const stream = await options.graph.stream(options.input, config);
+  if (options.signal?.aborted) throw new RunAborted();
+  const config = { ...threadConfig(options.conversationId), streamMode: "updates" };
+  if (!options.completedSnapshot) {
+    const stream = await options.graph.stream(options.input, config);
 
-  for await (const _chunk of stream) {
-    if (options.signal?.aborted === true) throw new RunAborted();
+    for await (const chunk of stream) {
+      if (options.signal?.aborted === true) throw new RunAborted();
+      if (chunk !== null && typeof chunk === "object") {
+        for (const name of Object.keys(chunk)) {
+          if (name !== "__interrupt__") await options.onNode?.(name);
+        }
+      }
+    }
   }
 
-  const snapshot = await options.graph.getState(config);
-  if (hasPendingInterrupt(snapshot)) return { kind: "interrupted" };
+  const snapshot = options.completedSnapshot ?? await options.graph.getState(config);
+  const values = snapshot.values ?? {};
+  if (hasPendingInterrupt(snapshot)) {
+    const raw = snapshot.tasks?.flatMap(task => task.interrupts ?? [])[0];
+    const interrupt = raw !== null && typeof raw === "object" && "value" in raw ? raw.value : raw;
+    return { kind: "interrupted", values, interrupt: (interrupt ?? {}) as Record<string, unknown> };
+  }
 
   const stage = snapshot.values?.stage;
-  return { kind: "completed", stage: typeof stage === "string" ? stage : null };
+  return { kind: "completed", stage: typeof stage === "string" ? stage : null, values };
 }
 // end

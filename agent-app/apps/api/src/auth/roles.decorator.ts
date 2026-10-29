@@ -3,6 +3,6 @@ import type { UserRole } from "@prisma/client";
 
 export const ROLES_KEY = "roles";
 
-/** Declares the roles allowed to invoke a controller route. */
+/** 声明允许调用控制器路由的角色。 */
 export const Roles = (...roles: UserRole[]): MethodDecorator & ClassDecorator =>
   SetMetadata(ROLES_KEY, roles);

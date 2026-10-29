@@ -1,11 +1,9 @@
 import type { ModuleRuntimeEvidence } from "@kf/domain-client";
 
 /**
- * Exact native KF 3.6 runtime evidence captured on 2026-08-12.
+ * 2026年8月12日，捕获了精确的KF 3.6运行时证据。
  *
- * Each entry survived native import, publish, operations-center deployment,
- * process start, TCP serving, and runtime Page1 JSON readback. Definitions not
- * listed here remain beta even when they share individual KF capabilities.
+ * 每个条目在原生导入、发布、操作中心部署、进程启动、TCP服务和运行时Page1 JSON读回过程中均存活。这些定义不在这里列出，但它们共享KF能力时仍为beta版本。
  */
 export const REVIEWED_KF36_MODULE_RUNTIME_EVIDENCE: readonly ModuleRuntimeEvidence[] = Object.freeze([
   Object.freeze({

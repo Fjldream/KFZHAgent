@@ -10,6 +10,28 @@ import { withStepMemo } from "../run-step-memo.js";
 import { assessBlueprintRevision } from "../blueprint-quality.js";
 import { encodeBlueprintMessage } from "../blueprint-message.js";
 import { hashDesignPlan } from "../design-plan-version.js";
+// modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+import { VISUAL_RUN_PLAN_VERSION, type AcceptedVisualPlanningInput } from "@kf/contracts";
+import { validateAcceptedVisualPlanningInput } from "@kf/domain-client";
+
+const clearVisualEngineering: AgentGraphUpdate = {
+  visualBlueprintConfirmationHash: null, visualSemanticPlan: null, visualPlanConfirmationHash: null,
+  capabilityCandidates: undefined, capabilityCandidatesHash: undefined, solutionImplementationPlan: undefined,
+  solutionImplementationPlanHash: undefined, solutionPlanRepairAttempt: undefined, creativeConfirmationId: undefined,
+  creativeProjectKey: undefined, creativeDomainKind: undefined, activeChangeRequestId: undefined, changePlanId: undefined,
+  planHash: undefined, planSummary: undefined, capabilityReport: undefined, buildJobId: undefined, buildAuthorization: undefined,
+  diffArtifactId: undefined, previewArtifactId: undefined,
+};
+const rejectVisualBlueprint = (code: string): AgentGraphUpdate => ({ ...clearVisualEngineering, stage: "idle", lastErrorCode: code,
+  designPlan: undefined, designPlanHash: undefined, revising: undefined });
+const visualBlueprintStopCodes = new Set(["IMAGE_EGRESS_NOT_ALLOWED", "VISUAL_RUN_REQUIRED", "VISUAL_RUN_NOT_ACTIVE",
+  "VISUAL_BLUEPRINT_CREDENTIAL_ROUTE_MISMATCH",
+  "VISUAL_BLUEPRINT_CONFIG_REQUIRED", "VISUAL_BLUEPRINT_CONFIG_CHANGED", "VISUAL_BLUEPRINT_CONFIG_INVALID",
+  "VISUAL_BLUEPRINT_CONTEXT_MISMATCH", "VISUAL_BLUEPRINT_CONTEXT_TOO_LARGE", "VISUAL_BLUEPRINT_CACHE_INVALID",
+  "VISUAL_BLUEPRINT_IN_PROGRESS", "VISUAL_BLUEPRINT_STALE", "VISUAL_ANALYSIS_STALE", "VISUAL_REFERENCE_INPUT_CHANGED",
+  "VISUAL_CONTINUATION_INTEGRITY_FAILED", "STALE_BASE_REVISION", "MODEL_CANCELLED", "MODEL_TIMEOUT", "MODEL_AUTH_ERROR",
+  "MODEL_QUOTA_ERROR", "MODEL_RATE_LIMIT", "MODEL_TRANSIENT", "MODEL_PROTOCOL_ERROR", "MODEL_CAPABILITY_UNSUPPORTED"]);
+// end
 
 /**
  * Generates or revises a DesignPlan (spec §5.3) and hands it back to the user:
@@ -31,15 +53,26 @@ import { hashDesignPlan } from "../design-plan-version.js";
  */
 export function createDesignPlanNode(deps: SolutionGraphDeps) {
   const node = async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
+    // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+    let acceptedVisual: AcceptedVisualPlanningInput | undefined;
+    if (state.acceptedVisualPlanningInput != null || state.visualBlueprintConfirmationHash != null
+      || state.visualSemanticPlan != null || state.visualPlanConfirmationHash != null) {
+      try {
+        if (state.planVersion !== VISUAL_RUN_PLAN_VERSION || state.generationWorkflow !== "creative-v2") throw new Error("protocol");
+        acceptedVisual = validateAcceptedVisualPlanningInput(state.acceptedVisualPlanningInput);
+      } catch { return rejectVisualBlueprint("VISUAL_PLANNING_INPUT_INVALID"); }
+      if (!deps.modelPort.createVisualDesignPlan) return rejectVisualBlueprint("VISUAL_BLUEPRINT_MODEL_NOT_CONFIGURED");
+    }
+    // end
     const revisingConfirmedCreativeBlueprint =
-      state.generationWorkflow === "creative-v2"
+      acceptedVisual === undefined && state.generationWorkflow === "creative-v2"
       && state.designPlan?.schema === "kf-design-plan/v3"
       && state.designPlanHash !== undefined
       && (state.revising === true
         || state.intent === "NEW_REQUIREMENT"
         || state.intent === "MODIFY_REQUIREMENT"
         || state.intent === "REVISE_DESIGN");
-    const revising = state.revising === true || state.intent === "REVISE_DESIGN" || revisingConfirmedCreativeBlueprint;
+    const revising = acceptedVisual === undefined && (state.revising === true || state.intent === "REVISE_DESIGN" || revisingConfirmedCreativeBlueprint);
     let modulePlanningCatalog;
     let editableEntities = (state as { editableEntities?: import("../ports.js").EditableEntity[] }).editableEntities;
     if (state.generationWorkflow === "module-v1" && state.workspaceMode !== "upload") {
@@ -65,10 +98,15 @@ export function createDesignPlanNode(deps: SolutionGraphDeps) {
       workspaceId: state.workspaceId,
       conversationId: state.conversationId,
       generationWorkflow: state.generationWorkflow,
-      recentMessages: state.recentMessages,
+      // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+      recentMessages: acceptedVisual === undefined ? state.recentMessages : [{ role: "user" as const, content: latestUserMessage(state) ?? "" }],
+      // end
       requirementText: latestUserMessage(state),
-      revisionSummary: state.revisionSummary,
-      designPlan: state.designPlan,
+      // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+      revisionSummary: acceptedVisual === undefined ? state.revisionSummary : undefined,
+      designPlan: acceptedVisual === undefined ? state.designPlan : undefined,
+      ...(acceptedVisual === undefined ? {} : { visualReference: acceptedVisual.reference, currentRevisionId: state.currentRevisionId }),
+      // end
       ...(modulePlanningCatalog === undefined ? {} : { modulePlanningCatalog }),
       // editableEntities may not be materialised on state yet; the context
       // field stays optional so a future wiring can feed it through.
@@ -77,8 +115,15 @@ export function createDesignPlanNode(deps: SolutionGraphDeps) {
     let rawPlan: unknown;
     let modelCallFailed = false;
     try {
-      rawPlan = await deps.modelPort.createDesignPlan(modelInput, { revising });
-    } catch {
+      // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+      rawPlan = acceptedVisual === undefined ? await deps.modelPort.createDesignPlan(modelInput, { revising })
+        : await deps.modelPort.createVisualDesignPlan!(modelInput);
+      // end
+    } catch (error) {
+      // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+      if (acceptedVisual !== undefined) return rejectVisualBlueprint(error instanceof Error && visualBlueprintStopCodes.has(error.message)
+        ? error.message : "INVALID_MODEL_OUTPUT");
+      // end
       modelCallFailed = true;
     }
     const parseDesignPlan = (value: unknown) => state.generationWorkflow === "creative-v2"
@@ -100,6 +145,9 @@ export function createDesignPlanNode(deps: SolutionGraphDeps) {
     }
 
     if (rejectionReasons.length > 0) {
+      // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+      if (acceptedVisual !== undefined) return rejectVisualBlueprint("INVALID_MODEL_OUTPUT");
+      // end
       let retried: unknown;
       modelCallFailed = false;
       try {
@@ -150,6 +198,9 @@ export function createDesignPlanNode(deps: SolutionGraphDeps) {
       content: rendered,
     });
     return {
+      // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+      ...(acceptedVisual === undefined ? {} : { ...clearVisualEngineering, visualBlueprintConfirmationHash: acceptedVisual.confirmationHash }),
+      // end
       designPlan: plan,
       designPlanHash: hash,
       designRevision: revision,
@@ -187,6 +238,12 @@ export function createDesignPlanNode(deps: SolutionGraphDeps) {
     designRevision: state.designRevision,
     currentRevisionId: state.currentRevisionId,
     requirement: latestUserMessage(state),
+    // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+    ...(state.acceptedVisualPlanningInput != null ? { acceptedVisualPlanningInput: state.acceptedVisualPlanningInput }
+      : state.visualBlueprintConfirmationHash != null || state.visualSemanticPlan != null || state.visualPlanConfirmationHash != null
+        ? { visualBlueprintConfirmationHash: state.visualBlueprintConfirmationHash, visualSemanticPlan: state.visualSemanticPlan,
+          visualPlanConfirmationHash: state.visualPlanConfirmationHash } : {}),
+    // end
   }));
   // end
 }

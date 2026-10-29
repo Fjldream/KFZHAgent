@@ -1,0 +1,419 @@
+{
+  "schema": "kf-design-plan/v3",
+  "displayName": "园区能源总览静态演示页",
+  "objective": "以静态原生客户端形式呈现园区能源总览，展示顶部标题栏、静态侧栏、三项核心指标、重点设备状态、运行摘要与页脚说明；所有数值均为演示数据，不接业务数据源，侧栏不做导航，查看运行说明按钮仅保留静态外观。",
+  "audiences": [
+    "园区能源管理值守人员",
+    "能源运营负责人",
+    "到访评审与验收人员"
+  ],
+  "scenarios": [
+    "值守人员快速浏览今日用电量、当前总功率与设备在线率等演示指标",
+    "负责人查看重点设备的演示运行状态并识别待检修项",
+    "评审人员确认页面结构、层级与静态演示数据说明是否完整清晰"
+  ],
+  "pages": [
+    {
+      "id": "overview-page",
+      "title": "园区能源总览",
+      "purpose": "在单一静态总览页中集中展示演示性能源指标、重点设备状态与运行摘要，供客户阅读与后续独立确认。",
+      "readingOrder": [
+        "page-header",
+        "side-menu",
+        "main-heading-region",
+        "kpi-cards",
+        "device-status-card",
+        "summary-card",
+        "page-footer"
+      ],
+      "regions": [
+        {
+          "id": "page-header",
+          "purpose": "展示系统名称、当前页面名称与演示数据标识，帮助用户确认所处页面与数据性质。",
+          "semanticRoles": [
+            "页头",
+            "系统标题",
+            "页面标题",
+            "状态标签"
+          ],
+          "dataShape": "三条静态文字：系统名、页面名、演示数据标签",
+          "density": "compact",
+          "importance": "secondary",
+          "content": [
+            "横向排列的系统标题、页面名称与演示数据标签",
+            "系统标题位于页头左侧，页面名称与演示数据标签依次跟随"
+          ],
+          "sampleData": [],
+          "interactions": [],
+          "states": [
+            "静态展示，无交互"
+          ],
+          "visualIntent": "页头保持轻量，沿用整体浅冷色背景，标题文字清晰可读，演示数据标签以弱强调色区分。",
+          "visualRegionIds": [
+            "header",
+            "header-title",
+            "header-page",
+            "header-badge"
+          ]
+        },
+        {
+          "id": "side-menu",
+          "purpose": "以静态方式呈现侧栏菜单项，说明产品功能范围，不承担导航跳转。",
+          "semanticRoles": [
+            "侧栏",
+            "菜单项",
+            "静态入口"
+          ],
+          "dataShape": "纵向排列的三个静态菜单文字项",
+          "density": "comfortable",
+          "importance": "supporting",
+          "content": [
+            "侧栏纵向排列三个菜单项：能源总览、设备监测、告警中心",
+            "菜单项按纵向顺序排列，当前页对应能源总览",
+            "侧栏为静态展示，不提供页面跳转"
+          ],
+          "sampleData": [],
+          "interactions": [],
+          "states": [
+            "静态展示，无导航行为"
+          ],
+          "visualIntent": "侧栏使用略深的表面色与主内容区分，菜单文字左对齐，保持简洁的纵向节奏。",
+          "visualRegionIds": [
+            "sidebar",
+            "sidebar-nav",
+            "sidebar-overview",
+            "sidebar-monitor",
+            "sidebar-alert"
+          ]
+        },
+        {
+          "id": "main-heading-region",
+          "purpose": "标明主内容区域主题与说明，引导用户进入指标阅读。",
+          "semanticRoles": [
+            "区块标题",
+            "说明文字"
+          ],
+          "dataShape": "两级静态标题文字",
+          "density": "compact",
+          "importance": "secondary",
+          "content": [
+            "主标题为能源总览",
+            "主标题下方为一行说明：掌握园区用能与设备运行状态"
+          ],
+          "sampleData": [],
+          "interactions": [],
+          "states": [
+            "静态展示，无交互"
+          ],
+          "visualIntent": "主标题采用较大字重与深色前景，说明文字弱化，与指标卡片之间留出清晰间距。",
+          "visualRegionIds": [
+            "main",
+            "main-heading",
+            "main-subtitle"
+          ]
+        },
+        {
+          "id": "kpi-cards",
+          "purpose": "集中展示三项核心能源指标，便于用户快速阅读当前演示状态。",
+          "semanticRoles": [
+            "指标卡组",
+            "关键指标",
+            "数值与单位"
+          ],
+          "dataShape": "三张横向等宽指标卡，每卡含标签、数值与单位",
+          "density": "comfortable",
+          "importance": "primary",
+          "content": [
+            "三张指标卡横向排列：今日用电量、当前总功率、设备在线率",
+            "每张卡片上为指标名称，中间为大号数值，下方为单位"
+          ],
+          "sampleData": [
+            {
+              "label": "今日用电量",
+              "value": "12,480",
+              "unit": "kWh"
+            },
+            {
+              "label": "当前总功率",
+              "value": "856",
+              "unit": "kW"
+            },
+            {
+              "label": "设备在线率",
+              "value": "98.6",
+              "unit": "%"
+            }
+          ],
+          "interactions": [],
+          "states": [
+            "静态展示，演示数值"
+          ],
+          "visualIntent": "指标卡使用浅色表面与圆角，数值字号突出，单位以弱化小字呈现，三卡保持一致的内部对齐节奏。",
+          "visualRegionIds": [
+            "kpi-row",
+            "kpi-today",
+            "kpi-today-label",
+            "kpi-today-value",
+            "kpi-today-unit",
+            "kpi-power",
+            "kpi-power-label",
+            "kpi-power-value",
+            "kpi-power-unit",
+            "kpi-online",
+            "kpi-online-label",
+            "kpi-online-value",
+            "kpi-online-unit"
+          ]
+        },
+        {
+          "id": "device-status-card",
+          "purpose": "以静态列表展示重点设备名称与运行状态，帮助用户识别待检修设备。",
+          "semanticRoles": [
+            "设备列表",
+            "状态标签"
+          ],
+          "dataShape": "卡片标题加三行设备名称与状态文字",
+          "density": "comfortable",
+          "importance": "primary",
+          "content": [
+            "卡片标题为重点设备",
+            "下方纵向排列三行设备信息，每行为设备名称与对应状态",
+            "设备包括1号配电室、中央空调、光伏逆变器，其中光伏逆变器为待检修"
+          ],
+          "sampleData": [
+            {
+              "label": "1号配电室",
+              "value": "运行正常"
+            },
+            {
+              "label": "中央空调",
+              "value": "运行正常"
+            },
+            {
+              "label": "光伏逆变器",
+              "value": "待检修"
+            }
+          ],
+          "interactions": [],
+          "states": [
+            "静态展示，演示状态"
+          ],
+          "visualIntent": "设备名称左对齐，状态右对齐，行间以留白分隔；待检修状态以强调色区分，形成可读的状态对比。",
+          "visualRegionIds": [
+            "devices",
+            "devices-title",
+            "device-1",
+            "device-1-status",
+            "device-2",
+            "device-2-status",
+            "device-3",
+            "device-3-status"
+          ]
+        },
+        {
+          "id": "summary-card",
+          "purpose": "汇总当前告警数量、今日能耗目标与数据更新时间，并提供静态的查看运行说明按钮外观。",
+          "semanticRoles": [
+            "摘要卡",
+            "数据项",
+            "静态按钮"
+          ],
+          "dataShape": "卡片标题加三行左右对齐的标签与值，底部为按钮外观",
+          "density": "comfortable",
+          "importance": "primary",
+          "content": [
+            "卡片标题为运行摘要",
+            "三行摘要项：当前告警、今日能耗目标、数据更新时间",
+            "底部为查看运行说明按钮外观，暂不提供动作"
+          ],
+          "sampleData": [
+            {
+              "label": "当前告警",
+              "value": "2 项"
+            },
+            {
+              "label": "今日能耗目标",
+              "value": "15,000 kWh"
+            },
+            {
+              "label": "数据更新时间",
+              "value": "14:30"
+            }
+          ],
+          "interactions": [
+            "查看运行说明按钮仅保留静态外观，未确认点击行为"
+          ],
+          "states": [
+            "静态展示，演示数据",
+            "按钮为静态外观，无点击反馈"
+          ],
+          "visualIntent": "摘要项标签居左、值居右，行距均匀；按钮占满卡片宽度，采用强调色描边或填充但保持静态观感。",
+          "visualRegionIds": [
+            "summary",
+            "summary-title",
+            "summary-alert-label",
+            "summary-alert-value",
+            "summary-target-label",
+            "summary-target-value",
+            "summary-time-label",
+            "summary-time-value",
+            "summary-button"
+          ]
+        },
+        {
+          "id": "page-footer",
+          "purpose": "说明页面用途与数据性质，提示所有数值均为演示数据。",
+          "semanticRoles": [
+            "页脚",
+            "说明文字"
+          ],
+          "dataShape": "一行静态说明文字",
+          "density": "compact",
+          "importance": "supporting",
+          "content": [
+            "页脚说明：仅用于界面与工程生成验收 · 所有数值均为演示数据"
+          ],
+          "sampleData": [],
+          "interactions": [],
+          "states": [
+            "静态展示，无交互"
+          ],
+          "visualIntent": "页脚文字位于主内容右下侧，小字号弱化显示，不抢主内容视觉层级。",
+          "visualRegionIds": [
+            "footer"
+          ]
+        }
+      ]
+    }
+  ],
+  "journeys": [
+    {
+      "id": "overview-read",
+      "actor": "园区能源管理值守人员",
+      "goal": "快速阅读总览页的演示指标与设备状态，确认页面结构与信息完整。",
+      "steps": [
+        {
+          "pageId": "overview-page",
+          "regionId": "page-header",
+          "action": "阅读页头中的系统名称、页面名称与演示数据标签",
+          "result": "用户看到能源管理系统、园区能源总览与演示数据标识",
+          "kind": "observe",
+          "expectedTexts": [
+            "能源管理系统",
+            "园区能源总览",
+            "演示数据"
+          ]
+        },
+        {
+          "pageId": "overview-page",
+          "regionId": "side-menu",
+          "action": "查看侧栏菜单项文字",
+          "result": "用户看到三个静态菜单项，了解产品功能范围",
+          "kind": "observe",
+          "expectedTexts": [
+            "能源总览",
+            "设备监测",
+            "告警中心"
+          ]
+        },
+        {
+          "pageId": "overview-page",
+          "regionId": "main-heading-region",
+          "action": "阅读主内容标题与说明",
+          "result": "用户确认当前页面主题与阅读引导",
+          "kind": "observe",
+          "expectedTexts": [
+            "能源总览",
+            "掌握园区用能与设备运行状态"
+          ]
+        },
+        {
+          "pageId": "overview-page",
+          "regionId": "kpi-cards",
+          "action": "阅读三张指标卡的名称、数值与单位",
+          "result": "用户看到今日用电量、当前总功率与设备在线率的演示数值",
+          "kind": "observe",
+          "expectedTexts": [
+            "今日用电量",
+            "12,480",
+            "kWh",
+            "当前总功率",
+            "856",
+            "kW",
+            "设备在线率",
+            "98.6",
+            "%"
+          ]
+        },
+        {
+          "pageId": "overview-page",
+          "regionId": "device-status-card",
+          "action": "阅读重点设备列表及状态",
+          "result": "用户认出三台演示设备及其运行状态，含待检修项",
+          "kind": "observe",
+          "expectedTexts": [
+            "重点设备",
+            "1号配电室",
+            "运行正常",
+            "中央空调",
+            "光伏逆变器",
+            "待检修"
+          ]
+        },
+        {
+          "pageId": "overview-page",
+          "regionId": "summary-card",
+          "action": "阅读运行摘要项与按钮文字",
+          "result": "用户看到告警数量、能耗目标、更新时间与静态按钮文字",
+          "kind": "observe",
+          "expectedTexts": [
+            "运行摘要",
+            "当前告警",
+            "2 项",
+            "今日能耗目标",
+            "15,000 kWh",
+            "数据更新时间",
+            "14:30",
+            "查看运行说明"
+          ]
+        },
+        {
+          "pageId": "overview-page",
+          "regionId": "page-footer",
+          "action": "阅读页脚说明",
+          "result": "用户确认页面用于验收且数值均为演示数据",
+          "kind": "observe",
+          "expectedTexts": [
+            "仅用于界面与工程生成验收 · 所有数值均为演示数据"
+          ]
+        }
+      ]
+    }
+  ],
+  "visualDirection": {
+    "tone": "清爽克制的工业能源管理风格，浅冷色背景配青绿色强调，信息层级清晰，静态演示气质明确。",
+    "colors": [
+      "背景浅冷灰 #eef3f6",
+      "前景深墨绿 #17333b",
+      "强调青绿 #0f8a8a"
+    ],
+    "typography": "标题使用较粗字重与深色前景，指标数值使用大号醒目文字，辅助说明与单位使用较小弱化字号，保持统一行高与对齐。",
+    "spacingAndSurfaces": "以 8/16/24/32 为间距节奏，卡片表面使用浅色底与 8/12 圆角，卡片间留白充分，页头、侧栏与主内容通过表面色差区分。"
+  },
+  "acceptanceScenarios": [
+    "页面顶部可读到能源管理系统、园区能源总览与演示数据三项文字。",
+    "侧栏可见能源总览、设备监测、告警中心三个静态菜单项，且不产生导航跳转。",
+    "三张指标卡分别显示今日用电量 12,480 kWh、当前总功率 856 kW、设备在线率 98.6%。",
+    "重点设备卡显示1号配电室运行正常、中央空调运行正常、光伏逆变器待检修。",
+    "运行摘要卡显示当前告警 2 项、今日能耗目标 15,000 kWh、数据更新时间 14:30。",
+    "查看运行说明按钮文字可见，但仅有静态外观，无未经确认的点击动作。",
+    "页脚显示仅用于界面与工程生成验收 · 所有数值均为演示数据。",
+    "页面不使用整张参考截图作为背景，各文字区域保持独立且父容器不重复子节点文字。"
+  ],
+  "openQuestions": [
+    "侧栏菜单项的选中态与图标精确样式是否需要保留？",
+    "查看运行说明按钮最终点击行为未在图中体现，需要确认。",
+    "除演示数据外的真实数据来源与刷新机制未知。",
+    "侧栏在原生客户端中是否需要固定宽度与固定位置？"
+  ]
+}

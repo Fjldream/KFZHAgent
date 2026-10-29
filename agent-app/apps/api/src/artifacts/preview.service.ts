@@ -11,12 +11,9 @@ import { ARTIFACT_STORAGE } from "./artifact-storage.js";
 import { DeliverySnapshotService } from "../delivery/delivery-snapshot.service.js";
 
 /**
- * Renders a built artifact's client project as a static HTML preview.
+ * 渲染构建项目的客户端项目为静态的 HTML 预览。
  *
- * Data source: the artifact itself — it is unpacked and its `project/page/*.json`
- * documents are converted (KF native page JSON -> IR shapes) and rendered as a
- * self-contained HTML page. This covers compile-mode builds (the revision state
- * only carries plan/mode metadata, not the compiled project).
+ * 数据源：该 artifact 自身 — 它是解包的，并且其 `project/page/*.json` 文件转换为 IR 形状（KF 自然页面 JSON -> IR 形状）并渲染为一个自包含的 HTML 页面。这覆盖了编译模式构建（仅携带计划/模式元数据，而不是编译的项目）。
  */
 @Injectable()
 export class PreviewService {

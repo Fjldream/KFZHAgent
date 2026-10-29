@@ -24,18 +24,13 @@ const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const INVALID_CREDENTIALS = "Invalid credentials";
 
 /**
- * A real Argon2id hash of a fixed dummy password. When the submitted username
- * does not exist, the login path still runs one full Argon2 verify against it
- * so the response timing matches the existing-user path and attackers cannot
- * enumerate usernames through a timing side channel (I4). The verified value
- * is always false.
+ * 固定虚拟密码的真实 Argon2id 哈希。提交的用户名不存在时，登录路径仍会针对该哈希执行一次完整的 Argon2 验证，使响应耗时与用户存在时一致，防止攻击者通过计时侧信道枚举用户名（I4）。验证结果始终为 false。
  */
 const DUMMY_PASSWORD_HASH =
   "$argon2id$v=19$m=65536,p=4,t=3$A9WpYfELHo0bunkko2pKmQ$cTq4J9gHBP9/eZ9mBL/hA/IYM8yb7c0YncbeSkMohM4";
 
 /**
- * Local username/password authentication with HttpOnly session cookies.
- * There is deliberately no registration route here.
+ * 使用 HttpOnly 会话 Cookie 的本地用户名/密码身份验证。这里特意不提供注册路由。
  */
 @Controller("api")
 export class AuthController {
@@ -66,8 +61,7 @@ export class AuthController {
     const password = typeof body.password === "string" ? body.password : "";
     const user = await this.users.findLoginTarget(tenantName, username);
     if (user === null) {
-      // I4: burn one full Argon2 verify against a dummy hash so the
-      // unknown-username path takes the same time as the known-user path.
+      // I4: 对一个未知用户名路径进行全量 Argon2 验证，同时对一个已知用户名路径进行验证，这样两个路径的耗时相同。
       await this.passwords.verify(password, DUMMY_PASSWORD_HASH);
       throw new UnauthorizedException(INVALID_CREDENTIALS);
     }
@@ -161,10 +155,7 @@ export class AuthController {
     if (!changed) {
       throw new UnauthorizedException("Current password is incorrect");
     }
-    // Password changed => revoke every session for the user (including this
-    // restricted first-login one), then issue a FULL session so the user can
-    // keep working without a second login (I2: first login forces the change,
-    // the change hands over a complete session).
+    // 密码修改后，撤销该用户的所有会话（包括当前受限的首次登录会话），再签发 FULL 会话，使用户无需再次登录即可继续工作（I2：首次登录强制修改密码，修改完成后交接为完整会话）。
     await this.sessions.revokeAllForUser(req.principal.userId);
     const { token } = await this.sessions.createSession(req.principal.userId);
     const cookieSecure = process.env.COOKIE_SECURE !== "false";

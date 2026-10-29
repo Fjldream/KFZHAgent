@@ -10,11 +10,20 @@ import {
   type LayoutNode,
   type SolutionImplementationPlan,
   type SolutionNode,
+  // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+  resolveVisualBlueprintSources,
+  type VisualPlanningContext,
+  // end
 } from "@kf/contracts";
 import type { DesignKnowledgeSnapshot } from "../design-knowledge/design-knowledge-catalog.js";
 import { createDefaultModuleRegistry } from "../modules/module-registry.js";
 import { listControlCapabilities } from "../style/control-capability-registry.js";
 import { buildBlueprintRegionQueries, type BlueprintRegionQuery } from "./blueprint-region-query.js";
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+import type { VisualRegion } from "@kf/contracts";
+import { getVisualCapabilitySurface } from "../design-knowledge/design-knowledge-catalog.js";
+import type { MappingCandidate } from "../visual/region-mapping.js";
+// end
 
 const MAX_DETAILED_CAPABILITIES = 25;
 const MIN_CONTROLS = 3;
@@ -33,15 +42,27 @@ const NATURAL_INTERACTION_MAPPINGS: ReadonlyArray<readonly [string, RegExp]> = [
 type RankedCandidate = CapabilityCandidateBundle["regions"][number]["controls"][number];
 
 interface RankedRegionDraft {
+  // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+  readonly visualControlIds: readonly string[];
+  readonly visualLayoutIds: readonly string[];
+  // end
   readonly query: BlueprintRegionQuery;
   readonly controls: readonly RankedCandidate[];
   readonly layouts: readonly RankedCandidate[];
   readonly recipes: readonly RankedCandidate[];
+  readonly minimumControls: number;
+  readonly requiredInteractions: readonly string[];
+  readonly structuralControlIds: readonly string[];
+  readonly structuralRecipeIds: readonly string[];
+  readonly supportedInteractionsByControlId: ReadonlyMap<string, ReadonlySet<string>>;
 }
 
 export interface CapabilityRetrievalInput {
   readonly blueprint: CustomerSolutionBlueprint;
   readonly knowledge: DesignKnowledgeSnapshot;
+  // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+  readonly visualReference?: VisualPlanningContext;
+  // end
 }
 
 interface ScoreComponents {
@@ -74,7 +95,7 @@ function normalizeText(value: string): string {
   return value.normalize("NFKC").toLocaleLowerCase("en-US").trim();
 }
 
-/** Chinese is represented by character bigrams; ASCII-like content by lower-case words. */
+/** 中文由大字组成；ASCII 类似的内容由小写字母组成。 */
 function tokenize(...values: readonly string[]): ReadonlySet<string> {
   const tokens = new Set<string>();
   for (const value of values) {
@@ -113,7 +134,29 @@ function guidanceMatch(guidance: readonly string[], queryText: readonly string[]
 }
 
 function queryText(query: BlueprintRegionQuery): readonly string[] {
-  return [query.purpose, query.visualIntent, ...query.semanticRoles, query.dataShape, ...query.interactions];
+  return [query.pageId, query.regionId, query.purpose, query.visualIntent, ...query.semanticRoles, query.dataShape, ...query.content, ...query.interactions];
+}
+
+function structuralControlIds(query: BlueprintRegionQuery): readonly string[] {
+  const text = normalizeText(queryText(query).join(" "));
+  const ids = new Set<string>();
+  if (query.content.length > 0 || query.semanticRoles.length > 0) ids.add("text");
+  if (/(?:image|media|gallery|avatar|portrait|图片|图像|媒体|画廊|头像|照片|作品)/.test(text)) ids.add("image");
+  if (/(?:form|input|message|contact|填写|输入|表单|留言|联系)/.test(text)) ids.add("input");
+  if (/(?:submit|button|cta|提交|按钮|表单操作)/.test(text)) ids.add("button");
+  return [...ids].sort(compareCodePoints);
+}
+
+function structuralRecipeIds(query: BlueprintRegionQuery): readonly string[] {
+  const text = normalizeText(queryText(query).join(" "));
+  const ids = new Set<string>();
+  if (/(?:hero|首屏|头图|主视觉)/.test(text)) ids.add("split-hero");
+  if (/(?:gallery|media|portfolio|projects?|画廊|媒体|图片|作品|项目)/.test(text)) ids.add("media-card-gallery");
+  if (/(?:filter|search|筛选|过滤|搜索|检索|项目列表)/.test(text)) ids.add("filtered-record-workspace");
+  if (/(?:detail|experience|详情|明细|经历|经验)/.test(text)) ids.add("master-detail-workspace");
+  if (/(?:admin|sidebar|管理|侧栏)/.test(text)) ids.add("sidebar-admin-shell");
+  if (/(?:form|dialog|contact|表单|弹窗|对话框|联系|留言)/.test(text)) ids.add("form-dialog-flow");
+  return [...ids].sort(compareCodePoints);
 }
 
 function supportedInteractionIds(profile: ScriptCapabilityProfile | undefined): ReadonlySet<string> {
@@ -123,6 +166,14 @@ function supportedInteractionIds(profile: ScriptCapabilityProfile | undefined): 
     ...profile.events.filter((item) => item.availability === "supported").map((item) => item.semanticEvent),
     ...profile.methods.filter((item) => item.availability === "supported").map((item) => item.semanticMethod),
   ]);
+}
+
+function knownInteractionIds(knowledge: DesignKnowledgeSnapshot): ReadonlySet<string> {
+  return new Set(knowledge.scriptCapabilityProfiles.flatMap((profile) => [
+    ...profile.actions.map((item) => item.semanticAction),
+    ...profile.events.map((item) => item.semanticEvent),
+    ...profile.methods.map((item) => item.semanticMethod),
+  ]));
 }
 
 function requiredInteractionIds(
@@ -249,12 +300,9 @@ function rankedControls(
   const capabilitiesById = new Map(listControlCapabilities().map((item) => [item.id, item]));
   const profilesById = new Map(knowledge.controlDesignProfiles.map((item) => [item.capabilityId, item]));
   const scriptsById = new Map(knowledge.scriptCapabilityProfiles.map((item) => [item.capabilityId, item]));
-  const knownInteractionIds = new Set(knowledge.scriptCapabilityProfiles.flatMap((profile) => [
-    ...profile.actions.map((item) => item.semanticAction),
-    ...profile.events.map((item) => item.semanticEvent),
-    ...profile.methods.map((item) => item.semanticMethod),
-  ]));
-  const requirements = category === "control" ? requiredInteractionIds(query, knownInteractionIds) : [];
+  const requirements = category === "control"
+    ? requiredInteractionIds(query, knownInteractionIds(knowledge))
+    : [];
   const candidates: RankedCandidate[] = [];
 
   for (const profile of knowledge.controlDesignProfiles) {
@@ -262,8 +310,6 @@ function rankedControls(
     if (technical === undefined || !isTechnicallyGeneratable(technical)) continue;
     const isLayout = technical.category === "layout";
     if ((category === "layout") !== isLayout) continue;
-    const supported = supportedInteractionIds(scriptsById.get(profile.capabilityId));
-    if (requirements.some((requirement) => !supported.has(requirement))) continue;
     const components = controlComponents(
       profile,
       query,
@@ -285,6 +331,52 @@ function rankedControls(
 
   return candidates.sort(compareRankedCandidates);
 }
+
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+/** Same local scoring and caps as text retrieval, without pretending a screenshot is a blueprint. */
+export function retrieveVisualCapabilities(input: {
+  regions: readonly VisualRegion[]; knowledge: DesignKnowledgeSnapshot;
+}): MappingCandidate[] {
+  if (input.regions.length > 100) throw new Error("VISUAL_MAPPING_LIMIT_EXCEEDED");
+  const selected = new Map<string, MappingCandidate>();
+  // Canonical ordering makes the shared 25-profile budget independent of source ordering.
+  for (const region of [...input.regions].sort((left, right) => compareCodePoints(left.id, right.id))) {
+    const isContainer = ["header", "sidebar", "content", "card", "form"].includes(region.role);
+    const surfaces = input.knowledge.controlDesignProfiles.flatMap(profile => {
+      const surface = getVisualCapabilitySurface(profile.capabilityId);
+      return surface?.eligible && surface.supportedRoles.includes(region.role) ? [surface] : [];
+    });
+    const query: BlueprintRegionQuery = {
+      pageId: "visual", regionId: region.id,
+      semanticRoles: input.knowledge.controlDesignProfiles.filter(profile => surfaces.some(surface => surface.capabilityId === profile.capabilityId))
+        .flatMap(profile => profile.semanticRoles),
+      dataShape: isContainer ? "none" : region.role === "image" ? "media-list" : region.role === "action" ? "action-list" : "scalar",
+      density: "comfortable", purpose: region.role, content: region.text,
+      interactions: [], // OCR hints are not executable semantic interaction requirements.
+      visualIntent: region.role,
+    };
+    const categories: ("layout" | "control")[] = region.role === "form" ? ["control", "layout"] : [isContainer ? "layout" : "control"];
+    const ranked = categories.flatMap(category => rankedControls({ ...query, dataShape: category === "layout" ? "none" : region.role === "form" ? "scalar" : query.dataShape }, input.knowledge, category)
+      .filter(candidate => surfaces.some(surface => surface.capabilityId === candidate.id))
+      .slice(0, category === "layout" ? MAX_LAYOUTS : MAX_CONTROLS));
+    for (const candidate of ranked) {
+      if (!selected.has(candidate.id) && selected.size >= MAX_DETAILED_CAPABILITIES) continue;
+      const surface = surfaces.find(item => item.capabilityId === candidate.id)!;
+      const previous = selected.get(candidate.id);
+      // Role admission is per queried region; do not accidentally expand another role's cap.
+      selected.set(candidate.id, {
+        capabilityId: candidate.id, controlType: surface.controlType,
+        supportedRoles: [...new Set([...(previous?.supportedRoles ?? []), region.role])].sort(),
+        // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+        evidence: [], fallback: null, score: Math.max(previous?.score ?? -Infinity, quantizeCandidateScore(candidate.score)),
+        regionScores: { ...previous?.regionScores, [region.id]: quantizeCandidateScore(candidate.score) },
+        // end
+      });
+    }
+  }
+  return [...selected.values()].sort((left, right) => compareCodePoints(left.capabilityId, right.capabilityId));
+}
+// end
 
 function recipeComponents(
   recipe: CompositionRecipe,
@@ -333,9 +425,19 @@ function rankedRecipes(
 
 function requireMinimumCandidates(draft: RankedRegionDraft): void {
   const issues: string[] = [];
-  if (draft.controls.length < MIN_CONTROLS) issues.push(`controls=${draft.controls.length}, required=${MIN_CONTROLS}`);
+  if (draft.controls.length < draft.minimumControls) {
+    issues.push(`controls=${draft.controls.length}, required=${draft.minimumControls}`);
+  }
   if (draft.layouts.length < MIN_LAYOUTS) issues.push(`layouts=${draft.layouts.length}, required=${MIN_LAYOUTS}`);
   if (draft.recipes.length < 1) issues.push(`recipes=${draft.recipes.length}, required=1`);
+  const missingInteractions = draft.requiredInteractions.filter((requirement) =>
+    !draft.controls.some((candidate) =>
+      draft.supportedInteractionsByControlId.get(candidate.id)?.has(requirement) === true,
+    ),
+  );
+  if (missingInteractions.length > 0) {
+    issues.push(`unsupported interactions=${missingInteractions.join(",")}`);
+  }
   if (issues.length > 0) {
     throw new Error(`CAPABILITY_RETRIEVAL_BLOCKED: ${draft.query.pageId}/${draft.query.regionId}: ${issues.join(", ")}`);
   }
@@ -350,12 +452,46 @@ function deepFreeze<T>(value: T): T {
 }
 
 export function retrieveCapabilities(input: CapabilityRetrievalInput): CapabilityCandidateBundle {
-  const drafts = buildBlueprintRegionQueries(input.blueprint).map((query): RankedRegionDraft => ({
-    query,
-    controls: rankedControls(query, input.knowledge, "control"),
-    layouts: rankedControls(query, input.knowledge, "layout"),
-    recipes: rankedRecipes(query, input.knowledge),
-  }));
+  // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+  const hasVisualSources = input.blueprint.pages.some((page) => page.regions.some((region) => region.visualRegionIds !== undefined));
+  if (hasVisualSources && input.visualReference === undefined) throw new Error("VISUAL_BLUEPRINT_CONTEXT_REQUIRED");
+  const visualSources = input.visualReference === undefined ? [] : resolveVisualBlueprintSources(input.blueprint, input.visualReference, true);
+  // end
+  const knownInteractions = knownInteractionIds(input.knowledge);
+  const supportedInteractionsByControlId = new Map(input.knowledge.scriptCapabilityProfiles.map((profile) => [
+    profile.capabilityId,
+    supportedInteractionIds(profile),
+  ]));
+  const drafts = buildBlueprintRegionQueries(input.blueprint).map((query): RankedRegionDraft => {
+    const requirements = requiredInteractionIds(query, knownInteractions);
+    // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+    const controls = rankedControls(query, input.knowledge, "control");
+    const layouts = rankedControls(query, input.knowledge, "layout");
+    const visualIds = [...new Set(visualSources.filter((source) => source.pageId === query.pageId && source.regionId === query.regionId).map((source) => source.capabilityId))].sort(compareCodePoints);
+    for (const id of visualIds) if (getVisualCapabilitySurface(id)?.eligible !== true || ![...controls, ...layouts].some((candidate) => candidate.id === id)) {
+      throw new Error(`VISUAL_BLUEPRINT_CAPABILITY_UNAVAILABLE: ${query.pageId}/${query.regionId}/${id}`);
+    }
+    const visualControlIds = visualIds.filter((id) => controls.some((candidate) => candidate.id === id));
+    const visualLayoutIds = visualIds.filter((id) => layouts.some((candidate) => candidate.id === id));
+    const structuralIds = structuralControlIds(query).filter((id) => controls.some((candidate) => candidate.id === id));
+    if (new Set([...visualControlIds, ...structuralIds]).size > MAX_CONTROLS || visualLayoutIds.length > MAX_LAYOUTS) {
+      throw new Error(`VISUAL_BLUEPRINT_REGION_TOO_BROAD: ${query.pageId}/${query.regionId}`);
+    }
+    // end
+    return {
+      query,
+      // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+      controls, layouts, visualControlIds, visualLayoutIds,
+      // end
+      recipes: rankedRecipes(query, input.knowledge),
+      minimumControls: requirements.length === 0 ? MIN_CONTROLS : 1,
+      requiredInteractions: requirements,
+      structuralControlIds: structuralControlIds(query).filter((capabilityId) =>
+        rankedControls(query, input.knowledge, "control").some((candidate) => candidate.id === capabilityId)),
+      structuralRecipeIds: structuralRecipeIds(query),
+      supportedInteractionsByControlId,
+    };
+  });
   drafts.forEach(requireMinimumCandidates);
 
   const detailedIds = new Set<string>();
@@ -378,14 +514,29 @@ export function retrieveCapabilities(input: CapabilityRetrievalInput): Capabilit
     );
   };
   for (const draft of drafts) {
-    reserveMinimum(draft, draft.controls, MIN_CONTROLS, "controls");
+    // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+    for (const id of draft.visualControlIds) reserveMinimum(draft, draft.controls.filter((candidate) => candidate.id === id), 1, `reviewed visual control ${id}`);
+    for (const id of draft.visualLayoutIds) reserveMinimum(draft, draft.layouts.filter((candidate) => candidate.id === id), 1, `reviewed visual layout ${id}`);
+    // end
+    reserveMinimum(draft, draft.controls, draft.minimumControls, "controls");
+    for (const capabilityId of draft.structuralControlIds) {
+      reserveMinimum(draft, draft.controls.filter((candidate) => candidate.id === capabilityId), 1, `structural control ${capabilityId}`);
+    }
+    for (const requirement of draft.requiredInteractions) {
+      const supporting = draft.controls.filter((candidate) =>
+        draft.supportedInteractionsByControlId.get(candidate.id)?.has(requirement) === true,
+      );
+      reserveMinimum(draft, supporting, 1, `interaction ${requirement}`);
+    }
     reserveMinimum(draft, draft.layouts, MIN_LAYOUTS, "layouts");
   }
 
   const regions = drafts.map((draft) => {
-    const select = (ranked: readonly RankedCandidate[], maximum: number): RankedCandidate[] => {
+    // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+    const select = (ranked: readonly RankedCandidate[], maximum: number, required: readonly string[] = []): RankedCandidate[] => {
       const selected: RankedCandidate[] = [];
-      for (const candidate of ranked) {
+      for (const candidate of [...ranked.filter((item) => required.includes(item.id)), ...ranked.filter((item) => !required.includes(item.id))]) {
+    // end
         if (selected.length === maximum) break;
         if (detailedIds.has(candidate.id) || detailedIds.size < MAX_DETAILED_CAPABILITIES) {
           detailedIds.add(candidate.id);
@@ -394,12 +545,55 @@ export function retrieveCapabilities(input: CapabilityRetrievalInput): Capabilit
       }
       return selected;
     };
+    const selectControls = (): RankedCandidate[] => {
+      const selected = new Map<string, RankedCandidate>();
+      const add = (candidate: RankedCandidate | undefined): void => {
+        if (candidate === undefined || selected.size === MAX_CONTROLS) return;
+        if (!detailedIds.has(candidate.id) && detailedIds.size === MAX_DETAILED_CAPABILITIES) return;
+        detailedIds.add(candidate.id);
+        selected.set(candidate.id, candidateForTransport(candidate));
+      };
+      // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+      draft.visualControlIds.forEach((id) => add(draft.controls.find((candidate) => candidate.id === id)));
+      // end
+      draft.structuralControlIds.forEach((id) => add(draft.controls.find((candidate) => candidate.id === id)));
+      for (const requirement of draft.requiredInteractions) {
+        add(draft.controls.find((candidate) =>
+          draft.supportedInteractionsByControlId.get(candidate.id)?.has(requirement) === true));
+      }
+      draft.controls.forEach(add);
+      return [...selected.values()];
+    };
+    const selectRecipes = (): RankedCandidate[] => {
+      const selected = new Map<string, RankedCandidate>();
+      const add = (candidate: RankedCandidate | undefined): void => {
+        if (candidate !== undefined && selected.size < MAX_RECIPES) selected.set(candidate.id, candidateForTransport(candidate));
+      };
+      draft.recipes
+        .filter((candidate) => draft.structuralRecipeIds.includes(candidate.id))
+        .forEach(add);
+      draft.recipes.forEach(add);
+      return [...selected.values()];
+    };
+    // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+    const selectedControls = selectControls();
+    const selectedLayouts = select(draft.layouts, MAX_LAYOUTS, draft.visualLayoutIds);
+    if (draft.visualControlIds.length + draft.visualLayoutIds.length > 0 && (
+      draft.visualControlIds.some((id) => !selectedControls.some((item) => item.id === id))
+      || draft.visualLayoutIds.some((id) => !selectedLayouts.some((item) => item.id === id))
+      || draft.requiredInteractions.some((requirement) => !selectedControls.some((item) => draft.supportedInteractionsByControlId.get(item.id)?.has(requirement) === true))
+    )) throw new Error(`VISUAL_BLUEPRINT_REGION_TOO_BROAD: ${draft.query.pageId}/${draft.query.regionId}`);
+    // end
     return {
       pageId: draft.query.pageId,
       regionId: draft.query.regionId,
-      controls: select(draft.controls, MAX_CONTROLS),
-      layouts: select(draft.layouts, MAX_LAYOUTS),
-      recipes: draft.recipes.slice(0, MAX_RECIPES).map(candidateForTransport),
+      // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+      controls: selectedControls,
+      // end
+      // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+      layouts: selectedLayouts,
+      // end
+      recipes: selectRecipes(),
     };
   });
 
@@ -408,7 +602,11 @@ export function retrieveCapabilities(input: CapabilityRetrievalInput): Capabilit
     knowledgeCatalogVersion: input.knowledge.version,
     blueprintHash: canonicalHash(input.blueprint),
     regions,
-    detailedCapabilityIds: [...detailedIds].sort(compareCodePoints),
+    // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+    // Reservations constrain selection; only actually advertised candidates may become model detail identities.
+    // Do not reclaim provisional slots to add more candidates or alter any region's ranking/permission set.
+    detailedCapabilityIds: [...new Set(regions.flatMap(region => [...region.controls, ...region.layouts]).map(candidate => candidate.id))].sort(compareCodePoints),
+    // end
     generatedAtPolicy: "deterministic-no-timestamp",
   });
 }
@@ -485,7 +683,9 @@ function walkNode(
   }
   if (node.recipeId !== undefined) {
     const unmatchedRecipes = unmatchedSourcePageRegions(sourcePageId, node.sourceBlueprintRegionIds, bundle, "recipes", new Set([node.recipeId]));
-    if (unmatchedRecipes.length > 0) issues.push(`layout ${node.id}: recipe ${node.recipeId} is not a candidate for page-regions [${unmatchedRecipes.join(", ")}]`);
+    if (unmatchedRecipes.length === node.sourceBlueprintRegionIds.length) {
+      issues.push(`layout ${node.id}: recipe ${node.recipeId} is not a candidate for page-regions [${unmatchedRecipes.join(", ")}]`);
+    }
   }
   node.children.forEach((child) => walkNode(child, sourcePageId, bundle, issues, registry));
 }

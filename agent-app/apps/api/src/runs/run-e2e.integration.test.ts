@@ -2,6 +2,7 @@
 process.env.DATABASE_URL =
   process.env.TEST_DATABASE_URL ?? "postgresql://postgres@127.0.0.1:5432/kf_agent_test_agent_next";
 process.env.MODEL_PORT_MODE = "fake";
+process.env.KF_SERVER_PLAN_HMAC_KEY_BASE64 ??= Buffer.alloc(32, 0x62).toString("base64");
 
 import { assertSafeTestDatabase } from "../../../../tests/helpers/database-safety.js";
 assertSafeTestDatabase({
@@ -54,6 +55,8 @@ describe("run end to end with the fake model", () => {
     const registry = createRunHandlerRegistry({
       prisma: fixture.prisma,
       loadGraph: async () => (await conversationService.getGraph()) as unknown as GraphLike,
+      acquireTurn: id => conversationService.acquireRunTurn(id),
+      registerMemo: (id, memo) => conversationService.registerRunMemo(id, memo),
     });
     const steps = new PrismaRunStepStore(fixture.prisma);
     const service = new RunExecutionService({
@@ -78,8 +81,8 @@ describe("run end to end with the fake model", () => {
       status: run.status, failureCode: run.failureCode,
       types: events.map((event) => event.type),
     }));
-    expect(["SUCCEEDED", "WAITING_APPROVAL", "WAITING_INPUT", "FAILED"]).toContain(run.status);
-    expect(events.some((event) => event.type === "run.finished")).toBe(run.status !== "WAITING_APPROVAL");
+    expect(run.status).toBe("SUCCEEDED");
+    expect(events.some((event) => event.type === "run.completed")).toBe(true);
 
     // 预算行必须随 run 创建（T07）；callsUsed 目前为 0 是已知缺口：
     // 图内模型调用落账时还没有写 runId（T02 收尾项），账本行 runId 为 null。

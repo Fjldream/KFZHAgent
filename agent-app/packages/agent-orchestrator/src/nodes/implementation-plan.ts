@@ -1,3 +1,4 @@
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
 import { createHash } from "node:crypto";
 import type { ChangePlan, DesignPlan, UIImplementationSpec } from "@kf/contracts";
 import { planHash, stableStringify } from "@kf/domain-client";
@@ -8,8 +9,7 @@ import type { AgentGraphStateValue, AgentGraphUpdate } from "../state.js";
 const MAX_REJECTION_DETAIL = 500;
 
 /**
- * Converts a confirmed customer blueprint into bounded UI intent and then
- * delegates all KF operations to the deterministic domain compiler.
+ * 将确认的客户蓝图转换为受控的用户意图界面，并将所有KF操作委托给确定的领域编译器。
  */
 export function createImplementationPlanNode(deps: SolutionGraphDeps) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
@@ -75,14 +75,18 @@ export function createImplementationPlanNode(deps: SolutionGraphDeps) {
       return persistInvalidImplementation(deps, state, [errorDetail(error)]);
     }
 
+    // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+    // uiImplementation is a proposal, not proof of an applied revision. Compile
+    // the complete desired intent against editableEntities from currentRevisionId.
+    // Diffing against an unapproved proposal drops still-unapplied operations.
     let compiled: Awaited<ReturnType<NonNullable<typeof deps.uiImplementationCompiler>["compile"]>>;
+    // end
     let rejectionReasons = assessCoverage(state.designPlan, candidate);
     if (rejectionReasons.length === 0) {
       try {
         compiled = await deps.uiImplementationCompiler.compile({
           workspaceId: state.workspaceId,
           spec: candidate,
-          ...(state.uiImplementation !== undefined ? { previousSpec: state.uiImplementation } : {}),
           editableEntities,
         });
         rejectionReasons = validateCompiledPlan(compiled.plan);
@@ -106,7 +110,6 @@ export function createImplementationPlanNode(deps: SolutionGraphDeps) {
         compiled = await deps.uiImplementationCompiler.compile({
           workspaceId: state.workspaceId,
           spec: candidate,
-          ...(state.uiImplementation !== undefined ? { previousSpec: state.uiImplementation } : {}),
           editableEntities,
         });
         const repairedPlanIssues = validateCompiledPlan(compiled.plan);
@@ -288,3 +291,4 @@ function summarizePlan(plan: ChangePlan): string {
   const kinds = [...counts.entries()].map(([kind, count]) => `${kind}×${count}`).join("、");
   return `计划包含 ${plan.operations.length} 个操作（${kinds}）。`.slice(0, 500);
 }
+// end

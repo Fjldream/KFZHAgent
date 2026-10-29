@@ -17,9 +17,8 @@ interface InteractiveCapabilityNode {
 }
 
 /**
- * Maps semantic trigger ownership to an evidence-backed native trigger owner.
- * Unsupported controls, including Image, retain their original capability so
- * the interaction compiler can emit an exact unresolved-trigger diagnostic.
+ * 将语义触发所有权映射到证据支持的原生触发所有者。
+ * 不支持的控件，包括图像，保留其原始能力，以便交互编译器可以发出一个精确的未触发触发诊断。
  */
 export function effectiveInteractiveCapability(node: InteractiveCapabilityNode): string {
   if (node.capabilityId !== "text") return node.capabilityId;
@@ -98,9 +97,7 @@ function freezeCapability(capability: ControlCapability): ControlCapability {
 }
 
 /**
- * Explicit capability records for every compiler inventory entry. New compiler
- * inventory must be added here deliberately; assertCapabilityCoverage() makes
- * accidental omissions fail fast instead of silently defaulting to support.
+ * 每台编译器库存记录的显式能力记录。新编译器库存必须在这里故意添加；assertCapabilityCoverage() 会使得意外遗漏快速失败，而不是默认支持。
  */
 const CONTROL_CAPABILITIES: readonly ControlCapability[] = Object.freeze([
   pendingCapability("button", "static", "Button"),
@@ -190,7 +187,15 @@ export function getControlCapability(id: string): ControlCapability | undefined 
   return CONTROL_CAPABILITIES.find((capability) => capability.id === id);
 }
 
-/** Throws if reviewed compiler inventory and explicit capability records diverge. */
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+/** Visual generation cannot treat a reviewed template shell as a working UI adapter. */
+export function supportsNewVisualGeneration(capability: ControlCapability): boolean {
+  const complete = new Set<CapabilityStatus>(["full", "pending-verification"]);
+  return complete.has(capability.generation.status) && complete.has(capability.style.status);
+}
+// end
+
+/** 如果审查的编译器库存和明确的能力记录不一致，则抛出异常。 */
 export function assertCapabilityCoverage(): void {
   const expectedIds = [
     ...supportedControlTypes()

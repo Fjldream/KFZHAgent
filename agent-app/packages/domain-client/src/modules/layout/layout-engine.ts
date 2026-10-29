@@ -26,8 +26,7 @@ export interface PageLayoutResult {
 }
 
 /**
- * Optional solver-only facts never appear in a model-authored ModulePlan.
- * The previous layout is used as an anchor reference during a revision.
+ * 模型编写的 ModulePlan 中绝不会出现可选的、仅供求解器使用的事实。修订期间会把先前布局用作锚点参考。
  */
 export interface PageLayoutInput extends Pick<ModulePlanPage, "id" | "mode" | "modules"> {
   readonly canvasWidth?: number;
@@ -100,7 +99,7 @@ interface GridSlot {
   readonly width: number;
 }
 
-/** Integer quotient/remainder boundaries avoid a lost pixel in non-divisible grids. */
+/** 整数商/余数边界避免在非除法网格中丢失像素。 */
 function gridSlot(region: RegionBounds, column: number, span: number): GridSlot | undefined {
   const distributedWidth = region.width - ((GRID_COLUMNS - 1) * region.gap);
   if (distributedWidth < GRID_COLUMNS || column < 0 || span < 1 || column + span > GRID_COLUMNS) return undefined;
@@ -149,8 +148,7 @@ function fixedRegionBounds(mode: PageLayoutInput["mode"], width: number, height:
 
   const headerHeight = 64;
   const sidebarWidth = 240;
-  // Native toolbar modules require a 48px usable row; 64px shell chrome
-  // leaves exactly that after the fixed 8px top/bottom padding.
+  // 原生工具栏模块需要一个 48 像素可用的行；64 像素的壳外边框 chrome 剩下那个，正好是 8 像素的顶部/底部填充。
   const toolbarHeight = 64;
   const footerHeight = 48;
   const bodyBottom = height - footerHeight;
@@ -185,7 +183,7 @@ function addFixedRegion(
     }
     if (requestedHeight === undefined || slot === undefined) {
       issues.push(issue("MODULE_TOO_SMALL", candidate.module.id));
-      // Even an unplaceable request consumes a deterministic row footprint.
+      // 即使一个不可放置的请求也会消耗一个确定的行脚印。
       column = GRID_COLUMNS;
       rowHeight = Math.max(rowHeight, requestedHeight ?? candidate.definition.layout.height.min);
       continue;
@@ -206,8 +204,7 @@ function addFixedRegion(
       continue;
     }
     const candidateBounds = alignedBounds(candidate, content, column, slot, y, height);
-    // A rejected module still owns its requested slot. Later siblings must not
-    // backfill it, otherwise a repair changes unrelated fixed-layout geometry.
+    // 一个被拒绝的模块仍然拥有其请求的槽位。稍后的兄弟必须不能填充它，否则修复会改变无关的固定布局几何。
     if (!candidate.validDefinitionRegion || candidateBounds === undefined) {
       issues.push(issue(!candidate.validDefinitionRegion ? "INVALID_REGION" : "MODULE_TOO_SMALL", candidate.module.id));
       consumeSlot();
@@ -276,9 +273,7 @@ function reusableAnchors(
     .filter((entry): entry is { candidate: Candidate; bounds: ModuleBounds } => entry.bounds !== undefined);
   if (prior.some(({ bounds }) => !isIntegerBounds(bounds)) || prior.some((entry, index) => prior.slice(index + 1).some((other) => overlaps(entry.bounds, other.bounds)))) return;
 
-  // The first calculated difference is the revision's affected range. Only a
-  // valid unchanged prefix may borrow prior objects; later values are always
-  // the fresh deterministic solution and anchors never override constraints.
+  // 第一个计算的差异是修订的影响范围。只有有效的未更改前缀才能借用先前的对象；稍后的值总是新鲜的确定性解决方案，锚点从不覆盖约束。
   let affected = false;
   for (const candidate of ordered) {
     const next = current[candidate.module.id];
@@ -293,8 +288,7 @@ function reusableAnchors(
 }
 
 /**
- * Solves module placement using only integer arithmetic. It never rescales a
- * page globally: vertical flow grows, while fixed canvases report repairable issues.
+ * 使用整数算术解决模块放置问题。它从不全局缩放页面：垂直流增长，而固定画布报告可修复的问题。
  */
 export function solvePageLayout(page: PageLayoutInput, registry: ModuleRegistry): PageLayoutResult {
   const width = clampPositiveInteger(page.canvasWidth, DEFAULT_CANVAS_WIDTH);

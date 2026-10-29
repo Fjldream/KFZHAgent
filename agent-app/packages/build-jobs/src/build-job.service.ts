@@ -1,5 +1,10 @@
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
 import { Prisma, type BuildJob, type JobStatus, type PrismaClient } from "@prisma/client";
+import { recordAgentBuildAudit } from "./agent-build-audit.js";
 import { projectKeySchema } from "@kf/contracts";
+// modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+import { currentAgentRunExecution } from "./agent-run-scope.js";
+// end
 
 import type {
   CompleteBuildInput,
@@ -13,36 +18,16 @@ import {
 const MAX_LEASE_CANDIDATE_WORKSPACES = 16;
 
 /**
- * Durable build-job lease and commit logic, shared by the API (enqueue) and
- * the worker (lease/execute/commit).
+ * 持久化构建作业的租约与提交逻辑，由 API（入队）和 worker（租赁/执行/提交）共享。
  *
- * Idempotency: `enqueue` returns the existing row for a repeated
- * idempotencyKey; the UNIQUE index on idempotencyKey is the concurrency
- * backstop.
+ * 幂等性：`enqueue` 对重复的 idempotencyKey 返回现有记录；idempotencyKey 上的 UNIQUE 索引是并发兜底。
  *
- * Leasing: `leaseNext` advances a persistent cross-tenant round-robin cursor,
- * inspects at most one candidate workspace per bounded tenant batch, and
- * serializes each workspace claim with non-blocking `pg_try_advisory_xact_lock`
- * (transaction-scoped, auto-released), then locks one candidate row with
- * `SELECT ... FOR UPDATE SKIP LOCKED`, taking a claim (`leaseOwner` +
- * `leaseExpiresAt`) and bumping `attemptCount`. Only QUEUED/RUNNING/VALIDATING
- * rows with an expired or absent lease are claimable, and only when no other
- * row of the same workspace currently holds a live lease (one active job per
- * workspace). The advisory lock closes the READ COMMITTED race where a
- * `NOT EXISTS` scan could not see another transaction's uncommitted RUNNING
- * update.
+ * 租赁：`leaseNext` 推进持久化的跨租户轮询游标，在每个有界租户批次中最多检查一个候选工作空间，并使用非阻塞的 `pg_try_advisory_xact_lock`（事务范围、自动释放）串行化每次工作空间申领；随后通过 `SELECT ... FOR UPDATE SKIP LOCKED` 锁定一条候选记录，取得申领信息（`leaseOwner` 和 `leaseExpiresAt`）并递增 `attemptCount`。只有租约已过期或不存在的 QUEUED/RUNNING/VALIDATING 记录可以被申领，并且同一工作空间当前不能有其他记录持有有效租约（每个工作空间只能有一个活动作业）。咨询锁消除了 READ COMMITTED 下的竞态：`NOT EXISTS` 扫描可能看不到另一个事务尚未提交的 RUNNING 更新。
  *
- * Crash recovery: a worker that dies mid-build leaves the row RUNNING with an
- * expired lease; after expiry `leaseNext` re-claims it and `completeBuild`
- * commits the result exactly once. Re-committing an already terminal row is a
- * no-op (defense in depth).
+ * 崩溃恢复：worker 在构建中途退出后，会留下租约已过期的 RUNNING 记录；租约到期后，`leaseNext` 会重新申领该记录，`completeBuild` 则只提交一次结果。对已处于终态的记录再次提交不会执行任何操作（纵深防御）。
  */
 /**
- * Test-only extension points for BuildJobService. `beforeClaim` runs inside
- * the lease transaction after the claim SELECT has locked the candidate row
- * but before the RUNNING UPDATE, letting a test widen the READ COMMITTED race
- * window (the exact condition that allowed two jobs of one workspace to be
- * claimed concurrently before the advisory-lock fix).
+ * BuildJobService 的测试专用扩展点。`beforeClaim` 在租约事务内部运行：申领 SELECT 已锁定候选记录，但 RUNNING UPDATE 尚未执行；测试可以借此扩大 READ COMMITTED 的竞态窗口（修复咨询锁之前，该条件会导致同一工作空间的两个作业被并发申领）。
  */
 export interface BuildJobServiceDebugHooks {
   beforeClaim?: () => Promise<void>;
@@ -59,10 +44,48 @@ export class BuildJobService {
     this.#debugHooks = debugHooks;
   }
 
-  /** Enqueues a build job; idempotent on idempotencyKey. */
+  /** 将构建作业入队；以 idempotencyKey 保证幂等。 */
   async enqueue(input: EnqueueBuildInput): Promise<BuildJob> {
+    // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+    const scope = currentAgentRunExecution();
+    if (!scope) return this.enqueueRecord(input, this.prisma);
+    scope.signal.throwIfAborted();
+    if (scope.tenantId !== input.tenantId) throw new BuildJobConflictError("RUN_TENANT_MISMATCH");
+    return this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtextextended(${`kf-run-control:${scope.runId}`}, 0))`;
+      // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+      const rows = await tx.$queryRaw<Array<{ status: string; workspaceId: string; baseRevisionId: string | null }>>`
+        SELECT "status", "workspaceId", "baseRevisionId" FROM "AgentRun"
+        WHERE "id" = ${scope.runId} AND "tenantId" = ${scope.tenantId}
+          AND "leaseOwner" = ${scope.ownerId} AND "fence" = ${scope.fence} FOR UPDATE
+      `;
+      const run = rows[0];
+      if (!run || run.workspaceId !== input.workspaceId) throw new BuildJobConflictError("RUN_LEASE_REJECTED");
+      // 先取得权威行锁再读数据库墙钟，避免等待锁期间过期仍入队。
+      // AgentRun 租约由 raw-SQL Date 写入 session 本地 timestamp；BuildJob 的 ORM UTC 口径不能复用到这里。
+      const [leaseCheck] = await tx.$queryRaw<Array<{ active: boolean }>>`
+        SELECT "leaseExpiresAt" > clock_timestamp()::timestamp AS "active"
+        FROM "AgentRun" WHERE "id" = ${scope.runId}
+      `;
+      if (leaseCheck?.active !== true) throw new BuildJobConflictError("RUN_LEASE_REJECTED");
+      if (run.status === "CANCEL_REQUESTED") throw new BuildJobConflictError("RUN_CANCEL_REQUESTED");
+      if (!["RUNNING", "BUILDING"].includes(run.status)) throw new BuildJobConflictError("RUN_NOT_EXECUTING");
+      if (run.baseRevisionId !== input.baseRevisionId) throw new BuildJobConflictError("RUN_BASE_REVISION_MISMATCH");
+      // end
+      const job = await this.enqueueRecord(input, tx, scope.runId);
+      if (job.agentRunId !== scope.runId) throw new BuildJobConflictError("BUILD_RUN_BINDING_MISMATCH");
+      await tx.agentRun.update({ where: { id: scope.runId }, data: { status: "BUILDING", buildJobId: job.id } });
+      await recordAgentBuildAudit(tx, job, "enqueued");
+      return job;
+    });
+  }
+
+  private async enqueueRecord(input: EnqueueBuildInput, database: PrismaClient | Prisma.TransactionClient, agentRunId?: string): Promise<BuildJob> {
+    // end
     const projectKey = normalizeProjectKey(input.projectKey, input.domainKind);
-    const existing = await this.prisma.buildJob.findUnique({
+    // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+    const existing = await database.buildJob.findUnique({
+      // end
       where: { idempotencyKey: input.idempotencyKey },
     });
     if (existing !== null) {
@@ -70,13 +93,17 @@ export class BuildJobService {
       return existing;
     }
 
-    const workspace = await this.prisma.solutionWorkspace.findFirst({
+    // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+    const workspace = await database.solutionWorkspace.findFirst({
+      // end
       where: { id: input.workspaceId, tenantId: input.tenantId },
     });
     if (workspace === null) {
       throw new BuildJobNotFoundError("workspace");
     }
-    const baseRevision = await this.prisma.solutionRevision.findFirst({
+    // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+    const baseRevision = await database.solutionRevision.findFirst({
+      // end
       where: {
         id: input.baseRevisionId,
         workspaceId: input.workspaceId,
@@ -86,7 +113,9 @@ export class BuildJobService {
     if (baseRevision === null) {
       throw new BuildJobNotFoundError("base revision");
     }
-    const plan = await this.prisma.changePlan.findFirst({
+    // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+    const plan = await database.changePlan.findFirst({
+      // end
       where: {
         id: input.changePlanId,
         tenantId: input.tenantId,
@@ -101,14 +130,17 @@ export class BuildJobService {
     }
 
     try {
-      return await this.prisma.buildJob.create({
-        data: { ...input, projectKey, status: "QUEUED" },
+      // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+      return await database.buildJob.create({
+        data: { ...input, projectKey, status: "QUEUED", ...(agentRunId ? { agentRunId } : {}) },
+        // end
       });
     } catch (error) {
-      // Concurrent enqueue of the same key: the UNIQUE index is the final
-      // authority, return the winning row.
+      // 相同键的并发入队：UNIQUE 索引是最终依据，返回竞争胜出的记录。
       if (isUniqueViolation(error)) {
-        const winner = await this.prisma.buildJob.findUnique({
+        // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+        const winner = await database.buildJob.findUnique({
+          // end
           where: { idempotencyKey: input.idempotencyKey },
         });
         if (winner !== null) {
@@ -121,24 +153,15 @@ export class BuildJobService {
   }
 
   /**
-   * Claims the next runnable build job. Returns null when nothing is
-   * claimable. `now` is injected for deterministic lease tests.
-   *
-   * The "one active job per workspace" guard cannot be implemented with a
-   * `NOT EXISTS` scan alone: under READ COMMITTED each statement sees its own
-   * snapshot, so a concurrent transaction's uncommitted RUNNING update is
-   * invisible and two workers could claim two QUEUED jobs of the same
-   * workspace. We therefore serialize the claim decision per candidate
-   * workspace with a bounded `pg_try_advisory_xact_lock(workspaceId)` loop
-   * (transaction-scoped, auto-released) before re-checking committed state.
-   */
+ * 申领下一个可运行的构建作业。没有可申领作业时返回 null。注入 `now` 以支持确定性的租约测试。
+ *
+ * “每个工作空间只能有一个活动作业”的守卫不能只通过 `NOT EXISTS` 扫描实现：在 READ COMMITTED 隔离级别下，每条语句看到自己的快照，因此另一个并发事务尚未提交的 RUNNING 更新不可见，两个 worker 可能分别申领同一工作空间的两个 QUEUED 作业。为此，我们在重新检查已提交状态前，通过有界的 `pg_try_advisory_xact_lock(workspaceId)` 循环（事务范围、自动释放）按候选工作空间串行化申领决策。
+ */
   async leaseNext(owner: string, now: Date, leaseMs?: number): Promise<BuildJob | null> {
     const ttl = leaseMs ?? this.leaseMs;
     const expiry = new Date(now.getTime() + ttl);
     return this.prisma.$transaction(async (tx) => {
-      // Serialize only the small scheduling decision. The persisted cursor
-      // makes every call begin after the last tenant that actually won a
-      // claim, so one old backlog cannot occupy every candidate batch.
+      // 只串行化小型调度决策。持久化游标使每次调用都从上一个实际成功申领作业的租户之后开始，因此某个旧积压队列无法占满所有候选批次。
       await tx.$executeRaw`
         INSERT INTO "BuildSchedulerCursor" ("id", "lastTenantId", "updatedAt")
         VALUES (1, '', ${now})
@@ -280,40 +303,50 @@ export class BuildJobService {
    * on success. Re-committing a terminal job is a no-op.
    */
   async completeBuild(input: CompleteBuildInput): Promise<BuildJob> {
+    // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+    const binding = await this.prisma.buildJob.findFirst({ where: { id: input.jobId, tenantId: input.tenantId }, select: { agentRunId: true } });
+    // end
     return this.prisma.$transaction(async (tx) => {
-      // Lock order is part of the concurrency contract: BuildJob first,
-      // SolutionWorkspace second. Every completion takes both locks before a
-      // terminal, lease, or stale-base decision so the decision and writes
-      // share one atomic authority under PostgreSQL READ COMMITTED.
-      const lockedJobs = await tx.$queryRaw<BuildJobRow[]>`
+      let completedNow = false;
+      let resultRevisionId: string | null = null;
+      const complete = async (): Promise<BuildJob> => {
+        // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+        // 与取消/入队共用最外层 run-control 锁，内部保留原 job -> workspace 锁序。
+        if (binding?.agentRunId) await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtextextended(${`kf-run-control:${binding.agentRunId}`}, 0))`;
+        // end
+        // Lock order is part of the concurrency contract: BuildJob first,
+        // SolutionWorkspace second. Every completion takes both locks before a
+        // terminal, lease, or stale-base decision so the decision and writes
+        // share one atomic authority under PostgreSQL READ COMMITTED.
+        const lockedJobs = await tx.$queryRaw<BuildJobRow[]>`
         SELECT * /* kf_complete_build_job_lock */
         FROM "BuildJob"
         WHERE "id" = ${input.jobId}
         FOR UPDATE
       `;
-      const lockedJob = lockedJobs[0] ?? null;
-      if (lockedJob === null || lockedJob.tenantId !== input.tenantId) {
-        throw new BuildJobNotFoundError("build job");
-      }
-      const job = lockedJob;
-      const lockedWorkspaces = await tx.$queryRaw<LockedWorkspaceRow[]>`
+        const lockedJob = lockedJobs[0] ?? null;
+        if (lockedJob === null || lockedJob.tenantId !== input.tenantId) {
+          throw new BuildJobNotFoundError("build job");
+        }
+        const job = lockedJob;
+        const lockedWorkspaces = await tx.$queryRaw<LockedWorkspaceRow[]>`
         SELECT "id", "tenantId", "currentRevisionId" /* kf_complete_workspace_lock */
         FROM "SolutionWorkspace"
         WHERE "id" = ${job.workspaceId}
           AND "tenantId" = ${job.tenantId}
         FOR UPDATE
       `;
-      const workspace = lockedWorkspaces[0] ?? null;
-      if (workspace === null) {
-        throw new BuildJobNotFoundError("workspace");
-      }
-      if (job.status === "SUCCEEDED" || job.status === "FAILED") {
-        return job;
-      }
-      // CURRENT_TIMESTAMP is fixed at transaction start and can therefore be
-      // stale after a row-lock wait. Evaluate wall-clock database time only
-      // after both authoritative locks have been acquired.
-      const leaseChecks = await tx.$queryRaw<{ leaseIsActive: boolean }[]>`
+        const workspace = lockedWorkspaces[0] ?? null;
+        if (workspace === null) {
+          throw new BuildJobNotFoundError("workspace");
+        }
+        if (job.status === "SUCCEEDED" || job.status === "FAILED") {
+          return job;
+        }
+        // CURRENT_TIMESTAMP is fixed at transaction start and can therefore be
+        // stale after a row-lock wait. Evaluate wall-clock database time only
+        // after both authoritative locks have been acquired.
+        const leaseChecks = await tx.$queryRaw<{ leaseIsActive: boolean }[]>`
         SELECT (
           "leaseExpiresAt" IS NOT NULL
           AND "leaseExpiresAt" > (clock_timestamp() AT TIME ZONE 'UTC')
@@ -321,179 +354,210 @@ export class BuildJobService {
         FROM "BuildJob"
         WHERE "id" = ${job.id}
       `;
-      const leaseIsActive = leaseChecks[0]?.leaseIsActive === true;
-      if (
-        job.leaseOwner !== input.leaseOwner ||
-        job.attemptCount !== input.leaseAttempt ||
-        !leaseIsActive
-      ) {
-        throw new BuildJobLeaseError("lease was lost or expired before completion");
-      }
+        const leaseIsActive = leaseChecks[0]?.leaseIsActive === true;
+        if (
+          job.leaseOwner !== input.leaseOwner ||
+          job.attemptCount !== input.leaseAttempt ||
+          !leaseIsActive
+        ) {
+          throw new BuildJobLeaseError("lease was lost or expired before completion");
+        }
+        completedNow = true;
 
-      if (input.status === "SUCCEEDED") {
-        if (input.result === undefined) {
-          throw new BuildJobConflictError("SUCCEEDED completion requires a build result");
-        }
-        const { result, validationReport } = input;
-        if (result.creativeBinding !== undefined
-          && (!isSha256(result.creativeBinding.creativeArtifactHash)
-            || !isSha256(result.creativeBinding.nativeMaterializationHash))) {
-          return recordBuildConflict(tx, job, "creative delivery binding contains an invalid hash");
-        }
-        const baseRevision = await tx.solutionRevision.findFirst({
-          where: {
-            id: job.baseRevisionId,
-            tenantId: job.tenantId,
-            workspaceId: job.workspaceId,
-          },
-        });
-        if (baseRevision === null) {
-          throw new BuildJobNotFoundError("base revision");
-        }
-        if (workspace.currentRevisionId !== job.baseRevisionId) {
-          const message =
-            `stale base revision ${job.baseRevisionId}; workspace currently points to ` +
-            `${workspace.currentRevisionId ?? "no revision"}`;
-          return recordBuildConflict(tx, job, message);
-        }
-        const baseProjects = await tx.domainProjectRevision.findMany({
-          where: {
-            tenantId: job.tenantId,
-            solutionRevisionId: job.baseRevisionId,
-          },
-        });
-        const boundProject = baseProjects.find(
-          (project) => project.projectKey === job.projectKey,
-        );
-        if (boundProject !== undefined && boundProject.domainKind !== job.domainKind) {
-          return recordBuildConflict(
-            tx,
-            job,
-            `projectKey ${job.projectKey} belongs to domain ${boundProject.domainKind}, ` +
-              `not ${job.domainKind}`,
-          );
-        }
-        if (result.domainKind !== job.domainKind) {
-          return recordBuildConflict(
-            tx,
-            job,
-            `build result domain ${result.domainKind} does not match job domain ${job.domainKind}`,
-          );
-        }
-        let nextState: Prisma.InputJsonValue;
-        try {
-          nextState = toInputJsonValue(
-            replaceRevisionProjectBuildState(
-              baseRevision.state,
-              job.projectKey,
-              job.domainKind,
-              result.state,
-            ),
-          );
-        } catch (error) {
-          if (error instanceof RevisionStateError) {
-            return recordBuildConflict(tx, job, error.message);
+        if (input.status === "SUCCEEDED") {
+          // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+          // 即便包已写入临时存储，取消先提交时也不能发布修订/制品。
+          if (job.cancelRequestedAt) return recordBuildCancellation(tx, job);
+          // end
+          if (input.result === undefined) {
+            throw new BuildJobConflictError("SUCCEEDED completion requires a build result");
           }
-          throw error;
-        }
-        const latest = await tx.solutionRevision.findFirst({
-          where: { workspaceId: job.workspaceId, tenantId: job.tenantId },
-          orderBy: { revisionNumber: "desc" },
-        });
-        const revision = await tx.solutionRevision.create({
-          data: {
-            tenantId: job.tenantId,
-            workspaceId: job.workspaceId,
-            changePlanId: job.changePlanId,
-            revisionNumber: (latest?.revisionNumber ?? 0) + 1,
-            kind: result.kind,
-            parentRevisionId: job.baseRevisionId,
-            state: nextState,
-          },
-        });
-        const preservedProjects = baseProjects.filter(
-          (project) => project.projectKey !== job.projectKey,
-        );
-        if (preservedProjects.length > 0) {
-          await tx.domainProjectRevision.createMany({
-            data: preservedProjects.map((project) => ({
+          const { result, validationReport } = input;
+          if (result.creativeBinding !== undefined
+            && (!isSha256(result.creativeBinding.creativeArtifactHash)
+              || !isSha256(result.creativeBinding.nativeMaterializationHash))) {
+            return recordBuildConflict(tx, job, "creative delivery binding contains an invalid hash");
+          }
+          const baseRevision = await tx.solutionRevision.findFirst({
+            where: {
+              id: job.baseRevisionId,
+              tenantId: job.tenantId,
+              workspaceId: job.workspaceId,
+            },
+          });
+          if (baseRevision === null) {
+            throw new BuildJobNotFoundError("base revision");
+          }
+          if (workspace.currentRevisionId !== job.baseRevisionId) {
+            const message =
+              `stale base revision ${job.baseRevisionId}; workspace currently points to ` +
+              `${workspace.currentRevisionId ?? "no revision"}`;
+            return recordBuildConflict(tx, job, message);
+          }
+          const baseProjects = await tx.domainProjectRevision.findMany({
+            where: {
+              tenantId: job.tenantId,
+              solutionRevisionId: job.baseRevisionId,
+            },
+          });
+          const boundProject = baseProjects.find(
+            (project) => project.projectKey === job.projectKey,
+          );
+          if (boundProject !== undefined && boundProject.domainKind !== job.domainKind) {
+            return recordBuildConflict(
+              tx,
+              job,
+              `projectKey ${job.projectKey} belongs to domain ${boundProject.domainKind}, ` +
+              `not ${job.domainKind}`,
+            );
+          }
+          if (result.domainKind !== job.domainKind) {
+            return recordBuildConflict(
+              tx,
+              job,
+              `build result domain ${result.domainKind} does not match job domain ${job.domainKind}`,
+            );
+          }
+          let nextState: Prisma.InputJsonValue;
+          try {
+            nextState = toInputJsonValue(
+              replaceRevisionProjectBuildState(
+                baseRevision.state,
+                job.projectKey,
+                job.domainKind,
+                result.state,
+              ),
+            );
+          } catch (error) {
+            if (error instanceof RevisionStateError) {
+              return recordBuildConflict(tx, job, error.message);
+            }
+            throw error;
+          }
+          const latest = await tx.solutionRevision.findFirst({
+            where: { workspaceId: job.workspaceId, tenantId: job.tenantId },
+            orderBy: { revisionNumber: "desc" },
+          });
+          const revision = await tx.solutionRevision.create({
+            data: {
+              tenantId: job.tenantId,
+              workspaceId: job.workspaceId,
+              changePlanId: job.changePlanId,
+              revisionNumber: (latest?.revisionNumber ?? 0) + 1,
+              kind: result.kind,
+              parentRevisionId: job.baseRevisionId,
+              state: nextState,
+            },
+          });
+          resultRevisionId = revision.id;
+          // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+          // The delivery link commits with revision/artifact/job, never as a post-build update.
+          if (job.agentRunId !== null) {
+            const snapshot = await tx.generationSnapshot.findUnique({ where: { runId_stepKey: {
+              runId: job.agentRunId, stepKey: "compile-creative-solution",
+            } } });
+            if (snapshot !== null) {
+              if (snapshot.tenantId !== job.tenantId || snapshot.workspaceId !== job.workspaceId
+                || snapshot.baseRevisionId !== job.baseRevisionId || snapshot.changePlanId !== job.changePlanId
+                || snapshot.revisionId !== null || snapshot.buildJobId !== null
+                || snapshot.creativeArtifactHash !== result.creativeBinding?.creativeArtifactHash
+                || snapshot.nativeMaterializationHash !== result.creativeBinding?.nativeMaterializationHash) {
+                throw new BuildJobConflictError("GENERATION_BUILD_BINDING_MISMATCH");
+              }
+              await tx.generationSnapshot.update({ where: { id: snapshot.id }, data: { revisionId: revision.id, buildJobId: job.id } });
+            }
+          }
+          // end
+          const preservedProjects = baseProjects.filter(
+            (project) => project.projectKey !== job.projectKey,
+          );
+          if (preservedProjects.length > 0) {
+            await tx.domainProjectRevision.createMany({
+              data: preservedProjects.map((project) => ({
+                tenantId: job.tenantId,
+                solutionRevisionId: revision.id,
+                projectKey: project.projectKey,
+                domainKind: project.domainKind,
+                kind: project.kind,
+                mediaType: project.mediaType,
+                fileExtension: project.fileExtension,
+                packageHash: project.packageHash,
+                packageUrl: project.packageUrl,
+              })),
+            });
+          }
+          await tx.domainProjectRevision.create({
+            data: {
               tenantId: job.tenantId,
               solutionRevisionId: revision.id,
-              projectKey: project.projectKey,
-              domainKind: project.domainKind,
-              kind: project.kind,
-              mediaType: project.mediaType,
-              fileExtension: project.fileExtension,
-              packageHash: project.packageHash,
-              packageUrl: project.packageUrl,
-            })),
+              projectKey: job.projectKey,
+              domainKind: result.domainKind,
+              kind: result.domainProjectKind,
+              mediaType: result.mediaType,
+              fileExtension: result.fileExtension,
+              packageHash: result.packageHash,
+              packageUrl: result.packageUrl,
+            },
           });
+          await tx.artifact.create({
+            data: {
+              tenantId: job.tenantId,
+              buildJobId: job.id,
+              solutionRevisionId: revision.id,
+              ...(result.creativeBinding === undefined ? {} : {
+                creativeArtifactHash: result.creativeBinding.creativeArtifactHash,
+                nativeMaterializationHash: result.creativeBinding.nativeMaterializationHash,
+              }),
+              kind: result.artifact.kind,
+              mediaType: result.artifact.mediaType,
+              fileExtension: result.artifact.fileExtension,
+              storageKey: result.artifact.storageKey,
+              sizeBytes: result.artifact.sizeBytes,
+              sha256: result.artifact.sha256,
+            },
+          });
+          await tx.validationReport.create({
+            data: {
+              tenantId: job.tenantId,
+              buildJobId: job.id,
+              changePlanId: job.changePlanId,
+              outcome: validationReport.outcome,
+              summary: validationReport.summary,
+              details: validationReport.details as Prisma.InputJsonValue,
+            },
+          });
+          const updated = await tx.buildJob.update({
+            where: { id: job.id },
+            data: { status: "SUCCEEDED", leaseOwner: null, leaseExpiresAt: null },
+          });
+          await tx.solutionWorkspace.update({
+            where: { id: job.workspaceId },
+            data: { currentRevisionId: revision.id },
+          });
+          return updated;
         }
-        await tx.domainProjectRevision.create({
-          data: {
-            tenantId: job.tenantId,
-            solutionRevisionId: revision.id,
-            projectKey: job.projectKey,
-            domainKind: result.domainKind,
-            kind: result.domainProjectKind,
-            mediaType: result.mediaType,
-            fileExtension: result.fileExtension,
-            packageHash: result.packageHash,
-            packageUrl: result.packageUrl,
-          },
-        });
-        await tx.artifact.create({
-          data: {
-            tenantId: job.tenantId,
-            buildJobId: job.id,
-            solutionRevisionId: revision.id,
-            ...(result.creativeBinding === undefined ? {} : {
-              creativeArtifactHash: result.creativeBinding.creativeArtifactHash,
-              nativeMaterializationHash: result.creativeBinding.nativeMaterializationHash,
-            }),
-            kind: result.artifact.kind,
-            mediaType: result.artifact.mediaType,
-            fileExtension: result.artifact.fileExtension,
-            storageKey: result.artifact.storageKey,
-            sizeBytes: result.artifact.sizeBytes,
-            sha256: result.artifact.sha256,
-          },
-        });
+
+        // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+        if (job.cancelRequestedAt) return recordBuildCancellation(tx, job);
+        // end
         await tx.validationReport.create({
           data: {
             tenantId: job.tenantId,
             buildJobId: job.id,
             changePlanId: job.changePlanId,
-            outcome: validationReport.outcome,
-            summary: validationReport.summary,
-            details: validationReport.details as Prisma.InputJsonValue,
+            outcome: input.validationReport.outcome,
+            summary: input.validationReport.summary,
+            details: input.validationReport.details as Prisma.InputJsonValue,
           },
         });
-        const updated = await tx.buildJob.update({
+        return tx.buildJob.update({
           where: { id: job.id },
-          data: { status: "SUCCEEDED", leaseOwner: null, leaseExpiresAt: null },
+          data: { status: "FAILED", leaseOwner: null, leaseExpiresAt: null },
         });
-        await tx.solutionWorkspace.update({
-          where: { id: job.workspaceId },
-          data: { currentRevisionId: revision.id },
-        });
-        return updated;
-      }
-
-      await tx.validationReport.create({
-        data: {
-          tenantId: job.tenantId,
-          buildJobId: job.id,
-          changePlanId: job.changePlanId,
-          outcome: input.validationReport.outcome,
-          summary: input.validationReport.summary,
-          details: input.validationReport.details as Prisma.InputJsonValue,
-        },
-      });
-      return tx.buildJob.update({
-        where: { id: job.id },
-        data: { status: "FAILED", leaseOwner: null, leaseExpiresAt: null },
-      });
+      };
+      const result = await complete();
+      if (completedNow) await recordAgentBuildAudit(tx, result, "completed", resultRevisionId);
+      return result;
     });
   }
 
@@ -512,7 +576,24 @@ function isSha256(value: string): boolean {
   return /^[0-9a-f]{64}$/.test(value);
 }
 
+// modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+async function recordBuildCancellation(tx: Prisma.TransactionClient, job: BuildJob): Promise<BuildJob> {
+  await tx.validationReport.create({
+    data: {
+      tenantId: job.tenantId, buildJobId: job.id, changePlanId: job.changePlanId,
+      outcome: "cancelled", summary: "构建已在安全提交边界取消，未发布工程包", details: { code: "BUILD_CANCELLED" },
+    }
+  });
+  return tx.buildJob.update({ where: { id: job.id }, data: { status: "FAILED", terminalReason: "CANCELLED", leaseOwner: null, leaseExpiresAt: null } });
+}
+// end
+
 interface BuildJobRow {
+  // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+  agentRunId: string | null;
+  cancelRequestedAt: Date | null;
+  terminalReason: string | null;
+  // end
   id: string;
   tenantId: string;
   workspaceId: string;
@@ -648,3 +729,4 @@ export class BuildJobConflictError extends BuildJobError {
 export class BuildJobLeaseError extends BuildJobError {
   override name = "BuildJobLeaseError";
 }
+// end

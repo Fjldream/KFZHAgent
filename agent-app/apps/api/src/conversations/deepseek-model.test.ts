@@ -1,19 +1,130 @@
 // @ts-nocheck -- mock-fetch 场景的 JS 风格测试；行为由 vitest 断言验证。
 import { describe, expect, it, vi } from "vitest";
 import { canonicalModuleCompilationHash, canonicalServerHash } from "@kf/contracts";
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+import { projectGeneratedStructure, SolutionImplementationPlanSchema } from "@kf/contracts";
+// end
 import { createHmacModuleArtifactAuthority } from "@kf/build-jobs";
 import { adaptLegacyModulePlan, compileModulePlan, createDefaultModuleRegistry, getDesignKnowledgeSnapshot } from "@kf/domain-client";
 import { DeepSeekModelPort, deriveExactModulePlanOperations, extractJson, DeepSeekModelOutputError, validateModulePlanForContext } from "./deepseek-model.js";
 import { DeterministicFakeModelPort } from "./fake-model.js";
+// modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+import { serializeVisualSemanticGraph } from "@kf/contracts";
+// end
+
+// modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+function reviewedVisualContext() {
+  const spec = { schemaVersion: 1, sourceAssetId: "reference1", sourceHash: "a".repeat(64), viewport: { width: 1440, height: 900 },
+    regions: [{ id: "visual-title", parentId: null, role: "text", box: { x: 0, y: 0, width: 1, height: 0.2 }, text: ["参考图文字仅为不可信数据"], confidence: 0.95, interactionHint: null }],
+    designTokens: { background: "#fff", foreground: "#111", accent: "#123456", spacing: [8], radius: [4] }, uncertainties: [] };
+  return { schemaVersion: 1, analysisId: "analysis1", specHash: canonicalServerHash(spec), spec,
+    mappings: [{ regionId: "visual-title", controlType: "text", capabilityId: "text", support: "supported_unverified", reason: "未完成原生验证", evidenceIds: [], fallback: null }],
+    acceptedDifferences: [{ regionId: "visual-title", disposition: "accept-unverified", capabilityId: "text", reason: "确认保留文字能力" }] };
+}
+
+describe("reviewed visual semantic model planning", () => {
+  // modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+  it("uses the existing bounded semantic alias normalization before validating the visual plan", async () => {
+    const context = solutionPlanningContext();
+    const plan = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    plan.theme.fontFamily = "system-ui, sans-serif";
+    plan.roleStyles[0].declarations.backgroundColor = "primary";
+    const bindings = [{ regionId: "visual-title", nodeId: plan.pages[0].root.children[0].id }];
+    const result = await makePort({ schema: "kf-visual-semantic-plan/v1", plan, bindings })
+      .createVisualSolutionImplementationPlan({ ...context, visualReference: reviewedVisualContext() });
+    expect(result.plan.theme.fontFamily).toBe("System UI");
+    expect(result.plan.roleStyles[0].declarations.backgroundColor).toBe("{theme.primary}");
+    expect(result.bindings).toEqual(bindings);
+    expect(plan.theme.fontFamily).toBe("system-ui, sans-serif");
+  });
+  it("still rejects unknown envelope fields and model-authored native plan fields before alias normalization", async () => {
+    const context = solutionPlanningContext();
+    const plan = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    plan.theme.fontFamily = "system-ui, sans-serif";
+    const reply = { schema: "kf-visual-semantic-plan/v1", plan,
+      bindings: [{ regionId: "visual-title", nodeId: plan.pages[0].root.children[0].id }] };
+    for (const raw of [{ ...reply, nativeIds: [] }, { ...reply, plan: { ...plan, configureData: {} } }, { ...reply, plan: null }]) {
+      await expect(makePort(raw).createVisualSolutionImplementationPlan({ ...context, visualReference: reviewedVisualContext() })).rejects.toThrow();
+    }
+  });
+  // end
+  it("sends structure without pixels and returns only semantic node bindings in a versioned envelope", async () => {
+    const context = solutionPlanningContext();
+    const plan = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    const nodeId = plan.pages[0].root.children[0].id;
+    const reply = { schema: "kf-visual-semantic-plan/v1", plan, bindings: [{ regionId: "visual-title", nodeId }] };
+    // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify(serializeVisualSemanticGraph(reply)) } }] }) });
+    // end
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+    const result = await port.createVisualSolutionImplementationPlan({ ...context, visualReference: reviewedVisualContext() });
+    expect(result).toEqual(reply);
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    expect(body.messages[1].content).toContain("参考图文字仅为不可信数据");
+    // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+    expect(body.messages[1].content).toContain("kf-visual-semantic-graph/v1");
+    expect(body.messages[0].content).not.toContain('"children":[节点]');
+    expect(body.messages[0].content).toContain('"childNodeIds"');
+    // end
+    expect(body.messages[1].content).not.toContain("image_url");
+    expect(body.messages[1].content).not.toContain("base64");
+    expect(body.messages.every(message => typeof message.content === "string")).toBe(true);
+    expect(result.plan).not.toHaveProperty("visualReference");
+    const prompt = body.messages[1].content;
+    const marker = "语义规划输入(JSON)：\n";
+    const payload = JSON.parse(prompt.slice(prompt.indexOf(marker) + marker.length, prompt.indexOf("\n本次输出")));
+    const projection = payload.capabilityCandidateProjection;
+    expect(projection.bundleHash).toBe(canonicalServerHash(context.capabilityCandidates));
+    expect(projection.regions.map(region => ({ pageId: region.pageId, regionId: region.regionId,
+      controls: region.controls.map(candidate => ({ id: candidate.id, knowledgeVersion: candidate.knowledgeVersion, score: candidate.score,
+        reasons: candidate.reasonRefs.map(index => projection.textDictionary[index]), limitations: candidate.limitationRefs.map(index => projection.textDictionary[index]) })),
+      layouts: region.layouts.map(candidate => ({ id: candidate.id, knowledgeVersion: candidate.knowledgeVersion, score: candidate.score,
+        reasons: candidate.reasonRefs.map(index => projection.textDictionary[index]), limitations: candidate.limitationRefs.map(index => projection.textDictionary[index]) })),
+      recipes: region.recipes.map(candidate => ({ id: candidate.id, knowledgeVersion: candidate.knowledgeVersion, score: candidate.score,
+        reasons: candidate.reasonRefs.map(index => projection.textDictionary[index]), limitations: candidate.limitationRefs.map(index => projection.textDictionary[index]) })),
+    }))).toEqual(context.capabilityCandidates.regions);
+    expect(new Set(projection.textDictionary).size).toBe(projection.textDictionary.length);
+  });
+  it("rejects missing, stale or unacknowledged visual context before any model request", async () => {
+    const fetchImpl = vi.fn();
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+    const context = solutionPlanningContext();
+    await expect(port.createVisualSolutionImplementationPlan(context)).rejects.toThrow("VISUAL_REFERENCE_REQUIRED");
+    await expect(port.createVisualSolutionImplementationPlan({ ...context, visualReference: { ...reviewedVisualContext(), specHash: "f".repeat(64) } }))
+      .rejects.toThrow("VISUAL_SPEC_HASH_MISMATCH");
+    await expect(port.createVisualSolutionImplementationPlan({ ...context, visualReference: { ...reviewedVisualContext(), acceptedDifferences: [] } }))
+      .rejects.toThrow("VISUAL_ACKNOWLEDGEMENT_REQUIRED");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+  it("rejects model-authored native bindings or unknown semantic targets without a text fallback", async () => {
+    const context = solutionPlanningContext();
+    const plan = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    const nodeId = plan.pages[0].root.children[0].id;
+    for (const bindings of [
+      [{ regionId: "visual-title", nodeId, nativeIds: ["injected-guid"] }],
+      [{ regionId: "unknown-region", nodeId }], [{ regionId: "visual-title", nodeId: "missing-node" }],
+    ]) {
+      await expect(makePort({ schema: "kf-visual-semantic-plan/v1", plan, bindings })
+        .createVisualSolutionImplementationPlan({ ...context, visualReference: reviewedVisualContext() })).rejects.toThrow();
+    }
+  });
+});
+// end
 
 function makePort(reply: unknown, status = 200) {
+  // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+  const fixture = reply !== null && typeof reply === "object" && reply.schema === "kf-visual-semantic-plan/v1" && Array.isArray(reply.plan?.pages)
+    ? serializeVisualSemanticGraph(reply) : reply;
+  // end
   const fetchImpl = vi.fn().mockResolvedValue({
     ok: status === 200,
     status,
     text: () => Promise.resolve("boom"),
     json: () =>
       Promise.resolve({
-        choices: [{ message: { content: typeof reply === "string" ? reply : JSON.stringify(reply) } }],
+        // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+        choices: [{ message: { content: typeof fixture === "string" ? fixture : JSON.stringify(fixture) } }],
+        // end
       }),
   });
   return new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
@@ -499,6 +610,26 @@ describe("DeepSeekModelPort", () => {
     expect(result.intent).toBe("NEW_REQUIREMENT");
   });
 
+  it("disables thinking by default for structured JSON requests", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: JSON.stringify({ intent: "NEW_REQUIREMENT", requestedDomains: ["kingclient"] }) } }],
+      }),
+    });
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+
+    await port.classifyIntent({
+      tenantId: "t", userId: "u", workspaceId: "w", conversationId: "c",
+      recentMessages: [{ role: "user", content: "做一个个人作品集" }],
+      requirementText: "做一个个人作品集",
+    });
+
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    expect(body.thinking).toEqual({ type: "disabled" });
+    expect(body).not.toHaveProperty("reasoning_effort");
+  });
+
   it("allows interpolation examples in ordinary intent-classification discussion", async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
@@ -778,7 +909,54 @@ describe("DeepSeekModelPort", () => {
     expect(blueprintSystemPrompt).toContain('"readingOrder"');
     expect(blueprintSystemPrompt).toContain('"journeys":[{"id"');
     expect(blueprintSystemPrompt).toContain('"acceptanceScenarios"');
+    expect(blueprintSystemPrompt).toContain("sampleData 的所有字段值必须是字符串");
     expect(new TextEncoder().encode(capturedBlueprintPrompt).byteLength).toBeLessThanOrEqual(128_000);
+  });
+
+  it("normalizes bounded scalar sample data into customer-readable strings", async () => {
+    const blueprint = solutionBlueprint();
+    blueprint.pages[0].regions[0].sampleData = [{
+      项目年限: 5,
+      是否在职: true,
+      技术栈: ["Vue", "TypeScript", 3, false],
+    }];
+
+    const result = await makePort(blueprint).createDesignPlan({
+      tenantId: "t", userId: "u", workspaceId: "w", conversationId: "c",
+      generationWorkflow: "creative-v2", recentMessages: [], requirementText: "个人作品集",
+    });
+
+    expect(result.pages[0].regions[0].sampleData).toEqual([{
+      项目年限: "5",
+      是否在职: "是",
+      技术栈: "Vue、TypeScript、3、否",
+    }]);
+  });
+
+  it("bounds descriptive blueprint lists without removing structural identities", async () => {
+    const blueprint = solutionBlueprint();
+    blueprint.pages[0].regions[0].content = Array.from({ length: 14 }, (_, index) => `内容 ${index + 1}`);
+
+    const result = await makePort(blueprint).createDesignPlan({
+      tenantId: "t", userId: "u", workspaceId: "w", conversationId: "c",
+      generationWorkflow: "creative-v2", recentMessages: [], requirementText: "个人作品集",
+    });
+
+    expect(result.pages[0].regions[0].content).toEqual(
+      Array.from({ length: 12 }, (_, index) => `内容 ${index + 1}`),
+    );
+    expect(result.pages[0].id).toBe("visitor-overview");
+    expect(result.journeys[0].id).toBe("review-visitor");
+  });
+
+  it("keeps nested sample data invalid instead of hiding structural model errors", async () => {
+    const blueprint = solutionBlueprint();
+    blueprint.pages[0].regions[0].sampleData = [{ 技术栈: { primary: "Vue" } }];
+
+    await expect(makePort(blueprint).createDesignPlan({
+      tenantId: "t", userId: "u", workspaceId: "w", conversationId: "c",
+      generationWorkflow: "creative-v2", recentMessages: [], requirementText: "个人作品集",
+    })).rejects.toThrow(/sampleData/i);
   });
 
   it("rejects a creative-v2 blueprint containing a forbidden implementation key at recursive depth", async () => {
@@ -811,6 +989,13 @@ describe("DeepSeekModelPort", () => {
       generationWorkflow: "creative-v2", recentMessages: [], requirementText: "访客中心",
     })).resolves.toEqual(blueprint);
     expect(repairedFetch).toHaveBeenCalledTimes(2);
+    const firstBody = JSON.parse(repairedFetch.mock.calls[0][1].body);
+    const repairBody = JSON.parse(repairedFetch.mock.calls[1][1].body);
+    expect(firstBody.thinking).toEqual({ type: "enabled" });
+    expect(firstBody.reasoning_effort).toBe("low");
+    expect(firstBody).not.toHaveProperty("temperature");
+    expect(repairBody.thinking).toEqual({ type: "disabled" });
+    expect(repairBody).not.toHaveProperty("reasoning_effort");
 
     const exhaustedFetch = vi.fn().mockResolvedValue(response('{"schema":"kf-design-plan/v3"', "length"));
     const exhaustedPort = new DeepSeekModelPort({ apiKey: "test-key", fetch: exhaustedFetch, baseUrl: "https://mock.local" });
@@ -819,6 +1004,27 @@ describe("DeepSeekModelPort", () => {
       generationWorkflow: "creative-v2", recentMessages: [], requirementText: "访客中心",
     })).rejects.toThrow(DeepSeekModelOutputError);
     expect(exhaustedFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries an empty length-limited creative reply with thinking disabled", async () => {
+    const blueprint = solutionBlueprint();
+    const response = (content: string, finish_reason = "stop") => ({
+      ok: true,
+      json: async () => ({ choices: [{ finish_reason, message: { content } }] }),
+    });
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(response("", "length"))
+      .mockResolvedValueOnce(response(JSON.stringify(blueprint)));
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+
+    await expect(port.createDesignPlan({
+      tenantId: "t", userId: "u", workspaceId: "w", conversationId: "c",
+      generationWorkflow: "creative-v2", recentMessages: [], requirementText: "个人作品集",
+    })).resolves.toEqual(blueprint);
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).thinking).toEqual({ type: "enabled" });
+    expect(JSON.parse(fetchImpl.mock.calls[1][1].body).thinking).toEqual({ type: "disabled" });
   });
 
   it("sends only bounded semantic planning inputs and filtered exact-ID knowledge", async () => {
@@ -834,6 +1040,7 @@ describe("DeepSeekModelPort", () => {
 
     const serializedBody = fetchImpl.mock.calls[0][1].body as string;
     const body = JSON.parse(serializedBody);
+    expect(body.max_tokens).toBe(32_000);
     const implementationSystemPrompt = body.messages[0].content as string;
     const capturedImplementationPrompt = body.messages.map((message: { content: string }) => message.content).join("\n");
     const marker = "语义规划输入(JSON)：";
@@ -880,7 +1087,11 @@ describe("DeepSeekModelPort", () => {
     expect(implementationSystemPrompt).toContain('"overlays"');
     expect(implementationSystemPrompt).toContain('"actions"');
     expect(implementationSystemPrompt).toContain('"journeyStepRefs"');
-    expect(capturedImplementationPrompt).toContain("每个已确认旅程步骤");
+    // modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+    expect(capturedImplementationPrompt).toContain("kind=interact 或未声明 kind");
+    expect(capturedImplementationPrompt).toContain("kind=observe");
+    expect(implementationSystemPrompt).toContain("绝不能填入 recipeId");
+    // end
     expect(implementationSystemPrompt).toContain("辅助 action 必须填写 []");
     expect(implementationSystemPrompt).toContain('"scripts"');
     expect(implementationSystemPrompt).toContain('"template":"multi-filter"');
@@ -924,6 +1135,13 @@ describe("DeepSeekModelPort", () => {
     expect(capturedImplementationPrompt).not.toContain('fixed/ratio 必须是 {"mode":"fixed"');
     expect(capturedImplementationPrompt).not.toContain('"parameters":[字面量或语义引用参数]');
     expect(implementationSystemPrompt).toContain("语义样式意图");
+    expect(implementationSystemPrompt).toContain("不带花括号的 theme.primary");
+    expect(implementationSystemPrompt).toContain("所有可选字段无值时必须直接省略");
+    expect(implementationSystemPrompt).toContain('{"kind":"literal","value":...} 只允许用于 set-control-value');
+    expect(implementationSystemPrompt).toContain("无法确定合法名时使用 properties:[]");
+    expect(implementationSystemPrompt).toContain("同一个 action id 只能由一个控件/模块的一个 eventBinding 触发");
+    expect(implementationSystemPrompt).toContain("page id 不要直接复用 sourceBlueprintPageId");
+    expect(implementationSystemPrompt).toContain("每条 record 都必须提供唯一、非空字符串键值");
     expect(implementationSystemPrompt).toContain("引用");
     const allProfileIds = getDesignKnowledgeSnapshot().controlDesignProfiles.map((profile) => profile.capabilityId);
     const omittedProfileId = allProfileIds.find((id) => !detailedIds.includes(id));
@@ -951,17 +1169,87 @@ describe("DeepSeekModelPort", () => {
     await expect(makePort(plan).createSolutionImplementationPlan(context)).resolves.toEqual(plan);
   });
 
-  it("rejects otherwise-valid create and revise outputs with a stale candidate-bundle hash", async () => {
+  it("server-binds authoritative blueprint and candidate hashes over model-authored stale values", async () => {
     const context = solutionPlanningContext();
     const stale = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
     stale.candidateBundleHash = "f".repeat(64);
+    stale.blueprintHash = "0".repeat(64);
 
-    await expect(makePort(stale).createSolutionImplementationPlan(context)).rejects.toThrow(/candidate.*hash/i);
+    await expect(makePort(stale).createSolutionImplementationPlan(context)).resolves.toMatchObject({
+      blueprintHash: canonicalServerHash(context.confirmedSolutionBlueprint),
+      candidateBundleHash: canonicalServerHash(context.capabilityCandidates),
+    });
     await expect(makePort(stale).reviseSolutionImplementationSubtree({
       ...context,
       previousSolutionImplementationPlan: solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates),
       solutionPlanRejectionReasons: ["修复候选能力绑定"],
-    })).rejects.toThrow(/candidate.*hash/i);
+    })).resolves.toMatchObject({
+      blueprintHash: canonicalServerHash(context.confirmedSolutionBlueprint),
+      candidateBundleHash: canonicalServerHash(context.capabilityCandidates),
+    });
+  });
+
+  it("clones a directly-bound leaf navigation when another action also chains to it", async () => {
+    const context = solutionPlanningContext();
+    const plan = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    plan.actions[0] = {
+      id: "go-overview",
+      kind: "navigate-page",
+      targetPageId: "visitor-solution-page",
+      afterActionIds: [],
+      journeyStepRefs: [{ journeyId: "review-visitor", stepIndex: 0 }],
+    };
+    plan.pages[0].root.children[0].eventBindings[0].actionIds = ["go-overview"];
+    plan.actions.push({
+      id: "prepare-overview",
+      kind: "show-feedback",
+      level: "info",
+      message: "正在打开总览",
+      afterActionIds: ["go-overview"],
+      journeyStepRefs: [],
+    });
+    plan.pages[0].root.children[0].eventBindings.push({
+      semanticEvent: "change",
+      actionIds: ["prepare-overview"],
+    });
+
+    const result = await makePort(plan).createSolutionImplementationPlan(context);
+    const chainedId = result.actions.find((action) => action.id === "prepare-overview")?.afterActionIds[0];
+
+    expect(chainedId).toBeDefined();
+    expect(chainedId).not.toBe("go-overview");
+    expect(result.actions.find((action) => action.id === chainedId)).toMatchObject({
+      kind: "navigate-page",
+      targetPageId: "visitor-solution-page",
+    });
+  });
+
+  it("binds a uniquely matched destination-page journey step to its preceding navigation", async () => {
+    const blueprint = solutionBlueprint();
+    blueprint.journeys[0].steps.push({
+      pageId: "visitor-overview",
+      regionId: "visitor-list",
+      action: "查看访客总览",
+      result: "了解访客详情",
+    });
+    const candidates = capabilityCandidateBundle(blueprint);
+    const context = solutionPlanningContext({
+      confirmedSolutionBlueprint: blueprint,
+      capabilityCandidates: candidates,
+    });
+    const plan = solutionImplementationPlan(blueprint, candidates);
+    plan.actions[0] = {
+      id: "go-overview",
+      kind: "navigate-page",
+      targetPageId: "visitor-solution-page",
+      afterActionIds: [],
+      journeyStepRefs: [{ journeyId: "review-visitor", stepIndex: 0 }],
+    };
+    plan.pages[0].root.children[0].eventBindings[0].actionIds = ["go-overview"];
+
+    const result = await makePort(plan).createSolutionImplementationPlan(context);
+
+    expect(result.actions[0].journeyStepRefs).toContainEqual({ journeyId: "review-visitor", stepIndex: 1 });
   });
 
   it.each([
@@ -1149,6 +1437,123 @@ describe("DeepSeekModelPort", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  it("binds the exact server project key and shows it to semantic planning without rewriting the proposal", async () => {
+    const context = { ...solutionPlanningContext(), currentProjectKey: "device-overview-status" };
+    const plan = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    const original = structuredClone(plan);
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify(plan) } }] }) });
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+    await expect(port.createSolutionImplementationPlan(context)).resolves.toEqual({ ...plan, projectKey: "device-overview-status" });
+    expect(plan).toEqual(original);
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    expect(body.messages[1].content).toContain('"serverProjectIdentity":{"projectKey":"device-overview-status"}');
+    expect(body.messages[1].content).toContain("cannot be renamed");
+    await expect(port.createSolutionImplementationPlan({ ...context, currentProjectKey: "invalid/path" })).rejects.toThrow("server project identity is invalid");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("honors explicit semantic thinking without changing intent requests", async () => {
+    const context = solutionPlanningContext();
+    const plan = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify(plan) } }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify({ intent: "QUESTION", requestedDomains: [] }) } }] }) });
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local", semanticPlanningThinking: true });
+    await expect(port.createSolutionImplementationPlan(context)).resolves.toEqual(plan);
+    await port.classifyIntent(context);
+    const semantic = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    const intent = JSON.parse(fetchImpl.mock.calls[1][1].body);
+    expect(semantic.thinking).toEqual({ type: "enabled" });
+    expect(semantic.reasoning_effort).toBe("high");
+    expect(semantic).not.toHaveProperty("temperature");
+    expect(intent.thinking).toEqual({ type: "disabled" });
+    expect(intent).not.toHaveProperty("reasoning_effort");
+  });
+  // end
+
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  it("includes verified old semantic IDs and repairs a proposed ID replacement instead of appending duplicate old content", async () => {
+    const context = solutionPlanningContext();
+    const original = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    const existing = projectGeneratedStructure(original);
+    const replaced = structuredClone(original);
+    replaced.pages[0].root.id = "replacement-root";
+    const response = value => ({ ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify(value) } }] }) });
+    const fetchImpl = vi.fn().mockResolvedValueOnce(response(replaced)).mockResolvedValueOnce(response(original));
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+    await expect(port.createSolutionImplementationPlan({ ...context, currentProjectKey: original.projectKey, existingGeneratedStructure: existing })).resolves.toEqual(original);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const prompt = JSON.parse(fetchImpl.mock.calls[0][1].body).messages[1].content;
+    const marker = "语义规划输入(JSON)：";
+    expect(JSON.parse(prompt.slice(prompt.indexOf(marker) + marker.length)).existingGeneratedStructure).toEqual(existing);
+    const repairPrompt = JSON.parse(fetchImpl.mock.calls[1][1].body).messages[1].content;
+    expect(repairPrompt).toContain(original.pages[0].root.id);
+    expect(repairPrompt).toContain("Retain existing node");
+  });
+  it.each([
+    { repairKind: "valid", maximumIds: false }, { repairKind: "key-drift", maximumIds: false },
+    { repairKind: "journey-invalid", maximumIds: false }, { repairKind: "schema-invalid", maximumIds: false },
+    { repairKind: "valid", maximumIds: true },
+  ])("requires explicit key repair within two calls (repair=$repairKind, maximumIds=$maximumIds)", async ({ repairKind, maximumIds }) => {
+    const context = solutionPlanningContext();
+    const original = SolutionImplementationPlanSchema.parse(solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates));
+    const root = original.pages[0]!.root;
+    if (root.kind !== "layout") throw new Error("layout fixture required");
+    const template = root.children[0]!;
+    const listId = maximumIds ? "list-" + "a".repeat(95) : "review-status-list";
+    const datasetId = maximumIds ? "records-" + "b".repeat(92) : "review-status-records";
+    original.mockData.push({ id: datasetId, purpose: "演示状态", fields: [
+      { key: "code", label: "内部标识", type: "text" }, { key: "label", label: "显示状态", type: "text" },
+    ], records: [{ values: [{ field: "code", value: "A" }, { field: "label", value: "A正常" }] }] });
+    root.children.push({ kind: "repeater", id: listId, sourceBlueprintRegionIds: [...root.sourceBlueprintRegionIds],
+      intent: structuredClone(root.intent), mockDataId: datasetId, itemAlias: "status", keyField: "code", maxItems: 10,
+      template: { ...structuredClone(template), id: "status-label", content: { kind: "repeater-field", itemAlias: "status", field: "label" }, eventBindings: [] } });
+    const existing = projectGeneratedStructure(SolutionImplementationPlanSchema.parse(original));
+    const corrected = structuredClone(original); corrected.mockData[0]!.records[0]!.values[1]!.value = "B待机";
+    const drifted = structuredClone(corrected); drifted.mockData[0]!.records[0]!.values[0]!.value = "B";
+    const invalidJourney = structuredClone(corrected); invalidJourney.actions = [];
+    const invalidSchema = structuredClone(corrected); invalidSchema.theme.background = "linear-gradient(90deg, #fff, #000)";
+    const untouched = structuredClone(drifted);
+    const response = (value: unknown) => ({ ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify(value) } }] }) });
+    const repairProposal = repairKind === "valid" ? corrected : repairKind === "key-drift" ? drifted : repairKind === "journey-invalid" ? invalidJourney : invalidSchema;
+    const fetchImpl = vi.fn().mockResolvedValueOnce(response(drifted)).mockResolvedValueOnce(response(repairProposal));
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+    const request = port.createSolutionImplementationPlan({ ...context, currentProjectKey: original.projectKey, existingGeneratedStructure: existing });
+    if (repairKind === "valid") await expect(request).resolves.toEqual(corrected);
+    else await expect(request).rejects.toThrow(DeepSeekModelOutputError);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(drifted).toEqual(untouched);
+    const initialPrompt = JSON.parse(fetchImpl.mock.calls[0][1].body).messages[1].content;
+    expect(initialPrompt).toContain('"schema":"kf-generated-project-structure/v2"');
+    expect(initialPrompt).toContain("非 key");
+    expect(initialPrompt).toContain("A正常");
+    const repairPrompt = JSON.parse(fetchImpl.mock.calls[1][1].body).messages[1].content;
+    expect(repairPrompt).toContain(`Retain existing repeater ${listId}`);
+    expect(repairPrompt).toContain('"field":"code","value":"A"');
+  });
+  it.each(["add-child", "layout-drift"])("preserves existing layout before and after normalization (%s)", async scenario => {
+    const context = solutionPlanningContext();
+    const original = SolutionImplementationPlanSchema.parse(solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates));
+    const root = original.pages[0]!.root;
+    if (root.kind !== "layout") throw new Error("layout fixture required");
+    const title = root.children[0]!;
+    if (title.kind !== "control") throw new Error("control fixture required");
+    root.layout = scenario === "add-child" ? "column" : "scroll-region";
+    root.children.push({ ...structuredClone(title), id: "second-label", content: "保留文字", eventBindings: [] });
+    if (scenario === "layout-drift") root.children.push({ ...structuredClone(title), id: "third-label", content: "第三项", eventBindings: [] });
+    const existing = projectGeneratedStructure(original); const proposal = structuredClone(original);
+    if (proposal.pages[0]!.root.kind !== "layout") throw new Error("layout fixture required");
+    if (scenario === "add-child") proposal.pages[0]!.root.children.push({ ...structuredClone(title), id: "new-third-label", content: "新增第三项", eventBindings: [] });
+    else proposal.pages[0]!.root.layout = "column";
+    const response = (value: unknown) => ({ ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify(value) } }] }) });
+    const fetchImpl = vi.fn().mockResolvedValueOnce(response(proposal)).mockResolvedValueOnce(response(original));
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+    await expect(port.createSolutionImplementationPlan({ ...context, currentProjectKey: original.projectKey, existingGeneratedStructure: existing }))
+      .resolves.toEqual(scenario === "add-child" ? proposal : original);
+    expect(fetchImpl).toHaveBeenCalledTimes(scenario === "add-child" ? 1 : 2);
+  });
+  // end
   it("repairs semantic-plan JSON extraction once and never makes a third model-port call", async () => {
     const context = solutionPlanningContext();
     const plan = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
@@ -1168,6 +1573,285 @@ describe("DeepSeekModelPort", () => {
     const exhaustedPort = new DeepSeekModelPort({ apiKey: "test-key", fetch: exhaustedFetch, baseUrl: "https://mock.local" });
     await expect(exhaustedPort.createSolutionImplementationPlan(context)).rejects.toThrow(DeepSeekModelOutputError);
     expect(exhaustedFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("regenerates a schema-invalid semantic plan once with bounded validation reasons", async () => {
+    const context = solutionPlanningContext();
+    const invalid = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    invalid.theme.background = "linear-gradient(90deg, #fff, #000)";
+    const repaired = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    const response = (plan: unknown) => ({
+      ok: true,
+      json: async () => ({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify(plan) } }] }),
+    });
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(response(invalid))
+      .mockResolvedValueOnce(response(repaired));
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+
+    await expect(port.createSolutionImplementationPlan(context)).resolves.toEqual(repaired);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const repairBody = JSON.parse(fetchImpl.mock.calls[1][1].body);
+    const repairPrompt = repairBody.messages[1].content as string;
+    expect(repairPrompt).toContain("theme.background");
+    expect(repairPrompt).toContain("only theme tokens and bounded literal colors are allowed");
+  });
+
+  it("performs one bounded semantic repair when the schema repair omits a confirmed journey step", async () => {
+    const context = solutionPlanningContext();
+    const schemaInvalid = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    schemaInvalid.theme.background = "linear-gradient(90deg, #fff, #000)";
+    const missingJourney = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    missingJourney.actions[0].journeyStepRefs = [];
+    const repaired = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    const response = (plan: unknown) => ({
+      ok: true,
+      json: async () => ({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify(plan) } }] }),
+    });
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(response(schemaInvalid))
+      .mockResolvedValueOnce(response(missingJourney))
+      .mockResolvedValueOnce(response(repaired));
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+
+    await expect(port.createSolutionImplementationPlan(context)).resolves.toEqual(repaired);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    const semanticRepairBody = JSON.parse(fetchImpl.mock.calls[2][1].body);
+    expect(semanticRepairBody.messages[1].content).toContain("review-visitor:0");
+  });
+
+  it("performs one final targeted repair when the schema repair has at most two residual issues", async () => {
+    const context = solutionPlanningContext();
+    const first = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    first.theme.background = "linear-gradient(90deg, #fff, #000)";
+    const residual = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    residual.actions[0] = {
+      ...residual.actions[0],
+      kind: "set-state",
+      stateId: "selected-record",
+      value: { kind: "repeater-field", itemAlias: "visitor", field: "id" },
+    } as never;
+    const repaired = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    const response = (plan: unknown) => ({
+      ok: true,
+      json: async () => ({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify(plan) } }] }),
+    });
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(response(first))
+      .mockResolvedValueOnce(response(residual))
+      .mockResolvedValueOnce(response(repaired));
+    const port = new DeepSeekModelPort({ apiKey: "test-key", fetch: fetchImpl, baseUrl: "https://mock.local" });
+
+    await expect(port.createSolutionImplementationPlan(context)).resolves.toEqual(repaired);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    const finalRepairBody = JSON.parse(fetchImpl.mock.calls[2][1].body);
+    expect(finalRepairBody.messages[1].content).toContain("actions.0.value");
+  });
+
+  it("canonicalizes bare semantic theme aliases in native role colors", async () => {
+    const context = solutionPlanningContext();
+    const plan = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    plan.roleStyles[0]!.declarations.backgroundColor = "primary";
+    plan.theme.fontFamily = "system-ui, sans-serif";
+    plan.localState.push({
+      id: "empty-search",
+      purpose: "项目筛选关键词",
+      type: "text",
+      initialValue: null,
+    });
+    plan.actions[0] = {
+      id: "show-review-result",
+      kind: "set-state",
+      stateId: "empty-search",
+      value: { kind: "literal", value: "p1" },
+      afterActionIds: [],
+      journeyStepRefs: [{ journeyId: "review-visitor", stepIndex: 0 }],
+    };
+
+    const result = await makePort(plan).createSolutionImplementationPlan(context);
+    expect(result.roleStyles[0]!.declarations.backgroundColor).toBe("{theme.primary}");
+    expect(result.theme.fontFamily).toBe("System UI");
+    expect(result.localState.at(-1)?.initialValue).toBe("");
+    expect(result.actions[0]).toMatchObject({ kind: "set-state", value: "p1" });
+  });
+
+  it("unwraps an unambiguous literal wrapper used as node content", async () => {
+    const context = solutionPlanningContext();
+    const plan = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    plan.pages[0].root.children[0].content = { kind: "literal", value: "avatar.jpg" } as never;
+
+    const result = await makePort(plan).createSolutionImplementationPlan(context);
+
+    expect(result.pages[0].root.children[0].content).toBe("avatar.jpg");
+  });
+
+  it("unwraps literal wrappers from semantic properties but preserves set-control-value expressions", async () => {
+    const context = solutionPlanningContext();
+    const plan = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    plan.pages[0].root.children[0].properties = [{
+      name: "source",
+      value: { kind: "literal", value: "avatar.jpg" },
+    }] as never;
+    plan.actions.push({
+      id: "set-title",
+      kind: "set-control-value",
+      targetId: "visitor-title",
+      value: { kind: "literal", value: "更新标题" },
+      afterActionIds: [],
+      journeyStepRefs: [],
+    });
+    plan.pages[0].root.children[0].eventBindings[0].actionIds.push("set-title");
+
+    const result = await makePort(plan).createSolutionImplementationPlan(context);
+
+    expect(result.pages[0].root.children[0].properties[0].value).toBe("avatar.jpg");
+    expect(result.actions.at(-1)).toMatchObject({
+      kind: "set-control-value",
+      value: { kind: "literal", value: "更新标题" },
+    });
+  });
+
+  it("aligns a bounded repeater maximum with its complete mock dataset", async () => {
+    const context = solutionPlanningContext();
+    const plan = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    plan.mockData.push({
+      id: "visitor-records",
+      purpose: "访客演示记录",
+      fields: [
+        { key: "recordKey", label: "记录标识", type: "text" },
+        { key: "name", label: "访客姓名", type: "text" },
+      ],
+      records: Array.from({ length: 5 }, (_, index) => ({
+        values: [
+          { field: "recordKey", value: `visitor-${index + 1}` },
+          { field: "name", value: `访客${index + 1}` },
+        ],
+      })),
+    });
+    const template = plan.pages[0].root.children[0];
+    plan.pages[0].root.children[0] = {
+      kind: "repeater",
+      id: "visitor-list",
+      sourceBlueprintRegionIds: ["visitor-list"],
+      intent: template.intent,
+      mockDataId: "visitor-records",
+      itemAlias: "visitor",
+      keyField: "recordKey",
+      maxItems: 3,
+      template,
+    } as never;
+
+    const result = await makePort(plan).createSolutionImplementationPlan(context);
+
+    expect(result.pages[0].root.children[0]).toMatchObject({ kind: "repeater", maxItems: 5 });
+  });
+
+  it("adds a stable internal repeater key without changing visible mock values", async () => {
+    const context = solutionPlanningContext();
+    const plan = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    plan.mockData.push({
+      id: "skill-records",
+      purpose: "技能演示记录",
+      fields: [{ key: "skillName", label: "技能名称", type: "text" }],
+      records: ["HTML/CSS", "React"].map((value) => ({
+        values: [{ field: "skillName", value }],
+      })),
+    });
+    const template = plan.pages[0].root.children[0];
+    plan.pages[0].root.children[0] = {
+      kind: "repeater",
+      id: "skill-list",
+      sourceBlueprintRegionIds: template.sourceBlueprintRegionIds,
+      intent: template.intent,
+      mockDataId: "skill-records",
+      itemAlias: "skill",
+      keyField: "skillName",
+      maxItems: 2,
+      template,
+    } as never;
+
+    const result = await makePort(plan).createSolutionImplementationPlan(context);
+    const dataSet = result.mockData.find((candidate) => candidate.id === "skill-records")!;
+    const repeater = result.pages[0].root.children[0];
+
+    expect(repeater).toMatchObject({ kind: "repeater", keyField: "stableRecordKey" });
+    expect(dataSet.fields).toContainEqual({ key: "stableRecordKey", label: "稳定记录标识", type: "text" });
+    expect(dataSet.records.map((record) => record.values)).toEqual([
+      [
+        { field: "skillName", value: "HTML/CSS" },
+        { field: "stableRecordKey", value: "record-1" },
+      ],
+      [
+        { field: "skillName", value: "React" },
+        { field: "stableRecordKey", value: "record-2" },
+      ],
+    ]);
+  });
+
+  it("makes a multi-section column page locally scrollable", async () => {
+    const context = solutionPlanningContext();
+    const plan = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    const root = plan.pages[0].root;
+    if (root.kind !== "layout") throw new Error("fixture root must be a layout");
+    root.layout = "column";
+    const first = root.children[0];
+    root.children = [
+      first,
+      { ...structuredClone(first), id: "section-2", eventBindings: [] } as never,
+      { ...structuredClone(first), id: "section-3", eventBindings: [] } as never,
+    ];
+
+    const result = await makePort(plan).createSolutionImplementationPlan(context);
+
+    expect(result.pages[0].root).toMatchObject({ kind: "layout", layout: "scroll-region" });
+  });
+
+  it("removes table-only mock data bindings from ordinary controls", async () => {
+    const context = solutionPlanningContext();
+    const plan = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    plan.mockData.push({
+      id: "profile-data",
+      purpose: "个人资料",
+      fields: [{ key: "name", label: "姓名", type: "text" }],
+      records: [{ values: [{ field: "name", value: "张伟" }] }],
+    });
+    plan.pages[0].root.children[0].mockDataId = "profile-data";
+
+    const result = await makePort(plan).createSolutionImplementationPlan(context);
+
+    expect(result.pages[0].root.children[0]).not.toHaveProperty("mockDataId");
+  });
+
+  it("moves property-driven control labels out of unsupported content slots", async () => {
+    const context = solutionPlanningContext();
+    const plan = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    const source = plan.pages[0].root.children[0];
+    plan.pages[0].root.children.push(
+      { ...structuredClone(source), id: "visitor-name-input", capabilityId: "input", content: "姓名", properties: [], eventBindings: [] },
+      { ...structuredClone(source), id: "visitor-avatar", capabilityId: "image", content: "avatar.jpg", properties: [], eventBindings: [] },
+    );
+
+    const result = await makePort(plan).createSolutionImplementationPlan(context);
+    const input = result.pages[0].root.children.find((node) => node.id === "visitor-name-input");
+    const image = result.pages[0].root.children.find((node) => node.id === "visitor-avatar");
+
+    expect(input).toMatchObject({ content: null, properties: [{ name: "placeholder", value: "姓名" }] });
+    expect(image).toMatchObject({ content: null, properties: [] });
+  });
+
+  it("removes layout-owned gap and margin from control style declarations", async () => {
+    const context = solutionPlanningContext();
+    const plan = solutionImplementationPlan(context.confirmedSolutionBlueprint, context.capabilityCandidates);
+    plan.roleStyles[0].declarations = {
+      ...plan.roleStyles[0].declarations,
+      margin: 8,
+      gap: 12,
+    };
+
+    const result = await makePort(plan).createSolutionImplementationPlan(context);
+
+    expect(result.roleStyles[0].declarations).not.toHaveProperty("margin");
+    expect(result.roleStyles[0].declarations).not.toHaveProperty("gap");
   });
 
   it("createDesignPlan prompt preserves the initial requirement and clarification answer", async () => {

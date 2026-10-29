@@ -2,28 +2,23 @@ import type { AgentGraphStateValue, AgentGraphUpdate } from "../state.js";
 import type { SolutionGraphDeps } from "../ports.js";
 
 /**
- * How many recent messages are handed to the model. Hard bound per brief
- * Step 6; anything older lives only in the rolling conversationSummary.
+ * 交给模型的最近消息数量。按照简要步骤 6 设置硬性上限；更早的内容只保留在滚动 conversationSummary 中。
  */
 const RECENT_MESSAGE_LIMIT = 20;
 
 /**
- * Rolling-summary cap. The summary is recomputed as a pure function and
- * overwritten, so re-running this node is idempotent.
+ * 滚动总结覆盖。总结是作为一个纯函数重新计算并覆盖，因此重复运行这个节点是幂等的。
  */
 const SUMMARY_MAX_LENGTH = 4_000;
 
 /**
- * Loads bounded context for every run (brief Step 6):
- *   - recent messages (hard limit, never raw uploads/secrets/page JSON),
- *   - the rolling conversation summary,
- *   - the bounded current-revision summary,
- *   - and (when a build job is tracked) the terminal build outcome: a
- *     SUCCEEDED job refreshes the current revision and returns to idle; a
- *     FAILED job returns to the planning stage.
+ * 为每次运行加载有界上下文（简要步骤 6）：
+ *   - 最近消息（硬性上限，绝不包含原始上传、密钥或页面 JSON）；
+ *   - 滚动会话摘要；
+ *   - 有界的当前修订摘要；
+ *   - 跟踪构建作业时的终态构建结果：SUCCEEDED 作业刷新当前修订并返回 idle；FAILED 作业返回规划阶段。
  *
- * The node is read-mostly: the only write is the idempotent overwrite of the
- * conversation summary when a build outcome must be recorded.
+ * 该节点以读取为主：唯一写操作是在必须记录构建结果时幂等覆盖会话摘要。
  */
 export function createLoadContextNode(deps: SolutionGraphDeps) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
@@ -82,7 +77,10 @@ export function createLoadContextNode(deps: SolutionGraphDeps) {
     return {
       recentMessages: messages,
       conversationSummary: nextSummary,
-      currentRevisionId: refreshedRevisionId,
+      // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+      // 持久 run 的基线只由队列准入事务决定；旧 SSE 仍沿用原有刷新语义。
+      currentRevisionId: state.runId ? baseRevisionId : refreshedRevisionId,
+      // end
       workspaceMode: workspaceRouting?.mode,
       generationWorkflow,
       revisionSummary,

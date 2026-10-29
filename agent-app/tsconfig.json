@@ -1,14 +1,23 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
+    // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    // end
     "module": "ESNext",
     "moduleResolution": "Bundler"
   },
   "include": [
     "playwright.config.ts",
-    "tests/e2e/global-setup.ts",
-    "tests/e2e/helpers/config.ts",
-    "tests/e2e/helpers/destructive-reset.ts",
-    "tests/e2e/helpers/destructive-reset.test.ts"
+    "tests/helpers/generation-fixture.ts",
+    // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+    "tests/helpers/energy-saved-planning.ts",
+    "tests/helpers/visual-semantic-delta.ts",
+    // end
+    // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+    "tests/e2e/**/*.ts",
+    "apps/api/test-support/e2e-agent-worker.ts"
+    // end
   ]
 }

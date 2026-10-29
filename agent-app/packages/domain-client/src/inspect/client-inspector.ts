@@ -10,28 +10,26 @@ import {
 import { EASYUI_PROTO_FIELDS } from "../ir/easyui-types.js";
 import { parseTableData } from "../modules/definitions/native-data-adapters.js";
 import { classifyNativeRuntimeControl, type NativeRuntimeControlType } from "./native-runtime-type.js";
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+import { canonicalServerHash } from "@kf/contracts";
+// end
 
 /**
- * Lossless client project inspector.
+ * 无损客户端项目检查器。
  *
- * Consumes an unpacked native client workspace (as produced by
- * `importNativeClientPackage`) and produces:
- * - `raw`: the complete, untouched JSON trees (pages, variables, scripts,
- *   project metadata) — nothing is dropped, unknown fields included;
- * - `index`: an entity index keyed by KF GUID (pages, controls, variables);
- * - `summary`: a bounded, LLM-friendly digest of the project (counts plus a
- *   capped representative control list per page);
- * - `provenance`: for every mapped entity, its source file/JSON path and the
- *   list of fields that the IR/templates do not yet understand.
+ * 消费一个解包的原生客户端工作区（由 `importNativeClientPackage` 生成），并产生：
+ * - `raw`: 完整、未处理的 JSON 树（页面、变量、脚本、项目元数据）——没有任何内容被丢弃，未知字段包含在内；
+ * - `index`: 由 KF GUID（页面、控件、变量）键值对索引的实体索引；
+ * - `summary`: 项目的一个有界的、LLM 可以友好处理的摘要（计数器加上每页的有限代表控制列表）；
+ * - `provenance`: 对于每个映射的实体，其源文件/JSON 路径和 IR/模板尚未理解的字段列表。
  *
- * Unknown fields are never interpreted: they are preserved in `raw` and only
- * reported as names in `index`/`summary`/`provenance`.
+ * 未知字段从未被解释：它们被保留为 `raw` 中的名称，并且在 `index`/`summary`/`provenance` 中报告为名称。
  */
 
 export interface SummaryLimits {
-  /** Maximum number of representative controls listed per page. */
+  /** 每页列出的代表控制的最大数量。 */
   controlsPerPage: number;
-  /** Maximum number of pages listed in the summary. */
+  /** 生成计划中列出的页面的最大数量。 */
   pagesPerSummary: number;
 }
 
@@ -42,37 +40,37 @@ export const DEFAULT_SUMMARY_LIMITS: SummaryLimits = {
 
 export interface InspectOptions {
   summaryLimits?: Partial<SummaryLimits>;
-  /** Server-selected immutable identity for later runtime-correlation proof. */
+  /** 用于后期运行时关联证明的服务器选择的不可变身份。 */
   runtimeBinding?: { readonly workspaceId: string; readonly baseRevisionId: string };
 }
 
 const VERSION_DIR_RE = /^\d+\.\d+\.\d+\.\d+$/;
 
 // ---------------------------------------------------------------------------
-// Index shapes
+// 索引形状
 // ---------------------------------------------------------------------------
 
 export interface ControlIndexEntry {
   guid: string;
   pageGuid: string;
   type: string;
-  /** Exact reviewed capability variant (for example layout.2/easyui.17). */
+  /** 精确审查的可变能力变体（例如布局.2/易用性.17） */
   capabilityId: string;
   x: number;
   y: number;
   width: number;
   height: number;
-  /** Stable semantic id (the KF control `name`), never a KF GUID. */
+  /** 稳定语义标识符（KF 控制 `name`），从不引用 KF GUID。 */
   id: string;
   name?: string;
-  /** JSON-pointer-ish path inside the unpacked workspace, e.g. `project/page/Page1.json#/objects/0`. */
+  /** 解包工作空间中的稳定语义标识符路径（e.g），`project/page/Page1.json#/objects/0`。 */
   rawPath: string;
   unknownFields: string[];
 }
 
 export interface PageIndexEntry {
   guid: string;
-  /** Stable semantic page id (the KF page `name`; fallback to guid), never a KF GUID reference target. */
+  /** 稳定语义页面标识符（KF 页面 `name`；从不引用 KF GUID 参考目标） */
   id: string;
   name: string;
   file: string;
@@ -82,7 +80,7 @@ export interface PageIndexEntry {
 
 export interface VariableIndexEntry {
   guid: string;
-  /** Stable semantic variable id (the KF variable `name`, e.g. `$TestVar`; fallback to the numeric id). */
+  /** 稳定语义变量标识符（KF 变量 `name`，e.g. `$TestVar`；从不引用 KF GUID 参考目标） */
   id: string;
   name: string;
   file: string;
@@ -120,22 +118,22 @@ export interface Provenance {
 }
 
 // ---------------------------------------------------------------------------
-// Raw trees
+// 原始树
 // ---------------------------------------------------------------------------
 
 export interface RawTrees {
   project: unknown;
   pageManager: unknown;
-  /** pageGuid -> full page JSON tree (never modified). */
+  /** pageGuid -> 全部页面的 JSON 树（从不修改）。 */
   pages: Record<string, unknown>;
-  /** source file basename -> parsed JSON tree (variables/Tag files). */
+  /** 源文件基名 -> 解析后的 JSON 树（变量/标签文件）。 */
   variables: Record<string, unknown>;
-  /** source file basename -> script text (JS) or parsed JSON tree. */
+  /** 源文件基名 -> 脚本文本（JS）或解析后的 JSON 树。 */
   scripts: Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------
-// Bounded summary
+// 受限摘要
 // ---------------------------------------------------------------------------
 
 export interface ControlSummary {
@@ -152,7 +150,7 @@ export interface ControlSummary {
 
 export interface PageSummary {
   guid: string;
-  /** Stable semantic page id (the KF page `name`; fallback to guid). */
+  /** 稳定语义页面 ID（KF 页面 `name`； fallback 到 guid） */
   id: string;
   name: string;
   width?: number;
@@ -182,6 +180,9 @@ export interface InspectResult {
 export type ServerOwnedNativeControlType = NativeRuntimeControlType | { readonly kind: "malformed"; readonly reason: string };
 
 export interface ServerOwnedRuntimeIdentitySnapshot {
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  readonly variables: readonly { readonly file: string; readonly record: Readonly<Record<string, unknown>>; readonly recordHash: string }[];
+  // end
   readonly runtimeBinding?: Readonly<{ readonly workspaceId: string; readonly baseRevisionId: string }>;
   readonly controls: readonly {
     readonly guid: string;
@@ -194,21 +195,21 @@ export interface ServerOwnedRuntimeIdentitySnapshot {
 
 const serverOwnedInspectResults = new WeakMap<object, ServerOwnedRuntimeIdentitySnapshot>();
 
-/** Runtime trust check used by server-only consumers of the lossless inspector result. */
+/** 供无损 inspector 结果的服务器专用使用方采用的运行时信任检查。 */
 export function isServerOwnedInspectResult(value: unknown): value is InspectResult {
   return typeof value === "object" && value !== null && serverOwnedInspectResults.has(value);
 }
 
-/** Immutable identity-only snapshot captured when inspection completed. */
+/** 当检查完成时捕获的不可变身份唯一快照。 */
 export function serverOwnedRuntimeIdentitySnapshot(value: InspectResult): ServerOwnedRuntimeIdentitySnapshot | undefined {
   return serverOwnedInspectResults.get(value);
 }
 
 // ---------------------------------------------------------------------------
-// Known-field sets (sourced from kmui_*.js serialization + real SDB pages)
+// 已知字段集（来自 kmui_*.js 原始化 + 实际 SDB 页面）
 // ---------------------------------------------------------------------------
 
-/** Top-level keys of a KF page JSON file (verified against SDB `project/page/*.json`). */
+/** KF 页面 JSON 文件的顶层键（已与 SDB 的 `project/page/*.json` 核对）。 */
 const KNOWN_PAGE_FIELDS = new Set([
   "pageProperty",
   "version",
@@ -226,7 +227,7 @@ const KNOWN_PAGE_FIELDS = new Set([
   "pageViewHeight",
 ]);
 
-/** Fields shared by every control (KMUIModelBase + KMUIElementBase.propertys + SDB pages). */
+/** 每控件共享的字段（KMUIModelBase + KMUIElementBase.propertys + SDB 页面）。 */
 const COMMON_CONTROL_FIELDS = new Set([
   "name",
   "uiModelType",
@@ -284,7 +285,7 @@ const COMMON_CONTROL_FIELDS = new Set([
   "$ParentChildren",
   "$ParentProperty",
   "$ParentVariable",
-  // Layout/container glue fields shared across controls (verified in SDB pages):
+  // 每控件共享的布局/容器粘合字段（在 SDB 页面中验证）：
   "region",
   "baseProperty",
   "insiderObjects",
@@ -293,7 +294,7 @@ const COMMON_CONTROL_FIELDS = new Set([
   "layoutItems",
 ]);
 
-/** Control-specific serialized fields per KF uiModelType (constructor defaults + SDB pages). */
+/** 每个 KF uiModelType 的控制特定序列化字段（构造函数默认值 + SDB 页面）。 */
 const CONTROL_SPECIFIC_FIELDS: Readonly<Record<number, readonly string[]>> = {
   6: [
     "text",
@@ -373,7 +374,7 @@ function unknownKeys(obj: Record<string, unknown>, known: ReadonlySet<string>): 
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// 辅助函数
 // ---------------------------------------------------------------------------
 
 async function exists(p: string): Promise<boolean> {
@@ -400,9 +401,10 @@ function asNumber(value: unknown): number {
 }
 
 /**
- * Locates the project root inside an unpacked native client workspace.
- * A native package is `rootDir/<version>/...`; the inspector also accepts a
- * directory that directly contains `project.json`.
+ * 查找项目根目录
+ *
+ * 在解包的原生客户端工作区中，原生包是 `rootDir/<version>/...`; 检查器也接受一个
+ * 直接包含 `project.json` 的目录。
  */
 async function resolveProjectRoot(rootDir: string): Promise<string> {
   if (await exists(path.join(rootDir, "project.json"))) return rootDir;
@@ -1031,6 +1033,19 @@ export async function inspectClientProject(
   const rawVariables: Record<string, unknown> = {};
   const variablesIndex: Record<string, VariableIndexEntry> = {};
   let variableCount = 0;
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  const nativeVariables: ServerOwnedRuntimeIdentitySnapshot["variables"][number][] = [];
+  const captureVariable = (file: string, variable: Record<string, unknown>): void => {
+    const record = structuredClone(variable);
+    const pending: object[] = [record];
+    while (pending.length) {
+      const current = pending.pop()!;
+      Object.values(current).forEach(value => { if (value !== null && typeof value === "object" && !Object.isFrozen(value)) pending.push(value as object); });
+      Object.freeze(current);
+    }
+    nativeVariables.push(Object.freeze({ file, record, recordHash: canonicalServerHash(record) }));
+  };
+  // end
 
   if (await exists(tagDir)) {
     const variableFiles = (await readdir(tagDir, { withFileTypes: true }))
@@ -1049,6 +1064,9 @@ export async function inspectClientProject(
       rawVariables[file] = tagJson;
       const variables = Array.isArray(tagJson["Variables"]) ? (tagJson["Variables"] as Array<Record<string, unknown>>) : [];
       for (const variable of variables) {
+        // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+        captureVariable(`project/Tag/${file}`, variable);
+        // end
         const name = typeof variable["name"] === "string" ? (variable["name"]) : "";
         if (name === "") continue;
         const id = typeof variable["id"] === "string" || typeof variable["id"] === "number" ? String(variable["id"]) : name;
@@ -1072,6 +1090,9 @@ export async function inspectClientProject(
         rawVariables[file.replace(/\.json$/i, "")] = tagJson;
         const variables = Array.isArray(tagJson["Variables"]) ? (tagJson["Variables"] as Array<Record<string, unknown>>) : [];
         for (const variable of variables) {
+          // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+          captureVariable(`project/Tag/variables/${file}`, variable);
+          // end
           const name = typeof variable["name"] === "string" ? (variable["name"]) : "";
           if (name === "") continue;
           const id = typeof variable["id"] === "string" || typeof variable["id"] === "number" ? String(variable["id"]) : name;
@@ -1133,6 +1154,9 @@ export async function inspectClientProject(
 
   const result: InspectResult = { raw, index, summary, provenance, warnings };
   const runtimeIdentitySnapshot: ServerOwnedRuntimeIdentitySnapshot = Object.freeze({
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    variables: Object.freeze(nativeVariables),
+    // end
     ...(runtimeBinding === undefined ? {} : { runtimeBinding }),
     controls: Object.freeze(Object.entries(controlsIndex).flatMap(([guid, control]) => {
       const nativeType = nativeRuntimeTypeByControlGuid.get(guid);

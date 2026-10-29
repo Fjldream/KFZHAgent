@@ -1,0 +1,27 @@
+{
+  "physicalRequests": 1,
+  "invocations": [
+    {
+      "task": "vision",
+      "requestedModel": "deepseek-flash",
+      "actualModel": "deepseek-flash",
+      "status": "SUCCEEDED",
+      "failureCode": null,
+      "inputTokens": 1534,
+      "outputTokens": 3584,
+      "cacheHitTokens": 1280,
+      "cacheMissTokens": 254,
+      "latencyMs": 11716
+    }
+  ],
+  "outcomes": [
+    {
+      "id": "e157684d-2af1-4500-b9f5-cfe05b10f67d",
+      "status": "WAITING_INPUT",
+      "failureCode": null
+    }
+  ],
+  "productionRollout": false,
+  "nativeKfAccepted": false,
+  "browserAccepted": false
+}

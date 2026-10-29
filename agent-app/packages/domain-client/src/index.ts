@@ -18,6 +18,12 @@ export * from "./style/style-adapter.js";
 export * from "./style/style-engine.js";
 export * from "./implementation/ui-implementation-compiler.js";
 export * from "./implementation/runtime-correlation.js";
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+export { MAX_NATIVE_DEVELOPMENT_NAME_LENGTH } from "./compile/native-page-name.js";
+// end
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+export * from "./implementation/generated-state-reuse.js";
+// end
 export * from "./implementation/ui-implementation-v2-compiler.js";
 export {
   renderClientPreview,
@@ -56,7 +62,22 @@ export * from "./planning/legacy-module-plan-adapter.js";
 export {
   assertSolutionPlanUsesCandidates,
   retrieveCapabilities,
+  // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+  layoutCapabilityIdsFor,
+  // end
   type CapabilityRetrievalInput,
 } from "./planning/capability-retrieval.js";
 export * from "./solution-compile/solution-compiler.js";
 export * from "./interaction/interaction-compiler.js";
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+export { getVisualCapabilitySurface } from "./design-knowledge/design-knowledge-catalog.js";
+export { retrieveVisualCapabilities } from "./planning/capability-retrieval.js";
+export * from "./visual/capability-evidence.js";
+export * from "./visual/region-mapping.js";
+// modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+export * from "./visual/visual-layout-proposal.js";
+// end
+// end
+// modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+export * from "./visual/visual-plan-constraints.js";
+// end

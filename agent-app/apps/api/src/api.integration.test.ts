@@ -1,3 +1,5 @@
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+// HTTP 查询/安全测试仍走真实 API；历史生成场景显式使用测试专属驱动器。
 // @ts-nocheck -- Brief Step 1/2 的 API 契约测试含逐字代码（JS 风格，无类型标注），
 // 因此本文件关闭类型检查，但 ESLint 静态规则与运行时断言仍然生效。
 // Task 11: HTTP/SSE API, upload, confirmation, and download.
@@ -15,12 +17,18 @@ assertSafeTestDatabase({
 });
 // end
 process.env.KF_SERVER_PLAN_HMAC_KEY_BASE64 ??= Buffer.alloc(32, 0x54).toString("base64");
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+process.env.AGENT_ALLOWED_ORIGINS = "http://localhost:5174";
+// end
 
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import cookieParser from "cookie-parser";
 import type { ArtifactStorage, StoredArtifact } from "@kf/artifact-storage";
 import { BuildExecutor, BuildJobService } from "@kf/build-jobs";
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+import { graphBuildIdempotencyKey } from "@kf/build-jobs";
+// end
 import { canonicalModuleCompilationHash, canonicalServerHash } from "@kf/contracts";
 import { decodeBlueprintMessage, encodeBlueprintConfirmation } from "@kf/agent-orchestrator";
 import {
@@ -38,6 +46,10 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+// modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+import { vi } from "vitest";
+import { AuditService } from "./audit/audit.service.js";
+// end
 import { AppModule } from "./app.module.js";
 import { PrismaService } from "./prisma/prisma.service.js";
 import { PasswordService } from "./auth/password.service.js";
@@ -46,7 +58,11 @@ import { ARTIFACT_STORAGE } from "./artifacts/artifact-storage.js";
 import { MODEL_PORT } from "./conversations/model-port.js";
 import { DeterministicFakeModelPort } from "./conversations/fake-model.js";
 import { AssetService } from "./assets/asset.service.js";
-import { ConversationService, finalStateData } from "./conversations/conversation.service.js";
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+import { ConversationService } from "./conversations/conversation.service.js";
+import { LegacyConversationDriver, finalStateData } from "../test-support/legacy-conversation-driver.js";
+import { legacyGraphRequest } from "../test-support/legacy-graph-request.js";
+// end
 import { WorkspaceService } from "./workspaces/workspace.service.js";
 import { MODULE_ARTIFACT_AUTHORITY, SERVER_PLAN_AUTHORITY } from "./conversations/server-plan-authority.js";
 
@@ -455,12 +471,21 @@ beforeAll(async () => {
   storageRoot = await mkdtemp(path.join(tmpdir(), "kf-api-artifacts-"));
   process.env.ARTIFACT_STORAGE_ROOT = storageRoot;
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+    .overrideProvider(ConversationService).useClass(LegacyConversationDriver)
     .overrideProvider(MODEL_PORT)
     .useValue(new FakeModelPort())
     .compile();
   app = moduleRef.createNestApplication();
   app.use(cookieParser());
   await app.init();
+  // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+  // 全新隔离库先建运行时检查点表，再执行每用例的清理。
+  await app.get(ConversationService).getGraph();
+  // end
+  // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+  // Supertest otherwise starts/closes the listener per request. Keep concurrent SSE/REST requests on one server.
+  await app.listen(0, "127.0.0.1");
+  // end
   server = app.getHttpServer();
   prisma = moduleRef.get(PrismaService);
   tenants = moduleRef.get(TenantsService);
@@ -615,20 +640,15 @@ async function createConversation(cookie: string, workspaceId: string, title: st
     .expect(201);
 }
 
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+// 这些历史领域断言不再请求旧 HTTP；真正公开的执行契约见 runs 集成套件。
 function sendMessage(cookie: string, conversationId: string, content: string) {
-  // Not async on purpose: returns the supertest Test for chaining .expect().
-  return request(server)
-    .post(`/api/conversations/${conversationId}/messages`)
-    .set("Cookie", cookie)
-    .send({ content });
+  return legacyGraphRequest(app, cookie, conversationId, { type: "message", content });
 }
-
 function resume(cookie: string, conversationId: string, body: Record<string, unknown>) {
-  return request(server)
-    .post(`/api/conversations/${conversationId}/resume`)
-    .set("Cookie", cookie)
-    .send(body);
+  return legacyGraphRequest(app, cookie, conversationId, { type: "resume", body });
 }
+// end
 
 /** Parses the SSE frames of a message response into [event, data] pairs. */
 function parseSse(text: string): { event: string; data: unknown }[] {
@@ -904,10 +924,7 @@ describe("api contract", () => {
     const conv = await createConversation(cookie, ws.body.id, "Resume");
     await planRequirement(cookie, conv.body.id);
 
-    await request(server)
-      .post(`/api/conversations/${conv.body.id}/resume`)
-      .set("Cookie", cookie)
-      .send({ action: "approve", planHash: "wrong-hash" })
+    await resume(cookie, conv.body.id, { action: "approve", planHash: "wrong-hash" })
       .expect(409)
       .expect(({ body }) => {
         expect(body.error.code).toBe("PLAN_HASH_MISMATCH");
@@ -926,7 +943,7 @@ describe("api contract", () => {
     expect(res.body.buildJobId).toBeTruthy();
 
     const job = await request(server)
-      .get(`/api/build-jobs/${res.body.buildJobId}`)
+      .get(`/api/build-jobs/${String(res.body.buildJobId)}`)
       .set("Cookie", cookie)
       .expect(200);
     expect(job.body.planHash).toBe(planHash);
@@ -1252,11 +1269,11 @@ describe("api security", () => {
     await request(server).post("/api/workspaces").send({ name: "X" }).expect(401);
     await request(server).post("/api/conversations").send({ workspaceId: "w", title: "t" }).expect(401);
     await request(server)
-      .post("/api/conversations/c1/messages")
+      .post("/api/conversations/c1/runs")
       .send({ content: "hi" })
       .expect(401);
     await request(server)
-      .post("/api/conversations/c1/resume")
+      .post("/api/runs/r1/cancel")
       .send({ action: "approve", planHash: "h" })
       .expect(401);
     await request(server).get("/api/build-jobs/j1").expect(401);
@@ -1312,9 +1329,10 @@ describe("api security", () => {
       .set("Cookie", cookieB)
       .expect(404);
     await request(server)
-      .post(`/api/conversations/${convA.body.id}/messages`)
+      .post(`/api/conversations/${convA.body.id}/runs`)
       .set("Cookie", cookieB)
-      .send({ content: "hi" })
+      .set("Origin", "http://localhost:5174")
+      .send({ clientRequestId: "cross-tenant", clientMessageId: "cross-tenant-message", mode: "discuss", action: { type: "message", text: "hi" } })
       .expect(404);
     await request(server)
       .delete(`/api/workspaces/${wsA.body.id}`)
@@ -1609,6 +1627,30 @@ describe("hardening fixes", () => {
     expect(res.body.message).toContain("download-token");
   });
 
+  // modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+  it("rejects an approval arriving after the winning turn has released its fence (I1 ordering)", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createUploadWorkspace(cookie, "Completed Approval WS");
+    await uploadPackage(cookie, ws.body.id, await makePackage()).expect(201);
+    const conv = await createConversation(cookie, ws.body.id, "Completed Approval");
+    const planHash = await planRequirement(cookie, conv.body.id);
+
+    const approved = await resume(cookie, conv.body.id, { action: "approve", planHash }).expect(200);
+    expect(approved.body.stage).toBe("building");
+    expect(approved.body.buildJobId).toBeTruthy();
+    expect(await prisma.conversationTurnFence.count({ where: { conversationId: conv.body.id } })).toBe(0);
+
+    const stale = await resume(cookie, conv.body.id, { action: "approve", planHash }).expect(409);
+    // Once the writer has released its fence, this is a stale decision, not an in-flight turn.
+    expect(stale.body.error.code).toBe("NO_PENDING_APPROVAL");
+    const acmeId = await tenantIdOf(TENANT_A.tenant);
+    expect(await prisma.auditLog.count({ where: { tenantId: acmeId, action: "PLAN_CONFIRMED" } })).toBe(1);
+    expect(await prisma.auditLog.count({ where: { tenantId: acmeId, action: "BUILD_START" } })).toBe(1);
+    expect(await prisma.buildJob.count({ where: { workspaceId: ws.body.id } })).toBe(1);
+  });
+  // end
+
+  // modified by jinlong.feng at 2026-10-23 Agent工作台迭代
   it("fences concurrent resumes: one approve wins and audit stays single (I1 concurrency)", async () => {
     const cookie = await login(TENANT_A_MEMBER);
     const ws = await createUploadWorkspace(cookie, "Concurrent Resume WS");
@@ -1616,36 +1658,79 @@ describe("hardening fixes", () => {
     const conv = await createConversation(cookie, ws.body.id, "Concurrent");
     const planHash = await planRequirement(cookie, conv.body.id);
 
-    // Three resumes of the same conversation race at the same time. The
-    // The shared durable turn lease admits exactly one graph writer. Every
-    // loser fails fast before checkpoint access or audit side effects.
-    const [r1, r2, r3] = await Promise.all([
-      resume(cookie, conv.body.id, { action: "approve", planHash }),
-      resume(cookie, conv.body.id, { action: "approve", planHash }),
-      resume(cookie, conv.body.id, { action: "approve", planHash }),
-    ]);
+    // Promise.all alone does not guarantee overlap at the durable lease boundary.
+    // Hold the real audit transaction after the graph cleared its interrupt,
+    // proving that the writer fence lasts through audit commit, not just graph drain.
+    let markAuditEntered!: () => void;
+    let releaseAudit!: () => void;
+    const auditEntered = new Promise<void>((resolve) => { markAuditEntered = resolve; });
+    const auditGate = new Promise<void>((resolve) => { releaseAudit = resolve; });
+    const audit = app.get(AuditService);
+    const recordAudit = audit.record.bind(audit);
+    const auditSpy = vi.spyOn(audit, "record").mockImplementation(async (input, tx) => {
+      const row = await recordAudit(input, tx);
+      if (input.action === "PLAN_CONFIRMED" && input.detail?.workspaceId === ws.body.id) {
+        markAuditEntered();
+        await auditGate;
+      }
+      return row;
+    });
+    const approving = Promise.resolve(resume(cookie, conv.body.id, { action: "approve", planHash }));
+    try {
+      await Promise.race([
+        auditEntered,
+        approving.then(() => { throw new Error("APPROVAL_AUDIT_GATE_NOT_REACHED"); }),
+      ]);
+      const fence = await prisma.conversationTurnFence.findUniqueOrThrow({ where: { conversationId: conv.body.id } });
+      expect(fence.state).toBe("ADMITTED");
+      const graph = await app.get(ConversationService).getGraph();
+      const snapshot = await graph.getState({ configurable: { thread_id: conv.body.id } });
+      expect(snapshot.values.stage).toBe("building");
+      expect(snapshot.tasks.some(task => task.interrupts.length > 0)).toBe(false);
+      const acmeId = await tenantIdOf(TENANT_A.tenant);
+      expect(await prisma.auditLog.count({ where: { tenantId: acmeId, action: "PLAN_CONFIRMED" } })).toBe(0);
 
-    const statuses = [r1.status, r2.status, r3.status].sort((a, b) => a - b);
-    expect(statuses).toEqual([200, 409, 409]);
+      const [r2, r3] = await Promise.all([
+        resume(cookie, conv.body.id, { action: "approve", planHash }),
+        resume(cookie, conv.body.id, { action: "approve", planHash }),
+      ]);
+      // Assert rejection while the winner is still gated; queuing contenders
+      // until release cannot masquerade as correct fail-fast fencing.
+      expect([r2.status, r3.status]).toEqual([409, 409]);
+      expect([r2.body.error.code, r3.body.error.code]).toEqual([
+        "CONVERSATION_TURN_IN_PROGRESS", "CONVERSATION_TURN_IN_PROGRESS",
+      ]);
+      expect(auditSpy).toHaveBeenCalledTimes(1);
+      expect(await prisma.conversationTurnFence.findUnique({ where: { conversationId: conv.body.id } })).toEqual(fence);
+      releaseAudit();
+      const r1 = await approving;
 
-    const ok = [r1, r2, r3].find((r) => r.status === 200);
-    expect(ok.body.stage).toBe("building"); // enqueue-build only confirms durable queueing
-    expect(ok.body.buildJobId).toBeTruthy();
-    const conflicts = [r1, r2, r3].filter((r) => r.status === 409);
-    expect(conflicts).toHaveLength(2);
-    for (const conflict of conflicts) {
-      expect(conflict.body.error.code).toBe("CONVERSATION_TURN_IN_PROGRESS");
+      const statuses = [r1.status, r2.status, r3.status].sort((a, b) => a - b);
+      expect(statuses).toEqual([200, 409, 409]);
+
+      const ok = [r1, r2, r3].find((r) => r.status === 200);
+      expect(ok.body.stage).toBe("building"); // enqueue-build only confirms durable queueing
+      expect(ok.body.buildJobId).toBeTruthy();
+      const conflicts = [r1, r2, r3].filter((r) => r.status === 409);
+      expect(conflicts).toHaveLength(2);
+      for (const conflict of conflicts) {
+        expect(conflict.body.error.code).toBe("CONVERSATION_TURN_IN_PROGRESS");
+      }
+
+      expect(
+        await prisma.auditLog.count({ where: { tenantId: acmeId, action: "PLAN_CONFIRMED" } }),
+      ).toBe(1);
+      expect(
+        await prisma.auditLog.count({ where: { tenantId: acmeId, action: "BUILD_START" } }),
+      ).toBe(1);
+      expect(await prisma.buildJob.count({ where: { workspaceId: ws.body.id } })).toBe(1);
+      expect(await prisma.conversationTurnFence.count({ where: { conversationId: conv.body.id } })).toBe(0);
+    } finally {
+      releaseAudit();
+      try { await approving; } finally { auditSpy.mockRestore(); }
     }
-
-    const acmeId = await tenantIdOf(TENANT_A.tenant);
-    expect(
-      await prisma.auditLog.count({ where: { tenantId: acmeId, action: "PLAN_CONFIRMED" } }),
-    ).toBe(1);
-    expect(
-      await prisma.auditLog.count({ where: { tenantId: acmeId, action: "BUILD_START" } }),
-    ).toBe(1);
-    expect(await prisma.buildJob.count({ where: { workspaceId: ws.body.id } })).toBe(1);
   });
+  // end
 });
 
 // ---------------------------------------------------------------------------
@@ -1966,7 +2051,10 @@ describe("task 12 api surface", () => {
       '代码示例：```ts\nconst value = { normal: true };\n```',
       '{"kind":"customer-summary","metadata":{"label":"普通 JSON"}}',
     ];
-    for (const content of contents) await prisma.message.create({ data: { tenantId, conversationId: conv.body.id, role: "assistant", content } });
+    // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+    // 本用例只验脱敏；显式时间避免高速 INSERT 同毫秒导致 PostgreSQL 任意排列。
+    for (const [index, content] of contents.entries()) await prisma.message.create({ data: { tenantId, conversationId: conv.body.id, role: "assistant", content, createdAt: new Date(Date.UTC(2020, 0, 1, 0, 0, index)) } });
+    // end
     await prisma.message.create({ data: { tenantId, conversationId: conv.body.id, role: "user", content: "请解释 signature 这个普通英文词" } });
 
     const response = await request(server).get(`/api/conversations/${conv.body.id}/messages`).set("Cookie", cookie).expect(200);
@@ -2008,6 +2096,49 @@ describe("task 12 api surface", () => {
     await request(server).get(`/api/artifacts/${artifact.id}/preview`).set("Cookie", cookie).expect(409);
   });
 
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  it("keeps an exact historical module delivery downloadable and forkable after the conversation advances", async () => {
+    const cookie = await login(TENANT_A_MEMBER);
+    const ws = await createWorkspace(cookie, "Historical module delivery", "module-v1");
+    const conv = await createConversation(cookie, ws.body.id, "Historical module conversation");
+    const tenantId = await tenantIdOf(TENANT_A.tenant);
+    const actor = await prisma.user.findFirstOrThrow({ where: { tenantId, username: TENANT_A_MEMBER.username } });
+    const plan = await prisma.changePlan.create({ data: { tenantId, workspaceId: ws.body.id, planHash: "d".repeat(64) } });
+    const revision = await prisma.solutionRevision.create({ data: { tenantId, workspaceId: ws.body.id, changePlanId: plan.id,
+      revisionNumber: 2, kind: "built", parentRevisionId: ws.body.currentRevisionId, state: {} } });
+    const run = await prisma.agentRun.create({ data: { tenantId, workspaceId: ws.body.id, conversationId: conv.body.id,
+      requestedByUserId: actor.id, clientRequestId: "historical-module", requestHash: "b".repeat(64), mode: "build",
+      action: { type: "message", text: "历史模块工程" }, status: "SUCCEEDED", resultRevisionId: revision.id } });
+    const job = await prisma.buildJob.create({ data: { tenantId, workspaceId: ws.body.id, baseRevisionId: ws.body.currentRevisionId,
+      changePlanId: plan.id, planHash: plan.planHash, projectKey: "kingclient", domainKind: "kingclient", agentRunId: run.id,
+      idempotencyKey: graphBuildIdempotencyKey({ conversationId: conv.body.id, changePlanId: plan.id, planHash: plan.planHash,
+        projectKey: "kingclient", domainKind: "kingclient" }), status: "SUCCEEDED" } });
+    await prisma.agentRun.update({ where: { id: run.id }, data: { buildJobId: job.id } });
+    const stored = await storage.put({ tenantId, kind: "client-package", stream: Readable.from([Buffer.from("historical-module-bytes")]), maxBytes: 1024 });
+    const artifact = await prisma.artifact.create({ data: { tenantId, buildJobId: job.id, solutionRevisionId: revision.id,
+      kind: "client-package", storageKey: stored.artifactId, sha256: stored.sha256, sizeBytes: stored.sizeBytes } });
+    await prisma.domainProjectRevision.create({ data: { tenantId, solutionRevisionId: revision.id, projectKey: "kingclient", domainKind: "kingclient",
+      packageUrl: artifact.storageKey, packageHash: artifact.sha256 } });
+    await prisma.validationReport.create({ data: { tenantId, buildJobId: job.id, outcome: "pass" } });
+    const anchor = await prisma.message.create({ data: { tenantId, conversationId: conv.body.id, role: "assistant", runId: run.id, content: "旧版本已生成" } });
+    const graph = await app.get(ConversationService)["getGraph"]();
+    const oldValues = { ...signedDeliveryState({ revisionId: job.baseRevisionId }), tenantId, workspaceId: ws.body.id, conversationId: conv.body.id,
+      buildJobId: job.id, changePlanId: job.changePlanId, planHash: job.planHash, currentRevisionId: job.baseRevisionId };
+    await graph.updateState({ configurable: { thread_id: conv.body.id } }, oldValues);
+    await graph.updateState({ configurable: { thread_id: conv.body.id } }, { ...oldValues,
+      buildJobId: "later-build-job", changePlanId: "later-change-plan", planHash: "f".repeat(64) });
+    const detail = await request(server).get(`/api/v2/workspaces/${ws.body.id}/revisions/${revision.id}`).set("Cookie", cookie).expect(200);
+    expect(detail.body.delivery).toMatchObject({ artifactId: artifact.id, buildJobId: job.id, runId: run.id });
+    const issued = await request(server).post(`/api/artifacts/${artifact.id}/download-token`).set("Cookie", cookie).expect(200);
+    const downloaded = await request(server).get(`/api/artifacts/download/${issued.body.token}`).set("Cookie", cookie).expect(200);
+    expect(Buffer.from(downloaded.body).toString()).toBe("historical-module-bytes");
+    const fork = await request(server).post(`/api/v2/conversations/${conv.body.id}/forks`).set("Cookie", cookie)
+      .set("Origin", "http://localhost:5174").send({ clientRequestId: "e3ece470-8a7a-4f0f-8e18-378669eafec1", messageId: anchor.id, revisionId: revision.id }).expect(201);
+    expect(fork.body.id).not.toBe(conv.body.id);
+    await prisma.buildJob.update({ where: { id: job.id }, data: { status: "FAILED" } });
+    await request(server).post(`/api/artifacts/${artifact.id}/download-token`).set("Cookie", cookie).expect(409);
+  });
+  // end
   it("restores a tenant/workspace/job-bound warning snapshot and becomes blocked after build failure", async () => {
     const cookie = await login(TENANT_A_MEMBER);
     const ws = await createWorkspace(cookie, "Persisted delivery WS");
@@ -2480,14 +2611,14 @@ describe("task 12 api surface", () => {
     });
 
     const artifacts = await request(server)
-      .get(`/api/build-jobs/${jobId}/artifacts`)
+      .get(`/api/build-jobs/${String(jobId)}/artifacts`)
       .set("Cookie", cookie)
       .expect(200);
     expect(artifacts.body).toHaveLength(1);
     expect(artifacts.body[0].kind).toBe("client-package");
 
     const report = await request(server)
-      .get(`/api/build-jobs/${jobId}/report`)
+      .get(`/api/build-jobs/${String(jobId)}/report`)
       .set("Cookie", cookie)
       .expect(200);
     expect(report.body.outcome).toBe("pass");
@@ -2521,7 +2652,7 @@ describe("task 12 api surface", () => {
     });
 
     const report = await request(server)
-      .get(`/api/build-jobs/${approved.body.buildJobId}/report`)
+      .get(`/api/build-jobs/${String(approved.body.buildJobId)}/report`)
       .set("Cookie", cookie)
       .expect(200);
 
@@ -2548,3 +2679,5 @@ describe("task 12 api surface", () => {
     );
   });
 });
+
+// end

@@ -1,4 +1,4 @@
-// @ts-nocheck -- mutation fixtures intentionally probe malformed runtime values.
+// @ts-nocheck -- 有意图的修改fixture探查不完整的运行值。
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, expect, it } from "vitest";
 import {
@@ -8,6 +8,36 @@ import {
   SolutionImplementationPlanSchema,
   SolutionNodeSchema,
 } from "./solution-implementation-plan.js";
+// modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+import { canonicalServerHash } from "./server-plan-envelope.js";
+// end
+
+// modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+describe("native layout surface role contract", () => {
+  it("preserves absent roles and their canonical identity", () => {
+    const original = SolutionImplementationPlanSchema.parse(solutionPlanFixture);
+    const replay = SolutionImplementationPlanSchema.parse(original);
+    expect(Object.hasOwn(replay.pages[0].root, "styleRole")).toBe(false);
+    expect(canonicalServerHash(replay)).toBe(canonicalServerHash(original));
+  });
+  it("accepts a declared role on native layout containers", () => {
+    const fixture = structuredClone(solutionPlanFixture);
+    fixture.pages[0].root.styleRole = "record-title";
+    const parsed = SolutionImplementationPlanSchema.parse(fixture);
+    expect(parsed.pages[0].root.styleRole).toBe("record-title");
+  });
+  it.each(["missing-role", "", null, 1])("rejects invalid layout role %s", (role) => {
+    const fixture = structuredClone(solutionPlanFixture);
+    fixture.pages[0].root.styleRole = role;
+    expect(SolutionImplementationPlanSchema.safeParse(fixture).success).toBe(false);
+  });
+  it("keeps layout instance overrides outside the native contract", () => {
+    const fixture = structuredClone(solutionPlanFixture);
+    fixture.pages[0].root.styleOverride = { declarations: { padding: 16 }, states: {} };
+    expect(SolutionImplementationPlanSchema.safeParse(fixture).success).toBe(false);
+  });
+});
+// end
 
 const theme = {
   background: "#f4f7fb",
@@ -999,6 +1029,28 @@ describe("SolutionImplementationPlanSchema", () => {
     semanticPlan.scripts[1].steps[0].intent = "Show empty state if no record is selected";
     semanticPlan.scripts[1].steps[1].intent = "Show guidance for new operators while records are loading";
     expect(SolutionImplementationPlanSchema.safeParse(semanticPlan).success).toBe(true);
+  });
+
+  it("accepts frontend technology names as customer content without admitting executable forms", () => {
+    for (const content of [
+      "JavaScript",
+      "使用 D3.js 和 ECharts 展示实时数据",
+      "使用虚拟滚动和 WebSocket 提升实时体验",
+      "Node.js 与 Next.js 项目经验",
+      "avatar.jpg",
+      "邮箱：zhangwei@example.com",
+      "GitHub：github.com/zhangwei",
+    ]) {
+      const plan = cloneFixture();
+      findNode(plan, "equipment-name").content = content;
+      expect(SolutionImplementationPlanSchema.safeParse(plan).success, content).toBe(true);
+    }
+
+    for (const content of ["new WebSocket('ws://host')", "javascript:alert(1)", "detail.text.value"]) {
+      const plan = cloneFixture();
+      findNode(plan, "equipment-name").content = content;
+      expect(SolutionImplementationPlanSchema.safeParse(plan).success, content).toBe(false);
+    }
   });
 
   it.each([

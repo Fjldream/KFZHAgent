@@ -26,7 +26,7 @@ interface ManagedEnvelope {
   end: number;
 }
 
-/** Finds exact ownership comments only at CSS top level, outside strings/comments/rules. */
+/** 仅在 CSS 的顶层找到确切的所有权评论，不在字符串、注释或规则中。 */
 function findManagedEnvelope(css: string): ManagedEnvelope | undefined {
   const markers: Array<{ kind: "start" | "end"; index: number }> = [];
   let depth = 0;
@@ -35,8 +35,8 @@ function findManagedEnvelope(css: string): ManagedEnvelope | undefined {
   let escaped = false;
   for (let index = 0; index < css.length;) {
     const char = css[index]!;
-    // CSS comments do not assign escape semantics to backslashes: the first
-    // literal */ always closes the comment.
+    // CSS注释不为斜杠分配逃逸语法：第一个
+    // 斜杠总是关闭注释。
     if (inComment) {
       if (char === "*" && css[index + 1] === "/") {
         inComment = false;
@@ -152,7 +152,7 @@ function serializeRules(rules: Rules): string {
     .join("");
 }
 
-/** Preserves unmanaged CSS and merges a deterministic compiler-owned delta. */
+/** 保留未管理的CSS，并合并一个确定的编译器拥有的差分。 */
 export function mergeManagedStyleData(existingValue: unknown, compiledDelta: string): string {
   const existing = typeof existingValue === "string" ? existingValue : "";
   if (compiledDelta === "") return existing;

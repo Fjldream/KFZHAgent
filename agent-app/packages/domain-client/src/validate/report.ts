@@ -1,14 +1,11 @@
 import type { CheckStatus, ValidationChecks, ValidationReport } from "@kf/contracts";
 
 /**
- * Validation report assembly (brief Step 6).
+ * 校验报告组装（简要步骤 6）。
  *
- * Every layer produces a `CheckOutcome`; `makeReport` folds the six outcomes
- * into the `@kf/contracts` ValidationReport shape:
- * - `status` is "fail" whenever ANY required check fails — warnings never
- *   override failures,
- * - each failed/warned check contributes its issues to `report.warnings` so a
- *   caller always has the human-readable detail behind a pass/fail.
+ * 每一层都会生成 `CheckOutcome`；`makeReport` 将六个结果折叠为 `@kf/contracts` 的 ValidationReport 结构：
+ * - 只要任一必需检查失败，`status` 就为 “fail”；警告绝不会覆盖失败；
+ * - 每个失败或警告检查都会把问题加入 `report.warnings`，使调用方始终能看到 pass/fail 背后可读的详细信息。
  */
 
 export interface CheckOutcome {

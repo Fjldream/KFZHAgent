@@ -1,0 +1,302 @@
+[
+  {
+    "regionId": "header",
+    "disposition": "accept-unverified",
+    "capabilityId": "layout.2",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "header-brand",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "header-divider",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "header-title",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "header-badge",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "sidebar",
+    "disposition": "accept-unverified",
+    "capabilityId": "layout.4",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "nav-overview",
+    "disposition": "accept-unverified",
+    "capabilityId": "button",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "nav-monitor",
+    "disposition": "accept-unverified",
+    "capabilityId": "button",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "nav-alert",
+    "disposition": "accept-unverified",
+    "capabilityId": "button",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "content",
+    "disposition": "accept-unverified",
+    "capabilityId": "layout.4",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "page-title",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "page-subtitle",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "kpi-row",
+    "disposition": "accept-unverified",
+    "capabilityId": "layout.2",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "kpi-energy",
+    "disposition": "accept-unverified",
+    "capabilityId": "layout.4",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "kpi-energy-label",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "kpi-energy-value",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "kpi-energy-unit",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "kpi-power",
+    "disposition": "accept-unverified",
+    "capabilityId": "layout.4",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "kpi-power-label",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "kpi-power-value",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "kpi-power-unit",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "kpi-online",
+    "disposition": "accept-unverified",
+    "capabilityId": "layout.4",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "kpi-online-label",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "kpi-online-value",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "kpi-online-unit",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "bottom-row",
+    "disposition": "accept-unverified",
+    "capabilityId": "layout.2",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "devices-card",
+    "disposition": "accept-unverified",
+    "capabilityId": "layout.4",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "devices-title",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "device-1",
+    "disposition": "accept-unverified",
+    "capabilityId": "layout.2",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "device-1-name",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "device-1-status",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "device-2",
+    "disposition": "accept-unverified",
+    "capabilityId": "layout.2",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "device-2-name",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "device-2-status",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "device-3",
+    "disposition": "accept-unverified",
+    "capabilityId": "layout.2",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "device-3-name",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "device-3-status",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "summary-card",
+    "disposition": "accept-unverified",
+    "capabilityId": "layout.4",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "summary-title",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "summary-alert",
+    "disposition": "accept-unverified",
+    "capabilityId": "layout.2",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "summary-alert-label",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "summary-alert-value",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "summary-target",
+    "disposition": "accept-unverified",
+    "capabilityId": "layout.2",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "summary-target-label",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "summary-target-value",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "summary-updated",
+    "disposition": "accept-unverified",
+    "capabilityId": "layout.2",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "summary-updated-label",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "summary-updated-value",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "btn-view-docs",
+    "disposition": "accept-unverified",
+    "capabilityId": "button",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  },
+  {
+    "regionId": "footer-note",
+    "disposition": "accept-unverified",
+    "capabilityId": "richtext",
+    "reason": "仅接受静态原生组件近似；数据为演示值，无导航或数据源；不代表交互、运行或像素一致已验证。"
+  }
+]

@@ -9,15 +9,12 @@ const T_B = "tenant-b";
 const W_A = "workspace-a";
 const W_B = "workspace-b";
 
-// Hand-checked valid 1×1 images. Tests intentionally give false HTTP MIME
-// headers: the service must derive media type from bytes, not client claims.
+// 人工检查的1×1图像。测试故意提供无效的HTTP MIME头：服务必须从字节中推断媒体类型，而不是客户端的声明。
 const PNG_1X1 = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/mXPo5QAAAABJRU5ErkJggg==",
   "base64",
 );
-// Minimal structurally complete 1×1 sequential/progressive fixtures. The
-// asset service validates container grammar and metadata, not JPEG entropy
-// decoding, so the deliberately tiny entropy payload is sufficient here.
+// 最小的结构完整1×1顺序/进展灯具。资产服务验证容器语法和元数据，而不是JPEG熵解码，因此故意的极小熵负载在这里是足够的。
 const JPEG_1X1 = Buffer.from([
   0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
   0xff, 0xc0, 0x00, 0x0b, 0x08, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x11, 0x00,

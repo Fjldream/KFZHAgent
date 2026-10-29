@@ -1,0 +1,76 @@
+{
+  "physicalRequests": 2,
+  "acceptanceMode": "semantic-only-with-new-approvals",
+  "planningFixtureRequests": 2,
+  "publicFactsHash": "33b3c8d0272d72fedf73c7dbb0c97b31f51bef16b1dbe902732cc690a0c2a30b",
+  "invocations": [
+    {
+      "task": "vision",
+      "requestedModel": "deepseek-flash",
+      "actualModel": "saved-public-vision-fixture",
+      "status": "SUCCEEDED",
+      "failureCode": null,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "cacheHitTokens": null,
+      "cacheMissTokens": null,
+      "latencyMs": 15
+    },
+    {
+      "task": "blueprint",
+      "requestedModel": "deepseek-flash",
+      "actualModel": "saved-public-blueprint-fixture",
+      "status": "SUCCEEDED",
+      "failureCode": null,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "cacheHitTokens": null,
+      "cacheMissTokens": null,
+      "latencyMs": 2
+    },
+    {
+      "task": "implementation",
+      "requestedModel": "deepseek-flash",
+      "actualModel": "deepseek-flash",
+      "status": "SUCCEEDED",
+      "failureCode": null,
+      "inputTokens": 26513,
+      "outputTokens": 7553,
+      "cacheHitTokens": 0,
+      "cacheMissTokens": 26513,
+      "latencyMs": 23388
+    },
+    {
+      "task": "repair",
+      "requestedModel": "deepseek-flash",
+      "actualModel": "deepseek-flash",
+      "status": "SUCCEEDED",
+      "failureCode": null,
+      "inputTokens": 30776,
+      "outputTokens": 272,
+      "cacheHitTokens": 4352,
+      "cacheMissTokens": 26424,
+      "latencyMs": 2261
+    }
+  ],
+  "outcomes": [
+    {
+      "id": "27c4cffc-ed4e-4f07-a676-2dacdc5bbf10",
+      "status": "CANCELLED",
+      "failureCode": null
+    },
+    {
+      "id": "3de45ba9-b067-46e5-a6e5-fd7613bc635a",
+      "status": "CANCELLED",
+      "failureCode": null
+    },
+    {
+      "id": "a5ea1d3c-8751-46ba-aff6-652344042bac",
+      "status": "SUCCEEDED",
+      "failureCode": null
+    }
+  ],
+  "productionRollout": false,
+  "nativeKfAccepted": false,
+  "browserAccepted": false
+}

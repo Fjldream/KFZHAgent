@@ -2,6 +2,28 @@
 import { describe, expect, it } from "vitest";
 import { canonicalJson } from "./canonical-json.js";
 import { buildTaskPrompt } from "./task-prompts.js";
+// modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+import { PROMPT_VERSIONS, VISUAL_ANALYSIS_SYSTEM_PROMPT } from "./task-prompts.js";
+import { VisualReferenceSpecSchema } from "@kf/contracts";
+
+describe("visual analysis output contract", () => {
+  it("versions a complete parseable JSON example and keeps API envelope fields out of model output", () => {
+    expect(PROMPT_VERSIONS.vision).toBe("vision@v2");
+    const example = VISUAL_ANALYSIS_SYSTEM_PROMPT.match(/JSON example:\n([^\n]+)/)?.[1];
+    expect(example).toBeDefined();
+    const value: unknown = JSON.parse(example!);
+    expect(VisualReferenceSpecSchema.safeParse(value).success).toBe(true);
+    expect(VISUAL_ANALYSIS_SYSTEM_PROMPT).toContain("Do not add API envelope fields");
+    // A real DeepSeek reply added type:json_object. Keep strict rejection rather than stripping it.
+    expect(VisualReferenceSpecSchema.safeParse({ ...value as Record<string, unknown>, type: "json_object" }).success).toBe(false);
+  });
+  it("requires leaf text coverage without granting model-owned interaction or data requirements", () => {
+    expect(VISUAL_ANALYSIS_SYSTEM_PROMPT).toContain("Do not duplicate descendant text in containers");
+    expect(VISUAL_ANALYSIS_SYSTEM_PROMPT).toContain('interactionHint must be null, never "static"');
+    expect(VISUAL_ANALYSIS_SYSTEM_PROMPT).toContain("Never output clarifications, interactionRequirement or dataRequirement");
+  });
+});
+// end
 
 describe("canonicalJson", () => {
   it("sorts object keys recursively and keeps array order", () => {

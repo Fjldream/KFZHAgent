@@ -7,7 +7,7 @@ import type { AgentGraphStateValue, AgentGraphUpdate } from "./state.js";
  * 未接线（或 state 无 runId）时节点行为与改造前完全一致。
  */
 export interface RunStepMemo {
-  find(stepKey: string, inputHash: string): Promise<unknown | null>;
+  find(stepKey: string, inputHash: string): Promise<unknown>;
   save(stepKey: string, inputHash: string, output: unknown): Promise<void>;
 }
 
@@ -59,7 +59,7 @@ export function withStepMemo(
     const memo = options.resolveMemo?.(runId ?? "");
     if (memo === undefined || runId === undefined || runId.length === 0) return node(state);
 
-    const inputHash = stepInputHash(stepKey, options.planVersion ?? "graph@1", selectInputs(state));
+    const inputHash = stepInputHash(stepKey, options.planVersion ?? state.planVersion ?? "graph@1", selectInputs(state));
     const cached = await memo.find(stepKey, inputHash);
     if (cached !== null) return cached as AgentGraphUpdate;
 

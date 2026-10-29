@@ -358,6 +358,11 @@ export function compileResolvedStyle(input: CompileResolvedStyleInput): Compiled
   if (adapter === undefined) throw new Error(`STYLE_ADAPTER_UNAVAILABLE: ${input.capabilityId}`);
   const resolved = resolveStyle(input.theme, roleStyle, instanceOverride);
   const nativeFields: NativeStyleFields = {};
+  // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+  if (["layout.2", "layout.4", "layout.5"].includes(input.capabilityId)
+    && [resolved.declarations.borderTopWidth, resolved.declarations.borderRightWidth, resolved.declarations.borderBottomWidth, resolved.declarations.borderLeftWidth]
+      .some(width => width !== undefined && width > 0)) nativeFields.isShowBorder = true;
+  // end
   const cssFragments: CompiledStyleFragment[] = [];
   const scopedFragments: CompiledScopedStyleFragment[] = [];
   const context: CompilePartContext = {
@@ -501,6 +506,12 @@ export function listStyleCompilationIssues(
 
   const adapter = getStyleAdapter(capabilityId);
   for (const [field, value] of Object.entries(compiled.nativeFields)) {
+    // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+    if (field === "isShowBorder" && value === true && ["layout.2", "layout.4", "layout.5"].includes(capabilityId)
+      && compiled.cssFragments?.some(fragment => fragment.selectorToken === "root" && fragment.state === "normal"
+        && [fragment.declarations.borderTopWidth, fragment.declarations.borderRightWidth, fragment.declarations.borderBottomWidth, fragment.declarations.borderLeftWidth]
+          .some(width => width !== undefined && width > 0))) continue;
+    // end
     if (adapter === undefined || field !== "backgroundColor") {
       issues.push({
         code: "UNEXPECTED_NATIVE_STYLE_FIELD",

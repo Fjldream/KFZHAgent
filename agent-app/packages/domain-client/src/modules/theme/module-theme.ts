@@ -5,7 +5,7 @@ import {
   type ThemeSpec,
 } from "@kf/contracts";
 
-/** The only visual vocabulary module definitions may receive from a page theme. */
+/** 只有视觉词汇表模块定义可能从页面主题接收。 */
 export const ModulePlanThemeSchema = ComponentStyleSpecSchema;
 
 const ROLE_STYLE = {
@@ -19,9 +19,8 @@ const ROLE_STYLE = {
 export type ModuleThemeRole = keyof typeof ROLE_STYLE;
 
 /**
- * Applies a small, reviewed semantic style role to a strict component style.
- * CSS/native conversion deliberately remains downstream in the existing Style
- * Adapter boundary.
+ * 为严格组件样式应用一个小而审查过的语义风格角色。
+ * CSS/原生转换故意在现有的样式适配器边界下游。
  */
 export function resolveModuleComponentStyle(
   themeInput: ThemeSpec,

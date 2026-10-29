@@ -3,6 +3,14 @@
 import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { PrismaRunStore, type StartRunInput } from "./run-store.js";
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+import { resolveWorkbenchConfig } from "./feature-policy.js";
+
+// 测试只给本夹具租户开放；生产 store 的默认策略仍是服务端默认关闭。
+export const runTestPolicy = (tenantIds: readonly string[]) => (tenantId: string) => resolveWorkbenchConfig(tenantId, {
+  AGENT_RUNS_V2: "true", AGENT_FEATURE_TENANT_ALLOWLIST: tenantIds.join(","),
+});
+// end
 
 export type RunTestFixture = {
   prisma: PrismaClient;
@@ -46,7 +54,9 @@ export async function createRunTestFixture(leaseMs = 30_000): Promise<RunTestFix
 
   return {
     prisma,
-    store: new PrismaRunStore(prisma, leaseMs),
+    // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+    store: new PrismaRunStore(prisma, leaseMs, runTestPolicy([a.tenantId, b.tenantId])),
+    // end
     tenantA: a.tenantId,
     tenantB: b.tenantId,
     conversationA: a.conversationId,
@@ -74,6 +84,9 @@ export async function createRunTestFixture(leaseMs = 30_000): Promise<RunTestFix
     },
     cleanup: async () => {
       const tenantIds = scopes.map((scope) => scope.tenantId);
+      // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+      await prisma.auditLog.deleteMany({ where: { tenantId: { in: tenantIds } } });
+      // end
       const runs = await prisma.agentRun.findMany({
         where: { tenantId: { in: tenantIds } },
         select: { id: true },

@@ -1,10 +1,13 @@
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
-import { ConversationController } from "./conversation.controller.js";
-import type { DisposableSseStream, SseEvent } from "./conversation.service.js";
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+import { LegacyConversationController as ConversationController } from "../../test-support/legacy-conversation-controller.js";
+// end
+import type { DisposableSseStream, SseEvent } from "../../test-support/legacy-conversation-driver.js";
 import { ConversationTurnBusyError } from "./conversation-turn-lease.js";
 
-describe("ConversationController SSE disposal", () => {
+describe("historical controller fixture SSE disposal", () => {
   it("disposes an uniterated stream when response headers fail", async () => {
     const events = disposableEvents([{ event: "state", data: {} }]);
     const controller = controllerReturning(events);
@@ -119,3 +122,4 @@ function httpDoubles() {
   });
   return { req, res };
 }
+// end

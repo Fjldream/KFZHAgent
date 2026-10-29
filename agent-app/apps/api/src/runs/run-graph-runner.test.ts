@@ -15,7 +15,7 @@ const graph = (options: {
     tasks: [{ interrupts: [...(options.interrupts ?? [])] }],
     values: (options.stage === undefined
       ? {}
-      : { stage: options.stage }) as Record<string, unknown>,
+      : { stage: options.stage }),
   })),
 });
 
@@ -26,7 +26,7 @@ describe("runGraphOnce", () => {
       input: { tenantId: "t1" },
       conversationId: "c1",
     });
-    expect(outcome).toEqual({ kind: "completed", stage: "done" });
+    expect(outcome).toEqual({ kind: "completed", stage: "done", values: { stage: "done" } });
   });
 
   it("reports an interruption instead of success when the graph pauses for approval", async () => {
@@ -35,7 +35,7 @@ describe("runGraphOnce", () => {
       input: {},
       conversationId: "c1",
     });
-    expect(outcome).toEqual({ kind: "interrupted" });
+    expect(outcome).toMatchObject({ kind: "interrupted", interrupt: { planHash: "h" } });
   });
 
   it("stops when the signal is aborted mid-stream", async () => {
@@ -51,7 +51,7 @@ describe("runGraphOnce", () => {
 
   it("treats a missing stage as null rather than guessing", async () => {
     const outcome = await runGraphOnce({ graph: graph({}), input: {}, conversationId: "c1" });
-    expect(outcome).toEqual({ kind: "completed", stage: null });
+    expect(outcome).toEqual({ kind: "completed", stage: null, values: {} });
   });
 });
 // end

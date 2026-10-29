@@ -1,3 +1,4 @@
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
 import { describe, expect, it, vi } from "vitest";
 import type {
   CapabilityReport,
@@ -16,6 +17,9 @@ import type {
 import type { AgentGraphStateValue } from "../state.js";
 import { createImplementationPlanNode } from "./implementation-plan.js";
 import { TEST_SERVER_PLAN_SIGNER } from "../test-server-plan-signer.js";
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+import { compileUiImplementation } from "@kf/domain-client";
+// end
 
 const blueprint: CustomerEffectBlueprint = {
   schema: "kf-design-plan/v2",
@@ -197,6 +201,32 @@ function bed(specs: UIImplementationSpec[], compileError?: Error, depsOverride: 
 }
 
 describe("implementation-plan node", () => {
+  // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+  it.each([false, true])("compiles every pending intent against the real base, not the unbuilt prior proposal (changed=%s)", async changed => {
+    const pending = implementation();
+    const revised = structuredClone(pending);
+    if (changed) revised.pages[0]!.components[0]!.content = "修改后的产品标题";
+    const compile = vi.fn<UiImplementationCompilerPort["compile"]>(({ spec, previousSpec }) => {
+      const stripSources = (value: UIImplementationSpec) => ({ ...value, pages: value.pages.map(page => ({ ...page, components: page.components.map(original => {
+        const component = { ...original }; delete component.sourceModuleId; return component;
+      }) })) });
+      return Promise.resolve(compileUiImplementation(stripSources(spec), {
+        workspaceId: "w1", pageGuidById: { Page1: "page-guid" },
+        existingControlGuidByComponentId: { "products-title": "products-guid", "projects-title": "projects-guid" },
+        existingControlCapabilityIdByComponentId: { "products-title": "text", "projects-title": "text" },
+        existingControlGeometryByComponentId: Object.fromEntries(pending.pages[0]!.components.map(component => [component.id, component.geometry])),
+        ...(previousSpec ? { previousImplementation: stripSources(previousSpec) } : {}),
+      }));
+    });
+    const fixture = bed([revised], undefined, { uiImplementationCompiler: { compile } });
+    const result = await fixture.node({ ...state(), stage: "planning", resumeAction: "revise", uiImplementation: pending });
+    expect(result.stage).toBe("approval");
+    expect(result.lastErrorCode).toBeUndefined();
+    const saved = fixture.savePlan.mock.calls[0]?.[0] as { plan: { plan: ChangePlan } };
+    expect(saved.plan.plan.operations).toContainEqual(expect.objectContaining({ entityId: "projects-guid", op: "update", changes: [{ path: "/text", value: "projects" }] }));
+    expect(saved.plan.plan.operations).toContainEqual(expect.objectContaining({ entityId: "products-guid", op: "update", changes: [{ path: "/text", value: changed ? "修改后的产品标题" : "products" }] }));
+  });
+  // end
   it("compiles and persists a complete blueprint implementation without model-authored ChangePlan", async () => {
     const fixture = bed([implementation()]);
 
@@ -316,7 +346,6 @@ describe("implementation-plan node", () => {
 
     expect(fixture.reviseUiImplementation).toHaveBeenCalledTimes(1);
     expect(fixture.compile).toHaveBeenCalledWith(expect.objectContaining({
-      previousSpec: previous,
       spec: expect.objectContaining({
         pages: [expect.objectContaining({
           components: expect.arrayContaining([
@@ -332,3 +361,4 @@ describe("implementation-plan node", () => {
     );
   });
 });
+// end

@@ -7,6 +7,9 @@ import {
   type UIImplementationSpecV2,
 } from "@kf/contracts";
 import type { IntrinsicSize } from "./intrinsic-measure.js";
+// modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+import { EMPTY_LAYOUT_INSETS, type LayoutContentInsets } from "./layout-surface.js";
+// end
 
 const MAX_DIMENSION = MAX_COMPILED_LAYOUT_EXTENT;
 const GRID_COLUMN_LIMIT = 12;
@@ -42,6 +45,9 @@ export interface CompiledLayoutNode {
   readonly geometry: LayoutGeometry;
   readonly zIndex: number;
   readonly overflow: "visible" | "local-scroll";
+  // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+  readonly contentInsets?: LayoutContentInsets;
+  // end
   readonly scrollContentExtent?: Readonly<{ width: number; height: number }>;
   readonly children: readonly CompiledLayoutNode[];
 }
@@ -50,6 +56,9 @@ export interface LayoutCompileInput {
   readonly page: SolutionPage;
   readonly expandedRoot: SolutionNode;
   readonly intrinsicByNodeId: ReadonlyMap<string, IntrinsicSize>;
+  // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+  readonly layoutInsetsByNodeId?: ReadonlyMap<string, LayoutContentInsets>;
+  // end
 }
 
 export interface CompiledLayoutTree {
@@ -163,6 +172,13 @@ export function assertImplementationMatchesCompiledLayout(
     if (metadata.overflow !== node.overflow) {
       implementationMismatch(pageId, node.id, "overflow", node.overflow, metadata.overflow);
     }
+    // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+    if ((metadata.contentInsets === undefined) !== (node.contentInsets === undefined)
+      || (metadata.contentInsets !== undefined && node.contentInsets !== undefined
+        && (["left", "right", "top", "bottom"] as const).some(side => metadata.contentInsets![side] !== node.contentInsets![side]))) {
+      implementationMismatch(pageId, node.id, "compiledLayout", JSON.stringify(node.contentInsets) ?? "absent insets", JSON.stringify(metadata.contentInsets) ?? "absent insets");
+    }
+    // end
     const expectedGeometry = relocatedGeometry.get(node.id) ?? node.geometry;
     if (!sameGeometry(controls[0]!.geometry, expectedGeometry)) {
       implementationMismatch(pageId, node.id, "geometry", formatGeometry(expectedGeometry), formatGeometry(controls[0]!.geometry));
@@ -235,6 +251,9 @@ export function deriveCompilerOwnedTabPaneGeometry(
 
 interface CompileContext {
   readonly intrinsic: ReadonlyMap<string, IntrinsicSize>;
+  // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+  readonly layoutInsets: ReadonlyMap<string, LayoutContentInsets>;
+  // end
   readonly byId: Map<string, CompiledLayoutNode>;
 }
 
@@ -268,7 +287,9 @@ export function compileLayout(input: LayoutCompileInput): CompiledLayoutTree {
   if (rootWidthBounds.minimum > pageContentWidth && !rootOwnsGridAttempts) {
     unsatisfiable(input.expandedRoot.id, rootWidthBounds.minimum, rootIntrinsic.minHeight, pageContentWidth, pageContentHeight, [], false);
   }
-  const context: CompileContext = { intrinsic: input.intrinsicByNodeId, byId: new Map() };
+  // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+  const context: CompileContext = { intrinsic: input.intrinsicByNodeId, layoutInsets: input.layoutInsetsByNodeId ?? new Map(), byId: new Map() };
+  // end
   const rootWidth = Math.min(pageContentWidth, rootUsesAvailableWidth(input.expandedRoot) ? rootWidthBounds.maximum : rootWidthBounds.preferred);
   const rootHeight = preferredHeight(context, input.expandedRoot, rootWidth, false);
   const root = compileNode(context, input.expandedRoot, {
@@ -331,6 +352,12 @@ function validateInput(input: LayoutCompileInput): readonly SolutionNode[] {
   for (const id of input.intrinsicByNodeId.keys()) {
     if (!ids.has(id)) inputInvalid(id);
   }
+  // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+  for (const [id, insets] of input.layoutInsetsByNodeId ?? []) {
+    if (nodes.find(node => node.id === id)?.kind !== "layout"
+      || [insets.left, insets.right, insets.top, insets.bottom].some(value => !finiteNonnegative(value) || value > 400 || round(value) !== value)) inputInvalid(id);
+  }
+  // end
   return Object.freeze(nodes);
 }
 
@@ -441,21 +468,41 @@ function compileNode(
   let children: readonly CompiledLayoutNode[] = Object.freeze([]);
   if (node.kind === "layout") {
     const ordered = orderedChildren(node);
+    // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+    const insets = context.layoutInsets.get(node.id) ?? EMPTY_LAYOUT_INSETS;
+    const contentBox = freezeGeometry({ x: box.x + insets.left, y: box.y + insets.top,
+      width: box.width - insets.left - insets.right, height: box.height - insets.top - insets.bottom });
+    if (contentBox.width <= 0 || contentBox.height < 0) {
+      unsatisfiable(node.id, insets.left + insets.right, insets.top + insets.bottom, box.width, box.height, [], scrollAllowed);
+    }
+    // end
     const childScrollAllowed = scrollAllowed || node.layout === "scroll-region";
     if (node.layout === "row" || node.layout === "split" || node.layout === "sidebar-content" || node.layout === "master-detail") {
-      children = compileRow(context, node, ordered, box, zIndex, childScrollAllowed);
+      // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+      children = compileRow(context, node, ordered, contentBox, zIndex, childScrollAllowed);
+      // end
     } else if (node.layout === "column" || node.layout === "scroll-region") {
-      children = compileColumn(context, node, ordered, box, zIndex, childScrollAllowed);
+      // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+      children = compileColumn(context, node, ordered, contentBox, zIndex, childScrollAllowed);
+      // end
     } else if (node.layout === "grid" || node.layout === "asymmetric-grid") {
-      children = compileGrid(context, node, ordered, box, zIndex, childScrollAllowed);
+      // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+      children = compileGrid(context, node, ordered, contentBox, zIndex, childScrollAllowed);
+      // end
     } else if (node.layout === "stack" || node.layout === "overlay-anchor") {
-      children = compileStack(context, node, ordered, box, zIndex, childScrollAllowed);
+      // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+      children = compileStack(context, node, ordered, contentBox, zIndex, childScrollAllowed);
+      // end
     } else {
-      children = compileDock(context, node, ordered, box, zIndex, childScrollAllowed);
+      // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+      children = compileDock(context, node, ordered, contentBox, zIndex, childScrollAllowed);
+      // end
     }
   }
   const scrollContentExtent = node.kind === "layout" && node.layout === "scroll-region"
-    ? contentExtent(box, children)
+    // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+    ? contentExtent(box, children, context.layoutInsets.get(node.id) ?? EMPTY_LAYOUT_INSETS)
+    // end
     : undefined;
   if (scrollContentExtent !== undefined
     && (scrollContentExtent.width > MAX_COMPILED_LAYOUT_EXTENT || scrollContentExtent.height > MAX_COMPILED_LAYOUT_EXTENT)) {
@@ -476,6 +523,10 @@ function compileNode(
     geometry: box,
     zIndex,
     overflow: node.kind === "layout" && node.layout === "scroll-region" ? "local-scroll" : "visible",
+    // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+    ...(context.layoutInsets.has(node.id) && Object.values(context.layoutInsets.get(node.id)!).some(value => value > 0)
+      ? { contentInsets: context.layoutInsets.get(node.id)! } : {}),
+    // end
     ...(scrollContentExtent === undefined ? {} : { scrollContentExtent }),
     children,
   });
@@ -559,12 +610,17 @@ function sharedAxisSize(
 function contentExtent(
   viewport: LayoutGeometry,
   children: readonly CompiledLayoutNode[],
+  // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+  insets: LayoutContentInsets,
+  // end
 ): Readonly<{ width: number; height: number }> {
   let right = viewport.x + viewport.width;
   let bottom = viewport.y + viewport.height;
   const visit = (node: CompiledLayoutNode): void => {
-    right = Math.max(right, node.geometry.x + node.geometry.width);
-    bottom = Math.max(bottom, node.geometry.y + node.geometry.height);
+    // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+    right = Math.max(right, node.geometry.x + node.geometry.width + insets.right);
+    bottom = Math.max(bottom, node.geometry.y + node.geometry.height + insets.bottom);
+    // end
     if (node.layout !== "scroll-region") node.children.forEach(visit);
   };
   children.forEach(visit);
@@ -735,37 +791,42 @@ function compileDock(
   return Object.freeze(children.map((child) => compileNode(context, child, requireRectangle(rectangles, child.id), zIndex, scrollAllowed)));
 }
 
+// modified by jinlong.feng at 2026-10-26 Agent工作台迭代
 function preferredHeight(context: CompileContext, node: SolutionNode, availableWidth: number, scrollAllowed: boolean): number {
   const measured = requireIntrinsic(context.intrinsic, node.id);
-  let contentHeight = measured.preferredHeight;
+  const insets = context.layoutInsets.get(node.id) ?? EMPTY_LAYOUT_INSETS;
+  const verticalInsets = insets.top + insets.bottom;
+  const innerWidth = availableWidth - insets.left - insets.right;
+  const measuredContentHeight = Math.max(0, measured.preferredHeight - verticalInsets);
+  let contentHeight = measuredContentHeight;
   if (node.kind === "layout") {
     const children = orderedChildren(node);
     const gap = preferredGap(node);
     if (node.layout === "row" || node.layout === "split" || node.layout === "sidebar-content" || node.layout === "master-detail") {
-      const widths = allocateAxis(context, node, children, "width", availableWidth, measured.preferredHeight, scrollAllowed).sizes;
-      contentHeight = Math.max(measured.preferredHeight, ...children.map((child, index) => preferredHeight(context, child, widths[index]!, scrollAllowed)));
+      const widths = allocateAxis(context, node, children, "width", innerWidth, measuredContentHeight, scrollAllowed).sizes;
+      contentHeight = Math.max(measuredContentHeight, ...children.map((child, index) => preferredHeight(context, child, widths[index]!, scrollAllowed)));
     } else if (node.layout === "column" || node.layout === "scroll-region") {
       const childScrollAllowed = scrollAllowed || node.layout === "scroll-region";
-      const widths = children.map((child) => crossAxisWidth(context, child, availableWidth, axisPreferred(context, child, "height"), childScrollAllowed));
-      contentHeight = Math.max(measured.preferredHeight, sum(children.map((child, index) => preferredHeight(context, child, widths[index]!, childScrollAllowed))) + gap * (children.length - 1));
+      const widths = children.map((child) => crossAxisWidth(context, child, innerWidth, axisPreferred(context, child, "height"), childScrollAllowed));
+      contentHeight = Math.max(measuredContentHeight, sum(children.map((child, index) => preferredHeight(context, child, widths[index]!, childScrollAllowed))) + gap * (children.length - 1));
     } else if (node.layout === "grid" || node.layout === "asymmetric-grid") {
-      const tracks = gridTracks(context, node, children, availableWidth, scrollAllowed);
+      const tracks = gridTracks(context, node, children, innerWidth, scrollAllowed);
       const rows: number[] = [];
       children.forEach((child, index) => {
         const row = Math.floor(index / tracks.columns);
         const column = index % tracks.columns;
         rows[row] = Math.max(rows[row] ?? 0, preferredHeight(context, child, tracks.widths[column]!, scrollAllowed));
       });
-      contentHeight = Math.max(measured.preferredHeight, sum(rows) + tracks.gap * Math.max(0, rows.length - 1));
+      contentHeight = Math.max(measuredContentHeight, sum(rows) + tracks.gap * Math.max(0, rows.length - 1));
     } else if (node.layout === "stack" || node.layout === "overlay-anchor") {
-      const sharedWidth = sharedWidthForMeasurement(context, node, children, availableWidth, scrollAllowed);
-      contentHeight = Math.max(measured.preferredHeight, stackHeightBounds(context, node, children, sharedWidth, scrollAllowed).preferred);
+      const sharedWidth = sharedWidthForMeasurement(context, node, children, innerWidth, scrollAllowed);
+      contentHeight = Math.max(measuredContentHeight, stackHeightBounds(context, node, children, sharedWidth, scrollAllowed).preferred);
     } else {
-      contentHeight = Math.max(measured.preferredHeight, dockPreferredHeight(context, node, children, availableWidth, scrollAllowed));
+      contentHeight = Math.max(measuredContentHeight, dockPreferredHeight(context, node, children, innerWidth, scrollAllowed));
     }
   }
   const bounds = axisBoundsFromMeasured(node, measured, "height");
-  const resolved = resolveHeightIntent(node.intent.height, bounds, contentHeight);
+  const resolved = resolveHeightIntent(node.intent.height, bounds, contentHeight + verticalInsets);
   const minimum = minimumHeight(context, node, availableWidth, scrollAllowed || (node.kind === "layout" && node.layout === "scroll-region"));
   if ((resolved < minimum || minimum > bounds.maximum) && !(node.kind === "layout" && node.layout === "scroll-region")) {
     unsatisfiable(node.id, axisMinimum(context, node, "width"), minimum, availableWidth, resolved, [], scrollAllowed);
@@ -775,17 +836,20 @@ function preferredHeight(context: CompileContext, node: SolutionNode, availableW
 
 function minimumHeight(context: CompileContext, node: SolutionNode, availableWidth: number, scrollAllowed: boolean): number {
   if (node.kind !== "layout") return axisMinimum(context, node, "height");
+  const insets = context.layoutInsets.get(node.id) ?? EMPTY_LAYOUT_INSETS;
+  const verticalInsets = insets.top + insets.bottom;
+  const innerWidth = availableWidth - insets.left - insets.right;
   const children = orderedChildren(node);
   const gap = minimumGap(node);
   let required: number;
   if (node.layout === "row" || node.layout === "split" || node.layout === "sidebar-content" || node.layout === "master-detail") {
-    required = Math.max(...children.map((child) => minimumHeight(context, child, availableWidth, scrollAllowed)));
+    required = Math.max(...children.map((child) => minimumHeight(context, child, innerWidth, scrollAllowed)));
   } else if (node.layout === "column" || node.layout === "scroll-region") {
     const childScrollAllowed = scrollAllowed || node.layout === "scroll-region";
-    const widths = children.map((child) => crossAxisWidth(context, child, availableWidth, axisMinimum(context, child, "height"), childScrollAllowed));
+    const widths = children.map((child) => crossAxisWidth(context, child, innerWidth, axisMinimum(context, child, "height"), childScrollAllowed));
     required = sum(children.map((child, index) => minimumHeight(context, child, widths[index]!, childScrollAllowed))) + gap * (children.length - 1);
   } else if (node.layout === "grid" || node.layout === "asymmetric-grid") {
-    const tracks = gridTracks(context, node, children, availableWidth, scrollAllowed);
+    const tracks = gridTracks(context, node, children, innerWidth, scrollAllowed);
     const rows: number[] = [];
     children.forEach((child, index) => {
       const row = Math.floor(index / tracks.columns);
@@ -793,14 +857,16 @@ function minimumHeight(context: CompileContext, node: SolutionNode, availableWid
     });
     required = sum(rows) + minimumGap(node) * Math.max(0, rows.length - 1);
   } else if (node.layout === "stack" || node.layout === "overlay-anchor") {
-    const sharedWidth = sharedWidthForMeasurement(context, node, children, availableWidth, scrollAllowed);
+    const sharedWidth = sharedWidthForMeasurement(context, node, children, innerWidth, scrollAllowed);
     required = stackHeightBounds(context, node, children, sharedWidth, scrollAllowed).minimum;
   } else {
-    required = dockMinimumHeight(context, node, children, availableWidth, scrollAllowed);
+    required = dockMinimumHeight(context, node, children, innerWidth, scrollAllowed);
   }
+  required += verticalInsets;
   if (node.layout === "scroll-region") return Math.min(axisMinimum(context, node, "height"), required);
   return Math.max(axisMinimum(context, node, "height"), required);
 }
+// end
 
 function dockPreferredHeight(context: CompileContext, parent: LayoutNode, children: readonly SolutionNode[], width: number, scrollAllowed: boolean): number {
   const north = preferredHeight(context, children[0]!, width, scrollAllowed);

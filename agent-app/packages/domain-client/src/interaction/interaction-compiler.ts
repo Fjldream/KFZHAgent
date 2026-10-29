@@ -6,6 +6,9 @@ import {
   CustomerSolutionBlueprintSchema,
   SolutionImplementationPlanSchema,
   UIImplementationSpecV2Schema,
+  // modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+  validateObservationJourneys,
+  // end
   type CompiledEventBinding,
   type CompiledScriptModule,
   type CustomerSolutionBlueprint,
@@ -36,6 +39,10 @@ export type InteractionDiagnosticCode =
   | "INTERACTION_SCRIPT_CYCLE"
   | "INTERACTION_OUTPUT_CONSUMER_MISSING"
   | "JOURNEY_REFERENCE_UNKNOWN"
+  // modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+  | "JOURNEY_OBSERVATION_UNPROVEN"
+  | "JOURNEY_OBSERVATION_ACTION_REFERENCE"
+  // end
   | "JOURNEY_REFERENCE_AMBIGUOUS"
   | "JOURNEY_STEP_UNCOVERED"
   | "JOURNEY_TRIGGER_OWNERSHIP_MISMATCH"
@@ -54,10 +61,30 @@ export interface InteractionCompilationRequest {
   readonly reason: string;
 }
 
+/**
+ * 描述故意省略的交互边而不是不安全或编译错误的程序。API 可以将这些作为兼容性警告显示，而其他交互错误仍然保持阻塞。
+ */
+export const RECOVERABLE_INTERACTION_DIAGNOSTIC_CODES: ReadonlySet<InteractionDiagnosticCode> = new Set([
+  "INTERACTION_CLOSURE_MISSING",
+]);
+
+export function interactionDiagnosticsBlockCompilation(
+  diagnostics: Readonly<{
+    errors: readonly InteractionDiagnostic[];
+    requests: readonly InteractionCompilationRequest[];
+  }>,
+  recoverableRequestActionIds: ReadonlySet<string> = new Set(),
+): boolean {
+  return diagnostics.errors.some((diagnostic) =>
+    diagnostic.code !== "INTERACTION_CLOSURE_MISSING"
+      || !recoverableRequestActionIds.has(diagnostic.nodeId))
+    || diagnostics.requests.some((request) => !recoverableRequestActionIds.has(request.actionId));
+}
+
 export interface InteractionCompilationResult {
-  /** Canonical hash of the authoritative raw model plan. */
+  /** 权威原始模型计划的哈希值。 */
   readonly sourceSolutionPlanHash: string;
-  /** Canonical hash of the server-derived plan used for compilation. */
+  /** 用于编译的服务器衍生计划的哈希值。 */
   readonly loweredSolutionPlanHash: string;
   readonly implementation: UIImplementationSpecV2;
   readonly diagnostics: {
@@ -477,6 +504,12 @@ export function compileInteractions(input: unknown): InteractionCompilationResul
         errors.push(diagnostic("JOURNEY_REFERENCE_UNKNOWN", action.id, `unknown journey step reference: ${stepKey}`));
         return;
       }
+      // modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+      if (step.kind === "observe") {
+        errors.push(diagnostic("JOURNEY_OBSERVATION_ACTION_REFERENCE", action.id, `observation cannot be covered by an action: ${stepKey}`));
+        return;
+      }
+      // end
       const owner = graphAction === undefined ? undefined : triggerOwnerByControl.get(graphAction.trigger.controlId);
       if (owner === undefined || owner.pageId !== step.pageId || !owner.regionIds.has(step.regionId)) {
         errors.push(diagnostic("JOURNEY_TRIGGER_OWNERSHIP_MISMATCH", action.id, `trigger does not belong to ${step.pageId}/${step.regionId}`));
@@ -525,7 +558,12 @@ export function compileInteractions(input: unknown): InteractionCompilationResul
       observableJourneyCoverage.add(stepKey);
     }
   });
-  blueprint.journeys.forEach((journey) => journey.steps.forEach((_step, stepIndex) => {
+  // modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+  validateObservationJourneys(blueprint, plan, implementation).forEach((issue) =>
+    errors.push(diagnostic("JOURNEY_OBSERVATION_UNPROVEN", issue.stepKey, `${issue.message}: ${issue.expectedText}`)));
+  blueprint.journeys.forEach((journey) => journey.steps.forEach((step, stepIndex) => {
+    if (step.kind === "observe") return;
+  // end
     const stepKey = `${journey.id}:${stepIndex}`;
     if (!observableJourneyCoverage.has(stepKey)) {
       errors.push(diagnostic("JOURNEY_STEP_UNCOVERED", stepKey, "confirmed journey step has no ownership-correct observable trigger closure"));

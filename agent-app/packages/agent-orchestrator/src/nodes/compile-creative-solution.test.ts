@@ -371,3 +371,60 @@ describe("compile creative solution node", () => {
     expect(fixture.messages.at(-1)).toContain("34be85be-d3a8-4c24-bb0b-b2ba07a355b1");
   });
 });
+
+// modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+function reviewedVisualInput(title = "访客标题") {
+  const spec = { schemaVersion: 1, sourceAssetId: "reference1", sourceHash: "a".repeat(64), viewport: { width: 1440, height: 900 },
+    regions: [{ id: "heading", parentId: null, role: "text", box: { x: 0, y: 0, width: 1, height: 1 }, text: [title], confidence: 0.9, interactionHint: null }],
+    designTokens: { background: "#fff", foreground: "#111", accent: "#123456", spacing: [8], radius: [4] }, uncertainties: [] };
+  const reference = { schemaVersion: 1, analysisId: "analysis1", specHash: canonicalServerHash(spec), spec,
+    mappings: [{ regionId: "heading", controlType: "text", capabilityId: "text", support: "supported_unverified", reason: "未验证", evidenceIds: [], fallback: null }],
+    acceptedDifferences: [{ regionId: "heading", disposition: "accept-unverified", capabilityId: "text", reason: "同意保留" }] };
+  const reviewHash = "b".repeat(64);
+  return { schema: "kf-accepted-visual-planning/v1", reviewHash, confirmationHash: canonicalServerHash({ reviewHash, reference }), reference };
+}
+const visualWrapper = () => ({ schema: "kf-visual-semantic-plan/v1", plan: semanticPlan, bindings: [{ regionId: "heading", nodeId: "visitor-title" }] });
+const visualState = (accepted = reviewedVisualInput()) => state({ planVersion: "run-plan@7", acceptedVisualPlanningInput: accepted,
+  visualSemanticPlan: visualWrapper(), visualPlanConfirmationHash: accepted.confirmationHash } as never);
+
+describe("reviewed visual compilation in the graph node", () => {
+  it("forwards reviewed structure and validated semantic bindings to the existing compiler", async () => {
+    const fixture = bed(); const accepted = reviewedVisualInput();
+    const result = await createCompileCreativeSolutionNode(fixture.deps)(visualState(accepted));
+    expect(result).toMatchObject({ stage: "building", buildAuthorization: "creative-solution" });
+    expect(fixture.compile).toHaveBeenCalledWith(expect.objectContaining({ visual: { reference: accepted.reference, bindings: visualWrapper().bindings } }));
+  });
+  it("rejects torn review/protocol/binding state before compiler or message side effects", async () => {
+    for (const overrides of [
+      { acceptedVisualPlanningInput: null }, { planVersion: "run-plan@6" }, { visualSemanticPlan: null },
+      { visualPlanConfirmationHash: "c".repeat(64) },
+      { visualSemanticPlan: { ...visualWrapper(), bindings: [{ regionId: "heading", nodeId: "missing" }] } },
+      { visualSemanticPlan: { ...visualWrapper(), plan: { ...semanticPlan, projectKey: "altered" } } },
+    ]) {
+      const fixture = bed();
+      const result = await createCompileCreativeSolutionNode(fixture.deps)({ ...visualState(), ...overrides } as never);
+      expect(result).toMatchObject({ stage: "idle", lastErrorCode: "VISUAL_PLANNING_INPUT_INVALID", buildAuthorization: undefined });
+      expect(fixture.compile).not.toHaveBeenCalled();
+      expect(fixture.messages).toEqual([]);
+    }
+  });
+  it("does not reuse a compiled result when only the reviewed visual confirmation changes", async () => {
+    const fixture = bed(); const cache = new Map<string, unknown>();
+    const original = await fixture.compile();
+    let calls = 0;
+    fixture.compile.mockImplementation(async () => ({ ...original, changePlanId: `visual-plan-${++calls}` }));
+    const node = createCompileCreativeSolutionNode({ ...fixture.deps, resolveRunStepMemo: () => ({
+      find: async (key, hash) => cache.get(`${key}:${hash}`) ?? null,
+      save: async (key, hash, output) => { cache.set(`${key}:${hash}`, output); },
+    }) });
+    const first = { ...visualState(reviewedVisualInput("标题A")), runId: "memo-run" };
+    const second = { ...visualState(reviewedVisualInput("标题B")), runId: "memo-run" };
+    expect((await node(first)).changePlanId).toBe("visual-plan-1");
+    expect((await node(first)).changePlanId).toBe("visual-plan-1");
+    expect((await node(second)).changePlanId).toBe("visual-plan-2");
+    expect(await node({ ...first, visualSemanticPlan: { ...visualWrapper(), bindings: [] } } as never))
+      .toMatchObject({ lastErrorCode: "VISUAL_PLANNING_INPUT_INVALID", buildAuthorization: undefined });
+    expect(calls).toBe(2);
+  });
+});
+// end

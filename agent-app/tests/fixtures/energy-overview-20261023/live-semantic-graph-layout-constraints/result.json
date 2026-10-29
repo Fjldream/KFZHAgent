@@ -1,0 +1,85 @@
+{
+  "physicalRequests": 5,
+  "invocations": [
+    {
+      "task": "vision",
+      "requestedModel": "deepseek-flash",
+      "actualModel": "deepseek-flash",
+      "status": "SUCCEEDED",
+      "failureCode": null,
+      "inputTokens": 1534,
+      "outputTokens": 2929,
+      "cacheHitTokens": 1280,
+      "cacheMissTokens": 254,
+      "latencyMs": 10045
+    },
+    {
+      "task": "blueprint",
+      "requestedModel": "deepseek-flash",
+      "actualModel": "deepseek-flash",
+      "status": "SUCCEEDED",
+      "failureCode": null,
+      "inputTokens": 10518,
+      "outputTokens": 2857,
+      "cacheHitTokens": 2304,
+      "cacheMissTokens": 8214,
+      "latencyMs": 14915
+    },
+    {
+      "task": "repair",
+      "requestedModel": "deepseek-flash",
+      "actualModel": "deepseek-flash",
+      "status": "SUCCEEDED",
+      "failureCode": null,
+      "inputTokens": 13424,
+      "outputTokens": 2868,
+      "cacheHitTokens": 10496,
+      "cacheMissTokens": 2928,
+      "latencyMs": 9945
+    },
+    {
+      "task": "implementation",
+      "requestedModel": "deepseek-flash",
+      "actualModel": "deepseek-flash",
+      "status": "SUCCEEDED",
+      "failureCode": null,
+      "inputTokens": 27046,
+      "outputTokens": 7662,
+      "cacheHitTokens": 0,
+      "cacheMissTokens": 27046,
+      "latencyMs": 23312
+    },
+    {
+      "task": "repair",
+      "requestedModel": "deepseek-flash",
+      "actualModel": "deepseek-flash",
+      "status": "SUCCEEDED",
+      "failureCode": null,
+      "inputTokens": 27914,
+      "outputTokens": 7677,
+      "cacheHitTokens": 3968,
+      "cacheMissTokens": 23946,
+      "latencyMs": 22643
+    }
+  ],
+  "outcomes": [
+    {
+      "id": "6c9e2ffd-5483-4282-b47d-d7931203b927",
+      "status": "CANCELLED",
+      "failureCode": null
+    },
+    {
+      "id": "35f2027d-d72b-4db3-95fa-67645ee7e1e4",
+      "status": "CANCELLED",
+      "failureCode": null
+    },
+    {
+      "id": "2ca6fb48-96d7-4af8-8ca7-5f6a4ab25588",
+      "status": "FAILED",
+      "failureCode": "INVALID_MODEL_OUTPUT"
+    }
+  ],
+  "productionRollout": false,
+  "nativeKfAccepted": false,
+  "browserAccepted": false
+}

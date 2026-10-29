@@ -1,6 +1,9 @@
-// modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
 import { API_BASE, ApiError } from "./api.js";
 import { parseSseBlocks } from "./sse.js";
+// modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+import type { VisualReviewAcceptance } from "@kf/contracts";
+// end
 
 export type RunStatusLike =
   | "QUEUED" | "RUNNING" | "WAITING_INPUT" | "WAITING_APPROVAL" | "BUILDING"
@@ -12,6 +15,10 @@ export type RunSnapshotLike = {
   lastSeq: number;
   failureCode: string | null;
   resultRevisionId: string | null;
+  buildJobId?: string | null;
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  retryPolicy?: "new-run" | "new-visual-review";
+  // end
 };
 
 export type RunEventLike = {
@@ -44,8 +51,26 @@ export type StartRunInput = {
   clientRequestId: string;
   clientMessageId: string;
   mode: "discuss" | "plan" | "build";
-  action: { type: "message"; text: string };
+  // modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+  attachmentIds?: string[];
+  visualReference?: { primaryAssetId: string; sendingConsent: { noticeVersion: "visual-egress@1"; accepted: true } };
+  // end
+  action: { type: "message"; text: string }
+    | { type: "confirm_blueprint"; expectedRunId: string; receipt: string }
+    | { type: "resume_approval"; expectedRunId: string; action: "approve" | "revise" | "cancel"; planHash: string }
+    // modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+    | (VisualReviewAcceptance & { type: "accept_visual_reference" });
+    // end
 };
+
+export async function fetchLatestRun(conversationId: string): Promise<RunSnapshotLike | null> {
+  const response = await fetch(`${API_BASE}/api/conversations/${encodeURIComponent(conversationId)}/runs/latest`, { credentials: "include" });
+  if (!response.ok) throw await asApiError(response, "RUN_SNAPSHOT_FAILED");
+  // modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+  const body = await response.text();
+  return body.trim().length === 0 ? null : JSON.parse(body) as RunSnapshotLike | null;
+  // end
+}
 
 /** 创建 run；同一 clientRequestId 重复提交会拿回同一个 run（服务端幂等）。 */
 export async function startRun(conversationId: string, input: StartRunInput): Promise<RunSnapshotLike> {
@@ -57,6 +82,20 @@ export async function startRun(conversationId: string, input: StartRunInput): Pr
   });
   if (!response.ok) throw await asApiError(response, "RUN_START_FAILED");
   return (await response.json()) as RunSnapshotLike;
+}
+
+export async function cancelRun(runId: string): Promise<RunSnapshotLike> {
+  const response = await fetch(`${API_BASE}/api/runs/${encodeURIComponent(runId)}/cancel`, { method: "POST", credentials: "include" });
+  if (!response.ok) throw await asApiError(response, "RUN_CANCEL_FAILED");
+  return await response.json() as RunSnapshotLike;
+}
+
+export async function retryRun(runId: string, clientRequestId: string): Promise<RunSnapshotLike> {
+  const response = await fetch(`${API_BASE}/api/runs/${encodeURIComponent(runId)}/retry`, {
+    method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientRequestId }),
+  });
+  if (!response.ok) throw await asApiError(response, "RUN_RETRY_FAILED");
+  return await response.json() as RunSnapshotLike;
 }
 
 /**
@@ -82,23 +121,32 @@ export async function* streamRunEvents(options: {
   if (reader === undefined) return;
 
   const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  const maxFrameBytes = 65_536;
   let buffer = "";
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
 
-    let boundary = buffer.indexOf("\n\n");
-    while (boundary >= 0) {
-      const block = buffer.slice(0, boundary + 2);
-      buffer = buffer.slice(boundary + 2);
-      // 心跳帧（": keep-alive"）没有 data，parseSseBlocks 会返回空 data，直接跳过。
-      // parseSseBlocks 已做 JSON 解析，并且会跳过没有 data 的心跳帧。
-      for (const frame of parseSseBlocks(block)) {
-        yield frame.data as RunEventLike;
+      let boundary = buffer.indexOf("\n\n");
+      while (boundary >= 0) {
+        const block = buffer.slice(0, boundary + 2);
+        if (encoder.encode(block).byteLength > maxFrameBytes) throw new Error("RUN_EVENT_FRAME_TOO_LARGE");
+        buffer = buffer.slice(boundary + 2);
+        // 心跳不含 data，通用解析器会跳过；网络 chunk 大小不等于单帧大小。
+        for (const frame of parseSseBlocks(block)) {
+          yield frame.data as RunEventLike;
+        }
+        boundary = buffer.indexOf("\n\n");
       }
-      boundary = buffer.indexOf("\n\n");
+      if (encoder.encode(buffer).byteLength > maxFrameBytes) throw new Error("RUN_EVENT_FRAME_TOO_LARGE");
     }
+  } finally {
+    // 正常 EOF、抛错、AbortSignal 和消费者提前 break 都释放 fetch reader。
+    try { await reader.cancel(); } catch { /* 已断开的 reader 不影响清理。 */ }
+    reader.releaseLock();
   }
 }
 // end

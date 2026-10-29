@@ -118,13 +118,13 @@ function balanced(src: string, start: number, open: string, close: string): stri
 
 /** 提取构造器体（function 或 class constructor） */
 export function extractConstructorBody(src: string): string {
-  // class X extends Y { ... constructor(){ ... } }
+  // 类声明结构：class X extends Y { ... constructor(){ ... } }
   const cls = src.match(/class\s+\w+[\s\S]*?constructor\s*\([^)]*\)\s*\{/);
   if (cls) {
     const start = src.indexOf(cls[0]) + cls[0].length - 1; // 指向 { 本身，depth 从 1 起
     return balanced(src, start, "{", "}");
   }
-  // function KX(...){ ... }
+  // 函数声明结构：function KX(...){ ... }
   const fn = src.match(/function\s+KMU?\w*\s*\([^)]*\)\s*\{/);
   if (fn) {
     const start = src.indexOf(fn[0]) + fn[0].length - 1;

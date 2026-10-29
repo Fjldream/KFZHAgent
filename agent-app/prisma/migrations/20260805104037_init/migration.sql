@@ -1,10 +1,10 @@
--- CreateEnum
+-- 创建枚举
 CREATE TYPE "UserRole" AS ENUM ('platform_admin', 'tenant_admin', 'member');
 
--- CreateEnum
+-- 创建枚举
 CREATE TYPE "JobStatus" AS ENUM ('QUEUED', 'RUNNING', 'VALIDATING', 'SUCCEEDED', 'FAILED');
 
--- CreateTable
+-- 创建表
 CREATE TABLE "Tenant" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
@@ -13,7 +13,7 @@ CREATE TABLE "Tenant" (
     CONSTRAINT "Tenant_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- 创建表
 CREATE TABLE "User" (
     "id" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
@@ -28,7 +28,7 @@ CREATE TABLE "User" (
     CONSTRAINT "User_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- 创建表
 CREATE TABLE "UserSession" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
@@ -41,7 +41,7 @@ CREATE TABLE "UserSession" (
     CONSTRAINT "UserSession_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- 创建表
 CREATE TABLE "SolutionWorkspace" (
     "id" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
@@ -53,7 +53,7 @@ CREATE TABLE "SolutionWorkspace" (
     CONSTRAINT "SolutionWorkspace_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- 创建表
 CREATE TABLE "Conversation" (
     "id" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
@@ -65,7 +65,7 @@ CREATE TABLE "Conversation" (
     CONSTRAINT "Conversation_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- 创建表
 CREATE TABLE "Message" (
     "id" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
@@ -77,7 +77,7 @@ CREATE TABLE "Message" (
     CONSTRAINT "Message_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- 创建表
 CREATE TABLE "ChangeRequest" (
     "id" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
@@ -90,7 +90,7 @@ CREATE TABLE "ChangeRequest" (
     CONSTRAINT "ChangeRequest_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- 创建表
 CREATE TABLE "ChangePlan" (
     "id" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
@@ -103,7 +103,7 @@ CREATE TABLE "ChangePlan" (
     CONSTRAINT "ChangePlan_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- 创建表
 CREATE TABLE "SolutionRevision" (
     "id" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
@@ -116,7 +116,7 @@ CREATE TABLE "SolutionRevision" (
     CONSTRAINT "SolutionRevision_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- 创建表
 CREATE TABLE "DomainProjectRevision" (
     "id" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
@@ -129,7 +129,7 @@ CREATE TABLE "DomainProjectRevision" (
     CONSTRAINT "DomainProjectRevision_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- 创建表
 CREATE TABLE "BuildJob" (
     "id" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
@@ -149,7 +149,7 @@ CREATE TABLE "BuildJob" (
     CONSTRAINT "BuildJob_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- 创建表
 CREATE TABLE "Artifact" (
     "id" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
@@ -163,7 +163,7 @@ CREATE TABLE "Artifact" (
     CONSTRAINT "Artifact_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- 创建表
 CREATE TABLE "ValidationReport" (
     "id" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
@@ -177,7 +177,7 @@ CREATE TABLE "ValidationReport" (
     CONSTRAINT "ValidationReport_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- 创建表
 CREATE TABLE "AuditLog" (
     "id" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
@@ -191,65 +191,65 @@ CREATE TABLE "AuditLog" (
     CONSTRAINT "AuditLog_pkey" PRIMARY KEY ("id")
 );
 
--- CreateIndex
+-- 创建索引
 CREATE UNIQUE INDEX "Tenant_name_key" ON "Tenant"("name");
 
--- CreateIndex
+-- 创建索引
 CREATE UNIQUE INDEX "User_tenantId_username_key" ON "User"("tenantId", "username");
 
--- CreateIndex
+-- 创建索引
 CREATE UNIQUE INDEX "UserSession_tokenHash_key" ON "UserSession"("tokenHash");
 
--- CreateIndex
+-- 创建索引
 CREATE INDEX "UserSession_userId_idx" ON "UserSession"("userId");
 
--- CreateIndex
+-- 创建索引
 CREATE INDEX "UserSession_expiresAt_idx" ON "UserSession"("expiresAt");
 
--- CreateIndex
+-- 创建索引
 CREATE UNIQUE INDEX "SolutionWorkspace_tenantId_name_key" ON "SolutionWorkspace"("tenantId", "name");
 
--- CreateIndex
+-- 创建索引
 CREATE INDEX "Conversation_tenantId_workspaceId_idx" ON "Conversation"("tenantId", "workspaceId");
 
--- CreateIndex
+-- 创建索引
 CREATE INDEX "Message_tenantId_conversationId_idx" ON "Message"("tenantId", "conversationId");
 
--- CreateIndex
+-- 创建索引
 CREATE INDEX "ChangeRequest_tenantId_workspaceId_idx" ON "ChangeRequest"("tenantId", "workspaceId");
 
--- CreateIndex
+-- 创建索引
 CREATE INDEX "ChangePlan_tenantId_workspaceId_idx" ON "ChangePlan"("tenantId", "workspaceId");
 
--- CreateIndex
+-- 创建索引
 CREATE INDEX "SolutionRevision_tenantId_workspaceId_idx" ON "SolutionRevision"("tenantId", "workspaceId");
 
--- CreateIndex
+-- 创建索引
 CREATE INDEX "DomainProjectRevision_tenantId_solutionRevisionId_idx" ON "DomainProjectRevision"("tenantId", "solutionRevisionId");
 
--- CreateIndex
+-- 创建索引
 CREATE UNIQUE INDEX "BuildJob_idempotencyKey_key" ON "BuildJob"("idempotencyKey");
 
--- CreateIndex
+-- 创建索引
 CREATE INDEX "BuildJob_status_leaseExpiresAt_idx" ON "BuildJob"("status", "leaseExpiresAt");
 
--- CreateIndex
+-- 创建索引
 CREATE INDEX "BuildJob_tenantId_workspaceId_idx" ON "BuildJob"("tenantId", "workspaceId");
 
--- CreateIndex
+-- 创建索引
 CREATE INDEX "Artifact_tenantId_buildJobId_idx" ON "Artifact"("tenantId", "buildJobId");
 
--- CreateIndex
+-- 创建索引
 CREATE INDEX "ValidationReport_tenantId_buildJobId_idx" ON "ValidationReport"("tenantId", "buildJobId");
 
--- CreateIndex
+-- 创建索引
 CREATE INDEX "AuditLog_tenantId_createdAt_idx" ON "AuditLog"("tenantId", "createdAt");
 
--- AddForeignKey
+-- 添加外键
 ALTER TABLE "User" ADD CONSTRAINT "User_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
--- AddForeignKey
+-- 添加外键
 ALTER TABLE "UserSession" ADD CONSTRAINT "UserSession_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- AddForeignKey
+-- 添加外键
 ALTER TABLE "SolutionWorkspace" ADD CONSTRAINT "SolutionWorkspace_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

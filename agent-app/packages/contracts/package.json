@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./visual-review-revision": "./src/visual-review-revision.ts"
   },
   "scripts": {
     "test": "vitest run --passWithNoTests",

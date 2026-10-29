@@ -108,6 +108,23 @@ function compile(root: SolutionNode, overrides: ReadonlyMap<string, IntrinsicSiz
   return compileLayout({ page: page(root, canvas), expandedRoot: root, intrinsicByNodeId: intrinsicMap(root, overrides) });
 }
 
+// modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+describe("compiler-owned layout insets", () => {
+  it.each(["unknown", "leaf", "negative", "nonfinite", "precision"])("rejects %s inset records", (mutation) => {
+    const root = layout("root", "column", [control("leaf")]);
+    const insets = { left: mutation === "negative" ? -1 : 16, right: mutation === "precision" ? 0.333 : 16, top: mutation === "nonfinite" ? NaN : 16, bottom: 16 };
+    const owner = mutation === "unknown" ? "missing" : mutation === "leaf" ? "leaf" : "root";
+    expect(() => compileLayout({ page: page(root), expandedRoot: root, intrinsicByNodeId: intrinsicMap(root),
+      layoutInsetsByNodeId: new Map([[owner, insets]]) })).toThrow(/LAYOUT_INPUT_INVALID/);
+  });
+  it("preserves the exact old layout result with a zero inset map", () => {
+    const root = layout("root", "column", [control("leaf")]);
+    const input = { page: page(root), expandedRoot: root, intrinsicByNodeId: intrinsicMap(root) };
+    expect(compileLayout({ ...input, layoutInsetsByNodeId: new Map([["root", { left: 0, right: 0, top: 0, bottom: 0 }]]) })).toEqual(compileLayout(input));
+  });
+});
+// end
+
 function nativeImplementationFor(compiled: ReturnType<typeof compile>): UIImplementationSpecV2 {
   const controls: UIImplementationControlV2[] = [];
   const visit = (node: CompiledLayoutNode, parentId: string | undefined, depth: number): void => {

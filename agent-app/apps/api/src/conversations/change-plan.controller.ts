@@ -112,8 +112,7 @@ export class ChangePlanController {
     if (plan === null) {
       throw new NotFoundException();
     }
-    // Never expose server-owned semantic authorizations. A corrupt/tampered
-    // envelope must fail closed instead of being mistaken for a legacy plan.
+    // 不要暴露服务器拥有的语义授权。一个被篡改/损坏的信封必须关闭以失败，而不是被误认为是旧计划。
     const publicPlan = publicChangePlan(plan.plan, plan.planHash, this.serverPlanAuthority);
     return {
       id: plan.id,

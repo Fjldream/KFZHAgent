@@ -236,8 +236,10 @@ export function semanticImplementationTextIssue(
     const identifier = match[0];
     if (identifier === "function" && semanticFunctionKeywords?.has(match.index ?? -1)) continue;
     const normalized = normalizedName(identifier);
-    if (domAndNetworkNames.has(normalized)) return `forbidden runtime name: ${identifier}`;
-    if (rawRuntimeNames.has(normalized)) return `implementation runtime name: ${identifier}`;
+    const narrativeTechnologyName = mode !== "semantic-js-source"
+      && (normalized === "javascript" || normalized === "websocket");
+    if (!narrativeTechnologyName && domAndNetworkNames.has(normalized)) return `forbidden runtime name: ${identifier}`;
+    if (!narrativeTechnologyName && rawRuntimeNames.has(normalized)) return `implementation runtime name: ${identifier}`;
   }
   if (mode === "semantic-js-source") {
     const literalAndCodeIdentifiers = screenedText.match(/[A-Za-z_$][A-Za-z0-9_$]*/g) ?? [];
@@ -264,8 +266,13 @@ export function semanticImplementationTextIssue(
   if (!options.structuralIdentifier && containsUnsafeCall(value) && !/^status\([^()]*\)$/i.test(trimmed)) return "code-like calls are not allowed";
   if (!options.structuralIdentifier && /^[A-Za-z_$][A-Za-z0-9_$]*\?\.\s*\([^)]*\)$/.test(trimmed)) return "code-like calls are not allowed";
   if (!options.structuralIdentifier && /\b[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.|\?\.)[A-Za-z_$][A-Za-z0-9_$]*|(?:\?\.)?\[[^\]]+\])+(?:\?\.)?\s*\(/.test(trimmed)) return "code-like calls are not allowed";
+  const narrativeMemberView = trimmed
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "email-address")
+    .replace(/\b(?:[A-Z0-9-]+\.)+(?:com|org|net|io|cn|com\.cn|gov\.cn)(?:\/[A-Z0-9._~!$&'()*+,;=:@%/-]*)?/gi, "web-address")
+    .replace(/\b(?:D3|Node|Next|Vue)\.js\b/gi, "technology")
+    .replace(/\b[A-Za-z0-9_-]+\.(?:avif|gif|jpe?g|png|svg|webp|pdf|docx?|xlsx?|pptx?)\b/gi, "asset-file");
   if (!options.structuralIdentifier && !options.allowDottedIdentifier
-    && /\b[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*|\[[^\]]+\])+/.test(trimmed)) return "executable member or index syntax is not allowed";
+    && /\b[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*|\[[^\]]+\])+/.test(narrativeMemberView)) return "executable member or index syntax is not allowed";
   return undefined;
 }
 
@@ -642,11 +649,20 @@ const compiledActionBase = {
 };
 
 const CompiledStateValueSchema = z.union([z.boolean(), z.number().finite(), z.string().max(2_000), z.null()]);
+const CompiledVisibilityTargetSchema = z.object({
+  semanticControlId: StableSemanticIdSchema,
+  instanceName: CompilerInstanceNameSchema,
+}).strict();
 
 export const CompiledNativeActionSchema = z.discriminatedUnion("kind", [
-  z.object({ ...compiledActionBase, kind: z.literal("navigate-page"), targetPageGuid: CompilerPageGuidSchema }).strict(),
-  z.object({ ...compiledActionBase, kind: z.literal("open-overlay"), ownerSemanticControlId: StableSemanticIdSchema, targetSemanticControlId: StableSemanticIdSchema, targetInstanceName: CompilerInstanceNameSchema }).strict(),
-  z.object({ ...compiledActionBase, kind: z.literal("close-overlay"), ownerSemanticControlId: StableSemanticIdSchema, targetSemanticControlId: StableSemanticIdSchema, targetInstanceName: CompilerInstanceNameSchema }).strict(),
+  z.object({
+    ...compiledActionBase,
+    kind: z.literal("navigate-page"),
+    targetPageGuid: CompilerPageGuidSchema,
+    targetPageName: StableSemanticIdSchema,
+  }).strict(),
+  z.object({ ...compiledActionBase, kind: z.literal("open-overlay"), ownerSemanticControlId: StableSemanticIdSchema, targetSemanticControlId: StableSemanticIdSchema, targetInstanceName: CompilerInstanceNameSchema, targetControls: z.array(CompiledVisibilityTargetSchema).min(1).max(256) }).strict(),
+  z.object({ ...compiledActionBase, kind: z.literal("close-overlay"), ownerSemanticControlId: StableSemanticIdSchema, targetSemanticControlId: StableSemanticIdSchema, targetInstanceName: CompilerInstanceNameSchema, targetControls: z.array(CompiledVisibilityTargetSchema).min(1).max(256) }).strict(),
   z.object({ ...compiledActionBase, kind: z.literal("set-visibility"), targetInstanceName: CompilerInstanceNameSchema, visible: z.boolean() }).strict(),
   z.object({ ...compiledActionBase, kind: z.literal("switch-tab"), targetInstanceName: CompilerInstanceNameSchema, tabId: StableSemanticIdSchema }).strict(),
   z.object({

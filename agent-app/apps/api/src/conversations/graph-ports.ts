@@ -20,6 +20,9 @@ import {
   deriveGuid,
   attachRuntimeCorrelation,
   compileInteractions,
+  // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+  explicitlyUnresolvedImageClickActions,
+  // end
   createCreativeUIImplementationV2Compiler,
   importNativeClientPackage,
   inspectClientProject,
@@ -35,7 +38,6 @@ import {
   canonicalServerHash,
   modelAssetIdToWorkspaceAssetId,
   type ChangePlan,
-  type CustomerSolutionBlueprint,
   type ServerPlanEnvelope,
   type SolutionImplementationPlan,
   type UIImplementationSpecV2,
@@ -47,39 +49,60 @@ import {
   type ServerPlanAuthority,
 } from "@kf/build-jobs";
 import { Logger } from "@nestjs/common";
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+import { resolveCreativeProjectKey } from "./creative-project-identity.js";
+import { readGeneratedRuntimeProvenance, correlateGeneratedRuntime, assertGeneratedStructureCanBeSent, type CreativeRuntimeBase } from "./creative-runtime-provenance.js";
+import { projectGeneratedStructure } from "@kf/contracts";
+import { verifyGeneratedStateReuse } from "@kf/domain-client";
+// end
 import type { Prisma } from "@prisma/client";
-import { randomUUID } from "node:crypto";
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+import { createHash, randomUUID } from "node:crypto";
+// end
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+import { currentAgentRunExecution } from "@kf/build-jobs";
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+import { assertRunMessageScope, listRunMessages, runAllowsVisualHistory, hasVisualConversationSource } from "./run-message-context.js";
+// end
+// end
 import { PrismaService } from "../prisma/prisma.service.js";
 import { BuildJobService } from "../build-jobs/build-job.service.js";
 import { SERVER_PLAN_HMAC_KEY_ENV, signAcceptedBlueprintAtConfirmation } from "./server-plan-authority.js";
 import type { AssetService } from "../assets/asset.service.js";
 import { REVIEWED_KF36_MODULE_RUNTIME_EVIDENCE } from "./module-runtime-evidence.js";
+// modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+import { GenerationSnapshotService, type GenerationSnapshotInput } from "../generation/generation-snapshot.service.js";
+import { compileSolutionImplementationWithProvenance, resolveVisualSemanticBindings, validateVisualPlanningContext } from "@kf/domain-client";
+// end
 
 /**
- * Real Prisma-backed ports for the solution graph (brief "Consumes" line).
- * The graph stays free of direct database access; every read/write flows
- * through these ports so it remains deterministic and resumable.
+ * 解决方案图使用的真实 Prisma 后端端口（简要“Consumes”行）。图本身不直接访问数据库；所有读写都经过这些端口，从而保持确定性和可恢复性。
  */
 
-/** How many recent messages are handed to the model (mirrors the graph bound). */
+/** 模型中接收的最近消息数量（与图绑定） */
 const RECENT_MESSAGE_LIMIT = 20;
 const CREATIVE_COMPILATION_LOGGER = new Logger("CreativeSolutionCompiler");
 
-/** Nest token for the production-local deterministic retrieval boundary. */
+/** 生产-本地确定性检索边界标识符 */
 export const CAPABILITY_RETRIEVAL_PORT = Symbol("CAPABILITY_RETRIEVAL_PORT");
 
-/** Nest token for the only server-owned creative compilation/persistence boundary. */
+/** 仅服务器拥有原创编译/持久化边界标识符 */
 export const CREATIVE_SOLUTION_COMPILER_PORT = Symbol("CREATIVE_SOLUTION_COMPILER_PORT");
 
-/** Pure in-process retrieval: immutable design knowledge in, bounded candidates out. */
+/** 纯进程内检索：输入不可变的设计知识，输出有界的候选项。 */
 export const LOCAL_CAPABILITY_RETRIEVAL_PORT: CapabilityRetrievalPort = Object.freeze({
-  retrieve({ blueprint }: { blueprint: CustomerSolutionBlueprint }) {
+  // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+  retrieve({ blueprint, visualReference }: Parameters<CapabilityRetrievalPort["retrieve"]>[0]) {
+  // end
     return Promise.resolve(retrieveCapabilities({
       blueprint,
       knowledge: getDesignKnowledgeSnapshot(),
+      // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+      ...(visualReference === undefined ? {} : { visualReference }),
+      // end
     }));
   },
 });
@@ -106,9 +129,31 @@ export function createGraphPorts(
 ): GraphPorts {
   const buildJobs = new BuildJobService(prisma);
   const moduleRegistry = createDefaultModuleRegistry(REVIEWED_KF36_MODULE_RUNTIME_EVIDENCE);
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  let contextInspectionsInFlight = 0;
+  // end
 
   const workspaceQuery: WorkspaceQueryPort = {
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    getRevisionProjectKey: input => resolveCreativeProjectKey(prisma, input),
+    async getGeneratedProjectStructure(input) {
+      if (!serverPlanAuthority) throw new Error("SOLUTION_EXISTING_CONTEXT_INVALID");
+      const evidence = await resolveCreativeEvidence({ prisma, storage, tenantId: input.tenantId,
+        workspaceId: input.workspaceId, baseRevisionId: input.revisionId, projectKey: input.projectKey, domainKind: input.domainKind,
+        enterInspection() { if (contextInspectionsInFlight >= CREATIVE_EVIDENCE_LIMITS.maxConcurrentInspections) throw new Error("CREATIVE_EVIDENCE_CONCURRENCY_EXCEEDED"); contextInspectionsInFlight++; },
+        leaveInspection() { contextInspectionsInFlight--; } });
+      if (!evidence.generatedBase) return undefined;
+      const previous = await readGeneratedRuntimeProvenance(prisma, serverPlanAuthority, evidence.generatedBase);
+      if (!previous) throw new Error("SOLUTION_EXISTING_CONTEXT_INVALID");
+      assertGeneratedStructureCanBeSent(previous);
+      return projectGeneratedStructure(previous.semanticPlan);
+    },
+    // end
     async listRecentMessages({ tenantId, conversationId, limit }) {
+      // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+      const scope = currentAgentRunExecution();
+      if (scope) return listRunMessages(prisma, scope, tenantId, conversationId, Math.min(limit, RECENT_MESSAGE_LIMIT));
+      // end
       const rows = await prisma.message.findMany({
         where: { tenantId, conversationId },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -120,9 +165,37 @@ export function createGraphPorts(
       }));
     },
     async appendMessage({ tenantId, conversationId, role, content }) {
-      await prisma.message.create({ data: { tenantId, conversationId, role, content } });
+      // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+      const scope = currentAgentRunExecution();
+      await prisma.$transaction(async tx => {
+        if (scope) {
+          await assertRunMessageScope(tx, scope, tenantId, conversationId);
+          const inserted = await tx.$executeRaw`
+            INSERT INTO "Message" ("id", "tenantId", "conversationId", "role", "content", "runId")
+            SELECT ${randomUUID()}, ${tenantId}, ${conversationId}, ${role}, ${content}, "id" FROM "AgentRun"
+            WHERE "id" = ${scope.runId} AND "tenantId" = ${tenantId} AND "conversationId" = ${conversationId}
+              AND "leaseOwner" = ${scope.ownerId} AND "fence" = ${scope.fence} AND "leaseExpiresAt" > ${new Date()}
+              AND "status" IN ('RUNNING','BUILDING')
+          `;
+          if (inserted !== 1) throw new Error("FENCE_REJECTED");
+        } else {
+          const conversation = role === "user" ? await tx.conversation.findFirst({ where: { id: conversationId, tenantId } }) : null;
+          const untouched = conversation && ["新对话", "New conversation"].includes(conversation.title)
+            && conversation.createdAt.getTime() === conversation.updatedAt.getTime()
+            && !await tx.message.findFirst({ where: { tenantId, conversationId }, select: { id: true } });
+          await tx.message.create({ data: { tenantId, conversationId, role, content } });
+          if (untouched) await tx.conversation.updateMany({ where: { id: conversationId, tenantId }, data: { title: Array.from(content.trim()).slice(0, 24).join("") || "新对话" } });
+        }
+        await tx.conversation.updateMany({ where: { id: conversationId, tenantId }, data: { lastActivityAt: new Date() } });
+      });
+      // end
     },
     async getConversationSummary({ tenantId, conversationId }) {
+      // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+      const scope = currentAgentRunExecution();
+      if (scope && !await runAllowsVisualHistory(prisma, scope, tenantId, conversationId)
+        && await hasVisualConversationSource(prisma, tenantId, conversationId)) return undefined;
+      // end
       const conversation = await prisma.conversation.findFirst({
         where: { id: conversationId, tenantId },
       });
@@ -184,8 +257,7 @@ export function createGraphPorts(
       if (projectRevision !== null && projectRevision.packageUrl !== null) {
         return inspectBuiltClientEntities(tenantId, projectRevision.packageUrl, storage);
       }
-      // compile-mode revisions store the ClientProjectIR in state; its control
-      // GUIDs are deterministic per workspace: deriveGuid({ seed: workspaceId }, id).
+      // 编译模式修订存储 ClientProjectIR 在状态中；其控制GUIDs 是每工作区的确定性： deriveGuid({ seed: workspaceId }, id)。
       const record = revision.state as Record<string, unknown>;
       if (!Array.isArray(record["pages"])) {
         return [];
@@ -198,9 +270,7 @@ export function createGraphPorts(
             kind: "page",
             name: pageName,
             type: "page",
-            // Page compiler uses the page name and adds the native `k`
-            // prefix. Missing that prefix makes every later create operation
-            // target a page GUID that does not exist in the package.
+            // 页面编译器使用页面名称，并添加前缀 `k`。缺少这个前缀会导致每次创建操作都指向不存在于包中的页面 GUID。
             guid: `k${deriveGuid({ seed: workspaceId }, pageName)}`,
           });
         }
@@ -463,6 +533,12 @@ export function createCreativeSolutionCompilerFromEnvironment(
   return Object.freeze({
     async compile(input) {
       try {
+        // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+        if (input.visual !== undefined) {
+          if (currentAgentRunExecution() === undefined) throw new Error("GENERATION_RUN_REQUIRED");
+          validateVisualPlanningContext(input.visual.reference);
+        }
+        // end
         if (input.projectKey !== input.semanticPlan.projectKey || input.domainKind !== "kingclient") {
           throw new Error("CREATIVE_PROJECT_IDENTITY_MISMATCH");
         }
@@ -497,57 +573,58 @@ export function createCreativeSolutionCompilerFromEnvironment(
           sha256: asset.sha256,
           sizeBytes: asset.sizeBytes,
         }));
-        const implementation = compileSolutionImplementation({
+        // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+        const semanticCompileInput = {
           plan: input.semanticPlan,
           candidateBundle: input.candidateBundle,
           moduleRegistry: createDefaultModuleRegistry(),
           approvedAssets,
           activeCatalogVersion: input.candidateBundle.knowledgeCatalogVersion,
-        });
-        const correlated = correlateCreativeImplementation({
+        };
+        const visualCompilation = input.visual === undefined ? undefined : compileSolutionImplementationWithProvenance(semanticCompileInput);
+        const implementation = visualCompilation?.implementation ?? compileSolutionImplementation(semanticCompileInput);
+        // end
+        // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+        const previousGenerated = evidence.generatedBase === undefined ? undefined
+          : await readGeneratedRuntimeProvenance(prisma, facade.authority, evidence.generatedBase);
+        const verifiedStateReuse = previousGenerated === undefined || evidence.inspection === undefined ? undefined
+          : verifyGeneratedStateReuse({ workspaceId: input.workspaceId, baseRevisionId: input.baseRevisionId,
+            inspection: evidence.inspection, previous: previousGenerated.verifiedMaterialization });
+        const correlated = await correlateCreativeImplementation({
+        // end
           workspaceId: input.workspaceId,
           baseRevisionId: input.baseRevisionId,
           implementation,
           semanticStateIds: input.semanticPlan.localState.map((state) => state.id),
           editableEntities: evidence.editableEntities,
+          // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+          ...(evidence.generatedBase === undefined || evidence.inspection === undefined ? {} : {
+            inspection: evidence.inspection,
+            resolveExisting: () => Promise.resolve(previousGenerated?.implementation),
+          }),
+          // end
         });
         const interactions = compileInteractions({
           blueprint: input.blueprint,
           plan: input.semanticPlan,
           implementation: correlated.implementation,
         });
-        const explicitlyUnresolvedImageClickActions = new Set<string>();
-        const collectImageClicks = (node: SolutionImplementationPlan["pages"][number]["root"]): void => {
-          if (node.kind === "layout") {
-            node.children.forEach(collectImageClicks);
-            return;
-          }
-          if (node.kind === "registered-module") {
-            node.slots.forEach((slot) => slot.children.forEach(collectImageClicks));
-            return;
-          }
-          if (node.kind === "repeater") {
-            collectImageClicks(node.template);
-            return;
-          }
-          if (node.capabilityId !== "image") return;
-          node.eventBindings
-            .filter((binding) => binding.semanticEvent === "click")
-            .forEach((binding) => binding.actionIds.forEach((actionId) => explicitlyUnresolvedImageClickActions.add(actionId)));
-        };
-        input.semanticPlan.pages.forEach((page) => collectImageClicks(page.root));
-        input.semanticPlan.overlays.forEach((overlay) => collectImageClicks(overlay.root));
-        const recoverableRequests = interactions.diagnostics.requests
-          .filter((request) => request.reason === "TRIGGER_EVENT_UNSUPPORTED"
-            && explicitlyUnresolvedImageClickActions.has(request.actionId));
-        const recoverableActionIds = new Set(recoverableRequests.map((request) => request.actionId));
-        const recoverableErrors = interactions.diagnostics.errors
-          .filter((diagnostic) => diagnostic.code === "INTERACTION_CLOSURE_MISSING"
-            && recoverableActionIds.has(diagnostic.nodeId));
+        // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+        // Match the authoritative compiler: only an explicitly unresolved Image click may be omitted.
+        const imageClickActions = explicitlyUnresolvedImageClickActions(input.semanticPlan);
+        const recoverableRequestActionIds = new Set(interactions.diagnostics.requests
+          .filter(request => request.reason === "TRIGGER_EVENT_UNSUPPORTED" && imageClickActions.has(request.actionId))
+          .map(request => request.actionId));
+        const isRecoverable = (diagnostic: { code: string; nodeId: string }): boolean =>
+          diagnostic.code === "INTERACTION_CLOSURE_MISSING" && recoverableRequestActionIds.has(diagnostic.nodeId);
+        const recoverableErrors = interactions.diagnostics.errors.filter(isRecoverable);
+        // end
         const warnings = [
           ...interactions.diagnostics.warnings,
           ...recoverableErrors,
-          ...recoverableRequests.map((request) => ({
+          // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+          ...interactions.diagnostics.requests.filter(request => recoverableRequestActionIds.has(request.actionId)).map((request) => ({
+          // end
             code: "INTERACTION_COMPILATION_REQUEST",
             nodeId: request.actionId,
             message: request.reason,
@@ -560,21 +637,21 @@ export function createCreativeSolutionCompilerFromEnvironment(
         }));
         const blocking: CreativeCompilationDiagnostic[] = [
           ...interactions.diagnostics.errors
-            .filter((diagnostic) => !recoverableErrors.includes(diagnostic))
+            // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+            .filter((diagnostic) => !isRecoverable(diagnostic))
+            // end
             .map((diagnostic) => ({
             code: diagnostic.code,
             nodeId: diagnostic.nodeId,
             message: "交互工程能力校验未通过",
             phase: "interaction",
           })),
-          ...interactions.diagnostics.requests
-            .filter((request) => !recoverableRequests.includes(request))
-            .map((request) => ({
-              code: "INTERACTION_COMPILATION_REQUEST",
-              nodeId: request.actionId,
-              message: "交互需要补充明确的可执行能力",
-              phase: "interaction" as const,
-            })),
+          // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+          ...interactions.diagnostics.requests.filter(request => !recoverableRequestActionIds.has(request.actionId)).map(request => ({
+            code: "INTERACTION_COMPILATION_REQUEST", nodeId: request.actionId,
+            message: "交互工程能力校验未通过", phase: "interaction",
+          })),
+          // end
         ];
         if (blocking.length > 0) return { status: "blocked" as const, diagnostics: blocking, warnings };
 
@@ -603,6 +680,9 @@ export function createCreativeSolutionCompilerFromEnvironment(
           evidenceVersion: "1.0.0",
           verifiedAssets: assetProof,
           ...(correlated.verifiedExisting === undefined ? {} : { verifiedExisting: correlated.verifiedExisting }),
+          // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+          ...(verifiedStateReuse === undefined ? {} : { verifiedStateReuse }),
+          // end
         });
         if (lowered.capabilityReport.status === "fail") {
           return {
@@ -653,6 +733,20 @@ export function createCreativeSolutionCompilerFromEnvironment(
           confirmationId,
           planHash,
           envelope: verified,
+          // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+          ...(currentAgentRunExecution() === undefined ? {} : { generationSnapshot: {
+            tenantId: input.tenantId, workspaceId: input.workspaceId, runId: currentAgentRunExecution()!.runId,
+            stepKey: "compile-creative-solution", baseRevisionId: input.baseRevisionId,
+            artifact: lowered.artifact, materialization: lowered.materialization, assetManifest: approvedAssets,
+            visual: input.visual === undefined || visualCompilation === undefined ? null : resolveVisualSemanticBindings({
+              context: input.visual.reference, bindings: input.visual.bindings, plan: input.semanticPlan,
+              // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+              blueprint: input.blueprint,
+              // end
+              provenance: visualCompilation.provenance, materialization: lowered.materialization,
+            }),
+          } }),
+          // end
         });
         const partial = [...new Set([
           ...lowered.capabilityReport.partial,
@@ -724,13 +818,16 @@ function collectCreativeAssetIds(plan: SolutionImplementationPlan): string[] {
   return [...ids].sort(compareCodePoints);
 }
 
-function correlateCreativeImplementation(input: {
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+async function correlateCreativeImplementation(input: {
   workspaceId: string;
   baseRevisionId: string;
   implementation: UIImplementationSpecV2;
   semanticStateIds: readonly string[];
   editableEntities: readonly EditableEntity[];
-}): { implementation: UIImplementationSpecV2; verifiedExisting?: VerifiedExistingRuntimeCorrelationHandle } {
+  inspection?: InspectResult;
+  resolveExisting?: () => Promise<UIImplementationSpecV2 | undefined>;
+}): Promise<{ implementation: UIImplementationSpecV2; verifiedExisting?: VerifiedExistingRuntimeCorrelationHandle }> {
   const derived = attachRuntimeCorrelation({
     workspaceId: input.workspaceId,
     baseRevisionId: input.baseRevisionId,
@@ -746,23 +843,20 @@ function correlateCreativeImplementation(input: {
   const existingControlNames = new Set(input.editableEntities
     .filter((entity) => entity.kind === "control")
     .map((entity) => entity.name.toLocaleLowerCase("en-US")));
-  for (const page of derived.runtimeCorrelation!.pages) {
-    if (existingPageNames.has(page.semanticPageId.toLocaleLowerCase("en-US"))
-      || existingPageGuids.has(page.pageGuid.toLocaleLowerCase("en-US"))) {
-      throw new Error("CREATIVE_RUNTIME_IDENTITY_COLLISION");
-    }
+  const collision = derived.runtimeCorrelation!.pages.some(page =>
+    existingPageNames.has(page.semanticPageId.toLocaleLowerCase("en-US")) || existingPageGuids.has(page.pageGuid.toLocaleLowerCase("en-US")))
+    || derived.runtimeCorrelation!.controls.some(control => existingControlNames.has(control.instanceName.toLocaleLowerCase("en-US")));
+  if (collision) {
+    const previous = input.inspection && await input.resolveExisting?.();
+    if (previous && input.inspection) return correlateGeneratedRuntime({ workspaceId: input.workspaceId,
+      baseRevisionId: input.baseRevisionId, implementation: input.implementation, semanticStateIds: input.semanticStateIds,
+      previous, inspection: input.inspection });
+    // Inspection alone, uploaded names and model aliases never authorize reuse.
+    throw new Error("CREATIVE_RUNTIME_IDENTITY_COLLISION");
   }
-  for (const control of derived.runtimeCorrelation!.controls) {
-    if (existingControlNames.has(control.instanceName.toLocaleLowerCase("en-US"))) {
-      throw new Error("CREATIVE_RUNTIME_IDENTITY_COLLISION");
-    }
-  }
-  // Existing-runtime reuse is intentionally absent without a server-issued
-  // opaque semantic/runtime provenance handle. Native names discovered by
-  // inspection are collision evidence only; model semantic text never selects
-  // an uploaded entity.
   return { implementation: derived };
 }
+// end
 
 async function resolveCreativeEvidence(input: {
   prisma: PrismaService;
@@ -774,7 +868,9 @@ async function resolveCreativeEvidence(input: {
   domainKind: string;
   enterInspection(): void;
   leaveInspection(): void;
-}): Promise<{ editableEntities: EditableEntity[]; inspection?: InspectResult }> {
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+}): Promise<{ editableEntities: EditableEntity[]; inspection?: InspectResult; generatedBase?: CreativeRuntimeBase }> {
+// end
   const revision = await input.prisma.solutionRevision.findFirst({
     where: {
       id: input.baseRevisionId,
@@ -823,7 +919,12 @@ async function resolveCreativeEvidence(input: {
           runtimeBinding: { workspaceId: input.workspaceId, baseRevisionId: input.baseRevisionId },
         });
         assertCreativeInspectionBudget(inspection);
-        return { editableEntities: entitiesFromInspection(inspection), inspection };
+        // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+        return { editableEntities: entitiesFromInspection(inspection), inspection,
+          ...(revision.kind !== "built" ? {} : { generatedBase: { tenantId: input.tenantId, workspaceId: input.workspaceId,
+            revisionId: input.baseRevisionId, projectKey: input.projectKey, domainKind: input.domainKind,
+            storageKey: packageUrl, packageHash: createHash("sha256").update(bytes).digest("hex"), packageSize: bytes.length } }) };
+        // end
       } finally {
         await rm(destination, { recursive: true, force: true });
       }
@@ -958,6 +1059,9 @@ async function persistCreativePlan(
     confirmationId: string;
     planHash: string;
     envelope: ServerPlanEnvelope;
+    // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+    generationSnapshot?: Omit<GenerationSnapshotInput, "changePlanId">;
+    // end
   },
 ): Promise<{ changeRequestId: string; changePlanId: string; planHash: string }> {
   const changeRequestId = `cr:${input.workspaceId}:${input.conversationId}:${input.confirmationId}`;
@@ -1010,6 +1114,11 @@ async function persistCreativePlan(
         },
       });
     }
+    // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+    if (input.generationSnapshot !== undefined) {
+      await new GenerationSnapshotService(prisma).createInTransaction(tx, { ...input.generationSnapshot, changePlanId });
+    }
+    // end
     return { changeRequestId, changePlanId, planHash: input.planHash };
   });
 }
@@ -1041,6 +1150,16 @@ function creativeDiagnostic(error: unknown): CreativeCompilationDiagnostic {
 }
 
 const SAFE_CREATIVE_REASON_CODES = new Set([
+  // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+  "VISUAL_SPEC_HASH_MISMATCH",
+  "VISUAL_ACKNOWLEDGEMENT_REQUIRED",
+  "VISUAL_DIFFERENCE_REQUIRED",
+  "VISUAL_SEMANTIC_NODE_MISSING",
+  "VISUAL_SEMANTIC_BINDING_DUPLICATE",
+  "VISUAL_CAPABILITY_MISMATCH",
+  "VISUAL_COMPONENT_OWNERSHIP_CONFLICT",
+  "VISUAL_NATIVE_OWNERSHIP_CONFLICT",
+  // end
   "APPROVED_ASSET_INVALID",
   "BLUEPRINT_PAGE_SOURCE_MISMATCH",
   "BLUEPRINT_REGION_SOURCE_MISSING",
@@ -1061,6 +1180,12 @@ const SAFE_CREATIVE_REASON_CODES = new Set([
   "CREATIVE_PERSISTENCE_OWNERSHIP_MISMATCH",
   "CREATIVE_PROJECT_IDENTITY_MISMATCH",
   "CREATIVE_RUNTIME_IDENTITY_COLLISION",
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  "CREATIVE_RUNTIME_PROVENANCE_INVALID",
+  "CREATIVE_RUNTIME_PROVENANCE_AMBIGUOUS",
+  "CREATIVE_GENERATED_NATIVE_NAME_REGENERATION_REQUIRED",
+  "CREATIVE_EXISTING_STATE_PROVENANCE_INVALID",
+  // end
   "EXPANSION_BUDGET_EXCEEDED",
   "IMPLEMENTATION_PAGE_MISSING",
   "INPUT_ACCESSOR_FORBIDDEN",

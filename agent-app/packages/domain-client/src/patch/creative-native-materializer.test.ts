@@ -13,12 +13,22 @@ import {
 } from "@kf/contracts";
 import {
   createHmacCreativeBuildFacade,
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  createHmacServerPlanAuthority,
+  readVerifiedCreativeMaterialization,
+  // end
   resolveBuildAssets,
   resolveStoredPlan,
 } from "@kf/build-jobs";
 import { describe, expect, it } from "vitest";
 import { compileClientProject } from "../compile/client-compiler.js";
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+import { nativePageNameForSemanticId } from "../compile/native-page-name.js";
+import { verifyGeneratedStateReuse, readVerifiedGeneratedStateReuse } from "../implementation/generated-state-reuse.js";
+import { validateCreativeArtifactMaterializationProjection, canonicalCreativeBuildArtifactHash } from "@kf/contracts";
+// end
 import { inspectClientProject } from "../inspect/client-inspector.js";
+import type { ClientProjectIR } from "../ir/client-project-ir.schema.js";
 import { createCreativeUIImplementationV2Compiler } from "../implementation/ui-implementation-v2-compiler.js";
 import {
   attachRuntimeCorrelation,
@@ -54,6 +64,9 @@ function creativeInput(
   scrollOverflow = false,
   includeOverlay = false,
   includeTabs = false,
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  unsafePageIds = false,
+  // end
 ) {
   const blueprint = {
     schema: "kf-design-plan/v3" as const, displayName: "工程", objective: "完成交互",
@@ -190,9 +203,11 @@ function creativeInput(
             sourceBlueprintPageId: "bp-detail", sourceBlueprintRegionIds: ["region-detail"], eventBindings: [] },
           { id: "styled", parentId: "detail-root", role: "action", capabilityId: "button", content: "样式",
             depth: 1, zIndex: 1, geometry: { x: 0, y: 520, width: 120, height: 40 },
-            nativeProperties: { backgroundColor: "#0b6bcb" },
-            compiledStyle: { nativeFields: { backgroundColor: "#0b6bcb" },
-              cssFragments: [{ selectorToken: "root", state: "normal", declarations: { borderRadius: 8 } }], warnings: [] },
+            // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+            nativeProperties: {},
+            compiledStyle: { nativeFields: {},
+              cssFragments: [{ selectorToken: "root", state: "normal", declarations: { backgroundColor: "#0b6bcb", borderRadius: 8 } }], warnings: [] },
+            // end
             sourceSolutionNodeId: "styled", sourceBlueprintPageId: "bp-detail",
             sourceBlueprintRegionIds: ["region-detail"], eventBindings: [] },
           { id: "detail-image", parentId: "detail-root", role: "content", capabilityId: "image", depth: 1,
@@ -382,6 +397,16 @@ function creativeInput(
     implementationBase.sourceSolutionPlanHash = canonicalServerHash(semanticPlan);
     implementationBase.sourceModuleRegistryHash = solutionModuleRegistryHash(semanticPlan, createDefaultModuleRegistry());
   }
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  if (unsafePageIds) {
+    const mappedPageId = (id: string) => id === "home" ? "page-overview" : id === "detail" ? "page-details" : id;
+    for (const page of semanticPlan.pages) page.id = mappedPageId(page.id);
+    for (const action of semanticPlan.actions) if (action.kind === "navigate-page") action.targetPageId = mappedPageId(action.targetPageId);
+    for (const page of implementationBase.pages) page.id = mappedPageId(page.id);
+    implementationBase.sourceSolutionPlanHash = canonicalServerHash(semanticPlan);
+    implementationBase.sourceModuleRegistryHash = solutionModuleRegistryHash(semanticPlan, createDefaultModuleRegistry());
+  }
+  // end
   const correlated = attachRuntimeCorrelation({
     workspaceId: "workspace", baseRevisionId: "revision", implementation: implementationBase,
     ...(verifiedExisting === undefined ? {} : { verifiedExisting }),
@@ -511,6 +536,14 @@ async function baseWorkspace() {
   }, { seed: "base" });
 }
 
+async function bootstrapWorkspace(controls: ClientProjectIR["pages"][number]["controls"] = []) {
+  return compileClientProject({
+    schema: "kf-client-project-ir/v1", id: "solution", name: "Solution", version: "1.0.0.1",
+    pages: [{ id: "page-home", name: "Page1", width: 1440, height: 900, controls }],
+    variables: [], scripts: [],
+  }, { seed: "bootstrap" });
+}
+
 async function baseWorkspaceWithVariable(name: string) {
   return compileClientProject({
     schema: "kf-client-project-ir/v1", id: "base", name: "Base", version: "1.0.0.1",
@@ -547,6 +580,9 @@ async function existingSignedFixture(withImageAsset = false) {
   grid["data"] = [{ id: "old" }];
   grid["customerGridField"] = { preserved: true };
   styled["styleDataNew"] = "#legacy{color:red}";
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  styled["styleData"] = "#customer-button{color:green}";
+  // end
   styled["backgroundColor"] = "#333333";
   styled["customerButtonField"] = { preserved: true };
   await writeFile(pagePath, JSON.stringify(pageJson, null, 2));
@@ -614,6 +650,123 @@ async function existingSignedFixture(withImageAsset = false) {
 }
 
 describe("creative native materializer", () => {
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  it("keeps an exact signed legacy long-name artifact readable but refuses to newly materialize its invalid generated names", async () => {
+    const legacy = JSON.parse(await readFile(new URL("../../../../tests/fixtures/creative-legacy-runtime-names-20261027.json", import.meta.url), "utf8")) as {
+      envelope: { planHash: string };
+    };
+    const original = JSON.stringify(legacy);
+    const authority = createHmacServerPlanAuthority(Buffer.alloc(32, 0x73));
+    const resolved = resolveStoredPlan(legacy.envelope, { expectedPlanHash: legacy.envelope.planHash,
+      expectedRevisionId: "legacy-name-fixture-base" }, authority);
+    if (!resolved.creativeMaterialization) throw new Error("verified legacy fixture required");
+    const materialized = readVerifiedCreativeMaterialization(resolved.creativeMaterialization);
+    expect(materialized.materialization.controls.some(control => control.instanceName.length > 32)).toBe(true);
+    expect(JSON.stringify(legacy)).toBe(original);
+    const base = await bootstrapWorkspace();
+    await expect(applyClientPatch(base.rootDir, resolved.plan, { planHash: legacy.envelope.planHash,
+      creativeMaterialization: resolved.creativeMaterialization, semanticOperations: resolved.semanticOperations, replaceGenerativeBootstrap: true }))
+      .rejects.toThrow("creative generated control name exceeds KF development limit");
+  });
+  // end
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  it("materializes safe physical page names without changing semantic IDs or GUID navigation", async () => {
+    const input = creativeInput(undefined, 0, false, false, false, false, false, true);
+    const facade = createHmacCreativeBuildFacade(Buffer.alloc(32, 0x41), createCreativeUIImplementationV2Compiler);
+    const result = facade.compiler.compiler.compile(input);
+    const envelope = facade.authority.sign({ plan: result.plan, revisionId: "revision", semanticOperations: result.semanticOperations, creative: result.trustedCreativePayload });
+    const planHash = canonicalChangePlanHash(result.plan);
+    const resolved = resolveStoredPlan(JSON.parse(JSON.stringify(envelope)), { expectedPlanHash: planHash, expectedRevisionId: "revision" }, facade.authority);
+    const creativeMaterialization = resolved.creativeMaterialization;
+    if (creativeMaterialization === undefined) throw new Error("verified creative fixture required");
+    const base = await bootstrapWorkspace();
+    const candidate = await applyClientPatch(base.rootDir, result.plan, { planHash, creativeMaterialization, replaceGenerativeBootstrap: true });
+    const inspection = await inspectClientProject(candidate.rootDir);
+    const names = ["page-overview", "page-details"].map(nativePageNameForSemanticId);
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    expect(names.every(name => name.length <= 32)).toBe(true);
+    for (const page of Object.values(inspection.raw.pages)) {
+      for (const control of walkControls(page)) {
+        const baseProperty = control["baseProperty"] as Record<string, unknown> | undefined;
+        const name = baseProperty?.["name"] ?? control["name"];
+        if (typeof name === "string") expect(name).toMatch(/^[A-Za-z][A-Za-z0-9_]{0,31}$/);
+      }
+    }
+    // end
+    expect(inspection.summary.pages.map(page => page.name).sort()).toEqual([...names].sort());
+    const manager = JSON.parse(await readFile(path.join(candidate.rootDir, "1.0.0.1/project/pageManager.json"), "utf8"));
+    expect(manager).toMatchObject({ default: names[0], appHomePage: names[0] });
+    for (const page of result.materialization.pages) {
+      const name = nativePageNameForSemanticId(page.semanticPageId);
+      expect(page.semanticPageId).toMatch(/^page-/);
+      expect(inspection.index.pages[page.pageGuid]).toMatchObject({ id: name, name, file: `project/page/${name}.json` });
+      expect(inspection.raw.pages[page.pageGuid]).toMatchObject({ pageProperty: { name }, pagePrototype: { name, guid: page.pageGuid } });
+      expect(manager.Pages).toContainEqual(expect.objectContaining({ id: page.pageGuid, name }));
+    }
+    const detail = result.materialization.pages.find(page => page.semanticPageId === "page-details")!;
+    expect(input.implementation.compiledActions).toEqual(expect.arrayContaining([expect.objectContaining({ targetPageGuid: detail.pageGuid })]));
+    const report = await validateClientProject(base.rootDir, candidate, result.plan, { skipRoundTrip: true, creativeMaterialization, replaceGenerativeBootstrap: true });
+    expect(report.status, report.warnings.join("\n")).toBe("pass");
+    const detailJson = inspection.raw.pages[detail.pageGuid]!;
+    const button = walkControls(detailJson).find(control => control["uiModelType"] === 35)!;
+    button["styleDataNew"] = button["styleData"];
+    delete button["styleData"];
+    await writeFile(path.join(candidate.rootDir, "1.0.0.1", inspection.index.pages[detail.pageGuid]!.file), JSON.stringify(detailJson));
+    const tampered = await validateClientProject(base.rootDir, candidate, result.plan, { skipRoundTrip: true, creativeMaterialization, replaceGenerativeBootstrap: true });
+    expect(tampered.status).toBe("fail");
+    expect(tampered.warnings.join("\n")).toContain("creative managed styleData mismatch: styled");
+  });
+  // end
+  it("replaces the empty generative Page1 bootstrap and promotes the semantic home page", async () => {
+    const { result, resolved, planHash } = await signedFixture();
+    const base = await bootstrapWorkspace();
+    const candidate = await applyClientPatch(base.rootDir, result.plan, {
+      planHash, creativeMaterialization: resolved.creativeMaterialization,
+      replaceGenerativeBootstrap: true,
+    } as ApplyPatchOptions & { creativeMaterialization: unknown });
+
+    const inspection = await inspectClientProject(candidate.rootDir);
+    expect(inspection.summary.pages.map((page) => page.name).sort()).toEqual(["detail", "home"]);
+
+    const projectDir = path.join(candidate.rootDir, "1.0.0.1", "project");
+    const manager = JSON.parse(await readFile(path.join(projectDir, "pageManager.json"), "utf8")) as {
+      default: string;
+      appHomePage: string;
+      Pages: Array<{ id: string; name: string }>;
+    };
+    expect(manager).toMatchObject({ default: "home", appHomePage: "home" });
+    expect(manager.Pages.map((page) => page.name).sort()).toEqual(["detail", "home"]);
+
+    const expectedPageGuids = manager.Pages.map((page) => page.id).sort();
+    const pageGroup = JSON.parse(await readFile(path.join(projectDir, "pageGroupManager.json"), "utf8")) as {
+      Groups: { pages: string[] };
+    };
+    expect(pageGroup.Groups.pages.sort()).toEqual(expectedPageGuids);
+    const diffusion = JSON.parse(await readFile(path.join(projectDir, "diffusionManager.json"), "utf8")) as {
+      page: Record<string, unknown>;
+    };
+    expect(Object.keys(diffusion.page).sort()).toEqual(expectedPageGuids);
+  });
+
+  it("preserves a genuine non-empty Page1 and its existing home-page selection", async () => {
+    const { result, resolved, planHash } = await signedFixture();
+    const base = await bootstrapWorkspace([
+      { id: "CustomerTitle", type: "text", x: 20, y: 20, width: 240, height: 40, text: "客户页面" },
+    ]);
+    const candidate = await applyClientPatch(base.rootDir, result.plan, {
+      planHash, creativeMaterialization: resolved.creativeMaterialization,
+      replaceGenerativeBootstrap: true,
+    } as ApplyPatchOptions & { creativeMaterialization: unknown });
+
+    const inspection = await inspectClientProject(candidate.rootDir);
+    expect(inspection.summary.pages.map((page) => page.name).sort()).toEqual(["Page1", "detail", "home"]);
+    const manager = JSON.parse(await readFile(
+      path.join(candidate.rootDir, "1.0.0.1", "project", "pageManager.json"),
+      "utf8",
+    )) as { default: string; appHomePage: string };
+    expect(manager).toMatchObject({ default: "Page1", appHomePage: "Page1" });
+  });
+
   it.each([
     ["exact", (name: string) => name],
     ["case-folded", (name: string) => name.toLocaleUpperCase("en-US")],
@@ -627,6 +780,74 @@ describe("creative native materializer", () => {
     } as ApplyPatchOptions & { creativeMaterialization: unknown }))
       .rejects.toThrow(/creative compiler-owned state variable collision/i);
   });
+
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  it("reuses only signed generated local state and independently rejects changed native records at materialization", async () => {
+    const first = await signedFixture(0, false, false, false, true);
+    const base = await baseWorkspace();
+    const published = await applyClientPatch(base.rootDir, first.result.plan, { planHash: first.planHash, creativeMaterialization: first.resolved.creativeMaterialization } as ApplyPatchOptions);
+    const inspection = await inspectClientProject(published.rootDir, { runtimeBinding: { workspaceId: "workspace", baseRevisionId: "revision" } });
+    const stateProof = verifyGeneratedStateReuse({ workspaceId: "workspace", baseRevisionId: "revision", inspection, previous: first.resolved.creativeMaterialization as never });
+    const oldCorrelation = first.result.artifact.implementation.runtimeCorrelation!;
+    const existing = verifyExistingRuntimeCorrelation({ workspaceId: "workspace", baseRevisionId: "revision", inspection, correlations: {
+      pages: oldCorrelation.pages.map(page => ({ ...page, source: "uploaded-existing" })),
+      controls: oldCorrelation.controls.map(control => ({ ...control, source: "uploaded-existing" })),
+    } });
+    const input = creativeInput(existing, 0, false, false, false, true);
+    const result = first.facade.compiler.compiler.compile({ ...input, verifiedStateReuse: stateProof });
+    expect(result.materialization.states?.[0]?.existing).toMatchObject({ baseRevisionId: "revision", scope: "workspace-generated-local", recordHash: expect.stringMatching(/^[a-f0-9]{64}$/) });
+    for (const kind of ["foreign-base", "duplicate", "unknown-state"] as const) {
+      const artifact = structuredClone(result.artifact); const materialization = structuredClone(result.materialization);
+      const stateEvidence = artifact.evidence.states![0]!;
+      if (kind === "foreign-base") { stateEvidence.existing.baseRevisionId = "foreign"; materialization.states![0]!.existing!.baseRevisionId = "foreign"; }
+      if (kind === "duplicate") artifact.evidence.states!.push(structuredClone(stateEvidence));
+      if (kind === "unknown-state") stateEvidence.semanticStateId = "unrelated-semantic-state";
+      artifact.hashes.evidenceHash = canonicalServerHash(artifact.evidence);
+      materialization.creativeArtifactHash = canonicalCreativeBuildArtifactHash(artifact);
+      expect(() => validateCreativeArtifactMaterializationProjection(artifact, materialization)).toThrow(/state/);
+    }
+    const envelope = first.facade.authority.sign({ plan: result.plan, revisionId: "revision", semanticOperations: result.semanticOperations, creative: result.trustedCreativePayload });
+    const resolved = resolveStoredPlan(envelope, { expectedRevisionId: "revision", expectedPlanHash: canonicalChangePlanHash(result.plan) }, first.facade.authority);
+    if (!resolved.creativeMaterialization) throw new Error("verified creative fixture required");
+    const options = { planHash: canonicalChangePlanHash(result.plan), creativeMaterialization: resolved.creativeMaterialization };
+    const second = await applyClientPatch(published.rootDir, result.plan, options);
+    expect((await inspectClientProject(second.rootDir)).index.variables).toEqual(inspection.index.variables);
+    expect(() => readVerifiedGeneratedStateReuse({} as never, "workspace", "revision", input.semanticPlan)).toThrow(/PROVENANCE_INVALID/);
+    expect(() => readVerifiedGeneratedStateReuse(JSON.parse(JSON.stringify(stateProof)) as never, "workspace", "revision", input.semanticPlan)).toThrow(/PROVENANCE_INVALID/);
+    expect(() => readVerifiedGeneratedStateReuse(stateProof, "foreign", "revision", input.semanticPlan)).toThrow(/PROVENANCE_INVALID/);
+    expect(() => readVerifiedGeneratedStateReuse(stateProof, "workspace", "foreign", input.semanticPlan)).toThrow(/PROVENANCE_INVALID/);
+    expect(() => verifyGeneratedStateReuse({ workspaceId: "workspace", baseRevisionId: "revision", inspection, previous: {} as never })).toThrow(/UNVERIFIED/);
+    const uploaded = await baseWorkspaceWithVariable(result.materialization.states![0]!.variableName);
+    const uploadedInspection = await inspectClientProject(uploaded.rootDir, { runtimeBinding: { workspaceId: "workspace", baseRevisionId: "revision" } });
+    expect(() => verifyGeneratedStateReuse({ workspaceId: "workspace", baseRevisionId: "revision", inspection: uploadedInspection, previous: first.resolved.creativeMaterialization as never })).toThrow(/PROVENANCE_INVALID/);
+    const future = first.facade.compiler.compiler.compile({ ...creativeInput(undefined, 0, false, false, false, true), compilerVersion: "2.0.0" });
+    const futureEnvelope = first.facade.authority.sign({ plan: future.plan, revisionId: "revision", semanticOperations: future.semanticOperations, creative: future.trustedCreativePayload });
+    const futureResolved = resolveStoredPlan(futureEnvelope, { expectedRevisionId: "revision", expectedPlanHash: canonicalChangePlanHash(future.plan) }, first.facade.authority);
+    expect(() => verifyGeneratedStateReuse({ workspaceId: "workspace", baseRevisionId: "revision", inspection, previous: futureResolved.creativeMaterialization as never })).toThrow(/PROVENANCE_INVALID/);
+    expect(() => verifyGeneratedStateReuse({ workspaceId: "workspace", baseRevisionId: "revision", inspection: JSON.parse(JSON.stringify(inspection)) as never, previous: first.resolved.creativeMaterialization as never })).toThrow(/PROVENANCE_INVALID/);
+    const changedType = structuredClone(input.semanticPlan); changedType.localState[0]!.type = "number"; changedType.localState[0]!.initialValue = 0;
+    expect(() => readVerifiedGeneratedStateReuse(stateProof, "workspace", "revision", changedType)).toThrow(/PROVENANCE_INVALID/);
+    const state = result.materialization.states![0]!;
+    const variablePath = path.join(published.rootDir, "1.0.0.1", state.existing!.file);
+    const pristine = await readFile(variablePath, "utf8");
+    for (const tamper of ["value", "type", "id", "unknown", "duplicate", "case-alias", "id-alias"] as const) {
+      const document = JSON.parse(pristine) as { Variables: Array<Record<string, unknown>> };
+      const variable = document.Variables.find(value => value["name"] === state.variableName)!;
+      if (tamper === "value") variable["defaultValue"] = true;
+      if (tamper === "type") variable["dataType"] = 3;
+      if (tamper === "id") variable["id"] = 999;
+      if (tamper === "unknown") variable["extraNativeField"] = "changed after proof";
+      if (tamper === "duplicate") document.Variables.push(structuredClone(variable));
+      if (tamper === "case-alias") document.Variables.push({ ...structuredClone(variable), name: state.variableName.toUpperCase() });
+      if (tamper === "id-alias") document.Variables.push({ ...structuredClone(variable), name: "unrelated-variable-with-the-same-id" });
+      await writeFile(variablePath, JSON.stringify(document));
+      await expect(applyClientPatch(published.rootDir, result.plan, options)).rejects.toThrow(/PROVENANCE_INVALID/);
+      const changedInspection = await inspectClientProject(published.rootDir, { runtimeBinding: { workspaceId: "workspace", baseRevisionId: "revision" } });
+      if (tamper !== "unknown" && tamper !== "id") expect(() => verifyGeneratedStateReuse({ workspaceId: "workspace", baseRevisionId: "revision", inspection: changedInspection, previous: first.resolved.creativeMaterialization as never })).toThrow();
+      await writeFile(variablePath, pristine);
+    }
+  });
+  // end
 
   it("blocks a missing non-Image closure during the authoritative V2 recompile", () => {
     const input = creativeInput();
@@ -680,15 +901,18 @@ describe("creative native materializer", () => {
       const nativeByName = (name: string) => controls.find((control) => control["name"] === name)!;
       const visibilityLink = (owner: string, operation: "open-overlay" | "close-overlay") =>
         ((nativeByName(owner)["linkMng"] as { linkList: Array<Record<string, unknown>> }).linkList)
-          .find((link) => (link["kfCompilerAction"] as Record<string, unknown> | undefined)?.["operation"] === operation)!;
+          .find((link) => decodedModules(String(link["script"])).some((module) =>
+            module.metadata["sourceScriptId"] === (operation === "open-overlay" ? "open-review-overlay" : "close-review-overlay")))!;
       expect((nativeOverlay["baseProperty"] as Record<string, unknown>)["visible"]).toBe(false);
+      expect(nativeByName(close.instanceName)["runVisible"]).toBe(false);
       for (const [owner, operation, visible] of [[open.instanceName, "open-overlay", true], [close.instanceName, "close-overlay", false]] as const) {
         const link = visibilityLink(owner, operation);
-        expect(link["kfCompilerAction"]).toMatchObject({
-          schema: "kf-compiled-action/v3", operation, targetSemanticControlId: overlay.semanticControlId,
-          targetInstanceName: overlay.instanceName, visible,
-        });
-        expect(decodedModules(String(link["script"]))[0]?.body).toBe(`${overlay.instanceName}.setVisible(${String(visible)});\n`);
+        const expectedTargets = operation === "open-overlay"
+          ? [overlay.instanceName, close.instanceName]
+          : [close.instanceName, overlay.instanceName];
+        expect(decodedModules(String(link["script"]))[0]?.body).toBe(
+          expectedTargets.map((target) => `${target}.setVisible(${String(visible)});`).join("\n") + "\n",
+        );
       }
       return { nativeOverlay, openLink: visibilityLink(open.instanceName, "open-overlay") };
     };
@@ -725,7 +949,7 @@ describe("creative native materializer", () => {
     (tamperedOverlay["baseProperty"] as Record<string, unknown>)["visible"] = true;
     const tamperedOpen = pageControls.find((control) => control["name"] === open.instanceName)!;
     const tamperedOpenLink = ((tamperedOpen["linkMng"] as { linkList: Array<Record<string, unknown>> }).linkList)
-      .find((link) => (link["kfCompilerAction"] as Record<string, unknown> | undefined)?.["operation"] === "open-overlay")!;
+      .find((link) => String(link["script"]).includes("setVisible(true)"))!;
     tamperedOpenLink["script"] = String(tamperedOpenLink["script"]).replace("setVisible(true)", "setVisible(false)");
     await writeFile(pagePath, JSON.stringify(pageJson, null, 2));
     const tamperedReport = await pack.validate({
@@ -794,8 +1018,10 @@ describe("creative native materializer", () => {
       .toEqual(expect.arrayContaining([expect.objectContaining({ name: open.instanceName })]));
     expect((byName.get(root.instanceName)?.["insiderObjects"] as Array<Record<string, unknown>>)
       .map((control) => control["name"])).toEqual([
-      result.materialization.controls.find((control) => control.semanticControlId === "portrait")!.instanceName,
       open.instanceName,
+      // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+      result.materialization.controls.find((control) => control.semanticControlId === "portrait")!.instanceName,
+      // end
     ]);
     expect(byName.get(open.instanceName)).toMatchObject({
       leftTopPt: { x: open.geometry.x, y: open.geometry.y },
@@ -803,13 +1029,12 @@ describe("creative native materializer", () => {
       height: open.geometry.height,
     });
     const nativeNavigate = (((byName.get(open.instanceName)?.["linkMng"] as { linkList: Array<Record<string, unknown>> }).linkList)
-      .find((entry) => entry["action"] === "navigatePage"));
-    expect(nativeNavigate).toMatchObject({
-      action: "navigatePage",
-      pageId: result.materialization.pages.find((page) => page.semanticPageId === "detail")!.pageGuid,
-    });
+      .find((entry) => String(entry["script"]).includes('ShowPage("detail",1);')));
+    expect(nativeNavigate).toMatchObject({ linkId: 200001, enable: true, name: "onClick" });
     const nativeGrid = byName.get(grid.instanceName)!;
     expect(nativeGrid["data"]).toEqual([{ id: "1" }]);
+    expect(String(nativeGrid["configureData"])).toContain("$('#' + id).datagrid(");
+    expect(String(nativeGrid["configureData"])).toContain('"data":[{"id":"1"}]');
     const rowClick = ((nativeGrid["linkMng"] as { linkList: Array<Record<string, unknown>> }).linkList)
       .find((entry) => entry["name"] === "onClickRow");
     expect(rowClick).toMatchObject({ linkId: 200024, enable: true });
@@ -829,8 +1054,8 @@ describe("creative native materializer", () => {
     const importedControls = Object.values(roundTripped.raw.pages).flatMap((page) => walkControls(page));
     const importedOpen = importedControls.find((control) => control["name"] === open.instanceName)!;
     expect(((importedOpen["linkMng"] as { linkList: Array<Record<string, unknown>> }).linkList)
-      .find((entry) => entry["action"] === "navigatePage"))
-      .toMatchObject({ pageId: result.materialization.pages.find((page) => page.semanticPageId === "detail")!.pageGuid });
+      .find((entry) => String(entry["script"]).includes('ShowPage("detail",1);')))
+      .toMatchObject({ linkId: 200001, enable: true, name: "onClick" });
     expect(importedControls.some((control) => control["name"] === grid.instanceName
       && String(((control["linkMng"] as { linkList: Array<Record<string, unknown>> }).linkList)
         .find((entry) => entry["linkId"] === 200024)?.["script"]).includes(`${grid.instanceName}.SetData([])`))).toBe(true);
@@ -1214,10 +1439,15 @@ describe("creative native materializer", () => {
       data: [{ id: "1" }], customerGridField: { preserved: true },
     });
     expect(native.get("Button1")).toMatchObject({
-      backgroundColor: "#0b6bcb", customerButtonField: { preserved: true },
+      // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+      backgroundColor: "#333333", customerButtonField: { preserved: true },
+      // end
     });
-    expect(String(native.get("Button1")!["styleDataNew"])).toContain("#legacy{color:red}");
-    expect(String(native.get("Button1")!["styleDataNew"])).toContain("#domId .el-button{border-radius:8px}");
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    expect(native.get("Button1")!["styleDataNew"]).toBe("#legacy{color:red}");
+    expect(String(native.get("Button1")!["styleData"])).toContain("#customer-button{color:green}");
+    expect(String(native.get("Button1")!["styleData"])).toContain("#domId .el-button{background-color:#0b6bcb;border-radius:8px}");
+    // end
 
     let validationIndexes = 0;
     const report = await validateClientProject(base.rootDir, candidate, result.plan, {

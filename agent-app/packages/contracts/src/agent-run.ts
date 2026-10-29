@@ -1,5 +1,8 @@
 // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
 import { z } from "zod";
+// modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+import { VisualAcceptedDifferencesSchema, VisualReviewReceiptSchema } from "./visual-acceptance.js";
+// end
 
 /** design §7 固定状态集合；终态不可复活。 */
 export const RunStatusSchema = z.enum([
@@ -37,6 +40,11 @@ export const RunActionSchema = z.discriminatedUnion("type", [
     expectedRunId: z.string().min(1),
     analysisId: z.string().min(1),
     analysisHash: z.string().min(1),
+    // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+    // Optional only for reading old internal signed actions. Public/store admission requires both.
+    receipt: VisualReviewReceiptSchema.optional(),
+    acceptedDifferences: VisualAcceptedDifferencesSchema.optional(),
+    // end
   }).strict(),
   z.object({
     type: z.literal("revise_regions"),
@@ -101,7 +109,7 @@ const eventPayloads: Record<RunEventType, z.ZodTypeAny> = {
     planHash: z.string().min(1).max(200),
     summary: z.string().max(600).optional(),
   }).strict(),
-  "input.required": z.object({ question: z.string().min(1).max(600) }).strict(),
+  "input.required": z.object({ question: z.string().min(1).max(600), receipt: z.string().max(4000).optional() }).strict(),
   "build.updated": z.object({
     buildJobId: z.string().min(1),
     status: z.string().min(1).max(40),
@@ -153,6 +161,9 @@ export type RunSnapshot = {
   resultRevisionId: string | null;
   failureCode: string | null;
   supersededByRunId: string | null;
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  retryPolicy?: "new-run" | "new-visual-review";
+  // end
 };
 
 export type RunLease = {

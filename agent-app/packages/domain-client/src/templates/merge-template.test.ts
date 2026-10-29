@@ -71,8 +71,7 @@ describe("control template merge rule", () => {
   });
 
   it("does not leak base sizePolicy into control templates", () => {
-    // base-fields intentionally carries no sizePolicy; the merged result must
-    // contain exactly the control template's shape.
+    // base-fields 特意不携带 sizePolicy；合并结果必须严格保持控件模板的结构。
     const merged = mergeControlTemplate(baseFields, textTemplate);
     expect(Object.hasOwn(merged, "sizePolicy")).toBe(true);
     const mergedButton = mergeControlTemplate(baseFields, buttonTemplate);

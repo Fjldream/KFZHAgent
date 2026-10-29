@@ -11,7 +11,7 @@ const stableIdSchema = z
   .regex(/^[A-Za-z][A-Za-z0-9_-]*$/)
   .refine((value) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value));
 
-/** Registered module namespaces are semantic identifiers, not KF IDs. */
+/** 注册的模块命名空间是语义标识符，而不是 KF ID。 */
 const moduleKindSchema = z
   .string()
   .trim()
@@ -65,7 +65,7 @@ export const ModulePlanModuleSchema = z
     placement: ModulePlacementSchema,
     interactions: z.array(ModuleInteractionSchema).max(12),
     assetId: stableIdSchema.optional(),
-    /** Explicit confirmed-blueprint provenance; blueprint IDs are human labels and may contain spaces. */
+    /** 明确的确认蓝图出处；蓝图 ID 是人类标签，可能包含空格。 */
     sourceBlueprintModuleIds: z.array(z.string().trim().min(1).max(100)).min(1).max(12).optional(),
   })
   .strict();
@@ -85,7 +85,7 @@ const moduleUpdateSchema = z
     content: moduleTextSchema.optional(),
     placement: ModulePlacementSchema.optional(),
     interactions: z.array(ModuleInteractionSchema).max(12).optional(),
-    /** null is an explicit remove; undefined means this operation does not touch the binding. */
+    /** null 是一个明确的移除；undefined 表示此操作不会触及绑定。 */
     assetId: stableIdSchema.nullable().optional(),
     sourceBlueprintModuleIds: z.array(z.string().trim().min(1).max(100)).min(1).max(12).optional(),
   })
@@ -112,7 +112,7 @@ export const ModulePlanOperationSchema = z.discriminatedUnion("op", [
       op: z.literal("changeVariant"),
       pageId: stableIdSchema,
       moduleId: stableIdSchema,
-      /** Must match the persisted module version; upgrades need a new module plan. */
+      /** 必须匹配持久化模块版本；升级需要新的模块计划。 */
       templateVersion: templateVersionSchema,
       variant: stableIdSchema,
     })
@@ -144,8 +144,7 @@ export const ModulePlanOperationSchema = z.discriminatedUnion("op", [
 ]);
 
 /**
- * A declaration-only module plan. It constrains LLM output to registered
- * layout intent and asset IDs; compilation owns concrete coordinates and I/O.
+ * 仅包含声明的模块计划。它把 LLM 输出约束为已注册的布局意图和资产 ID；具体坐标和 I/O 由编译阶段负责。
  */
 export const ModulePlanSchema = z
   .object({

@@ -15,25 +15,17 @@ import {
 } from "./json-pointer.js";
 
 /**
- * Change-scope hashing (brief Step 5).
- *
- * Before a single file is patched the whole base workspace is content-hashed
- * (SHA-256 per file) and every JSON pointer the confirmed plan is allowed to
- * touch is recorded. After patching, the candidate tree is hashed again and
- * any file whose hash changed — or any JSON field whose semantic diff is not
- * covered by a planned pointer — is reported as a scope violation. This is the
- * losslessness guarantee: nothing the plan did not confirm may ever change.
+ * 在单个文件被修补之前，整个基础工作区的内容被内容哈希（SHA-256 每个文件）并记录确认计划中允许更改的每个 JSON 指针。在修补后，候选树被重新哈希，任何文件的哈希改变（或任何 JSON 字段的语义差异未被计划的指针覆盖）——或者任何 JSON 字段的哈希改变——报告为范围违规。这是无损失保证：计划中未确认的任何更改都可能永远改变。
  */
 
 export interface ChangeScope {
-  /** Files the plan legitimately changes, relative to the workspace root. */
+  /** 合法更改文件计划，相对于工作区根。 */
   touchedFiles: Set<string>;
   /**
-   * Planned JSON pointers per file (file relative to the version directory,
-   * e.g. `project/page/Page1.json`). Pointers start with `#`.
-   */
+ * 每个文件的计划JSON指针（相对于版本目录，例如 `project/page/Page1.json`）。指针以 `#` 开始。
+ */
   touchedPointers: Map<string, Set<string>>;
-  /** Version directory name relative to the workspace root (`"."` when root). */
+  /** 工作空间根目录相对于版本目录的相对名称(`"."` 时为根目录). */
   versionDir: string;
 }
 
@@ -49,7 +41,7 @@ export interface ScopeVerifyResult {
 
 export type EntityKind = "control" | "page" | "variable";
 
-/** Structural operation shape accepted by scope computation (contract + normalized plans). */
+/** 作用域计算所接受的结构化操作形状（契约计划和规范化计划）。 */
 export interface ScopeOperation {
   op: string;
   entityType?: string;
@@ -66,15 +58,15 @@ export interface ScopePlan {
 
 export interface EntityLocation {
   kind: EntityKind;
-  /** File relative to the version directory, e.g. `project/page/Page1.json`. */
+  /** 版本目录中的文件相对路径, e.g. `project/page/Page1.json`. */
   file: string;
-  /** JSON pointer of the entity root inside that file, e.g. `#/objects/0`. */
+  /** 文件中实体根的JSON指针，e.g。`#/objects/0`。 */
   pointer: string;
-  /** IR control type for controls (`button`, `text`, ...). */
+  /** 控制类型，用于控制（`button`, `text`, ...） */
   controlType?: string;
-  /** KF GUID for controls — identity used to re-locate the entity in the candidate. */
+  /** 控制的KF GUID — 用于重新定位实体的标识符 */
   guid?: string;
-  /** Semantic variable name for variables — identity used to re-locate the entity. */
+  /** 变量的语义名称 — 用于重新定位实体的标识符 */
   name?: string;
 }
 
@@ -83,7 +75,7 @@ export function isControlLocation(loc: EntityLocation): loc is EntityLocation & 
 }
 
 // ---------------------------------------------------------------------------
-// Hashing + helpers
+// 哈希 + 辅助函数
 // ---------------------------------------------------------------------------
 
 async function readJsonAt(rootDir: string, versionDir: string, file: string): Promise<unknown> {
@@ -91,7 +83,7 @@ async function readJsonAt(rootDir: string, versionDir: string, file: string): Pr
   return JSON.parse(await readFile(full, "utf8")) as unknown;
 }
 
-/** Returns the version directory name relative to rootDir (`.`, or the x.y.z.w dir). */
+/** 返回版本目录相对于 rootDir (`.`, 或者 x.y.z.w 目录)。 */
 export async function resolveVersionDirName(rootDir: string): Promise<string> {
   if (existsSync(path.join(rootDir, "project.json"))) return ".";
   const entries = await readdir(rootDir, { withFileTypes: true });

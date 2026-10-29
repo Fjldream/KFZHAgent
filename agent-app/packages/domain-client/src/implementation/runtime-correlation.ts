@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+import { MAX_NATIVE_DEVELOPMENT_NAME_LENGTH } from "../compile/native-page-name.js";
+// end
 import { types as utilTypes } from "node:util";
 import {
   CompilerInstanceNameSchema,
@@ -201,7 +204,11 @@ function runtimeInstanceName(workspaceId: string, semanticControlId: string, cap
   const digest = createHash("sha256")
     .update("kf-runtime-control\0", "utf8").update(workspaceId, "utf8").update("\0", "utf8")
     .update(semanticControlId, "utf8").update("\0", "utf8").update(capabilityId, "utf8").digest("hex");
-  return `${runtimeDescriptor(capabilityId).prefix}${BigInt(`0x${digest}`).toString(10)}`;
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  const prefix = runtimeDescriptor(capabilityId).prefix;
+  const suffix = BigInt(`0x${digest}`).toString(10).slice(0, MAX_NATIVE_DEVELOPMENT_NAME_LENGTH - prefix.length);
+  return `${prefix}${suffix}`;
+  // end
 }
 function acceptsNativeType(descriptor: RuntimeCapabilityDescriptor, actual: ServerOwnedNativeControlType): boolean {
   if (actual.kind === "malformed") return false;

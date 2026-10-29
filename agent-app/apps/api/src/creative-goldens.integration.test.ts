@@ -1,3 +1,5 @@
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+// 历史 golden 领域回归仅用测试驱动器，不注册旧执行 HTTP。
 // @ts-nocheck -- 金标准.fixture是JSON边界值；运行时的schema和集成验证故意提供权威的检查。
 import "reflect-metadata";
 process.env.DATABASE_URL =
@@ -30,6 +32,9 @@ import {
   inspectClientProject,
 } from "@kf/domain-client";
 import { DomainRegistry } from "@kf/domain-registry";
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+import { nativeStyleStorage } from "../../../packages/domain-client/src/compile/native-presentation.js";
+// end
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -40,6 +45,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { JobRunner } from "../../worker/src/job-runner.js";
 import { encodeBlueprintConfirmation } from "@kf/agent-orchestrator";
 import { AppModule } from "./app.module.js";
+import { ConversationService } from "./conversations/conversation.service.js";
+import { LegacyConversationDriver } from "../test-support/legacy-conversation-driver.js";
+import { legacyGraphRequest } from "../test-support/legacy-graph-request.js";
 import { ARTIFACT_STORAGE } from "./artifacts/artifact-storage.js";
 import { PasswordService } from "./auth/password.service.js";
 import { DeterministicFakeModelPort } from "./conversations/fake-model.js";
@@ -198,12 +206,16 @@ beforeAll(async () => {
   process.env.ARTIFACT_STORAGE_ROOT = storageRoot;
   model = new GoldenModelPort();
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+    .overrideProvider(ConversationService).useClass(LegacyConversationDriver)
     .overrideProvider(MODEL_PORT)
     .useValue(model)
     .compile();
   app = moduleRef.createNestApplication();
   app.use(cookieParser());
   await app.init();
+  // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+  await app.get(ConversationService).getGraph();
+  // end
   server = app.getHttpServer();
   prisma = moduleRef.get(PrismaService);
   passwords = moduleRef.get(PasswordService);
@@ -334,6 +346,25 @@ function walkControls(value, result = []) {
 function nativeName(control) {
   return control.name ?? control.baseProperty?.name;
 }
+
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+/** 独立检查实际包内事件片段，不依赖编译器的序列化 helper 计算预期。 */
+function packagedActionSegments(owner) {
+  return (owner?.linkMng?.linkList ?? []).flatMap((link) => {
+    if (typeof link.script !== "string") return [];
+    return [...link.script.matchAll(/^\/\/ kf-compiled-event\/v1 ([A-Za-z0-9_-]+)\n/gm)].map((match) => {
+      const metadata = JSON.parse(Buffer.from(match[1], "base64url").toString("utf8"));
+      const bytes = Buffer.from(link.script.slice(match.index + match[0].length), "utf8").subarray(0, metadata.bodyByteLength);
+      expect(metadata).toMatchObject({ schema: "kf-compiled-event/v1", ownerInstanceName: nativeName(owner), placement: "event", kfEvent: link.name, linkId: link.linkId ?? null });
+      expect(bytes.length).toBe(metadata.bodyByteLength);
+      expect(createHash("sha256").update(bytes).digest("hex")).toBe(metadata.bodySha256);
+      expect(link.enable).toBe(true);
+      expect(link).not.toHaveProperty("action");
+      return { metadata, body: bytes.toString("utf8") };
+    });
+  });
+}
+// end
 
 function runPackagedTabsInitialization(nativeTabs) {
   const prefix = "// kf-compiled-tabs/v1 ";
@@ -746,18 +777,12 @@ async function runGoldenBuild(fixture, runNumber) {
   const conversation = await createConversation(cookie, workspaceId, fixture.id);
 
   model.queueIntent("NEW_REQUIREMENT");
-  const proposed = await request(server)
-    .post(`/api/conversations/${conversation.body.id}/messages`)
-    .set("Cookie", cookie)
-    .send({ content: fixture.prompt })
+  const proposed = await legacyGraphRequest(app, cookie, conversation.body.id, { type: "message", content: fixture.prompt })
     .expect(200);
   const proposal = doneEvent(proposed.text);
   expect(proposal.stage).toBe("design-review");
 
-  const confirmed = await request(server)
-    .post(`/api/conversations/${conversation.body.id}/messages`)
-    .set("Cookie", cookie)
-    .send({ content: encodeBlueprintConfirmation(proposal.designRevision, proposal.designPlanHash) })
+  const confirmed = await legacyGraphRequest(app, cookie, conversation.body.id, { type: "message", content: encodeBlueprintConfirmation(proposal.designRevision, proposal.designPlanHash) })
     .expect(200);
   const building = doneEvent(confirmed.text);
   const diagnosticMessages = building.stage === "building" ? [] : await prisma.message.findMany({
@@ -875,6 +900,17 @@ async function runGoldenBuild(fixture, runNumber) {
       const link = owner?.linkMng?.linkList?.find((entry) =>
         entry.kfCompilerAction?.schema === "kf-compiled-action/v3"
         && entry.kfCompilerAction?.sourceActionId === overlayAction.sourceActionId);
+      // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+      // 多目标/多效果事件按当前 KF 合同合并到单个有序脚本槽，不能只找旧 v3 标记。
+      if (link === undefined) {
+        const segment = packagedActionSegments(owner).find((entry) => entry.metadata.sourceScriptId === overlayAction.sourceActionId);
+        expect(segment, `${fixture.id}: packaged overlay action ${overlayAction.sourceActionId}`).toBeDefined();
+        const targets = overlayAction.kind === "open-overlay" ? overlayAction.targetControls : [...overlayAction.targetControls].reverse();
+        expect(segment.body).toBe(targets.map((target) => `${target.instanceName}.setVisible(${overlayAction.kind === "open-overlay"});`).join("\n") + "\n");
+        for (const target of targets) expect(segment.metadata.instanceReferences).toContainEqual({ semanticId: target.semanticControlId, instanceName: target.instanceName });
+        continue;
+      }
+      // end
       expect(link, `${fixture.id}: packaged overlay binding ${overlayAction.sourceActionId}`).toMatchObject({
         script: expect.stringContaining(`${overlayAction.targetInstanceName}.setVisible(${overlayAction.kind === "open-overlay"});`),
         kfCompilerAction: {
@@ -895,9 +931,12 @@ async function runGoldenBuild(fixture, runNumber) {
     expect(navigationActions.length, `${fixture.id}: navigation actions`).toBeGreaterThanOrEqual(1);
     navigationActions.forEach((navigation) => {
       const navigationOwner = controlsByName.get(navigation.ownerInstanceName);
-      expect(navigationOwner?.linkMng?.linkList?.some((link) =>
-        link.action === "navigatePage" && link.pageId === navigation.targetPageGuid),
-      `${fixture.id}: packaged navigation ${navigation.sourceActionId}`).toBe(true);
+      // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+      const segment = packagedActionSegments(navigationOwner).find((entry) => entry.metadata.sourceScriptId === navigation.sourceActionId);
+      expect(segment, `${fixture.id}: packaged navigation ${navigation.sourceActionId}`).toBeDefined();
+      expect(segment.body).toBe(`ShowPage(${JSON.stringify(navigation.targetPageName)},1);\n`);
+      expect(segment.metadata.pageReferences).toContainEqual({ semanticId: navigation.targetPageName, pageGuid: navigation.targetPageGuid });
+      // end
     });
 
     if (fixture.id === "portal") {
@@ -930,7 +969,12 @@ async function runGoldenBuild(fixture, runNumber) {
 
     const styled = materialization.stylesData.find((style) => style.compiledStyle.cssFragments.length > 0);
     expect(styled, `${fixture.id}: compiled CSS fragment`).toBeDefined();
-    expect(String(controlsByName.get(styled.instanceName)?.styleDataNew)).toContain("#");
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    const styledNative = controlsByName.get(styled.instanceName);
+    expect(styledNative).toBeDefined();
+    const { owner, field } = nativeStyleStorage(styledNative);
+    expect(String(owner[field])).toContain("#");
+    // end
 
     const packagedScript = importedControls.flatMap((control) => control.linkMng?.linkList ?? [])
       .find((link) => String(link.script).includes("kf-compiled-event/v1"));
@@ -1058,3 +1102,5 @@ describe("KF creative golden projects", () => {
     }
   }, 300_000);
 });
+
+// end

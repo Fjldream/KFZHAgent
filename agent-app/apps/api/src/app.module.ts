@@ -11,6 +11,9 @@ import { RevisionsModule } from "./revisions/revisions.module.js";
 import { TenantsModule } from "./tenants/tenants.module.js";
 import { UsersModule } from "./users/users.module.js";
 import { WorkspacesModule } from "./workspaces/workspaces.module.js";
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+import { ReferenceAssetsModule } from "./vision/reference-assets.module.js";
+// end
 
 @Module({
   imports: [
@@ -23,6 +26,9 @@ import { WorkspacesModule } from "./workspaces/workspaces.module.js";
     RevisionsModule,
     ArtifactsModule,
     AssetsModule,
+    // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+    ReferenceAssetsModule,
+    // end
     BuildJobsModule,
     ConversationsModule,
     RunsModule,

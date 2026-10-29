@@ -20,6 +20,22 @@ const approvedAsset: ApprovedAssetFacts = {
 };
 const modelAssetId = "asset-00000000000040008000000000000001";
 
+// modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+it("persists a solid layout border with zero undeclared sides without changing other controls", () => {
+  const layout = compileScopedStyleFragment(KF36_RUNTIME_PROFILE.selectors["layout.4"]!.parts.root!,
+    "kf36-layout-1111111111111111", "surface", "normal", { borderLeftWidth: 1, borderColor: "#dde5ec" }, []);
+  expect(layout.persistedCssText).toContain("border-style:solid");
+  expect(layout.persistedCssText).toContain("border-right-width:0px");
+  expect(layout.persistedCssText).toContain("border-top-width:0px");
+  expect(layout.persistedCssText).toContain("border-bottom-width:0px");
+  expect(layout.declarations).toEqual({ borderLeftWidth: 1, borderColor: "#dde5ec" });
+  expect(() => assertCompiledScopedStyleFragmentComplete(layout)).not.toThrow();
+  const button = compileScopedStyleFragment(KF36_RUNTIME_PROFILE.selectors.button!.parts.root!,
+    "kf36-button-1111111111111111", "button", "normal", { borderLeftWidth: 1 }, []);
+  expect(button.persistedCssText).toBe("#domId .el-button{border-left-width:1px}");
+});
+// end
+
 describe("compileScopedCss", () => {
   const buttonSelectorRoles = KF36_RUNTIME_PROFILE.selectors.button!;
 

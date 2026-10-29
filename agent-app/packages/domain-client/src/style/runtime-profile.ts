@@ -11,7 +11,7 @@ export interface KFSelectorEvidence {
   readonly runtimeMarkers: readonly string[];
   readonly selectorSourcePath: string;
   readonly selectorMarkers: readonly string[];
-  /** Exact complete-file digest when a selector property is promoted from external product source. */
+  /** 当将选择的外部产品源的属性从外部产品源提升到外部产品源时，必须使用精确的完整文件摘要。 */
   readonly selectorSourceSha256?: string;
 }
 
@@ -23,7 +23,7 @@ export interface KFStylePartSelector {
 }
 
 export interface SelectorRoles {
-  /** Legacy root-only compiler placeholder retained for v1 callers. */
+  /** 保留遗留的根唯一编译器占位符，用于v1调用者。 */
   readonly root: "#domId";
   readonly parts: Readonly<Record<string, KFStylePartSelector>>;
 }

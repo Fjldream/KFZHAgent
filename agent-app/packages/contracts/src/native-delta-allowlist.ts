@@ -1,7 +1,5 @@
 /**
- * Canonical native field-delta policy shared by contract validation and the
- * domain patcher/lowerer. Keep this module dependency-free so signed artifact
- * validation never has to trust a policy projection supplied by the artifact.
+ * 契约校验与领域 patcher/lowerer 共享的规范原生字段增量策略。保持该模块无依赖，使签名制品校验无需信任由制品提供的策略投影。
  */
 
 function freezeFields(fields: readonly string[]): readonly string[] {
@@ -61,7 +59,7 @@ const AUTHORITATIVE_EASYUI_ALL_FIELDS = freezeFields([
   ...new Set(Object.values(AUTHORITATIVE_EASYUI_PROTO_FIELDS).flat()),
 ]);
 
-/** `guid` is deliberately excluded because native identities are immutable. */
+/** 故意排除`guid`，因为原始身份是不可变的。 */
 const AUTHORITATIVE_COMMON_CONTROL_ALLOWED_FIELDS = freezeFields([
   "name", "leftTopPt", "width", "height", "x", "y", "backgroundColor",
   "comment", "visible", "runVisible", "enable", "lock", "sizePolicy",
@@ -147,8 +145,7 @@ const AUTHORITATIVE_VARIABLE_ALLOWED_FIELDS = freezeFields([
 ]);
 
 /**
- * Frozen compatibility views for historical imports. Each view is copied from
- * the private policy so callers can neither mutate nor retain its references.
+ * 为历史导入提供冻结兼容视图。每个视图都从私有政策复制而来，使调用者无法修改或保留其引用。
  */
 export const EASYUI_PROTO_FIELDS = freezeFieldTable(AUTHORITATIVE_EASYUI_PROTO_FIELDS);
 export const EASYUI_ALL_FIELDS = freezeFields(AUTHORITATIVE_EASYUI_ALL_FIELDS);

@@ -1,0 +1,76 @@
+{
+  "physicalRequests": 2,
+  "acceptanceMode": "semantic-only-with-new-approvals",
+  "planningFixtureRequests": 2,
+  "publicFactsHash": "33b3c8d0272d72fedf73c7dbb0c97b31f51bef16b1dbe902732cc690a0c2a30b",
+  "invocations": [
+    {
+      "task": "vision",
+      "requestedModel": "deepseek-flash",
+      "actualModel": "saved-public-vision-fixture",
+      "status": "SUCCEEDED",
+      "failureCode": null,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "cacheHitTokens": null,
+      "cacheMissTokens": null,
+      "latencyMs": 9
+    },
+    {
+      "task": "blueprint",
+      "requestedModel": "deepseek-flash",
+      "actualModel": "saved-public-blueprint-fixture",
+      "status": "SUCCEEDED",
+      "failureCode": null,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "cacheHitTokens": null,
+      "cacheMissTokens": null,
+      "latencyMs": 1
+    },
+    {
+      "task": "implementation",
+      "requestedModel": "deepseek-flash",
+      "actualModel": "deepseek-flash",
+      "status": "SUCCEEDED",
+      "failureCode": null,
+      "inputTokens": 26460,
+      "outputTokens": 7585,
+      "cacheHitTokens": 3584,
+      "cacheMissTokens": 22876,
+      "latencyMs": 23104
+    },
+    {
+      "task": "repair",
+      "requestedModel": "deepseek-flash",
+      "actualModel": "deepseek-flash",
+      "status": "SUCCEEDED",
+      "failureCode": null,
+      "inputTokens": 30350,
+      "outputTokens": 7567,
+      "cacheHitTokens": 4224,
+      "cacheMissTokens": 26126,
+      "latencyMs": 21504
+    }
+  ],
+  "outcomes": [
+    {
+      "id": "09721681-8145-4544-9954-3f2cd20d70ca",
+      "status": "CANCELLED",
+      "failureCode": null
+    },
+    {
+      "id": "cd1dae79-5bc8-4978-9c45-ca44851099cd",
+      "status": "CANCELLED",
+      "failureCode": null
+    },
+    {
+      "id": "a32e5078-ceb4-4501-8984-6afb101ce2bf",
+      "status": "FAILED",
+      "failureCode": "INVALID_MODEL_OUTPUT"
+    }
+  ],
+  "productionRollout": false,
+  "nativeKfAccepted": false,
+  "browserAccepted": false
+}

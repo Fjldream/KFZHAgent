@@ -1,4 +1,8 @@
-import { getControlCapability } from "../style/control-capability-registry.js";
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+import type { VisualRegion } from "@kf/contracts";
+import { getControlCapability, supportsNewVisualGeneration } from "../style/control-capability-registry.js";
+import { listGeneratedComponentPropertyNames } from "../implementation/component-properties.js";
+// end
 import { getStyleAdapter } from "../style/adapters/base-adapters.js";
 import { listCompositionRecipes } from "./composition-recipe-registry.js";
 import { listControlDesignProfiles } from "./control-design-registry.js";
@@ -222,3 +226,41 @@ const SNAPSHOT: DesignKnowledgeSnapshot = deepFreeze({
 export function getDesignKnowledgeSnapshot(): DesignKnowledgeSnapshot {
   return SNAPSHOT;
 }
+
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+/** A projection, not a change to v1 catalog content or existing signed plan hashes. */
+const VISUAL_ROLE_SEMANTICS: Readonly<Record<VisualRegion["role"], readonly string[]>> = {
+  header: ["row-layout"], sidebar: ["column-layout"],
+  content: ["row-layout", "column-layout", "dock-layout"], card: ["row-layout", "column-layout"],
+  form: ["form-input", "row-layout", "column-layout"], table: ["structured-record-list"], chart: [],
+  image: ["media", "portrait", "product-visual"], text: ["heading", "body-copy", "narrative-content"],
+  action: ["primary-action", "secondary-action"],
+};
+
+export function getVisualCapabilitySurface(capabilityId: string) {
+  const technical = getControlCapability(capabilityId);
+  if (technical === undefined) return undefined;
+  const profile = SNAPSHOT.controlDesignProfiles.find(item => item.capabilityId === capabilityId);
+  const style = SNAPSHOT.styleCapabilityProfiles.find(item => item.capabilityId === capabilityId);
+  const script = SNAPSHOT.scriptCapabilityProfiles.find(item => item.capabilityId === capabilityId);
+  const supportedRoles = (Object.keys(VISUAL_ROLE_SEMANTICS) as VisualRegion["role"][])
+    .filter(role => VISUAL_ROLE_SEMANTICS[role].some(semantic => profile?.semanticRoles.includes(semantic)));
+  const properties = [
+    ...listGeneratedComponentPropertyNames(capabilityId).filter(name => name !== "parentId").map(name => `property:${name}`),
+    ...(style?.parts.filter(part => part.availability === "supported")
+      .flatMap(part => part.properties.map(property => `style:${part.id}.${property}`)) ?? []),
+  ];
+  const interactions = script === undefined ? [] : [
+    ...script.events.filter(item => item.availability === "supported").map(item => item.semanticEvent),
+    ...script.actions.filter(item => item.availability === "supported").map(item => item.semanticAction),
+    ...script.methods.filter(item => item.availability === "supported").map(item => item.semanticMethod),
+  ];
+  return Object.freeze({
+    capabilityId, controlType: capabilityId, supportedRoles: Object.freeze(supportedRoles),
+    eligible: profile !== undefined && supportsNewVisualGeneration(technical),
+    properties: Object.freeze([...new Set(properties)].sort()),
+    interactions: Object.freeze([...new Set(interactions)].sort()),
+    generationStatus: technical.generation.status, limitations: technical.limitations,
+  });
+}
+// end

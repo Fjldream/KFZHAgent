@@ -9,8 +9,7 @@ const output = (
 ): ModuleRequiredOutputContract => Object.freeze({ outputId, role, capabilityId, critical: true, ...extra });
 
 /**
- * Registry-owned, compiler-independent manifest derivation for the 15 V1 kinds.
- * It depends only on the accepted instance/variant and schema-parsed content.
+ * 注册所有者，编译无关的标识符衍生，用于15 V1种的15种类型。它仅依赖于接受的实例/变体和解析的schema内容。
  */
 export function deriveV1RequiredOutputs(kind: string, input: ModuleQualityManifestInput): readonly ModuleRequiredOutputContract[] {
   const { instance, content } = input;

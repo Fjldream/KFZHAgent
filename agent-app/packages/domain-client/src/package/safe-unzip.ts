@@ -3,25 +3,21 @@ import path from "node:path";
 import { unzipSync } from "fflate";
 
 /**
- * Safe ZIP-compatible handling for KF native client `.gz` packages.
+ * 对 KF 原生客户端 `.gz` 包进行安全的 ZIP 兼容处理。
  *
- * KF client exports use a `.gz` extension but the bytes are a standard ZIP
- * container. All safety checks (path traversal, absolute paths, symlinks,
- * zip-bomb size/ratio limits) are implemented here against the ZIP central
- * directory before any content is decompressed; fflate is only used as the
- * compression codec.
+ * KF 客户端导出文件使用 `.gz` 扩展名，但其字节内容是标准 ZIP 容器。所有安全检查（路径穿越、绝对路径、符号链接、Zip 炸弹大小/压缩比限制）都会在解压任何内容之前，依据 ZIP 中央目录完成；fflate 只用作压缩编解码器。
  */
 
 export interface UnzipLimits {
-  /** Maximum size of the compressed input itself. */
+  /** 压缩输入本身的最大大小。 */
   maxCompressedBytes: number;
-  /** Maximum total size of all expanded entry payloads. */
+  /** 所有扩展的条目元数据总大小的最大值。 */
   maxExpandedBytes: number;
-  /** Maximum number of entries in one archive. */
+  /** 一个档案中最多可以包含的条目数量。 */
   maxFileCount: number;
-  /** Maximum length of any single entry path (characters). */
+  /** 任何单个条目路径的最大长度（字符）。 */
   maxPathLength: number;
-  /** Maximum expanded/compressed ratio per entry (zip-bomb guard). */
+  /** 每个条目的扩展/压缩比率的最大值（防止炸弹）。 */
   maxCompressionRatio: number;
 }
 
@@ -33,7 +29,7 @@ export const DEFAULT_UNZIP_LIMITS: UnzipLimits = {
   maxCompressionRatio: 50,
 };
 
-/** Error used for every rejected unpack, prefixed per the task brief. */
+/** 每个拒绝解包时使用的错误。 */
 export class PackageUnpackError extends Error {
   constructor(message: string) {
     super(`PACKAGE_UNPACK_FAILED: ${message}`);

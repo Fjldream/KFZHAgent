@@ -1,4 +1,4 @@
-// @ts-nocheck -- integration fixture uses narrow Prisma/storage doubles.
+// @ts-nocheck -- 集成测试用例使用窄 Prisma/存储双倍。
 import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 import {

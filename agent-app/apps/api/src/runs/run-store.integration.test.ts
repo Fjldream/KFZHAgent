@@ -10,15 +10,18 @@ assertSafeTestDatabase({
 });
 
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createRunTestFixture, messageInput, type RunTestFixture } from "./run-test-fixture.js";
 import { FENCE_REJECTED, IDEMPOTENCY_CONFLICT } from "./run-store.js";
+import { BuildJobService, withAgentRunExecution } from "@kf/build-jobs";
+import { setTimeout as delay } from "node:timers/promises";
 
 let fixture: RunTestFixture;
 
 beforeAll(async () => {
   fixture = await createRunTestFixture();
 });
+beforeEach(async () => { await fixture.resetRuns(); });
 
 afterAll(async () => {
   await fixture.cleanup();
@@ -54,6 +57,72 @@ describe("run creation idempotency", () => {
 });
 
 describe("run claim and fencing", () => {
+  it("honors a stop that wins the race with pausing for confirmation", async () => {
+    const created = await fixture.store.create(messageInput(fixture, "cancel-before-pause", "生成页面"));
+    const lease = await fixture.store.claim("pausing-worker", fixture.tenantA, new Date());
+    if (!lease) throw new Error("lease missing");
+    await fixture.prisma.agentRun.update({ where: { id: created.id }, data: { status: "CANCEL_REQUESTED", cancelRequestedAt: new Date() } });
+    expect(await fixture.store.pause(lease, fixture.tenantA, "WAITING_INPUT")).toMatchObject({ status: "CANCELLED", failureCode: "RUN_CANCELLED" });
+    expect(await fixture.prisma.agentRunEvent.count({ where: { runId: created.id, type: "run.cancelled" } })).toBe(1);
+    expect(await fixture.prisma.agentRun.findUnique({ where: { id: created.id } })).toMatchObject({ leaseOwner: null, leaseExpiresAt: null, finishedAt: expect.any(Date) });
+  });
+  it("rejects enqueue from an expired raw-SQL run lease before looking up any build input", async () => {
+    const created = await fixture.store.create(messageInput(fixture, "expired-enqueue", "生成页面"));
+    const lease = await fixture.store.claim("expired-agent", fixture.tenantA, new Date(Date.now() - 60000));
+    if (!lease) throw new Error("lease missing");
+    await expect(withAgentRunExecution({ runId: created.id, tenantId: fixture.tenantA, ownerId: lease.ownerId, fence: lease.fence, signal: new AbortController().signal }, () => new BuildJobService(fixture.prisma).enqueue({
+      tenantId: fixture.tenantA, workspaceId: fixture.workspaceA, baseRevisionId: "must-not-look-up", changePlanId: "must-not-look-up", planHash: "a".repeat(64), domainKind: "kingclient", idempotencyKey: randomUUID(),
+    }))).rejects.toThrow("RUN_LEASE_REJECTED");
+  });
+  it("rechecks run lease expiry after waiting for the authoritative row lock", async () => {
+    const short = await createRunTestFixture(100);
+    let release!: () => void;
+    let acquired!: () => void;
+    const locked = new Promise<void>(resolve => { acquired = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let holder: Promise<unknown> | undefined;
+    try {
+      const created = await short.store.create(messageInput(short, "lock-expiry-enqueue", "生成页面"));
+      const lease = await short.store.claim("blocked-agent", short.tenantA, new Date());
+      if (!lease) throw new Error("lease missing");
+      holder = short.prisma.$transaction(async tx => {
+        await tx.$queryRaw`SELECT "id" FROM "AgentRun" WHERE "id" = ${created.id} FOR UPDATE`;
+        acquired();
+        await gate;
+      });
+      await locked;
+      const pending = withAgentRunExecution({ runId: created.id, tenantId: short.tenantA, ownerId: lease.ownerId, fence: lease.fence, signal: new AbortController().signal }, () => new BuildJobService(short.prisma).enqueue({
+        tenantId: short.tenantA, workspaceId: short.workspaceA, baseRevisionId: "must-not-look-up", changePlanId: "must-not-look-up", planHash: "a".repeat(64), domainKind: "kingclient", idempotencyKey: randomUUID(),
+      }));
+      const assertion = expect(pending).rejects.toThrow("RUN_LEASE_REJECTED");
+      await delay(160);
+      release();
+      await assertion;
+    } finally {
+      release?.();
+      await holder;
+      await short.cleanup();
+    }
+  });
+  it("does not claim two legacy queued rows in the same conversation concurrently", async () => {
+    const conversationId = await fixture.newConversation();
+    const first = await fixture.store.create(messageInput(fixture, "parallel-claim", "生成页面", { conversationId }));
+    const row = await fixture.prisma.agentRun.findUniqueOrThrow({ where: { id: first.id } });
+    await fixture.prisma.agentRun.create({ data: { tenantId: row.tenantId, workspaceId: row.workspaceId, conversationId,
+      requestedByUserId: row.requestedByUserId, clientRequestId: "legacy-queued", requestHash: "legacy", action: { type: "message", text: "旧排队消息" }, mode: "build", status: "QUEUED",
+    } });
+    const leases = await Promise.all([fixture.store.claim("parallel-a", fixture.tenantA, new Date()), fixture.store.claim("parallel-b", fixture.tenantA, new Date())]);
+    expect(leases.filter(Boolean)).toHaveLength(1);
+    expect(await fixture.prisma.agentRun.count({ where: { conversationId, status: "RUNNING" } })).toBe(1);
+  });
+  it("rolls terminal state back when inserting the terminal event fails", async () => {
+    const created = await fixture.store.create(messageInput(fixture, "atomic-finish", "生成页面"));
+    const lease = await fixture.store.claim("atomic-worker", fixture.tenantA, new Date());
+    if (!lease) throw new Error("lease missing");
+    await fixture.prisma.agentRunEvent.create({ data: { runId: created.id, tenantId: fixture.tenantA, seq: 2, type: "run.completed", payload: {} } });
+    await expect(fixture.store.finish(lease, fixture.tenantA, "SUCCEEDED")).rejects.toThrow();
+    expect(await fixture.prisma.agentRun.findUnique({ where: { id: created.id } })).toMatchObject({ status: "RUNNING", lastSeq: 1, leaseOwner: "atomic-worker" });
+  });
   it("claims one run per conversation and leaves it RUNNING", async () => {
     await fixture.resetRuns();
     const conversationId = await fixture.newConversation();
@@ -67,7 +136,9 @@ describe("run claim and fencing", () => {
     expect(running.leaseOwner).toBe("worker-1");
 
     // 同一会话已有活跃 run，后续排队任务不得被领取。
-    await fixture.store.create(messageInput(fixture, "claim-2", "第二个任务", { conversationId }));
+    // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+    expect(await fixture.store.create(messageInput(fixture, "claim-2", "第二个任务", { conversationId }))).toMatchObject({ status: "QUEUED" });
+    // end
     expect(await fixture.store.claim("worker-2", fixture.tenantA, new Date())).toBeNull();
   });
 
@@ -196,7 +267,7 @@ describe("expired lease recovery", () => {
     }
   });
 
-  it("refuses to recover while a pending conversation turn fence exists", async () => {
+  it.each(["PENDING", "ADMITTED", "QUARANTINED"])("refuses recovery while a %s conversation turn fence exists", async state => {
     await fixture.resetRuns();
     const short = await createRunTestFixture(50);
     try {
@@ -205,7 +276,7 @@ describe("expired lease recovery", () => {
       const oldLease = await short.store.claim("worker-old", short.tenantA, new Date());
       if (oldLease === null) throw new Error("lease missing");
       await short.prisma.conversationTurnFence.create({
-        data: { conversationId, ownerId: "legacy-sse", leaseId: `lease-${created.id}` },
+        data: { conversationId, ownerId: "legacy-sse", leaseId: `lease-${created.id}`, state },
       });
       await new Promise((resolve) => setTimeout(resolve, 80));
       expect(await short.store.recoverExpired("worker-new", short.tenantA, new Date())).toBeNull();

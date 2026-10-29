@@ -1,36 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { useWorkflowStage } from "./stage";
-import type { WorkspaceState } from "./workspace";
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+import type { WorkflowStageState } from "./stage";
+// end
 
 /**
  * Task 9 Step 1：useWorkflowStage 纯函数级推导测试。
  * 组合覆盖 error 优先、approval 优先于 building、构建中三态、成功/失败、默认 idle。
  */
-function makeState(overrides: Partial<WorkspaceState> = {}): WorkspaceState {
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+function makeState(overrides: Partial<WorkflowStageState> = {}): WorkflowStageState {
   return {
-    workspaceId: null,
-    workspace: null,
-    loading: false,
     error: null,
-    conversationId: null,
-    messages: [],
-    streaming: false,
-    phaseHint: null,
-    resuming: false,
     pendingApproval: null,
-    lastDone: null,
-    buildJobId: null,
     buildJobStatus: null,
-    artifacts: [],
-    previewArtifactId: undefined,
-    validationReport: null,
-    revisions: [],
-    currentRevisionId: null,
-    moduleDeliveryResult: null,
-    projectDelivery: null,
     ...overrides,
   };
 }
+// end
 
 describe("useWorkflowStage", () => {
   it("maps error to error with the highest priority", () => {

@@ -1,6 +1,5 @@
 /**
- * Component identities are deterministic semantic references, never KF GUIDs.
- * The slash avoids ambiguities that a hyphen-only concatenation would create.
+ * 组件标识是确定性的语义引用，绝不是 KF GUID。使用斜杠可避免仅用连字符拼接时产生的歧义。
  */
 export function stableModuleComponentId(moduleId: string, slot: string): string {
   if (!isStableSegment(moduleId) || !isStableSegment(slot)) {

@@ -251,9 +251,15 @@ function compiledLayoutMetadata(node: LayoutNode, compiled: CompiledLayoutNode) 
       kind: node.layout,
       overflow: "local-scroll" as const,
       scrollContentExtent: { ...compiled.scrollContentExtent },
+      // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+      ...(compiled.contentInsets === undefined ? {} : { contentInsets: { ...compiled.contentInsets } }),
+      // end
     };
   }
-  return { kind: node.layout, overflow: "visible" as const };
+  // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+  return { kind: node.layout, overflow: "visible" as const,
+    ...(compiled.contentInsets === undefined ? {} : { contentInsets: { ...compiled.contentInsets } }) };
+  // end
 }
 
 function reviewedLayoutNativeProperties(
@@ -286,7 +292,12 @@ function emitLayout(context: CompileContext, node: LayoutNode, walk: WalkContext
     geometry: { ...compiled.geometry },
     compiledLayout: compiledLayoutMetadata(node, compiled),
     nativeProperties: reviewedLayoutNativeProperties(capabilityId, walk.parentId),
-    ...(node.layout === "scroll-region" ? { style: { declarations: { overflow: "auto" as const }, states: {} } } : {}),
+    // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+    ...(node.styleRole !== undefined || node.layout === "scroll-region" ? { style: {
+      ...(node.styleRole === undefined ? {} : { role: node.styleRole }),
+      declarations: node.layout === "scroll-region" ? { overflow: "auto" as const } : {}, states: {},
+    } } : {}),
+    // end
     ...(walk.sourceRepeaterId === undefined ? {} : { sourceRepeaterId: walk.sourceRepeaterId }),
     ...sourceFields({ ...node, id }, context),
   }, [id]);

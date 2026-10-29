@@ -57,7 +57,7 @@ export class RunWorker {
         handled = await this.runOnce();
       } catch {
         // 执行器负责把失败写进 run；这里只保证进程活着。
-        handled = true;
+        handled = false;
       }
       this.lastHeartbeat = this.now();
       if (!handled) await this.sleep(this.idleDelayMs);

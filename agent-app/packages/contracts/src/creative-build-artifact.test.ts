@@ -56,7 +56,7 @@ const implementation = {
     sourceBlueprintPageId: "bp-home", sourceBlueprintRegionIds: ["hero"],
     eventBindings: [{ id: "kf$binding:navigate", ownerInstanceName: "Button1", kfEvent: "onClick", linkId: 200001, phase: "event", scriptModuleIds: [], nativeActionIds: ["kf$action:navigate"] }],
   }] }],
-  compiledActions: [{ id: "kf$action:navigate", sourceActionId: "navigate", ownerInstanceName: "Button1", kind: "navigate-page", targetPageGuid: "k00000000-0000-4000-8000-000000000001" }],
+  compiledActions: [{ id: "kf$action:navigate", sourceActionId: "navigate", ownerInstanceName: "Button1", kind: "navigate-page", targetPageName: "home", targetPageGuid: "k00000000-0000-4000-8000-000000000001" }],
   compiledScripts: [], runtimeCorrelation: { controls: [{ semanticControlId: "open", instanceName: "Button1" }], pages: [{ semanticPageId: "home", pageGuid: "k00000000-0000-4000-8000-000000000001" }] },
 };
 
@@ -99,6 +99,95 @@ function buttonDeltaPolicy() {
 }
 
 describe("creative build contracts", () => {
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  function existingProjection(nativeProperties: Record<string, string | number | boolean | null>) {
+    const value = CreativeBuildArtifactSchema.parse(structuredClone(artifact()));
+    const native = TrustedNativeMaterializationSchema.parse(structuredClone(materialization()));
+    const page = value.implementation.pages[0]!;
+    if (page.compatibility !== "native") throw new Error("native fixture required");
+    page.controls[0]!.nativeProperties = nativeProperties;
+    native.controls[0]!.nativeProperties = structuredClone(nativeProperties);
+    const deltas = [{ path: "/x", value: 10 }, { path: "/y", value: 10 }, { path: "/width", value: 120 }, { path: "/height", value: 40 },
+      ...Object.entries(nativeProperties).map(([key, field]) => ({ path: `/${key}`, value: field })), { path: "/text", value: "打开" }];
+    value.evidence.pages[0]!.source = "uploaded-existing";
+    Object.assign(value.evidence.controls[0]!, { source: "uploaded-existing", nativeGuid: "native-button-guid", existingDeltas: deltas, deltaAllowlistPolicy: buttonDeltaPolicy() });
+    native.pages[0]!.source = "uploaded-existing";
+    Object.assign(native.controls[0]!, { source: "uploaded-existing", nativeGuid: "native-button-guid", existingDeltas: structuredClone(deltas) });
+    function seal() {
+      value.hashes.implementationHash = canonicalServerHash(value.implementation);
+      value.hashes.evidenceHash = canonicalServerHash(value.evidence);
+      native.implementationHash = value.hashes.implementationHash;
+      native.creativeArtifactHash = canonicalCreativeBuildArtifactHash(value);
+    }
+    seal();
+    return { value, native, seal };
+  }
+  function reorderJsonKeys(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(reorderJsonKeys);
+    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).reverse().map(([key, nested]) => [key, reorderJsonKeys(nested)]));
+    return value;
+  }
+  it("verifies persisted existing deltas after JSONB reorders native property keys without changing signed arrays", () => {
+    const fixture = existingProjection({ type: "primary", disabled: false });
+    expect(() => validateCreativeArtifactMaterializationProjection(fixture.value, fixture.native)).not.toThrow();
+    const reorderedArtifact = reorderJsonKeys(fixture.value);
+    const reorderedNative = reorderJsonKeys(fixture.native);
+    expect(canonicalServerHash(reorderedArtifact)).toBe(canonicalServerHash(fixture.value));
+    expect(canonicalServerHash(reorderedNative)).toBe(canonicalServerHash(fixture.native));
+    expect(() => validateCreativeArtifactMaterializationProjection(reorderedArtifact, reorderedNative)).not.toThrow();
+  });
+  it("keeps repeated delta paths ordered and rejects synchronized wrong values", () => {
+    const fixture = existingProjection({ text: "先前正文", type: "primary" });
+    expect(() => validateCreativeArtifactMaterializationProjection(fixture.value, fixture.native)).not.toThrow();
+    const deltas = fixture.value.evidence.controls[0]!.existingDeltas!;
+    [deltas[4], deltas[6]] = [deltas[6]!, deltas[4]!];
+    fixture.native.controls[0]!.existingDeltas = structuredClone(deltas);
+    fixture.seal();
+    expect(() => validateCreativeArtifactMaterializationProjection(fixture.value, fixture.native)).toThrow(/delta allowlist policy/);
+    const wrongValue = existingProjection({ type: "primary", disabled: false });
+    wrongValue.value.evidence.controls[0]!.existingDeltas![0]!.value = 999;
+    wrongValue.native.controls[0]!.existingDeltas = structuredClone(wrongValue.value.evidence.controls[0]!.existingDeltas);
+    wrongValue.seal();
+    expect(() => validateCreativeArtifactMaterializationProjection(wrongValue.value, wrongValue.native)).toThrow(/delta allowlist policy/);
+  });
+  // end
+  // modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+  function observationArtifact() {
+    const value = CreativeBuildArtifactSchema.parse(structuredClone(artifact()));
+    value.blueprint.journeys[0]!.steps.push({ kind: "observe", pageId: "bp-home", regionId: "hero",
+      action: "阅读按钮标签", result: "看到标签", expectedTexts: ["打开"] });
+    const page = value.implementation.pages[0]!;
+    if (page.compatibility !== "native") throw new Error("native fixture required");
+    page.controls[0]!.nativeProperties["text"] = "打开";
+    return value;
+  }
+  function rehashObservation(value: ReturnType<typeof observationArtifact>) {
+    value.candidateBundle.blueprintHash = canonicalServerHash(value.blueprint);
+    value.semanticPlan.blueprintHash = canonicalServerHash(value.blueprint);
+    value.semanticPlan.candidateBundleHash = canonicalServerHash(value.candidateBundle);
+    value.implementation.sourceSolutionPlanHash = canonicalServerHash(value.semanticPlan);
+    value.hashes = { blueprintHash: canonicalServerHash(value.blueprint), candidateBundleHash: canonicalServerHash(value.candidateBundle),
+      semanticPlanHash: canonicalServerHash(value.semanticPlan), implementationHash: canonicalServerHash(value.implementation), evidenceHash: canonicalServerHash(value.evidence) };
+    return value;
+  }
+  it("reproves observation text at the artifact boundary", () => {
+    expect(CreativeBuildArtifactSchema.safeParse(rehashObservation(observationArtifact())).success).toBe(true);
+    const missing = observationArtifact();
+    const page = missing.implementation.pages[0]!;
+    if (page.compatibility !== "native") throw new Error("native fixture required");
+    page.controls[0]!.nativeProperties["text"] = "错误文字";
+    const result = CreativeBuildArtifactSchema.safeParse(rehashObservation(missing));
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues.some((issue) => issue.message.includes("unproven observation"))).toBe(true);
+  });
+  it("rejects rehashed artifact actions impersonating observations", () => {
+    const value = observationArtifact();
+    value.semanticPlan.actions[0]!.journeyStepRefs!.push({ journeyId: "open-detail", stepIndex: 1 });
+    const result = CreativeBuildArtifactSchema.safeParse(rehashObservation(value));
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues.some((issue) => issue.message.includes("observation cannot be covered by an action"))).toBe(true);
+  });
+  // end
   it("uses one code-point comparator for creative identity ordering", () => {
     expect(compareCreativeIdentifiers("A", "a")).toBeLessThan(0);
     expect(["a_", "😀", "a", "A", "a-", "á"].sort(compareCreativeIdentifiers))

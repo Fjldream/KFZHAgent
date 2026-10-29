@@ -1,7 +1,10 @@
 import {
   canonicalServerHash,
   type MockDataSet,
-  type SemanticScalar,
+  // modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+  SolutionProvenanceError,
+  projectSolutionNodes,
+  // end
   type SolutionImplementationPlan,
   type SolutionNode,
   type UIImplementationControlV2,
@@ -14,15 +17,15 @@ import {
   type SemanticDataRecord,
 } from "./module-node-compiler.js";
 import { deriveSemanticTabPaneOwnership, TabPaneOwnershipError } from "../implementation/tab-pane-ownership.js";
+// modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+import { resolveLayoutContentInsets } from "./layout-surface.js";
+// end
 
 type PlanNode = SolutionNode;
 
-export class SolutionProvenanceError extends Error {
-  constructor(readonly nodeId: string, detail: string) {
-    super(`SOLUTION_PROVENANCE_INVALID: ${nodeId} (${detail})`);
-    this.name = "SolutionProvenanceError";
-  }
-}
+// modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+export { SolutionProvenanceError, normalizeSolutionRepeaterKey } from "@kf/contracts";
+// end
 
 export interface ExpectedControlProvenance {
   readonly sourceNode: PlanNode;
@@ -30,8 +33,6 @@ export interface ExpectedControlProvenance {
   readonly sourceRepeaterId?: string;
   readonly kind: "layout" | "control" | "repeater-item" | "registered-module";
 }
-
-const FORBIDDEN_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 
 /** Correlation only, not authentication; consumers must still replay the trusted semantic projection. */
 export function solutionModuleRegistryHash(plan: SolutionImplementationPlan, registry: ModuleRegistry): string {
@@ -61,29 +62,12 @@ export function solutionModuleRegistryHash(plan: SolutionImplementationPlan, reg
   return canonicalServerHash([...identities.entries()].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0).map(([, identity]) => identity));
 }
 
-export function normalizeSolutionRepeaterKey(value: SemanticScalar): string {
-  if (value === null || typeof value === "boolean") throw new SolutionProvenanceError("repeater-key", `unsafe key: ${String(value)}`);
-  if (typeof value === "number" && (!Number.isFinite(value) || value < 0)) {
-    throw new SolutionProvenanceError("repeater-key", `unsafe key: ${String(value)}`);
-  }
-  const raw = String(value).normalize("NFKC").trim();
-  if (raw.length === 0 || raw.length > 48 || FORBIDDEN_KEYS.has(raw.toLowerCase())
-    || !/^[A-Za-z0-9][A-Za-z0-9 _-]*$/.test(raw)) {
-    throw new SolutionProvenanceError("repeater-key", `unsafe key: ${raw || "empty"}`);
-  }
-  const normalized = raw.toLowerCase().replace(/[ _]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(normalized)) throw new SolutionProvenanceError("repeater-key", `unsafe key: ${raw}`);
-  return normalized;
-}
-
+// modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+// Key normalization and expanded identity traversal now share the contracts projection above.
+// Keep the local scalar record adapter for existing whole-dataset binding checks.
+// end
 function recordOf(dataSet: MockDataSet, index: number): SemanticDataRecord {
   return Object.fromEntries(dataSet.records[index]!.values.map((entry) => [entry.field, entry.value]));
-}
-
-function expandedId(prefix: string | undefined, nodeId: string): string {
-  const id = prefix === undefined ? nodeId : `${prefix}--${nodeId}`;
-  if (id.length > 100) throw new SolutionProvenanceError(nodeId, "expanded id exceeds 100 characters");
-  return id;
 }
 
 function sameOptional(left: string | undefined, right: string | undefined): boolean {
@@ -150,62 +134,18 @@ export function validateSolutionControlSemanticProjection(input: Readonly<{
     records: ReadonlyMap<string, SemanticDataRecord>;
   }>>();
 
-  const visit = (
-    node: PlanNode,
-    prefix: string | undefined,
-    parentId: string | undefined,
-    sourceRepeaterId: string | undefined,
-    records: ReadonlyMap<string, SemanticDataRecord>,
-  ): void => {
-    if (node.kind === "repeater") {
-      const dataSet = dataSets.get(node.mockDataId);
-      if (dataSet === undefined) throw new SolutionProvenanceError(node.id, `unknown mock data: ${node.mockDataId}`);
-      const baseId = expandedId(prefix, node.id);
-      const keys = new Set<string>();
-      dataSet.records.forEach((_record, index) => {
-        const record = recordOf(dataSet, index);
-        const keyValue = record[node.keyField];
-        if (keyValue === undefined || Array.isArray(keyValue) || typeof keyValue === "object") {
-          throw new SolutionProvenanceError(node.id, `missing scalar key field: ${node.keyField}`);
-        }
-        const key = normalizeSolutionRepeaterKey(keyValue);
-        if (keys.has(key)) throw new SolutionProvenanceError(node.id, `normalized key collision: ${key}`);
-        keys.add(key);
-        const itemId = `${baseId}--${key}`;
-        expected.set(itemId, {
-          sourceNode: node,
-          ...(parentId === undefined ? {} : { parentId }),
-          sourceRepeaterId: node.id,
-          kind: "repeater-item",
-        });
-        recordsByControl.set(itemId, records);
-        const nestedRecords = new Map(records);
-        nestedRecords.set(node.itemAlias, record);
-        visit(node.template, itemId, itemId, node.id, nestedRecords);
-      });
-      return;
+  // modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+  for (const entry of projectSolutionNodes(input.plan, input.root).values()) {
+    if (entry.sourceNode.kind === "registered-module") {
+      modules.set(entry.id, { sourceNode: entry.sourceNode, records: entry.records,
+        ...(entry.parentId === undefined ? {} : { parentId: entry.parentId }),
+        ...(entry.sourceRepeaterId === undefined ? {} : { sourceRepeaterId: entry.sourceRepeaterId }) });
+    } else {
+      expected.set(entry.id, entry);
+      recordsByControl.set(entry.id, entry.records);
     }
-
-    const id = expandedId(prefix, node.id);
-    if (node.kind === "registered-module") {
-      modules.set(id, {
-        sourceNode: node,
-        ...(parentId === undefined ? {} : { parentId }),
-        ...(sourceRepeaterId === undefined ? {} : { sourceRepeaterId }),
-        records,
-      });
-      return;
-    }
-    expected.set(id, {
-      sourceNode: node,
-      ...(parentId === undefined ? {} : { parentId }),
-      ...(sourceRepeaterId === undefined ? {} : { sourceRepeaterId }),
-      kind: node.kind,
-    });
-    recordsByControl.set(id, records);
-    if (node.kind === "layout") node.children.forEach((child) => visit(child, prefix, id, sourceRepeaterId, records));
-  };
-  visit(input.root, undefined, undefined, undefined, new Map());
+  }
+  // end
 
   let tabPaneBySourceNodeId: ReadonlyMap<string, ReturnType<typeof deriveSemanticTabPaneOwnership>[number]>;
   try {
@@ -273,6 +213,16 @@ export function validateSolutionControlSemanticProjection(input: Readonly<{
         throw new SolutionProvenanceError(control.id, "repeater item layout mismatch");
       }
     } else if (provenance.sourceNode.kind === "layout") {
+      // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+      if (control.style?.role !== provenance.sourceNode.styleRole) {
+        throw new SolutionProvenanceError(control.id, "layout surface role mismatch");
+      }
+      const resolvedInsets = resolveLayoutContentInsets(input.plan, provenance.sourceNode);
+      const expectedInsets = Object.values(resolvedInsets).some(value => value > 0) ? resolvedInsets : undefined;
+      if (canonicalServerHash(control.compiledLayout?.contentInsets ?? null) !== canonicalServerHash(expectedInsets ?? null)) {
+        throw new SolutionProvenanceError(control.id, "layout surface insets mismatch");
+      }
+      // end
       if (!isLayoutCapabilityFor(control, provenance.sourceNode.layout) || control.compiledLayout?.kind !== provenance.sourceNode.layout
         || control.dataBinding !== undefined || control.assetIds !== undefined) {
         throw new SolutionProvenanceError(control.id, "layout capability mismatch");

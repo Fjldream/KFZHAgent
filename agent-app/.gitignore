@@ -22,3 +22,7 @@ tests/e2e/.e2e-pids.json
 
 # Task: demo runtime artifacts (never committed)
 .kf-demo-artifacts/
+.kf-trial-artifacts/
+# modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+.kf-trial-v1/
+# end

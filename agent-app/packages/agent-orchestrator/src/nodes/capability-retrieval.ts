@@ -50,7 +50,9 @@ export function createCapabilityRetrievalNode(deps: SolutionGraphDeps) {
     const blueprintHash = canonicalServerHash(blueprint);
     try {
       const parsedBundle = CapabilityCandidateBundleSchema.safeParse(
-        await deps.capabilityRetrieval.retrieve({ blueprint }),
+        // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+        await deps.capabilityRetrieval.retrieve({ blueprint, ...(state.acceptedVisualPlanningInput == null ? {} : { visualReference: state.acceptedVisualPlanningInput.reference }) }),
+        // end
       );
       if (
         !parsedBundle.success

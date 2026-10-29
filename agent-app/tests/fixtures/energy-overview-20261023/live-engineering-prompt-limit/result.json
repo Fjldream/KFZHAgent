@@ -1,0 +1,61 @@
+{
+  "physicalRequests": 3,
+  "invocations": [
+    {
+      "task": "vision",
+      "requestedModel": "deepseek-flash",
+      "actualModel": "deepseek-flash",
+      "status": "SUCCEEDED",
+      "failureCode": null,
+      "inputTokens": 1534,
+      "outputTokens": 2548,
+      "cacheHitTokens": 1280,
+      "cacheMissTokens": 254,
+      "latencyMs": 8989
+    },
+    {
+      "task": "blueprint",
+      "requestedModel": "deepseek-flash",
+      "actualModel": "deepseek-flash",
+      "status": "SUCCEEDED",
+      "failureCode": null,
+      "inputTokens": 9384,
+      "outputTokens": 2322,
+      "cacheHitTokens": 640,
+      "cacheMissTokens": 8744,
+      "latencyMs": 12344
+    },
+    {
+      "task": "repair",
+      "requestedModel": "deepseek-flash",
+      "actualModel": "deepseek-flash",
+      "status": "SUCCEEDED",
+      "failureCode": null,
+      "inputTokens": 11756,
+      "outputTokens": 2765,
+      "cacheHitTokens": 9344,
+      "cacheMissTokens": 2412,
+      "latencyMs": 11529
+    }
+  ],
+  "outcomes": [
+    {
+      "id": "d829ca42-dc54-4f80-ac89-baa8c4bb961e",
+      "status": "CANCELLED",
+      "failureCode": null
+    },
+    {
+      "id": "92366576-dc11-4194-8672-fb90efd903b3",
+      "status": "CANCELLED",
+      "failureCode": null
+    },
+    {
+      "id": "3b22c2a9-8f26-40b6-b084-fcbe62c21715",
+      "status": "FAILED",
+      "failureCode": "INVALID_MODEL_OUTPUT"
+    }
+  ],
+  "productionRollout": false,
+  "nativeKfAccepted": false,
+  "browserAccepted": false
+}

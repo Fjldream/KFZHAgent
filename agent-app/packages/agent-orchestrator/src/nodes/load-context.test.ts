@@ -31,6 +31,13 @@ function state(overrides: Record<string, unknown> = {}) {
 }
 
 describe("load-context build lifecycle", () => {
+  // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+  it.each(["idle", "building"])("keeps a durable run's admitted base while loading %s context after another conversation advances", async stage => {
+    const deps = makeDeps("SUCCEEDED");
+    const update = await createLoadContextNode(deps as never)(state({ runId: "durable-run", stage, ...(stage === "building" ? { buildJobId: "job-old" } : {}) }) as never);
+    expect(update.currentRevisionId).toBe("rev-1");
+  });
+  // end
   it("loads the server-owned workflow discriminator with a tenant-scoped workspace lookup", async () => {
     const deps = makeDeps("QUEUED");
 

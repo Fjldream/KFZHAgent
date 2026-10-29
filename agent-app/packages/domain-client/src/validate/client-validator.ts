@@ -2,6 +2,11 @@ import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+import { nativePageNameForSemanticId } from "../compile/native-page-name.js";
+import { creativeNativeDeltaValue } from "../implementation/creative-native-geometry.js";
+import { compareNativeSiblingPlacement, nativeStyleStorage, type NativeSiblingPlacement } from "../compile/native-presentation.js";
+// end
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { parse } from "acorn";
@@ -51,21 +56,16 @@ import {
 } from "./report.js";
 
 /**
- * Six-layer client validator (brief Step 6).
+ * 六层客户端 validator（简要步骤 6）。
  *
- * `validateClientProject(base, candidate, plan)` is the ONLY authority that
- * can pass or fail a modified workspace. Each layer is independent and each
- * returns pass/warn/fail; `status` is "pass" only when every required check
- * passes. Warnings (e.g. a planned change with no observable effect) are
- * collected in the report and never override a failure.
+ * `validateClientProject(base, candidate, plan)` 是判定修改后工作空间通过或失败的唯一权限主体。各层相互独立，分别返回 pass/warn/fail；只有所有必需检查均通过时，`status` 才为 “pass”。警告（例如计划内变更没有可观察效果）会收集到报告中，绝不会覆盖失败结果。
  *
- *  1. packageStructure — the candidate is a valid, unpackable workspace,
- *  2. jsonSchema      — every JSON file parses and page/control shapes hold,
- *  3. references      — GUID uniqueness + pageManager / action references,
- *  4. businessRules   — known uiModelTypes, in-bounds geometry, well-formed
- *                       script actions, confirmed destructive deletes,
- *  5. changeScope     — nothing outside the confirmed plan changed,
- *  6. roundTrip       — pack candidate and unpack it again: byte-identical.
+ *  1. packageStructure — 候选项是有效、可解包的工作空间；
+ *  2. jsonSchema      — 每个 JSON 文件都可解析，页面/控件结构有效；
+ *  3. references      — GUID 唯一性以及 pageManager / action 引用有效；
+ *  4. businessRules   — uiModelType 已知、几何范围有效、脚本 action 结构正确、破坏性删除已确认；
+ *  5. changeScope     — 已确认计划之外没有任何内容发生变化；
+ *  6. roundTrip       — 打包候选项后再次解包，结果逐字节一致。
  */
 
 async function exists(p: string): Promise<boolean> {
@@ -393,6 +393,14 @@ function compilerSourceIssue(
   if (/\b(?:window|document|globalThis|fetch|XMLHttpRequest|WebSocket|eval|Function)\b/.test(source)) return "compiled script contains a forbidden global";
   const declaredInstances = new Set(metadata.instanceReferences.map((reference) => reference.instanceName));
   const program = parse(source, { ecmaVersion: 2022, sourceType: "script" }) as unknown as Record<string, unknown>;
+  const isCanonicalShowPageCall = (call: Record<string, unknown>): boolean => {
+    const args = Array.isArray(call["arguments"]) ? call["arguments"] as Array<Record<string, unknown>> : [];
+    const pageName = args[0]?.["type"] === "Literal" && typeof args[0]["value"] === "string"
+      ? args[0]["value"] : undefined;
+    return call["type"] === "CallExpression" && args.length === 2 && pageName !== undefined
+      && args[1]?.["type"] === "Literal" && args[1]["value"] === 1
+      && metadata.pageReferences.some((reference) => reference.semanticId === pageName);
+  };
   const allowedNodeTypes = new Set([
     "Program", "VariableDeclaration", "VariableDeclarator", "ExpressionStatement", "ReturnStatement", "IfStatement",
     "FunctionDeclaration", "ArrowFunctionExpression", "BlockStatement", "EmptyStatement",
@@ -668,9 +676,7 @@ function compilerSourceIssue(
     if (["BinaryExpression", "UnaryExpression"].includes(String(value["type"]))) return { kind: "scalar" };
     return unknownFact;
   };
-  // Binding names are globally unique in this restricted grammar, so a small
-  // fixed point is enough to propagate aliases, callback element facts, and
-  // call results without introducing flow-insensitive shadowing escapes.
+  // 在这一受限语法中，绑定名称全局唯一，因此一个小型不动点就足以传播别名、回调元素事实和调用结果，而不会引入流不敏感的遮蔽逃逸。
   for (let iteration = 0; iteration <= declaredNames.size + 1; iteration += 1) {
     let changed = false;
     walk(program as never, {
@@ -860,6 +866,7 @@ function compilerSourceIssue(
               && Array.isArray(parentRecord["params"]) && parentRecord["params"].includes(node));
           const allowedGlobal = ["String", "Number", "Boolean", "Math", "Date"].includes(name)
             || (name === "ShowMessage" && parentRecord?.["callee"] === node && isCanonicalShowMessageCall(parentRecord))
+            || (name === "ShowPage" && parentRecord?.["callee"] === node && isCanonicalShowPageCall(parentRecord))
             || name === "$Variable"
             || (name === "arguments" && metadata.placement === "event" && isDatagrid(instanceTypes.get(metadata.ownerInstanceName)) && metadata.kfEvent === "onClickRow")
             || declaredInstances.has(name) && instanceTypes.has(name);
@@ -886,7 +893,8 @@ function compilerSourceIssue(
           const name = typeof callee["name"] === "string" ? callee["name"] : undefined;
           if (name === undefined || (!resolvesCallable(scopeByNode.get(node), name)
             && !["String", "Number", "Boolean"].includes(name)
-            && !(name === "ShowMessage" && isCanonicalShowMessageCall(record)))) astIssue ??= "dynamic or unknown direct call";
+            && !(name === "ShowMessage" && isCanonicalShowMessageCall(record))
+            && !(name === "ShowPage" && isCanonicalShowPageCall(record)))) astIssue ??= "dynamic or unknown direct call";
           if (name !== undefined && resolvesCallable(scopeByNode.get(node), name)) {
             const edges = functionCalls.get(currentFunction) ?? new Set<string>(); edges.add(name); functionCalls.set(currentFunction, edges);
             const start = typeof record["start"] === "number" ? record["start"] : Number.MAX_SAFE_INTEGER;
@@ -902,13 +910,19 @@ function compilerSourceIssue(
           const receiver = factOf(object);
           const standardGlobal = objectName !== undefined && !resolvesLocal(object === undefined ? undefined : scopeByNode.get(object), objectName);
           const runtimeType = objectName === undefined ? undefined : instanceTypes.get(objectName);
-          const exactOverlayVisibilityCall = visibilityAction !== undefined
-            && objectName === visibilityAction.targetInstanceName
-            && runtimeType?.kind === "layout"
+          const exactOverlayVisibilityCall = objectName !== undefined
+            && declaredInstances.has(objectName)
+            // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+            // KF 的 KMUIExtDatagrid.prototype.setVisible(bool) 已有真实实现；
+            // 弹层子控件必须一起显隐。仍限定已声明实例、布尔字面量和编译脚本来源。
+            && (runtimeType?.kind === "layout" || runtimeType?.kind === "static" || isDatagrid(runtimeType))
+            // end
             && member === "setVisible"
             && args.length === 1
             && args[0]?.["type"] === "Literal"
-            && args[0]["value"] === visibilityAction.visible;
+            && typeof args[0]["value"] === "boolean"
+            && (visibilityAction === undefined || objectName !== visibilityAction.targetInstanceName
+              || args[0]["value"] === visibilityAction.visible);
           const runtimeCall = objectName !== undefined && declaredInstances.has(objectName)
             && (member === "SetData" && (isUiModel(runtimeType, 31) || isDatagrid(runtimeType)) && args.length === 1
               || member === "GetCheckedNodes" && isUiModel(runtimeType, 44) && args.length === 0
@@ -1066,6 +1080,10 @@ function compilerSourceIssue(
         || (isUiModel(runtimeType, 31) && member === "SetData" && called)
         || (isDatagrid(runtimeType) && member === "SetData" && called)
         || (isUiModel(runtimeType, 44) && member === "GetCheckedNodes" && called && !written)
+        // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+        || ((runtimeType?.kind === "layout" || runtimeType?.kind === "static" || isDatagrid(runtimeType))
+          && member === "setVisible" && called && !written)
+        // end
         || (visibilityAction !== undefined && runtimeType?.kind === "layout"
           && name === visibilityAction.targetInstanceName && member === "setVisible" && called && !written);
       if (!supported) unsupportedRuntimeMember ??= `${name}.${member ?? "?"}`;
@@ -1290,8 +1308,10 @@ function compilerSourceIssue(
     return "compiled configureData placement is not in the evidence-backed allowlist";
   }
   const declaredPages = new Set(metadata.pageReferences.map((reference) => reference.pageGuid));
-  for (const { pageGuid } of metadata.pageReferences) {
-    if (!source.includes(JSON.stringify(pageGuid))) return `compiled script does not use declared page reference "${pageGuid}"`;
+  for (const { semanticId, pageGuid } of metadata.pageReferences) {
+    if (!source.includes(JSON.stringify(pageGuid)) && !source.includes(JSON.stringify(semanticId))) {
+      return `compiled script does not use declared page reference "${pageGuid}"`;
+    }
   }
   for (const pageGuid of source.match(/(?<![A-Za-z0-9])k?[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![A-Za-z0-9])/gi) ?? []) {
     if (!declaredPages.has(pageGuid)) return `compiled script uses undeclared page reference "${pageGuid}"`;
@@ -1765,7 +1785,10 @@ function rawControlInstanceName(value: unknown): string | undefined {
 function indexCreativeRawPage(
   node: unknown,
   controlsByName: Map<string, Record<string, unknown>>,
-  createdByInstanceName: ReadonlyMap<string, { readonly zIndex: number; readonly order: number }>,
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  createdByInstanceName: ReadonlyMap<string, NativeSiblingPlacement>,
+  layoutType?: number,
+  // end
 ): boolean {
   if (Array.isArray(node)) {
     const actual = node.flatMap((value) => {
@@ -1775,7 +1798,9 @@ function indexCreativeRawPage(
     const expected = actual.slice().sort((left, right) => {
       const leftOrder = createdByInstanceName.get(left)!;
       const rightOrder = createdByInstanceName.get(right)!;
-      return leftOrder.zIndex - rightOrder.zIndex || leftOrder.order - rightOrder.order;
+      // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+      return compareNativeSiblingPlacement(leftOrder, rightOrder, layoutType);
+      // end
     });
     let mismatch = actual.some((name, index) => name !== expected[index]);
     for (const value of node) {
@@ -1783,7 +1808,10 @@ function indexCreativeRawPage(
       const name = rawControlInstanceName(value);
       if (name !== undefined) controlsByName.set(name, value);
       for (const key of ["objects", "children", "layoutItems", "insiderObjects"]) {
-        if (indexCreativeRawPage(value[key], controlsByName, createdByInstanceName)) mismatch = true;
+        // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+        if (indexCreativeRawPage(value[key], controlsByName, createdByInstanceName,
+          key === "insiderObjects" && typeof value["layoutType"] === "number" ? value["layoutType"] : undefined)) mismatch = true;
+        // end
       }
     }
     return mismatch;
@@ -1791,7 +1819,10 @@ function indexCreativeRawPage(
   if (!isObjectRecord(node)) return false;
   let mismatch = false;
   for (const key of ["objects", "children", "layoutItems", "insiderObjects"]) {
-    if (indexCreativeRawPage(node[key], controlsByName, createdByInstanceName)) mismatch = true;
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    if (indexCreativeRawPage(node[key], controlsByName, createdByInstanceName,
+      key === "insiderObjects" && typeof node["layoutType"] === "number" ? node["layoutType"] : undefined)) mismatch = true;
+    // end
   }
   return mismatch;
 }
@@ -1846,12 +1877,18 @@ async function creativeMaterializationIssues(
     .flatMap((entry) => entry.name === undefined ? [] : [[entry.name, entry] as const]));
   const materializedControlByName = new Map(materialization.controls
     .map((control) => [control.instanceName, control] as const));
-  const createdZOrderByPage = new Map<string, Map<string, { zIndex: number; order: number }>>();
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  const createdZOrderByPage = new Map<string, Map<string, NativeSiblingPlacement>>();
+  // end
   for (const control of materialization.controls) {
     if (control.source !== "workspace-derived") continue;
     const page = createdZOrderByPage.get(control.pageGuid)
-      ?? new Map<string, { zIndex: number; order: number }>();
-    page.set(control.instanceName, { zIndex: control.zIndex, order: control.order });
+      // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+      ?? new Map<string, NativeSiblingPlacement>();
+      // end
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    page.set(control.instanceName, { zIndex: control.zIndex, order: control.order, geometry: control.geometry });
+    // end
     createdZOrderByPage.set(control.pageGuid, page);
   }
   const rawControlByName = new Map<string, Record<string, unknown>>();
@@ -1868,7 +1905,9 @@ async function creativeMaterializationIssues(
   for (const page of materialization.pages) {
     const entry = inspection.index.pages[page.pageGuid];
     const summary = pageSummaryByGuid.get(page.pageGuid);
-    if (entry === undefined || (page.source === "workspace-derived" && entry.id !== page.semanticPageId)) {
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    if (entry === undefined || (page.source === "workspace-derived" && entry.id !== nativePageNameForSemanticId(page.semanticPageId))) {
+    // end
       issues.push(`creative page correlation mismatch: ${page.semanticPageId}`);
     }
     if (summary?.width !== page.width || summary.height !== page.height) {
@@ -1973,7 +2012,10 @@ async function creativeMaterializationIssues(
       const field = delta.path.slice(1);
       const actual = field === "x" ? entry.x : field === "y" ? entry.y
         : field === "width" ? entry.width : field === "height" ? entry.height : raw[field];
-      const expected = field === "src" ? assetRuntimeSrcByControl.get(control.semanticControlId) ?? delta.value : delta.value;
+      // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+      const expected = field === "src" ? assetRuntimeSrcByControl.get(control.semanticControlId) ?? delta.value
+        : creativeNativeDeltaValue(delta, parentGeometry);
+      // end
       if (!isDeepStrictEqual(actual, expected)) issues.push(`creative existing delta mismatch: ${control.semanticControlId}${delta.path}`);
     }
     if (style !== undefined) {
@@ -1995,10 +2037,15 @@ async function creativeMaterializationIssues(
             approvedAssets: style.approvedAssets.map((asset) => asset.approvedAsset),
             runtimeProfile: KF36_RUNTIME_PROFILE,
           });
-          const actualStyleData = typeof raw["styleDataNew"] === "string" ? raw["styleDataNew"] : "";
+          // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+          const { owner, field } = nativeStyleStorage(raw);
+          const actualStyleData = typeof owner[field] === "string" ? owner[field] : "";
+          // end
           const expectedStyleData = mergeManagedStyleData(actualStyleData, compiled.styleDataNew);
           if (actualStyleData !== expectedStyleData) {
-            issues.push(`creative managed styleDataNew mismatch: ${control.semanticControlId}`);
+            // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+            issues.push(`creative managed ${field} mismatch: ${control.semanticControlId}`);
+            // end
           }
         } catch (error) {
           issues.push(`creative style validation failed: ${control.semanticControlId}: ${String(error)}`);
@@ -2072,6 +2119,7 @@ async function checkCreativeChangeScope(
   semanticOperations: readonly TrustedSemanticOperation[],
   assets: readonly DomainAssetInput[],
   materializationIssues: readonly string[],
+  replaceGenerativeBootstrap: boolean,
 ): Promise<{ outcome: CheckOutcome; warnings: string[] }> {
   let expectedRoot: string | undefined;
   try {
@@ -2080,6 +2128,7 @@ async function checkCreativeChangeScope(
       creativeMaterialization: handle,
       semanticOperations,
       assets,
+      replaceGenerativeBootstrap,
     });
     expectedRoot = expected.rootDir;
     const [expectedFiles, candidateFiles] = await Promise.all([
@@ -2213,6 +2262,8 @@ export interface ValidateOptions {
   /** Worker-verified semantic authorizations required by exact replay validation. */
   semanticOperations?: readonly TrustedSemanticOperation[];
   creativeMaterialization?: VerifiedCreativeMaterialization;
+  /** Mirrors patch authority for a compiler-created new-workspace bootstrap only. */
+  replaceGenerativeBootstrap?: boolean;
   /** Counting-only observer for bounded creative page indexing tests. */
   creativeInstrumentation?: CreativePageInstrumentation;
 }
@@ -2310,6 +2361,7 @@ export async function validateClientProject(
       options?.semanticOperations ?? [],
       options?.creativeAssets ?? [],
       creativeIssues,
+      options?.replaceGenerativeBootstrap === true,
     );
   outcomes.changeScope = scope.outcome;
   extraWarnings.push(...scope.warnings);

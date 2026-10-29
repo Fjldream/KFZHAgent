@@ -121,7 +121,7 @@ const semanticPropertyNameSchema = z
     "implementation property names are not allowed",
   );
 
-/** Blueprint provenance also accepts legacy bounded human labels losslessly. */
+/** 蓝图来源信息也能无损接受旧版的有界可读标签。 */
 const provenanceIdSchema = z
   .string()
   .trim()
@@ -130,7 +130,7 @@ const provenanceIdSchema = z
   .refine((value) => !canonicalUuidToken.test(value), "GUID-shaped provenance identifiers are not allowed")
   .refine((value) => !/<\/?script\b|\b(?:javascript|vbscript)\s*:/i.test(value), "executable provenance identifiers are not allowed");
 
-/** Capability identity is syntactic here; signed-candidate membership belongs to Task 4. */
+/** 能力身份在这里是语法的；签署候选成员属于任务4。 */
 const capabilityIdSchema = z
   .string()
   .trim()
@@ -159,7 +159,7 @@ const shortTextSchema = z.string().trim().min(1).max(400);
 const hashSchema = z.string().regex(/^[0-9a-f]{64}$/);
 export const LEGACY_MODULE_PLAN_CANDIDATE_BUNDLE_HASH = "3e147b2b8351b526f10dd9dfc47c4c93bbfc29814d791400e3e5b02c38220840";
 
-/** Exact source-contract shapes admitted only by the legacy compatibility branch. */
+/** 仅由遗留兼容性分支接受的源-合同形状。 */
 const legacyStableIdSchema = z
   .string()
   .trim()
@@ -317,6 +317,9 @@ export interface LayoutNode extends SolutionNodeBase {
   kind: "layout";
   layout: "row" | "column" | "grid" | "asymmetric-grid" | "split" | "stack" | "dock" | "sidebar-content" | "master-detail" | "scroll-region" | "overlay-anchor";
   recipeId?: string | undefined;
+  // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+  styleRole?: string | undefined;
+  // end
   children: SolutionNode[];
 }
 
@@ -386,6 +389,9 @@ export const LayoutNodeSchema = z
       "overlay-anchor",
     ]),
     recipeId: stableIdSchema.optional(),
+    // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+    styleRole: stableIdSchema.optional(),
+    // end
     children: z.array(z.lazy(() => SolutionNodeSchema)).min(1).max(24),
   })
   .strict();
@@ -672,7 +678,11 @@ const LegacyNavigateActionSchema = z
   })
   .strict();
 
-const SolutionImplementationPlanObjectSchema = z
+// modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+export const SOLUTION_NODE_MAX_DEPTH = 12;
+export const SOLUTION_NODE_MAX_COUNT = 1_000;
+export const SolutionImplementationPlanObjectSchema = z
+// end
   .object({
     schema: z.literal("kf-solution-implementation/v1"),
     projectKey: projectKeySchema,
@@ -1099,8 +1109,10 @@ function collectNode(
   nodeIds.add(node.id);
   if (node.kind === "control") controlIds.add(node.id);
   entries.push({ node, path, page, depth });
-  if (depth > 12) ctx.addIssue({ code: "custom", path, message: "solution-node depth exceeds twelve levels" });
-  if (entries.length > 1_000) {
+  // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+  if (depth > SOLUTION_NODE_MAX_DEPTH) ctx.addIssue({ code: "custom", path, message: "solution-node depth exceeds twelve levels" });
+  if (entries.length > SOLUTION_NODE_MAX_COUNT) {
+  // end
     ctx.addIssue({ code: "custom", path, message: "solution plan exceeds one thousand nodes" });
     return;
   }
@@ -1142,6 +1154,11 @@ function validateNodeReferences(
       if (!nodeIds.has(targetId)) ctx.addIssue({ code: "custom", path: [...path, "intent", "groupWith", index], message: `unknown grouped node id: ${targetId}` });
       if (targetId === node.id) ctx.addIssue({ code: "custom", path: [...path, "intent", "groupWith", index], message: "a node cannot group with itself" });
     });
+    // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+    if (node.kind === "layout" && node.styleRole !== undefined && !roleIds.has(node.styleRole)) {
+      ctx.addIssue({ code: "custom", path: [...path, "styleRole"], message: `unknown style role: ${node.styleRole}` });
+    }
+    // end
     if (node.kind === "control") {
       if (!roleIds.has(node.styleRole)) ctx.addIssue({ code: "custom", path: [...path, "styleRole"], message: `unknown style role: ${node.styleRole}` });
       if (node.mockDataId !== undefined && !mockDataIds.has(node.mockDataId)) ctx.addIssue({ code: "custom", path: [...path, "mockDataId"], message: `unknown mock-data id: ${node.mockDataId}` });

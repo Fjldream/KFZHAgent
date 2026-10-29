@@ -31,7 +31,12 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
       { path: "/workspaces", name: "workspaces", component: WorkspacesView, meta: { requiresAuth: true } },
       // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
       { path: "/workspaces/:id", redirect: (to) => `/workspaces/${String(to.params.id)}/workbench` },
-      { path: "/workspaces/:id/workbench", name: "workbench", component: RunWorkbenchView, props: true, meta: { requiresAuth: true } },
+      { path: "/workspaces/:id/workbench/:conversationId?", name: "workbench", component: RunWorkbenchView,
+        props: (route) => ({ workspaceId: String(route.params.id),
+          ...(route.params.conversationId ? { conversationId: String(route.params.conversationId) } : {}),
+          ...(typeof route.query.run === "string" ? { runId: route.query.run } : {}),
+          preview: import.meta.env.DEV && route.query.preview === "workbench" }),
+        meta: { requiresAuth: true } },
       // end
       { path: "/:pathMatch(.*)*", redirect: "/workspaces" },
     ],

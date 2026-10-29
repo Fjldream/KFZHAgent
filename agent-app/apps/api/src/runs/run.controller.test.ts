@@ -1,29 +1,42 @@
 // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
-import { BadRequestException } from "@nestjs/common";
+import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import type { AuthenticatedRequest } from "../auth/tenant.guard.js";
 import { RunController } from "./run.controller.js";
 import type { PrismaRunQueries } from "./run-query.service.js";
 import type { RunService } from "./run.service.js";
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+import { EventEmitter } from "node:events";
+import { RunEventStreamService } from "./run-event-stream.service.js";
+// end
 
-const req = { principal: { tenantId: "t1", userId: "u1" } } as unknown as AuthenticatedRequest;
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+const req = Object.assign(new EventEmitter(), { principal: { tenantId: "t1", userId: "u1" } }) as unknown as AuthenticatedRequest;
+// end
 
 const fakeRes = () => {
-  const res = {
+  // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+  const res = Object.assign(new EventEmitter(), {
     status: vi.fn(),
     setHeader: vi.fn(),
     write: vi.fn(),
     end: vi.fn(),
     json: vi.fn(),
     writableEnded: false,
-  };
+    destroyed: false,
+    writableLength: 0,
+    flushHeaders: () => undefined,
+  });
+  res.write.mockReturnValue(true);
+  // end
   res.status.mockReturnValue(res);
   return res;
 };
 
 const controllerWith = (overrides: { runs?: Partial<RunService>; snapshot?: unknown } = {}) => {
+  const start = vi.fn(async () => ({ id: "run-1" }));
   const runs = {
-    start: vi.fn(async () => ({ id: "run-1" })),
+    start,
     snapshot: vi.fn(),
     events: vi.fn(async () => []),
     ...overrides.runs,
@@ -35,14 +48,17 @@ const controllerWith = (overrides: { runs?: Partial<RunService>; snapshot?: unkn
       resultRevisionId: null, failureCode: null, supersededByRunId: null,
     }),
   } as unknown as PrismaRunQueries;
-  return { controller: new RunController(runs, queries), runs, queries };
+  // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+  const streams = new RunEventStreamService(runs, queries, { isSubscriptionActive: () => Promise.resolve(true) });
+  return { controller: new RunController(runs, streams), runs, queries, start };
+  // end
 };
 
 describe("RunController", () => {
   it("starts a run for the authenticated principal", async () => {
-    const { controller, runs } = controllerWith();
+    const { controller, start } = controllerWith();
     await controller.start(req, "c1", { clientRequestId: "r1", clientMessageId: "m1" });
-    expect(runs.start).toHaveBeenCalledWith({ tenantId: "t1", userId: "u1" }, "c1",
+    expect(start).toHaveBeenCalledWith({ tenantId: "t1", userId: "u1" }, "c1",
       expect.objectContaining({ clientRequestId: "r1" }));
   });
 
@@ -67,7 +83,7 @@ describe("RunController", () => {
 
   it("returns 404 without opening a stream when the run is unknown", async () => {
     const { controller } = controllerWith({
-      runs: { events: vi.fn(async () => { throw new BadRequestException("INVALID_CURSOR"); }) },
+      runs: { events: vi.fn(async () => { throw new NotFoundException("RUN_NOT_FOUND"); }) },
     });
     const res = fakeRes();
     await controller.events(req, res as never, "missing", "0", "10");

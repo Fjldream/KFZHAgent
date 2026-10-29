@@ -4,26 +4,19 @@ import { ApprovalResumeSchema } from "../state.js";
 import type { ChangePlanRepository } from "../ports.js";
 
 /**
- * Human-in-the-loop approval point (brief Step 5).
+ * 人工参与的审批节点（简述第 5 步）。
  *
- * First execution publishes the structured interrupt payload — type,
- * changeRequestId, planHash, summary, diffArtifactId, previewArtifactId — and
- * pauses. Resume (`Command({ resume })`) must carry an action of
- * approve/revise/cancel plus the exact planHash the user was shown:
- *   - approve → enqueue-build,
- *   - revise  → plan-change (re-plans against the same request),
- *   - cancel  → cancel-plan,
- *   - missing/invalid action or planHash mismatch → idle + lastErrorCode, and
- *     crucially NO side effect and no build enqueue.
+ * 首次执行会发布结构化的中断载荷——type、changeRequestId、planHash、summary、diffArtifactId、previewArtifactId——然后暂停。恢复执行（`Command({ resume })`）时，必须携带 approve/revise/cancel 操作以及曾向用户展示的准确 planHash：
+ *   - approve → enqueue-build，
+ *   - revise  → plan-change（根据同一请求重新规划），
+ *   - cancel  → cancel-plan，
+ *   - 操作缺失/无效或 planHash 不匹配 → idle + lastErrorCode；关键是不得产生副作用，也不得将构建入队。
  *
- * The routing decision is written into `resumeAction` and a conditional edge
- * turns it into a node jump, so this node never needs a Command return value.
+ * 路由决策写入 `resumeAction`，再由条件边将其转换为节点跳转，因此该节点无需返回 Command 值。
  */
 export function createApprovalNode() {
   return (state: AgentGraphStateValue): AgentGraphUpdate => {
-    // A plan-change failure (INVALID_MODEL_OUTPUT) must never reach the
-    // approval interrupt: return to idle preserving the error code so the
-    // caller can see why no plan is pending.
+    // plan-change 失败（INVALID_MODEL_OUTPUT）绝不能进入审批中断：返回 idle 并保留错误代码，使调用方知道为何没有待处理计划。
     if (state.lastErrorCode === "INVALID_MODEL_OUTPUT") {
       return { stage: "idle" };
     }
@@ -75,8 +68,7 @@ export function createApprovalNode() {
 }
 
 /**
- * Closes the pending change request. Idempotent: re-running only touches
- * requests that are still OPEN.
+ * 关闭待处理的更改请求。幂等：重新运行只会触及时尚OPEN的请求。
  */
 export function createCancelPlanNode(deps: { changePlanRepository: ChangePlanRepository }) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {

@@ -1,0 +1,5 @@
+{
+  "model": "deepseek-flash",
+  "finishReason": "stop",
+  "content": "{\"schema\":\"kf-visual-semantic-graph-delta/v1\",\"baseDraftHash\":\"4461ee57b555ea5d381e79e61a7a916429d38a6e63a640a54f660ed3bc208e71\",\"operations\":[{\"op\":\"upsert-nodes\",\"nodes\":[{\"id\":\"node-devices\",\"kind\":\"layout\",\"layout\":\"row\",\"styleRole\":\"card-surface\",\"sourceBlueprintRegionIds\":[\"device-status-card\"],\"intent\":{\"importance\":\"primary\",\"visualWeight\":2,\"readingOrder\":1,\"density\":\"comfortable\",\"groupWith\":[],\"width\":{\"mode\":\"fill\"},\"height\":{\"mode\":\"content\"},\"align\":\"stretch\"},\"childNodeIds\":[\"node-devices-inner\"]},{\"id\":\"node-devices-inner\",\"kind\":\"layout\",\"layout\":\"column\",\"sourceBlueprintRegionIds\":[\"device-status-card\"],\"intent\":{\"importance\":\"primary\",\"visualWeight\":2,\"readingOrder\":1,\"density\":\"comfortable\",\"groupWith\":[],\"width\":{\"mode\":\"fill\"},\"height\":{\"mode\":\"content\"},\"align\":\"stretch\"},\"childNodeIds\":[\"node-devices-title\",\"node-device-row-1\",\"node-device-row-2\",\"node-device-row-3\"]}]}]}"
+}

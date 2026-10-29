@@ -36,7 +36,7 @@ import { TEST_SERVER_PLAN_SIGNER } from "./test-server-plan-signer.js";
 type CompiledGraph = ReturnType<typeof compileSolutionGraph>;
 
 // ---------------------------------------------------------------------------
-// Fakes
+// 伪造
 // ---------------------------------------------------------------------------
 
 class FakeWorkspaceQuery implements WorkspaceQueryPort {

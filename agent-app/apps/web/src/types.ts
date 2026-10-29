@@ -1,3 +1,4 @@
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
 /**
  * 前端 API 契约类型（与 Task 11 契约一致；字段名逐字来自 API 响应）。
  */
@@ -24,7 +25,7 @@ export interface Workspace {
   name: string;
   description?: string | null;
   mode: string;
-  /** Server-owned workflow discriminator; never inferred from artifact kind. */
+  /** 服务器持有的工作流判别器；绝不根据制品类型推断。 */
   generationWorkflow?: "legacy" | "module-v1" | "creative-v2";
   currentRevisionId?: string | null;
   /** 后端 SolutionWorkspace 返回含这些字段（前端仅展示用）。 */
@@ -63,32 +64,6 @@ export interface ScriptChange {
   entityId: string;
   entityType?: string;
   paths: string[];
-}
-
-/** SSE done 事件中的 approval interrupt 载荷（brief Step 5 字段逐字）。 */
-export interface ApprovalInterrupt {
-  type: "plan-approval";
-  changeRequestId?: string;
-  planHash?: string;
-  summary?: string;
-  diffArtifactId?: string;
-  previewArtifactId?: string;
-}
-
-export interface SseDonePayload {
-  stage?: string | null;
-  intent?: string | null;
-  lastErrorCode?: string | null;
-  buildJobId?: string | null;
-  workspaceId?: string | null;
-  conversationId?: string | null;
-  planHash?: string | null;
-  changePlanId?: string | null;
-  changeRequestId?: string | null;
-  modulePlanHash?: string | null;
-  interrupt?: ApprovalInterrupt | null;
-  /** Customer-safe projection of module compilation. Technical plans never cross this boundary. */
-  moduleDeliveryResult?: ModuleDeliveryResult | null;
 }
 
 export type ModuleDeliveryStatus = "ready" | "ready_with_warnings" | "blocked";
@@ -272,14 +247,21 @@ export interface CustomerSolutionBlueprintView {
       interactions: string[];
       states: string[];
       visualIntent: string;
+      // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+      visualRegionIds?: string[];
+      // end
     }>;
   }>;
   journeys: Array<{
     id: string;
     actor: string;
     goal: string;
-    steps: Array<{ pageId: string; regionId: string; action: string; result: string }>;
-    completion: string;
+    // modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+    steps: Array<{ pageId: string; regionId: string; action: string; result: string; kind?: "observe" | "interact"; expectedTexts?: string[] }>;
+    // end
+    // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+    completion?: string;
+    // end
   }>;
   visualDirection: {
     tone: string;
@@ -376,7 +358,7 @@ export function parseDesignPlan(content: string): DesignPlanView | null {
 
 const BLUEPRINT_MESSAGE_PREFIX = "KF_BLUEPRINT_MESSAGE/1\n";
 
-/** Decode the internal transport envelope into a customer-only view model. */
+/** 将内部传输信封解码为仅面向客户的视图模型。 */
 export function parseCustomerEffectBlueprint(
   content: string,
 ): CustomerBlueprintView | null {
@@ -498,6 +480,7 @@ function boundedText(value: unknown, max = SOLUTION_TEXT_MAX): string | null {
     && value.length <= max
     && value.trim() === value
     ? value
+// end
     : null;
 }
 
@@ -613,6 +596,12 @@ function parseSolutionRegion(value: unknown): CustomerSolutionBlueprintView["pag
   const interactions = boundedTextArray(value["interactions"]);
   const states = boundedTextArray(value["states"], 1);
   const visualIntent = boundedText(value["visualIntent"]);
+  // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+  const visualIds = value["visualRegionIds"];
+  if (visualIds !== undefined && (!Array.isArray(visualIds) || visualIds.length < 1 || visualIds.length > 100
+    || visualIds.some((id) => typeof id !== "string" || id.length > 128 || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(id))
+    || new Set(visualIds).size !== visualIds.length)) return null;
+  // end
   const density = value["density"];
   const importance = value["importance"];
   const sampleValue = value["sampleData"];
@@ -638,7 +627,9 @@ function parseSolutionRegion(value: unknown): CustomerSolutionBlueprintView["pag
   return {
     id, purpose, semanticRoles, dataShape, density, importance, content,
     sampleData: sampleData as Array<Array<{ label: string; value: string }>>,
-    interactions, states, visualIntent,
+    // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+    interactions, states, visualIntent, ...(visualIds === undefined ? {} : { visualRegionIds: visualIds as string[] }),
+    // end
   };
 }
 
@@ -659,8 +650,16 @@ function parseSolutionJourney(value: unknown): CustomerSolutionBlueprintView["jo
     const regionId = boundedId(step["regionId"]);
     const action = boundedText(step["action"]);
     const result = boundedText(step["result"]);
+    // modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+    const kind = step["kind"];
+    if (kind !== undefined && kind !== "observe" && kind !== "interact") return null;
+    const expectedTexts = kind === "observe" ? boundedTextArray(step["expectedTexts"], 1) : undefined;
+    if (kind === "observe" && (expectedTexts === null || expectedTexts === undefined || new Set(expectedTexts).size !== expectedTexts.length)) return null;
+    if (kind !== "observe" && Object.hasOwn(step, "expectedTexts")) return null;
     return pageId === null || regionId === null || action === null || result === null
-      ? null : { pageId, regionId, action, result };
+      ? null : { pageId, regionId, action, result, ...(kind === undefined ? {} : { kind }),
+        ...(expectedTexts === undefined || expectedTexts === null ? {} : { expectedTexts }) };
+    // end
   });
   if (steps.some((step) => step === null)) return null;
   return { id, actor, goal, steps: steps as CustomerSolutionBlueprintView["journeys"][number]["steps"], completion };

@@ -12,7 +12,7 @@ describe("native action capability knowledge", () => {
     expect(requireNativeActionCapability("navigate-page")).toMatchObject({
       semanticAction: "navigate-page",
       availability: "supported",
-      serialization: "navigate-command",
+      serialization: "navigation-script",
     });
   });
 

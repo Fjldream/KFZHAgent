@@ -22,9 +22,9 @@ export interface SerializedStyleDeclarations {
 }
 
 export interface CompiledScopedStyleFragment {
-  /** Deterministic metadata used to correlate compiler output; it is not a DOM selector. */
+  /** 用于关联编译器输出的确定性元数据；它不是DOM选择器。 */
   readonly componentScopeToken: string;
-  /** Exact plan component identity required when binding the eventual KF runtime DOM id. */
+  /** 当将最终的KF运行时DOM ID绑定到选择的最终属性时，必须使用精确的计划组件身份。 */
   readonly componentCorrelationId: string;
   readonly selectorToken: "root" | `part:${string}`;
   readonly state: StyleState;
@@ -367,7 +367,19 @@ export function compileScopedStyleFragment(
     throw new Error(`STYLE_STATE_UNSUPPORTED: ${partSelector.semanticPart}.${state}`);
   }
   const frozenDeclarations = deepFreeze(StyleDeclarationV2Schema.parse(declarations));
-  const serialized = serializeStyleDeclarations(frozenDeclarations, approvedAssets);
+  // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+  // KF layout roots default to no border. Explicit widths require a solid style,
+  // and undeclared sides must remain zero rather than CSS's default medium width.
+  const layoutBorder = partSelector.semanticPart === "root" && partSelector.evidence.templateFields.objectType === 2
+    && [frozenDeclarations.borderTopWidth, frozenDeclarations.borderRightWidth, frozenDeclarations.borderBottomWidth, frozenDeclarations.borderLeftWidth]
+      .some(width => width !== undefined && width > 0);
+  const serialized = serializeStyleDeclarations(layoutBorder ? {
+    ...frozenDeclarations,
+    borderTopWidth: frozenDeclarations.borderTopWidth ?? 0, borderRightWidth: frozenDeclarations.borderRightWidth ?? 0,
+    borderBottomWidth: frozenDeclarations.borderBottomWidth ?? 0, borderLeftWidth: frozenDeclarations.borderLeftWidth ?? 0,
+  } : frozenDeclarations, approvedAssets);
+  const cssBody = layoutBorder ? `${serialized.body};border-style:solid` : serialized.body;
+  // end
   const frozenAssets = deepFreeze(serialized.resolvedAssets.map((asset) => ({ ...asset })));
   const selectorToken = partSelector.semanticPart === "root"
     ? "root" as const
@@ -379,7 +391,9 @@ export function compileScopedStyleFragment(
     state,
     declarations: frozenDeclarations,
     persistedSelector: selector,
-    persistedCssText: serialized.body === "" ? "" : `${selector}{${serialized.body}}`,
+    // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+    persistedCssText: cssBody === "" ? "" : `${selector}{${cssBody}}`,
+    // end
     resolvedAssets: frozenAssets,
   });
   TRUSTED_SCOPED_STYLE_FRAGMENTS.set(fragment, fragmentIntegrity(fragment));

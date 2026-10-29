@@ -20,8 +20,7 @@ const EDGE_PADDING = 40;
 const THEME_COLOR = "#2f6fed";
 
 /**
- * Escape a text value for safe embedding in HTML text nodes and attribute
- * values. Every non-richtext control payload passes through here.
+ * 将文本值转义以确保在 HTML 文本节点和属性值中安全嵌入。每个非富文本控件的 payload 都会经过这里。
  */
 export function escapeHtml(value: string): string {
   return value

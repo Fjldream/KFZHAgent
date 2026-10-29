@@ -2,14 +2,11 @@ import { Injectable } from "@nestjs/common";
 import * as crypto from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service.js";
 
-/** Name of the HttpOnly session cookie. */
+/** HttpOnly 会话 cookie 的名称。 */
 export const SESSION_COOKIE_NAME = "kf_session";
 
 /**
- * Authenticated identity attached to a request by the session guard.
- * tenantId comes exclusively from the server-side session record.
- * `mustChangePassword` reflects the user's current flag so the tenant guard
- * can confine a first-login session to the password-change endpoint (I2).
+ * 由会话守卫附加到请求上的已认证身份。tenantId 只来自服务器端会话记录。`mustChangePassword` 反映用户当前的标志，使租户守卫可以把首次登录会话限制在密码修改端点（I2）。
  */
 export type SessionPrincipal = {
   userId: string;
@@ -20,15 +17,12 @@ export type SessionPrincipal = {
 };
 
 /**
- * Opaque 256-bit random session tokens. The database stores only the SHA-256
- * hash of each token so a leaked row dump cannot be replayed. Sessions expire
- * after an absolute TTL and after an idle timeout; logging in rotates to a
- * fresh token; changing the password revokes every session for the user.
+ * 不透明的 256 位随机会话令牌。数据库只存储每个令牌的 SHA-256 哈希，因此泄漏的记录转储无法用于重放。会话会在绝对 TTL 到期或空闲超时后失效；登录会轮换为新令牌；修改密码会撤销该用户的所有会话。
  */
 @Injectable()
 export class SessionService {
-  private static readonly SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-  private static readonly IDLE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+  private static readonly SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 天
+  private static readonly IDLE_TTL_MS = 30 * 60 * 1000; // 30 分钟
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -73,7 +67,7 @@ export class SessionService {
       await this.revokeSessionById(session.id);
       return null;
     }
-    // Slide the last-used timestamp (no DB write on a cold `createdAt`).
+    // 滑动更新最后使用时间戳（首次使用 `createdAt` 时不写数据库）。
     await this.prisma.userSession.update({
       where: { id: session.id },
       data: { lastUsedAt: now },
@@ -94,6 +88,19 @@ export class SessionService {
       data: { revokedAt: new Date() },
     });
   }
+
+  // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+  /** SSE 心跳不是用户操作：只读复核，不滑动 lastUsedAt，且不能沿用已变更的租户/角色。 */
+  async isSubscriptionActive(principal: SessionPrincipal): Promise<boolean> {
+    const now = new Date();
+    const session = await this.prisma.userSession.findFirst({ where: {
+      id: principal.sessionId, userId: principal.userId, revokedAt: null,
+      expiresAt: { gt: now }, lastUsedAt: { gte: new Date(now.getTime() - SessionService.IDLE_TTL_MS) },
+      user: { tenantId: principal.tenantId, role: principal.role, mustChangePassword: false },
+    }, select: { id: true } });
+    return session !== null;
+  }
+  // end
 
   async revokeAllForUser(userId: string): Promise<void> {
     await this.prisma.userSession.updateMany({

@@ -1,7 +1,6 @@
 import { defineConfig } from "vitest/config";
 
-// The checkpoint integration suite shares the kf_agent_test database with the
-// other workspace integration suites; keep this package's files sequential.
+// 检查点集成套件与其他工作区集成套件共享 kf_agent_test 数据库；请将此包的文件保持顺序。
 export default defineConfig({
   test: {
     fileParallelism: false,

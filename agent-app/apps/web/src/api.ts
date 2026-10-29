@@ -1,3 +1,7 @@
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+import type { Page, ConversationListItem, MessageView, RevisionDetail, ConversationForkInput } from "@kf/contracts";
+// end
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
 import type {
   ArtifactRow,
   BuildJob,
@@ -24,6 +28,18 @@ import type {
  */
 export const API_BASE: string =
   (import.meta.env.VITE_API_BASE as string | undefined) ?? "";
+
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+export type WorkbenchConfigResponse = {
+  schemaVersion: 1;
+  planVersion: string;
+  flags: { agentRunsV2: boolean; agentWorkbenchV2: boolean; agentUsageV2: boolean; agentVisionV1: boolean; budgetGuard: boolean };
+  // modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+  imagePolicy: "disabled" | "explicit-consent";
+  outboundImagesAllowed: boolean;
+  // end
+};
+// end
 
 export class ApiError extends Error {
   readonly status: number;
@@ -79,6 +95,11 @@ async function nullableJsonResponse<T>(path: string, init: RequestInit = {}): Pr
 }
 
 export const api = {
+  // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+  async getWorkbenchConfig(signal?: AbortSignal): Promise<WorkbenchConfigResponse> {
+    return jsonResponse<WorkbenchConfigResponse>("/api/v2/workbench-config", { cache: "no-store", ...(signal ? { signal } : {}) });
+  },
+  // end
   // ---- 认证（Cookie 会话）------------------------------------------------
   async login(input: { tenant: string; username: string; password: string }): Promise<LoginResult> {
     return jsonResponse<LoginResult>("/api/auth/login", {
@@ -122,6 +143,14 @@ export const api = {
       body: JSON.stringify({ confirm: true }),
     });
   },
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  async revisionDetail(workspaceId: string, revisionId: string): Promise<RevisionDetail> {
+    return jsonResponse<RevisionDetail>(`/api/v2/workspaces/${encodeURIComponent(workspaceId)}/revisions/${encodeURIComponent(revisionId)}`);
+  },
+  async forkConversation(conversationId: string, input: ConversationForkInput): Promise<ConversationListItem> {
+    return jsonResponse<ConversationListItem>(`/api/v2/conversations/${encodeURIComponent(conversationId)}/forks`, { method: "POST", body: JSON.stringify(input) });
+  },
+  // end
   async listRevisions(workspaceId: string): Promise<Revision[]> {
     return jsonResponse<Revision[]>(`/api/workspaces/${workspaceId}/revisions`);
   },
@@ -136,7 +165,30 @@ export const api = {
     return (await res.json()) as UploadResult;
   },
 
-  // ---- 会话对话（SSE） -----------------------------------------------------
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  async getConversationV2(id: string): Promise<ConversationListItem> {
+    return jsonResponse<ConversationListItem>(`/api/v2/conversations/${encodeURIComponent(id)}`);
+  },
+  // end
+  async conversationPage(workspaceId: string, cursor: string | null = null, archived = false): Promise<Page<ConversationListItem>> {
+    const query = new URLSearchParams({ workspaceId, archived: String(archived), limit: "50" });
+    if (cursor) query.set("cursor", cursor);
+    return jsonResponse<Page<ConversationListItem>>(`/api/v2/conversations?${query}`);
+  },
+  async messagePage(conversationId: string, before: string | null = null): Promise<Page<MessageView>> {
+    const query = new URLSearchParams({ limit: "50" });
+    if (before) query.set("before", before);
+    return jsonResponse<Page<MessageView>>(`/api/v2/conversations/${encodeURIComponent(conversationId)}/messages?${query}`);
+  },
+  async updateConversation(id: string, input: { title?: string; archived?: boolean }): Promise<ConversationListItem> {
+    return jsonResponse<ConversationListItem>(`/api/v2/conversations/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(input) });
+  },
+  async createConversationV2(workspaceId: string): Promise<ConversationListItem> {
+    return jsonResponse<ConversationListItem>("/api/v2/conversations", { method: "POST", body: JSON.stringify({ workspaceId }) });
+  },
+// end
+  // ---- 会话与历史查询 -----------------------------------------------------
   async createConversation(workspaceId: string, title?: string): Promise<{ id: string; title: string }> {
     return jsonResponse<{ id: string; title: string }>("/api/conversations", {
       method: "POST",
@@ -175,13 +227,6 @@ export const api = {
       `/api/conversations/${encodeURIComponent(conversationId)}/delivery${query}`,
     );
   },
-  async resume(conversationId: string, input: { action: "approve" | "revise" | "cancel"; planHash: string }): Promise<Record<string, unknown>> {
-    return jsonResponse<Record<string, unknown>>(`/api/conversations/${conversationId}/resume`, {
-      method: "POST",
-      body: JSON.stringify(input),
-    });
-  },
-
   // ---- 构建 / 制品 / 下载 -------------------------------------------------
   async getLatestBuildJob(workspaceId: string): Promise<BuildJob | null> {
     const response = await jsonResponse<{ job: BuildJob | null }>(
@@ -215,3 +260,4 @@ export const api = {
 };
 
 export type JobStatusLike = BuildJobStatus;
+// end

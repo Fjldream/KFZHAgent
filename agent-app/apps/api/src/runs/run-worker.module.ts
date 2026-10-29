@@ -10,6 +10,9 @@ import { RevisionsModule } from "../revisions/revisions.module.js";
 import { TenantsModule } from "../tenants/tenants.module.js";
 import { UsersModule } from "../users/users.module.js";
 import { WorkspacesModule } from "../workspaces/workspaces.module.js";
+// modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+import { ReferenceAssetsModule } from "../vision/reference-assets.module.js";
+// end
 
 /**
  * worker 专用装配：复用 API 的业务模块，但**不导入 BuildJobsModule**，
@@ -28,6 +31,9 @@ import { WorkspacesModule } from "../workspaces/workspaces.module.js";
     ArtifactsModule,
     AssetsModule,
     ConversationsModule,
+    // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+    ReferenceAssetsModule,
+    // end
   ],
 })
 export class AgentWorkerModule {}

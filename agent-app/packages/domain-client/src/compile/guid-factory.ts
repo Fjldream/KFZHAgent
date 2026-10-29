@@ -1,32 +1,24 @@
 import { v5 as uuidV5 } from "uuid";
 
 /**
- * Deterministic GUID derivation (brief Step 4).
+ * 确定性 GUID 派生（简要步骤 4）。
  *
- * A compiled KF project replaces every semantic entity id (page name, control
- * name, variable name) with a UUID-compatible KF GUID derived ONLY from the
- * build seed and the semantic id:
+ * 编译后的 KF 项目会把每个语义实体 ID（页面名称、控件名称、变量名称）替换为与 UUID 兼容的 KF GUID，该 GUID 仅由构建种子和语义 ID 派生：
  *
  *   guid = uuidV5(entityId, uuidV5(build.seed, KF_BUILD_NAMESPACE))
  *
- * The same IR + seed always yields the same GUIDs (byte-for-byte workspaces);
- * a different seed yields different GUIDs. uuid v5 uses SHA-1 per RFC 4122 via
- * the standard `uuid` package (pure JS + node:crypto, stable across Linux and
- * Windows), so results are reproducible on any host.
+ * 相同的 IR 和种子始终生成相同的 GUID（工作空间逐字节一致）；种子不同，GUID 也不同。UUID v5 按照 RFC 4122 使用 SHA-1，并通过标准 `uuid` 包实现（纯 JS + node:crypto，在 Linux 与 Windows 上保持稳定），因此结果可在任何主机上复现。
  */
 
 export type BuildSeed = { seed: string };
 
 /**
- * Fixed RFC 4122-style namespace for every KF build. Chosen once and frozen:
- * changing it would change every derived GUID for existing builds.
+ * 所有 KF 构建使用的固定 RFC 4122 风格命名空间。选定后即冻结：修改它会改变现有构建派生出的每一个 GUID。
  */
 export const KF_BUILD_NAMESPACE = "3c7c6a9e-1f4d-4e8b-9c5a-2b6f7d8e9a0b";
 
 /**
- * Derives the RFC 4122 v5 UUID for a semantic entity id under a build seed.
- * `entityId` is a STABLE SEMANTIC id (page name, control name, variable name),
- * never a KF GUID and never a numeric internal id.
+ * 根据 RFC 4122 v5 UUID 为基于构建种子的语义实体标识符衍生。`entityId` 是一个稳定语义标识符（页面名称、控制名称、变量名称），而不是一个 KF GUID 或者一个数字内部标识符。
  */
 export function deriveGuid(build: BuildSeed, entityId: string): string {
   return uuidV5(entityId, uuidV5(build.seed, KF_BUILD_NAMESPACE));

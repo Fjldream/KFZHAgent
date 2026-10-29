@@ -1,4 +1,4 @@
-// @ts-nocheck -- focused port test uses narrow Prisma/storage doubles.
+// @ts-nocheck -- 专注于端口的端到端测试使用窄 Prisma/存储双倍。
 import { Readable } from "node:stream";
 import { Logger } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
@@ -492,6 +492,43 @@ describe("conversation graph workspace query", () => {
     }
     expect(prisma.requests.size).toBe(2);
     expect(prisma.plans.size).toBe(2);
+  });
+
+  it("persists an evidence-backed feedback interaction without recoverable interaction warnings", async () => {
+    const prisma = creativePrisma();
+    const compiler = createCreativeSolutionCompilerFromEnvironment(
+      prisma.client,
+      {} as never,
+      { resolveManyForCompilation: vi.fn().mockResolvedValue([]) },
+      { KF_SERVER_PLAN_HMAC_KEY_BASE64: Buffer.alloc(32, 0x59).toString("base64") },
+    );
+    const fixture = creativeFixture();
+    fixture.plan.actions[0] = {
+      id: "navigate",
+      kind: "show-feedback",
+      level: "info",
+      message: "详情准备中",
+      afterActionIds: [],
+      journeyStepRefs: [{ journeyId: "open-detail", stepIndex: 0 }],
+    };
+
+    const outcome = await compiler.compile({
+      tenantId: "tenant-creative",
+      workspaceId: "workspace-creative",
+      conversationId: "conversation-partial-interaction",
+      baseRevisionId: "revision-creative",
+      projectKey: fixture.plan.projectKey,
+      domainKind: "kingclient",
+      blueprint: fixture.blueprint,
+      candidateBundle: fixture.candidates,
+      semanticPlan: fixture.plan,
+    });
+
+    expect(outcome).toMatchObject({
+      status: "compiled",
+      capabilityReport: { status: "warning" },
+      warnings: [],
+    });
   });
 
   it("selects uploaded evidence by exact project/domain identity and inspects it once", async () => {
@@ -1332,6 +1369,9 @@ function creativePrisma(options: {
   const client = {
     solutionRevision,
     domainProjectRevision,
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    generationSnapshot: { findMany: vi.fn().mockResolvedValue([]) },
+    // end
     async $transaction(run) {
       const requestDraft = new Map([...requests].map(([key, value]) => [key, structuredClone(value)]));
       const planDraft = new Map([...plans].map(([key, value]) => [key, structuredClone(value)]));

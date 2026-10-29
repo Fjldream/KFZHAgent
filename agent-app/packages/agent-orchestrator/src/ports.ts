@@ -17,6 +17,9 @@ import type {
 import type { ModelPort } from "./model-port.js";
 import type { RunStepMemo } from "./run-step-memo.js";
 import type { GraphMessage } from "./state.js";
+// modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+import type { VisualPlanningContext, VisualSemanticBinding } from "@kf/contracts";
+// end
 
 /**
  * Ports consumed by the solution graph (brief "Consumes" line):
@@ -82,6 +85,16 @@ export interface WorkspaceQueryPort {
     tenantId: string;
     workspaceId: string;
   }): Promise<string | undefined>;
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  /** Server-owned project metadata of the exact admitted base; ambiguous/missing evidence must reject. */
+  getRevisionProjectKey?(input: {
+    tenantId: string; workspaceId: string; revisionId: string; domainKind: string; defaultProjectKey: string;
+  }): Promise<string>;
+  /** Bounded semantic structure backed by the exact signed generated base, without native identities. */
+  getGeneratedProjectStructure?(input: {
+    tenantId: string; workspaceId: string; revisionId: string; projectKey: string; domainKind: string;
+  }): Promise<import("@kf/contracts").GeneratedProjectStructure | undefined>;
+  // end
   /** Server-owned workspace origin used only for safe workflow routing. */
   getWorkspaceRouting?(input: {
     tenantId: string;
@@ -239,6 +252,9 @@ export interface AcceptedBlueprintConfirmationPort {
 export interface CapabilityRetrievalPort {
   retrieve(input: {
     blueprint: CustomerSolutionBlueprint;
+    // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+    visualReference?: VisualPlanningContext;
+    // end
   }): Promise<CapabilityCandidateBundle>;
 }
 
@@ -262,6 +278,10 @@ export interface CreativeSolutionCompilerInput {
   blueprint: CustomerSolutionBlueprint;
   candidateBundle: CapabilityCandidateBundle;
   semanticPlan: SolutionImplementationPlan;
+  // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+  /** Server-only reviewed input. Public receipt/admission is separately required before enabling vision. */
+  visual?: { reference: VisualPlanningContext; bindings: VisualSemanticBinding[] };
+  // end
 }
 
 export type CreativeSolutionCompilerOutcome =

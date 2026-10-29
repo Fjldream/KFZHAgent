@@ -8,7 +8,7 @@ import type { Request } from "express";
 import { SESSION_COOKIE_NAME, SessionService } from "./session.service.js";
 
 /**
- * Authenticated request with the server-resolved tenant context attached.
+ * 带有服务器解析的租户上下文的认证请求。
  */
 export type AuthenticatedRequest = Request & {
   principal: {
@@ -20,7 +20,7 @@ export type AuthenticatedRequest = Request & {
   };
 };
 
-/** Routes a first-login (must-change-password) session may reach. */
+/** 首次登录（必须更改密码）会话可能到达的路由。 */
 const FIRST_LOGIN_ALLOWED_PATHS = new Set([
   "/api/auth/change-password",
   "/api/auth/logout",
@@ -28,15 +28,9 @@ const FIRST_LOGIN_ALLOWED_PATHS = new Set([
 ]);
 
 /**
- * Resolves tenantId exclusively from the authenticated session cookie. No
- * tenantId from a request body is ever trusted. Invalid/expired sessions are
- * rejected with 401.
+ * 仅从经过身份验证的会话 Cookie 中解析 tenantId。绝不信任请求正文中的 tenantId。无效或过期的会话会以 401 拒绝。
  *
- * I2: a user whose `mustChangePassword` flag is still set (temporary first
- * login password) gets a RESTRICTED session: the guard authenticates it but
- * only permits the password-change flow (change-password / logout / me).
- * Every other API route is rejected with 403 until the password is changed,
- * so the temporary password can never be used to operate the platform.
+ * I2：`mustChangePassword` 标志仍为已设置状态（首次登录使用临时密码）的用户会获得 RESTRICTED 会话：守卫会验证该会话，但只允许修改密码流程（change-password / logout / me）。在密码修改前，所有其他 API 路由都会以 403 拒绝，因此临时密码绝不能用于操作平台。
  */
 @Injectable()
 export class TenantGuard implements CanActivate {

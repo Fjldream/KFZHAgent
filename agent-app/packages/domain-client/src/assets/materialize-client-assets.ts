@@ -21,15 +21,15 @@ export async function materializeClientAssets(input: {
   plan: unknown;
   assets: readonly DomainAssetInput[];
   maxAggregateBytes?: number;
-  /** HMAC-verified creative style assets. They are published, never treated as image-control rewrites. */
+  /** 经过HMAC验证的创意风格资产。它们是发布，从不被视为图像控制的重写。 */
   additionalVerifiedAssets?: readonly {
     assetId: string; targetPath: string; mediaType: string; sha256: string; sizeBytes: number;
   }[];
-  /** Verified semantic-to-runtime correlation for creative image bindings. */
+  /** 验证创意到运行时的语义到运行时的关联，以绑定创意图像。 */
   creativeControlCorrelations?: readonly {
     semanticControlId: string; instanceName: string; nativeGuid?: string;
   }[];
-  /** Deterministic race injection used only by filesystem security tests. */
+  /** 仅用于文件系统安全测试的确定性竞态注入。 */
   hooks?: {
     beforePublish?: () => Promise<void>;
     afterStageBeforePublish?: () => Promise<void>;
@@ -41,10 +41,10 @@ export async function materializeClientAssets(input: {
     writeStage?: (handle: FileHandle, bytes: Uint8Array) => Promise<void>;
   };
 }): Promise<void> {
-  // Asset materialization is an internal extension of the long-lived patch API.
-  // Preserve legacy callers that have neither approved bytes nor an own binding
-  // field without forcing their already-validated plan through the newer schema.
-  // Use the descriptor so an untrusted accessor is never executed by this guard.
+  // 资产化是长期生命周期补丁API的内部扩展。
+  // 保留那些既未批准字节也未拥有自己的绑定字段的遗留调用者
+  // 不强制通过较新的模式验证过的计划。
+  // 使用描述符，以防止此保护器执行未信任的访问者。
   if (input.assets.length === 0 && !hasOwnDataAssetBindings(input.plan)
     && (input.additionalVerifiedAssets?.length ?? 0) === 0) return;
   const parsed = internalChangePlanSchema.safeParse(input.plan);

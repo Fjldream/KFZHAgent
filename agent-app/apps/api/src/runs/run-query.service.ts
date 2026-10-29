@@ -1,6 +1,9 @@
 // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
 import type { RunEvent, RunSnapshot } from "@kf/contracts";
 import type { PrismaClient } from "@prisma/client";
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+import { VISUAL_RUN_PLAN_VERSION } from "@kf/contracts";
+// end
 
 export const RUN_NOT_FOUND = "RUN_NOT_FOUND";
 export const RUN_EVENT_CURSOR_INVALID = "RUN_EVENT_CURSOR_INVALID";
@@ -16,6 +19,10 @@ const toSnapshot = (row: {
   id: string; tenantId: string; workspaceId: string; conversationId: string; status: string;
   lastSeq: number; baseRevisionId: string | null; buildJobId: string | null;
   resultRevisionId: string | null; failureCode: string | null; supersededByRunId: string | null;
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  configSnapshot?: unknown;
+  inputSnapshot?: unknown;
+  // end
 }): RunSnapshot => ({
   id: row.id,
   tenantId: row.tenantId,
@@ -28,6 +35,11 @@ const toSnapshot = (row: {
   resultRevisionId: row.resultRevisionId,
   failureCode: row.failureCode,
   supersededByRunId: row.supersededByRunId,
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  retryPolicy: (row.configSnapshot as { planVersion?: unknown } | null)?.planVersion === VISUAL_RUN_PLAN_VERSION
+    || row.inputSnapshot !== null && typeof row.inputSnapshot === "object" && ["visualAdmission", "visualContinuation", "visualEngineering"].some(key => Object.hasOwn(row.inputSnapshot!, key))
+    ? "new-visual-review" : "new-run",
+  // end
 });
 
 /**
@@ -36,6 +48,29 @@ const toSnapshot = (row: {
  */
 export class PrismaRunQueries implements RunQueries {
   constructor(private readonly prisma: PrismaClient) {}
+
+  async latest(tenantId: string, conversationId: string): Promise<RunSnapshot | null> {
+    if (!await this.prisma.conversation.findFirst({ where: { id: conversationId, tenantId }, select: { id: true } })) throw new Error(RUN_NOT_FOUND);
+    // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+    // 当前业务屏障优先，不能让较新受理的 queued 输入遮住审批/正在执行的轮次。
+    const barrier = await this.prisma.agentRun.findFirst({ where: { tenantId, conversationId, status: { in: ["RUNNING", "BUILDING", "CANCEL_REQUESTED", "WAITING_INPUT", "WAITING_APPROVAL"] } }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+    if (barrier) return toSnapshot(barrier);
+    const [queued] = await this.prisma.$queryRaw<Array<{ id: string }>>`
+      SELECT r."id" FROM "AgentRun" r WHERE r."tenantId" = ${tenantId} AND r."conversationId" = ${conversationId} AND r."status" = 'QUEUED'
+        AND NOT EXISTS (SELECT 1 FROM "AgentRun" predecessor WHERE predecessor."id" = r."predecessorRunId" AND predecessor."status" = 'QUEUED')
+      ORDER BY r."createdAt", r."id" LIMIT 1
+    `;
+    if (queued) return this.snapshot(tenantId, queued.id);
+    // 完成顺序由前序链决定，不能依赖旧 raw-SQL 与 ORM 混合口径的 finishedAt。
+    const [tail] = await this.prisma.$queryRaw<Array<{ id: string }>>`
+      SELECT r."id" FROM "AgentRun" r WHERE r."tenantId" = ${tenantId} AND r."conversationId" = ${conversationId}
+        AND NOT EXISTS (SELECT 1 FROM "AgentRun" child WHERE child."predecessorRunId" = r."id" AND child."tenantId" = ${tenantId} AND child."conversationId" = ${conversationId})
+      ORDER BY r."createdAt" DESC, r."id" DESC LIMIT 1
+    `;
+    const row = tail ? await this.prisma.agentRun.findFirst({ where: { id: tail.id, tenantId, conversationId } }) : null;
+    // end
+    return row ? toSnapshot(row) : null;
+  }
 
   async snapshot(tenantId: string, runId: string): Promise<RunSnapshot> {
     const row = await this.prisma.agentRun.findFirst({ where: { id: runId, tenantId } });

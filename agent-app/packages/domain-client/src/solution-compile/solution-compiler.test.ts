@@ -21,6 +21,23 @@ import {
   type SolutionCompileInput,
 } from "./solution-compiler.js";
 import { validateSolutionControlSemanticProjection } from "./solution-provenance.js";
+// modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { canonicalChangePlanHash, CustomerSolutionBlueprintSchema } from "@kf/contracts";
+import { createHmacCreativeBuildFacade, resolveStoredPlan } from "@kf/build-jobs";
+import { compileClientProject } from "../compile/client-compiler.js";
+import { createKingClientDomainPack } from "../domain-pack/king-client-domain-pack.js";
+import { createCreativeUIImplementationV2Compiler } from "../implementation/ui-implementation-v2-compiler.js";
+import { attachRuntimeCorrelation } from "../implementation/runtime-correlation.js";
+import { compileInteractions } from "../interaction/interaction-compiler.js";
+import { inspectClientProject } from "../inspect/client-inspector.js";
+import { importNativeClientPackage } from "../package/native-client-package.js";
+// end
+// modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+import { compileSolutionImplementationWithProvenance, readSemanticCompilationProvenance } from "./solution-compiler.js";
+// end
 
 const CATALOG_VERSION = "1.0.0";
 const WORKSPACE_ASSET_ID = "11111111-2222-3333-4444-555555555555";
@@ -362,6 +379,44 @@ function exactExpansionBudgetFixture(recordCount: number) {
   }], sourcePages, { mockData: [recordsDataSet("budget-data", recordCount)] });
 }
 
+// modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+describe("compiler-owned semantic expansion provenance", () => {
+  it("maps repeated template nodes to all actual emitted components without parsing ID prefixes", () => {
+    const fixture = adminFixture();
+    const input = { plan: fixture.plan, candidateBundle: fixture.bundle, moduleRegistry: createDefaultModuleRegistry(),
+      approvedAssets: [], activeCatalogVersion: CATALOG_VERSION };
+    const result = compileSolutionImplementationWithProvenance(input);
+    expect(result.implementation).toEqual(compileSolutionImplementation(input));
+    const provenance = readSemanticCompilationProvenance(result.provenance, fixture.plan);
+    const names = provenance.filter(entry => entry.nodeId === "person-name");
+    expect(names.map(entry => entry.componentId)).toEqual(["people-list--e-001--person-name", "people-list--e-002--person-name"]);
+    expect(names.every(entry => entry.capabilityId === "text")).toBe(true);
+    const compiled = result.implementation.pages.flatMap(page => page.compatibility === "native" ? page.controls : []);
+    expect(provenance.map(entry => entry.componentId).sort()).toEqual(compiled.map(control => control.id).sort());
+  });
+  it("keeps registered module provenance through nested repeaters", () => {
+    const fixture = nestedRepeaterModuleFixture();
+    const result = compileSolutionImplementationWithProvenance({ plan: fixture.plan, candidateBundle: fixture.bundle,
+      moduleRegistry: createDefaultModuleRegistry(), approvedAssets: [], activeCatalogVersion: CATALOG_VERSION });
+    const provenance = readSemanticCompilationProvenance(result.provenance, fixture.plan);
+    expect(provenance.filter(entry => entry.nodeId === "nested-kpis").length).toBeGreaterThan(4);
+    expect(provenance.every(entry => fixture.plan.pages[0]!.root.id === entry.nodeId
+      || ["outer", "outer-template", "inner", "nested-kpis"].includes(entry.nodeId))).toBe(true);
+    expect(Object.isFrozen(provenance)).toBe(true);
+    expect(provenance.every(entry => Object.isFrozen(entry))).toBe(true);
+  });
+  it("rejects forged or replayed provenance for a different semantic plan", () => {
+    const fixture = adminFixture();
+    const result = compileSolutionImplementationWithProvenance({ plan: fixture.plan, candidateBundle: fixture.bundle,
+      moduleRegistry: createDefaultModuleRegistry(), approvedAssets: [], activeCatalogVersion: CATALOG_VERSION });
+    expect(() => readSemanticCompilationProvenance({} as typeof result.provenance, fixture.plan)).toThrow("SEMANTIC_PROVENANCE_REQUIRED");
+    expect(() => readSemanticCompilationProvenance(result.provenance, { ...fixture.plan, projectKey: "other-project" })).toThrow("SEMANTIC_PROVENANCE_PLAN_MISMATCH");
+    expect(readSemanticCompilationProvenance(result.provenance, structuredClone(fixture.plan)))
+      .toEqual(readSemanticCompilationProvenance(result.provenance, fixture.plan));
+  });
+});
+// end
+
 function nestedExpansionBombFixture() {
   const sourcePages = [{ pageId: "bp-bomb", regions: ["bomb"] }] as const;
   const nested = repeaterNode(
@@ -416,6 +471,164 @@ function cumulativeExpansionFixture() {
 function nativeControls(result: ReturnType<typeof compileFixture>) {
   return result.pages.flatMap((page) => page.compatibility === "native" ? page.controls : []);
 }
+
+// modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+describe("native layout surface compilation", () => {
+  function surfaceFixture(kind: LayoutNode["layout"] = "column") {
+    const root = layout("surface", "overview", kind, [
+      textNode("surface-first", "overview", "能源总览"),
+      textNode("surface-second", "overview", "设备在线", 1),
+    ]);
+    const fixture = planWithBundle("surface-proof", [{
+      id: "surface-page", title: "能源总览", purpose: "验证原生容器表面", canvas: "desktop",
+      sourceBlueprintPageId: "bp-surface", sourceBlueprintRegionIds: ["overview"], initialStateIds: [], root,
+    }], [{ pageId: "bp-surface", regions: ["overview"] }]);
+    Object.assign(fixture.plan.pages[0]!.root, { styleRole: "card-surface" });
+    fixture.plan.roleStyles.push({ role: "card-surface", declarations: {
+      backgroundColor: "{theme.surface}", borderColor: "#dde5ec", borderRadius: 10,
+      padding: 16, borderLeftWidth: 1, borderRightWidth: 3, borderTopWidth: 2, borderBottomWidth: 4,
+    }, states: {} });
+    return fixture;
+  }
+
+  it.each(["row", "column", "grid", "stack", "scroll-region"] as const)("keeps %s children inside padding and asymmetric borders", (kind) => {
+    const fixture = surfaceFixture(kind);
+    const controls = nativeControls(compileFixture(fixture));
+    const surface = controls.find(control => control.id === "surface")!;
+    expect(surface.style?.role).toBe("card-surface");
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    expect(surface.compiledStyle?.nativeFields).toMatchObject({ isShowBorder: true });
+    expect(surface.compiledStyle?.nativeFields).not.toHaveProperty("backgroundColor");
+    // end
+    expect(surface.compiledStyle?.cssFragments).toContainEqual(expect.objectContaining({
+      // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+      selectorToken: "root", state: "normal", declarations: expect.objectContaining({ backgroundColor: theme.surface, padding: 16, borderRadius: 10 }),
+      // end
+    }));
+    for (const child of controls.filter(control => control.parentId === surface.id)) {
+      expect(child.geometry.x).toBeGreaterThanOrEqual(surface.geometry.x + 17);
+      expect(child.geometry.y).toBeGreaterThanOrEqual(surface.geometry.y + 18);
+      expect(child.geometry.x + child.geometry.width).toBeLessThanOrEqual(surface.geometry.x + surface.geometry.width - 19);
+      expect(child.geometry.y + child.geometry.height).toBeLessThanOrEqual(surface.geometry.y + surface.geometry.height - 20);
+    }
+  });
+
+  it("adds vertical insets exactly once and honors padding axes", () => {
+    const styled = surfaceFixture();
+    const plain = structuredClone(styled);
+    Reflect.deleteProperty(plain.plan.pages[0]!.root, "styleRole");
+    const plainControls = nativeControls(compileFixture(plain));
+    const styledControls = nativeControls(compileFixture(styled));
+    const outer = styledControls.find(control => control.id === "surface")!;
+    expect(outer.geometry.height).toBe(plainControls.find(control => control.id === "surface")!.geometry.height + 38);
+    styled.plan.roleStyles.find(role => role.role === "card-surface")!.declarations.paddingHorizontal = 24;
+    styled.plan.roleStyles.find(role => role.role === "card-surface")!.declarations.paddingVertical = 8;
+    const axes = nativeControls(compileFixture(styled));
+    const first = axes.find(control => control.id === "surface-first")!;
+    const parent = axes.find(control => control.id === "surface")!;
+    expect(first.geometry.x - parent.geometry.x).toBe(25);
+    expect(first.geometry.y - parent.geometry.y).toBe(10);
+  });
+
+  it("rejects a surface role that overrides compiler overflow", () => {
+    const fixture = surfaceFixture();
+    fixture.plan.roleStyles.find(role => role.role === "card-surface")!.declarations.overflow = "hidden";
+    expect(() => compileFixture(fixture)).toThrow(/LAYOUT_SURFACE_OVERFLOW/);
+  });
+
+  it("quantizes decimal padding plus borders to the shared geometry precision", () => {
+    const fixture = surfaceFixture();
+    Object.assign(fixture.plan.roleStyles.find(role => role.role === "card-surface")!.declarations,
+      { padding: 0.1, borderLeftWidth: 0.2, borderRightWidth: 0.2, borderTopWidth: 0.2, borderBottomWidth: 0.2 });
+    const surface = nativeControls(compileFixture(fixture)).find(control => control.id === "surface")!;
+    expect(surface.compiledLayout?.contentInsets).toEqual({ left: 0.3, right: 0.3, top: 0.3, bottom: 0.3 });
+  });
+
+  it("keeps nested card padding independent at each level", () => {
+    const fixture = surfaceFixture();
+    const root = fixture.plan.pages[0]!.root as LayoutNode;
+    root.children = [{ ...layout("nested-surface", "overview", "column", root.children), styleRole: "card-surface" }];
+    const controls = nativeControls(compileFixture(fixture));
+    const outer = controls.find(control => control.id === "surface")!;
+    const inner = controls.find(control => control.id === "nested-surface")!;
+    const first = controls.find(control => control.id === "surface-first")!;
+    expect(inner.geometry.x - outer.geometry.x).toBe(17);
+    expect(first.geometry.x - inner.geometry.x).toBe(17);
+    expect(inner.geometry.y - outer.geometry.y).toBe(18);
+    expect(first.geometry.y - inner.geometry.y).toBe(18);
+    expect(inner.geometry.x + inner.geometry.width).toBe(outer.geometry.x + outer.geometry.width - 19);
+  });
+
+  it("retains the bottom padding in a bounded scroll extent", () => {
+    const fixture = surfaceFixture("scroll-region");
+    fixture.plan.pages[0]!.root.intent.height = { mode: "fixed", value: 60 };
+    const controls = nativeControls(compileFixture(fixture));
+    const surface = controls.find(control => control.id === "surface")!;
+    const children = controls.filter(control => control.parentId === surface.id);
+    if (surface.compiledLayout?.kind !== "scroll-region") throw new Error("scroll fixture required");
+    expect(surface.compiledLayout.scrollContentExtent.height).toBe(
+      Math.max(...children.map(child => child.geometry.y + child.geometry.height)) - surface.geometry.y + 20,
+    );
+    expect(surface.compiledStyle?.cssFragments).toContainEqual(expect.objectContaining({
+      declarations: expect.objectContaining({ overflow: "auto", padding: 16 }),
+    }));
+  });
+
+  it("rejects border changes in container states before layout", () => {
+    const fixture = surfaceFixture();
+    fixture.plan.roleStyles.find(role => role.role === "card-surface")!.states.hover = { borderLeftWidth: 2 };
+    expect(() => compileFixture(fixture)).toThrow(/LAYOUT_SURFACE_STATE_GEOMETRY/);
+  });
+
+  it("retains surface style and insets through signed native patch, validation, package and import", async () => {
+    const fixture = surfaceFixture();
+    const blueprint = CustomerSolutionBlueprintSchema.parse({
+      schema: "kf-design-plan/v3", displayName: "容器样式验收", objective: "阅读能源状态", audiences: ["运维人员"], scenarios: ["阅读指标"],
+      pages: [{ id: "bp-surface", title: "能源总览", purpose: "阅读状态", readingOrder: ["overview"], regions: [{ id: "overview", purpose: "能源状态",
+        semanticRoles: ["content"], dataShape: "static", density: "comfortable", importance: "primary", content: ["能源总览", "设备在线"],
+        sampleData: [], interactions: [], states: ["正常显示"], visualIntent: "白色卡片" }] }],
+      journeys: [{ id: "read-surface", actor: "运维人员", goal: "阅读状态", steps: [{ kind: "observe", pageId: "bp-surface", regionId: "overview",
+        action: "阅读能源总览", result: "看到能源总览", expectedTexts: ["能源总览"] }], completion: "已阅读状态" }],
+      visualDirection: { tone: "清晰", colors: ["白色"], typography: "易读", spacingAndSurfaces: "卡片留白" },
+      acceptanceScenarios: ["可以阅读能源状态"], openQuestions: [],
+    });
+    fixture.plan.blueprintHash = fixture.bundle.blueprintHash = canonicalServerHash(blueprint);
+    fixture.plan.candidateBundleHash = canonicalServerHash(fixture.bundle);
+    const correlated = attachRuntimeCorrelation({ workspaceId: "surface-workspace", baseRevisionId: "surface-base", implementation: compileFixture(fixture) });
+    const interactions = compileInteractions({ blueprint, plan: fixture.plan, implementation: correlated });
+    expect(interactions.diagnostics.errors).toEqual([]);
+    expect(interactions.diagnostics.requests).toEqual([]);
+    const facade = createHmacCreativeBuildFacade(Buffer.alloc(32, 0x51), createCreativeUIImplementationV2Compiler);
+    const compiled = facade.compiler.compiler.compile({ workspaceId: "surface-workspace", baseRevisionId: "surface-base", blueprint,
+      semanticPlan: fixture.plan, candidateBundle: fixture.bundle, implementation: interactions.implementation,
+      compilerVersion: "1.0.0", evidenceVersion: "1.0.0" });
+    const envelope = facade.authority.sign({ plan: compiled.plan, revisionId: "surface-base", semanticOperations: compiled.semanticOperations, creative: compiled.trustedCreativePayload });
+    const hash = canonicalChangePlanHash(compiled.plan);
+    const resolved = resolveStoredPlan(envelope, { expectedPlanHash: hash, expectedRevisionId: "surface-base" }, facade.authority);
+    const base = await compileClientProject({ schema: "kf-client-project-ir/v1", id: "surface-base", name: "Surface", version: "1.0.0.1",
+      pages: [{ id: "empty", name: "Page1", width: 1440, height: 900, controls: [] }], variables: [], scripts: [] }, { seed: "surface" });
+    const pack = createKingClientDomainPack({ nativeAccepted: true });
+    const candidate = await pack.patch({ baseWorkspace: base, changePlan: compiled.plan, expectedPlanHash: hash,
+      semanticOperations: resolved.semanticOperations, creativeMaterialization: resolved.creativeMaterialization });
+    const validation = await pack.validate({ baseWorkspace: base, candidateWorkspace: candidate, changePlan: compiled.plan,
+      creativeMaterialization: resolved.creativeMaterialization });
+    expect(validation.status, validation.warnings.join("\n")).toBe("pass");
+    const imported = await importNativeClientPackage((await pack.package({ workspace: candidate })).bytes,
+      await mkdtemp(path.join(tmpdir(), "kf-surface-import-")));
+    const inspection = await inspectClientProject(imported);
+    const serialized = JSON.stringify(inspection.raw.pages);
+    expect(serialized).toContain('"isShowBorder":true');
+    expect(serialized).toContain("border-style:solid");
+    expect(serialized).toContain("padding:16px");
+    expect(serialized).toContain("border-radius:10px");
+    const artifact = structuredClone(correlated);
+    const owner = nativeControls(artifact).find(control => control.id === "surface")!;
+    owner.compiledLayout!.contentInsets!.left = 0;
+    expect(() => validateSolutionControlSemanticProjection({ plan: fixture.plan, controls: nativeControls(artifact),
+      root: fixture.plan.pages[0]!.root, moduleRegistry: createDefaultModuleRegistry() })).toThrow(/insets mismatch/);
+  }, 30_000);
+});
+// end
 
 function withRuntimeCorrelation(result: ReturnType<typeof compileFixture>) {
   const implementation = structuredClone(result);
@@ -530,6 +743,22 @@ function errorFrom(run: () => void): SolutionCompileError {
 }
 
 describe("compileSolutionImplementation", () => {
+  it("keeps intrinsic and layout gaps consistent for an expanded repeater inside a scroll page", () => {
+    const sourcePages = [{ pageId: "bp-skills", regions: ["skills"] }] as const;
+    const fixture = planWithBundle("scroll-repeater-gaps", [{
+      id: "skills-page", title: "技能", purpose: "浏览技能", canvas: "desktop",
+      sourceBlueprintPageId: "bp-skills", sourceBlueprintRegionIds: ["skills"], initialStateIds: [],
+      root: layout("skills-root", "skills", "scroll-region", [
+        layout("skills-section", "skills", "column", [
+          textNode("skills-heading", "skills", "核心技能"),
+          repeaterNode("skills-list", "skills", "skills-data", "skill", textNode("skill-name", "skills", "技能"), 5),
+        ]),
+      ]),
+    }], sourcePages, { mockData: [recordsDataSet("skills-data", 5)] });
+
+    expect(() => compileFixture(fixture)).not.toThrow();
+  });
+
   it("accepts exact compiler provenance for repeater expansions and registered-module components", () => {
     const admin = adminFixture();
     const adminImplementation = withRuntimeCorrelation(compileFixture(admin));

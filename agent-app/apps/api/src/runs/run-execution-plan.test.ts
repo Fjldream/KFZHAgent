@@ -1,6 +1,10 @@
 // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
 import { expect, it } from "vitest";
-import { RUN_PLAN_VERSION, planRunSteps } from "./run-execution-plan.js";
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+import { planRunSteps } from "./run-execution-plan.js";
+import { createHash } from "node:crypto";
+import { canonicalJson } from "../models/canonical-json.js";
+// end
 
 const message = { type: "message" as const, text: "生成一个生产大屏" };
 
@@ -18,7 +22,10 @@ it("is deterministic for the same action and base revision", () => {
 it("invalidates the hash when the base revision or plan version changes", () => {
   const before = planRunSteps(message, "rev-1")[0]?.inputHash;
   expect(planRunSteps(message, "rev-2")[0]?.inputHash).not.toBe(before);
-  expect(RUN_PLAN_VERSION).toBe("run-plan@2");
+  // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+  const oldHash = createHash("sha256").update(canonicalJson({ planVersion: "run-plan@4", route: "classify", action: message, baseRevisionId: "rev-1" }), "utf8").digest("hex");
+  expect(before).not.toBe(oldHash);
+  // end
 });
 
 it("labels button actions by their own route without adding steps", () => {

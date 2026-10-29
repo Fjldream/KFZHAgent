@@ -1,0 +1,76 @@
+{
+  "physicalRequests": 2,
+  "acceptanceMode": "semantic-only-with-new-approvals",
+  "planningFixtureRequests": 2,
+  "publicFactsHash": "33b3c8d0272d72fedf73c7dbb0c97b31f51bef16b1dbe902732cc690a0c2a30b",
+  "invocations": [
+    {
+      "task": "vision",
+      "requestedModel": "deepseek-flash",
+      "actualModel": "saved-public-vision-fixture",
+      "status": "SUCCEEDED",
+      "failureCode": null,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "cacheHitTokens": null,
+      "cacheMissTokens": null,
+      "latencyMs": 8
+    },
+    {
+      "task": "blueprint",
+      "requestedModel": "deepseek-flash",
+      "actualModel": "saved-public-blueprint-fixture",
+      "status": "SUCCEEDED",
+      "failureCode": null,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "cacheHitTokens": null,
+      "cacheMissTokens": null,
+      "latencyMs": 2
+    },
+    {
+      "task": "implementation",
+      "requestedModel": "deepseek-flash",
+      "actualModel": "deepseek-flash",
+      "status": "SUCCEEDED",
+      "failureCode": null,
+      "inputTokens": 26678,
+      "outputTokens": 6908,
+      "cacheHitTokens": 3456,
+      "cacheMissTokens": 23222,
+      "latencyMs": 21289
+    },
+    {
+      "task": "repair",
+      "requestedModel": "deepseek-flash",
+      "actualModel": "deepseek-flash",
+      "status": "SUCCEEDED",
+      "failureCode": null,
+      "inputTokens": 30161,
+      "outputTokens": 377,
+      "cacheHitTokens": 4352,
+      "cacheMissTokens": 25809,
+      "latencyMs": 2643
+    }
+  ],
+  "outcomes": [
+    {
+      "id": "26e36772-9630-48f9-80f9-481eeab69527",
+      "status": "CANCELLED",
+      "failureCode": null
+    },
+    {
+      "id": "5936e42a-d8de-448b-ac0b-a2876ed9e172",
+      "status": "CANCELLED",
+      "failureCode": null
+    },
+    {
+      "id": "0533c863-3469-41b4-93f2-4cd96a6a16ae",
+      "status": "FAILED",
+      "failureCode": "INVALID_MODEL_OUTPUT"
+    }
+  ],
+  "productionRollout": false,
+  "nativeKfAccepted": false,
+  "browserAccepted": false
+}

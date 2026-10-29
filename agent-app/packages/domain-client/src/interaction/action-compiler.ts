@@ -112,6 +112,7 @@ function runtimeIndexes(context: TrustedActionCompilationContext) {
     instanceName: control.instanceName,
     capabilityId: control.capabilityId,
     pageId: control.pageId,
+    ...(control.parentId === undefined ? {} : { parentId: control.parentId }),
   }]));
   const pages = new Map(context.pages.map((entry) => [entry.semanticPageId, entry.pageGuid]));
   const overlayHosts = new Map(context.overlayHosts.map((entry) => [entry.overlayId, { controlId: entry.controlId, pageId: entry.pageId }]));
@@ -149,18 +150,38 @@ function compileEffect(
   switch (effect.kind) {
     case "navigate-page": {
       const targetPageGuid = indexes.pages.get(effect.targetPageId);
-      return targetPageGuid === undefined ? undefined : parseNativeAction({ ...base, kind: effect.kind, targetPageGuid }, action.id);
+      return targetPageGuid === undefined ? undefined : parseNativeAction({
+        ...base,
+        kind: effect.kind,
+        targetPageGuid,
+        targetPageName: effect.targetPageId,
+      }, action.id);
     }
     case "open-overlay":
     case "close-overlay": {
       const target = indexes.overlayHosts.get(effect.overlayId);
       const targetInstanceName = target === undefined ? undefined : indexes.controls.get(target.controlId)?.instanceName;
-      return targetInstanceName === undefined || target === undefined ? undefined : parseNativeAction({
+      if (targetInstanceName === undefined || target === undefined) return undefined;
+      const belongsToOverlay = (controlId: string): boolean => {
+        let current: string | undefined = controlId;
+        const visited = new Set<string>();
+        while (current !== undefined && !visited.has(current)) {
+          if (current === target.controlId) return true;
+          visited.add(current);
+          current = indexes.controls.get(current)?.parentId;
+        }
+        return false;
+      };
+      const targetControls = Array.from(indexes.controls.entries())
+        .filter(([controlId, control]) => control.pageId === target.pageId && belongsToOverlay(controlId))
+        .map(([semanticControlId, control]) => ({ semanticControlId, instanceName: control.instanceName }));
+      return parseNativeAction({
         ...base,
         kind: effect.kind,
         ownerSemanticControlId: action.trigger.controlId,
         targetSemanticControlId: target.controlId,
         targetInstanceName,
+        targetControls,
       }, action.id);
     }
     case "set-visibility": {

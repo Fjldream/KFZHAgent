@@ -1,4 +1,5 @@
 <script setup lang="ts">
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { api } from "../api";
@@ -142,9 +143,13 @@ async function onCreate(): Promise<void> {
   try {
     const created = await api.createWorkspace({ name, mode: "new" });
     await router.push(`/workspaces/${created.id}`);
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  } catch (cause) {
+    createError.value = cause instanceof Error ? cause.message : "创建工程失败，请检查名称或网络后重试";
   } finally {
     busy.value = false;
   }
+// end
 }
 
 /** 空态「新建工程」按钮：输入框无内容时先预设名称，避免静默无响应。 */
@@ -166,9 +171,13 @@ async function onCreateUpload(): Promise<void> {
   try {
     const created = await api.createWorkspace({ name, mode: "upload" });
     await router.push(`/workspaces/${created.id}`);
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  } catch (cause) {
+    createError.value = cause instanceof Error ? cause.message : "创建工程失败，请检查名称或网络后重试";
   } finally {
     busy.value = false;
   }
+// end
 }
 
 async function onLogout(): Promise<void> {
@@ -209,9 +218,11 @@ onMounted(() => {
   playChromeEntrance();
   void refresh();
 });
+// end
 </script>
 
 <template>
+<!-- modified by jinlong.feng at 2026-10-27 Agent工作台迭代 -->
   <div ref="pageEl" class="page">
     <header class="topbar glass">
       <div class="brand"><BrandLogo :size="26" /></div>
@@ -312,6 +323,7 @@ onMounted(() => {
       </section>
     </div>
   </div>
+<!-- end -->
 </template>
 
 <style scoped>

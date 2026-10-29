@@ -64,6 +64,28 @@ function correlationMaps(result: UIImplementationSpecV2) {
 }
 
 describe("attachRuntimeCorrelation", () => {
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  it.each(["text", "richtext", "button", "datetimepicker", "inputnumber", "easyui.22", "layout.2", "layout.4", "layout.5"])("bounds generated %s names at the native 32-character limit without changing semantic/page identities", capabilityId => {
+    const source = implementation(["overview"], ["device-summary"]);
+    const page = source.pages[0]!;
+    if (page.compatibility !== "native") throw new Error("native fixture required");
+    page.controls[0]!.capabilityId = capabilityId;
+    const result = attachRuntimeCorrelation({ workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: source });
+    const entry = result.runtimeCorrelation!.controls[0]!;
+    expect(entry.semanticControlId).toBe("device-summary");
+    expect(entry.instanceName).toMatch(/^[A-Za-z][A-Za-z0-9_]{0,31}$/);
+    expect(CompilerInstanceNameSchema.safeParse(entry.instanceName).success).toBe(true);
+    expect(result.runtimeCorrelation!.pages[0]!.pageGuid).toBe(`k${deriveGuid({ seed: WORKSPACE_ID }, "overview")}`);
+    expect(attachRuntimeCorrelation({ workspaceId: WORKSPACE_ID, baseRevisionId: "next-revision", implementation: source }).runtimeCorrelation!.controls).toEqual(result.runtimeCorrelation!.controls);
+  });
+  it("retains one-to-one deterministic generated control names for a thousand distinct semantic IDs", () => {
+    const source = implementation(["overview"], Array.from({ length: 1000 }, (_, index) => `control-${index}`));
+    const result = attachRuntimeCorrelation({ workspaceId: WORKSPACE_ID, baseRevisionId: BASE_REVISION_ID, implementation: source });
+    const names = result.runtimeCorrelation!.controls.map(control => control.instanceName);
+    expect(names.every(name => name.length <= 32)).toBe(true);
+    expect(new Set(names.map(name => name.toLowerCase())).size).toBe(names.length);
+  });
+  // end
   let realInspection: InspectResult;
   let unboundInspection: InspectResult;
   let wrongWorkspaceInspection: InspectResult;

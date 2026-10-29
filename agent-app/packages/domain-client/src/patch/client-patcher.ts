@@ -1,7 +1,17 @@
 import { createHash } from "node:crypto";
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+import { assertExistingGeneratedStateMatches } from "../implementation/generated-state-reuse.js";
+// end
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+import { creativeNativeDeltaValue } from "../implementation/creative-native-geometry.js";
+// end
 import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+import { MAX_NATIVE_DEVELOPMENT_NAME_LENGTH, nativePageNameForSemanticId } from "../compile/native-page-name.js";
+import { compareNativeSiblingPlacement, nativeStyleStorage, type NativeSiblingPlacement } from "../compile/native-presentation.js";
+// end
 import {
   ChangeEntityIdSchema,
   ComponentStyleSpecSchema,
@@ -21,7 +31,9 @@ import {
   type VerifiedCreativeMaterialization,
 } from "@kf/build-jobs";
 import { z } from "zod";
-import { inspectClientProject, type EntityIndex, type InspectResult } from "../inspect/client-inspector.js";
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+import { inspectClientProject, serverOwnedRuntimeIdentitySnapshot, type EntityIndex, type InspectResult } from "../inspect/client-inspector.js";
+// end
 import { stableStringify, type ClientWorkspace } from "../compile/client-compiler.js";
 import { deriveGuid } from "../compile/guid-factory.js";
 import {
@@ -130,24 +142,19 @@ import {
 } from "./change-scope.js";
 
 /**
- * Lossless client patcher (brief Step 4).
+ * 无损客户端 patcher（简要步骤 4）。
  *
- * `applyClientPatch(base, plan)` copies the base workspace tree and applies a
- * confirmed ChangePlan field-by-field on the copy:
- * - update patches JSON-pointer paths that are allowlisted per entity type;
- *   unknown/future fields are never touched,
- * - create compiles a complete entity from the reviewed templates and derives
- *   its KF GUID deterministically from the plan's workspace id,
- * - delete removes an entity but only when destructiveConfirmed=true and the
- *   operation digest matches the operation content.
+ * `applyClientPatch(base, plan)` 会复制基础工作空间树，并在副本上逐字段应用已确认的 ChangePlan：
+ * - update 修补按实体类型列入允许列表的 JSON Pointer 路径；绝不触碰未知或未来字段；
+ * - create 根据已审查的模板编译完整实体，并依据计划的 workspace ID 确定性派生其 KF GUID；
+ * - delete 只在 destructiveConfirmed=true 且操作摘要与操作内容匹配时删除实体。
  *
- * The returned candidate is a full, unpackable ClientWorkspace; nothing is
- * written back into `base`.
+ * 返回的候选项是完整、可解包的 ClientWorkspace；不会向 `base` 写回任何内容。
  */
 
 // ---------------------------------------------------------------------------
-// Normalization (contract shape from @kf/contracts; tolerates the brief's
-// `action` alias for `op` and an optional `entityType` hint on update/delete)
+// 规范化（从 @kf/contracts 中抽取合同形状；容忍简短的
+// `action` 作为 `op` 的别名，以及一个可选的 `entityType` 提示，用于更新/删除）
 // ---------------------------------------------------------------------------
 
 export interface NormalizedOperation {
@@ -737,6 +744,8 @@ export interface ApplyPatchOptions {
   assets?: readonly DomainAssetInput[];
   /** Opaque handle emitted only after the complete creative envelope passes HMAC verification. */
   creativeMaterialization?: VerifiedCreativeMaterialization;
+  /** True only when the base was compiled from a new generative revision, never for an imported package. */
+  replaceGenerativeBootstrap?: boolean;
   /** Counting-only observer for bounded creative page batching tests. */
   creativeInstrumentation?: CreativePageInstrumentation;
 }
@@ -1335,9 +1344,12 @@ function applyStyleToControl(
   }
   if (compiled.styleDataNew !== "") {
     try {
-      const merged = mergeManagedStyleData(control["styleDataNew"], compiled.styleDataNew);
-      if (merged !== control["styleDataNew"]) {
-        control["styleDataNew"] = merged;
+      // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+      const { owner, field } = nativeStyleStorage(control);
+      const merged = mergeManagedStyleData(owner[field], compiled.styleDataNew);
+      if (merged !== owner[field]) {
+        owner[field] = merged;
+      // end
         changed = true;
       }
     } catch (error) {
@@ -2042,7 +2054,10 @@ function nativeControlInstanceName(value: unknown): string | undefined {
 /** KF paints siblings in array order; reorder only compiler-created slots by signed zIndex/order. */
 function applyCreativeSiblingZOrder(
   node: unknown,
-  createdByInstanceName: ReadonlyMap<string, { readonly zIndex: number; readonly order: number }>,
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  createdByInstanceName: ReadonlyMap<string, NativeSiblingPlacement>,
+  layoutType?: number,
+  // end
 ): void {
   if (Array.isArray(node)) {
     const siblings = node as unknown[];
@@ -2053,14 +2068,19 @@ function applyCreativeSiblingZOrder(
     const ordered = positions.map((index) => siblings[index]).sort((left, right) => {
       const leftOrder = createdByInstanceName.get(nativeControlInstanceName(left)!)!;
       const rightOrder = createdByInstanceName.get(nativeControlInstanceName(right)!)!;
-      return leftOrder.zIndex - rightOrder.zIndex || leftOrder.order - rightOrder.order;
+      // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+      return compareNativeSiblingPlacement(leftOrder, rightOrder, layoutType);
+      // end
     });
     positions.forEach((position, index) => { siblings[position] = ordered[index]; });
     siblings.forEach((value) => applyCreativeSiblingZOrder(value, createdByInstanceName));
     return;
   }
   if (!isObject(node)) return;
-  for (const key of CONTROL_CONTAINER_KEYS) applyCreativeSiblingZOrder(node[key], createdByInstanceName);
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  for (const key of CONTROL_CONTAINER_KEYS) applyCreativeSiblingZOrder(node[key], createdByInstanceName,
+    key === "insiderObjects" && typeof node["layoutType"] === "number" ? node["layoutType"] : undefined);
+  // end
 }
 
 function pageSizeInto(page: Record<string, unknown>, width: number, height: number): void {
@@ -2069,6 +2089,53 @@ function pageSizeInto(page: Record<string, unknown>, width: number, height: numb
   const pageProperty = asRecord(page["pageProperty"]);
   pageProperty["pageSize"] = { width, height };
   pageProperty["windowSize"] = { width, height };
+}
+
+function emptyGenerativeBootstrapPage(inspection: InspectResult): {
+  readonly guid: string;
+  readonly file: string;
+} | undefined {
+  if (inspection.summary.pageCount !== 1) return undefined;
+  const page = inspection.summary.pages[0];
+  if (page === undefined || page.name !== "Page1" || page.width !== 1440 || page.height !== 900
+    || page.controlCount !== 0) return undefined;
+  const manager = asRecord(inspection.raw.pageManager);
+  if (manager["default"] !== "Page1" || manager["appHomePage"] !== "Page1") return undefined;
+  const indexed = inspection.index.pages[page.guid];
+  return indexed === undefined ? undefined : { guid: page.guid, file: indexed.file };
+}
+
+async function replaceGenerativeBootstrapPage(input: {
+  readonly candidate: string;
+  readonly versionDir: string;
+  readonly bootstrap: { readonly guid: string; readonly file: string };
+  readonly manager: Record<string, unknown>;
+  readonly managerPages: Array<Record<string, unknown>>;
+  readonly generatedPages: readonly { readonly pageGuid: string; readonly semanticPageId: string }[];
+  readonly homeSemanticPageId?: string;
+}): Promise<void> {
+  const home = input.generatedPages.find((page) => page.semanticPageId === input.homeSemanticPageId)
+    ?? input.generatedPages.find((page) => page.semanticPageId.toLocaleLowerCase("en-US") === "home")
+    ?? input.generatedPages[0];
+  if (home === undefined) return;
+  const bootstrapIndex = input.managerPages.findIndex((page) => page["id"] === input.bootstrap.guid);
+  if (bootstrapIndex < 0) throw new PatchConflictError("generative bootstrap page manager entry is missing");
+  input.managerPages.splice(bootstrapIndex, 1);
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  input.manager["default"] = nativePageNameForSemanticId(home.semanticPageId);
+  input.manager["appHomePage"] = nativePageNameForSemanticId(home.semanticPageId);
+  // end
+  await rm(filePath(input.candidate, input.versionDir, input.bootstrap.file));
+
+  const pageGuids = input.managerPages.flatMap((page) => typeof page["id"] === "string" ? [page["id"]] : []);
+  const pageGroup = await readJsonFile(input.candidate, input.versionDir, "project/pageGroupManager.json");
+  const groups = asRecord(pageGroup["Groups"]);
+  groups["pages"] = pageGuids;
+  await writeJsonFile(input.candidate, input.versionDir, "project/pageGroupManager.json", pageGroup);
+
+  const diffusion = await readJsonFile(input.candidate, input.versionDir, "project/diffusionManager.json");
+  diffusion["page"] = Object.fromEntries(pageGuids.map((guid) => [guid, []]));
+  await writeJsonFile(input.candidate, input.versionDir, "project/diffusionManager.json", diffusion);
 }
 
 async function applyVerifiedCreativePatch(
@@ -2086,9 +2153,19 @@ async function applyVerifiedCreativePatch(
     throw new PatchConflictError("verified creative materialization does not bind the supplied ChangePlan");
   }
   const { artifact, materialization } = verified;
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  const overlongGeneratedControl = materialization.controls.find(control => control.source === "workspace-derived"
+    && control.instanceName.length > MAX_NATIVE_DEVELOPMENT_NAME_LENGTH);
+  if (overlongGeneratedControl) throw new PatchConflictError(`creative generated control name exceeds KF development limit: ${overlongGeneratedControl.semanticControlId}`);
+  // end
   const normalizedPlan = normalizeChangePlan(verified.plan);
   const versionDir = await resolveVersionDirName(base);
-  const baseInspection = await inspectClientProject(base);
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  const baseInspection = await inspectClientProject(base, { runtimeBinding: { workspaceId: materialization.workspaceId, baseRevisionId: materialization.baseRevisionId } });
+  // end
+  const bootstrap = options.replaceGenerativeBootstrap === true
+    ? emptyGenerativeBootstrapPage(baseInspection)
+    : undefined;
   const candidate = await mkdtemp(path.join(options.workRoot ?? tmpdir(), "kf-client-candidate-"));
   try {
     await cp(base, candidate, { recursive: true });
@@ -2112,6 +2189,28 @@ async function applyVerifiedCreativePatch(
         defaultValue: state.defaultValue,
         comment: state.comment,
       })) throw new PatchConflictError(`creative semantic state payload mismatch: ${state.semanticStateId}`);
+      // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+      if (state.existing !== undefined) {
+        assertExistingGeneratedStateMatches({ workspaceId: materialization.workspaceId, baseRevisionId: materialization.baseRevisionId, inspection: baseInspection, state });
+        const document = await readJsonFile(candidate, versionDir, state.existing.file);
+        const variables = Array.isArray(document["Variables"]) ? document["Variables"] as unknown[] : [];
+        const matches = variables.filter((variable): variable is Record<string, unknown> => isObject(variable)
+          && variable["id"] === state.existing!.nativeId && variable["name"] === state.variableName);
+        if (matches.length !== 1 || canonicalServerHash(matches[0]) !== state.existing.recordHash) throw new PatchConflictError("creative existing state record changed");
+        const variable = matches[0]!;
+        variable["defaultValue"] = state.defaultValue; variable["comment"] = state.comment;
+        asRecord(variable["basicItem"])["defaultValue"] = state.defaultValue;
+        await writeJsonFile(candidate, versionDir, state.existing.file, document);
+        continue;
+      }
+      // New semantic IDs cannot claim any preexisting compiler-looking variable in any group.
+      const existingVariables = serverOwnedRuntimeIdentitySnapshot(baseInspection)?.variables;
+      if (existingVariables === undefined) throw new PatchConflictError("creative state inspection is not server-owned");
+      if (existingVariables.some(({ record: value }) => [value["name"], value["id"], value["guid"]]
+        .some(identity => typeof identity === "string" && identity.toLowerCase() === state.variableName.toLowerCase()))) {
+        throw new PatchConflictError(`creative compiler-owned state variable collision: ${state.variableName}`);
+      }
+      // end
       await applyCreate(candidate, versionDir, baseInspection, base, operation,
         materialization.workspaceId, options.semanticOperations ?? [], undefined, operation.entityId,
         undefined, undefined, VERIFIED_CREATIVE_STATE_CREATE);
@@ -2154,7 +2253,10 @@ async function applyVerifiedCreativePatch(
         entry["resolution"] = `${page.width} * ${page.height}`;
         continue;
       }
-      if (existing !== undefined || existingPageNames.has(page.semanticPageId)) {
+      // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+      const nativePageName = nativePageNameForSemanticId(page.semanticPageId);
+      if (existing !== undefined || existingPageNames.has(nativePageName)) {
+      // end
         throw new PatchConflictError(`creative page identity collision: ${page.semanticPageId}`);
       }
       if (/[\\/\0]/.test(page.semanticPageId)) throw new PatchConflictError(`unsafe creative page name: ${page.semanticPageId}`);
@@ -2162,28 +2264,51 @@ async function applyVerifiedCreativePatch(
       json["guid"] = page.pageGuid;
       pageSizeInto(json, page.width, page.height);
       const pageProperty = json["pageProperty"] as Record<string, unknown>;
-      pageProperty["name"] = page.semanticPageId;
+      // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+      pageProperty["name"] = nativePageName;
+      // end
       json["objects"] = [];
       json["pagePrototype"] = {
-        name: page.semanticPageId,
+        // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+        name: nativePageName,
+        // end
         guid: page.pageGuid,
         version: json["version"],
         type: json["objectType"],
       };
-      const file = `project/page/${page.semanticPageId}.json`;
+      // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+      const file = `project/page/${nativePageName}.json`;
+      // end
       registerPageBatch(page.pageGuid, file, json);
       pageIndexEntries[page.pageGuid] = {
-        guid: page.pageGuid, id: page.semanticPageId, name: page.semanticPageId,
+        // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+        guid: page.pageGuid, id: nativePageName, name: nativePageName,
+        // end
         file, controlGuids: [], unknownFields: [],
       };
-      existingPageNames.add(page.semanticPageId);
+      // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+      existingPageNames.add(nativePageName);
+      // end
       managerPages.push({
-        name: page.semanticPageId, description: "", height: page.height, width: page.width,
+        // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+        name: nativePageName, description: "", height: page.height, width: page.width,
+        // end
         positionX: 0, positionY: 0, pageType: 0, state: true,
         resolution: `${page.width} * ${page.height}`, id: page.pageGuid,
         groupId: defaultGroupId, security: "", createtime: "", priority: "",
         securitySection: "", user: "admin", resourceGroup: "", resourceGroupMsg: "",
       });
+    }
+    if (bootstrap !== undefined) {
+      const generatedPages = materialization.pages.filter((page) => page.source === "workspace-derived");
+      await replaceGenerativeBootstrapPage({
+        candidate, versionDir, bootstrap, manager, managerPages, generatedPages,
+        ...(artifact.semanticPlan.pages[0]?.id === undefined ? {} : {
+          homeSemanticPageId: artifact.semanticPlan.pages[0].id,
+        }),
+      });
+      delete pageIndexEntries[bootstrap.guid];
+      existingPageNames.delete("Page1");
     }
     await writeJsonFile(candidate, versionDir, "project/pageManager.json", manager);
 
@@ -2220,6 +2345,31 @@ async function applyVerifiedCreativePatch(
       owned.push(binding);
       bindingsByOwner.set(binding.ownerInstanceName, owned);
     }
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    // Reused parents must reach their signed geometry before new children are inserted.
+    // The signed deltas stay page-absolute; only the native field projection is parent-local.
+    const existingControls = materialization.controls.filter(control => control.source === "uploaded-existing");
+    for (const control of existingControls) {
+      const baseEntry = control.nativeGuid === undefined ? undefined : baseInspection.index.controls[control.nativeGuid];
+      if (baseEntry === undefined || baseEntry.name !== control.instanceName || baseEntry.pageGuid !== control.pageGuid) {
+        throw new PatchConflictError(`creative existing control correlation mismatch: ${control.semanticControlId}`);
+      }
+      const parentGeometry = control.parentSemanticControlId === undefined
+        ? undefined : controlBySemantic.get(control.parentSemanticControlId)?.geometry;
+      await applyUpdate(candidate, versionDir, baseInspection, base, {
+        op: "update", entityType: "control", entityId: control.nativeGuid!, properties: {},
+        changes: (control.existingDeltas ?? []).map(delta => ({ path: delta.path,
+          value: structuredClone(creativeNativeDeltaValue(delta, parentGeometry)) })),
+        destructiveConfirmed: false,
+      }, materialization.workspaceId, options.semanticOperations ?? [], pageBatches.get(control.pageGuid), control.semanticControlId);
+    }
+    for (const control of existingControls) {
+      const batch = pageBatches.get(control.pageGuid);
+      const ref = batch?.byName.get(control.instanceName);
+      if (batch === undefined || ref === undefined) throw new PatchConflictError(`creative existing control index missing: ${control.semanticControlId}`);
+      batch.origins.set(ref.root, { x: control.geometry.x, y: control.geometry.y });
+    }
+    // end
     const newControls = materialization.controls
       .filter((control) => control.source === "workspace-derived")
       .slice().sort((left, right) => left.depth - right.depth || left.order - right.order);
@@ -2265,19 +2415,41 @@ async function applyVerifiedCreativePatch(
       }
     }
 
-    // Stage 4: exact allowlisted existing deltas, then authoritative style/data.
-    for (const control of materialization.controls.filter((value) => value.source === "uploaded-existing")) {
-      const baseEntry = control.nativeGuid === undefined ? undefined : baseInspection.index.controls[control.nativeGuid];
-      if (baseEntry === undefined || baseEntry.name !== control.instanceName || baseEntry.pageGuid !== control.pageGuid) {
-        throw new PatchConflictError(`creative existing control correlation mismatch: ${control.semanticControlId}`);
+    // KF 3.6 does not cascade a layout host's runtime visibility to every
+    // independently materialized child control. Hide the complete overlay
+    // subtree at rest so no button/input leaks before the first open action.
+    const belongsToOverlay = (candidate: (typeof materialization.controls)[number], hostId: string): boolean => {
+      let current: (typeof materialization.controls)[number] | undefined = candidate;
+      const visited = new Set<string>();
+      while (current !== undefined && !visited.has(current.semanticControlId)) {
+        if (current.semanticControlId === hostId) return true;
+        visited.add(current.semanticControlId);
+        current = current.parentSemanticControlId === undefined
+          ? undefined
+          : controlBySemantic.get(current.parentSemanticControlId);
       }
-      await applyUpdate(candidate, versionDir, baseInspection, base, {
-        op: "update", entityType: "control", entityId: control.nativeGuid!, properties: {},
-        changes: (control.existingDeltas ?? []).map((delta) => ({ path: delta.path, value: structuredClone(delta.value) })),
-        destructiveConfirmed: false,
-      }, materialization.workspaceId, options.semanticOperations ?? [], pageBatches.get(control.pageGuid),
-      control.semanticControlId);
+      return false;
+    };
+    for (const host of materialization.controls.filter((control) => control.overlayHost?.initiallyVisible === false)) {
+      const page = pageBatches.get(host.pageGuid);
+      if (page === undefined) throw new PatchConflictError(`creative overlay page missing: ${host.semanticControlId}`);
+      for (const target of materialization.controls.filter((control) =>
+        control.pageGuid === host.pageGuid && belongsToOverlay(control, host.semanticControlId))) {
+        const native = page.byName.get(target.instanceName)?.root;
+        if (native === undefined) throw new PatchConflictError(`creative overlay subtree runtime control missing: ${target.semanticControlId}`);
+        if (target.capabilityId.startsWith("layout.")) {
+          asRecord(native["baseProperty"])["visible"] = false;
+        } else {
+          native["visible"] = false;
+          native["runVisible"] = false;
+        }
+        page.modified = true;
+      }
     }
+
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    // Stage 4: authoritative style/data after both reused and new entities exist.
+    // end
 
     const creativePageBatch = (pageGuid: string, semanticPageId: string): CreativePageBatch => {
       const page = pageBatches.get(pageGuid);
@@ -2318,8 +2490,24 @@ async function applyVerifiedCreativePatch(
         ))) ref.root[field] = structuredClone(value);
       }
       for (const [field, value] of Object.entries(style.compiledStyle.nativeFields)) ref.root[field] = structuredClone(value);
-      if (compiled.styleDataNew !== "") ref.root["styleDataNew"] = mergeManagedStyleData(ref.root["styleDataNew"], compiled.styleDataNew);
-      if (style.dataBinding?.records !== undefined) ref.root["data"] = structuredClone(style.dataBinding.records);
+      // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+      const { owner, field } = nativeStyleStorage(ref.root);
+      if (compiled.styleDataNew !== "") owner[field] = mergeManagedStyleData(owner[field], compiled.styleDataNew);
+      // end
+      if (style.dataBinding?.records !== undefined) {
+        const records = structuredClone(style.dataBinding.records);
+        ref.root["data"] = records;
+        if (control.capabilityId === "easyui.1") {
+          const existingColumns = Array.isArray(ref.root["columns"]) && Array.isArray(ref.root["columns"][0])
+            ? structuredClone(ref.root["columns"])
+            : [Object.keys(records[0] ?? {}).map((field) => ({ field, title: field, width: 160, align: "left" }))];
+          ref.root["columns"] = existingColumns;
+          // KF 3.6's KMUIExtDatagrid runtime deliberately installs a demo
+          // column set in jsonToObject; real product pages replace it through
+          // configureData. Emit the same product-proven initialization form.
+          ref.root["configureData"] = `$('#' + id).datagrid(${JSON.stringify({ columns: existingColumns, data: records })});\n`;
+        }
+      }
       page.modified = true;
     }
 
@@ -2352,6 +2540,9 @@ async function applyVerifiedCreativePatch(
     const createdZOrder = new Map(newControls.map((control) => [control.instanceName, {
       zIndex: control.zIndex,
       order: control.order,
+      // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+      geometry: control.geometry,
+      // end
     }] as const));
     for (const pageGuid of new Set(newControls.map((control) => control.pageGuid))) {
       const materializedPage = pageByGuid.get(pageGuid);

@@ -12,6 +12,9 @@ assertSafeTestDatabase({
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { RunExecutionService, STEP_NOT_IMPLEMENTED, type StepContext, type StepHandlerRegistry } from "./run-execution.service.js";
 import { PrismaRunStepStore } from "./run-step-store.js";
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+import { planRunSteps } from "./run-execution-plan.js";
+// end
 import { createRunTestFixture, messageInput, type RunTestFixture } from "./run-test-fixture.js";
 
 let fixture: RunTestFixture;
@@ -43,6 +46,25 @@ const handlers = (overrides: Partial<StepHandlerRegistry> = {}): StepHandlerRegi
 });
 
 describe("run execution service", () => {
+  // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+  it("refuses a frozen protocol version the worker cannot execute before calling graph handlers", async () => {
+    const lease = await startRun("future-protocol");
+    await fixture.prisma.agentRun.update({ where: { id: lease.runId }, data: { configSnapshot: { schemaVersion: 1, planVersion: "run-plan@future", flags: { agentRunsV2: true } } } });
+    const service = new RunExecutionService({ prisma: fixture.prisma, store: fixture.store, steps, handlers: handlers() });
+    expect(await service.executeLease(lease, new AbortController().signal)).toMatchObject({ status: "FAILED", failureCode: "RUN_CONFIG_VERSION_MISMATCH" });
+    expect(await fixture.prisma.agentRunStep.count({ where: { runId: lease.runId, status: "COMPLETED" } })).toBe(0);
+  });
+  it("does not let a completed step cache bypass frozen protocol validation", async () => {
+    const lease = await startRun("future-protocol-cached");
+    const planned = planRunSteps({ type: "message", text: "生成一个生产大屏" }, null)[0]!;
+    await steps.complete({ lease, tenantId: fixture.tenantA, stepKey: planned.stepKey, inputHash: planned.inputHash, output: { stage: "done" } });
+    await fixture.prisma.agentRun.update({ where: { id: lease.runId }, data: { configSnapshot: { schemaVersion: 1, planVersion: "run-plan@future" } } });
+    const service = new RunExecutionService({ prisma: fixture.prisma, store: fixture.store, steps, handlers: handlers() });
+    expect(await service.executeLease(lease, new AbortController().signal)).toMatchObject({ status: "FAILED", failureCode: "RUN_CONFIG_VERSION_MISMATCH" });
+    // 不通过删掉已提交输出来掩盖协议问题。
+    expect(await fixture.prisma.agentRunStep.count({ where: { runId: lease.runId, status: "COMPLETED" } })).toBe(1);
+  });
+  // end
   it("runs the whole plan and finishes the run", async () => {
     const lease = await startRun("exec-service-ok");
     const service = new RunExecutionService({
@@ -77,7 +99,9 @@ describe("run execution service", () => {
 
   it("passes the run action and base revision to every handler", async () => {
     const lease = await startRun("exec-service-context");
-    const seen = vi.fn(async (_context: StepContext) => ({ output: { ok: true } }));
+    // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+    const seen = vi.fn(async (context: StepContext) => { void context; return { output: { ok: true } }; });
+    // end
     const service = new RunExecutionService({
       prisma: fixture.prisma, store: fixture.store, steps,
       handlers: { graph: seen },

@@ -5,6 +5,9 @@ import { createPlanChangeNode } from "./plan-change.js";
 import { intentValues } from "../schemas/intent.js";
 import type { CustomerEffectBlueprint, CustomerSolutionBlueprint } from "@kf/contracts";
 import { decodeBlueprintMessage } from "../blueprint-message.js";
+// modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+import { canonicalServerHash } from "@kf/contracts";
+// end
 
 const designPlan: CustomerEffectBlueprint = {
   schema: "kf-design-plan/v2",
@@ -137,6 +140,81 @@ function baseState(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+// modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+function acceptedReference(title = "参考标题") {
+  const spec = { schemaVersion: 1, sourceAssetId: "reference1", sourceHash: "a".repeat(64), viewport: { width: 1440, height: 900 },
+    regions: [{ id: "heading", parentId: null, role: "text", box: { x: 0, y: 0, width: 1, height: 1 }, text: [title], confidence: 0.9, interactionHint: null }],
+    designTokens: { background: "#fff", foreground: "#111", accent: "#123456", spacing: [8], radius: [4] }, uncertainties: [] };
+  const reference = { schemaVersion: 1, analysisId: "analysis1", specHash: canonicalServerHash(spec), spec,
+    mappings: [{ regionId: "heading", controlType: "text", capabilityId: "text", support: "supported_unverified", reason: "尚未原生验证", evidenceIds: [], fallback: null }],
+    acceptedDifferences: [{ regionId: "heading", disposition: "accept-unverified", capabilityId: "text", reason: "接受未验证控件" }] };
+  const reviewHash = "b".repeat(64);
+  return { schema: "kf-accepted-visual-planning/v1", reviewHash, confirmationHash: canonicalServerHash({ reviewHash, reference }), reference };
+}
+describe("independent visual blueprint planning", () => {
+  function setup(result: unknown = creativeBlueprint) {
+    const messages: string[] = []; let textCalls = 0; const received: unknown[] = [];
+    const deps = { modelPort: {
+      createDesignPlan: async () => { textCalls++; return creativeBlueprint; },
+      createVisualDesignPlan: async (context: unknown) => { received.push(context); return result; },
+    }, workspaceQuery: { appendMessage: async (message: { content: string }) => { messages.push(message.content); } } };
+    return { deps, messages, received, textCalls: () => textCalls };
+  }
+  const visualState = (extra: Record<string, unknown> = {}) => baseState({ generationWorkflow: "creative-v2", planVersion: "run-plan@7",
+    acceptedVisualPlanningInput: acceptedReference(), currentRevisionId: "base1", ...extra });
+  it("uses only the visual port, displays a separately confirmable blueprint and clears old engineering authority", async () => {
+    const test = setup(); const accepted = acceptedReference();
+    const update = await createDesignPlanNode(test.deps as never)(visualState({ designPlan: creativeBlueprint,
+      designPlanHash: "c".repeat(64), buildAuthorization: "confirmed-blueprint", buildJobId: "old-job", creativeConfirmationId: "d".repeat(64),
+      recentMessages: [{ role: "assistant", content: "旧蓝图已批准" }, { role: "user", content: "根据图片重新规划" }] }) as never);
+    expect(update).toMatchObject({ stage: "design-review", designPlan: creativeBlueprint, visualBlueprintConfirmationHash: accepted.confirmationHash });
+    expect(update.buildAuthorization).toBeUndefined(); expect(update.buildJobId).toBeUndefined(); expect(update.creativeConfirmationId).toBeUndefined();
+    expect(test.textCalls()).toBe(0); expect(test.received).toHaveLength(1);
+    expect(test.received[0]).toMatchObject({ visualReference: accepted.reference, currentRevisionId: "base1", recentMessages: [{ role: "user", content: "根据图片重新规划" }] });
+    expect((test.received[0] as { designPlan?: unknown }).designPlan).toBeUndefined();
+    expect(test.messages).toHaveLength(1); expect(decodeBlueprintMessage(test.messages[0]!)).not.toBeNull();
+  });
+  it.each(["protocol", "confirmation", "orphan"] as const)("rejects %s mismatch before calling either model or displaying a blueprint", async change => {
+    const test = setup(); const accepted = acceptedReference();
+    const extra = change === "protocol" ? { planVersion: "run-plan@6" } : change === "confirmation"
+      ? { acceptedVisualPlanningInput: { ...accepted, confirmationHash: "e".repeat(64) } }
+      : { acceptedVisualPlanningInput: null, visualBlueprintConfirmationHash: "e".repeat(64) };
+    const update = await createDesignPlanNode(test.deps as never)(visualState(extra) as never);
+    expect(update).toMatchObject({ stage: "idle", lastErrorCode: "VISUAL_PLANNING_INPUT_INVALID", visualBlueprintConfirmationHash: null });
+    expect(test.textCalls()).toBe(0); expect(test.received).toHaveLength(0); expect(test.messages).toHaveLength(0);
+  });
+  it("does not fall back to the text method when the visual port is absent", async () => {
+    const test = setup(); const modelPort = { createDesignPlan: test.deps.modelPort.createDesignPlan };
+    const update = await createDesignPlanNode({ ...test.deps, modelPort } as never)(visualState() as never);
+    expect(update).toMatchObject({ stage: "idle", lastErrorCode: "VISUAL_BLUEPRINT_MODEL_NOT_CONFIGURED" });
+    expect(test.textCalls()).toBe(0); expect(test.messages).toHaveLength(0);
+  });
+  it("does not silently repair or retain an old approved blueprint after invalid visual output", async () => {
+    const test = setup({ schema: "kf-design-plan/v3", displayName: "不完整" });
+    const update = await createDesignPlanNode(test.deps as never)(visualState({ designPlan: creativeBlueprint, buildAuthorization: "confirmed-blueprint" }) as never);
+    expect(update).toMatchObject({ stage: "idle", lastErrorCode: "INVALID_MODEL_OUTPUT", visualBlueprintConfirmationHash: null });
+    expect(update.designPlan).toBeUndefined(); expect(update.buildAuthorization).toBeUndefined();
+    expect(test.received).toHaveLength(1); expect(test.textCalls()).toBe(0); expect(test.messages).toHaveLength(0);
+  });
+  it("does not reuse a blueprint memo across two differently confirmed visual inputs", async () => {
+    const test = setup(); const saved = new Map<string, unknown>();
+    const memo = { find: async (step: string, hash: string) => saved.get(`${step}:${hash}`) ?? null,
+      save: async (step: string, hash: string, output: unknown) => { saved.set(`${step}:${hash}`, output); } };
+    const node = createDesignPlanNode({ ...test.deps, resolveRunStepMemo: () => memo } as never);
+    const first = visualState({ runId: "visual-design-run", acceptedVisualPlanningInput: acceptedReference("标题A") });
+    const second = visualState({ runId: "visual-design-run", acceptedVisualPlanningInput: acceptedReference("标题B") });
+    await node(first as never); await node(first as never); await node(second as never);
+    expect(test.received).toHaveLength(2); expect(test.messages).toHaveLength(2); expect(test.textCalls()).toBe(0);
+  });
+  it.each(["IMAGE_EGRESS_NOT_ALLOWED", "VISUAL_RUN_NOT_ACTIVE"])("retains the safe stop reason %s instead of calling it invalid model output", async code => {
+    const test = setup(); test.deps.modelPort.createVisualDesignPlan = async () => { throw new Error(code); };
+    const update = await createDesignPlanNode(test.deps as never)(visualState() as never);
+    expect(update).toMatchObject({ stage: "idle", lastErrorCode: code, visualBlueprintConfirmationHash: null });
+    expect(test.messages).toHaveLength(0); expect(test.textCalls()).toBe(0);
+  });
+});
+// end
 
 describe("intent schema design-loop values", () => {
   it("adds CONFIRM_DESIGN and REVISE_DESIGN to the intent enum", () => {

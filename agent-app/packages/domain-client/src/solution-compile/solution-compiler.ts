@@ -26,6 +26,9 @@ import {
   compileResolvedStyle,
 } from "../style/style-engine.js";
 import { resolveStyle } from "../style/theme-resolver.js";
+// modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+import { expandLayoutIntrinsic, resolveLayoutContentInsets, type LayoutContentInsets } from "./layout-surface.js";
+// end
 import { compileComponents, compileOverlay } from "./component-compiler.js";
 import {
   measureIntrinsic,
@@ -38,6 +41,9 @@ import {
 } from "./layout-compiler.js";
 import type { SemanticDataRecord } from "./module-node-compiler.js";
 import { normalizeSolutionRepeaterKey, solutionModuleRegistryHash } from "./solution-provenance.js";
+// modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+import { validateSolutionControlSemanticProjection } from "./solution-provenance.js";
+// end
 
 export interface SolutionCompileInput {
   readonly plan: SolutionImplementationPlan;
@@ -46,6 +52,61 @@ export interface SolutionCompileInput {
   readonly approvedAssets: readonly ApprovedAssetFacts[];
   readonly activeCatalogVersion: string;
 }
+
+// modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+export interface SemanticComponentProvenance { readonly nodeId: string; readonly expandedNodeId: string; readonly componentId: string; readonly capabilityId: string }
+declare const semanticProvenanceBrand: unique symbol;
+export interface SemanticCompilationProvenance { readonly [semanticProvenanceBrand]: true }
+const semanticProvenanceRecords = new WeakMap<SemanticCompilationProvenance, {
+  planHash: string; entries: readonly SemanticComponentProvenance[];
+}>();
+export function compileSolutionImplementationWithProvenance(input: SolutionCompileInput) {
+  const safeInput = preflightInput(input);
+  const implementation = compileSolutionImplementation(safeInput);
+  const plan = SolutionImplementationPlanSchema.parse(safeInput.plan);
+  const entries: SemanticComponentProvenance[] = [];
+  for (const page of implementation.pages) {
+    if (page.compatibility !== "native") throw new Error("SEMANTIC_PROVENANCE_NATIVE_REQUIRED");
+    const sourcePage = plan.pages.find(source => source.id === page.id)!;
+    const byId = new Map(page.controls.map(control => [control.id, control]));
+    const overlayOwner = (control: UIImplementationControlV2): string | undefined => {
+      const seen = new Set<string>();
+      let current: UIImplementationControlV2 | undefined = control;
+      while (current !== undefined) {
+        if (seen.has(current.id)) throw new Error("SEMANTIC_PROVENANCE_PARENT_CYCLE");
+        seen.add(current.id);
+        if (current.overlayHost !== undefined) return current.overlayHost.overlayId;
+        current = current.parentId === undefined ? undefined : byId.get(current.parentId);
+      }
+      return undefined;
+    };
+    const owners = new Map(page.controls.map(control => [control.id, overlayOwner(control)]));
+    const surfaces = [{ root: sourcePage.root, controls: page.controls.filter(control => owners.get(control.id) === undefined) },
+      ...plan.overlays.filter(overlay => overlay.hostPageId === page.id).map(overlay => ({ root: overlay.root,
+        controls: page.controls.filter(control => owners.get(control.id) === overlay.id) }))];
+    for (const surface of surfaces) {
+      const expected = validateSolutionControlSemanticProjection({ plan, root: surface.root,
+        controls: surface.controls, moduleRegistry: safeInput.moduleRegistry });
+      for (const control of surface.controls) {
+        const source = expected.get(control.id);
+        if (source === undefined) throw new Error("SEMANTIC_PROVENANCE_COMPONENT_MISSING");
+        entries.push(Object.freeze({ nodeId: source.sourceNode.id, expandedNodeId: control.sourceSolutionNodeId,
+          componentId: control.id, capabilityId: control.capabilityId }));
+      }
+    }
+  }
+  const provenance = Object.freeze({}) as SemanticCompilationProvenance;
+  semanticProvenanceRecords.set(provenance, { planHash: canonicalServerHash(plan),
+    entries: Object.freeze(entries.sort((left, right) => compareCodePoints(left.componentId, right.componentId))) });
+  return Object.freeze({ implementation, provenance });
+}
+export function readSemanticCompilationProvenance(handle: SemanticCompilationProvenance, plan: SolutionImplementationPlan): readonly SemanticComponentProvenance[] {
+  const record = semanticProvenanceRecords.get(handle);
+  if (record === undefined) throw new Error("SEMANTIC_PROVENANCE_REQUIRED");
+  if (record.planHash !== canonicalServerHash(plan)) throw new Error("SEMANTIC_PROVENANCE_PLAN_MISMATCH");
+  return record.entries;
+}
+// end
 
 export type SolutionCompilePhase =
   | "parse"
@@ -547,12 +608,24 @@ function resolvedRootDeclarations(
   ).declarations;
 }
 
+function compilerLayoutGap(node: Extract<SolutionNode, { kind: "layout" }>): number {
+  const tokens = node.intent.density === "compact"
+    ? { section: 16, control: 8 }
+    : node.intent.density === "spacious"
+      ? { section: 32, control: 16 }
+      : { section: 24, control: 12 };
+  return node.children.some((child) => child.kind === "layout") ? tokens.section : tokens.control;
+}
+
 function measureTreeUnsafe(
   node: SolutionNode,
   plan: SolutionImplementationPlan,
   moduleRegistry: ModuleRegistry,
   available: number,
   output: Map<string, IntrinsicSize>,
+  // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+  layoutInsets: Map<string, LayoutContentInsets>,
+  // end
 ): IntrinsicSize {
   const declarations = node.kind === "control"
     ? resolvedRootDeclarations(plan, node)
@@ -583,8 +656,21 @@ function measureTreeUnsafe(
 
   let measured: IntrinsicSize;
   if (node.kind === "layout") {
-    const children = node.children.map((child) => measureTree(child, plan, moduleRegistry, available, output));
-    measured = measureIntrinsic({ ...base, kind: "layout", node, childMeasures: children, gap: plan.theme.spacingUnit });
+    // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+    const insets = resolveLayoutContentInsets(plan, node);
+    layoutInsets.set(node.id, insets);
+    const horizontal = insets.left + insets.right;
+    const innerAvailable = available - horizontal;
+    if (innerAvailable <= 0) throw new Error(`LAYOUT_SURFACE_CONTENT_EMPTY: ${node.id}`);
+    const width = widthConstraint(node, available);
+    const innerWidth = {
+      available: innerAvailable,
+      ...(width.min === undefined ? {} : { min: Math.max(0, width.min - horizontal) }),
+      ...(width.max === undefined ? {} : { max: Math.max(0, width.max - horizontal) }),
+    };
+    const children = node.children.map((child) => measureTree(child, plan, moduleRegistry, innerAvailable, output, layoutInsets));
+    measured = expandLayoutIntrinsic(measureIntrinsic({ ...base, width: innerWidth, kind: "layout", node, childMeasures: children, gap: compilerLayoutGap(node) }), insets);
+    // end
   } else if (node.kind === "registered-module") {
     const definition = moduleRegistry.require(node.moduleKind, node.templateVersion);
     measured = measureIntrinsic({ ...base, kind: "registered-module", node, layoutContract: definition.layout });
@@ -614,9 +700,14 @@ function measureTree(
   moduleRegistry: ModuleRegistry,
   available: number,
   output: Map<string, IntrinsicSize>,
+  // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+  layoutInsets: Map<string, LayoutContentInsets>,
+  // end
 ): IntrinsicSize {
   return boundary("measurement", node.id, () =>
-    measureTreeUnsafe(node, plan, moduleRegistry, available, output));
+    // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+    measureTreeUnsafe(node, plan, moduleRegistry, available, output, layoutInsets));
+    // end
 }
 
 function compilePageLayout(
@@ -627,8 +718,11 @@ function compilePageLayout(
 ): CompiledLayoutTree {
   const available = page.canvas === "large-display" ? 1808 : 1360;
   const intrinsic = new Map<string, IntrinsicSize>();
-  boundary("measurement", expandedRoot.id, () => measureTree(expandedRoot, plan, moduleRegistry, available, intrinsic));
-  return boundary("layout", expandedRoot.id, () => compileLayout({ page: { ...page, root: expandedRoot }, expandedRoot, intrinsicByNodeId: intrinsic }));
+  // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+  const layoutInsets = new Map<string, LayoutContentInsets>();
+  boundary("measurement", expandedRoot.id, () => measureTree(expandedRoot, plan, moduleRegistry, available, intrinsic, layoutInsets));
+  return boundary("layout", expandedRoot.id, () => compileLayout({ page: { ...page, root: expandedRoot }, expandedRoot, intrinsicByNodeId: intrinsic, layoutInsetsByNodeId: layoutInsets }));
+  // end
 }
 
 function styleSpecForRole(plan: SolutionImplementationPlan, role: string): ComponentStyleSpecV2 {

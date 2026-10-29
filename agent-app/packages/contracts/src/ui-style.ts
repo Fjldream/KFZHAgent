@@ -309,7 +309,7 @@ export const StyleDeclarationV2Schema = z.object({
   advanced: z.array(AdvancedStyleDeclarationSchema).max(8).optional(),
 }).strict();
 
-/** Frozen v1 declaration surface. Native v2 uses StyleDeclarationV2Schema above. */
+/** 冻结的 v1 声明接口。原生 v2 使用上方的 StyleDeclarationV2Schema。 */
 export const StyleDeclarationSchema = z.object({
   backgroundColor: legacyStyleColor.optional(),
   textColor: legacyStyleColor.optional(),
@@ -399,7 +399,7 @@ export const NativeThemeSpecSchema = ThemeSpecSchema.extend({
 export const UIComponentSpecSchema = z.object({
   id: z.string().min(1).max(100),
   role: z.string().min(1).max(100),
-  /** Customer-effect blueprint module implemented by this component. */
+  /** 由本组件实现的客户效应蓝图模块。 */
   sourceModuleId: z.string().min(1).max(100).optional(),
   capabilityId: z.string().min(1).max(100),
   critical: z.boolean().default(true),
@@ -455,15 +455,29 @@ const VisibleLayoutKindSchema = z.enum([
   "overlay-anchor",
 ]);
 
+// modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+const LayoutContentInsetsSchema = z.object({
+  left: z.number().min(0).max(400).refine(hasCompilerLayoutPrecision),
+  right: z.number().min(0).max(400).refine(hasCompilerLayoutPrecision),
+  top: z.number().min(0).max(400).refine(hasCompilerLayoutPrecision),
+  bottom: z.number().min(0).max(400).refine(hasCompilerLayoutPrecision),
+}).strict();
+// end
 export const CompiledLayoutMetadataSchema = z.discriminatedUnion("overflow", [
   z.object({
     kind: z.literal("scroll-region"),
     overflow: z.literal("local-scroll"),
     scrollContentExtent: ScrollContentExtentSchema,
+    // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+    contentInsets: LayoutContentInsetsSchema.optional(),
+    // end
   }).strict(),
   z.object({
     kind: VisibleLayoutKindSchema,
     overflow: z.literal("visible"),
+    // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+    contentInsets: LayoutContentInsetsSchema.optional(),
+    // end
   }).strict(),
 ]);
 
@@ -500,7 +514,7 @@ export const OverlayHostMetadataSchema = z.object({
   initiallyVisible: z.literal(false),
 }).strict();
 
-/** Compiler-owned correlation between one semantic Tabs control and one native pane. */
+/** 编译器与一个语义控件之间的关联，与一个原生窗格相关。 */
 export const TabPaneOwnershipSchema = z.object({
   ownerSemanticControlId: boundedId,
   tabId: boundedId,
@@ -607,10 +621,11 @@ function containsGeometry(
   outer: { x: number; y: number; width: number; height: number },
   inner: { x: number; y: number; width: number; height: number },
 ): boolean {
-  return inner.x >= outer.x
-    && inner.y >= outer.y
-    && inner.x + inner.width <= outer.x + outer.width
-    && inner.y + inner.height <= outer.y + outer.height;
+  const tolerance = 0.01;
+  return inner.x >= outer.x - tolerance
+    && inner.y >= outer.y - tolerance
+    && inner.x + inner.width <= outer.x + outer.width + tolerance
+    && inner.y + inner.height <= outer.y + outer.height + tolerance;
 }
 
 function hasCompilerLayoutPrecision(value: number): boolean {
@@ -832,8 +847,10 @@ export const UIImplementationSpecV2Schema = z.object({
             const descendant = pending.pop()!;
             if (visited.has(descendant.id)) continue;
             visited.add(descendant.id);
-            maximumRight = Math.max(maximumRight, descendant.geometry.x + descendant.geometry.width);
-            maximumBottom = Math.max(maximumBottom, descendant.geometry.y + descendant.geometry.height);
+            // modified by jinlong.feng at 2026-10-26 Agent工作台迭代
+            maximumRight = Math.max(maximumRight, descendant.geometry.x + descendant.geometry.width + (control.compiledLayout.contentInsets?.right ?? 0));
+            maximumBottom = Math.max(maximumBottom, descendant.geometry.y + descendant.geometry.height + (control.compiledLayout.contentInsets?.bottom ?? 0));
+            // end
             if (!isScrollOwner(descendant)) pending.push(...(childrenByParent.get(descendant.id) ?? []));
           }
           const quantize = (value: number): number => Math.round(value * 100) / 100;

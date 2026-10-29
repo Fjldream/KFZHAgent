@@ -16,6 +16,9 @@ import type { ClassifyIntentResult, Intent } from "./schemas/intent.js";
 import type { ProjectDesign } from "./schemas/project-design.js";
 import type { GraphMessage } from "./state.js";
 import type { EditableEntity } from "./ports.js";
+// modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+import type { VisualPlanningContext, VisualSemanticPlan } from "@kf/contracts";
+// end
 
 /**
  * 传递给模型端口的有界且已沙箱化的上下文。它绝不包含原始上传文件、机密信息、完整页面 JSON 或不受信任的脚本文本（简述第 6 步）：recentMessages 会被裁剪，修订内容以有界摘要表示，并且机密信息根本不会进入图状态。
@@ -37,6 +40,10 @@ export interface ModelPortContext {
   currentRevisionId?: string | undefined;
   /** 服务器持有的项目绑定，用于已接受蓝图/模块计划制品。 */
   currentProjectKey?: string | undefined;
+  // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+  /** Server-verified read-only semantic IDs and text of the admitted generated base. */
+  existingGeneratedStructure?: import("@kf/contracts").GeneratedProjectStructure | undefined;
+  // end
   /** 用户最新的回合，用作规划的要求文本。 */
   requirementText?: string | undefined;
   /** 重新设计的先前设计计划（REVISE_DESIGN / 设计迭代）。 */
@@ -61,6 +68,10 @@ export interface ModelPortContext {
   confirmedSolutionBlueprint?: CustomerSolutionBlueprint | undefined;
   /** 通过确定性方式检索并绑定哈希的候选项；绝不由模型编写。 */
   capabilityCandidates?: CapabilityCandidateBundle | undefined;
+  // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+  /** Structure only. Caller must resolve a trusted server-side review; never browser/model authority. */
+  visualReference?: VisualPlanningContext | undefined;
+  // end
   /** 仅提供仅在本地化修复时有效的数据模型，以本地化修复。 */
   previousSolutionImplementationPlan?: SolutionImplementationPlan | undefined;
   /** 仅提供给局部修复调用的有界 schema/引用问题。 */
@@ -77,6 +88,11 @@ export interface ModelPortContext {
  * `ClassifyIntentResult` 在 schemas/intent.ts 中定义（并在运行时由 zod 设门）；这里重新导出该类型，使 ModelPort 实现者只依赖图将要校验的数据结构的单一事实来源（I1）。
  */
 export interface ModelPort {
+  // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+  /** Optional while vision admission is disabled; missing capability must not fall back to text. */
+  createVisualDesignPlan?(input: ModelPortContext): Promise<CustomerSolutionBlueprint>;
+  createVisualSolutionImplementationPlan?(input: ModelPortContext): Promise<VisualSemanticPlan>;
+  // end
   classifyIntent(input: ModelPortContext): Promise<ClassifyIntentResult>;
   createProjectDesign(input: ModelPortContext): Promise<ProjectDesign>;
   createChangePlan(input: ModelPortContext): Promise<ChangePlan>;

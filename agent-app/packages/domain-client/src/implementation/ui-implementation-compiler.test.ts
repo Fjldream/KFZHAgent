@@ -460,8 +460,11 @@ describe("compileUiImplementation", () => {
       },
     });
     const candidate = await applyClientPatch(base, result.plan);
-    expect(await controlField(candidate.rootDir, "button-guid-1", "backgroundColor")).toBe("#e11d48");
-    expect(await controlField(candidate.rootDir, "button-guid-1", "styleDataNew")).toContain("background-color:#14b8a6");
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    const css = await controlField(candidate.rootDir, "button-guid-1", "styleData");
+    expect(css).toContain("background-color:#e11d48");
+    expect(css).toContain("background-color:#14b8a6");
+    // end
   });
 
   it("rejects raw nested layout children instead of forwarding native style fields", () => {

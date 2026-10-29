@@ -1,0 +1,15 @@
+{
+  "scenario": "operator-reviewed-static-rows",
+  "regionIds": [
+    "deviceRow1",
+    "deviceRow2",
+    "deviceRow3",
+    "alarmRow",
+    "targetRow",
+    "timeRow"
+  ],
+  "originalHash": "846f13a9fe79a86a0a9f5a9b24db24cf99bc17832d0bbd7e06ca271f997dfec3",
+  "revisedHash": "de33a1a0834ec362c91694d7408807e734513066fa9882a5e2dc04ef1beb26f4",
+  "omitsBusinessContent": false,
+  "addsDataSourceOrInteraction": false
+}

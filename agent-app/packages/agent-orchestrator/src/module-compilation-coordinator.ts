@@ -19,14 +19,14 @@ export interface CoordinateModuleCompilationInput {
   readonly projectKey: string;
   readonly revisionId: string;
   readonly acceptedBlueprintHash: string;
-  /** JSON loaded from AgentGraphState/checkpoint, never a runtime brand. */
+  /** 从AgentGraphState/checkpoint加载的JSON，从不涉及运行时品牌。 */
   readonly acceptedBlueprintArtifact: AcceptedBlueprintArtifact;
   readonly plan: ModulePlan;
   readonly workspaceId: string;
   readonly editableEntities: readonly EditableEntity[];
   readonly previousPlan?: ModulePlan;
   readonly previousImplementation?: UIImplementationSpec;
-  /** JSON loaded from the preceding checkpoint; verified again before use. */
+  /** 从前一个检查点加载的JSON，经过验证后再使用。 */
   readonly previousCompilationArtifact?: ModuleCompilationArtifact;
 }
 
@@ -38,17 +38,13 @@ export type CoordinatedModuleCompilation =
   | Readonly<{
       status: "compiled";
       outcome: Extract<Awaited<ReturnType<ModulePlanCompilerPort["compile"]>>, { status: "compiled" }>;
-      /** Signed JSON persisted in AgentGraphState. Never contains the HMAC key. */
+      /** 持久化在 AgentGraphState 中的签名 JSON。绝不包含 HMAC 密钥。 */
       moduleCompilationArtifact: ModuleCompilationArtifact;
       uiCompilation: Awaited<ReturnType<UiImplementationCompilerPort["compile"]>>;
     }>;
 
 /**
- * Concrete server service for Task 10's module node. It intentionally does not
- * require a current artifact before compilation: the deterministic compiler
- * emits an unsigned candidate, the server signs it, JSON-roundtrips it as a
- * checkpoint would, verifies it back into a runtime brand, then hands that
- * verified current artifact to the UI compiler.
+ * 任务 10 模块节点的具体服务器服务。它特意不要求编译前已有当前制品：确定性编译器生成未签名候选项，服务器为其签名，像检查点一样对其进行 JSON 往返，将其重新校验为运行时品牌，然后把已校验的当前制品交给 UI 编译器。
  */
 export class ModuleCompilationCoordinator {
   constructor(

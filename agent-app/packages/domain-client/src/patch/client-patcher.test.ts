@@ -346,15 +346,19 @@ describe("client patcher (Task 7 brief Step 1)", () => {
       style: { declarations: { backgroundColor: "#2563eb", borderRadius: 8 }, states: {} },
     }]));
 
-    expect(await controlField(candidate, "button-guid-1", "backgroundColor")).toBe("#2563eb");
-    expect(await controlField(candidate, "button-guid-1", "styleDataNew")).toContain("border-radius:8px");
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    expect(await controlField(candidate, "button-guid-1", "styleData")).toContain("background-color:#2563eb;border-radius:8px");
+    // end
     expect(await controlField(candidate, "button-guid-1", "customFutureField")).toEqual({ keep: true });
   });
 
   it("preserves customer CSS and merges successive compiler-managed declaration and state deltas", async () => {
     const base = await copyFixture("client-unknown-field");
     const customerCss = "#domId .customer-owned{color:#123456}";
-    await setControlField(base, "button-guid-1", "styleDataNew", customerCss);
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    await setControlField(base, "button-guid-1", "styleData", customerCss);
+    await setControlField(base, "button-guid-1", "styleDataNew", "legacy-unread-css");
+    // end
 
     const candidate = await applyClientPatch(base, plan([
       {
@@ -377,7 +381,10 @@ describe("client patcher (Task 7 brief Step 1)", () => {
       },
     ]));
 
-    const merged = await controlField(candidate, "button-guid-1", "styleDataNew");
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    const merged = await controlField(candidate, "button-guid-1", "styleData");
+    expect(await controlField(candidate, "button-guid-1", "styleDataNew")).toBe("legacy-unread-css");
+    // end
     expect(merged).toContain(customerCss);
     expect(merged).toContain("font-size:16px");
     expect(merged).not.toContain("font-size:14px");
@@ -385,7 +392,9 @@ describe("client patcher (Task 7 brief Step 1)", () => {
     expect(merged).toContain("#domId:hover{color:#ffffff}");
     expect(merged).toContain("#domId:active{opacity:0.8}");
     expect((merged as string).match(/KF_AGENT_MANAGED_STYLE_V1_START/g)).toHaveLength(1);
-    expect(await controlField(candidate, "button-guid-1", "backgroundColor")).toBe("#2563eb");
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    expect(merged).toContain("background-color:#2563eb");
+    // end
   });
 
   it("leaves imported native fields and styleDataNew byte-for-byte unchanged for an empty style delta", async () => {
@@ -458,8 +467,9 @@ describe("client patcher (Task 7 brief Step 1)", () => {
     }]));
     const createdGuid = deriveGuid({ seed: "w-test" }, "StyledButton");
 
-    expect(await controlField(candidate, createdGuid, "backgroundColor")).toBe("#2563eb");
-    expect(await controlField(candidate, createdGuid, "styleDataNew")).toContain("border-radius:8px");
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    expect(await controlField(candidate, createdGuid, "styleData")).toContain("background-color:#2563eb;border-radius:8px");
+    // end
   });
 
   it("rejects nested reserved native/style payloads at the create persistence boundary", async () => {

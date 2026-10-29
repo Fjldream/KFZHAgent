@@ -1,3 +1,4 @@
+<!-- modified by jinlong.feng at 2026-10-20 Agent工作台迭代 -->
 # Agent App Durable Runs Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -189,7 +190,9 @@ export function routeRunAction(action: RunAction): ActionRoute {
 
 **Files**
 
-- Create: `agent-app/apps/api/src/runs/run.controller.ts`、`run-events.service.ts`、`run-query.service.ts`
+<!-- modified by jinlong.feng at 2026-10-21 Agent工作台迭代 -->
+- Create: `agent-app/apps/api/src/runs/run.controller.ts`、`run-event-stream.service.ts`、`run-query.service.ts`
+<!-- end -->
 - Create: `agent-app/apps/api/src/auth/mutation-origin.guard.ts`、`mutation-origin.guard.test.ts`
 - Modify: `agent-app/tests/e2e/helpers/api.ts`（cookie写请求附带测试Origin）
 - Modify: `agent-app/apps/api/src/runs/run.module.ts`、`agent-app/apps/api/src/app.module.ts`（注册RunsModule；现有main.ts继续启动AppModule）
@@ -228,7 +231,23 @@ export function serializeRunEvent(event: RunEvent): string {
 - [ ] 测试断线期间完成后重连、重复游标、创建与订阅间竞态、session过期、跨tenant、数据脱敏、100个短连接不耗尽连接池。真实HTTP测试验证连接断开任务仍执行且无资源泄漏。
 - [ ] 全绿后提交点 `feat(agent): expose resumable run events and snapshots`。
 
+<!-- modified by jinlong.feng at 2026-10-21 Agent工作台迭代 -->
+### T10/T12 订阅子项实际进展
+
+- [x] RunEventStreamService 为只读服务，Controller 不再内嵌循环；生产固定 30 秒窗口、15 秒心跳、1 秒 poll、5 秒 drain 等待与 64 KiB 应用层写缓冲/单帧保护。终态分页补齐、正常 end 排空、空页不忙循环、安全错误与 private/no-store 已接通。
+- [x] 初始及持续只读会话复核，覆盖撤销/绝对过期/空闲/改密限制/租户和角色变化；内部心跳不刷新 lastUsedAt，普通 HTTP 滑动策略不变。断线解除在途查询等待并丢弃迟到结果，不宣称物理取消 SQL。
+- [x] Writable 背压/定时器/监听器与真实 HTTP 权限矩阵、100 短连接、断线后 Run 继续/按 seq 恢复已验。前端 reader、单帧上限、单消费循环、stop、快照鉴权停止重连、指数退避/抖动/恢复重置与等待取消已验。完整记录见 `agent-app/docs/run-stream-20261021.md`（719 项相关测试通过）。
+- [x] 后续 Playwright 首次 SSE 连接故障、worker 继续、after=0 补未读事件/完整 seq、刷新和消息去重已验；这不是代理/整机网络/长期 soak。见 `agent-app/docs/run-browser-20261021.md`，最新协议 @6，扩大 API 回归仍有偶发失败，不用历史总数宣称全绿。
+- [ ] 事件保留/过期 410 + snapshotUrl、浏览器/代理/多副本长期 soak、真实独立进程 kill 与发布矩阵。上方旧总项包含这些未完成边界，不提前全勾；T12 整体仍 IN_PROGRESS。
+<!-- end -->
+
 ## T11：取消、重试、排队和构建终态协调
+
+<!-- modified by jinlong.feng at 2026-10-21 Agent工作台迭代 -->
+2026-10-21 更新：同会话 FIFO、模型消息视图隔离、逐修订归属验证的基线衔接、队列上限、取消队列项、真实审批等待/进入/恢复三个阶段的停止，以及前端排队/自动跟进/冲突重新规划均已实施。使用 run-plan@4；无新增迁移。完整记录见 `agent-app/docs/run-queue-20261021.md`。核心链路已接通，预算相关验收继续暂缓；T12 灰度、旧入口兼容和系统级故障矩阵仍需完成，不能把本条当成 P2 发布门槛已全部通过。下面 2026-10-20 记录保留为历史状态。
+<!-- end -->
+
+2026-10-20 实施更新：安全停止、幂等新运行重试、真实模型 AbortSignal、构建提交竞争与孤儿 BUILDING 恢复已经落地并通过相关测试，详见 `agent-app/docs/run-control-20261020.md`。完整运行中消息排队与 `baseline.changed` 尚未实现，**本任务仍为 IN_PROGRESS**。构建对账复用既有 RunWorker 过期租约恢复与 `waitForRunBuild`，未新增第二个后台 reconciler；新增迁移实际编号为 `202610200007_build_run_control`（0005 已由活动时间回填占用）。取消已确认构建后重试会重新规划/确认，不自动重发旧审批或发布旧作业。
 
 **Files**
 
@@ -272,41 +291,57 @@ export function mapBuildTerminal(input: { status: "SUCCEEDED" | "FAILED"; termin
 - [ ] 测试queued取消、模型取消、enqueue竞争、build正在finalize时cancel、完成后cancel、预算用尽retry、两个对话同base冲突、孤儿BUILDING修复；保持build-jobs原workspace锁与stale-base回归全绿。
 - [ ] 提交点 `feat(agent): coordinate cancellation retries and build results`。
 
-## T12：旧接口兼容、恢复演练与启用门槛
+<!-- modified by jinlong.feng at 2026-10-21 Agent工作台迭代 -->
+## T12：旧执行入口退役、恢复演练与启用门槛
+
+<!-- modified by jinlong.feng at 2026-10-23 Agent工作台迭代 -->
+最新验收补充见 `agent-app/docs/approval-concurrency-20261023.md`：原历史领域 I1 并发测试已用真实 audit 提交 gate 保证锁内重叠并保留两个精确 BUSY/唯一副作用；新增锁释放后重放精确 NO_PENDING_APPROVAL。没有改生产执行器/租约或测试 timeout/retry/skip。完整 API 64 文件 927/927、无 skip（含视觉 Chrome），API/root tsc/lint 通过。本项收口不等于 T12 发布门槛完成：旧失败历史保留，短 lease/偶发 404/cleanup WARN 未宣称根治，OS kill/restart、代理/多副本/事件保留/整体升级回退和完整矩阵继续待验，生产 vision 关闭、预算暂缓。
+<!-- end -->
+
+维护者最新要求：不需要的旧接口可以删除。此要求替代初稿中的旧 SSE/POST resume 桥接，禁止后续模型为兼容重新注册旧执行路由。工程域的 legacy/module-v1/creative-v2 和历史数据仍保留。
 
 **Files**
 
 - Modify: `agent-app/apps/api/src/conversations/conversation.controller.ts`、`conversation.service.ts`
-- Modify: `agent-app/apps/api/src/delivery/delivery-snapshot.service.ts`
+- Retire: `agent-app/apps/web/src/stores/workspace.ts`、`workspace.test.ts`；删除旧 `api.resume` 与 `streamMessageTurn`，保留 Run 订阅所需 SSE 帧解析
+- Preserve: `agent-app/apps/api/src/delivery/delivery-snapshot.service.ts` 及仍在用的查询、下载和签名保护
 - Create: `agent-app/apps/api/src/runs/feature-policy.ts`
 - Create: `agent-app/apps/api/src/runs/workbench-config.controller.ts`
-- Test: `agent-app/apps/api/src/runs/legacy-compat.integration.test.ts`
+- Test: `agent-app/apps/api/src/runs/legacy-routes.integration.test.ts`
+- Test support: `agent-app/apps/api/test-support/legacy-conversation-driver.ts`、`legacy-conversation-controller.ts`、`legacy-graph-request.ts`（仅历史领域测试，禁止生产 imports）
 - Create: `agent-app/docs/agent-runs-operations.md`
 
 **Interfaces**
 
 ```ts
 export function resolveRunFeature(input: { enabled: boolean; allowedTenantIds: string[]; tenantId: string }): boolean;
-// 旧 POST /messages：flag=false维持旧语义；flag=true经持久run桥接成旧state/done格式。
-// 新 GET /events：始终仅订阅；恢复旧接口不导致同会话两个执行者。
+// 旧 POST messages/resume 无论 flag 状态均 404，无执行副作用。
+// 新 POST /api/conversations/:id/runs 仅受理，GET events 始终仅订阅。
+// 停用新入口也不得回落到旧执行器；已有任务只允许 drain/真实取消。
 ```
 
-- [ ] 红测 flag allowlist：
+- [x] 红测 flag allowlist（已用真实 HTTP/数据库覆盖精确匹配、默认关闭、伪造请求、错误依赖、跨租户与事务存储层绕过，不只测纯函数）：
 
 ```ts
 expect(resolveRunFeature({ enabled: true, allowedTenantIds: ["t1"], tenantId: "t2" })).toBe(false);
 expect(resolveRunFeature({ enabled: false, allowedTenantIds: ["t1"], tenantId: "t1" })).toBe(false);
 ```
 
-- [ ] Run: `pnpm --filter @kf/api exec vitest run src/runs/legacy-compat.integration.test.ts`；预期新行为缺失 FAIL。
-- [ ] 实现显式开关，不让请求自行提供flag；旧消息桥接使用服务端clientRequestId，旧disconnect行为若变为后台继续必须按租户灰度并在UI提示。旧resume保持审批校验，桥接前确认run状态/receipt；v2和旧API同时到达时只有一个进入图。
+- [x] 下线旧 messages/resume 及生产 service 内旧执行代码。Run retirement 红测分别得到 200/409（预期 404），绿测验证登录/未登录均 404、无消息/任务副作用、新 Run 正常受理，GET messages 保留。
+- [x] 历史编译/签名/交付场景使用 test-support 内存夹具保留，不注册旧 HTTP；真正 Run 验收仍使用未覆盖 provider 的生产服务。
+- [x] 实现服务端开关与精确 allowlist；请求不能自行提供 flag，Web 不读取 localStorage 权限；关闭新受理不重新启用旧执行器。真实 Run drain、幂等重放和原生审批取消已在关闭准入时验证；生产多副本配置加载与停机演练仍待实测。
 
 ```ts
 export const resolveRunFeature = (input: { enabled: boolean; allowedTenantIds: string[]; tenantId: string }) =>
   input.enabled && input.allowedTenantIds.includes(input.tenantId);
 ```
 
-- [ ] 写operations：领取/续期检查SQL、队列卡住排查、UNKNOWN模型调用处理、只按runId恢复/取消、停worker排空流程、flag关闭不DROP表。delivery优先读run绑定，兼容历史checkpoint；不从工作区最新job猜制品。
-- [ ] GET /api/v2/workbench-config通过TenantGuard返回有效flags、imagePolicy和outboundImagesAllowed；校验workbench依赖runs、vision依赖runs+usage，不合法组合拒绝启动新功能。新run存冻结配置，前端只按该接口显示入口；切tenant重新读取，不能从localStorage读取权限开关。
-- [ ] 集成矩阵：legacy/module-v1/creative-v2 × flag off/on ×正常/审批/断线；原API字段形状不变；kill API不影响worker，kill worker租约到期恢复且不重建已完成job。运行原conversation、advanced-interactions、creative-goldens、delivery测试。
-- [ ] 提交点 `test(agent): preserve legacy behavior across durable runs`。P2 gate：断线继续、事件恢复、并发隔离、取消真实状态四项均有实测记录，才允许P3用户灰度。
+- [x] operations 已记录实际 flags、关闭准入/排空、恢复和升级前置；尚未做生产部署/多副本回退演练，不把手册当作验收。
+- [x] 现行文本 Run 绑定 delivery 与功能/协议配置冻结已验；不从工作区最新 job 猜制品。统一 gateway 的模型/提示词/价格冻结仍随 T02/T03 收尾，不能提前勾选。
+- [x] GET /api/v2/workbench-config 经 TenantGuard 返回有效 flags、imagePolicy 和 outboundImagesAllowed；默认关闭、精确 allowlist、依赖/未实现配置失败关闭、private/no-store/Vary 校验、Run 快照冻结、step cache 前协议校验与前端只读/跨租户异步隔离已实现。vision/usage 等未接通能力继续关闭。
+- [x] 已迁移全部现存 Playwright helpers/specs/global-setup 到 Run/当前 UI；API/build-worker/双租户 agent-worker/Web 独立进程正常运行和清理，两轮各 9 项通过。覆盖三类工程核心正常路径、原生审批/取消、失败重试、断线恢复、讨论/切换、精确 allowlist readonly、安全和真实包。源上传缺口和原生重规划漏操作已修复；当前 run-plan@6。A 只替换模型固定输出，B 使用生产入口/fake，编译/签名/构建/下载不替换；不能当 KF 原生/真实模型或完整组合矩阵证据。
+- [ ] 完整 legacy/module-v1/creative-v2 × flag off/on ×正常/审批/断线/故障矩阵、API/worker kill/restart、无重复 job、代理/多副本与发布。扩大回归 API 偶发 403/HTTP Parse Error 仍待定位，最新整批仍有失败；T12 整体不全勾。见 run-browser 报告。
+- [x] 新 Run 的受理、原生审批消费、构建入队/实际结果审计补齐；决定 memo 和审计同事务，job 状态与审计同事务，幂等重放、审计故障回滚、过期 fence/锁等待过期、真实图 checkpoint gap 与同 hash 重新审批已验证。详见 `agent-app/docs/run-audit-20261021.md`；协议 run-plan@5，升级先排空旧协议。历史夹具不替代真实 Run 证据；OS 进程 kill/发布与保留策略仍未验收。
+- [ ] 提交点 `refactor(agent): retire legacy execution endpoints`。P2 gate：断线继续、事件恢复、并发隔离、取消真实状态四项均有实测记录，才允许用户灰度。
+<!-- end -->
+<!-- end -->

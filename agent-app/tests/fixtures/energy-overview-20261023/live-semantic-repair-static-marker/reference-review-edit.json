@@ -1,0 +1,15 @@
+{
+  "scenario": "operator-reviewed-static-rows",
+  "regionIds": [
+    "device-row-1",
+    "device-row-2",
+    "device-row-3",
+    "summary-row-1",
+    "summary-row-2",
+    "summary-row-3"
+  ],
+  "originalHash": "b0fb60bada0256109db97c5b50a7d67e8227c7035457b77f44620adddeab4527",
+  "revisedHash": "1d49a5eb95cd85824cac10e6af10abcbeeb47b1e3d27989a04516197b8aee935",
+  "omitsBusinessContent": false,
+  "addsDataSourceOrInteraction": false
+}

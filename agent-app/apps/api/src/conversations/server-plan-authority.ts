@@ -30,7 +30,7 @@ export function createModuleArtifactAuthorityFromEnvironment(
   return createHmacModuleArtifactAuthority(decodeServerPlanHmacKey(environment[SERVER_PLAN_HMAC_KEY_ENV]));
 }
 
-/** API confirmation boundary: Registry facts replace model kind/category/action claims before signing. */
+/** API确认边界：在签署之前，注册事实将模型的种类/类别/行动声明替换。 */
 export function signAcceptedBlueprintAtConfirmation(input: {
   readonly authority: ModuleArtifactAuthority;
   readonly blueprint: CustomerEffectBlueprint;

@@ -25,9 +25,7 @@ import { PrismaService } from "../prisma/prisma.service.js";
 import { ARTIFACT_STORAGE } from "../artifacts/artifact-storage.js";
 
 /**
- * The initial solution IR every generative ("new") workspace starts from. It
- * is a single empty page so the deterministic compiler always has something to
- * build; the agent later grows it through change plans.
+ * 每个生成式（“new”）工作空间所使用的初始解决方案 IR。它只包含一个空页面，使确定性编译器始终有内容可构建；之后 Agent 会通过变更计划扩展它。
  */
 export const DEFAULT_INITIAL_IR = {
   schema: "kf-client-project-ir/v1",
@@ -47,10 +45,10 @@ export const DEFAULT_INITIAL_IR = {
   scripts: [],
 } as const;
 
-/** Absolute server-side cap for a single uploaded source package. */
+/** 单个上传源包的绝对服务器端容量。 */
 const DEFAULT_SOURCE_MAX_BYTES = 256 * 1024 * 1024;
 
-/** ZIP local-file-header magic bytes (PK\x03\x04). */
+/** ZIP 文件头魔术字节（PK\x03\x04）。 */
 const ZIP_MAGIC = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
 
 export interface WorkspaceResult {
@@ -65,8 +63,7 @@ export interface SourceRevisionResult {
 }
 
 /**
- * Thrown by the upload sniffing transform when the first bytes are not a ZIP
- * container (brief Step 4: content sniffing).
+ * 当上传嗅探转换器在第一个字节不是ZIP容器（步骤4：内容嗅探）时抛出。
  */
 export class ZipMagicError extends Error {
   override name = "ZipMagicError";
@@ -76,9 +73,7 @@ export class ZipMagicError extends Error {
 }
 
 /**
- * Workspace lifecycle: a "new" workspace starts from an empty solution
- * revision (generative flow); an "upload" workspace starts empty and receives
- * its Source Revision 1 through the streaming upload (import flow).
+ * 工作空间生命周期：“new” 工作空间从空的解决方案修订开始（生成流程）；“upload” 工作空间同样从空状态开始，并通过流式上传接收其源修订 1（导入流程）。
  */
 @Injectable()
 export class WorkspaceService {
@@ -142,12 +137,8 @@ export class WorkspaceService {
   }
 
   /**
-   * Streaming upload (brief Step 4): sniffs the ZIP magic on the first chunk,
-   * streams the request body straight into ArtifactStorage (never buffering
-   * the whole package in memory), then imports and inspects it. The Source
-   * Revision is created only after safe import + inspection succeeds; any
-   * failure removes the stored package.
-   */
+ * 流式上传（简要步骤 4）：在第一个数据块中嗅探 ZIP 魔数，把请求正文直接流式写入 ArtifactStorage（绝不把整个包缓冲到内存），然后导入并检查。只有安全导入和检查成功后才创建源修订；任何失败都会删除已存储的包。
+ */
   async uploadSourceRevision(input: {
     tenantId: string;
     workspaceId: string;
@@ -168,9 +159,7 @@ export class WorkspaceService {
     const maxBytes = sanitizeMaxBytes(input.maxBytes);
     const domainKind = input.domainKind ?? "kingclient";
 
-    // Content sniffing + streaming: consume the first chunk, verify the ZIP
-    // magic, then rebuild a paused stream from the same iterator. Nothing is
-    // ever buffered in full; the request body flows straight into storage.
+    // 内容嗅探 + 流式处理：消费第一个分块，验证 ZIP 魔术，然后重建一个从相同迭代器中重建的暂停流。请求体中的任何内容都从未完全缓冲；请求体直接流入存储。
     let body: Readable;
     try {
       body = await sniffZipStream(input.stream);
@@ -213,8 +202,7 @@ export class WorkspaceService {
       }
       throw new UnprocessableEntityException(apiError("PROJECT_PARSE_FAILED", messageOf(error)));
     } finally {
-      // I2: always remove the unpack directory tree (success or failure) so
-      // uploads cannot leak tens of KB per request into TMPDIR.
+      // I2：无论成功还是失败，都要删除解包目录树，避免每次上传请求向 TMPDIR 泄漏数十 KB 文件。
       await rm(workDir, { recursive: true, force: true }).catch(() => {});
     }
 
@@ -234,10 +222,8 @@ export class WorkspaceService {
   }
 
   /**
-   * Upload flow (in-memory convenience variant, kept for worker/tests): stores
-   * the source ZIP as a tenant-scoped artifact, imports it into a read-only
-   * workspace directory, inspects it, and creates Source Revision 1.
-   */
+ * 上传流程（为 worker/测试保留的内存便捷变体）：把源 ZIP 存为租户范围的制品，将其导入只读工作空间目录，进行检查，并创建源修订 1。
+ */
   async createSourceRevision(input: {
     tenantId: string;
     workspaceId: string;
@@ -282,7 +268,7 @@ export class WorkspaceService {
       await this.cleanupUnadoptedSourceArtifact(input.tenantId, stored.artifactId);
       throw error;
     } finally {
-      // I2: always remove the unpack directory tree on this variant too.
+      // I2：总是移除解包目录树（成功或失败）。
       await rm(workDir, { recursive: true, force: true }).catch(() => {});
     }
   }
@@ -313,16 +299,10 @@ export class WorkspaceService {
   }
 
   /**
-   * Destructive workspace deletion (brief Step 7). The caller must have
-   * already surfaced a destructive confirmation (the controller enforces the
-   * confirm flag before calling); the audit trail records that confirmation
-   * separately.
-   *
-   * I3: in addition to removing database rows, every tenant-scoped artifact
-   * backing this workspace (source-package via DomainProjectRevision.packageUrl
-   * and build artifacts via Artifact.storageKey) is removed from
-   * ArtifactStorage so no files leak after the workspace row is gone.
-   */
+ * 破坏性删除工作空间（简要步骤 7）。调用方必须已展示破坏性操作确认（控制器会在调用前强制检查 confirm 标志）；审计轨迹会单独记录该确认。
+ *
+ * I3：除删除数据库记录外，还会从 ArtifactStorage 删除该工作空间对应的所有租户范围制品（通过 DomainProjectRevision.packageUrl 引用的 source-package，以及通过 Artifact.storageKey 引用的构建制品），确保工作空间记录删除后不会遗留文件。
+ */
   async deleteWorkspace(tenantId: string, workspaceId: string): Promise<void> {
     const workspace = await this.prisma.solutionWorkspace.findFirst({
       where: { id: workspaceId, tenantId },
@@ -332,9 +312,7 @@ export class WorkspaceService {
     }
     const removedStorageKeys: string[] = [];
     await this.prisma.$transaction(async (tx) => {
-      // Asset adoption takes the same workspace-row lock before it creates a
-      // row. Keep deletion on the identical lock/order so it cannot collect
-      // storage keys while an upload is about to adopt a new blob.
+      // 资产接纳在创建记录前会取得同一个工作空间行锁。删除操作必须保持完全相同的锁与顺序，避免在上传即将接纳新 Blob 时收集其存储键。
       const locked = await tx.$queryRaw<{ id: string }[]>`
         SELECT "id" /* kf_workspace_asset_lock */
         FROM "SolutionWorkspace"
@@ -343,6 +321,24 @@ export class WorkspaceService {
         FOR UPDATE
       `;
       if (locked[0] === undefined) throw new NotFoundException("workspace");
+      // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+      // The workspace FK lock prevents new Run admission while deleting. Never remove live execution facts.
+      const terminalRunStatuses = ["SUCCEEDED", "FAILED", "CANCELLED"];
+      if (await tx.agentRun.count({ where: { tenantId, workspaceId, status: { notIn: terminalRunStatuses } } }) > 0) {
+        throw new ConflictException("WORKSPACE_ACTIVE_RUNS");
+      }
+      // Preserve confirmed deletion of unclaimed legacy QUEUED jobs; only running workers require a stop first.
+      if (await tx.buildJob.count({ where: { tenantId, workspaceId, status: { in: ["RUNNING", "VALIDATING"] } } }) > 0) {
+        throw new ConflictException("WORKSPACE_ACTIVE_BUILDS");
+      }
+      // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+      // Explicit whole-workspace deletion owns these snapshots; expiry/Run cleanup does not.
+      await tx.generationSnapshot.deleteMany({ where: { tenantId, workspaceId } });
+      // end
+      // Existing confirmed workspace deletion already removes its conversations. Delete only terminal Runs first;
+      // event/step rows cascade, invocation metadata survives via the existing ON DELETE SET NULL relation.
+      await tx.agentRun.deleteMany({ where: { tenantId, workspaceId, status: { in: terminalRunStatuses } } });
+      // end
       const revisionIds = (
         await tx.solutionRevision.findMany({
           where: { workspaceId, tenantId },
@@ -368,6 +364,18 @@ export class WorkspaceService {
       });
       for (const asset of workspaceAssets) removedStorageKeys.push(asset.storageKey);
       await tx.workspaceAsset.deleteMany({ where: { tenantId, workspaceId } });
+
+      // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+      await tx.visualAnalysisCacheEntry.deleteMany({ where: { tenantId, workspaceId } });
+      const referenceAssets = await tx.referenceAsset.findMany({
+        where: { tenantId, workspaceId }, include: { derivative: true },
+      });
+      for (const reference of referenceAssets) {
+        removedStorageKeys.push(reference.storageKey);
+        if (reference.derivative) removedStorageKeys.push(reference.derivative.storageKey);
+      }
+      await tx.referenceAsset.deleteMany({ where: { tenantId, workspaceId } });
+      // end
 
       if (revisionIds.length > 0) {
         const domainRows = await tx.domainProjectRevision.findMany({

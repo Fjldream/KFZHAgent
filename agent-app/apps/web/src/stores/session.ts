@@ -1,3 +1,6 @@
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+import { clearConversationDrafts, ensureConversationDraftOwner } from "../conversation-drafts.js";
+// end
 import { reactive } from "vue";
 import { api, ApiError } from "../api";
 import type { SessionUser } from "../types";
@@ -47,6 +50,9 @@ async function login(input: LoginInput): Promise<void> {
   state.error = null;
   try {
     const result = await api.login(input);
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    ensureConversationDraftOwner(result.user.tenantId, result.user.id);
+    // end
     state.user = result.user;
     state.mustChangePassword = result.mustChangePassword;
     state.tenantName = input.tenant;
@@ -71,6 +77,9 @@ async function changePassword(input: {
   state.error = null;
   try {
     const result = await api.changePassword(input);
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    ensureConversationDraftOwner(result.user.tenantId, result.user.id);
+    // end
     state.user = result.user;
     state.mustChangePassword = false;
   } catch (error) {
@@ -89,12 +98,18 @@ async function restore(): Promise<boolean> {
   }
   try {
     const me = await api.me();
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    ensureConversationDraftOwner(me.tenantId, me.id);
+    // end
     state.user = { id: me.id, username: me.username, role: me.role, tenantId: me.tenantId };
     state.mustChangePassword = me.mustChangePassword;
     state.tenantName = localStorage.getItem(TENANT_STORAGE_KEY) ?? "";
     state.restored = true;
     return true;
   } catch {
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    clearConversationDrafts();
+    // end
     state.user = null;
     state.mustChangePassword = false;
     state.restored = true;
@@ -123,6 +138,9 @@ async function logout(): Promise<void> {
   try {
     await api.logout();
   } finally {
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    clearConversationDrafts();
+    // end
     state.user = null;
     state.tenantName = "";
     state.mustChangePassword = false;

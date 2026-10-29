@@ -1,4 +1,7 @@
 import { loadAfterE2eDestructiveResetGuard } from "../../../tests/e2e/helpers/destructive-reset.js";
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+import { TENANT_A_ID, TENANT_B_ID, TENANT_C_ID } from "../../../tests/e2e/helpers/config.js";
+// end
 
 const RESET_ENVIRONMENT = {
   databaseUrl: process.env.DATABASE_URL,
@@ -59,6 +62,9 @@ async function main(): Promise<void> {
     RESET_ENVIRONMENT,
     async () => Promise.all([import("argon2"), import("@prisma/client")]),
   );
+  // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+  const { DEFAULT_INITIAL_IR } = await import("./workspaces/workspace.service.js");
+  // end
   const prisma = new PrismaClient();
   try {
     for (const table of BUSINESS_TABLES) {
@@ -73,7 +79,9 @@ async function main(): Promise<void> {
     const hash = (password: string): Promise<string> =>
       argon2.hash(password, { type: argon2.argon2id });
 
-    const acme = await prisma.tenant.create({ data: { name: "E2E Acme" } });
+    // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+    const acme = await prisma.tenant.create({ data: { id: TENANT_A_ID, name: "E2E Acme" } });
+    // end
     await prisma.user.create({
       data: {
         tenantId: acme.id,
@@ -86,7 +94,9 @@ async function main(): Promise<void> {
       },
     });
 
-    const globex = await prisma.tenant.create({ data: { name: "E2E Globex" } });
+    // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+    const globex = await prisma.tenant.create({ data: { id: TENANT_B_ID, name: "E2E Globex" } });
+    // end
     await prisma.user.create({
       data: {
         tenantId: globex.id,
@@ -97,7 +107,14 @@ async function main(): Promise<void> {
       },
     });
 
-    console.log("[e2e-seed] seeded tenants E2E Acme (alice) / E2E Globex (bob)");
+    // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+    const readonly = await prisma.tenant.create({ data: { id: TENANT_C_ID, name: "E2E Readonly" } });
+    await prisma.user.create({ data: { tenantId: readonly.id, username: "carol", passwordHash: await hash("TempPass-123"), role: "tenant_admin", mustChangePassword: false } });
+    const moduleWorkspace = await prisma.solutionWorkspace.create({ data: { tenantId: acme.id, name: "E2E module-v1 fixture", mode: "new", generationWorkflow: "module-v1" } });
+    const moduleRevision = await prisma.solutionRevision.create({ data: { tenantId: acme.id, workspaceId: moduleWorkspace.id, revisionNumber: 1, kind: "initial", state: DEFAULT_INITIAL_IR } });
+    await prisma.solutionWorkspace.update({ where: { id: moduleWorkspace.id }, data: { currentRevisionId: moduleRevision.id } });
+    console.log("[e2e-seed] seeded two enabled tenants, one readonly tenant and a module-v1 fixture");
+    // end
   } finally {
     await prisma.$disconnect();
   }

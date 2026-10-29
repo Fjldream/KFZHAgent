@@ -22,11 +22,15 @@ import { createSolutionImplementationPlanNode } from "./nodes/solution-implement
 import { createCompileCreativeSolutionNode } from "./nodes/compile-creative-solution.js";
 import { hasCurrentDesignPlanVersion } from "./design-plan-version.js";
 import { decodeBlueprintConfirmation } from "./blueprint-message.js";
+// modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+import { withAgentRunNode } from "@kf/build-jobs";
+// end
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+import { withStepMemo } from "./run-step-memo.js";
+// end
 
 /**
- * Thrown when the caller tries to run a conversation that is paused at the
- * approval interrupt with an input that is not a resume command. The pending
- * approval stays intact and resumable (see I2).
+ * 当调用者尝试运行一个处于批准中断状态的会话，且输入的不是恢复命令时，会抛出异常。正在等待的批准保持完整且可恢复（见I2）。
  */
 export class ApprovalResumeRequiredError extends Error {
   override name = "ApprovalResumeRequiredError";
@@ -73,23 +77,50 @@ export function compileSolutionGraph(
   deps: SolutionGraphDeps,
   options?: { checkpointer?: BaseCheckpointSaver },
 ) {
+  // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+  const guarded = <T>(node: (state: AgentGraphStateValue) => T) =>
+    (state: AgentGraphStateValue) => withAgentRunNode(() => node(state));
+  // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+  const approval = createApprovalNode();
+  const memoizedApproval = withStepMemo("approval-decision", state => {
+    const output = approval(state);
+    return Promise.resolve({ ...output, ...(output.resumeAction && state.runId ? { approvalDecisionRunId: state.runId } : {}) });
+  }, { resolveMemo: deps.resolveRunStepMemo }, state => ({ planHash: state.planHash }));
+  // end
   const graph = new StateGraph(AgentGraphState)
-    .addNode("load-context", createLoadContextNode(deps))
-    .addNode("classify-intent", createClassifyIntentNode(deps))
-    .addNode("clarify", createClarifyNode(deps))
-    .addNode("design-plan", createDesignPlanNode(deps))
-    .addNode("implementation-plan", createImplementationPlanNode(deps))
-    .addNode("module-plan", createModulePlanNode(deps))
-    .addNode("capability-retrieval", createCapabilityRetrievalNode(deps))
-    .addNode("solution-implementation-plan", createSolutionImplementationPlanNode(deps))
-    .addNode("compile-creative-solution", createCompileCreativeSolutionNode(deps))
-    .addNode("plan-change", createPlanChangeNode(deps))
-    .addNode("approval", createApprovalNode())
-    .addNode("cancel-plan", createCancelPlanNode(deps))
-    .addNode("enqueue-build", createEnqueueBuildNode(deps))
-    .addNode("done", createDoneNode(deps))
+    .addNode("load-context", guarded(createLoadContextNode(deps)))
+    .addNode("classify-intent", guarded(createClassifyIntentNode(deps)))
+    .addNode("clarify", guarded(createClarifyNode(deps)))
+    .addNode("design-plan", guarded(createDesignPlanNode(deps)))
+    .addNode("implementation-plan", guarded(createImplementationPlanNode(deps)))
+    .addNode("module-plan", guarded(createModulePlanNode(deps)))
+    .addNode("capability-retrieval", guarded(createCapabilityRetrievalNode(deps)))
+    .addNode("solution-implementation-plan", guarded(createSolutionImplementationPlanNode(deps)))
+    .addNode("compile-creative-solution", guarded(createCompileCreativeSolutionNode(deps)))
+    .addNode("plan-change", guarded(createPlanChangeNode(deps)))
+    // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+    // interrupt 首次抛出不缓存；只有成功消费 resume 后才持久化决定及对应审计。
+    .addNode("approval", guarded(state => state.runId && state.approvalDecisionRunId === state.runId
+      ? Promise.resolve(approval(state)) : memoizedApproval(state)))
+    // end
+    .addNode("cancel-plan", guarded(createCancelPlanNode(deps)))
+    .addNode("enqueue-build", guarded(createEnqueueBuildNode(deps)))
+    .addNode("done", guarded(createDoneNode(deps)))
+    // end
     .addEdge(START, "load-context")
-    .addEdge("load-context", "classify-intent")
+    // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+    // Trusted image acceptance is deterministic, not another textual intent/approval classification.
+    // modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+    .addConditionalEdges("load-context", state => state.stage === "design-planning"
+      && (state.acceptedVisualPlanningInput != null || state.visualBlueprintConfirmationHash != null)
+      ? "design-plan" : state.acceptedVisualPlanningInput != null && state.stage === "design-review"
+        ? state.planVersion === "run-plan@7" && state.runMode === "build" && state.generationWorkflow === "creative-v2"
+          && state.visualBlueprintConfirmationHash === state.acceptedVisualPlanningInput.confirmationHash
+          && state.designPlan?.schema === "kf-design-plan/v3" && hasCurrentDesignPlanVersion(state.designPlan, state.designRevision, state.designPlanHash)
+          && state.creativeConfirmationId === undefined ? "capability-retrieval" : END
+        : "classify-intent")
+    // end
+    // end
     .addConditionalEdges("classify-intent", (state) => routeAfterClassify(state, deps))
     .addConditionalEdges("implementation-plan", routeAfterPlanChange)
     .addConditionalEdges("module-plan", routeAfterModulePlan)
@@ -107,6 +138,15 @@ export function compileSolutionGraph(
 
 /** Deterministic intent routing after classification (brief Step 4 + spec §5.2). */
 export function routeAfterClassify(state: AgentGraphStateValue, deps?: SolutionGraphDeps): string {
+  // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+  // 模式由服务器决定，不能让模型通过分类结果绕过只讨论/只规划边界。
+  if (state.runMode === "discuss") return END;
+  if (state.runMode === "plan") {
+    if (state.intent === "CLARIFY") return "clarify";
+    return ["NEW_REQUIREMENT", "MODIFY_REQUIREMENT", "REVISE_DESIGN"].includes(state.intent ?? "")
+      ? "design-plan" : END;
+  }
+  // end
   if (state.pendingRequirements !== undefined && state.pendingRequirements.length > 0) {
     // Unsupported domain requests never reach planning or the build queue.
     return END;

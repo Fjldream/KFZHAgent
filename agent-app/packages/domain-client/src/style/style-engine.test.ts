@@ -65,9 +65,11 @@ describe("compileControlStyle", () => {
       }),
       runtimeProfile: KF36_RUNTIME_PROFILE,
     })).toEqual({
-      nativeFields: { backgroundColor: "#2563eb" },
-      styleDataNew: "#domId{border-radius:8px;color:#ffffff;font-size:14px;font-weight:600}" +
+      // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+      nativeFields: {},
+      styleDataNew: "#domId{background-color:#2563eb;border-radius:8px;color:#ffffff;font-size:14px;font-weight:600}" +
         "#domId:hover{background-color:#1d4ed8}",
+      // end
       unsupported: [],
       warnings: [],
     });
@@ -92,8 +94,10 @@ describe("compileControlStyle", () => {
       instanceStyle: style({ declarations: { backgroundColor: "#ffffff" } }),
       runtimeProfile: KF36_RUNTIME_PROFILE,
     })).toEqual({
-      nativeFields: { backgroundColor: "#ffffff" },
-      styleDataNew: "",
+      // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+      nativeFields: {},
+      styleDataNew: "#domId{background-color:#ffffff}",
+      // end
       unsupported: [],
       warnings: [],
     });
@@ -108,8 +112,10 @@ describe("compileControlStyle", () => {
       instanceStyle: style({ declarations: { fontSize: 14 } }),
       runtimeProfile: KF36_RUNTIME_PROFILE,
     })).toMatchObject({
-      nativeFields: { backgroundColor: "#1d4ed8" },
-      styleDataNew: "#domId{font-size:14px}",
+      // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+      nativeFields: {},
+      styleDataNew: "#domId{background-color:#1d4ed8;font-size:14px}",
+      // end
       unsupported: [],
     });
   });
@@ -420,15 +426,17 @@ describe("compileResolvedStyle", () => {
       runtimeProfile: KF36_RUNTIME_PROFILE,
     });
 
-    expect(compiled.nativeFields).toEqual({ backgroundColor: "#0b6bcb" });
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    expect(compiled.nativeFields).toEqual({});
     expect(compiled.cssFragments).toEqual([
-      { selectorToken: "root", state: "normal", declarations: { textColor: "#ffffff", borderRadius: 8 } },
+      { selectorToken: "root", state: "normal", declarations: { backgroundColor: "#0b6bcb", textColor: "#ffffff", borderRadius: 8 } },
       { selectorToken: "root", state: "hover", declarations: { backgroundColor: "#1d4ed8", textColor: "#f8fafc" } },
     ]);
     expect(compiled.styleDataNew).toBe(
-      "#domId .el-button{border-radius:8px;color:#ffffff}" +
+      "#domId .el-button{background-color:#0b6bcb;border-radius:8px;color:#ffffff}" +
       "#domId .el-button:hover{background-color:#1d4ed8;color:#f8fafc}",
     );
+    // end
     expect(compiled.warnings).toEqual([]);
     expect(compiled.unsupported).toEqual([]);
   });
@@ -444,14 +452,16 @@ describe("compileResolvedStyle", () => {
       runtimeProfile: KF36_RUNTIME_PROFILE,
     });
 
-    expect(compiled.nativeFields).toEqual({ backgroundColor: "rebeccapurple" });
+    // modified by jinlong.feng at 2026-10-27 Agent工作台迭代
+    expect(compiled.nativeFields).toEqual({});
     expect(compiled.persistedStyleHandoff).toMatchObject({
       componentCorrelationId: "named-color-action",
-      expectedFragmentCount: 0,
-      expectedFragmentKeys: [],
-      styleDataNew: "",
-      fragments: [],
+      expectedFragmentCount: 1,
+      expectedFragmentKeys: ["root:normal"],
+      styleDataNew: "#domId .el-button{background-color:rebeccapurple}",
+      fragments: [expect.objectContaining({ selectorToken: "root", state: "normal", declarations: { backgroundColor: "rebeccapurple" } })],
     });
+    // end
     expect(() => assertPersistedStyleHandoffComplete(compiled.persistedStyleHandoff)).not.toThrow();
     expect(() => assertStyleCompilationAccepted("button", compiled)).not.toThrow();
   });

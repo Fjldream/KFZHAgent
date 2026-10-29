@@ -11,7 +11,7 @@ export interface ObservableClosureAnalysis {
   readonly evaluatedEdges: number;
 }
 
-/** Internal linear-time closure proof. Each node is evaluated at most once per inherited visibility state. */
+/** 内部线性时间闭包证明。每个节点最多仅在继承可见性状态中评估一次。 */
 export function analyzeObservableClosure(
   nodes: ReadonlyMap<string, ObservableClosureNode>,
   roots: readonly string[],

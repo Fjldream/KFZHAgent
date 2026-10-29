@@ -15,6 +15,9 @@ import {
 } from "@kf/contracts";
 import { StateSchema } from "@langchain/langgraph";
 import { IntentSchema } from "./schemas/intent.js";
+// modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+import { AcceptedVisualPlanningInputSchema, VisualSemanticPlanSchema } from "@kf/contracts";
+// end
 
 /**
  * A single persisted conversation message, bounded by role + content. Never
@@ -99,6 +102,11 @@ export const AgentGraphState = new StateSchema({
   // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
   /** 持久 run 的 id；旧 SSE 调用不传，图行为与改造前一致。 */
   runId: z.string().optional(),
+  runMode: z.enum(["discuss", "plan", "build"]).optional(),
+  // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+  /** 本轮已消费过审批；即便改稿 hash 未变，也必须在下一审批重新 interrupt。 */
+  approvalDecisionRunId: z.string().optional(),
+  // end
   /** 节点级幂等配方版本；升级节点逻辑时改这个值可整体失效缓存。 */
   planVersion: z.string().optional(),
   // end
@@ -159,6 +167,14 @@ export const AgentGraphState = new StateSchema({
   solutionImplementationPlan: SolutionImplementationPlanSchema.optional(),
   solutionImplementationPlanHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
   solutionPlanRepairAttempt: z.number().int().min(0).max(1).optional(),
+  // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+  /** Reserved visual graph state; ordinary Runs explicitly clear checkpoint carryover. */
+  acceptedVisualPlanningInput: AcceptedVisualPlanningInputSchema.nullable().optional(),
+  /** Confirms only which visual input produced the displayed blueprint, not engineering approval. */
+  visualBlueprintConfirmationHash: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(),
+  visualSemanticPlan: VisualSemanticPlanSchema.nullable().optional(),
+  visualPlanConfirmationHash: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(),
+  // end
   /** Durable identity of the v3 blueprint confirmation already consumed by engineering generation. */
   creativeConfirmationId: z.string().regex(/^[0-9a-f]{64}$/).optional(),
   creativeProjectKey: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/).optional(),

@@ -47,19 +47,11 @@ const PREVIEW_SMALL_CHANGE_WORDS = [
 ];
 
 /**
- * Classifies the current turn through ModelPort.classifyIntent and applies the
- * deterministic routing decisions:
- *   - unsupported-domain NEW/MODIFY requirements → pendingRequirements, idle,
- *     never planned or built (brief Step 4),
- *   - QUESTION → the assistant reply is persisted and the graph returns to
- *     idle,
- *   - ROLLBACK → explicitly not supported by this workflow yet,
- *   - everything else → routed by the conditional edge.
- *
- * The raw model output is zod-gated before ANY state side effect (I1): a real
- * LLM can emit an invented intent value or a malformed shape, and the graph
- * must reject it with INVALID_MODEL_OUTPUT instead of routing on garbage or
- * writing an assistant reply nobody asked for.
+ * 当前轮次的分类通过 ModelPort.classifyIntent 进行，然后应用确定性路由决策:
+ *   - 不支持的领域的新/修改要求 → pendingRequirements, 空闲, 从未计划或构建(简略步骤4),
+ *   - 问题 → 副助回复被持久化并返回到空闲,
+ *   - 撤销 → 该工作流程中尚未支持的,
+ *   - 其他 → 由条件边路经。在任何状态副作用之前，原始模型输出被 zod-gated (I1): 任何真实 LLM 可以产生一个虚构的意图值或一个畸形的形状，而图必须拒绝它以 INVALID_MODEL_OUTPUT 代替路由于垃圾或写入一个没有人要求的副助回复。
  */
 export function createClassifyIntentNode(deps: SolutionGraphDeps) {
   return async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
@@ -85,10 +77,7 @@ export function createClassifyIntentNode(deps: SolutionGraphDeps) {
       ].includes(creativeErrorCode ?? "");
     let result: ClassifyIntentResult;
     if (blueprintConfirmation !== null || isImplementationRetry || isCreativeCompilationRetry) {
-      // This exact phrase is emitted by our own UI after a persisted
-      // implementation failure. Route it deterministically so an old approved
-      // plan/build checkpoint cannot hijack the retry and no classifier call
-      // adds latency or cost.
+      // 持久化实现失败后，我们自己的 UI 会发出这一确切短语。对其进行确定性路由，防止旧的已批准计划/构建检查点劫持重试，同时避免分类器调用增加延迟或成本。
       result = { intent: "CONFIRM_DESIGN", requestedDomains: ["kingclient"] };
     } else {
       const rawResult: unknown = await deps.modelPort.classifyIntent({
@@ -114,6 +103,15 @@ export function createClassifyIntentNode(deps: SolutionGraphDeps) {
       result = parsed.data;
     }
 
+    // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+    if (state.runMode === "discuss" && result.intent !== "QUESTION") {
+      await deps.workspaceQuery.appendMessage({
+        tenantId: state.tenantId, conversationId: state.conversationId, role: "assistant",
+        content: result.reply ?? "已记录你的需求。当前是讨论模式，不会生成或修改工程；切换到规划模式可生成方案，切换到生成修改模式后可确认并构建。",
+      });
+      return { intent: "QUESTION", stage: state.stage, pendingRequirements: undefined, lastErrorCode: undefined };
+    }
+    // end
     // preview-review 阶段：对看预览后的反馈做关键词兜底分档（见上面词表）。
     // 误判防护：确认词只在短消息（≤20 字符）命中时生效，避免
     // "好的，把按钮再放大一点"这类含确认前缀的修改被终结为落地；
@@ -188,12 +186,12 @@ export function createClassifyIntentNode(deps: SolutionGraphDeps) {
         role: "assistant",
         content: reply,
       });
-      // Explicitly clear the pendingRequirements channel and any stale error
-      // code: a previous unsupported turn must never gate a later supported
-      // turn (see C1), and a plain question resets the error surface.
+      // 显式清空 pendingRequirements 通道和所有陈旧错误代码：先前不受支持的轮次绝不能阻碍后续受支持的轮次（见 C1），普通问题则会重置错误状态。
       return {
         intent: result.intent,
-        stage: "idle",
+        // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+        stage: state.runMode === "discuss" || state.runMode === "plan" ? state.stage : "idle",
+        // end
         pendingRequirements: undefined,
         lastErrorCode: undefined,
       };
@@ -219,10 +217,7 @@ export function createClassifyIntentNode(deps: SolutionGraphDeps) {
           lastErrorCode: undefined,
         };
       }
-      // The model needs more information before it can pick a route. The
-      // structured question is carried in state for the clarify node, which
-      // persists it as an assistant message and returns the graph to idle.
-      // pendingRequirements is cleared so this turn routes on its own signal.
+      // 模型需要更多信息才能选择路由。结构化问题会保存在状态中并传递给 clarify 节点；该节点将问题持久化为助手消息，然后让图返回 idle。清空 pendingRequirements，使本轮依据自身信号进行路由。
       return {
         intent: result.intent,
         clarifyingQuestion: result.clarifyingQuestion,
@@ -243,9 +238,7 @@ export function createClassifyIntentNode(deps: SolutionGraphDeps) {
     }
 
     // NEW_REQUIREMENT / MODIFY_REQUIREMENT / CONFIRM_PLAN / CANCEL_PLAN / BUILD
-    // Clear only the pendingRequirements channel so this turn is routed on its
-    // own signal (see C1). lastErrorCode is left untouched here: load-context
-    // may have just set BUILD_FAILED (planning) and the plan node must see it.
+    // 仅清除pendingRequirements通道，这样这个轮次会根据自己的信号路由(见C1)。lastErrorCode在这里是保留的：加载上下文可能刚刚设置了BUILD_FAILED(规划)并且计划节点必须看到它。
     return {
       intent: result.intent,
       pendingRequirements: undefined,

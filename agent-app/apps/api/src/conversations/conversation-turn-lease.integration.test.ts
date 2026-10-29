@@ -1,3 +1,4 @@
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
 process.env.DATABASE_URL =
   process.env.TEST_DATABASE_URL ??
   "postgresql://postgres@127.0.0.1:5432/kf_agent_test_agent_next";
@@ -17,8 +18,12 @@ import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
 import { Logger } from "@nestjs/common";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { ConversationController } from "./conversation.controller.js";
-import { ConversationService } from "./conversation.service.js";
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+import { LegacyConversationController as ConversationController } from "../../test-support/legacy-conversation-controller.js";
+// end
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+import { LegacyConversationDriver as ConversationService } from "../../test-support/legacy-conversation-driver.js";
+// end
 import {
   ConversationTurnBusyError,
   PostgresConversationTurnLeaseManager,
@@ -695,3 +700,4 @@ async function acquireEventually(
     }
   }
 }
+// end

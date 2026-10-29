@@ -16,7 +16,7 @@ const RankedCandidateSchema = z.object({
 export const RegionCapabilityCandidatesSchema = z.object({
   pageId: blueprintStableId,
   regionId: blueprintStableId,
-  controls: z.array(RankedCandidateSchema).min(3).max(5),
+  controls: z.array(RankedCandidateSchema).min(1).max(5),
   layouts: z.array(RankedCandidateSchema).min(1).max(3),
   recipes: z.array(RankedCandidateSchema).min(1).max(3),
 }).strict();

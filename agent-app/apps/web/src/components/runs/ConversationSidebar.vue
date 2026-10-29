@@ -1,20 +1,29 @@
 <!-- modified by jinlong.feng at 2026-10-20 Agent工作台迭代 -->
 <script setup lang="ts">
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
 import { computed, ref } from "vue";
 
-import type { SidebarConversation } from "./types.js";
+import type { SidebarConversation, ConversationState } from "./types.js";
 
 const props = withDefaults(defineProps<{
   workspaceName: string;
   conversations: SidebarConversation[];
   activeId?: string;
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
   archivedCount?: number;
+  more?: boolean;
+  paging?: boolean;
+  showingArchive?: boolean;
+// end
 }>(), { archivedCount: 0 });
 
 const emit = defineEmits<{
   select: [id: string];
   create: [];
+// modified by jinlong.feng at 2026-10-27 Agent工作台迭代
   manageArchive: [];
+  loadMore: [];
+// end
 }>();
 
 const query = ref("");
@@ -39,17 +48,19 @@ const stateText = (item: SidebarConversation): string => {
     case "archived": return "归档";
   }
 };
+// end
 </script>
 
 <template>
+<!-- modified by jinlong.feng at 2026-10-27 Agent工作台迭代 -->
   <div class="side">
-    <div class="ws-switch">{{ workspaceName }}<span class="chev" aria-hidden="true">▾</span></div>
+    <div class="ws-switch">💧 {{ workspaceName }}<span class="chev" aria-hidden="true">▾</span></div>
 
     <button class="new-conv" type="button" @click="emit('create')">✦ 新会话</button>
 
     <label class="search">
       <span aria-hidden="true">🔍</span>
-      <input v-model="query" type="search" placeholder="搜索对话" aria-label="搜索对话" />
+      <input v-model="query" type="search" placeholder="搜索已加载对话" aria-label="搜索对话" />
     </label>
 
     <div class="conv-scroll">
@@ -69,7 +80,7 @@ const stateText = (item: SidebarConversation): string => {
         </span>
         <span class="conv-sub">
           <span v-if="item.state === 'running'" class="spinner" aria-hidden="true" />
-          <span v-else class="badge-dot" :class="item.state" aria-hidden="true" />
+          <span v-else class="badge-dot" :class="{ green: item.state === 'done' }" aria-hidden="true" />
           {{ stateText(item) }}
         </span>
       </button>
@@ -89,151 +100,19 @@ const stateText = (item: SidebarConversation): string => {
         </button>
       </template>
 
+      <!-- modified by jinlong.feng at 2026-10-27 Agent工作台迭代 -->
+      <button v-if="more" type="button" class="link" :disabled="paging" @click="emit('loadMore')">{{ paging ? '正在加载…' : '加载更多会话' }}</button>
+      <!-- end -->
       <p v-if="visible.length === 0" class="empty">没有匹配的对话</p>
     </div>
 
     <div class="side-foot">
-      <button type="button" class="link" @click="emit('manageArchive')">📥 归档管理</button>
+      <button type="button" class="link" @click="emit('manageArchive')">{{ showingArchive ? '返回活跃会话' : '📥 归档管理' }}</button>
       <span>{{ conversations.length }} 个会话</span>
     </div>
   </div>
+<!-- end -->
 </template>
 
-<style scoped>
-.side { display: flex; flex-direction: column; height: 100%; padding: 10px 10px 0; gap: 8px; }
 
-.ws-switch {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 8px;
-  font-size: 13px;
-  font-weight: 600;
-  border-radius: var(--radius-button);
-  color: var(--color-text);
-}
-
-.chev { color: var(--color-text-secondary); font-size: 11px; }
-
-.new-conv {
-  padding: 8px 10px;
-  border-radius: var(--radius-button);
-  border: 1px solid var(--color-border);
-  background: var(--color-surface);
-  color: var(--color-accent);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  box-shadow: var(--shadow-card);
-}
-
-.new-conv:active { transform: scale(0.97); }
-
-.search {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  border-radius: var(--radius-button);
-  background: var(--fill-quaternary);
-  color: var(--color-text-secondary);
-  font-size: 12px;
-}
-
-.search input {
-  border: 0;
-  background: none;
-  outline: none;
-  font: inherit;
-  color: var(--color-text);
-  width: 100%;
-}
-
-.conv-scroll { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
-
-.side-label {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--color-text-secondary);
-  padding: 8px 8px 4px;
-  letter-spacing: 0.02em;
-}
-
-.conv {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px;
-  border: 0;
-  border-radius: var(--radius-button);
-  background: none;
-  text-align: left;
-  cursor: pointer;
-  color: inherit;
-}
-
-.conv:hover { background: var(--fill-quaternary); }
-.conv.active { background: var(--fill-tertiary); }
-.conv.archived { opacity: 0.72; }
-
-.conv-top { display: flex; align-items: center; gap: 6px; }
-.conv-title { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.unread {
-  margin-left: auto;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  border-radius: 8px;
-  background: var(--color-accent);
-  color: #fff;
-  font-size: 10px;
-  font-weight: 700;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.conv-sub {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  color: var(--color-text-secondary);
-}
-
-.badge-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--fill-tertiary); flex: none; }
-.badge-dot.queued { background: var(--color-text-secondary); }
-.badge-dot.done { background: var(--color-success); }
-
-.spinner {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  border: 1.5px solid var(--fill-tertiary);
-  border-top-color: var(--color-accent);
-  animation: spin 900ms linear infinite;
-  flex: none;
-}
-
-.empty { padding: 12px 8px; font-size: 12px; color: var(--color-text-secondary); }
-
-.side-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px;
-  border-top: 1px solid var(--color-border);
-  font-size: 11px;
-  color: var(--color-text-secondary);
-}
-
-.link { border: 0; background: none; color: var(--color-accent); font-size: 11px; cursor: pointer; padding: 0; }
-
-@keyframes spin { to { transform: rotate(360deg); } }
-
-@media (prefers-reduced-motion: reduce) {
-  .spinner { animation: none; }
-}
-</style>
 <!-- end -->

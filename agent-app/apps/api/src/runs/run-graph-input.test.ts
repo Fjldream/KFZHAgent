@@ -43,4 +43,12 @@ it("keeps an empty message list for deterministic actions", () => {
   expect(input.recentMessages).toEqual([]);
   expect(input).toMatchObject({ runId: "run-1" });
 });
+// modified by jinlong.feng at 2026-10-22 Agent工作台迭代
+it("explicitly clears prior visual planning state when starting an ordinary Run", () => {
+  const previous = { acceptedVisualPlanningInput: { privateReview: true }, visualSemanticPlan: { old: true }, visualPlanConfirmationHash: "old", visualBlueprintConfirmationHash: "old" };
+  expect({ ...previous, ...buildRunGraphInput(source(), "继续文字规划") }).toMatchObject({
+    acceptedVisualPlanningInput: null, visualSemanticPlan: null, visualPlanConfirmationHash: null, visualBlueprintConfirmationHash: null,
+  });
+});
+// end
 // end

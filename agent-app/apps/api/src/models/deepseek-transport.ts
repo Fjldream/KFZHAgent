@@ -25,6 +25,9 @@ export type JsonModelCall = {
   /** 仅 thinking 开启时生效；保留给老入口的既有参数。 */
   reasoningEffort?: "low" | "high" | "max";
   signal?: AbortSignal;
+  // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+  maxResponseBytes?: number;
+  // end
 };
 
 /** 新入口（gateway）在此基础上附带记账作用域。 */
@@ -84,6 +87,7 @@ type DeepSeekPayload = {
  * 只在 finally 里清 timer；headers 到手就清 timer 会让慢 body 永久挂住。
  * 外部取消与自身超时必须区分：前者 MODEL_CANCELLED，后者 MODEL_TIMEOUT。
  */
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
 export async function requestDeepSeekJson(
   call: JsonModelCall,
   fetchImpl: typeof fetch,
@@ -99,17 +103,9 @@ export async function requestDeepSeekJson(
     ? AbortSignal.any([call.signal, timeoutController.signal])
     : timeoutController.signal;
 
-  const body = {
-    model: call.route.model,
-    messages: call.messages,
-    response_format: { type: "json_object" },
-    max_tokens: call.maxOutputTokens,
-    ...(call.route.supportsThinking ? { thinking: { type: call.thinking ? "enabled" : "disabled" } } : {}),
-    ...(call.route.supportsThinking && call.thinking && call.reasoningEffort !== undefined
-      ? { reasoning_effort: call.reasoningEffort }
-      : {}),
-    ...(call.temperature !== undefined ? { temperature: call.temperature } : {}),
-  };
+  // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+  const body = serializeJsonModelBody(call);
+  // end
 
   try {
     const response = await fetchImpl(
@@ -120,12 +116,18 @@ export async function requestDeepSeekJson(
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify(body),
+        body,
         signal,
       },
     );
 
     if (!response.ok) {
+      // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+      if (call.maxResponseBytes !== undefined) {
+        await response.body?.cancel().catch(() => undefined);
+        throw new ModelTransportError(statusCode(response.status), `model http ${response.status}`);
+      }
+      // end
       // 错误体可能含内部细节，只保留前 200 字，且绝不包含 apiKey。
       const text = typeof response.text === "function"
         ? await response.text().catch(() => "")
@@ -136,7 +138,11 @@ export async function requestDeepSeekJson(
       );
     }
 
-    const payload = (await response.json()) as DeepSeekPayload;
+    // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+    const payload = (call.maxResponseBytes === undefined
+      ? await response.json()
+      : await readBoundedJson(response, call.maxResponseBytes)) as DeepSeekPayload;
+    // end
     const choice = payload.choices?.[0];
     const content = choice?.message?.content;
     const finishReason = typeof choice?.finish_reason === "string" ? choice.finish_reason : null;
@@ -160,18 +166,52 @@ export async function requestDeepSeekJson(
   } catch (error) {
     if (error instanceof ModelTransportError) throw error;
     if (isAbortError(error) || timeoutController.signal.aborted || call.signal?.aborted === true) {
-      // 外部取消优先：调用方主动 abort 不能被当成 provider 超时。
-      if (call.signal?.aborted === true) {
-        throw new ModelTransportError(MODEL_CANCELLED, "model request cancelled");
-      }
+      if (call.signal?.aborted === true) throw new ModelTransportError(MODEL_CANCELLED, "model request cancelled");
       throw new ModelTransportError(MODEL_TIMEOUT, "model request exceeded deadline");
     }
-    throw new ModelTransportError(
-      MODEL_TRANSIENT,
-      `model transport failed: ${error instanceof Error ? error.name : "unknown"}`,
-    );
+    throw new ModelTransportError(MODEL_TRANSIENT, `model transport failed: ${error instanceof Error ? error.name : "unknown"}`);
   } finally {
     clearTimeout(timer);
   }
 }
+// end
+
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+/** Shared wire representation: admission measures the exact body sent by the transport. */
+export function serializeJsonModelBody(call: JsonModelCall): string {
+  return JSON.stringify({
+    model: call.route.model,
+    messages: call.messages,
+    response_format: { type: "json_object" },
+    max_tokens: call.maxOutputTokens,
+    ...(call.route.supportsThinking ? { thinking: { type: call.thinking ? "enabled" : "disabled" } } : {}),
+    ...(call.route.supportsThinking && call.thinking && call.reasoningEffort !== undefined
+      ? { reasoning_effort: call.reasoningEffort }
+      : {}),
+    ...(call.temperature !== undefined ? { temperature: call.temperature } : {}),
+  });
+}
+
+async function readBoundedJson(response: Response, limit: number): Promise<unknown> {
+  if (!Number.isSafeInteger(limit) || limit < 1 || !response.body) throw new ModelTransportError(MODEL_PROTOCOL_ERROR, "model response unavailable");
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      const bytes: unknown = next.value;
+      if (!(bytes instanceof Uint8Array)) throw new ModelTransportError(MODEL_PROTOCOL_ERROR, "model response invalid");
+      size += bytes.byteLength;
+      if (size > limit) throw new ModelTransportError(MODEL_PROTOCOL_ERROR, "model response too large");
+      chunks.push(bytes);
+    }
+    return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+}
+// end
 // end

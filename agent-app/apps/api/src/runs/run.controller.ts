@@ -1,16 +1,15 @@
-// modified by jinlong.feng at 2026-10-20 Agent工作台迭代
+// modified by jinlong.feng at 2026-10-21 Agent工作台迭代
 import { BadRequestException, Body, Controller, NotFoundException, Get, HttpCode, HttpStatus, Param, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
 import type { Response } from "express";
 import { MutationOriginGuard } from "../auth/mutation-origin.guard.js";
+import { RunControlService } from "./run-control.service.js";
 import { TenantGuard, type AuthenticatedRequest } from "../auth/tenant.guard.js";
-import { isTerminal } from "./run-state.js";
-import { PrismaRunQueries, serializeRunEvent } from "./run-query.service.js";
+import { RunEventStreamService } from "./run-event-stream.service.js";
 // RunService 必须值导入：`import type` 会擦除运行时引用，Nest 解析不到 provider token
 import { RunService, type StartRunBody } from "./run.service.js";
-
-const STREAM_WINDOW_MS = 30_000;
-const HEARTBEAT_MS = 15_000;
-const POLL_MS = 1_000;
+// modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+import { Header } from "@nestjs/common";
+// end
 
 const principalOf = (req: AuthenticatedRequest): { tenantId: string; userId: string } => {
   const principal = req.principal as { tenantId?: string; userId?: string };
@@ -35,7 +34,8 @@ const intParam = (raw: string | undefined, fallback: number, name: string): numb
 export class RunController {
   constructor(
     private readonly runs: RunService,
-    private readonly queries: PrismaRunQueries,
+    private readonly eventStreams: RunEventStreamService,
+    private readonly control?: RunControlService,
   ) {}
 
   @Post("conversations/:conversationId/runs")
@@ -54,6 +54,43 @@ export class RunController {
   async snapshot(@Req() req: AuthenticatedRequest, @Param("runId") runId: string) {
     return this.runs.snapshot(principalOf(req), runId);
   }
+  // modified by jinlong.feng at 2026-10-23 Agent工作台迭代
+  @Get("runs/:runId/visual-review")
+  @Header("Cache-Control", "private, no-store")
+  @Header("Vary", "Cookie")
+  async visualReview(@Req() req: AuthenticatedRequest, @Param("runId") runId: string) {
+    return this.runs.visualReview(principalOf(req), runId);
+  }
+  @Post("runs/:runId/visual-review/revisions")
+  @UseGuards(MutationOriginGuard)
+  @HttpCode(HttpStatus.OK)
+  @Header("Cache-Control", "private, no-store")
+  @Header("Vary", "Cookie")
+  async reviseVisualReview(@Req() req: AuthenticatedRequest, @Param("runId") runId: string, @Body() body: unknown) {
+    return this.runs.reviseVisualReview(principalOf(req), runId, body);
+  }
+  // end
+
+  @Post("runs/:runId/cancel")
+  @UseGuards(MutationOriginGuard)
+  @HttpCode(HttpStatus.OK)
+  async cancel(@Req() req: AuthenticatedRequest, @Param("runId") runId: string) {
+    if (!this.control) throw new Error("RUN_CONTROL_NOT_CONFIGURED");
+    return this.control.cancel(req.principal.tenantId, runId, req.principal.userId);
+  }
+
+  @Post("runs/:runId/retry")
+  @UseGuards(MutationOriginGuard)
+  @HttpCode(HttpStatus.ACCEPTED)
+  async retry(@Req() req: AuthenticatedRequest, @Param("runId") runId: string, @Body() body: { clientRequestId?: unknown }) {
+    if (!this.control) throw new Error("RUN_CONTROL_NOT_CONFIGURED");
+    return this.control.retry(req.principal.tenantId, runId, req.principal.userId, body?.clientRequestId);
+  }
+
+  @Get("conversations/:conversationId/runs/latest")
+  async latest(@Req() req: AuthenticatedRequest, @Param("conversationId") conversationId: string) {
+    return this.runs.latest(principalOf(req), conversationId);
+  }
 
   // modified by jinlong.feng at 2026-10-20 Agent工作台迭代
   @Get("runs/:runId/usage")
@@ -71,50 +108,9 @@ export class RunController {
     @Query("after") afterRaw?: string,
     @Query("limit") limitRaw?: string,
   ): Promise<void> {
-    const principal = principalOf(req);
     const after = intParam(afterRaw, 0, "CURSOR");
     const limit = intParam(limitRaw, 100, "LIMIT");
-
-    // 先取一页：游标非法/跨租户在这里就以 400/404 结束，不会写出半个 SSE 流。
-    let cursor = after;
-    try {
-      const first = await this.runs.events(principal, runId, cursor, limit);
-      res.status(200);
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache, no-transform");
-      res.setHeader("Connection", "keep-alive");
-      res.setHeader("X-Accel-Buffering", "no");
-      for (const event of first) {
-        res.write(serializeRunEvent(event));
-        cursor = event.seq;
-      }
-    } catch (error) {
-      const status = error instanceof BadRequestException ? 404 : 500;
-      res.status(status).json({ message: error instanceof Error ? error.message : "RUN_EVENTS_FAILED" });
-      return;
-    }
-
-    const startedAt = Date.now();
-    let lastWriteAt = Date.now();
-    while (!res.writableEnded && Date.now() - startedAt < STREAM_WINDOW_MS) {
-      const snapshot = await this.queries.snapshot(principal.tenantId, runId).catch(() => null);
-      if (snapshot === null) break;
-      if (cursor >= snapshot.lastSeq && isTerminal(snapshot.status)) break;
-
-      const batch = await this.runs.events(principal, runId, cursor, limit).catch(() => []);
-      for (const event of batch) {
-        res.write(serializeRunEvent(event));
-        cursor = event.seq;
-        lastWriteAt = Date.now();
-      }
-
-      if (Date.now() - lastWriteAt >= HEARTBEAT_MS) {
-        res.write(": keep-alive\n\n");
-        lastWriteAt = Date.now();
-      }
-      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
-    }
-    res.end();
+    return this.eventStreams.stream(req, res, runId, after, limit);
   }
 }
 // end

@@ -10,6 +10,14 @@ afterEach(() => {
 });
 
 describe("API JSON response contracts", () => {
+  // modified by jinlong.feng at 2026-10-21 Agent工作台迭代
+  it("reads workbench permissions with the session and bypasses cached grants", async () => {
+    const transport = vi.fn(async () => new Response(JSON.stringify({ schemaVersion: 1, flags: { agentRunsV2: false, agentWorkbenchV2: false } })));
+    vi.stubGlobal("fetch", transport);
+    expect(await api.getWorkbenchConfig()).toMatchObject({ flags: { agentRunsV2: false } });
+    expect(transport).toHaveBeenCalledWith("/api/v2/workbench-config", expect.objectContaining({ credentials: "include", cache: "no-store" }));
+  });
+  // end
   it("treats an empty successful delivery response as no persisted delivery", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(emptyOk()));
 
