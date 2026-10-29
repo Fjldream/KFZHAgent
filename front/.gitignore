@@ -2,5 +2,7 @@ node_modules/
 build/
 .recovery-staging/
 .env.*
-!.env
+# modified by jinlong.feng at 2026-10-29 KF源码精简入库
+.env
+# end
 !.env.example
