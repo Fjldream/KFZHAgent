@@ -108,8 +108,7 @@ export function createDesignPlanNode(deps: SolutionGraphDeps) {
       ...(acceptedVisual === undefined ? {} : { visualReference: acceptedVisual.reference, currentRevisionId: state.currentRevisionId }),
       // end
       ...(modulePlanningCatalog === undefined ? {} : { modulePlanningCatalog }),
-      // editableEntities may not be materialised on state yet; the context
-      // field stays optional so a future wiring can feed it through.
+      // editableEntities 在状态尚未被材料化时可能不被材料化；上下文字段保持可选，因此未来可以将它通过喂食。
       editableEntities,
     };
     let rawPlan: unknown;
@@ -170,8 +169,7 @@ export function createDesignPlanNode(deps: SolutionGraphDeps) {
 
     if (!parsed.success || rejectionReasons.length > 0) {
       if (!revising || state.designPlan === undefined) {
-        // I1: never persist or hash garbage from the model. A first blueprint
-        // gets one repair attempt, then safely returns without side effects.
+        // 1: 从模型中永远不要持久化或哈希垃圾。一个初始蓝图只进行一次修复尝试，然后安全地返回，不会产生副作用。
         return { stage: "idle", lastErrorCode: "INVALID_MODEL_OUTPUT" };
       }
       await deps.workspaceQuery.appendMessage({
@@ -248,7 +246,7 @@ export function createDesignPlanNode(deps: SolutionGraphDeps) {
   // end
 }
 
-/** The latest user turn, used as the requirement text for the model. */
+/** 最新用户回合，作为模型的需要文本。 */
 function latestUserMessage(state: AgentGraphStateValue): string | undefined {
   for (let i = state.recentMessages.length - 1; i >= 0; i -= 1) {
     const message = state.recentMessages[i];

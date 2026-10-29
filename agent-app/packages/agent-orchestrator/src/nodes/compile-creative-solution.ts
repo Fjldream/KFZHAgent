@@ -19,7 +19,7 @@ const MAX_DIAGNOSTICS = 10;
 const MAX_DIAGNOSTIC_DETAIL = 500;
 const MAX_MESSAGE_DIAGNOSTICS = 3;
 
-/** Compiles a confirmed creative solution and persists its complete signed server envelope. */
+/** 编译一个确认的创意解决方案并持久化其完整的签名服务器包。 */
 export function createCompileCreativeSolutionNode(deps: SolutionGraphDeps) {
   const node = async (state: AgentGraphStateValue): Promise<AgentGraphUpdate> => {
     // modified by jinlong.feng at 2026-10-22 Agent工作台迭代
@@ -57,9 +57,7 @@ export function createCompileCreativeSolutionNode(deps: SolutionGraphDeps) {
       || parsedCandidates.data.blueprintHash !== canonicalServerHash(parsedBlueprint.data)
       || parsedSemanticPlan.data.blueprintHash !== canonicalServerHash(parsedBlueprint.data)
       || parsedSemanticPlan.data.candidateBundleHash !== canonicalServerHash(parsedCandidates.data)) {
-      // A torn/stale confirmed version is rejected without any external
-      // effect: no customer-message persistence, compiler persistence, or
-      // enqueue authorization may occur from mismatched confirmation state.
+      // 一个撕裂/陈旧确认版本在没有外部影响的情况下被拒绝：没有客户消息持久化、编译器持久化或队列授权可能从不匹配的确认状态中发生。
       return {
         stage: "idle",
         lastErrorCode: "CREATIVE_SOLUTION_INPUT_INVALID",

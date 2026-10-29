@@ -21,7 +21,7 @@ KF 快照约 22.4 MiB，保留原目录层级；依赖、第三方大资源库�
 克隆当前交接版本：
 
 ```sh
-git clone --branch codex/agent-usable-v1-20261029 --single-branch https://github.com/Fjldream/KFZHAgent.git
+git clone --branch main --single-branch https://github.com/Fjldream/KFZHAgent.git
 cd KFZHAgent
 node scripts/export-kf-reference.mjs --verify
 ```
