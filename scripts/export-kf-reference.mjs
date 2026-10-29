@@ -3,6 +3,9 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+// modified by jinlong.feng at 2026-10-29 KF客户端完整入库与启动审计
+import { vendorRoots, includeVendorDirectory, includeVendorFile, isVendorReference, vendorSummary, vendorPolicy } from './kf-vendor-policy.mjs';
+// end
 
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 const outputRoot = path.join(repositoryRoot, 'kf-reference');
@@ -26,7 +29,10 @@ const manifestJsonNames = new Set([
 const redactedValue = 'KF_REFERENCE_REDACTED';
 const credentialName = /^(?:password|passwd|pwd|secret|api_?key|accessKeySecret|privateKey|client_?secret|session_?secret|secret_?key)$/i;
 const tokenPattern = /\b(?:sk-[a-zA-Z0-9_-]{24,}|(?:ghp_|github_pat_)[a-zA-Z0-9_]{25,})\b/;
-const privateKeyPattern = /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/;
+// modified by jinlong.feng at 2026-10-29 KF客户端完整入库与启动审计
+// A PEM format delimiter in a crypto library is not embedded private material.
+const privateKeyPattern = /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----(?:\s|\\[rn])+[A-Za-z0-9+/=]{32,}/;
+// end
 const credentialUrl = /(?:https?|postgres(?:ql)?|mysql|mongodb|redis):\/\/[^\s/:"']+:[^\s/@"']+@/;
 const digest = data => createHash('sha256').update(data).digest('hex');
 
@@ -56,6 +62,72 @@ async function walk(directory, relativePath) {
   }
   return files;
 }
+
+// modified by jinlong.feng at 2026-10-29 KF客户端完整入库与启动审计
+async function walkVendors(directory, relativePath) {
+  const files = [];
+  for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name, 'en'))) {
+    const relative = `${relativePath}/${entry.name}`;
+    if (entry.isSymbolicLink()) continue;
+    if (entry.isDirectory() && includeVendorDirectory(relative)) files.push(...await walkVendors(path.join(directory, entry.name), relative));
+    else if (entry.isFile() && includeVendorFile(relative)) files.push(relative);
+  }
+  return files;
+}
+
+function assertReferenceContent(relativePath, content) {
+  const text = content.toString('utf8');
+  if (tokenPattern.test(text) || privateKeyPattern.test(text) || credentialUrl.test(text)) throw new Error(`SENSITIVE_CONTENT_REQUIRES_REVIEW:${relativePath}`);
+}
+
+async function vendorRecords() {
+  const files = [];
+  for (const root of vendorRoots) files.push(...await walkVendors(path.join(repositoryRoot, root), root));
+  const prepared = [];
+  for (const relativePath of files.sort()) {
+    const content = await readFile(path.join(repositoryRoot, relativePath));
+    assertReferenceContent(relativePath, content);
+    prepared.push({ relativePath, content, record: {
+      path: relativePath, bytes: content.length, sha256: digest(content),
+      originalSha256: digest(content), redactions: 0, kind: 'runtime-dependency',
+    } });
+  }
+  return prepared;
+}
+
+async function appendVendors() {
+  await verifyReference();
+  const manifest = JSON.parse(await readFile(path.join(outputRoot, 'manifest.json'), 'utf8'));
+  const existing = new Map(manifest.files.map(record => [record.path, record]));
+  const prepared = await vendorRecords();
+  const additions = [];
+  for (const item of prepared) {
+    const previous = existing.get(item.relativePath);
+    if (previous) {
+      if (previous.sha256 !== item.record.sha256) throw new Error(`VENDOR_SOURCE_CHANGED:${item.relativePath}`);
+    } else {
+      try { await stat(path.join(outputRoot, item.relativePath)); throw new Error(`VENDOR_TARGET_EXISTS:${item.relativePath}`); }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+      additions.push(item);
+    }
+  }
+  for (const item of additions) {
+    const target = path.join(outputRoot, item.relativePath);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, item.content, { flag: 'wx' });
+  }
+  const records = [...manifest.files, ...additions.map(item => item.record)].sort((a, b) => a.path.localeCompare(b.path, 'en'));
+  const updated = {
+    ...manifest, fileCount: records.length, totalBytes: records.reduce((sum, row) => sum + row.bytes, 0),
+    ...vendorSummary(records), policy: {
+      ...manifest.policy, excludedDirectoriesScope: 'business-source traversal only; runtimeDependencies uses its own policy',
+      runtimeDependencies: vendorPolicy(),
+    }, files: records,
+  };
+  await writeFile(path.join(outputRoot, 'manifest.json'), JSON.stringify(updated, null, 2) + '\n');
+  console.log(JSON.stringify({ addedVendorFiles: additions.length, ...vendorSummary(records), files: records.length, bytes: updated.totalBytes }));
+}
+// end
 
 function localizationFile(relativePath) {
   return /\/(?:Global\/kmui_(?:en|ko|zh)_resource\.js|views\/lang\/)/.test(relativePath);
@@ -141,9 +213,13 @@ async function exportReference() {
   };
   await writeFile(path.join(outputRoot, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n', { flag: 'wx' });
   console.log(JSON.stringify({ files: manifest.fileCount, bytes: manifest.totalBytes, redactedFiles: manifest.redactedFiles, redactedLiterals: manifest.redactedLiterals }));
+  // modified by jinlong.feng at 2026-10-29 KF客户端完整入库与启动审计
+  await appendVendors();
+  // end
 }
 
-async function verifyReference() {
+// modified by jinlong.feng at 2026-10-29 KF客户端完整入库与启动审计
+export async function verifyReference() {
   const manifest = JSON.parse(await readFile(path.join(outputRoot, 'manifest.json'), 'utf8'));
   const paths = new Set();
   for (const record of manifest.files) {
@@ -151,17 +227,23 @@ async function verifyReference() {
     paths.add(record.path);
     const content = await readFile(path.join(outputRoot, record.path));
     if (content.length !== record.bytes || digest(content) !== record.sha256) throw new Error(`SNAPSHOT_MISMATCH:${record.path}`);
-    const text = content.toString('utf8');
-    if (tokenPattern.test(text) || privateKeyPattern.test(text) || credentialUrl.test(text)) throw new Error(`SENSITIVE_CONTENT_REQUIRES_REVIEW:${record.path}`);
+    // modified by jinlong.feng at 2026-10-29 KF客户端完整入库与启动审计
+    if (isVendorReference(record.path) && (!includeVendorFile(record.path) || record.originalSha256 !== record.sha256 || record.redactions !== 0)) throw new Error(`VENDOR_POLICY_MISMATCH:${record.path}`);
+    assertReferenceContent(record.path, content);
+    // end
   }
   if (paths.size !== manifest.fileCount) throw new Error('MANIFEST_COUNT_MISMATCH');
   console.log(JSON.stringify({ verifiedFiles: paths.size, bytes: manifest.totalBytes, redactedFiles: manifest.redactedFiles }));
 }
+// end
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const operation = process.argv[2];
   if (operation === '--export') await exportReference();
   else if (operation === '--verify') await verifyReference();
-  else throw new Error('Usage: node scripts/export-kf-reference.mjs --export|--verify');
+  // modified by jinlong.feng at 2026-10-29 KF客户端完整入库与启动审计
+  else if (operation === '--append-vendors') await appendVendors();
+  else throw new Error('Usage: node scripts/export-kf-reference.mjs --export|--verify|--append-vendors');
+  // end
 }
 // end

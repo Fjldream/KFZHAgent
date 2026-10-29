@@ -1,0 +1,219 @@
+{
+  "date": "2026-10-29",
+  "purpose": "Read-only matching-source module search requested by user",
+  "installedSourceComparison": {
+    "host": "192.168.3.32",
+    "moduleCandidates": [],
+    "clients": [
+      {
+        "root": "/opt/KingFusion3.6_Center/kingdevopscenter/kingclient/exe",
+        "exists": true,
+        "files": [
+          {
+            "file": "index.js",
+            "bytes": 95,
+            "sha256": "9f54dafe4d44a33c5b378d171bcc264108ca082951a1e1417b73cb23870a593e",
+            "localOriginalPresent": true,
+            "matchesLocalOriginal": true
+          },
+          {
+            "file": "app.js",
+            "bytes": 2048,
+            "sha256": "0db0022649593a8d6b837be6f247dae87a7e4c45363285285e5dad00c57b0715",
+            "localOriginalPresent": true,
+            "matchesLocalOriginal": true
+          },
+          {
+            "file": "package.json",
+            "bytes": 284,
+            "sha256": "2b92f42dc5128ce7612e634be391a984d80e080fd600ac39c6c49cd771709785",
+            "localOriginalPresent": true,
+            "matchesLocalOriginal": true
+          },
+          {
+            "file": "core/enums/index.js",
+            "bytes": 75,
+            "sha256": "82576ccf00174b9d372ae7603e0fae8ae9955f2d781849aba071a3950dd1585d",
+            "localOriginalPresent": true,
+            "matchesLocalOriginal": true
+          },
+          {
+            "file": "lib/services/projectPermissionManage/checkProjectPermission.js",
+            "bytes": 3751,
+            "sha256": "d64bcbe239e58b4568f9a982ddd33827b50ffb6459b36c26eecf21af84c33438",
+            "localOriginalPresent": true,
+            "matchesLocalOriginal": true
+          }
+        ],
+        "installedPackages": {
+          "better-sqlite3": {
+            "version": "12.2.0",
+            "engines": {
+              "node": "20.x || 22.x || 23.x || 24.x"
+            }
+          },
+          "sqlite3": {
+            "version": "5.1.6",
+            "engines": null
+          },
+          "express": {
+            "version": "4.21.2",
+            "engines": {
+              "node": ">= 0.10.0"
+            }
+          }
+        }
+      },
+      {
+        "root": "/opt/KingFusion3.6_Center/kingexedb/kingclient/exe",
+        "exists": true,
+        "files": [
+          {
+            "file": "index.js",
+            "bytes": 95,
+            "sha256": "9f54dafe4d44a33c5b378d171bcc264108ca082951a1e1417b73cb23870a593e",
+            "localOriginalPresent": true,
+            "matchesLocalOriginal": true
+          },
+          {
+            "file": "app.js",
+            "bytes": 4212,
+            "sha256": "0821ebcf8ebf9090356bb5f224fd3c6170cdb3fdaf83ea44e36ca681d32c5062",
+            "localOriginalPresent": true,
+            "matchesLocalOriginal": false
+          },
+          {
+            "file": "package.json",
+            "bytes": 284,
+            "sha256": "2b92f42dc5128ce7612e634be391a984d80e080fd600ac39c6c49cd771709785",
+            "localOriginalPresent": true,
+            "matchesLocalOriginal": true
+          },
+          {
+            "file": "core/enums/index.js",
+            "bytes": 75,
+            "sha256": "82576ccf00174b9d372ae7603e0fae8ae9955f2d781849aba071a3950dd1585d",
+            "localOriginalPresent": true,
+            "matchesLocalOriginal": true
+          },
+          {
+            "file": "lib/controllers/controller_user.js",
+            "bytes": 14429,
+            "sha256": "c0c53e7508613a4d6ad7b4f40fb5f6104ff097fa9cb19f5617285e43bfe137d5",
+            "localOriginalPresent": true,
+            "matchesLocalOriginal": false
+          }
+        ],
+        "installedPackages": {
+          "better-sqlite3": {
+            "version": "12.2.0",
+            "engines": {
+              "node": "20.x || 22.x || 23.x || 24.x"
+            }
+          },
+          "sqlite3": {
+            "version": "5.1.6",
+            "engines": null
+          },
+          "express": {
+            "version": "4.21.2",
+            "engines": {
+              "node": ">= 0.10.0"
+            }
+          }
+        }
+      },
+      {
+        "root": "/opt/KingFusion3.6_Node/kingexedb/kingclient/exe",
+        "exists": true,
+        "files": [
+          {
+            "file": "index.js",
+            "bytes": 95,
+            "sha256": "9f54dafe4d44a33c5b378d171bcc264108ca082951a1e1417b73cb23870a593e",
+            "localOriginalPresent": true,
+            "matchesLocalOriginal": true
+          },
+          {
+            "file": "app.js",
+            "bytes": 4212,
+            "sha256": "0821ebcf8ebf9090356bb5f224fd3c6170cdb3fdaf83ea44e36ca681d32c5062",
+            "localOriginalPresent": true,
+            "matchesLocalOriginal": false
+          },
+          {
+            "file": "package.json",
+            "bytes": 284,
+            "sha256": "2b92f42dc5128ce7612e634be391a984d80e080fd600ac39c6c49cd771709785",
+            "localOriginalPresent": true,
+            "matchesLocalOriginal": true
+          },
+          {
+            "file": "core/enums/index.js",
+            "bytes": 75,
+            "sha256": "82576ccf00174b9d372ae7603e0fae8ae9955f2d781849aba071a3950dd1585d",
+            "localOriginalPresent": true,
+            "matchesLocalOriginal": true
+          },
+          {
+            "file": "lib/controllers/controller_user.js",
+            "bytes": 14429,
+            "sha256": "c0c53e7508613a4d6ad7b4f40fb5f6104ff097fa9cb19f5617285e43bfe137d5",
+            "localOriginalPresent": true,
+            "matchesLocalOriginal": false
+          }
+        ],
+        "installedPackages": {
+          "better-sqlite3": {
+            "version": "12.2.0",
+            "engines": {
+              "node": "20.x || 22.x || 23.x || 24.x"
+            }
+          },
+          "sqlite3": {
+            "version": "5.1.6",
+            "engines": null
+          },
+          "express": {
+            "version": "4.21.2",
+            "engines": {
+              "node": ">= 0.10.0"
+            }
+          }
+        }
+      }
+    ],
+    "nodeVersionOnPath": null,
+    "readOnly": true
+  },
+  "installerFilenameListing": {
+    "archive": "/opt/KF/KingFusion3.6_sp4_linux_x86_64_KylinOS_svn5822_mini.zip",
+    "results": [
+      {
+        "package": "KingFusion3.6_sp4_linux_x86_64_KylinOS_svn5822_mini/KingFusion3.6_sp4_center_x86_64_linux_KylinOS/package/common.kf4z",
+        "listingExitCode": 0,
+        "listedEntries": 54454,
+        "matchingModulePaths": [],
+        "listingError": ""
+      },
+      {
+        "package": "KingFusion3.6_sp4_linux_x86_64_KylinOS_svn5822_mini/KingFusion3.6_sp4_center_x86_64_linux_KylinOS/package/kingdevopscenter.kf4z",
+        "listingExitCode": 0,
+        "listedEntries": 77793,
+        "matchingModulePaths": [
+          "kingdevopscenter/kingclient/exe/lib/services/projectPermissionManage/checkProjectPermission.js"
+        ],
+        "listingError": ""
+      }
+    ],
+    "method": "server-only archive filename listing from anonymous memory; no package bytes exported; no disk extraction",
+    "readOnlyProductFiles": true
+  },
+  "productServicesModified": false,
+  "archiveBodiesExported": false,
+  "sourceFilesCopiedToRepository": false,
+  "limitations": [
+    "Only filenames and selected source hashes were examined; a whole-service runtime acceptance was not performed",
+    "No matching missing module was found; installed runtime files with differing hashes were not substituted"
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "date": "2026-10-29",
+  "scope": "Installed KF client/common code and static-resource completion, plus read-only Linux/Docker startup audit",
+  "sourceFiles": 22794,
+  "snapshotBytes": 432540131,
+  "allSourceOriginalHashesUnchanged": true,
+  "allSnapshotHashesVerified": true,
+  "byteIdenticalFiles": 22762,
+  "redactedFiles": 32,
+  "byteIdenticalVendorFiles": 10185,
+  "restoredDisplayMaskFiles": [
+    "KingFusion3.6_Center/kingdevopscenter/kingclient/exe/public/javascripts/Common/Graphic/Link/trigger/km_inputlinkstring.js",
+    "KingFusion3.6_Center/kingexedb/kingclient/exe/public/javascripts/Common/Graphic/Link/trigger/km_inputlinkstring.js",
+    "KingFusion3.6_Node/kingexedb/kingclient/exe/public/javascripts/Common/Graphic/Link/trigger/km_inputlinkstring.js"
+  ],
+  "clientContentMissingAgainstDeclaredScope": 0,
+  "toolTestsPassed": 17,
+  "cleanSourceVerification": {
+    "clientCompletionIdempotent": true,
+    "freshClientCompletionMatchesCurrent": true,
+    "snapshotVerificationWithoutInstalledKfOrDependencies": true,
+    "verification": {
+      "verifiedFiles": 22794,
+      "bytes": 432540131,
+      "redactedFiles": 32
+    },
+    "kfIndependentStartupVerified": false
+  },
+  "manifestSha256": "a21056310aa1626b775c6c45f7b22427721e77d05fbde43b40055bebe4078947",
+  "startupAuditSha256": "4fdb1bc0b02e109d15550647f1d28fcefb6203c2fa0943eb42bdfaa4592a234a",
+  "toolSha256": {
+    "scripts/export-kf-reference.mjs": "7eb57a9c9b53a58a1e284f9036793d4458ce608a1719d2c095ef95705bb1126b",
+    "scripts/kf-vendor-policy.mjs": "9d9dd698af019486ce33f40d107fc639a26743dd7eadedb01303e2f88d066b0d",
+    "scripts/complete-kf-client-reference.mjs": "71d141fb038f39d4df576e73a86909a294327e6907a1e29cfd7e6c6c360fa219",
+    "scripts/audit-kf-client-startup.mjs": "13b1f7b2326ce84b1b036ee3a733d0e551dda7c1a448ab7592d1b5df9805f66a",
+    "scripts/export-kf-reference.test.mjs": "25f43ae262b9962a45ec4d3fee0a27418ccaeeafeb16606907bd20e33b34dff7",
+    "scripts/complete-kf-client-reference.test.mjs": "29de60008ee2784fb94628830045b3422a33d8f94b029820a9a4906618037a8a",
+    "scripts/audit-kf-client-startup.test.mjs": "b492aa4f3cccd8cf6d25470b4ef8f8a4a507eb8d60942c12bbb02448f1de3e3c"
+  },
+  "independentKfStartupVerified": false,
+  "dockerImageBuilt": false,
+  "licenseVerified": false,
+  "linuxLiteralRelativeImportCaseMismatches": 0,
+  "excludedMacosAppleDoubleMetadata": true,
+  "unguardedModuleLevelImportGaps": 1,
+  "entryPointReachabilityVerified": false,
+  "guardedOriginalImportGaps": 2,
+  "serverSourceCheckSha256": "acf51cf8fa6f584de7537241d7848a08397a9e76278c39c7f9c1f39cf32953f4"
+}
