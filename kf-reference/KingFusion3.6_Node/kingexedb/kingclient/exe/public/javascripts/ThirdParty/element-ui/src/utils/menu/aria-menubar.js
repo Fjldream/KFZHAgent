@@ -1,0 +1,1 @@
+import i from"./aria-menuitem";const o=function(e){this.domNode=e,this.init()};o.prototype.init=function(){let e=this.domNode.childNodes;[].filter.call(e,t=>t.nodeType===1).forEach(t=>{new i(t)})};export default o;

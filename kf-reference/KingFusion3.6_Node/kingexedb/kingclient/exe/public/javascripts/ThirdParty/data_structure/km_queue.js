@@ -1,0 +1,1 @@
+function KMQueue(){this.queue=[]}KMQueue.prototype.enqueue=function(e){this.queue.push(e)},KMQueue.prototype.dequeue=function(){return this.queue.shift()},KMQueue.prototype.peek=function(){return this.queue[0]},KMQueue.prototype.length=function(){return this.queue.length},KMQueue.prototype.print=function(){console.log(this.queue.join(" "))};

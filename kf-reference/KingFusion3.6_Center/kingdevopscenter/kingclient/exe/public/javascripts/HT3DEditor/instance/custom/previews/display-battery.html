@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>HT Material Comp Battery</title>
+    <meta charset="UTF-8">
+    <link rel="shortcut icon" href="custom/images/favicon.ico?v=2" />
+    <style>
+        html,
+        body {
+            padding: 0px;
+            margin: 0px;
+        }
+    </style>
+
+    <script src='custom/configs/htconfig.js'></script>
+    <script src='libs/core/ht.js'></script>
+    <script src='libs/plugin/ht-edgetype.js'></script>
+    <script src='libs/plugin/ht-obj.js'></script>
+    <script src='libs/core/ht-ui.js'></script>
+    <script src='libs/plugin/ht-vector.js'></script>
+    <script src='libs/plugin/ht-animation.js'></script>
+
+    <script>
+        function recharging(data, textData) {
+            var rp = 1;
+            var isRecharging = false;
+            textData.setAttr('isRecharging', isRecharging);
+            setInterval(function () {
+                if (isRecharging) {
+                    // * 充电中
+                    data.setAttr('remainingPower', rp);
+                    data.setAttr('batteryColor', getCurrentColor(rp));
+                    rp = parseFloat((rp += 0.01).toFixed(2));
+                    // * 切换状态
+                    if (rp === 1) {
+                        isRecharging = false;
+                        textData.setAttr('isRecharging', isRecharging);
+                    }
+                } else {
+                    // * 使用中
+                    data.setAttr('remainingPower', rp);
+                    data.setAttr('batteryColor', getCurrentColor(rp));
+                    rp = parseFloat((rp -= 0.01).toFixed(2));
+                    // * 切换状态
+                    if (rp === 0) {
+                        isRecharging = true;
+                        textData.setAttr('isRecharging', isRecharging);
+                    }
+                }
+            }, 50);
+        }
+        function getCurrentColor(remainingPower) {
+            if (remainingPower >= 0 && remainingPower <= 0.1) {
+                return '#ED5662';
+            } else if (remainingPower > 0.1 && remainingPower <= 0.3) {
+                return '#F7BD32';
+            } else if (remainingPower > 0.3 && remainingPower <= 1) {
+                return '#8BC44C';
+            }
+        }
+        // * 加载数据
+        function loadData(dataModel, graphView) {
+            ht.Default.xhrLoad('displays/industry/battery.json', function (text) {
+                var json = ht.Default.parse(text);
+                if (json.title) document.title = json.title;
+                dataModel.deserialize(json);
+                graphView.fitContent(true);
+                var b1 = dataModel.getDataByTag('b1');
+                var r1 = dataModel.getDataByTag('r1');
+                recharging(b1, r1);
+            });
+        }
+        // * 初始化
+        function init() {
+            dataModel = new ht.DataModel();
+            graphView = new ht.graph.GraphView(dataModel);
+            graphView.addToDOM();
+            loadData(dataModel, graphView);
+        }
+    </script>
+</head>
+
+<body onload="init()">
+</body>
+
+</html>

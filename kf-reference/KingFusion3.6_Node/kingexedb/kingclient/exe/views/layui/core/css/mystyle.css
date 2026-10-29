@@ -1,0 +1,67 @@
+.component {
+    position: absolute;
+    width: 160px;
+    left: 120px;
+    top: 16px;
+}
+
+.component .layui-input {
+    height: 30px;
+    padding-left: 12px;
+    background-color: #424652;
+    background-color: rgba(255, 255, 255, .05);
+    border: none 0;
+    color: #fff;
+    color: rgba(255, 255, 255, .5);
+    font-size: 12px;
+}
+
+.component .layui-form-select .layui-edge {
+    display: none;
+    border-top-color: #999;
+}
+
+.component .layui-form-select dl {
+    top: 36px;
+    background-color: rgba(255, 255, 255, .9)
+}
+
+.my-header {
+    min-width: 1160px;
+}
+
+.my-header .component {
+    left: 185px;
+}
+
+.layui-body {
+    overflow: hidden;
+}
+
+.back-to-top {
+    position: absolute;
+    width: 66px;
+    text-align: center;
+    top: 75px;
+    right: 20px;
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.75);
+    border: solid 5px;
+    border-radius:5px;
+    border-color: rgba(158, 158, 158, 0);
+    background: rgba(158, 158, 158, 0.75);
+    z-index: 9999;
+}
+
+.share {
+    top: 105px;
+}
+
+.back-to-top:hover {
+    cursor: pointer;
+    background: rgba(100, 100, 100, 0.75);
+}
+
+.layui-nav-itemed {
+    font-weight: bolder;
+}

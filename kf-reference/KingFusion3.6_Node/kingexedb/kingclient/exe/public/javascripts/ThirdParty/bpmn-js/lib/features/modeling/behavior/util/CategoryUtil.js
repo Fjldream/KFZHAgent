@@ -1,0 +1,1 @@
+import{add as c}from"diagram-js/lib/util/Collections";import{getBusinessObject as o}from"../../../../util/ModelUtil";export function createCategoryValue(r,a){var e=a.create("bpmn:CategoryValue"),t=a.create("bpmn:Category",{categoryValue:[e]});return c(r.get("rootElements"),t),o(t).$parent=r,o(e).$parent=t,e}

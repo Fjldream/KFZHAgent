@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>场景预览</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=0">
+    <link rel="shortcut icon" href="custom/images/favicon.ico" />
+    <style>
+        html,
+        body {
+            padding: 0px;
+            margin: 0px;
+        }
+    </style>
+
+    <script src='custom/configs/htconfig.js'></script>
+    <script src='custom/configs/config-transform.js'></script>
+    <script src='custom/configs/config-service.js'></script>
+    <script src='libs/core/ht.js'></script>
+    <script src='custom/configs/buckle.js'></script>
+    <script src='libs/plugin/ht-modeling.js'></script>
+    <script src='libs/plugin/ht-obj.js'></script>
+    <script src='libs/plugin/ht-edgetype.js'></script>
+    <script src="libs/plugin/ht-textureLoader.js"></script>
+    <script src="libs/plugin/ht-fbx.js"></script>
+    <script src="libs/plugin/ht-gltf.js"></script>
+    <script src='libs/plugin/ht-form.js'></script>
+    <script src="libs/plugin/ht-vector.js"></script>
+    <script src="libs/plugin/ht-animation.js"></script>
+    <script src="libs/plugin/ht-animation.js"></script>
+    <script src="libs/plugin/Pipe.js"></script>
+
+    <script>
+        dataModel = new ht.DataModel();
+        g3d = new ht.graph3d.Graph3dView(dataModel);
+        g3d.enableToolTip();
+        window.addEventListener('load', function () {
+            g3d.addToDOM();
+            g3d.deserialize('previews/scene.json', function (json, dm, gv, datas) {
+                let DmAttr =  dataModel._datas._as;
+                for (let index = 0; index < DmAttr.length; index++) {
+                    let laneNode = DmAttr[index];
+                    if (laneNode.getDisplayName() && laneNode.getDisplayName().indexOf("巷道") !== -1) {
+                        dataModel.remove(laneNode);
+                        index--;
+                    }
+                }
+                var self = this;
+                let config = {
+                    autoLinkEnable: true,
+                    autoLinkThreshold: 5,
+                    autoCrossEnable: true,
+                    autoCrossThreshold: 8,
+                    unionType: 2,
+                    aspectBottomWidth: 4,
+                    aspectSideHeight: 4,
+                    aspectDomeHeight: 4,
+                    aspectThinkness: 0.5,
+                    splitTopEnable: true,
+                };
+                self._flowPipes = [];
+                var dataAttr = dm.a("DmAttr");
+                self._pipeUtil = new Pipe();
+                //生成巷道
+                if (dataAttr.length > 0) {
+                    genTunnel(config, dataAttr);
+                }
+                function genTunnel(config, dataContent) {
+                    let maxX = -Number.MAX_VALUE;
+                    let minX = Number.MAX_VALUE;
+                    let maxY = -Number.MAX_VALUE;
+                    let minY = Number.MAX_VALUE;
+                    let maxZ = -Number.MAX_VALUE;
+                    let minZ = Number.MAX_VALUE;
+                    let dataJson = [];
+                    for (let i = 0; i < dataContent.length; i++) {
+                        let item = dataContent[i];
+                        if (!item) {
+                            continue;
+                        }
+                        let line = item;
+                        if (JSON.stringify(line) !== '{}') {
+                            let t1 = parseFloat(line['起点 Y']);
+                            let t2 = parseFloat(line['起点 Z']);
+                            let t3 = parseFloat(line['起点 X']);
+                            let t4 = parseFloat(line['端点 Y']);
+                            let t5 = parseFloat(line['端点 Z']);
+                            let t6 = parseFloat(line['端点 X']);
+                            maxX = Math.max(maxX, t1);
+                            maxX = Math.max(maxX, t4);
+
+                            minX = Math.min(minX, t1);
+                            minX = Math.min(minX, t4);
+
+                            maxY = Math.max(maxY, t2);
+                            maxY = Math.max(maxY, t5);
+
+                            minY = Math.min(minY, t2);
+                            minY = Math.min(minY, t5);
+
+                            maxZ = Math.max(maxZ, t3);
+                            maxZ = Math.max(maxZ, t6);
+
+                            minZ = Math.min(minZ, t3);
+                            minZ = Math.min(minZ, t6);
+
+                            let ObjectNode = {
+                                "ID": line["ID"],
+                                "一氧化碳": line["一氧化碳"],
+                                "二氧化碳": line["二氧化碳"],
+                                "压差": line["压差"],
+                                "固定风量": line["固定风量"],
+                                "巷道名称": line["巷道名称"],
+                                "巷道类型": line["巷道类型"],
+                                "总阻力": line["总阻力"],
+                                "断面类型": line["断面类型"],
+                                "权重": line["权重"],
+                                "气压": line["气压"],
+                                "氧气": line["氧气"],
+                                "温度": line["温度"],
+                                "湿度": line["湿度"],
+                                "烟感": line["烟感"],
+                                "甲烷": line["甲烷"],
+                                "端点 X": line["端点 X"],
+                                "端点 Y": line["端点 Y"],
+                                "端点 Z": line["端点 Z"],
+                                "等积孔面积": line["等积孔面积"],
+                                "类型": line["类型"],
+                                "粉尘": line["粉尘"],
+                                "终止节点": line["终止节点"],
+                                "自定义属性1": line["自定义属性1"],
+                                "自定义属性2": line["自定义属性2"],
+                                "自定义属性3": line["自定义属性3"],
+                                "自定义属性4": line["自定义属性4"],
+                                "自定义属性5": line["自定义属性5"],
+                                "自定义属性6": line["自定义属性6"],
+                                "起始节点": line["起始节点"],
+                                "起点 X": line["起点 X"],
+                                "起点 Y": line["起点 Y"],
+                                "起点 Z": line["起点 Z"],
+                                "长度": line["长度"],
+                                "面积": line["面积"],
+                                "风向": line["风向"],
+                                "风向设定方向": line["风向设定方向"],
+                                "风速": line["风速"],
+                                "风量": line["风量"],
+                                "风量设定": line["风量设定"],
+                                "风阻": line["风阻"],
+                                "nodeColor": line["nodeColor"]
+                            }
+                            let item = [
+                                [t1, t2, t3],
+                                [t4, t5, t6],
+                                "巷道" + line['ID'],
+                                ObjectNode
+                            ];
+                            dataJson.push(item);
+                        }
+                    }
+                    let offset = [(maxX + minX) / 2, 0, (maxZ + minZ) / 2];
+                    let shape3dMap = self._pipeUtil.getTunnel(config, dataJson, offset);
+                    let imageMap = {
+                        "inbottom": "models/in_bottom.jpg",
+                        "intop": "models/in_top.jpg",
+                        "inwall": "models/in_wall.jpg",
+                        "outbottom": "models/out.jpg",
+                        "outtop": "models/out.jpg",
+                    };
+                    let pipes = [];
+                    for (let name in shape3dMap) {
+                        let item = shape3dMap[name];
+                        let shape3ds = [];
+                        for (let key in item.shape3ds) {
+                            let item2 = item.shape3ds[key];
+                            item2["image"] = imageMap[key];
+                            shape3ds.push(item2);
+                        }
+                        let pipeAttr = self._pipeUtil._pipes;
+                        dm.a("pipeUtil", self._pipeUtil);
+                        let pipeNode = new ht.Node();
+                        pipeNode.s('shape3d', shape3ds);
+                        pipeNode.setSize3d(item["size"]);
+                        pipeNode.p3(item["center"]);
+                        pipeNode.s({
+                            'shape3d.reverse.flip': true,
+                            "3d.clipbox.mask": 0,
+                            "shadow.cast": false,
+                            'shape3d.reverse.cull': false,
+                            '3d.movable': false,
+                            '3d.selectable': true,
+                            'select.brightness': 1.5,
+                        });
+                        pipeNode.a(item.attr);
+                        pipeNode.setDisplayName(item.attr.name)
+                        for (let arr = 0; arr < pipeAttr.length; arr++) {
+                            const pipeIndex = pipeAttr[arr][3][0];
+                            if (pipeIndex && typeof (pipeIndex["ID"]) === "number") {
+                                pipeIndex["ID"] = pipeIndex["ID"].toString();
+                            }
+                            if (pipeIndex && pipeIndex["ID"] === item.attr.name.slice(2)) {
+                                pipeNode.a(pipeIndex)
+                                if (pipeIndex.nodeColor) {
+                                    pipeNode.setStyle("body.color", pipeIndex.nodeColor)
+                                }
+                            }
+                        }
+                        dm.add(pipeNode);
+                    }
+                }
+            });
+        });
+    </script>
+</head>
+
+<body>
+</body>
+
+</html>

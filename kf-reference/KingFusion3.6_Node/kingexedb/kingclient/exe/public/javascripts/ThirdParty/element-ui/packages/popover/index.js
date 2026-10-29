@@ -1,0 +1,1 @@
+import o from"./src/main";import e from"./src/directive";import i from"vue";i.directive("popover",e),o.install=function(r){r.directive("popover",e),r.component(o.name,o)},o.directive=e;export default o;

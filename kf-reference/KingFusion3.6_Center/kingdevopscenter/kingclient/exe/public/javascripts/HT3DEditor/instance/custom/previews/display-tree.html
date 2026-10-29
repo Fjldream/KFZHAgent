@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Preview Display</title>
+        <meta charset="UTF-8">
+        <link rel="shortcut icon" href="custom/images/favicon.ico?v=2" />
+        <style>
+            html, body {
+                padding: 0px;
+                margin: 0px;
+            }
+        </style>
+
+        <script src='custom/configs/htconfig.js'></script>
+        <script src='libs/core/ht.js'></script>
+        <script src='libs/plugin/ht-edgetype.js'></script>
+
+        <script>
+            function init() {
+                dataModel = new ht.DataModel();
+                treeView = new ht.widget.TreeView(dataModel);
+                graphView = new ht.graph.GraphView(dataModel);
+                splitView = new ht.widget.SplitView(treeView, graphView, 'h', 0.3);
+                splitView.addToDOM();
+
+                ht.Default.xhrLoad('previews/display.json', function(text) {
+                    var json = ht.Default.parse(text);
+                    if(json.title) document.title = json.title;
+                    dataModel.deserialize(json);
+                });
+            }
+
+        </script>
+    </head>
+    <body onload='setTimeout(init, 300)'>
+    </body>
+</html>

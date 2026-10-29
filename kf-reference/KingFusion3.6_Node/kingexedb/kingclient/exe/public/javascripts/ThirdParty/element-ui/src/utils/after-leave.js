@@ -1,0 +1,1 @@
+export default function(e,r,l=300,a=!1){if(!e||!r)throw new Error("instance & callback is required");let f=!1;const t=function(){f||(f=!0,r&&r.apply(null,arguments))};a?e.$once("after-leave",t):e.$on("after-leave",t),setTimeout(()=>{t()},l+100)}

@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>Preview Display</title>
+  <meta charset="UTF-8">
+  <link rel="shortcut icon" href="custom/images/favicon.ico?v=2" />
+  <style>
+    html,
+    body {
+      padding: 0px;
+      margin: 0px;
+    }
+
+    .overview {
+      position: absolute;
+      right: 22px;
+      bottom: 18px;
+      width: 200px;
+      height: 150px;
+      background: rgb(240, 239, 248);
+    }
+
+    .overviewAnim {
+      -webkit-transition: width .3s, height .3s;
+      -moz-transition: width .3s, height .3s;
+      -o-transition: width .3s, height .3s;
+      transition: width .3s, height .3s;
+    }
+  </style>
+  <script>
+    window.htconfig = {
+
+    };
+  </script>
+  <script src='custom/configs/htconfig.js'></script>
+  <script src='custom/libs/echarts.js'></script>
+  <script src='custom/configs/config-transform.js'></script>
+  <script src='custom/configs/config-service.js'></script>
+  <script src='libs/core/ht.js'></script>
+  <script src="libs/ht-cssanimation.js"></script>
+  <script src='custom/configs/buckle.js'></script>
+  <script src='libs/core/ht-ui.js'></script>
+  <script src='libs/plugin/ht-edgetype.js'></script>
+  <script src="libs/plugin/ht-obj.js"></script>
+  <script src='libs/plugin/ht-form.js'></script>
+  <script src='libs/plugin/ht-vector.js'></script>
+  <script src='libs/plugin/ht-flow.js'></script>
+  <script src='libs/plugin/ht-animation.js'></script>
+  <script src='libs/plugin/ht-dialog.js'></script>
+  <script src='libs/plugin/ht-overview.js'></script>
+  <script src='libs/plugin/creaateRectInteractor.js'></script>
+  <script src='libs/plugin/creaatePolygonInteractor.js'></script>
+  <script src='libs/plugin/Turf.js'></script>
+  <script src='libs/Graph.js'></script>
+  <script src='./display.js'></script>
+
+</head>
+
+<body onload='setTimeout(init, 300)'>
+</body>
+
+</html>

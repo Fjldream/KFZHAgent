@@ -1,0 +1,1 @@
+import e from"./events/EventType.js";export default{SINGLECLICK:"singleclick",CLICK:e.CLICK,DBLCLICK:e.DBLCLICK,POINTERDRAG:"pointerdrag",POINTERMOVE:"pointermove",POINTERDOWN:"pointerdown",POINTERUP:"pointerup",POINTEROVER:"pointerover",POINTEROUT:"pointerout",POINTERENTER:"pointerenter",POINTERLEAVE:"pointerleave",POINTERCANCEL:"pointercancel"};

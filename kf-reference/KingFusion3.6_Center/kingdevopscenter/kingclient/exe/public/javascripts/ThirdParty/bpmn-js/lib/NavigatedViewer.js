@@ -1,0 +1,1 @@
+import r from"inherits";import e from"./Viewer";import i from"diagram-js/lib/navigation/keyboard-move";import p from"diagram-js/lib/navigation/movecanvas";import m from"diagram-js/lib/navigation/zoomscroll";export default function o(t){e.call(this,t)}r(o,e),o.prototype._navigationModules=[i,p,m],o.prototype._modules=[].concat(e.prototype._modules,o.prototype._navigationModules);

@@ -1,0 +1,1 @@
+import r from"./Filter.js";import{assert as i}from"../../asserts.js";class s extends r{constructor(t,o){super(t),this.conditions=o,i(this.conditions.length>=2,"At least 2 conditions are required")}}export default s;

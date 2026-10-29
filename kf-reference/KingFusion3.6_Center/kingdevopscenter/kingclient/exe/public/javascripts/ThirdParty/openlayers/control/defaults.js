@@ -1,0 +1,1 @@
+import r from"./Attribution.js";import e from"../Collection.js";import n from"./Rotate.js";import u from"./Zoom.js";export function defaults(t){t=t||{};const o=new e;return(t.zoom!==void 0?t.zoom:!0)&&o.push(new u(t.zoomOptions)),(t.rotate!==void 0?t.rotate:!0)&&o.push(new n(t.rotateOptions)),(t.attribution!==void 0?t.attribution:!0)&&o.push(new r(t.attributionOptions)),o}

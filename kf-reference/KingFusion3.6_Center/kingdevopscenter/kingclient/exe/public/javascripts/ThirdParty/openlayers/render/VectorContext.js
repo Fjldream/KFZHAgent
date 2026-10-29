@@ -1,0 +1,1 @@
+class i{drawCustom(e,t,r,l,n){}drawGeometry(e){}setStyle(e){}drawCircle(e,t,r){}drawFeature(e,t,r){}drawGeometryCollection(e,t,r){}drawLineString(e,t,r){}drawMultiLineString(e,t,r){}drawMultiPoint(e,t,r){}drawMultiPolygon(e,t,r){}drawPoint(e,t,r){}drawPolygon(e,t,r){}drawText(e,t,r){}setFillStrokeStyle(e,t){}setImageStyle(e,t){}setTextStyle(e,t){}}export default i;

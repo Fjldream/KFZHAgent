@@ -1,0 +1,1 @@
+import e from"./BpmnAutoResize";import o from"./BpmnAutoResizeProvider";export default{__init__:["bpmnAutoResize","bpmnAutoResizeProvider"],bpmnAutoResize:["type",e],bpmnAutoResizeProvider:["type",o]};

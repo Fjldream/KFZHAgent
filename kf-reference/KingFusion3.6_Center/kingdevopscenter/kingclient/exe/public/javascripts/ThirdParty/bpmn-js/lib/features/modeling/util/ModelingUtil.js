@@ -1,0 +1,1 @@
+import{some as o}from"min-dash";import{is as n}from"../../../util/ModelUtil";export function isAny(r,t){return o(t,function(i){return n(r,i)})}export function getParent(r,t){for(typeof t=="string"&&(t=[t]);r=r.parent;)if(isAny(r,t))return r;return null}

@@ -1,0 +1,1 @@
+import n from"diagram-js/lib/features/auto-resize/AutoResize";import r from"inherits";import{is as m}from"../../util/ModelUtil";export default function e(i){i.invoke(n,this)}e.$inject=["injector"],r(e,n),e.prototype.resize=function(i,o,t){m(i,"bpmn:Participant")?this._modeling.resizeLane(i,o,null,t):this._modeling.resizeShape(i,o,null,t)};

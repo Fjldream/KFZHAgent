@@ -1,0 +1,1 @@
+export function appendParams(n,e){const c=[];Object.keys(e).forEach(function(o){e[o]!==null&&e[o]!==void 0&&c.push(o+"="+encodeURIComponent(e[o]))});const t=c.join("&");return n=n.replace(/[?&]$/,""),n+=n.includes("?")?"&":"?",n+t}

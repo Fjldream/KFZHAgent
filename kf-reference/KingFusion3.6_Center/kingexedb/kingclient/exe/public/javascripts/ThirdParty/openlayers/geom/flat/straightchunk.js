@@ -1,0 +1,1 @@
+export function matchingChunk(q,k,e,s,m){let y=e,d=e,i=0,t=0,a=e,M,n,l,h,r,o,x,f,c,u;for(n=e;n<s;n+=m){const g=k[n],p=k[n+1];r!==void 0&&(c=g-r,u=p-o,h=Math.sqrt(c*c+u*u),x!==void 0&&(t+=l,M=Math.acos((x*c+f*u)/(l*h)),M>q&&(t>i&&(i=t,y=a,d=n),t=0,a=n-m)),l=h,x=c,f=u),r=g,o=p}return t+=h,t>i?[a,n]:[y,d]}

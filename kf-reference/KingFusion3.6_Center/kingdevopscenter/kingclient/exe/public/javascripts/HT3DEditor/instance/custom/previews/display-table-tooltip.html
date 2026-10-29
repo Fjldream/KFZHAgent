@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Preview Display</title>
+    <meta charset="UTF-8">
+    <link rel="shortcut icon" href="custom/images/favicon.ico?v=2" />
+    <style>
+        html,
+        body {
+            padding: 0px;
+            margin: 0px;
+        }
+    </style>
+
+    <script src='custom/configs/htconfig.js'></script>
+    <script src='custom/libs/echarts.js'></script>
+    <script src='libs/core/ht.js'></script>
+    <script src='libs/plugin/ht-edgetype.js'></script>
+    <script src="libs/plugin/ht-obj.js"></script>
+    <script src='libs/core/ht-ui.js'></script>
+    <script src='libs/plugin/ht-vector.js'></script>
+
+    <script>
+        // 鼠标悬浮提示类
+        function Tooltip (){
+            var div = this._container = document.createElement('div'),
+                style = div.style;
+
+            style.boxSizing = 'border-box';
+            style.padding = '5px 12px';
+            style.margin = 0;
+            style.position = 'absolute';
+            style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+            style.color = 'rgb(247,247,247)';
+            style.borderRadius = '5px';
+            style.webkitTransition = 'all 0.5';
+            style.transition = 'all 0.5';
+        }
+
+        Tooltip.prototype.show = function(text, e) {
+            this._container.innerText = text;
+            document.body.appendChild(this._container);
+            this.update(e);
+        }
+        Tooltip.prototype.update = function(e) {
+            var divRect = this._container.getBoundingClientRect(),
+                winInfo = ht.Default.getWindowInfo(),
+                style = this._container.style,
+                x = (e.clientX || e.pageX) + 8,
+                y = (e.clientY || e.pageY) + 8;
+
+            if (x + divRect.width > winInfo.width) {
+                x = x - 16 - divRect.width;
+            }
+            if (y + divRect.height > winInfo.height) {
+                y = y - 16 - divRect.height;
+            }
+
+            this._container.style.left = x + 'px';
+            this._container.style.top = y + 'px';
+        }
+        Tooltip.prototype.hide = function() {
+            if (this._container.parentNode === document.body) {
+                document.body.removeChild(this._container);
+            }
+        }
+
+        function init() {
+            dataModel = new ht.DataModel();
+            graphView = new ht.graph.GraphView(dataModel);
+            tooltip = new Tooltip();
+            graphView.addToDOM();
+
+            ht.Default.xhrLoad('previews/display.json', function (text) {
+                var json = ht.Default.parse(text);
+                if (json.title) document.title = json.title;
+                dataModel.deserialize(json);
+                graphView.fitContent(true);
+                onDispalyLoad();
+            });
+        }
+        function onDispalyLoad() {
+            var dataList = [{ "station": "天津1号站", "device": "JJ-NB01", "value": '0', "dataid": 44232 }, { "station": "天津1号站", "device": "JJ-NB02", "value": '0', "dataid": 44234 }, { "station": "天津1号站", "device": "JJ-NB03", "value": '0', "dataid": 44236 }, { "station": "天津1号站", "device": "JJ-NB04", "value": '0', "dataid": 44238 }, { "station": "天津1号站", "device": "CZ-NB01", "value": '0', "dataid": 44130 }, { "station": "天津1号站", "device": "CZ-NB02", "value": '0', "dataid": 44132 }, { "station": "天津1号站", "device": "CZ-NB03", "value": '0', "dataid": 44134 }, { "station": "天津1号站", "device": "CZ-NB04", "value": '0', "dataid": 44136 }, { "station": "天津1号站", "device": "CZ-NB05", "value": '0', "dataid": 44138 }, { "station": "天津1号站", "device": "CZ-NB06", "value": '0', "dataid": 44140 }, { "station": "天津1号站", "device": "FL-NB04", "value": '0', "dataid": 44206 }, { "station": "天津1号站", "device": "FL-NB05", "value": '0', "dataid": 44208 }, { "station": "天津1号站", "device": "FL-NB06", "value": '0', "dataid": 44210 }, { "station": "天津1号站", "device": "FL-NB07", "value": '0', "dataid": 44212 }, { "station": "天津1号站", "device": "FL-NB08", "value": '0', "dataid": 44214 }, { "station": "天津1号站", "device": "FL-NB01", "value": '0', "dataid": 44200 }, { "station": "天津1号站", "device": "FL-NB02", "value": '0', "dataid": 44202 }, { "station": "天津1号站", "device": "FL-NB03", "value": '0', "dataid": 44204 }, { "station": "天津1号站", "device": "RCL-NB01", "value": '0', "dataid": 45927 }, { "station": "天津1号站", "device": "RCL-NB02", "value": '0', "dataid": 45929 }, { "station": "天津1号站", "device": "JG-NB01", "value": '0', "dataid": 45920 }, { "station": "天津1号站", "device": "DZ-NB01", "value": '0', "dataid": 45944 }, { "station": "天津2号站", "device": "XZ-NB01", "value": '0', "dataid": 46738 }, { "station": "天津2号站", "device": "XZ-NB02", "value": '0', "dataid": 46740 }, { "station": "天津2号站", "device": "XZ-NB03", "value": '0', "dataid": 46742 }, { "station": "天津2号站", "device": "XZ-NB04", "value": '0', "dataid": 46744 }, { "station": "天津2号站", "device": "XZ-NB05", "value": '0', "dataid": 46746 }, { "station": "天津2号站", "device": "XZ-NB06", "value": '0', "dataid": 46748 }, { "station": "天津2号站", "device": "XZ-NB07", "value": '0', "dataid": 46750 }, { "station": "天津2号站", "device": "XZ-NB08", "value": '0', "dataid": 46752 }, { "station": "天津2号站", "device": "XZ-NB09", "value": '0', "dataid": 46754 }, { "station": "天津2号站", "device": "XZ-NB10", "value": '0', "dataid": 46756 }, { "station": "天津2号站", "device": "XZ-NB11", "value": '0', "dataid": 46758 }, { "station": "天津2号站", "device": "XZ-NB12", "value": '0', "dataid": 46760 }, { "station": "天津2号站", "device": "XZ-NB13", "value": '0', "dataid": 46762 }, { "station": "天津2号站", "device": "XZ-NB14", "value": '0', "dataid": 46764 }, { "station": "天津3号站", "device": "H01N01", "value": '0', "dataid": 54278 }, { "station": "天津3号站", "device": "H01N02", "value": '0', "dataid": 53728 }, { "station": "天津3号站", "device": "H01N03", "value": '0', "dataid": 53678 }, { "station": "天津3号站", "device": "H01N04", "value": '0', "dataid": 53578 }, { "station": "天津3号站", "device": "H01N05", "value": '0', "dataid": 53528 }, { "station": "天津3号站", "device": "H01N06", "value": '0', "dataid": 53778 }, { "station": "天津3号站", "device": "H02N07", "value": '0', "dataid": 53828 }, { "station": "天津3号站", "device": "H02N08", "value": '0', "dataid": 53878 }, { "station": "天津3号站", "device": "H02N09", "value": '0', "dataid": 53928 }, { "station": "天津3号站", "device": "H02N10", "value": '0', "dataid": 53978 }, { "station": "天津3号站", "device": "H02N11", "value": '0', "dataid": 54028 }, { "station": "天津3号站", "device": "H02N12", "value": '0', "dataid": 54078 }, { "station": "天津3号站", "device": "H03N13", "value": '0', "dataid": 54128 }, { "station": "天津3号站", "device": "H03N14", "value": '0', "dataid": 54178 }, { "station": "天津3号站", "device": "H03N15", "value": '0', "dataid": 54228 }]
+            var stationMap = {},
+                dataidMap = {}, // dataid 映射
+                dataidList = [], // 记录 dataid，用于后面模拟数据用
+                tableData = [];
+            dataList.forEach(function (item) {
+                var obj = stationMap[item.station];
+                if (obj) {
+                    obj.devices.push(item);
+                }
+                else {
+                    obj = stationMap[item.station] = {
+                        station: item.station,
+                        devices: [
+                            item
+                        ]
+                    };
+                    tableData.push(obj);
+                }
+                dataidMap[item.dataid] = item;
+                dataidList.push(item.dataid);
+            });
+            // 生成列定义对象
+            var columnDef = [{
+                key: 'station',
+                width: 100
+            }];
+            var maxDeviceCount = 0;
+            tableData.forEach(function (d) {
+                maxDeviceCount = Math.max(maxDeviceCount, d.devices.length);
+            });
+
+            for (let i = 0; i < maxDeviceCount; i++) {
+                // const element = array[i];
+                columnDef.push({
+                    key: 'devices',
+                    width: 36,
+                    format: function (val, rowData, rowIndex, colIndex) {
+                        val = val[colIndex - 1];
+                        return val ? (val.value || '') : '';
+                    },
+                    drawCell: function (g, text, rect, option) {
+                        var x = rect.x + (rect.width - 19) / 2,
+                            y = rect.y + (rect.height - 19) / 2;
+                        if (text === '0') {
+                            ht.Default.drawImage(g, ht.Default.getImage('symbols/demo/building/绿点.json'), x, y, 19, 19)
+                        }
+                        else if (text === '1') {
+                            ht.Default.drawImage(g, ht.Default.getImage('symbols/demo/building/红点.json'), x, y, 19, 19)
+                        }
+
+                    }
+
+                })
+            }
+
+            var table = dataModel.getDataByTag('table');
+            table.a({
+                'ht.columns': columnDef,
+                'ht.dataSource': tableData,
+                'ht.onHoverCell': function(e, cellValue, rowData, column, rowIndex, colIndex){
+                    if (e) {
+                        var stationData = rowData.devices[colIndex - 1];
+                        if (stationData) {
+                            tooltip.show(stationData.device + ': ' + (cellValue === '0' ? '正常' : '异常'), e);
+                        }
+                        else {
+                            tooltip.hide();
+                        }
+                    }
+                    else {
+                        tooltip.hide();
+                    }
+                }
+            })
+            // 数据模拟, 每秒更新一个点数据
+            setInterval(function () {
+                var index = Math.floor(Math.random() * dataidList.length),
+                    val = Math.random() > 0.5 ? '1' : '0';
+                dataid = dataidList[index];
+                data = dataidMap[dataid];
+                data.value = val;
+                table.a('ht.dataSource', tableData);
+                table.iv();
+            }, 1000);
+        }
+
+    </script>
+</head>
+
+<body onload='setTimeout(init, 300)'>
+</body>
+
+</html>

@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Preview Display</title>
+        <meta charset="UTF-8">
+        <!--<link rel="shortcut icon" href="custom/images/favicon.ico?v=2" />-->
+        <style>
+            html, body {
+                padding: 0px;
+                margin: 0px;
+            }
+        </style>
+        <script>
+            //通过全局样式设置 去掉默认选中样式（去掉绿色边框）
+            window.htconfig = {
+                Style: {
+                    'select.width': 0
+                }
+            }
+        </script>
+        <!--<script src='../../custom/configs/htconfig.js'></script>-->
+        <!--<script src='../../custom/libs/echarts.js'></script>-->
+        <script src='../../libs/core/ht.js'></script>
+        <script src='../../libs/plugin/ht-edgetype.js'></script>
+        <script src='../../libs/plugin/ht-obj.js'></script>
+        <script src='../../libs/core/ht-ui.js'></script>
+        <script src='../../libs/plugin/ht-vector.js'></script>
+        <script>
+            function init() {
+                dataModel = new ht.DataModel()
+                graphView = new ht.graph.GraphView(dataModel)
+                graphView.addToDOM()
+                // graphView.setPannable(false)
+                // graphView.handleScroll = function() {}
+                graphView.setRectSelectable(false)
+                graphView.setMovableFunc(function(data) { return false })
+                window.addEventListener('resize', function(e) { graphView.fitContent() }, false)
+
+                ht.Default.xhrLoad('previews/display.json', function(text) {
+                    var json = ht.Default.parse(text)
+                    if(json.title) document.title = json.title
+                    dataModel.deserialize(json)
+                    graphView.fitContent(true)
+
+                    // 更新日期和时间
+                    var day = dataModel.getDataByTag('时间')
+                    day.timer = setInterval(function(){
+                        // day.a('date', new Date().toLocaleDateString())
+                        day.a('date', new Date().getFullYear() + '年' + (new Date().getMonth() + 1) + '月' + new Date().getDate() + '日')
+                        day.a('time', new Date().toLocaleTimeString('chinese', { hour12: false }))
+                        day.a('week', "星期" + "日一二三四五六".charAt(new Date().getDay()))
+                        if (!day.dm()) {
+                            clearInterval(day.timer)
+                        }
+                    }, 1000)
+
+                    // 能耗小球转动 自控运行转动
+                    var ball = dataModel.getDataByTag('能耗面板')
+                    var automatic = dataModel.getDataByTag('楼宇自控系统面板')
+                    function anim() {
+                        ht.Default.startAnim({
+                            duration: 1000,
+                            action: function (v, t) {
+                                ball.a('rotation', ball.a('rotation') + 0.05)
+                                automatic.a('楼宇自控运行', automatic.a('楼宇自控运行') + 0.05)
+                            },
+                            finishFunc: function () {
+                                anim()
+                            }
+                        })
+                    }
+                    anim()
+
+                    // 自控叹号闪烁
+                    setInterval(function(){
+                        automatic.a('楼宇自控叹号', !automatic.a('楼宇自控叹号'))
+                    }, 500)
+
+                    // 移动 蓝色滑动线跟随滑动
+                    var underline = dataModel.getDataByTag('蓝色滑动线')
+                    graphView.getView().addEventListener('mousemove', function (e) {
+                        var data = graphView.getDataAt(e)
+                        if (data) {
+                            if (data.getTag() === '警报管理下拉' || data.getTag() === '模式管理下拉' || data.getTag() === '应急管理下拉' || data.getTag() === '设备管理下拉' || data.getTag() === '系统配置下拉') {
+                                ht.Default.startAnim({
+                                    duration: 500,
+                                    easing: function (t) { return t * t * t * t },
+                                    action: function (v, t) {
+                                        underline.setPosition(underline.getPosition().x + (data.getPosition().x - underline.getPosition().x) * v, underline.getPosition().y)
+                                    }
+                                })
+                            }
+                        }
+                    })
+
+                    // 滚轮 选择日期时间
+                    graphView.getView().addEventListener('mousewheel', function (e) {
+                        var data = graphView.getDataAt(e)
+                        if (data) {
+                            if (data.getTag() === '滚动年' || data.getTag() === '滚动月') {
+                                var detail = 0
+                                if (!e) e = graphView.getView().e
+                                if (e.wheelDelta) {
+                                    detail = e.wheelDelta/120
+                                } else if (e.detail) {
+                                    detail = -e.detail/3
+                                }
+
+                                if (detail) {
+                                    var year = ['年上1', '年上2', '年上3', '年中', '年下3', '年下2', '年下1']
+                                    var month = ['月上1', '月上2', '月上3', '月中', '月下3', '月下2', '月下1']
+                                    var attr
+
+                                    function dateChange(a, num) {
+                                        data.a(a, parseInt(data.a(a)) + num)
+                                    }
+
+                                    // if (detail < 0) { // 向下滚动
+                                    //     if (data.a('月中') < 12 && data.a('月中') > 0.9) {
+                                    //         // dateChange('月中', 1)
+                                    //
+                                    //         data.a('月中', parseInt(data.a('月中')) + 1)
+                                    //         data.a('月下3', parseInt(data.a('月中')) + 1)
+                                    //         data.a('月下2', parseInt(data.a('月下3')) + 1)
+                                    //         data.a('月下1', parseInt(data.a('月下2')) + 1)
+                                    //     } else {
+                                    //         data.a('月中', 1)
+                                    //     }
+                                    // }
+                                    // else { // 向上滚动
+                                    //     if (data.a('月中') < 12.1 && data.a('月中') > 1) {
+                                    //         //dateChange('月中', -1)
+                                    //
+                                    //         data.a('月中', parseInt(data.a('月中')) - 1)
+                                    //         data.a('月上3', parseInt(data.a('月中')) - 1)
+                                    //         data.a('月上2', parseInt(data.a('月上3')) - 1)
+                                    //         data.a('月上1', parseInt(data.a('月上2')) - 1)
+                                    //     } else {
+                                    //         data.a('月中', 12)
+                                    //     }
+                                    // }
+
+                                    if (detail < 0) { // 向下滚动
+                                        for (var i = 0; i < year.length; i++) {
+                                            attr = year[i]
+                                            dateChange(attr, 1)
+                                        }
+                                        if (data.a('月中') < 12 && data.a('月中') > 0.9) {
+                                            for (var i = 0; i < month.length; i++) {
+                                                attr = month[i]
+                                                dateChange(attr, 1)
+                                            }
+                                        }
+                                        // else {
+                                        //     data.a('月中', 1)
+                                        // }
+                                    }
+                                    else { // 向上滚动
+                                        for (var i = 0; i < year.length; i++) {
+                                            attr = year[i]
+                                            dateChange(attr, -1)
+                                        }
+                                        if (data.a('月中') < 12.1 && data.a('月中') > 1) {
+                                            for (var i = 0; i < month.length; i++) {
+                                                attr = month[i]
+                                                dateChange(attr, -1)
+                                            }
+                                        }
+                                        // else {
+                                        //     data.a('月中', 12)
+                                        // }
+                                    }
+
+                                    if (data.a('月中') === 1) {
+                                        data.a('月上3v', false)
+                                        data.a('月上2v', false)
+                                        data.a('月上1v', false)
+                                    }
+                                    else {
+                                        data.a('月上3v', true)
+                                        data.a('月上2v', true)
+                                        data.a('月上1v', true)
+                                    }
+                                    if (data.a('月中') === 12) {
+                                        data.a('月下3v', false)
+                                        data.a('月下2v', false)
+                                        data.a('月下1v', false)
+                                    }
+                                    else {
+                                        data.a('月下3v', true)
+                                        data.a('月下2v', true)
+                                        data.a('月下1v', true)
+                                    }
+                                }
+                            }
+                        }
+                    })
+
+                    // 点击
+                    var flag = true
+                    var arr = ['楼宇自控', '能源计量', '智能照明', '视频监控', '入侵警报', '门禁管理', '消防警报', '巡更管理', '车场管理', '机房监控', '多媒体会议', '信息发布', '无线对讲']
+                    function buttons(data) {
+                        var tag
+                        for (var i = 0; i < arr.length; i++) {
+                            tag = arr[i]
+                            if (graphView.dm().getDataByTag(tag + '图') === data) {
+                                graphView.dm().getDataByTag(tag + '按钮').a('status', 1)
+                            } else {
+                                graphView.dm().getDataByTag(tag + '按钮').a('status', 0)
+                            }
+                        }
+                    }
+                    graphView.mi(function (e) {
+                        var data = e.data
+                        if (e.kind === 'clickData') {
+                            // 左侧导航按钮进出
+                            var tag
+                            for (var i = 0; i < arr.length; i++) {
+                                tag = arr[i] + '图'
+                                if (data.getTag() === tag) {
+                                    buttons(data)
+                                }
+                            }
+                            // 楼层管理面板
+                            if (data.getTag() === '下标题') {
+                                var floor = graphView.dm().getDataByTag('楼层管理')
+                                if (flag) {
+                                    ht.Default.startAnim({
+                                        duration: 1000,
+                                        action: function (v, t) {
+                                            data.setPosition(data.getPosition().x, data.getPosition().y + (-9650 - data.getPosition().y) * v)
+                                            floor.s('clip.percentage', floor.s('clip.percentage') + (1 - floor.s('clip.percentage')) * v)
+                                        }
+                                    })
+                                }
+                                else {
+                                    ht.Default.startAnim({
+                                        duration: 1000,
+                                        action: function (v, t) {
+                                            data.setPosition(data.getPosition().x, data.getPosition().y + (-9525 - data.getPosition().y) * v)
+                                            floor.s('clip.percentage', floor.s('clip.percentage') + (0 - floor.s('clip.percentage')) * v)
+                                        }
+                                    })
+                                }
+                                flag = ! flag
+                            }
+                        }
+                    })
+                })
+            }
+        </script>
+    </head>
+    <body onload='setTimeout(init, 300)'>
+    </body>
+</html>

@@ -1,0 +1,1 @@
+import r from"./BaseVector.js";import t from"../renderer/canvas/VectorImageLayer.js";class i extends r{constructor(e){e=e||{};const a=Object.assign({},e);delete a.imageRatio,super(a),this.imageRatio_=e.imageRatio!==void 0?e.imageRatio:1}getImageRatio(){return this.imageRatio_}createRenderer(){return new t(this)}}export default i;

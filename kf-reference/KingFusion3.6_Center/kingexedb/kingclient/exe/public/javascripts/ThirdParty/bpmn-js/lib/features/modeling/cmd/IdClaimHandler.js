@@ -1,0 +1,1 @@
+export default function d(i){this._moddle=i}d.$inject=["moddle"],d.prototype.execute=function(i){var e=this._moddle.ids,l=i.id,m=i.element,n=i.claiming;n?e.claim(l,m):e.unclaim(l)},d.prototype.revert=function(i){var e=this._moddle.ids,l=i.id,m=i.element,n=i.claiming;n?e.unclaim(l):e.claim(l,m)};

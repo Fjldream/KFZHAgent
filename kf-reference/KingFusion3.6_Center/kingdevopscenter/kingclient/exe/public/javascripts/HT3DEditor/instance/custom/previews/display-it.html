@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>IT Network</title>
+    <meta charset="UTF-8">
+    <link rel="shortcut icon" href="custom/images/favicon.ico?v=2" />
+    <style>
+        html, body {
+            padding: 0px;
+            margin: 0px;
+        }
+    </style>
+    <script src='custom/configs/htconfig.js'></script>
+    <script src='libs/core/ht.js'></script>
+    <script src='libs/plugin/ht-edgetype.js'></script>
+    <script src="libs/plugin/ht-animation.js"></script>
+</head>
+<body>
+<script>
+(function(){
+    var it = window.it = {};
+    it.warn = {
+        initWarnItem: function(){
+            var self = this,
+                warn = this.warnTemp = it.main.dm.getDataByTag('warn');
+            this.pool = [];
+            self.initSerializer();
+        },
+        getWarnItem: function(){
+            if (this.pool.length > 0) {
+                return this.pool.pop();
+            } else {
+                return this.copy();
+            }
+        },
+        randomData: function() {
+            var dm = it.main.dm,
+                datas = dm.getDatas(),
+                size = dm.size(),
+                index, data;
+            do {
+                index = Math.floor(Math.random() * size);
+                data = datas.get(index);
+            } while(data instanceof ht.Edge ||
+                    data instanceof ht.Group ||
+                    data instanceof ht.Text ||
+                    data.getTag() === 'warn');
+            return data;
+        },
+        randomPlay: function(){
+            var self = this,
+                dm = it.main.dm,
+                list = dm.getDatas(),
+                total = list.size();
+            self.initWarnItem();
+            setInterval(function(){
+                if (Math.random() < 0.7 ) return;
+                var item = self.randomData();
+
+                var count = item.a('alarmCount') || 0;
+                var i = Math.floor(Math.random() * 3) - 1;
+                count += i;
+                if (count < 0) count = 0;
+
+                item.a('alarmCount', count);
+
+                var warn = item.a('warn');
+                if (warn && count === 0) {
+                    warn.setAnimation(null);
+                    warn.s('2d.visible', false);
+                    self.pool.push(warn);
+
+                    dm.remove(warn);
+
+                    item.a('warn', null);
+                    return;
+                }
+
+                if (!warn && count > 0) {
+                    warn = self.getWarnItem();
+                    warn.p(item.p());
+                    warn.s('2d.visible', true);
+                    dm.add(warn);
+
+                    item.a('warn', warn);
+
+                    self.warnAnimate(warn);
+                }
+            }, 800);
+        },
+        warnAnimate: function(node){
+            var self = this;
+            node._counter = 0;
+            node.s('opacity', 1);
+            node.setSize(0, 0);
+            node.setAnimation({
+                hide: {
+                    property: "opacity",
+                    accessType: "style",
+                    frames: 30,
+                    from: 1,
+                    to: 0,
+                    next: 'expandSize',
+                    onComplete: function() {
+                        this.setSize(0, 0);
+                        this.s('opacity', 1);
+                    }
+                },
+                expandSize: {
+                    from: 0,
+                    to: 100,
+                    next: "hide",
+                    onUpdate: function(v) {
+                        this.setSize(v, v);
+                    }
+                },
+                start: ["expandSize"]
+            });
+        },
+        initSerializer: function() {
+            var self = this;
+
+            var temp = self.warnTemp;
+            var s = self._JSONSerializer = new ht.JSONSerializer(it.main.dm);
+            s.isSerializable = function(d) { return d === temp; };
+
+            self.tempJson = s.serialize(0);
+
+            var dm = self.dm = new ht.DataModel();
+            self._parseSerializer = new ht.JSONSerializer(dm);
+        },
+        copy: function() {
+            var ps = this._parseSerializer;
+            ps.deserialize(this.tempJson);
+            var node = this.dm.getDatas().get(0);
+            this.dm.clear();
+            return node;
+        }
+    }
+    it.main = {
+        animate: function(){
+            var cp = this.dm.getDataByTag('mana');
+            this.dm.enableAnimation();
+            // cp.setAnimation({
+            //     blend: {
+            //         from: 255,
+            //         to: 0,
+            //         next: "clear",
+            //         onUpdate: function(value) {
+            //             value = parseInt(value);
+            //             this.s("body.color", "rgb(255, " + value + ", " + value + ")");
+            //         }
+            //     },
+            //     clear: {
+            //         from: 0,
+            //         to: 255,
+            //         next: "blend",
+            //         onUpdate: function(value) {
+            //             value = parseInt(value);
+            //             this.s("body.color", "rgb(255, " + value + ", " + value + ")");
+            //         }
+            //     },
+            //     start: ["blend"]
+            // });;
+        },
+        init: function(){
+            var self = this;
+            var dataModel = this.dm = new ht.DataModel();
+            var graphView = this.graphView = new ht.graph.GraphView(dataModel);
+            graphView.addToDOM();
+
+            window.addEventListener('resize', function() {
+                graphView.fitContent();
+            });
+
+            ht.Default.xhrLoad('previews/display.json', function(text) {
+                var json = ht.Default.parse(text);
+                if(json.title) document.title = json.title;
+                dataModel.deserialize(json);
+
+                dataModel.each(function(d) {
+                    if (d instanceof ht.Edge ||
+                        d instanceof ht.Group ||
+                        d instanceof ht.Text ||
+                        d.getTag() === 'warn')
+                        return;
+                    d.s('icons', {
+                      "alarm": {
+                        "names": [
+                          "symbols/demo/it/alarm.json"
+                        ],
+                        "position": 8,
+                        "width": 30,
+                        "height": 30
+                      }
+                    });
+                });
+
+                graphView.fitContent(true);
+                self.animate();
+                it.warn.randomPlay();
+            });
+        }
+    };
+    it.main.init();
+})();
+</script>
+</body>
+</html>
