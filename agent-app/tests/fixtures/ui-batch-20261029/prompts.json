@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-29",
+  "generationMode": "built-in-imagegen",
+  "purpose": "Synthetic UI inputs for manual image-to-KF client generation testing; not generated client results",
+  "cases": [
+    {
+      "id": "simple-overview",
+      "file": "EnergySimpleOverview.png",
+      "title": "能源概览：基础布局",
+      "focus": "基础文字、指标、状态、按钮和父子布局；不包含复杂表格与图表。",
+      "request": "请根据参考图生成能源概览客户端工程，保留主要文字、三项指标和设备状态，全部使用演示数据。查看说明按钮仅展示本地提示，不连接真实服务。",
+      "prompt": "Use case: ui-mockup. Asset type: a synthetic UI screenshot used to test a KF native-client generation agent. Create exactly one finished screen, flat front-on screenshot filling the canvas, no browser chrome, no device hardware, no perspective, no watermark, no photography. Professional industrial energy-management UI with crisp readable simplified-Chinese typography, consistent alignment and restrained borders. All numbers are invented demonstration data. Clearly show a small badge reading 演示数据. Use only the requested screen content; no explanatory captions outside the UI. Landscape canvas about 1600 by 1000. Light white and very pale gray surfaces with teal accent and dark navy text. Header 能源管理系统 and 园区能源总览. A narrow left nav with 能源概览 selected, 设备监测, 告警中心. Main title 能源概览. Exactly three large metric panels: 今日用电量 / 12,480 / kWh; 当前总功率 / 856 / kW; 设备在线率 / 98.6 / %. Below, two wide simple panels: 重点设备 has three static rows 1号配电室 / 正常, 中央空调 / 正常, 光伏逆变器 / 待检修; 运行摘要 has 当前告警 / 2 项, 今日目标 / 15,000 kWh, 更新时间 / 14:30. One rectangular button 查看说明. Quiet footer 所有数值均为演示数据. Clear generous native-component geometry. No charts, no tables, no decorative illustration."
+    },
+    {
+      "id": "equipment-grid",
+      "file": "EquipmentStatusGrid.png",
+      "title": "设备监测：重复卡片与深色样式",
+      "focus": "重复设备卡片、嵌套布局、深色背景、状态颜色和文字对比。",
+      "request": "请根据参考图生成设备监测客户端工程，保留六张设备卡片及各自状态、功率和温度，使用静态演示值；查看详情不触发设备控制。",
+      "prompt": "Use case: ui-mockup. Asset type: a synthetic UI screenshot used to test a KF native-client generation agent. Create exactly one finished screen, flat front-on screenshot filling the canvas, no browser chrome, no device hardware, no perspective, no watermark, no photography. Professional industrial energy-management UI with crisp readable simplified-Chinese typography, consistent alignment and restrained borders. All numbers are invented demonstration data. Clearly show a small badge reading 演示数据. Use only the requested screen content; no explanatory captions outside the UI. Landscape canvas about 1600 by 1000. Refined dark monitoring UI: deep blue-gray background, slightly lighter panels, off-white text, cyan accent, green normal status, amber warning, gray offline. Header 设备监测 and 能源管理系统. Compact left nav 能源概览, 设备监测 selected, 告警中心. Main summary strip: 设备总数 6, 在线设备 5, 告警设备 1. Below exactly six equal device cards in a clean 3-column 2-row grid. Each card has a short title, distinct readable status badge, two numeric rows, and a small 查看详情 button. Card contents: 1号变压器 / 正常 / 功率 320 kW / 温度 42 ℃; 2号变压器 / 正常 / 功率 286 kW / 温度 40 ℃; 中央空调 / 正常 / 功率 168 kW / 温度 26 ℃; 光伏逆变器 / 告警 / 功率 82 kW / 温度 68 ℃; 冷却水泵 / 正常 / 功率 36 kW / 温度 31 ℃; 备用水泵 / 离线 / 功率 0 kW / 温度 --. Simple small outline icons only. No graphs, no detailed tables, no physical machines."
+    },
+    {
+      "id": "alarm-table",
+      "file": "AlarmCenterTable.png",
+      "title": "告警中心：筛选、表格与分页",
+      "focus": "表格、分页、筛选项、批量动作与不支持区域的明确审核；不假设现有表格能力已通过验证。",
+      "request": "请按参考图生成告警中心客户端工程，保留筛选栏、六条告警、状态和分页视觉。若表格、分页或动作暂不支持，请明确说明并等待选择，不自动删除。数据均为演示数据。",
+      "prompt": "Use case: ui-mockup. Asset type: a synthetic UI screenshot used to test a KF native-client generation agent. Create exactly one finished screen, flat front-on screenshot filling the canvas, no browser chrome, no device hardware, no perspective, no watermark, no photography. Professional industrial energy-management UI with crisp readable simplified-Chinese typography, consistent alignment and restrained borders. All numbers are invented demonstration data. Clearly show a small badge reading 演示数据. Use only the requested screen content; no explanatory captions outside the UI. Landscape canvas about 1600 by 1000, light neutral enterprise UI with restrained blue accent. Header 能源管理系统 / 告警中心. Left nav 能源概览, 设备监测, 告警中心 selected. Main title 告警中心. Three compact summary numbers: 待处理 3, 已确认 2, 已恢复 1. A tidy filter row with 设备名称 search input, 告警级别 dropdown showing 全部, 状态 dropdown showing 全部, 查询 primary button, 重置 secondary button. Under it a real legible six-row data table titled 告警记录, with checkbox column and exactly five text columns 时间, 设备, 告警内容, 级别, 状态. Six short rows: 14:32 / 光伏逆变器 / 温度偏高 / 高 / 待处理; 14:20 / 1号变压器 / 电压越限 / 中 / 待处理; 14:08 / 冷却水泵 / 通讯异常 / 中 / 待处理; 13:56 / 中央空调 / 功率偏高 / 低 / 已确认; 13:30 / 2号变压器 / 温度偏高 / 低 / 已确认; 12:48 / 备用水泵 / 设备离线 / 中 / 已恢复. Use colored text badges, subtle row separators, clear aligned columns. Table footer 共 6 条, page 1 selected, simple previous and next arrows. One small 批量确认 button. No charts or tiny dense filler."
+    },
+    {
+      "id": "energy-charts",
+      "file": "EnergyTrendDashboard.png",
+      "title": "能耗分析：多类图表与复杂区域",
+      "focus": "折线图、柱状图、环形图、图例和坐标轴的区域识别与能力差异提示。",
+      "request": "请根据参考图生成能耗分析客户端工程，保留指标、图表标题、图例和时间范围。折线、柱状、环形图若无法还原，请明确列出差异，不把整张图作为页面背景。使用演示数据。",
+      "prompt": "Use case: ui-mockup. Asset type: a synthetic UI screenshot used to test a KF native-client generation agent. Create exactly one finished screen, flat front-on screenshot filling the canvas, no browser chrome, no device hardware, no perspective, no watermark, no photography. Professional industrial energy-management UI with crisp readable simplified-Chinese typography, consistent alignment and restrained borders. All numbers are invented demonstration data. Clearly show a small badge reading 演示数据. Use only the requested screen content; no explanatory captions outside the UI. Landscape canvas about 1600 by 1000. Dark navy analytical energy dashboard with white type, cyan and turquoise data colors, limited amber. Top title 能耗分析, badge 演示数据, time range 今日. Slim left nav 能源概览, 能耗分析 selected, 设备监测. Four compact KPI panels across top: 今日用电 12,480 kWh; 峰值功率 1,024 kW; 光伏发电 2,860 kWh; 节能率 12.6 %. Below, exactly three distinct well-separated chart regions. Upper wide region titled 24小时负荷趋势 with a crisp line chart, six readable x labels 00:00 04:00 08:00 12:00 16:00 20:00, y unit kW, two lines labeled 今日 and 昨日, clean thin grid. Bottom left region titled 分区用电对比 with a simple vertical bar chart and three readable categories 办公区, 生产区, 公共区, unit kWh. Bottom right region titled 用能构成 has one restrained three-segment donut and a legend 生产 62%, 空调 24%, 其他 14%. Charts are ordinary flat 2D with no glossy effects, no extra maps or illustrations. Large legible labels and uncluttered plotting space."
+    },
+    {
+      "id": "device-form",
+      "file": "EquipmentDetailForm.png",
+      "title": "设备详情：表单、只读状态与操作区",
+      "focus": "标签页、输入框、下拉框、开关、只读字段和交互意图的区分。",
+      "request": "请根据参考图生成设备详情客户端工程，保留分组、字段、单位、标签页和只读状态。保存配置仅验证本地演示表单，取消恢复本地演示值，不发送真实设备控制指令。",
+      "prompt": "Use case: ui-mockup. Asset type: a synthetic UI screenshot used to test a KF native-client generation agent. Create exactly one finished screen, flat front-on screenshot filling the canvas, no browser chrome, no device hardware, no perspective, no watermark, no photography. Professional industrial energy-management UI with crisp readable simplified-Chinese typography, consistent alignment and restrained borders. All numbers are invented demonstration data. Clearly show a small badge reading 演示数据. Use only the requested screen content; no explanatory captions outside the UI. Landscape canvas about 1600 by 1000. Light professional industrial form UI with teal accent, pale gray background, white content areas and navy text. Small breadcrumb 设备监测 / 设备详情. Page heading 1号变压器, green status 正常, a small 只读监测 badge. Left navigation 能源概览, 设备监测 selected, 告警中心. Two tabs 基础信息 selected and 告警记录. One large two-column structured form with group titles 基础信息 and 告警配置, each label and field clearly separated. Left group fields: 设备名称 input 1号变压器; 设备编号 read-only TR001; 所属区域 dropdown 生产区; 额定功率 input 500 followed by kW. Right group fields: 温度上限 input 80 followed by ℃; 功率上限 input 450 followed by kW; 告警通知 toggle visibly on; 备注 multiline input 季度例行维护. A compact separate read-only strip 当前功率 320 kW, 当前温度 42 ℃, 最近更新 14:30. Bottom action bar has primary 保存配置 and secondary 取消, with small note 仅修改本地演示配置. No charts, no operational start/stop controls, no dialog overlays."
+    },
+    {
+      "id": "mobile-overview",
+      "file": "MobileEnergyOverview.png",
+      "title": "移动能源看板：窄屏布局",
+      "focus": "纵向排列、窄屏文字截断、内容边距、底部导航和滚动布局。",
+      "request": "请按参考图生成移动能源看板客户端工程，采用窄屏纵向布局，保留指标、三条设备状态和两条告警摘要。全部数据为演示值，底部导航暂为本地页面切换。",
+      "prompt": "Use case: ui-mockup. Asset type: a synthetic UI screenshot used to test a KF native-client generation agent. Create exactly one finished screen, flat front-on screenshot filling the canvas, no browser chrome, no device hardware, no perspective, no watermark, no photography. Professional industrial energy-management UI with crisp readable simplified-Chinese typography, consistent alignment and restrained borders. All numbers are invented demonstration data. Clearly show a small badge reading 演示数据. Use only the requested screen content; no explanatory captions outside the UI. Portrait mobile application screen, about 900 by 1600, single tall canvas around 9:16. No phone frame, no OS status bar. Calm light UI with warm-white background, white panels, teal accent, dark navy text and generous comfortable readable Chinese type. Top header 移动能源看板 with small 演示数据 badge, subtitle 园区今日概况. A main large KPI area 今日用电量 / 12,480 / kWh and small helper 较昨日下降 8.2%. Under it two equal side-by-side KPI blocks 当前功率 / 856 kW and 在线率 / 98.6%. Then one full-width section 设备状态 with exactly three rows: 1号变压器 / 正常; 中央空调 / 正常; 光伏逆变器 / 待检修. Then section 最新告警 with two spacious rows 温度偏高 / 光伏逆变器 / 14:32 and 通讯异常 / 冷却水泵 / 14:08. A teal full-width button 查看全部告警. Small last-updated text 更新于 14:35. At the bottom a simple app navigation bar with 概览 selected, 设备, 告警. All content fits cleanly within width, calm vertical rhythm, no desktop sidebar, no charts or tables."
+    }
+  ]
+}
