@@ -1,0 +1,7 @@
+{
+   "graphicArray" : [
+      "{\n   \"brushArray\" : [\n      {\n         \"color\" : \"RGB(0,255,255)\"\n      }\n   ],\n   \"graphicType\" : \"OVAL\",\n   \"height\" : 250,\n   \"leftTopPt\" : {\n      \"x\" : 7,\n      \"y\" : 7\n   },\n   \"penInfo\" : {\n      \"arrowType\" : 0,\n      \"color\" : \"RGB(0,0,0)\",\n      \"lineStyle\" : 0,\n      \"width\" : 2,\n      \"widthType\" : 0\n   },\n   \"rotation\" : 0,\n   \"shearing\" : 0,\n   \"width\" : 250\n}\n",
+      "{\n   \"brushArray\" : [\n      {\n         \"color\" : \"RGB(0,255,255)\"\n      }\n   ],\n   \"graphicType\" : \"OVAL\",\n   \"height\" : 226,\n   \"leftTopPt\" : {\n      \"x\" : 19,\n      \"y\" : 19\n   },\n   \"penInfo\" : {\n      \"arrowType\" : 0,\n      \"color\" : \"RGB(0,0,0)\",\n      \"lineStyle\" : 0,\n      \"width\" : 2,\n      \"widthType\" : 0\n   },\n   \"rotation\" : 0,\n   \"shearing\" : 0,\n   \"width\" : 226\n}\n"
+   ],
+   "graphicType" : "GROUP"
+}

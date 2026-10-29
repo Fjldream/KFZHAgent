@@ -1,0 +1,20 @@
+{
+    "dbName": "SQLite",
+    "enmuDBType": {
+        "center": "./logs_center.db",
+        "node": "./logs_node.db"
+    },
+    "enmuType": {
+        "system": 1,
+        "opration": 2,
+        "script": 3
+    },
+    "enmuServerType": {
+        "devCenter": 1,
+        "opsCenter": 2,
+        "clentApp": 10,
+        "calculationApp": 11,
+        "datasourceApp": 12,
+        "alarmApp": 13
+    }
+}

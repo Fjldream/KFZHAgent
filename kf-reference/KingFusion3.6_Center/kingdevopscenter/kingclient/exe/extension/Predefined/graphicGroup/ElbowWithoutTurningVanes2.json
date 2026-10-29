@@ -1,0 +1,8 @@
+{
+   "graphicArray" : [
+      "{\n   \"arrayPt\" : [\n      {\n         \"x\" : 49,\n         \"y\" : 515\n      },\n      {\n         \"x\" : 49,\n         \"y\" : 49\n      },\n      {\n         \"x\" : 49,\n         \"y\" : 49\n      },\n      {\n         \"x\" : 515,\n         \"y\" : 49\n      }\n   ],\n   \"graphicType\" : \"POLYLINE\",\n   \"penInfo\" : {\n      \"arrowType\" : 0,\n      \"color\" : \"RGB(0,0,0)\",\n      \"lineStyle\" : 0,\n      \"width\" : 2,\n      \"widthType\" : 0\n   },\n   \"rotation\" : 0,\n   \"shearing\" : 0\n}\n",
+      "{\n   \"arrayPt\" : [\n      {\n         \"x\" : 15,\n         \"y\" : 448\n      },\n      {\n         \"x\" : 82,\n         \"y\" : 448\n      }\n   ],\n   \"graphicType\" : \"POLYLINE\",\n   \"penInfo\" : {\n      \"arrowType\" : 0,\n      \"color\" : \"RGB(0,0,0)\",\n      \"lineStyle\" : 0,\n      \"width\" : 2,\n      \"widthType\" : 0\n   },\n   \"rotation\" : 0,\n   \"shearing\" : 0\n}\n",
+      "{\n   \"arrayPt\" : [\n      {\n         \"x\" : 448,\n         \"y\" : 82\n      },\n      {\n         \"x\" : 448,\n         \"y\" : 15\n      }\n   ],\n   \"graphicType\" : \"POLYLINE\",\n   \"penInfo\" : {\n      \"arrowType\" : 0,\n      \"color\" : \"RGB(0,0,0)\",\n      \"lineStyle\" : 0,\n      \"width\" : 2,\n      \"widthType\" : 0\n   },\n   \"rotation\" : 0,\n   \"shearing\" : 0\n}\n"
+   ],
+   "graphicType" : "GROUP"
+}

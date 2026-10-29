@@ -1,0 +1,8 @@
+{
+   "graphicArray" : [
+      "{\n   \"brushArray\" : [\n      {\n         \"color\" : \"RGB(0,0,0)\"\n      }\n   ],\n   \"graphicType\" : \"OVAL\",\n   \"height\" : 22,\n   \"leftTopPt\" : {\n      \"x\" : 17,\n      \"y\" : 16\n   },\n   \"penInfo\" : {\n      \"arrowType\" : 0,\n      \"color\" : \"RGB(0,0,0)\",\n      \"lineStyle\" : 0,\n      \"width\" : 2,\n      \"widthType\" : 0\n   },\n   \"rotation\" : 0,\n   \"shearing\" : 0,\n   \"width\" : 22\n}\n",
+      "{\n   \"brushArray\" : [\n      {\n         \"color\" : \"RGB(0,0,0)\"\n      }\n   ],\n   \"graphicType\" : \"OVAL\",\n   \"height\" : 22,\n   \"leftTopPt\" : {\n      \"x\" : 565,\n      \"y\" : 16\n   },\n   \"penInfo\" : {\n      \"arrowType\" : 0,\n      \"color\" : \"RGB(0,0,0)\",\n      \"lineStyle\" : 0,\n      \"width\" : 2,\n      \"widthType\" : 0\n   },\n   \"rotation\" : 0,\n   \"shearing\" : 0,\n   \"width\" : 22\n}\n",
+      "{\n   \"arrayPt\" : [\n      {\n         \"x\" : 26,\n         \"y\" : 30\n      },\n      {\n         \"x\" : 578,\n         \"y\" : 30\n      }\n   ],\n   \"graphicType\" : \"POLYLINE\",\n   \"penInfo\" : {\n      \"arrowType\" : 0,\n      \"color\" : \"RGB(0,0,0)\",\n      \"lineStyle\" : 0,\n      \"width\" : 2,\n      \"widthType\" : 0\n   },\n   \"rotation\" : 0,\n   \"shearing\" : 0\n}\n"
+   ],
+   "graphicType" : "GROUP"
+}

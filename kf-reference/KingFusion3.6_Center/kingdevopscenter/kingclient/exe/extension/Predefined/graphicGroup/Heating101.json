@@ -1,0 +1,6 @@
+{
+   "graphicArray" : [
+      "{\n   \"brushArray\" : [\n      {\n         \"color\" : \"RGB(0,0,0)\"\n      }\n   ],\n   \"graphicType\" : \"OVAL\",\n   \"height\" : 64,\n   \"leftTopPt\" : {\n      \"x\" : 1,\n      \"y\" : 1\n   },\n   \"penInfo\" : {\n      \"arrowType\" : 0,\n      \"color\" : \"RGB(0,0,0)\",\n      \"lineStyle\" : 0,\n      \"width\" : 2,\n      \"widthType\" : 0\n   },\n   \"rotation\" : 0,\n   \"shearing\" : 0,\n   \"width\" : 64\n}\n"
+   ],
+   "graphicType" : "GROUP"
+}

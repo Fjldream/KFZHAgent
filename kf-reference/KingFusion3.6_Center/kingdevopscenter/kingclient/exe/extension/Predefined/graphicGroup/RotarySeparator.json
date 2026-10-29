@@ -1,0 +1,10 @@
+{
+   "graphicArray" : [
+      "{\n   \"arrayPt\" : [\n      {\n         \"x\" : 586,\n         \"y\" : 214\n      },\n      {\n         \"x\" : 458,\n         \"y\" : 129\n      }\n   ],\n   \"graphicType\" : \"POLYLINE\",\n   \"penInfo\" : {\n      \"arrowType\" : 0,\n      \"color\" : \"RGB(0,0,0)\",\n      \"lineStyle\" : 0,\n      \"width\" : 2,\n      \"widthType\" : 0\n   },\n   \"rotation\" : 0,\n   \"shearing\" : 0\n}\n",
+      "{\n   \"arrayPt\" : [\n      {\n         \"x\" : 17,\n         \"y\" : 492\n      },\n      {\n         \"x\" : 586,\n         \"y\" : 492\n      }\n   ],\n   \"graphicType\" : \"POLYLINE\",\n   \"penInfo\" : {\n      \"arrowType\" : 0,\n      \"color\" : \"RGB(0,0,0)\",\n      \"lineStyle\" : 0,\n      \"width\" : 2,\n      \"widthType\" : 0\n   },\n   \"rotation\" : 0,\n   \"shearing\" : 0\n}\n",
+      "{\n   \"brushArray\" : [\n      {\n         \"color\" : \"RGB(0,255,255)\"\n      }\n   ],\n   \"graphicType\" : \"OVAL\",\n   \"height\" : 344,\n   \"leftTopPt\" : {\n      \"x\" : 123,\n      \"y\" : 17\n   },\n   \"penInfo\" : {\n      \"arrowType\" : 0,\n      \"color\" : \"RGB(0,0,0)\",\n      \"lineStyle\" : 0,\n      \"width\" : 2,\n      \"widthType\" : 0\n   },\n   \"rotation\" : 0,\n   \"shearing\" : 0,\n   \"width\" : 344\n}\n",
+      "{\n   \"arrayPt\" : [\n      {\n         \"x\" : 17,\n         \"y\" : 220\n      },\n      {\n         \"x\" : 17,\n         \"y\" : 492\n      }\n   ],\n   \"graphicType\" : \"POLYLINE\",\n   \"penInfo\" : {\n      \"arrowType\" : 0,\n      \"color\" : \"RGB(0,0,0)\",\n      \"lineStyle\" : 0,\n      \"width\" : 2,\n      \"widthType\" : 0\n   },\n   \"rotation\" : 0,\n   \"shearing\" : 0\n}\n",
+      "{\n   \"arrayPt\" : [\n      {\n         \"x\" : 586,\n         \"y\" : 492\n      },\n      {\n         \"x\" : 586,\n         \"y\" : 214\n      }\n   ],\n   \"graphicType\" : \"POLYLINE\",\n   \"penInfo\" : {\n      \"arrowType\" : 0,\n      \"color\" : \"RGB(0,0,0)\",\n      \"lineStyle\" : 0,\n      \"width\" : 2,\n      \"widthType\" : 0\n   },\n   \"rotation\" : 0,\n   \"shearing\" : 0\n}\n"
+   ],
+   "graphicType" : "GROUP"
+}

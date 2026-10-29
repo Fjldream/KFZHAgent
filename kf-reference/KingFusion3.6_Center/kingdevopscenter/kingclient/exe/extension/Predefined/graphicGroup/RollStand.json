@@ -1,0 +1,9 @@
+{
+   "graphicArray" : [
+      "{\n   \"brushArray\" : [\n      {\n         \"color\" : \"RGB(0,255,255)\"\n      }\n   ],\n   \"graphicType\" : \"OVAL\",\n   \"height\" : 378,\n   \"leftTopPt\" : {\n      \"x\" : 22,\n      \"y\" : 402\n   },\n   \"penInfo\" : {\n      \"arrowType\" : 0,\n      \"color\" : \"RGB(0,0,0)\",\n      \"lineStyle\" : 0,\n      \"width\" : 2,\n      \"widthType\" : 0\n   },\n   \"rotation\" : 0,\n   \"shearing\" : 0,\n   \"width\" : 378\n}\n",
+      "{\n   \"brushArray\" : [\n      {\n         \"color\" : \"RGB(0,255,255)\"\n      }\n   ],\n   \"graphicType\" : \"OVAL\",\n   \"height\" : 378,\n   \"leftTopPt\" : {\n      \"x\" : 22,\n      \"y\" : 23\n   },\n   \"penInfo\" : {\n      \"arrowType\" : 0,\n      \"color\" : \"RGB(0,0,0)\",\n      \"lineStyle\" : 0,\n      \"width\" : 2,\n      \"widthType\" : 0\n   },\n   \"rotation\" : 0,\n   \"shearing\" : 0,\n   \"width\" : 378\n}\n",
+      "{\n   \"brushArray\" : [\n      {\n         \"color\" : \"RGB(0,255,255)\"\n      }\n   ],\n   \"graphicType\" : \"OVAL\",\n   \"height\" : 18,\n   \"leftTopPt\" : {\n      \"x\" : 202,\n      \"y\" : 582\n   },\n   \"penInfo\" : {\n      \"arrowType\" : 0,\n      \"color\" : \"RGB(0,0,0)\",\n      \"lineStyle\" : 0,\n      \"width\" : 2,\n      \"widthType\" : 0\n   },\n   \"rotation\" : 0,\n   \"shearing\" : 0,\n   \"width\" : 18\n}\n",
+      "{\n   \"brushArray\" : [\n      {\n         \"color\" : \"RGB(0,255,255)\"\n      }\n   ],\n   \"graphicType\" : \"OVAL\",\n   \"height\" : 18,\n   \"leftTopPt\" : {\n      \"x\" : 202,\n      \"y\" : 203\n   },\n   \"penInfo\" : {\n      \"arrowType\" : 0,\n      \"color\" : \"RGB(0,0,0)\",\n      \"lineStyle\" : 0,\n      \"width\" : 2,\n      \"widthType\" : 0\n   },\n   \"rotation\" : 0,\n   \"shearing\" : 0,\n   \"width\" : 18\n}\n"
+   ],
+   "graphicType" : "GROUP"
+}
