@@ -1,0 +1,1 @@
+import u from"vue";export default function T(o,f){if(u.prototype.$isServer)return;if(!f){o.scrollTop=0;return}const s=[];let t=f.offsetParent;for(;t&&o!==t&&o.contains(t);)s.push(t),t=t.offsetParent;const e=f.offsetTop+s.reduce((i,c)=>i+c.offsetTop,0),p=e+f.offsetHeight,l=o.scrollTop,r=l+o.clientHeight;e<l?o.scrollTop=e:p>r&&(o.scrollTop=p-o.clientHeight)}

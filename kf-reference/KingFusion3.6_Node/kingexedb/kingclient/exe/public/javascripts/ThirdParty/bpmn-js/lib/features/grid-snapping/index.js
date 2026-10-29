@@ -1,0 +1,1 @@
+import p from"./BpmnGridSnapping";import i from"diagram-js/lib/features/grid-snapping";import n from"./behavior";export default{__depends__:[i,n],__init__:["bpmnGridSnapping"],bpmnGridSnapping:["type",p]};

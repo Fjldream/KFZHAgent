@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Thermometer State</title>
+    <meta charset="UTF-8">
+    <link rel="shortcut icon" href="custom/images/favicon.ico?v=2" />
+    <style>
+        html,
+        body {
+            padding: 0px;
+            margin: 0px;
+        }
+    </style>
+
+    <script src='../custom/configs/htconfig.js'></script>
+    <script src='../libs/core/ht.js'></script>
+
+    <script>
+        var animationTask = {
+            interval: 20,
+            percentage: 0,
+            up: true,
+            action: function (data) {
+                var min = data.a('tempMin');
+                var max = data.a('tempMax');
+                if (data.a('errorAnimation')) {
+                    min -= 20;
+                    max += 20;
+                }
+                if (data.a('isAnimation')) {
+                    if (this.up) {
+                        if (this.percentage <= 100) {
+                            data.setAttr('tempNumber', min + (max - min) / 100 * this.percentage);
+                            this.percentage++;
+                        } else {
+                            this.up = false;
+                            this.percentage = 100;
+                        }
+                    } else {
+                        if (this.percentage >= 0) {
+                            data.setAttr('tempNumber', min + (max - min) / 100 * this.percentage);
+                            this.percentage--;
+                        } else {
+                            this.up = true;
+                            this.percentage = 0;
+                        }
+                    }
+                }
+            },
+        }
+
+        function init() {
+            dataModel = new ht.DataModel();
+            graphView = new ht.graph.GraphView(dataModel);
+            graphView.addToDOM();
+            ht.Default.xhrLoad('previews/display.json', function (text) {
+                var json = ht.Default.parse(text);
+                if (json.title) document.title = json.title;
+                dataModel.deserialize(json);
+                graphView.fitContent(true);
+                dataModel.addScheduleTask(animationTask);
+            });
+        }
+    </script>
+</head>
+
+<body onload="init();">
+</body>
+
+</html>

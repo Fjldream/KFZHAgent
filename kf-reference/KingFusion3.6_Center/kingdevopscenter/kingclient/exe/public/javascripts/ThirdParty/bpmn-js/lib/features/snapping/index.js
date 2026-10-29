@@ -1,0 +1,1 @@
+import n from"./BpmnConnectSnapping";import p from"./BpmnCreateMoveSnapping";import e from"diagram-js/lib/features/snapping";export default{__depends__:[e],__init__:["connectSnapping","createMoveSnapping"],connectSnapping:["type",n],createMoveSnapping:["type",p]};

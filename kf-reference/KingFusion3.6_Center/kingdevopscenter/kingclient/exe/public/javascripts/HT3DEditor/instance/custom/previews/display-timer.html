@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Preview Display</title>
+        <meta charset="UTF-8">
+        <link rel="shortcut icon" href="custom/images/favicon.ico?v=2" />
+        <style>
+            html, body {
+                padding: 0px;
+                margin: 0px;
+            }
+        </style>
+
+        <script src='custom/configs/htconfig.js'></script>
+        <script src='custom/libs/echarts.js'></script>
+        <script src='libs/core/ht.js'></script>
+        <script src='libs/plugin/ht-edgetype.js'></script>
+        <script src="libs/plugin/ht-obj.js"></script>
+        <script src='libs/core/ht-ui.js'></script>
+        <script src='libs/plugin/ht-vector.js'></script>
+
+        <script>
+            function init() {
+                dataModel = new ht.DataModel();
+                graphView = new ht.graph.GraphView(dataModel);
+                graphView.addToDOM();
+
+                ht.Default.xhrLoad('previews/display.json', function(text) {
+                    var json = ht.Default.parse(text);
+                    if(json.title) document.title = json.title;
+                    dataModel.deserialize(json);
+                    var timers = dataModel.a('timers');
+                    if (timers) {
+                        timers.forEach(createTimer);
+                    }
+                    graphView.fitContent(true);
+                });
+            }
+
+            function createTimer(timer, index) {
+                var clock = new ht.Node();
+                clock.setImage('symbols/basic/clock.json');
+                clock.setX(150 * index);
+                clock.s('label2', 0);
+                clock.s('label2.position', 3);
+                clock.setName(timer.func + ':' + timer.interval);
+                dataModel.add(clock);
+                setInterval(function() {
+                    if (window[timer.func]) window[timer.func]();
+                    var date = new Date();
+                    clock.a({
+                        'clock.hour': date.getHours(),
+                        'clock.minute': date.getMinutes(),
+                        'clock.second': date.getSeconds()
+                    });
+                    clock.s('label2', clock.s('label2') + 1);
+                }, timer.interval);
+            }
+
+        </script>
+    </head>
+    <body onload='setTimeout(init, 300)'>
+    </body>
+</html>

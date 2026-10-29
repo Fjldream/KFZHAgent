@@ -1,0 +1,1 @@
+import o from"parchment";import{ColorAttributor as r}from"./color";let t=new o.Attributor.Class("background","ql-bg",{scope:o.Scope.INLINE}),c=new r("background","background-color",{scope:o.Scope.INLINE});export{t as BackgroundClass,c as BackgroundStyle};

@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8">
+	<title>Monitor Device Port - HT for Web</title>
+	<style>
+        html, body {
+            padding: 0px;
+            margin: 0px;
+        }
+    </style>
+</head>
+<body>
+<script src='libs/core/ht.js'></script>
+<script src='libs/plugin/ht-contextmenu.js'></script>
+<script>
+(function(){
+
+var treeData = [
+	{
+		name: '大西线',
+		children: [
+			{
+				name: '太原站',
+				children: [
+					{ sid: 1, name: 'XXX设备1', target: './displays/telecom/device2.json', ip: '192.168.0.2',selected: true},
+					{ sid: 2, name: 'XXX设备2', target: './displays/telecom/device3.json', ip: '192.168.0.1'}
+				]
+			}
+		]
+	},
+	{
+		name: '太石线',
+		children: [
+			{
+				name: '石家庄站',
+				children: [
+					{ sid: 3, name: 'XXX设备A', target: './displays/telecom/device1.json', ip: '192.168.0.3'},
+					{ sid: 4, name: 'XXX设备B', target: './displays/telecom/device2.json', ip: '192.168.0.4'}
+				]
+			}
+		]
+	},
+	{ name: '大西实验线'}
+]
+var statusNames = {
+	'1': '在线',
+	'2': '未使用',
+	'3': '告警',
+}
+var badgeColors = {
+	'1': '#F8E81C',
+	'2': '#F6A623',
+	'3': '#D0011B',
+};
+
+var ScrollBarInteractor = ht.graph.ScrollBarInteractor = function (graphView) {
+    ScrollBarInteractor.superClass.constructor.apply(this, arguments);
+};
+ht.Default.def(ScrollBarInteractor, ht.graph.Interactor, {
+    isVScrollable: function () {
+        return this.gv.getViewRect().height < this.gv.getScrollRect().height;
+    },
+    isHScrollable: function () {
+        return this.gv.getViewRect().width < this.gv.getScrollRect().width;
+    },
+    isV: function (e) {
+        var rect = this.gv.getViewRect();
+        return this.isVScrollable() && (rect.x + rect.width - this.gv.lp(e).x) * this.gv.getZoom() < 16;
+    },
+    isH: function (e) {
+        var rect = this.gv.getViewRect();
+        return this.isHScrollable() && (rect.y + rect.height - this.gv.lp(e).y) * this.gv.getZoom() < 16;
+    },
+    handle_mousemove: function (e) {
+        this.handle_touchmove(e);
+    },
+    handle_touchmove: function(e) {
+        if (ht.Default.isDragging() || !ht.Default.isLeftButton(e) || !this.gv.isScrollBarVisible()) {
+            return;
+        }
+        var self = this,
+            isV = self.isV(e),
+            isH = self.isH(e);
+
+        if(isV || isH){
+            self.gv.showScrollBar();
+        }
+        self.gv._scrolling = isV || isH;
+    },
+    handleWindowMouseUp: function (e) {
+        this.handleWindowTouchEnd(e);
+    },
+    handleWindowTouchEnd: function(e){
+        this._state = this._cp = this._tx = this._ty = this.gv._scrolling = null;
+        this.fi({kind: 'endScroll', event: e});
+    },
+    handle_mousedown: function (e) {
+        this.handle_touchstart(e);
+    },
+    handle_touchstart: function (e) {
+        var self = this;
+        self.gv.setFocus(e);
+        ht.Default.preventDefault(e);
+
+        self.handle_touchmove(e);
+        if(ht.Default.getTouchCount(e) > 1 || !self.gv._scrolling || !self.gv.isScrollBarVisible()){
+            return;
+        }
+        self._cp = ht.Default.getClientPoint(e);
+        self._tx = self.gv.tx();
+        self._ty = self.gv.ty();
+
+        var isV = self.isV(e);
+        if (isV) {
+            self._state = 'vScroll';
+        }
+        else {
+            self._state = 'hScroll';
+        }
+        ht.Default.startDragging(self, e);
+        self.fi({kind: 'beginScroll', event: e});
+    },
+    handleWindowMouseMove: function(e){
+        this.handleWindowTouchMove(e);
+    },
+    handleWindowTouchMove: function (e) {
+        var point = ht.Default.getClientPoint(e),
+            viewRect = this.gv.getViewRect(),
+            scrollRect = this.gv.getScrollRect(),
+            min = this.gv.getHeight() - this.gv.getContentRect().height - 20;
+
+        if (this._state === 'vScroll') {
+        	var newVal = this._ty + (this._cp.y - point.y) * scrollRect.height / viewRect.height;
+        	if (newVal > 0) {
+        		newVal = 0;
+        	}
+        	if (newVal < min) {
+        		newVal = min;
+        	}
+            this.gv.ty(newVal > 0 ? 0 : newVal);
+        }
+        // else if (this._state === 'hScroll') {
+        //     this.gv.tx(this._tx + (this._cp.x - point.x) * scrollRect.width / viewRect.width);
+        // }
+        this.fi({kind: 'betweenScroll', event: e});
+    }
+});
+
+
+var G = function(){
+	this.init();
+}
+
+G.prototype = {
+	constructor: G,
+
+	init: function() {
+		this.initUI();
+	},
+	initUI: function() {
+		var self = this,
+			borderPane = this.borderPane = new ht.widget.BorderPane(),
+			treeView = this.treeView = new ht.widget.TreeView(),
+			split = this.split = new ht.widget.SplitView(treeView, null, 'h', 170),
+			rightPane = this.rightPane = new ht.graph.GraphView(),
+			leftPane = this.leftPane = new ht.graph.GraphView(),
+			dm = this.dm = new ht.DataModel(),
+			gv = this.gv = new ht.graph.GraphView(dm),
+			contextMenu = this.contextMenu = new ht.widget.ContextMenu(),
+			tablePane = this.tablePane = new ht.widget.TablePane()
+			gvWrap = this.gvWrap = ht.Default.createDiv();
+
+		// gvWrap.appendChild(rightPane.getView());
+		gvWrap.style.backgroundColor = 'rgb(247,247,247)';
+		gvWrap.style.overflowY = 'scroll';
+		var rightPaneDiv = rightPane.getView();
+		rightPaneDiv.style.left = 0;
+		rightPaneDiv.style.right = 0;
+		rightPane.setHeight(750);
+
+		borderPane.setCenterView(gv);
+		// borderPane.setRightView(rightPane);
+		borderPane.setRightWidth(300);
+		borderPane.setLeftView(leftPane);
+		borderPane.setLeftWidth(300);
+		borderPane.setBottomHeight(240);
+		// device info gv
+		rightPane.setInteractors([
+			new ScrollBarInteractor(rightPane)
+		]);
+		rightPane.handleScroll = function(e){
+			console.log(e)
+		};
+		ht.Default.xhrLoad('./displays/telecom/base-port-info.json', function(text) {
+            var json = ht.Default.parse(text);
+            rightPane.dm().deserialize(json);
+        	rightPane.setTranslate(0, 0);
+        });
+
+		// port info gv
+        leftPane.getView().style.backgroundColor = 'rgb(247,247,247)';
+		leftPane.setInteractors([]);
+		ht.Default.xhrLoad('./displays/telecom/device-info.json', function(text) {
+            var json = ht.Default.parse(text);
+            leftPane.dm().deserialize(json);
+        	leftPane.setTranslate(0, 0);
+        });
+        // main gv
+        gv.dm().sm().ms(function(e) {
+        	var ld = this.gv.sm().ld(),
+        		oldRightView = this.borderPane.getRightView();
+
+        	if (ld && ld.a('portName')) {
+        		this.borderPane.setRightView(rightPane);
+        		this.showPortInfo(ld);
+        	}
+        	else {
+    			this.borderPane.setRightView(null);
+    			this.borderPane.setBottomView(null);
+        	}
+        }, this);
+
+		this.initTree();
+		this.initContextMenu();
+		this.initTablePane();
+		split.addToDOM();
+	},
+	initContextMenu: function () {
+		var self = this,
+			contextMenu = this.contextMenu;
+
+		contextMenu.enableGlobalKey();
+		contextMenu.beforeShow = function(e) {
+            let data = gv.getDataAt(e);
+            if (!data || !data.a('portName')) {
+                contextMenu.setItems([]);
+            }
+            else {
+                contextMenu.setItems([
+                    {
+                        label: '查看实时告警',
+                        action: function(){
+                        	self.borderPane.setBottomView(self.tablePane);
+                        	self.loadWarnList();
+                        }
+                    }
+                ]);
+            }
+        };
+        contextMenu.addTo(this.gv.getView());
+	},
+	initTree: function() {
+		var self = this,
+			data = treeData,
+			treeView = this.treeView;
+		treeView.hasExpandedChild = function(data) {
+	        if (!this.isExpanded(data)) {
+	            return false;
+	        }
+	        var children = data.getChildren(),
+	            size = children.size();
+	        if (size) {
+	            for (let i = 0; i < size; i++) {
+	                if (this.isVisible(children.get(i))) {
+	                    return true;
+	                }
+	            }
+	        }
+	        return false;
+	    };
+		treeView.getIcon = function(data) {
+			if (data.a('target')) {
+				return './symbols/demo/ui/device.json';
+			}
+			return treeView.hasExpandedChild(data) ? './symbols/demo/ui/direxpanded.json' : './symbols/demo/ui/dircollapsed.json';
+		}
+		// select listener
+		treeView.sm().ms(function() {
+			var ld = treeView.sm().ld()
+			if (ld && ld.a('target')) {
+				self.reloadDeviceInfo();
+			}
+		});
+		// add data
+		treeData.forEach(function(d){
+			self.addTreeData(d);
+		});
+		treeView.expandAll();
+		treeView.getView().style.backgroundColor = 'rgb(247, 247, 247)';
+	},
+	initTablePane: function () {
+		var table = this.tablePane;
+		table.addColumns([
+		{ name: 'createTime', displayName: '数据产生时间', accessType: 'attr'},
+		{ name: 'attachRoute', displayName: '所属路线', accessType: 'attr'},
+		{ name: 'siteName', displayName: '站点名称', accessType: 'attr'},
+		{ name: 'deviceName', displayName: '设备名称', accessType: 'attr'},
+		{ name: 'portNo', displayName: '接口编号', accessType: 'attr'},
+		{ name: 'cpu', displayName: 'CPU使用率(%)', accessType: 'attr'},
+		{ name: 'memory', displayName: '内存使用率(%)', accessType: 'attr'},
+		{ name: 'sendBytes', displayName: '发送字节数(B)', accessType: 'attr'},
+		{ name: 'receviceBytes', displayName: '接收字节数(B)', accessType: 'attr'},
+		]);
+	},
+	addTreeData: function (d, parent) {
+		var self = this,
+			htData = new ht.Data();
+		htData.setName(d.name);
+		htData.a(d);
+		if (parent) {
+			htData.setParent(parent);
+		}
+		this.treeView.dm().add(htData);
+		if (d.selected) {
+			setTimeout(function() {
+				self.treeView.sm().ss(htData);
+			}, 200)
+		}
+		if (d.children) {
+			d.children.forEach(function(child) {
+				self.addTreeData(child, htData);
+			})
+		}
+	},
+	loadWarnList: function() {
+		var len = this.random(10),
+			dm = this.tablePane.getDataModel();
+		dm.clear();
+		for (var i = 0; i < len; i++){
+			var d = new ht.Data();
+			d.a({
+				createTime: (new Date()).toLocaleDateString(),
+				attachRoute: '大西线',
+				siteName: '太原站',
+				deviceName: 'ABB',
+				portNo: 10,
+				cpu: this.random(100) + 1,
+				memory:  this.random(100) + 1,
+				sendBytes:  this.random(204800),
+				receviceBytes:  this.random(204800),
+			})
+			dm.add(d);
+		}
+	},
+	reloadDeviceInfo: function () {
+		var self = this,
+			tg = this.treeView.sm().ld(),
+			attr = tg.getAttrObject(),
+			dm = this.dm
+			gv = this.gv,
+			ldm = this.leftPane.dm();
+		this.split.setRightView(this.borderPane);
+
+		dm.clear();
+		ht.Default.xhrLoad(attr.target, function(text) {
+            var json = ht.Default.parse(text);
+            dm.deserialize(json);
+            gv.fitContent(true);
+            self.reloadPortInfo();
+        });
+		// device info
+		var deviceStatus = ldm.getDataByTag('deviceStatus');
+		deviceStatus.a('status', Math.floor(Math.random() * 4) + 1);
+		this.setDatas(ldm, {
+			deviceName: tg.getName(),
+			routeName: tg.getParent().getName(),
+			siteName: tg.getParent().getParent().getName(),
+			deviceIP: attr.ip
+		});
+	},
+	reloadPortInfo: function () {
+		var self = this,
+			ports = this.dm.toDatas(function(d) {
+				return !!d.a('portName');
+			});
+		// Analog data
+		ports.each(function(p) {
+			// 1、up 2、not used 3、warning
+			var state = self.random(3) + 1,
+				warnLevel = self.random(3) + 1,
+				warnCount = self.random(20) + 1;
+			p.a({
+				'portStatus': state
+			});
+
+			if (state === 3) {
+				p.s('body.color', 'rgb(24,219,40)');
+				p.addStyleIcon('icons', {
+					position: 8,
+					names: [self.getWarnIcon(warnLevel, warnCount)]
+				});
+			}
+		});
+	},
+	showPortInfo: function (port) {
+		var self = this,
+			data = ht.Default.clone(port.getAttrObject());
+		data.portStatus = statusNames[data.portStatus];
+		data.portSpeed = this.random(1000) + 'Mb/s';
+		data.sendBytes = this.random(100000);
+		data.sendMultiPackage = this.random(100);
+		data.sendPackage = this.random(100);
+		data.receviceBytes = this.random(100);
+		data.receviceMultiPackage = this.random(100);
+		data.recevicePackage = this.random(100);
+		data.inLost = this.random(200);
+		data.outLost = this.random(200);
+		data.inError = this.random(200);
+		data.outError = this.random(200);
+		data.sysTime = (new Date()).toLocaleString();
+
+		self.setDatas(this.rightPane.dm(), data);
+
+	},
+	getWarnIcon: function (warnLevel, warnCount) {
+		return {
+		  "width": 15,
+		  "height": 15,
+		  "comps": [
+		    {
+		      "type": "oval",
+		      "background": badgeColors[warnLevel],
+		      "rect": [
+		        0,
+		        0,
+		        15,
+		        15
+		      ]
+		    },
+		    {
+		      "type": "text",
+		      "text": warnCount,
+		      "align": "center",
+		      "color": "rgb(255,255,255)",
+		      "scaleX": 0.75,
+		      "scaleY": 0.75,
+		      "rect": [
+		        -2.5,
+		        -2.5,
+		        20,
+		        20
+		      ]
+		    }
+		  ]
+		}
+	},
+	setDatas: function (dm, obj) {
+		for (var key in obj) {
+			this.setData(dm, key, obj[key]);
+		}
+	},
+	setData: function (dm, key, value){
+		var dataBinding,
+			datas = dm.getDatas();
+		for (var i = 0, len = datas.size(); i < len; i++) {
+            dataBinding = datas.get(i).getDataBindings();
+            if (dataBinding) {
+                // update attrs
+                for (var name in dataBinding.a) {
+                    var db = dataBinding.a[name];
+                    if (db.id === key) {
+                    	datas.get(i).a(name, value);
+                    	return;
+                    }
+                }
+                // update styles
+                for (var name in dataBinding.s) {
+                    var db = dataBinding.s[name];
+                    if (db.id === key) {
+                    	datas.get(i).s(name, value);
+                    	return;
+                    }
+                }
+                // update properties
+                for (var name in dataBinding.p) {
+                    var db = dataBinding.p[name];
+                    if (db.id === key) {
+                    	datas.get(i)[ht.Default.setter(name)](value);
+                    	return;
+                    }
+                }
+            }
+		}
+	},
+	random: function (max) {
+		return Math.floor(Math.random() * max);
+	}
+}
+
+window.g = new G()
+})();
+</script>
+</body>
+</html>

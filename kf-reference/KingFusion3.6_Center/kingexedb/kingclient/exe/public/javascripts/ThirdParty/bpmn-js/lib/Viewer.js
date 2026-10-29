@@ -1,0 +1,1 @@
+import t from"inherits";import i from"./core";import m from"diagram-js/lib/i18n/translate";import l from"diagram-js/lib/features/selection";import p from"diagram-js/lib/features/overlays";import e from"./BaseViewer";export default function o(r){e.call(this,r)}t(o,e),o.prototype._modules=[i,m,l,p],o.prototype._moddleExtensions={};

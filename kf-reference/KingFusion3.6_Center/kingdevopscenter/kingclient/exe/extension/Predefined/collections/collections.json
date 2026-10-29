@@ -1,0 +1,283 @@
+{
+    "Linkbutton": [
+        {
+            "text": "详细配置",
+            "state": "open",
+            "children": [
+                { "id": 0, "text": "详细配置0", "des": "这是按钮控件的一个详细配置", "info": "$(this).click(alert('somethings'));\n" },
+                { "id": 1, "text": "详细配置1", "des": "这是按钮控件的一个详细配置", "info": "$(this).click(alert('somethings'));\n" }
+            ]
+        },
+        {
+            "text": "样式配置",
+            "state": "open",
+            "children": [
+                { "id": 0, "text": "样式配置0", "des": "这是按钮控件的一样式配置", "info": "#id{\n++++color:red;\n}" },
+                { "id": 1, "text": "样式配置1", "des": "这是按钮控件的一样式配置", "info": "#id{\n++++color:red;\n}" }
+            ]
+        }
+    ],
+    "Spinner": [
+        {
+            "text": "详细配置",
+            "state": "open",
+            "children": [
+                { "id": 0, "text": "详细配置0", "des": "这是按钮控件的一个详细配置", "info": "$(this).click(alert('somethings'));" },
+                { "id": 1, "text": "详细配置1", "des": "这是按钮控件的一个详细配置", "info": "" }
+            ]
+        },
+        {
+            "text": "样式配置",
+            "state": "open",
+            "children": [
+                { "id": 0, "text": "样式配置0", "des": "这是按钮控件的样式配置", "info": "#id{\n++++color:red;\n};" },
+                { "id": 1, "text": "样式配置1", "des": "这是微调器控件的一个样式配置", "info": "#id{\n++++color:red;\n++++background:red;\n}" }
+            ]
+        }
+    ],
+    "Combobox": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "Calendar": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "NumberSpinner": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "Numberbox": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "TimeSpinner": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "Silder": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "Datagrid": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "Propertygrid": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "Textbox": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "Searchbox": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "DateBox": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "DateTimeBox": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "MenuButton": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "ProgressBar": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "Tree": [
+        {
+            "text": "详细配置",
+            "state": "open",
+            "children": [
+                {
+                    "id": 0,
+                    "info": "// 初始化数据\n$('#' + id).tree({\n    data: [{\n        id: 'node1',\n        text: 'wellintech',\n        state: 'open',\n        children: [{\n            id: 'node1-1',\n            text: 'Development Department'\n        }, {\n            id: 'node1-2',\n            text: 'KF Web Clent'\n        }]\n    }, {\n        id: 'node2',\n        text: 'Web Develop'\n    }],\n});\n",
+                    "text": "111",
+                    "des": ""
+                }
+            ]
+        },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "TreeGrid": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "FileBox": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "Pagination": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "ToolTip": [
+        { "text": "详细配置", "state": "open", "children": [{ "id": 0, "info": "/*id为easyui控件的id*/\nconsole.log('something')", "text": "111111", "des": "" }] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "Window": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "Dialog": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "Tagbox": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "RichText": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "UIRadioButtonGroup": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "UICheckBox": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "Combotree": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "Switchbutton": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "Sidemenu": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "ImageCarsuel": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "Validatebox": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "CustomeCalendar": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "ElementUI_Datetimepicker": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "ElementUI_Cascader": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "ElementUI_Input": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "ElementUI_Checkbox": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "ElementUI_Radio": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "ElementUI_Button": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "ElementUI_Navmenu": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "ElementUI_Dropdown": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "ElementUI_Tree": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [{ "id": 0, "info": "/*id是easyui控件的id\n//domId是包裹easyui控件的外层div的id*/\n", "text": "aaaa", "des": "zzzzz" }] }
+    ],
+    "ElementUI_Upload": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [{ "id": 0, "info": "/*id是easyui控件的id\n//domId是包裹easyui控件的外层div的id*/\n", "text": "aaaa", "des": "zzzzz" }] }
+    ],
+    "ElementUI_Select": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [{ "id": 0, "info": "/*id是easyui控件的id\n//domId是包裹easyui控件的外层div的id*/\n", "text": "aaaa", "des": "zzzzz" }] }
+    ],
+    "ElementUI_Transfer": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [{ "id": 0, "info": "/*id是easyui控件的id\n//domId是包裹easyui控件的外层div的id*/\n", "text": "aaaa", "des": "zzzzz" }] }
+    ],
+    "ElementUI_Switch": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [{ "id": 0, "info": "/*id是easyui控件的id\n//domId是包裹easyui控件的外层div的id*/\n", "text": "aaaa", "des": "zzzzz" }] }
+    ],
+    "ElementUI_InputNumber": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [{ "id": 0, "info": "/*id是easyui控件的id\n//domId是包裹easyui控件的外层div的id*/\n", "text": "aaaa", "des": "zzzzz" }] }
+    ],
+    "ElementUI_Tag": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [{ "id": 0, "info": "/*id是easyui控件的id\n//domId是包裹easyui控件的外层div的id*/\n", "text": "aaaa", "des": "zzzzz" }] }
+    ],
+    "ElementUI_Tabs": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [{ "id": 0, "info": "/*id是easyui控件的id\n//domId是包裹easyui控件的外层div的id*/\n", "text": "aaaa", "des": "zzzzz" }] }
+    ],
+    "ElementUI_Timeline": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "ElementUI_Steps": [{ "text": "详细配置", "state": "open", "children": [] }],
+    "ElementUI_Table": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "FormLayout": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "HorizontalLayout": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "VerticalLayout": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "Accordion": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "Tab": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "DockingLayout": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "ProjectFlowChart": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "MobileLayout": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "Page_Editor": [
+        { "text": "详细配置", "state": "open", "children": [] },
+        { "text": "样式配置", "state": "open", "children": [] }
+    ],
+    "Gantt": [{ "text": "详细配置", "state": "open", "children": [] }]
+}

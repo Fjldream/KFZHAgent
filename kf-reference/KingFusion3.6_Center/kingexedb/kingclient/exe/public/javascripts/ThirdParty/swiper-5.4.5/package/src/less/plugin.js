@@ -1,0 +1,1 @@
+const fs=require("fs");function base64Encode(n){const s=fs.readFileSync(n);return Buffer.from(s).toString("base64")}module.exports={install(n,s,o){o.add("swiperIconsFont",()=>base64Encode("./src/icons/font/swiper-icons.woff"))}};

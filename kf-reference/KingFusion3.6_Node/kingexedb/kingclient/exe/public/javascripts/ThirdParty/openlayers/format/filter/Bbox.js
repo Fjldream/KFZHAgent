@@ -1,0 +1,1 @@
+import s from"./Filter.js";class o extends s{constructor(t,e,r){if(super("BBOX"),this.geometryName=t,this.extent=e,e.length!==4)throw new Error("Expected an extent with four values ([minX, minY, maxX, maxY])");this.srsName=r}}export default o;

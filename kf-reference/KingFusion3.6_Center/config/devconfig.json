@@ -1,0 +1,61 @@
+{
+  "opsCenterAddress": "127.0.0.1",
+  "devCenterAddress": "127.0.0.1",
+  "nginxport": 443,
+  "startport": 11001,
+  "devCenterStartPort": 11001,
+  "devCenterPortShift": {
+    "kinggateway": 0,
+    "kingio": 1,
+    "kingcalculation": 2,
+    "kingclient": 3,
+    "kingdbmanger": 4,
+    "kingoauth": 5,
+    "kinglicense": 6,
+    "kingalarm": 7,
+    "kinglog": 8,
+    "kingcalculationdebug": 11
+  },
+  "opsCenterPort": {
+    "kingops": 12000,
+    "kingfile": 12001,
+    "kingservicediscovery": 12002
+  },
+  "redis": {
+    "host": "127.0.0.1",
+    "port": 7000,
+    "pwd": "KF_REFERENCE_REDACTED"
+  },
+  "oauthClient": {
+    "grantType": "password",
+    "redirectUri": "/main",
+    "clientname": "KingIDE",
+    "description": "KingIDE",
+    "clientId": "9EAE7E9C1245D0AA",
+    "clientSecret": "KF_REFERENCE_REDACTED"
+  },
+  "kingopsserver": {
+    "grantType": "password",
+    "redirectUri": "https://127.0.0.1/opscenter",
+    "clientname": "opscenter",
+    "description": "kingopsserver",
+    "clientId": "E14A86DD1131AE95",
+    "clientSecret": "KF_REFERENCE_REDACTED"
+  },
+  "redirectUrl": {
+    "mainURL": "/",
+    "loginURL": "/login",
+    "oauthURL": "/kingoauth/",
+    "clientURL": "/kingclient/develop.html",
+    "calculationURL": "/kingcalculation/callback",
+    "ioURL": "/kingio/main",
+    "dbURL": "/kingdbm/main"
+  },
+  "access_token": {
+    "accessTokenLifetime": 3600
+  },
+  "kingclaculationdebugger": {
+    "clientId": "40A8B5AB49882025",
+    "clientSecret": "KF_REFERENCE_REDACTED"
+  }
+}

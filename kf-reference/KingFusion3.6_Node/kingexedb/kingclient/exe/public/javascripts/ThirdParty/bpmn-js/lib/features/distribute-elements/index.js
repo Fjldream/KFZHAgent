@@ -1,0 +1,1 @@
+import e from"diagram-js/lib/features/distribute-elements";import t from"./BpmnDistributeElements";export default{__depends__:[e],__init__:["bpmnDistributeElements"],bpmnDistributeElements:["type",t]};

@@ -1,0 +1,1 @@
+import r from"./getTranslate";import t from"./setTranslate";import a from"./minTranslate";import m from"./maxTranslate";import o from"./translateTo";export default{getTranslate:r,setTranslate:t,minTranslate:a,maxTranslate:m,translateTo:o};

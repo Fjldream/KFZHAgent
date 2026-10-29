@@ -1,0 +1,8 @@
+{
+   "graphicArray" : [
+      "{\n   \"arrayPt\" : [\n      {\n         \"x\" : 28,\n         \"y\" : 970\n      },\n      {\n         \"x\" : 970,\n         \"y\" : 970\n      }\n   ],\n   \"graphicType\" : \"POLYLINE\",\n   \"penInfo\" : {\n      \"arrowType\" : 0,\n      \"color\" : \"RGB(0,0,0)\",\n      \"lineStyle\" : 0,\n      \"width\" : 2,\n      \"widthType\" : 0\n   },\n   \"rotation\" : 0,\n   \"shearing\" : 0\n}\n",
+      "{\n   \"arrayPt\" : [\n      {\n         \"x\" : 499,\n         \"y\" : 970\n      },\n      {\n         \"x\" : 499,\n         \"y\" : 499\n      }\n   ],\n   \"graphicType\" : \"POLYLINE\",\n   \"penInfo\" : {\n      \"arrowType\" : 0,\n      \"color\" : \"RGB(0,0,0)\",\n      \"lineStyle\" : 0,\n      \"width\" : 2,\n      \"widthType\" : 0\n   },\n   \"rotation\" : 0,\n   \"shearing\" : 0\n}\n",
+      "{\n   \"arrayPt\" : [\n      {\n         \"x\" : 263,\n         \"y\" : 28\n      },\n      {\n         \"x\" : 263,\n         \"y\" : 499\n      },\n      {\n         \"x\" : 263,\n         \"y\" : 499\n      },\n      {\n         \"x\" : 735,\n         \"y\" : 499\n      },\n      {\n         \"x\" : 735,\n         \"y\" : 499\n      },\n      {\n         \"x\" : 735,\n         \"y\" : 28\n      }\n   ],\n   \"graphicType\" : \"POLYLINE\",\n   \"penInfo\" : {\n      \"arrowType\" : 0,\n      \"color\" : \"RGB(0,0,0)\",\n      \"lineStyle\" : 0,\n      \"width\" : 2,\n      \"widthType\" : 0\n   },\n   \"rotation\" : 0,\n   \"shearing\" : 0\n}\n"
+   ],
+   "graphicType" : "GROUP"
+}

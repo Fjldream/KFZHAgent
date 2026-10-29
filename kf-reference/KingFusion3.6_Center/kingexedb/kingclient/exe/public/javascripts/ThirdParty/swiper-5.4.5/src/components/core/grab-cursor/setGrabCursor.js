@@ -1,0 +1,1 @@
+import e from"../../../utils/support";export default function(t){const r=this;if(e.touch||!r.params.simulateTouch||r.params.watchOverflow&&r.isLocked||r.params.cssMode)return;const s=r.el;s.style.cursor="move",s.style.cursor=t?"-webkit-grabbing":"-webkit-grab",s.style.cursor=t?"-moz-grabbin":"-moz-grab",s.style.cursor=t?"grabbing":"grab"}

@@ -1,0 +1,155 @@
+==============================
+HT 编辑器国际化说明
+==============================
+
+//////////////////////////
+// 配置客户端语言
+window.hteditor_config = {
+    locale: 'en'
+};
+通过配置 window.hteditor_config.locale 属性决定国际化语言：
+    - en: 英文
+    - zh: 中文
+
+//////////////////////////
+// 默认国际化配置
+在 client/locales 目录下，配置了默认编辑器工具使用到的语言信息于 hteditor.strings 变量。
+    - client/locales/en.js：英文
+    - client/locales/zh.js：中文
+注意：该目录一般用于用户增加其他语言配置，不建议进行修改！
+
+//////////////////////////
+// 自定义国际化配置
+通过配置 hteditor.customStrings 属性，可扩展新的国际化语言定义，一般在实例工程的 custom/locales 目录下配置：
+    - instance/custom/locales/en.js: 英文
+    - instance/custom/locales/zh.js: 中文
+注意：hteditor.customStrings 优先级高于默认的 hteditor.strings，因此可作为覆盖默认配置之用
+
+//////////////////////////
+// storage 国际化配置
+HT 编辑器支持图标/组件/资源的国际化配置，只需要定义 'url:' 前缀的 key 路径信息即可，如：
+    - 'url:symbols/ht': '系统'
+    - 'url:symbols/ht/chart': '图表',
+
+//////////////////////////
+// 枚举类型国际化配置
+以下定义了告警级别 AlarmSeverity 新枚举值类型，在数据绑定设置值类型的下拉选项中，将尝试以  'AlarmSeverity' 查找对应国际化内容，若无国际化需求则定义 labels 属性即可，如需国际化则定义 i18nLabels 属性。
+window.hteditor_config.valueTypes = {
+    AlarmSeverity: {
+        type: 'enum',
+        values: [500, 400, 300, 200, 100, 0],
+        i18nLabels: [
+            'AlarmSeverityCritical',
+            'AlarmSeverityMajor',
+            'AlarmSeverityMinor',
+            'AlarmSeverityWarning',
+            'AlarmSeverityIndeterminate',
+            'AlarmSeverityCleared'
+        ],
+        icons: [
+            createColorIcon('#FF0000'),
+            createColorIcon('#FFA000'),
+            createColorIcon('#FFFF00'),
+            createColorIcon('#00FFFF'),
+            createColorIcon('#C800FF'),
+            createColorIcon('#00FF00')
+        ]
+    }
+};
+AlarmSeverity: '告警级别',
+AlarmSeverityCritical: '严重告警',
+AlarmSeverityMajor: '主要告警',
+AlarmSeverityMinor: '次要告警',
+AlarmSeverityWarning: '警告告警',
+AlarmSeverityIndeterminate: '未知告警',
+AlarmSeverityCleared: '清除告警',
+
+//////////////////////////
+// 数据绑定属性国际化配置
+图标数据绑定 dataBindings 中每个属性的 name 值，将作为显示属性时尝试获取国际化内容。
+{
+  "dataBindings": [
+    {
+      "attr": "tank.volume",
+      "valueType": "Percentage",
+      "name": "TankVolume",
+      "defaultValue": 0.679
+    },
+    {
+      "attr": "tank.color",
+      "valueType": "Color",
+      "name": "TankColor",
+      "defaultValue": "#3498DB"
+    },
+    {
+      "attr": "tank.alarm",
+      "valueType": "AlarmSeverity",
+      "defaultValue": 0,
+      "name": "TankAlarm"
+    }
+  ]
+  ...
+}
+TankVolume: '油罐存量',
+TankColor: '油罐颜色',
+TankAlarm: '油罐告警',
+
+//////////////////////////
+// 自定义组件属性国际化配置
+{
+  "width": 100,
+  "height": 30,
+  "func": "__ht__function(g, rect, comp, data, view) {...}",
+  "properties": {
+    "background": {
+      "valueType": "Color",
+      "defaultValue": "#20384A",
+      "name": "PBBackground"
+    },
+    "borderColor": {
+      "valueType": "Color",
+      "defaultValue": "rgb(255,255,255)",
+      "name": "PBBorderColor"
+    },
+    "borderWidth": {
+      "valueType": "Number",
+      "defaultValue": 0,
+      "name": "PBBorderWidth"
+    }
+    ...
+  }
+}
+PBGradientColor: '渐进色',
+PBBackground: '背景色',
+PBBorderColor: '边框颜色',
+
+//////////////////////////
+// 自定义属性页属性名国际化配置
+window.hteditor_config.customProperties = {
+    symbol: [
+        {
+            valueType: 'Color',
+            name: 'Custom Color',
+            property: 'custom.color',
+            defaultValue: 'orange',
+            dataBinding: true
+        }
+    ]
+}
+'Custom Color': '测试颜色'
+
+//////////////////////////
+// 获取国际化内容函数
+通过 hteditor.getString 函数可获取国际化内容，该函数逻辑如下：
+hteditor.getString = function S(key, nullable) {
+    if (key == null) return;
+    if (!nullable && hteditor.config.traceMissingI18n && !(hteditor.customStrings[key] || hteditor.strings[key])) {
+        console.log('i18n missing:[' + key + ']');
+    }
+    if (nullable) {
+        return hteditor.customStrings[key] || hteditor.strings[key];
+    }
+    else {
+        return hteditor.customStrings[key] || hteditor.strings[key] || key;
+    }
+}

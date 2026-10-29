@@ -1,0 +1,1 @@
+const t=(r,e,s)=>{const c=e.expression?e.value:e.arg,f=s.context.$refs[c];f&&(Array.isArray(f)?f[0].$refs.reference=r:f.$refs.reference=r)};export default{bind(r,e,s){t(r,e,s)},inserted(r,e,s){t(r,e,s)}};

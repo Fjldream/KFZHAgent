@@ -1,0 +1,79 @@
+==============================
+# HT 编辑器属性页说明
+==============================
+编辑器的右侧属性页可通过 editor.inspector 访问，会根据当前选中的不同图元类型切换不同的 inspector 对象，其本质由 ht.widget.FormPane 扩展而来，因此自定义属性页可调用 inspector.addRow 等 FormPane 相关函数。
+
+编辑器内部实现会让同一种类型的图元复用相同的 inspector 对象，分为以下四种：
+
+1、图纸类型：设置图纸全局属性
+editor.inspectorPane.displayInspector [type:display][name:display]
+
+2、图元类型：设置图元属性，根据图元类型分为以下几类
+editor.inspectorPane.htDataInspector [type:data][name:Data]
+editor.inspectorPane.htNodeInspector [type:data][name:Node]
+editor.inspectorPane.htBlockInspector [type:data][name:Block]
+editor.inspectorPane.htRefGraphInspector [type:data][name:RefGraph]
+editor.inspectorPane.htTextInspector [type:data][name:Text]
+editor.inspectorPane.htGroupInspector [type:data][name:Group]
+editor.inspectorPane.htEdgeInspector [type:data][name:Edge]
+editor.inspectorPane.htShapeInspector [type:data][name:Shape]
+
+3、图标类型：设置图标全局属性
+editor.inspectorPane.symbolInspector [type:symbol][name:symbol]
+
+4、组件类型：设置组件属性，根据组件类型分为以下几类
+editor.inspectorPane.basicInspector [type:comp][name:basic]
+editor.inspectorPane.borderInspector [type:comp][name:border]
+editor.inspectorPane.imageInspector [type:comp][name:image]
+editor.inspectorPane.shapeInspector [type:comp][name:shape]
+editor.inspectorPane.textInspector [type:comp][name:text]
+editor.inspectorPane.funcTypeInspector [type:comp][name:func]
+editor.inspectorPane.compTypeInspector [type:comp][name:comp]
+editor.inspectorPane.pieChartInspector [type:comp][name:pieChart]
+editor.inspectorPane.oneDimensionalColumnChartInspector [type:comp][name:oneDimensionalColumnChartInspector]
+editor.inspectorPane.columnChartInspector [type:comp][name:columnChart]
+editor.inspectorPane.lineChartInspector [type:comp][name:lineChart]
+
+=================
+# 用以下代码可输出所有属性类型及分组信息
+[
+    'displayInspector',
+
+    'htDataInspector',
+    'htNodeInspector',
+    'htBlockInspector',
+    'htRefGraphInspector',
+    'htTextInspector',
+    'htGroupInspector',
+    'htEdgeInspector',
+    'htShapeInspector',
+
+    'symbolInspector',
+
+    'basicInspector',
+    'borderInspector',
+    'imageInspector',
+    'shapeInspector',
+    'textInspector',
+    'funcTypeInspector',
+    'compTypeInspector',
+    'columnChartInspector',
+    'lineChartInspector',
+    'pieChartInspector',
+    'oneDimensionalColumnChartInspector'
+
+].forEach(function(name) {
+    var inspector = editor.inspectorPane[name];
+    console.log('=================');
+    console.log('editor.inspectorPane.' + name + ' [type:' + inspector.type + ']' + '[name:' + inspector.name + ']');
+    inspector.getRows().forEach(function(row) {
+        var keys = row.keys;
+        if (row.title) {
+            console.log('    ' + row.title);
+        }
+        else if (keys && keys.name) {
+            var prefix = '        [' + (keys.accessType || ' ') + ']';
+            console.log(prefix + row.keys.name + ' [' + row.keys.displayName + ']')
+        }
+    });
+});

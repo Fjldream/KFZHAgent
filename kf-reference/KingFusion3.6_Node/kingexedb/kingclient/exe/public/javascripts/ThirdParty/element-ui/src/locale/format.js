@@ -1,0 +1,1 @@
+import{hasOwn as r}from"element-ui/src/utils/util";const p=/(%|)\{([0-9a-zA-Z_]+)\}/g;export default function(c){function f(n,...e){return e.length===1&&typeof e[0]=="object"&&(e=e[0]),(!e||!e.hasOwnProperty)&&(e={}),n.replace(p,(o,h,u,l)=>{let t;return n[l-1]==="{"&&n[l+o.length]==="}"?u:(t=r(e,u)?e[u]:null,t==null?"":t)})}return f}

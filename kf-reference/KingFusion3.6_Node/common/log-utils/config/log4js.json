@@ -1,0 +1,174 @@
+{
+    "production": {
+        "appenders": {
+            "default": {
+                "type": "console",
+                "alwaysIncludePattern": true,
+                "category": "default"
+            },
+            "system": {
+                "type": "dateFile",
+                "filename": "./log/system",
+                "pattern": "yyyy-MM-dd.log",
+                "alwaysIncludePattern": true,
+                "maxLogSize": 10485760,
+                "numBackups": 10,
+                "layout": {
+                    "type": "pattern",
+                    "pattern": "%d{yyyy-MM-dd hh:mm:ss.SSS} %p %m"
+                }
+            },
+            "script": {
+                "type": "dateFile",
+                "filename": "./log/script",
+                "pattern": "yyyy-MM-dd.log",
+                "alwaysIncludePattern": true,
+                "maxLogSize": 10485760,
+                "numBackups": 10,
+                "layout": {
+                    "type": "pattern",
+                    "pattern": "%d{yyyy-MM-dd hh:mm:ss.SSS} %p %m"
+                }
+            }
+        },
+        "categories": {
+            "default": {
+                "appenders": [
+                    "default"
+                ],
+                "level": "all"
+            },
+            "trace": {
+                "appenders": [
+                    "script"
+                ],
+                "level": "trace"
+            },
+            "debug": {
+                "appenders": [
+                    "system"
+                ],
+                "level": "debug"
+            },
+            "info": {
+                "appenders": [
+                    "system"
+                ],
+                "level": "info"
+            },
+            "warn": {
+                "appenders": [
+                    "system"
+                ],
+                "level": "warn"
+            },
+            "error": {
+                "appenders": [
+                    "system"
+                ],
+                "level": "error"
+            },
+            "fatal": {
+                "appenders": [
+                    "system"
+                ],
+                "level": "fatal"
+            }
+        }
+    },
+    "development": {
+        "appenders": {
+            "default": {
+                "type": "console",
+                "alwaysIncludePattern": true,
+                "category": "default"
+            },
+            "application": {
+                "type": "dateFile",
+                "filename": "./log/application",
+                "pattern": "yyyy-MM-dd.log",
+                "alwaysIncludePattern": true,
+                "maxLogSize": 10485760,
+                "numBackups": 10,
+                "layout": {
+                    "type": "pattern",
+                    "pattern": "%d{yyyy-MM-dd hh:mm:ss.SSS} %p %m"
+                }
+            },
+            "system": {
+                "type": "dateFile",
+                "filename": "./log/system",
+                "pattern": "yyyy-MM-dd.log",
+                "alwaysIncludePattern": true,
+                "maxLogSize": 10485760,
+                "numBackups": 10,
+                "layout": {
+                    "type": "pattern",
+                    "pattern": "%d{yyyy-MM-dd hh:mm:ss.SSS} %p %m"
+                }
+            },
+            "script": {
+                "type": "dateFile",
+                "filename": "./log/script",
+                "pattern": "yyyy-MM-dd.log",
+                "alwaysIncludePattern": true,
+                "maxLogSize": 10485760,
+                "numBackups": 10,
+                "layout": {
+                    "type": "pattern",
+                    "pattern": "%d{yyyy-MM-dd hh:mm:ss.SSS} %p %m"
+                }
+            }
+        },
+        "categories": {
+            "default": {
+                "appenders": [
+                    "default"
+                ],
+                "level": "all"
+            },
+            "trace": {
+                "appenders": [
+                    "script",
+                    "default"
+                ],
+                "level": "trace"
+            },
+            "info": {
+                "appenders": [
+                    "system",
+                    "default"
+                ],
+                "level": "info"
+            },
+            "debug": {
+                "appenders": [
+                    "application",
+                    "default"
+                ],
+                "level": "debug"
+            },
+            "warn": {
+                "appenders": [
+                    "application",
+                    "default"
+                ],
+                "level": "warn"
+            },
+            "error": {
+                "appenders": [
+                    "application",
+                    "default"
+                ],
+                "level": "error"
+            },
+            "fatal": {
+                "appenders": [
+                    "system",
+                    "default"
+                ],
+                "level": "fatal"
+            }
+        }
+    }
+}

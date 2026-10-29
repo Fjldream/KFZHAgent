@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>HT Radial Bar Chart</title>
+    <meta charset="UTF-8">
+    <link rel="shortcut icon" href="custom/images/favicon.ico?v=2" />
+    <style>
+        html,
+        body {
+            padding: 0px;
+            margin: 0px;
+        }
+    </style>
+
+    <script src='custom/configs/htconfig.js'></script>
+    <script src='libs/core/ht.js'></script>
+    <script src='libs/plugin/ht-edgetype.js'></script>
+    <script src='libs/plugin/ht-obj.js'></script>
+    <script src='libs/core/ht-ui.js'></script>
+    <script src='libs/plugin/ht-vector.js'></script>
+    <script src='libs/plugin/ht-animation.js'></script>
+
+    <script>
+        var progressArr = [
+            {
+                name: 'p1',
+                easingType: 'Bounce.easeIn'
+            },
+            {
+                name: 'p2',
+                easingType: 'Bounce.easeOut'
+            },
+            {
+                name: 'p3',
+                easingType: 'Bounce.easeInOut'
+            }
+        ];
+        // * 获取随机数字
+        function getRandomNums() {
+            var data = new Array(3);
+            for (var i = 0; i < data.length; i++) {
+                data[i] = Math.floor((Math.random() * 60) + 20);
+            }
+            return data;
+        }
+        // * 更新数据
+        function updateData(data, easingType) {
+            var randomNumsArr = getRandomNums();
+            data.setAnimation({
+                show: {
+                    from: 0.4,
+                    to: 1,
+                    duration: 2000,
+                    easing: easingType,
+                    onUpdate: function (v) {
+                        v = parseFloat(v).toFixed(2);
+                        var animRandomNumsArr = randomNumsArr.map(function (item) {
+                            return item * v;
+                        });
+                        this.setAttr('progressPercentage', animRandomNumsArr);
+                    }
+                },
+                start: ['show']
+            });
+            dataModel.enableAnimation();
+        }
+
+        // * 加载数据
+        function loadData(dataModel, graphView) {
+            ht.Default.xhrLoad('previews/display.json', function (text) {
+                var json = ht.Default.parse(text);
+                if (json.title) document.title = json.title;
+                dataModel.deserialize(json);
+                graphView.fitContent(true);
+
+                progressArr.forEach(function (item) {
+                    var data = dataModel.getDataByTag(item.name);
+                    var easingType = item.easingType;
+                    setInterval(updateData.bind(null, data, easingType), 3000);
+                });
+            });
+        }
+
+        // * 初始化
+        function init() {
+            dataModel = new ht.DataModel();
+            graphView = new ht.graph.GraphView(dataModel);
+            graphView.addToDOM();
+            loadData(dataModel, graphView);
+        }
+    </script>
+</head>
+
+<body onload="init()">
+</body>
+
+</html>

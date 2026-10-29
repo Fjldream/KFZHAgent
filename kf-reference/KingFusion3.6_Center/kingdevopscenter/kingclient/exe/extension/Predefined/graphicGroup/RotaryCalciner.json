@@ -1,0 +1,6 @@
+{
+   "graphicArray" : [
+      "{\n   \"arrayPt\" : [\n      {\n         \"x\" : 80,\n         \"y\" : 21\n      },\n      {\n         \"x\" : 746,\n         \"y\" : 199\n      },\n      {\n         \"x\" : 746,\n         \"y\" : 199\n      },\n      {\n         \"x\" : 687,\n         \"y\" : 422\n      },\n      {\n         \"x\" : 687,\n         \"y\" : 422\n      },\n      {\n         \"x\" : 21,\n         \"y\" : 243\n      },\n      {\n         \"x\" : 21,\n         \"y\" : 243\n      },\n      {\n         \"x\" : 80,\n         \"y\" : 21\n      },\n      {\n         \"x\" : 80,\n         \"y\" : 21\n      },\n      {\n         \"x\" : 80,\n         \"y\" : 21\n      }\n   ],\n   \"brushArray\" : [\n      {\n         \"color\" : \"RGB(0,255,255)\"\n      }\n   ],\n   \"graphicType\" : \"POLYGON\",\n   \"penInfo\" : {\n      \"arrowType\" : 0,\n      \"color\" : \"RGB(0,0,0)\",\n      \"lineStyle\" : 0,\n      \"width\" : 2,\n      \"widthType\" : 0\n   },\n   \"rotation\" : 0,\n   \"shearing\" : 0\n}\n"
+   ],
+   "graphicType" : "GROUP"
+}

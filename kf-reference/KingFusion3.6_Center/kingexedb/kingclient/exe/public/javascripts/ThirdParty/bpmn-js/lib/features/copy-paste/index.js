@@ -1,0 +1,1 @@
+import o from"diagram-js/lib/features/copy-paste";import p from"./BpmnCopyPaste";import e from"./ModdleCopy";export default{__depends__:[o],__init__:["bpmnCopyPaste","moddleCopy"],bpmnCopyPaste:["type",p],moddleCopy:["type",e]};

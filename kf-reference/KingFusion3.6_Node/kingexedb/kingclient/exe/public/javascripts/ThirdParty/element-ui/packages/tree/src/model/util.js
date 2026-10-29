@@ -1,0 +1,1 @@
+export const NODE_KEY="$treeNodeId",markNodeData=function(r,e){!e||e[NODE_KEY]||Object.defineProperty(e,NODE_KEY,{value:r.id,enumerable:!1,configurable:!1,writable:!1})},getNodeKey=function(r,e){return r?e[r]:e[NODE_KEY]},findNearestComponent=(r,e)=>{let t=r;for(;t&&t.tagName!=="BODY";){if(t.__vue__&&t.__vue__.$options.name===e)return t.__vue__;t=t.parentNode}return null};

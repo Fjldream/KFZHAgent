@@ -1,0 +1,15 @@
+{
+  "http_type": "http",
+  "ssl_key": "",
+  "ssl_cert": "",
+  "cacheType": 0,
+  "serverManager": "http://127.0.0.1:9010",
+  "kpDevPath": "http://127.0.0.1:11001",
+  "oauth": {
+    "ip": "127.0.0.1",
+    "port": "11003",
+    "clientId": "9EAE7E9C1245D0AA",
+    "clientSecret": "KF_REFERENCE_REDACTED",
+    "redirectUri": "/"
+  }
+}

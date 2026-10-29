@@ -1,0 +1,45 @@
+{
+  "opsCenterAddress": "192.168.3.26",
+  "opsPublicAddress": "192.168.3.26",
+  "opsProxy": "192.168.3.26",
+  "proxyPublicAddress": "192.168.3.26",
+  "nginxType": 1,
+  "nginxPort": 443,
+  "opsProxyStartPort": 13000,
+  "opsProxyShift": {
+    "kingopsProxy": 0
+  },
+  "opsCenterPort": {
+    "kinglicense": 11007,
+    "kingops": 12000,
+    "kingfile": 12001,
+    "kingservicediscovery": 12002
+  },
+  "oauth": {
+    "active": {
+      "address": "192.168.3.26",
+      "oauthPort": 11006
+    }
+  },
+  "redis": {
+    "port": "7000",
+    "pwd": "KF_REFERENCE_REDACTED"
+  },
+  "userInfo": {
+    "username": "admin001",
+    "password": "KF_REFERENCE_REDACTED"
+  },
+  "defaultUser": {
+    "username": "admin002",
+    "password": "KF_REFERENCE_REDACTED"
+  },
+  "nodeInfo": {
+    "nodeName": "node"
+  },
+  "network": "",
+  "docker": {
+    "port": 2375,
+    "active": false
+  },
+  "usePm2": true
+}

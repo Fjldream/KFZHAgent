@@ -1,0 +1,1396 @@
+{
+  "date": "2026-10-29",
+  "target": "Linux / Docker",
+  "method": "read-only installed-source and snapshot audit; static literal require scan does not prove dynamic dependency closure",
+  "runtimeStartupAttempted": false,
+  "dockerBuildAttempted": false,
+  "independentStartupVerified": false,
+  "sourceManifestFiles": 22794,
+  "sourceManifestBytes": 432540131,
+  "contentCoverage": {
+    "groups": [
+      {
+        "root": "KingFusion3.6_Center/kingdevopscenter/kingclient/exe",
+        "originalComparisonAvailable": true,
+        "expectedFiles": 12567,
+        "missingFiles": [],
+        "explicitExclusions": 496
+      },
+      {
+        "root": "KingFusion3.6_Center/kingexedb/kingclient/exe",
+        "originalComparisonAvailable": true,
+        "expectedFiles": 4278,
+        "missingFiles": [],
+        "explicitExclusions": 378
+      },
+      {
+        "root": "KingFusion3.6_Node/kingexedb/kingclient/exe",
+        "originalComparisonAvailable": true,
+        "expectedFiles": 4363,
+        "missingFiles": [],
+        "explicitExclusions": 381
+      },
+      {
+        "root": "KingFusion3.6_Center/common",
+        "originalComparisonAvailable": true,
+        "expectedFiles": 37,
+        "missingFiles": [],
+        "explicitExclusions": 0
+      },
+      {
+        "root": "KingFusion3.6_Node/common",
+        "originalComparisonAvailable": true,
+        "expectedFiles": 37,
+        "missingFiles": [],
+        "explicitExclusions": 0
+      }
+    ],
+    "missingFileCount": 0,
+    "allRootsCompared": true
+  },
+  "clients": [
+    {
+      "root": "KingFusion3.6_Center/kingdevopscenter/kingclient/exe",
+      "originalInstallationAvailable": true,
+      "backendFilesScanned": 103,
+      "dependencyDeclarationCount": 0,
+      "undeclaredDependencies": [
+        "address",
+        "archiver",
+        "async",
+        "better-sqlite3",
+        "body-parser",
+        "compressing",
+        "compression",
+        "cookie-parser",
+        "crypto-js",
+        "date-fns",
+        "dayjs",
+        "express",
+        "imageinfo",
+        "joi",
+        "jszip",
+        "mime",
+        "multer",
+        "nanoid",
+        "node-cache",
+        "redis",
+        "request",
+        "unzip-stream",
+        "uuid",
+        "winston",
+        "winston-daily-rotate-file",
+        "winston-transport",
+        "xss"
+      ],
+      "dependencies": [
+        {
+          "name": "address",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.2.2",
+          "engines": {
+            "node": ">= 10.0.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "archiver",
+          "literalConsumerCount": 2,
+          "declared": false,
+          "installedVersion": "5.3.2",
+          "engines": {
+            "node": ">= 10"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "async",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "3.2.6",
+          "engines": null,
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "better-sqlite3",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "12.2.0",
+          "engines": {
+            "node": "20.x || 22.x || 23.x || 24.x"
+          },
+          "nativeBindings": [
+            {
+              "path": "build/Release/better_sqlite3.node",
+              "format": "Windows PE",
+              "architecture": "platform-specific"
+            },
+            {
+              "path": "build/Release/test_extension.node",
+              "format": "Windows PE",
+              "architecture": "platform-specific"
+            }
+          ],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "body-parser",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.20.3",
+          "engines": {
+            "node": ">= 0.8",
+            "npm": "1.2.8000 || >= 1.4.16"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "compressing",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.10.3",
+          "engines": {
+            "node": ">= 4.0.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "compression",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.8.1",
+          "engines": {
+            "node": ">= 0.8.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "cookie-parser",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.4.7",
+          "engines": {
+            "node": ">= 0.8.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "crypto-js",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "4.2.0",
+          "engines": null,
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "date-fns",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "4.1.0",
+          "engines": null,
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "dayjs",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.11.13",
+          "engines": null,
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "express",
+          "literalConsumerCount": 2,
+          "declared": false,
+          "installedVersion": "4.21.2",
+          "engines": {
+            "node": ">= 0.10.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "imageinfo",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.0.4",
+          "engines": {
+            "node": ">=0.4"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "joi",
+          "literalConsumerCount": 3,
+          "declared": false,
+          "installedVersion": "14.3.1",
+          "engines": null,
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "jszip",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "3.10.1",
+          "engines": null,
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "mime",
+          "literalConsumerCount": 2,
+          "declared": false,
+          "installedVersion": "1.6.0",
+          "engines": {
+            "node": ">=4"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "multer",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.4.5-lts.2",
+          "engines": {
+            "node": ">= 6.0.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "nanoid",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "3.3.11",
+          "engines": {
+            "node": "^10 || ^12 || ^13.7 || ^14 || >=15.0.1"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "node-cache",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "5.1.2",
+          "engines": {
+            "node": ">= 8.0.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "redis",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "3.1.2",
+          "engines": {
+            "node": ">=10"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "request",
+          "literalConsumerCount": 13,
+          "declared": false,
+          "installedVersion": "2.88.2",
+          "engines": {
+            "node": ">= 6"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "unzip-stream",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "0.3.4",
+          "engines": null,
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "uuid",
+          "literalConsumerCount": 3,
+          "declared": false,
+          "installedVersion": "8.3.2",
+          "engines": null,
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "winston",
+          "literalConsumerCount": 2,
+          "declared": false,
+          "installedVersion": "3.18.3",
+          "engines": {
+            "node": ">= 12.0.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "winston-daily-rotate-file",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "5.0.0",
+          "engines": {
+            "node": ">=8"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "winston-transport",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "4.9.0",
+          "engines": {
+            "node": ">= 12.0.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "xss",
+          "literalConsumerCount": 3,
+          "declared": false,
+          "installedVersion": "1.0.15",
+          "engines": {
+            "node": ">= 0.10.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        }
+      ],
+      "packageLockPresent": false,
+      "startScriptPresent": false,
+      "missingRelativeModules": [],
+      "unresolvedOriginalImports": [
+        {
+          "source": "KingFusion3.6_Center/kingdevopscenter/kingclient/exe/lib/services/projectPermissionManage/checkProjectPermission.js",
+          "request": "../../../core/enums/public",
+          "astCallSites": [
+            {
+              "functionScopes": [],
+              "eagerTopLevel": true,
+              "guardedByCatch": false,
+              "catchRethrows": false
+            }
+          ]
+        },
+        {
+          "source": "KingFusion3.6_Center/common/projectClient/routes/projectUtil.js",
+          "request": "../../../../config/nodeRegister.json",
+          "astCallSites": [
+            {
+              "functionScopes": [
+                "getProxyNodeId"
+              ],
+              "eagerTopLevel": false,
+              "guardedByCatch": false,
+              "catchRethrows": false
+            },
+            {
+              "functionScopes": [
+                "getProxyNodeName"
+              ],
+              "eagerTopLevel": false,
+              "guardedByCatch": false,
+              "catchRethrows": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "root": "KingFusion3.6_Center/kingexedb/kingclient/exe",
+      "originalInstallationAvailable": true,
+      "backendFilesScanned": 86,
+      "dependencyDeclarationCount": 0,
+      "undeclaredDependencies": [
+        "address",
+        "archiver",
+        "axios",
+        "better-sqlite3",
+        "body-parser",
+        "compressing",
+        "compression",
+        "cookie-parser",
+        "crypto-js",
+        "date-fns",
+        "dayjs",
+        "exceljs",
+        "express",
+        "iconv-lite",
+        "lodash",
+        "mime",
+        "mime-types",
+        "multer",
+        "nanoid",
+        "node-cache",
+        "node-disk-info",
+        "node-xlsx",
+        "nodemailer",
+        "redis",
+        "request",
+        "sqlite3",
+        "winston",
+        "winston-daily-rotate-file",
+        "winston-transport",
+        "ws",
+        "xss"
+      ],
+      "dependencies": [
+        {
+          "name": "address",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.2.2",
+          "engines": {
+            "node": ">= 10.0.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "archiver",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "5.3.2",
+          "engines": {
+            "node": ">= 10"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "axios",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.11.0",
+          "engines": null,
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "better-sqlite3",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "12.2.0",
+          "engines": {
+            "node": "20.x || 22.x || 23.x || 24.x"
+          },
+          "nativeBindings": [
+            {
+              "path": "build/Release/better_sqlite3.node",
+              "format": "Windows PE",
+              "architecture": "platform-specific"
+            },
+            {
+              "path": "build/Release/test_extension.node",
+              "format": "Windows PE",
+              "architecture": "platform-specific"
+            }
+          ],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "body-parser",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.20.3",
+          "engines": {
+            "node": ">= 0.8",
+            "npm": "1.2.8000 || >= 1.4.16"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "compressing",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.10.3",
+          "engines": {
+            "node": ">= 4.0.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "compression",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.8.1",
+          "engines": {
+            "node": ">= 0.8.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "cookie-parser",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.4.7",
+          "engines": {
+            "node": ">= 0.8.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "crypto-js",
+          "literalConsumerCount": 2,
+          "declared": false,
+          "installedVersion": "4.2.0",
+          "engines": null,
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "date-fns",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "4.1.0",
+          "engines": null,
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "dayjs",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.11.13",
+          "engines": null,
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "exceljs",
+          "literalConsumerCount": 2,
+          "declared": false,
+          "installedVersion": "4.4.0",
+          "engines": {
+            "node": ">=8.3.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "express",
+          "literalConsumerCount": 2,
+          "declared": false,
+          "installedVersion": "4.21.2",
+          "engines": {
+            "node": ">= 0.10.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "iconv-lite",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "0.6.3",
+          "engines": {
+            "node": ">=0.10.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "lodash",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "4.17.21",
+          "engines": null,
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "mime",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.6.0",
+          "engines": {
+            "node": ">=4"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "mime-types",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "2.1.35",
+          "engines": {
+            "node": ">= 0.6"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "multer",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.4.5-lts.2",
+          "engines": {
+            "node": ">= 6.0.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "nanoid",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "3.3.11",
+          "engines": {
+            "node": "^10 || ^12 || ^13.7 || ^14 || >=15.0.1"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "node-cache",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "5.1.2",
+          "engines": {
+            "node": ">= 8.0.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "node-disk-info",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.3.0",
+          "engines": {
+            "node": ">= 12"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "node-xlsx",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "0.23.0",
+          "engines": {
+            "node": ">=10.0.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "nodemailer",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "6.10.1",
+          "engines": {
+            "node": ">=6.0.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "redis",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "3.1.2",
+          "engines": {
+            "node": ">=10"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "request",
+          "literalConsumerCount": 13,
+          "declared": false,
+          "installedVersion": "2.88.2",
+          "engines": {
+            "node": ">= 6"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "sqlite3",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "5.1.6",
+          "engines": null,
+          "nativeBindings": [
+            {
+              "path": "build-tmp-napi-v6/Release/node_sqlite3.node",
+              "format": "Windows PE",
+              "architecture": "platform-specific"
+            },
+            {
+              "path": "lib/binding/napi-v6-linux-glibc-arm64/node_sqlite3.node",
+              "format": "Linux ELF",
+              "architecture": "arm64"
+            },
+            {
+              "path": "lib/binding/napi-v6-linux-glibc-x64/node_sqlite3.node",
+              "format": "Linux ELF",
+              "architecture": "x86_64"
+            },
+            {
+              "path": "lib/binding/napi-v6-win32-unknown-x64/node_sqlite3.node",
+              "format": "Windows PE",
+              "architecture": "platform-specific"
+            }
+          ],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "winston",
+          "literalConsumerCount": 2,
+          "declared": false,
+          "installedVersion": "3.18.3",
+          "engines": {
+            "node": ">= 12.0.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "winston-daily-rotate-file",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "5.0.0",
+          "engines": {
+            "node": ">=8"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "winston-transport",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "4.9.0",
+          "engines": {
+            "node": ">= 12.0.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "ws",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "8.18.3",
+          "engines": {
+            "node": ">=10.0.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "xss",
+          "literalConsumerCount": 2,
+          "declared": false,
+          "installedVersion": "1.0.15",
+          "engines": {
+            "node": ">= 0.10.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        }
+      ],
+      "packageLockPresent": false,
+      "startScriptPresent": false,
+      "missingRelativeModules": [],
+      "unresolvedOriginalImports": [
+        {
+          "source": "KingFusion3.6_Center/kingexedb/kingclient/exe/lib/controllers/controller_user.js",
+          "request": "../../core/utils/checkThirdToken",
+          "astCallSites": [
+            {
+              "functionScopes": [],
+              "eagerTopLevel": true,
+              "guardedByCatch": true,
+              "catchRethrows": false
+            }
+          ]
+        },
+        {
+          "source": "KingFusion3.6_Center/common/projectClient/routes/projectUtil.js",
+          "request": "../../../../config/nodeRegister.json",
+          "astCallSites": [
+            {
+              "functionScopes": [
+                "getProxyNodeId"
+              ],
+              "eagerTopLevel": false,
+              "guardedByCatch": false,
+              "catchRethrows": false
+            },
+            {
+              "functionScopes": [
+                "getProxyNodeName"
+              ],
+              "eagerTopLevel": false,
+              "guardedByCatch": false,
+              "catchRethrows": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "root": "KingFusion3.6_Node/kingexedb/kingclient/exe",
+      "originalInstallationAvailable": true,
+      "backendFilesScanned": 87,
+      "dependencyDeclarationCount": 0,
+      "undeclaredDependencies": [
+        "address",
+        "archiver",
+        "axios",
+        "better-sqlite3",
+        "body-parser",
+        "compressing",
+        "compression",
+        "cookie-parser",
+        "crypto-js",
+        "date-fns",
+        "dayjs",
+        "exceljs",
+        "express",
+        "iconv-lite",
+        "lodash",
+        "mime",
+        "mime-types",
+        "multer",
+        "nanoid",
+        "node-cache",
+        "node-disk-info",
+        "node-xlsx",
+        "nodemailer",
+        "redis",
+        "request",
+        "sqlite3",
+        "winston",
+        "winston-daily-rotate-file",
+        "winston-transport",
+        "ws",
+        "xss"
+      ],
+      "dependencies": [
+        {
+          "name": "address",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.2.2",
+          "engines": {
+            "node": ">= 10.0.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "archiver",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "5.3.2",
+          "engines": {
+            "node": ">= 10"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "axios",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.11.0",
+          "engines": null,
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "better-sqlite3",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "12.2.0",
+          "engines": {
+            "node": "20.x || 22.x || 23.x || 24.x"
+          },
+          "nativeBindings": [
+            {
+              "path": "build/Release/better_sqlite3.node",
+              "format": "Windows PE",
+              "architecture": "platform-specific"
+            },
+            {
+              "path": "build/Release/test_extension.node",
+              "format": "Windows PE",
+              "architecture": "platform-specific"
+            }
+          ],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "body-parser",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.20.3",
+          "engines": {
+            "node": ">= 0.8",
+            "npm": "1.2.8000 || >= 1.4.16"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "compressing",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.10.3",
+          "engines": {
+            "node": ">= 4.0.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "compression",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.8.1",
+          "engines": {
+            "node": ">= 0.8.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "cookie-parser",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.4.7",
+          "engines": {
+            "node": ">= 0.8.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "crypto-js",
+          "literalConsumerCount": 2,
+          "declared": false,
+          "installedVersion": "4.2.0",
+          "engines": null,
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "date-fns",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "4.1.0",
+          "engines": null,
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "dayjs",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.11.13",
+          "engines": null,
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "exceljs",
+          "literalConsumerCount": 2,
+          "declared": false,
+          "installedVersion": "4.4.0",
+          "engines": {
+            "node": ">=8.3.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "express",
+          "literalConsumerCount": 2,
+          "declared": false,
+          "installedVersion": "4.21.2",
+          "engines": {
+            "node": ">= 0.10.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "iconv-lite",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "0.6.3",
+          "engines": {
+            "node": ">=0.10.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "lodash",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "4.17.21",
+          "engines": null,
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "mime",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.6.0",
+          "engines": {
+            "node": ">=4"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "mime-types",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "2.1.35",
+          "engines": {
+            "node": ">= 0.6"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "multer",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.4.5-lts.2",
+          "engines": {
+            "node": ">= 6.0.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "nanoid",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "3.3.11",
+          "engines": {
+            "node": "^10 || ^12 || ^13.7 || ^14 || >=15.0.1"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "node-cache",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "5.1.2",
+          "engines": {
+            "node": ">= 8.0.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "node-disk-info",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "1.3.0",
+          "engines": {
+            "node": ">= 12"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "node-xlsx",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "0.23.0",
+          "engines": {
+            "node": ">=10.0.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "nodemailer",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "6.10.1",
+          "engines": {
+            "node": ">=6.0.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "redis",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "3.1.2",
+          "engines": {
+            "node": ">=10"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "request",
+          "literalConsumerCount": 14,
+          "declared": false,
+          "installedVersion": "2.88.2",
+          "engines": {
+            "node": ">= 6"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "sqlite3",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "5.1.6",
+          "engines": null,
+          "nativeBindings": [
+            {
+              "path": "build-tmp-napi-v6/Release/node_sqlite3.node",
+              "format": "Windows PE",
+              "architecture": "platform-specific"
+            },
+            {
+              "path": "lib/binding/napi-v6-linux-glibc-arm64/node_sqlite3.node",
+              "format": "Linux ELF",
+              "architecture": "arm64"
+            },
+            {
+              "path": "lib/binding/napi-v6-linux-glibc-x64/node_sqlite3.node",
+              "format": "Linux ELF",
+              "architecture": "x86_64"
+            },
+            {
+              "path": "lib/binding/napi-v6-win32-unknown-x64/node_sqlite3.node",
+              "format": "Windows PE",
+              "architecture": "platform-specific"
+            }
+          ],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "winston",
+          "literalConsumerCount": 2,
+          "declared": false,
+          "installedVersion": "3.18.3",
+          "engines": {
+            "node": ">= 12.0.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "winston-daily-rotate-file",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "5.0.0",
+          "engines": {
+            "node": ">=8"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "winston-transport",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "4.9.0",
+          "engines": {
+            "node": ">= 12.0.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "ws",
+          "literalConsumerCount": 1,
+          "declared": false,
+          "installedVersion": "8.18.3",
+          "engines": {
+            "node": ">=10.0.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        },
+        {
+          "name": "xss",
+          "literalConsumerCount": 2,
+          "declared": false,
+          "installedVersion": "1.0.15",
+          "engines": {
+            "node": ">= 0.10.0"
+          },
+          "nativeBindings": [],
+          "linuxRebuildVerified": false
+        }
+      ],
+      "packageLockPresent": false,
+      "startScriptPresent": false,
+      "missingRelativeModules": [],
+      "unresolvedOriginalImports": [
+        {
+          "source": "KingFusion3.6_Node/kingexedb/kingclient/exe/lib/controllers/controller_user.js",
+          "request": "../../core/utils/checkThirdToken",
+          "astCallSites": [
+            {
+              "functionScopes": [],
+              "eagerTopLevel": true,
+              "guardedByCatch": true,
+              "catchRethrows": false
+            }
+          ]
+        },
+        {
+          "source": "KingFusion3.6_Node/common/projectClient/routes/projectUtil.js",
+          "request": "../../../../config/nodeRegister.json",
+          "astCallSites": [
+            {
+              "functionScopes": [
+                "getProxyNodeId"
+              ],
+              "eagerTopLevel": false,
+              "guardedByCatch": false,
+              "catchRethrows": false
+            },
+            {
+              "functionScopes": [
+                "getProxyNodeName"
+              ],
+              "eagerTopLevel": false,
+              "guardedByCatch": false,
+              "catchRethrows": false
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "docker": {
+    "cliAvailable": true,
+    "daemonReachable": false,
+    "errorCode": "DOCKER_DAEMON_UNREACHABLE"
+  },
+  "licenseStatus": "user-reported-unavailable",
+  "astValidationAvailable": true,
+  "unguardedModuleLevelImportGaps": [
+    {
+      "source": "KingFusion3.6_Center/kingdevopscenter/kingclient/exe/lib/services/projectPermissionManage/checkProjectPermission.js",
+      "request": "../../../core/enums/public",
+      "astCallSites": [
+        {
+          "functionScopes": [],
+          "eagerTopLevel": true,
+          "guardedByCatch": false,
+          "catchRethrows": false
+        }
+      ]
+    }
+  ],
+  "entryPointReachabilityVerified": false,
+  "guardedOriginalImportGaps": [
+    {
+      "source": "KingFusion3.6_Center/kingexedb/kingclient/exe/lib/controllers/controller_user.js",
+      "request": "../../core/utils/checkThirdToken",
+      "astCallSites": [
+        {
+          "functionScopes": [],
+          "eagerTopLevel": true,
+          "guardedByCatch": true,
+          "catchRethrows": false
+        }
+      ]
+    },
+    {
+      "source": "KingFusion3.6_Node/kingexedb/kingclient/exe/lib/controllers/controller_user.js",
+      "request": "../../core/utils/checkThirdToken",
+      "astCallSites": [
+        {
+          "functionScopes": [],
+          "eagerTopLevel": true,
+          "guardedByCatch": true,
+          "catchRethrows": false
+        }
+      ]
+    }
+  ],
+  "sourceFindings": [
+    {
+      "id": "KF_SOURCE_UNRESOLVED_MODULE_LEVEL_IMPORT",
+      "detail": "checkProjectPermission.js requires absent core/enums/public at module scope. Entry-point reachability is not established; this is a source gap, not a reproduced startup failure"
+    }
+  ],
+  "capabilityFindings": [
+    {
+      "id": "KF_RUNTIME_THIRD_TOKEN_MODULE_UNAVAILABLE",
+      "detail": "Runtime catches missing checkThirdToken during controller loading, but the checkThirdToken handler dereferences it without a null guard; that endpoint remains unavailable"
+    }
+  ],
+  "blockingFindings": [
+    {
+      "id": "KF_STARTUP_DEPENDENCIES_UNDECLARED",
+      "detail": "Client package manifests do not declare their observed server dependencies; a reproducible Linux install manifest and lockfile are required"
+    },
+    {
+      "id": "KF_STARTUP_NATIVE_REBUILD_UNVERIFIED",
+      "detail": "SQLite native modules must be rebuilt or installed for the selected Linux architecture and Node ABI; installed better-sqlite3 binaries observed here are Windows PE"
+    },
+    {
+      "id": "KF_STARTUP_CONFIGURATION_NOT_INITIALIZED",
+      "detail": "Configuration samples contain redacted private values; runtime configuration and secret injection are not implemented"
+    },
+    {
+      "id": "KF_STARTUP_PROJECT_BOOTSTRAP_MISSING",
+      "detail": "Runtime requires an explicit project path, externalconfig.json and parent project.json; isolated sdb and demo-project initialization are required"
+    },
+    {
+      "id": "KF_STARTUP_SERVICE_STACK_MISSING",
+      "detail": "Gateway, OAuth, authorization and other configured services need a real deployment stack, routing and health checks; the existing agent-app stack is a different product"
+    },
+    {
+      "id": "KF_STARTUP_AUTHORIZATION_UNAVAILABLE",
+      "detail": "No usable standalone KF test authorization was provided; authentication and licensed runtime acceptance remain unverified"
+    },
+    {
+      "id": "KF_STARTUP_DOCKER_UNAVAILABLE",
+      "detail": "Docker CLI is installed but the Docker daemon is not reachable on this host"
+    }
+  ]
+}

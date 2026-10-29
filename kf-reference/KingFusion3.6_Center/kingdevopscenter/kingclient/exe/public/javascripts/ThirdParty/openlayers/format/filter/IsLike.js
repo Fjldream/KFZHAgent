@@ -1,0 +1,1 @@
+import d from"./Comparison.js";class o extends d{constructor(i,n,e,t,s,r){super("PropertyIsLike",i),this.pattern=n,this.wildCard=e!==void 0?e:"*",this.singleChar=t!==void 0?t:".",this.escapeChar=s!==void 0?s:"!",this.matchCase=r}}export default o;

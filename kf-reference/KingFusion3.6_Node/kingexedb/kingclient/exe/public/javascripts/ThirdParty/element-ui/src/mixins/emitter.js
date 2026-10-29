@@ -1,0 +1,1 @@
+function p(a,o,n){this.$children.forEach(t=>{var e=t.$options.componentName;e===a?t.$emit.apply(t,[o].concat(n)):p.apply(t,[a,o].concat([n]))})}export default{methods:{dispatch(a,o,n){for(var t=this.$parent||this.$root,e=t.$options.componentName;t&&(!e||e!==a);)t=t.$parent,t&&(e=t.$options.componentName);t&&t.$emit.apply(t,[o].concat(n))},broadcast(a,o,n){p.call(this,a,o,n)}}};

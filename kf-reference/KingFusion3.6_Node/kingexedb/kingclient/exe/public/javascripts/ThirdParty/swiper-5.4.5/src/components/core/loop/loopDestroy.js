@@ -1,0 +1,1 @@
+export default function(){const e=this,{$wrapperEl:l,params:s,slides:i}=e;l.children(`.${s.slideClass}.${s.slideDuplicateClass},.${s.slideClass}.${s.slideBlankClass}`).remove(),i.removeAttr("data-swiper-slide-index")}

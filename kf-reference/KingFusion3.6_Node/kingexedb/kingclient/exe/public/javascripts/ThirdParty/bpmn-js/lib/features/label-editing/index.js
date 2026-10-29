@@ -1,0 +1,1 @@
+import i from"diagram-js/lib/features/change-support";import e from"diagram-js/lib/features/resize";import r from"diagram-js-direct-editing";import t from"./LabelEditingProvider";import o from"./LabelEditingPreview";export default{__depends__:[i,e,r],__init__:["labelEditingProvider","labelEditingPreview"],labelEditingProvider:["type",t],labelEditingPreview:["type",o]};

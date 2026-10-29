@@ -1,0 +1,44 @@
+{
+  "language": "zh",
+  "userEmployeeIdSSO": false,
+  "closeBrowserClearInfo": false,
+  "solutions": {
+    "solutionName": "Demo",
+    "GUID": "c7f1771f-0c8f-4c75-9d71-3b8c4b6bd190",
+    "createTime": "2019-11-01 10:17:45",
+    "description": ""
+  },
+  "tenant": {
+    "tenantId": "c7f1771f-0c8f-4c75-9d71-3b8c4b6bd190"
+  },
+  "runOptions": {
+    "protocol": 0,
+    "opsProxyProtocol": 1
+  },
+  "sqlCrypty": {
+    "publicKey": "publickey",
+    "enable": true
+  },
+  "sdSSOLogin": false,
+  "casClient": {
+    "ignore": [],
+    "match": [],
+    "servicePrefix": "http://192.168.32.34",
+    "serverPath": "http://192.168.32.34:8080",
+    "paths": {
+      "validate": "/cas/validate",
+      "serviceValidate": "/cas/serviceValidate",
+      "login": "/cas/login",
+      "logout": "/cas/logout",
+      "proxy": null,
+      "proxyCallback": null
+    },
+    "restletIntegration": null
+  },
+  "logConfig": {
+    "retainTime": 7,
+    "node": {
+      "retainTime": 1
+    }
+  }
+}

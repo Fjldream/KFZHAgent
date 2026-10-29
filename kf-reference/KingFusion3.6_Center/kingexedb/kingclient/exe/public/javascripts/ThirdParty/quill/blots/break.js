@@ -1,0 +1,1 @@
+import n from"parchment";class e extends n.Embed{static value(){}insertInto(t,r){t.children.length===0?super.insertInto(t,r):this.remove()}length(){return 0}value(){return""}}e.blotName="break",e.tagName="BR";export default e;

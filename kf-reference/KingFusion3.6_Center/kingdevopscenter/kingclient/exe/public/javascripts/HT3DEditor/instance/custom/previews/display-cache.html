@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Preview Display</title>
+        <meta charset="UTF-8">
+        <link rel="shortcut icon" href="custom/images/favicon.ico?v=2" />
+        <style>
+            html, body {
+                padding: 0px;
+                margin: 0px;
+            }
+        </style>
+
+        <script src='custom/configs/htconfig.js'></script>
+        <script src='custom/libs/echarts.js'></script>
+        <script src='libs/core/ht.js'></script>
+        <script src='libs/plugin/ht-edgetype.js'></script>
+        <script src="libs/plugin/ht-obj.js"></script>
+        <script src='libs/core/ht-ui.js'></script>
+        <script src='libs/plugin/ht-form.js'></script>
+        <script src='libs/plugin/ht-vector.js'></script>
+
+        <script>
+            function init() {
+                graphView = new ht.graph.GraphView();
+                graphView.addToDOM();
+                ht.Default.setImageCacheRule({
+                    'symbols/symbol factory/Flow Meters/Oxygen Regulating valve 2.json': true,
+                    'symbols/symbol factory/环保/调节阀.json': true,
+                    'symbols/symbol factory/Chemical/Mixing station 2.json': true,
+                    'symbols/symbol factory/Flow Meters/电动球阀.json': true,
+                    'symbols/symbol factory/Flow Meters/Turbine meter 2.json': true,
+                });
+                graphView.deserialize('previews/display.json', function(json, dm, gv, datas) {
+                    if(json.title) document.title = json.title;
+                    graphView.fitContent(true);
+                });
+            }
+        </script>
+    </head>
+    <body onload='setTimeout(init, 300)'>
+    </body>
+</html>

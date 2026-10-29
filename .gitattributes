@@ -1,0 +1,4 @@
+# modified by jinlong.feng at 2026-10-29 KF客户端完整入库与启动审计
+# Keep KF reference hashes stable across checkouts with different core.autocrlf settings.
+kf-reference/** -text
+# end

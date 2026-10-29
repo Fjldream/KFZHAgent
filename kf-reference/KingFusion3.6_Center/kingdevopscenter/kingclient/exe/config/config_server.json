@@ -1,0 +1,6 @@
+{
+    "http_type": "http",
+    "ssl_key": "",
+    "ssl_cert": "",
+    "port": 11004
+}

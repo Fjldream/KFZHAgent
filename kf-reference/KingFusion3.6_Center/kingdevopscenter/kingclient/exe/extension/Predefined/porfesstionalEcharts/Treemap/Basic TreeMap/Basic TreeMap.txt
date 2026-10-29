@@ -1,0 +1,28 @@
+﻿option = {
+    series: [{
+        type: 'treemap',
+	    roam: false,                //add by jun.li on 2020/8/12 for {bug4574,固定与自定义图表组件编辑器相对位置}
+        data: [{
+            name: 'nodeA',            // First tree
+            value: 10,
+            children: [{
+                name: 'nodeAa',       // First leaf of first tree
+                value: 4
+            }, {
+                name: 'nodeAb',       // Second leaf of first tree
+                value: 6
+            }]
+        }, {
+            name: 'nodeB',            // Second tree
+            value: 20,
+            children: [{
+                name: 'nodeBa',       // Son of first tree
+                value: 20,
+                children: [{
+                    name: 'nodeBa1',  // Granson of first tree
+                    value: 20
+                }]
+            }]
+        }]
+    }]
+};

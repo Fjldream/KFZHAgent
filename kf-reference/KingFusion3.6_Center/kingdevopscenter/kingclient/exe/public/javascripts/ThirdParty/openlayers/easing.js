@@ -1,0 +1,1 @@
+export function easeIn(n){return Math.pow(n,3)}export function easeOut(n){return 1-easeIn(1-n)}export function inAndOut(n){return 3*n*n-2*n*n*n}export function linear(n){return n}export function upAndDown(n){return n<.5?inAndOut(2*n):1-inAndOut(2*(n-.5))}

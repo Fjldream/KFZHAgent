@@ -1,0 +1,1 @@
+import f from"../../../utils/support";export default function(o){const p=this,{$wrapperEl:r,params:t}=p;if(t.loop&&p.loopDestroy(),typeof o=="object"&&"length"in o)for(let e=0;e<o.length;e+=1)o[e]&&r.append(o[e]);else r.append(o);t.loop&&p.loopCreate(),t.observer&&f.observer||p.update()}

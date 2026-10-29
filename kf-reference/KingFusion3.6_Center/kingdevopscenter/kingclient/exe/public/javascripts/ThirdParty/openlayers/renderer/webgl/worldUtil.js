@@ -1,0 +1,1 @@
+import{getWidth as i}from"../../extent.js";export function getWorldParameters(r,l){const n=r.viewState.projection,t=l.getSource().getWrapX()&&n.canWrapX(),o=n.getExtent(),c=r.extent,e=t?i(o):null,s=t?Math.ceil((c[2]-o[2])/e)+1:1;return[t?Math.floor((c[0]-o[0])/e):0,s,e]}
