@@ -1,0 +1,1 @@
+import i from"../../../utils/utils";export default function(s=this.isHorizontal()?"x":"y"){const n=this,{params:a,rtlTranslate:e,translate:t,$wrapperEl:l}=n;if(a.virtualTranslate)return e?-t:t;if(a.cssMode)return t;let r=i.getTranslate(l[0],s);return e&&(r=-r),r||0}

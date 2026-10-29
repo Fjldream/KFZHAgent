@@ -1,0 +1,1 @@
+import e from"./appendSlide";import r from"./prependSlide";import o from"./addSlide";import m from"./removeSlide";import d from"./removeAllSlides";export default{appendSlide:e,prependSlide:r,addSlide:o,removeSlide:m,removeAllSlides:d};

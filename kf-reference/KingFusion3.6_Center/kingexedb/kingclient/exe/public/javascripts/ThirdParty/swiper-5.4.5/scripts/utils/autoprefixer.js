@@ -1,0 +1,1 @@
+const postcss=require("postcss"),autoprefixer=require("autoprefixer");module.exports=async(s,{from:o=void 0,to:n=void 0}={})=>new Promise((r,c)=>{postcss([autoprefixer]).process(s,{from:o,to:n}).then(e=>{e.warnings().forEach(t=>{console.warn(t.toString())}),r(e.css)}).catch(e=>{throw c(e),e})});

@@ -1,0 +1,1 @@
+import{window as i}from"ssr-window";const a=(function(){function r(){const e=i.navigator.userAgent.toLowerCase();return e.indexOf("safari")>=0&&e.indexOf("chrome")<0&&e.indexOf("android")<0}return{isEdge:!!i.navigator.userAgent.match(/Edge/g),isSafari:r(),isWebView:/(iPhone|iPod|iPad).*AppleWebKit(?!.*Safari)/i.test(i.navigator.userAgent)}})();export default a;

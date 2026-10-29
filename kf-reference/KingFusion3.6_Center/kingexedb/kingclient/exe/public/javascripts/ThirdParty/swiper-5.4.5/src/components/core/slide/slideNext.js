@@ -1,0 +1,1 @@
+export default function(i=this.params.speed,r=!0,n){const e=this,{params:t,animating:s}=e,o=e.activeIndex<t.slidesPerGroupSkip?1:t.slidesPerGroup;if(t.loop){if(s)return!1;e.loopFix(),e._clientLeft=e.$wrapperEl[0].clientLeft}return e.slideTo(e.activeIndex+o,i,r,n)}

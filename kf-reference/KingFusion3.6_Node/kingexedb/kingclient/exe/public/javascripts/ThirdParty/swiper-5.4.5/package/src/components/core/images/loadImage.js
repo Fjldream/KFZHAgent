@@ -1,0 +1,1 @@
+import{window as p}from"ssr-window";import u from"../../../utils/dom";export default function(t,o,f,n,m,r){let e;function i(){r&&r()}!u(t).parent("picture")[0]&&(!t.complete||!m)&&o?(e=new p.Image,e.onload=i,e.onerror=i,n&&(e.sizes=n),f&&(e.srcset=f),o&&(e.src=o)):i()}

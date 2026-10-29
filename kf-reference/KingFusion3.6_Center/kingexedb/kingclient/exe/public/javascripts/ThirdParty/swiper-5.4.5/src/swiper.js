@@ -1,0 +1,1 @@
+import o from"./components/core/core-class";import e from"./modules/device/device";import r from"./modules/support/support";import s from"./modules/browser/browser";import i from"./modules/resize/resize";import m from"./modules/observer/observer";const t=[e,r,s,i,m];typeof o.use>"u"&&(o.use=o.Class.use,o.installModule=o.Class.installModule),o.use(t);
